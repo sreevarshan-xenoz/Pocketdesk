@@ -3,3 +3,11 @@
 # CMake 4 refuses that outright. This lets CMake 4 configure it (older CMake
 # ignores the variable), on Linux and Windows alike.
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+[target.x86_64-pc-windows-gnu]
+# iroh-relay declares crate-type ["lib", "cdylib"], so Cargo links its DLL even
+# though nothing loads it, and MinGW's ld auto-exports every symbol of the
+# static archives inside (aws-lc's C symbols included) — past the 65,535
+# ordinals a PE export table can hold ("export ordinal too large"). Nothing in
+# this workspace's Windows build exports from a static archive on purpose.
+rustflags = ["-C", "link-arg=-Wl,--exclude-libs,ALL"]
