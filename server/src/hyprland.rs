@@ -20,11 +20,34 @@
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 use tracing::debug;
+
+/// The stream type Hyprland's sockets give us. Off Unix there are no Hyprland
+/// sockets; the alias only lets the IPC code compile, and [`connect_socket`]
+/// refuses before one could be built.
+#[cfg(unix)]
+type IpcStream = tokio::net::UnixStream;
+#[cfg(not(unix))]
+type IpcStream = tokio::io::DuplexStream;
+
+async fn connect_socket(path: &Path) -> Result<IpcStream> {
+    #[cfg(unix)]
+    {
+        tokio::net::UnixStream::connect(path)
+            .await
+            .with_context(|| format!("connect {}", path.display()))
+    }
+    #[cfg(not(unix))]
+    {
+        anyhow::bail!(
+            "Hyprland IPC needs Unix sockets, which this OS does not have ({})",
+            path.display()
+        )
+    }
+}
 
 /// Client-side handle to a running Hyprland instance.
 #[derive(Debug, Clone)]
@@ -154,9 +177,7 @@ impl HyprlandIpc {
         let path = self
             .request_socket()
             .context("no Hyprland request socket found")?;
-        let mut stream = UnixStream::connect(&path)
-            .await
-            .with_context(|| format!("connect {}", path.display()))?;
+        let mut stream = connect_socket(&path).await?;
         stream
             .write_all(req.as_bytes())
             .await
@@ -219,9 +240,9 @@ impl HyprlandIpc {
     /// "no more events".
     pub async fn subscribe_events(&self) -> Result<mpsc::Receiver<HyprEvent>> {
         let path = self.event_socket_path();
-        let stream = UnixStream::connect(&path)
+        let stream = connect_socket(&path)
             .await
-            .with_context(|| format!("connect to event socket {}", path.display()))?;
+            .context("connect to the Hyprland event socket")?;
         let (tx, rx) = mpsc::channel(64);
         tokio::spawn(async move {
             let mut stream = stream;
