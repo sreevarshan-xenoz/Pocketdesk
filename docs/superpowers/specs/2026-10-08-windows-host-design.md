@@ -52,8 +52,10 @@ first (large Linux-side refactor with no Windows value until done).
 
 ## 3. Build and cfg layout
 
-**Toolchain.** Windows builds target `x86_64-pc-windows-msvc` (VS Build Tools
-2022). The GNU host toolchain is not used for the Windows server.
+**Toolchain.** Windows builds target `x86_64-pc-windows-gnu` (MinGW-w64 via
+WinLibs). *Amended 2026-10-09:* the spec first chose MSVC, but the dev box has
+VC tools without a Windows SDK, so MSVC cannot link; the `windows` crate and the
+cmake-built opus both support GNU, and nothing in this design needs MSVC.
 
 **Cargo.**
 - Workspace adds `windows` (version pinned at implementation) with only the
