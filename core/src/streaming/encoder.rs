@@ -17,8 +17,10 @@
 //! encoder for stalls/Err storms and rebuilds along the same ladder.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::io::AsRawFd;
 use std::process::{ChildStderr, ChildStdin, ChildStdout};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use ffmpeg_sidecar::child::FfmpegChild;
@@ -30,17 +32,84 @@ use super::encoder_inproc::InProcessEncoder;
 use super::encoder_vaapi::VaapiEncoder;
 use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCodec, VideoFrame};
 
-/// Set a file descriptor to non-blocking mode.
-fn set_nonblocking(stream: &impl AsRawFd) -> io::Result<()> {
-    let fd = stream.as_raw_fd();
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let ret = unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
-    if ret < 0 {
-        return Err(io::Error::last_os_error());
-    }
+/// Encoded chunks in flight from the stdout reader thread. Bounded so a
+/// consumer that stops draining stalls FFmpeg (which the encode task's stall
+/// supervisor then sees) instead of growing memory without limit.
+const STDOUT_CHUNKS_IN_FLIGHT: usize = 256;
+
+/// Read the child's stdout on a dedicated thread and forward each chunk.
+///
+/// The encode loop must never block on the pipe. On Linux that used to be
+/// `O_NONBLOCK`; anonymous pipes on Windows have no equivalent, and a reader
+/// thread behaves the same on both. The channel disconnecting is EOF.
+fn spawn_stdout_reader(mut stdout: ChildStdout) -> io::Result<Receiver<io::Result<Vec<u8>>>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(STDOUT_CHUNKS_IN_FLIGHT);
+    std::thread::Builder::new()
+        .name("ffmpeg-stdout".into())
+        .spawn(move || {
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                match stdout.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if tx.send(Ok(buf[..n].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        })?;
+    Ok(rx)
+}
+
+/// What the stderr logger thread has seen: the line that best explains an
+/// exit, and whether the pipe has closed.
+#[derive(Default)]
+struct StderrTail {
+    reason: Mutex<Option<String>>,
+    closed: AtomicBool,
+}
+
+/// Whether an FFmpeg log line reports an error rather than a warning or info.
+fn is_ffmpeg_error_line(line: &str) -> bool {
+    line.contains("[error]") || line.contains("[fatal]")
+}
+
+/// Log FFmpeg's stderr as it arrives (keeping the pipe from filling) and keep
+/// the line most likely to explain an exit: the latest error line, else the
+/// latest line.
+fn spawn_stderr_logger(stderr: ChildStderr, tail: Arc<StderrTail>) -> io::Result<()> {
+    std::thread::Builder::new()
+        .name("ffmpeg-stderr".into())
+        .spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let is_error = is_ffmpeg_error_line(trimmed);
+                if is_error {
+                    error!("[ffmpeg] {}", trimmed);
+                } else if trimmed.contains("[warning]") {
+                    warn!("[ffmpeg] {}", trimmed);
+                } else {
+                    debug!("[ffmpeg] {}", trimmed);
+                }
+                let mut reason = tail.reason.lock().unwrap_or_else(|e| e.into_inner());
+                let keep_previous =
+                    !is_error && reason.as_deref().is_some_and(is_ffmpeg_error_line);
+                if !keep_previous {
+                    *reason = Some(trimmed.to_string());
+                }
+            }
+            tail.closed.store(true, Ordering::Release);
+        })?;
     Ok(())
 }
 
@@ -243,10 +312,10 @@ pub struct SidecarEncoder {
     process: FfmpegChild,
     /// Stdin pipe for submitting raw frames. Wrapped in Option for clean shutdown.
     stdin: Option<ChildStdin>,
-    /// Stdout pipe for reading encoded packets.
-    stdout: ChildStdout,
-    /// Stderr reader for FFmpeg log messages (consumed in background).
-    stderr: BufReader<ChildStderr>,
+    /// Encoded chunks from the stdout reader thread.
+    stdout: Receiver<io::Result<Vec<u8>>>,
+    /// What the stderr logger thread has seen (for exit reasons).
+    stderr: Arc<StderrTail>,
     /// Accumulated output buffer from stdout.
     output_buffer: Vec<u8>,
     /// NVENC high-power pin (R4 C3) — held only when the clock lock actually
@@ -296,11 +365,11 @@ impl SidecarEncoder {
             .take_stderr()
             .ok_or_else(|| anyhow::anyhow!("FFmpeg stderr not available"))?;
 
-        // Set stdout and stderr to non-blocking mode so we can read without blocking
-        set_nonblocking(&stdout)
-            .map_err(|e| anyhow::anyhow!("Failed to set FFmpeg stdout to non-blocking: {}", e))?;
-        set_nonblocking(&stderr)
-            .map_err(|e| anyhow::anyhow!("Failed to set FFmpeg stderr to non-blocking: {}", e))?;
+        let stdout = spawn_stdout_reader(stdout)
+            .map_err(|e| anyhow::anyhow!("Failed to start the FFmpeg stdout reader: {}", e))?;
+        let stderr_tail = Arc::new(StderrTail::default());
+        spawn_stderr_logger(stderr, stderr_tail.clone())
+            .map_err(|e| anyhow::anyhow!("Failed to start the FFmpeg stderr logger: {}", e))?;
 
         info!("FFmpeg encoder process spawned successfully");
 
@@ -312,7 +381,7 @@ impl SidecarEncoder {
             process,
             stdin: Some(stdin),
             stdout,
-            stderr: BufReader::new(stderr),
+            stderr: stderr_tail,
             output_buffer: Vec::with_capacity(64 * 1024), // 64 KB initial capacity
             // C3: only NVENC sessions get the GPU pinned; every other backend
             // (and non-NVIDIA / unprivileged hosts, where acquire() self-
@@ -342,23 +411,17 @@ impl SidecarEncoder {
 
         let probe = vec![0u8; self.config.width as usize * self.config.height as usize * 4];
         let deadline = Instant::now() + budget;
-        let mut buf = [0u8; 8192];
         loop {
             // Surface any output already produced: bits out of the encoder
             // are the strongest liveness proof there is.
             loop {
-                match self.stdout.read(&mut buf) {
-                    Ok(0) => {
+                match self.stdout.try_recv() {
+                    Ok(Ok(chunk)) => self.output_buffer.extend_from_slice(&chunk),
+                    Ok(Err(e)) => return Err(e.into()),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
                         anyhow::bail!("FFmpeg encoder closed stdout during startup");
                     }
-                    Ok(n) => {
-                        self.output_buffer.extend_from_slice(&buf[..n]);
-                        if n < buf.len() {
-                            break;
-                        }
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(e) => return Err(e.into()),
                 }
             }
             if !self.output_buffer.is_empty() {
@@ -393,15 +456,19 @@ impl SidecarEncoder {
     fn child_exited(&mut self) -> anyhow::Result<bool> {
         match self.process.as_inner_mut().try_wait() {
             Ok(Some(status)) => {
-                let mut reason = String::new();
-                let _ = self.stderr.read_line(&mut reason);
-                if reason.is_empty() {
-                    reason.push_str("no stderr output");
+                // The logger thread may not have read the last words yet.
+                let deadline = Instant::now() + std::time::Duration::from_millis(200);
+                while !self.stderr.closed.load(Ordering::Acquire) && Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
-                error!(
-                    "FFmpeg encoder process exited ({status}): {}",
-                    reason.trim()
-                );
+                let reason = self
+                    .stderr
+                    .reason
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+                    .unwrap_or_else(|| "no stderr output".to_string());
+                error!("FFmpeg encoder process exited ({status}): {reason}");
                 Ok(true)
             }
             Ok(None) => Ok(false),
@@ -516,95 +583,44 @@ impl SidecarEncoder {
         &self.config
     }
 
-    /// Read available data from FFmpeg stdout without blocking.
+    /// Take whatever the stdout reader has forwarded, without blocking.
     fn read_available_output(&mut self) -> anyhow::Result<()> {
-        // Also consume any stderr messages to prevent pipe buffer fill-up
-        self.consume_stderr();
-
-        let mut buf = [0u8; 8192];
         loop {
-            match self.stdout.read(&mut buf) {
-                Ok(0) => {
-                    // EOF — process may have exited
-                    debug!("FFmpeg stdout returned EOF");
-                    break;
-                }
-                Ok(n) => {
-                    self.output_buffer.extend_from_slice(&buf[..n]);
+            match self.stdout.try_recv() {
+                Ok(Ok(chunk)) => {
+                    self.output_buffer.extend_from_slice(&chunk);
                     trace!(
                         "Read {} bytes from FFmpeg stdout (total buffer: {})",
-                        n,
+                        chunk.len(),
                         self.output_buffer.len()
                     );
                 }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    // No more data available right now
-                    break;
-                }
-                Err(e) => {
+                Ok(Err(e)) => {
                     // Other errors may indicate process issues.
                     error!("Error reading from FFmpeg stdout: {}", e);
                     return Err(anyhow::anyhow!("FFmpeg stdout read error: {}", e));
+                }
+                // No more data available right now.
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    debug!("FFmpeg stdout reached end of stream");
+                    break;
                 }
             }
         }
         Ok(())
     }
 
-    /// Consume available stderr messages from FFmpeg.
-    fn consume_stderr(&mut self) {
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match self.stderr.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        // FFmpeg writes warnings/errors to stderr
-                        if trimmed.contains("[error]") || trimmed.contains("[fatal]") {
-                            error!("[ffmpeg] {}", trimmed);
-                        } else if trimmed.contains("[warning]") {
-                            warn!("[ffmpeg] {}", trimmed);
-                        } else {
-                            debug!("[ffmpeg] {}", trimmed);
-                        }
-                    }
-                }
-                Err(ref e)
-                    if e.kind() == io::ErrorKind::WouldBlock
-                        || e.kind() == io::ErrorKind::Interrupted =>
-                {
-                    break;
-                }
-                Err(e) => {
-                    trace!("FFmpeg stderr read error (non-critical): {}", e);
-                    break;
-                }
-            }
-        }
-    }
-
     /// Read all remaining output from FFmpeg stdout.
     fn read_all_output(&mut self) -> anyhow::Result<()> {
-        self.consume_stderr();
-        let mut buf = [0u8; 8192];
         loop {
-            match self.stdout.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    self.output_buffer.extend_from_slice(&buf[..n]);
-                }
-                Err(ref e)
-                    if e.kind() == io::ErrorKind::WouldBlock
-                        || e.kind() == io::ErrorKind::Interrupted =>
-                {
-                    break;
-                }
-                Err(e) => {
+            match self.stdout.try_recv() {
+                Ok(Ok(chunk)) => self.output_buffer.extend_from_slice(&chunk),
+                Ok(Err(e)) => {
                     warn!("Error draining FFmpeg stdout: {}", e);
                     break;
                 }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
         }
         Ok(())
