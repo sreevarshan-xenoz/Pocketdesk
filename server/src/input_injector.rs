@@ -6,19 +6,32 @@
 
 use anyhow::{Context, Result};
 use enigo::{Coordinate, Enigo, Key, Keyboard, Mouse, Settings};
+#[cfg(target_os = "linux")]
 use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
+#[cfg(target_os = "linux")]
 use evdev::{
     AbsInfo, AbsoluteAxisCode, AttributeSet, InputEvent, KeyCode, RelativeAxisCode, UinputAbsSetup,
 };
+// Off Linux the wire's evdev codes still need names; the core shim has the
+// same `KeyCode::KEY_*.0` shape as the evdev crate.
+#[cfg(not(target_os = "linux"))]
+use linux_link_core::input::evdev_codes::KeyCode;
 use linux_link_core::streaming::input_packet::InputPacket;
+#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::sync::Mutex;
-use tracing::{debug, info, warn};
+#[cfg(target_os = "linux")]
+use tracing::warn;
+use tracing::{debug, info};
 
 /// Event type constants from evdev kernel API
+#[cfg(target_os = "linux")]
 const EV_KEY: u16 = 0x01;
+#[cfg(target_os = "linux")]
 const EV_REL: u16 = 0x02;
+#[cfg(target_os = "linux")]
 const EV_SYN: u16 = 0x00;
+#[cfg(target_os = "linux")]
 const SYN_REPORT: u16 = 0;
 
 /// Canonical mapping between Linux evdev keycodes and enigo `Key` values.
@@ -65,9 +78,15 @@ const KEYCODE_MAP: &[(u16, Key)] = &[
     (KeyCode::KEY_LEFTCTRL.0, Key::LControl),
     (KeyCode::KEY_RIGHTCTRL.0, Key::RControl),
     (KeyCode::KEY_LEFTALT.0, Key::Alt),
+    #[cfg(not(windows))]
     (KeyCode::KEY_RIGHTALT.0, Key::Other(0xFFEA)), // XK_Alt_R
-    (KeyCode::KEY_LEFTMETA.0, Key::Meta),          // Super
+    #[cfg(windows)]
+    (KeyCode::KEY_RIGHTALT.0, Key::RMenu),
+    (KeyCode::KEY_LEFTMETA.0, Key::Meta), // Super
+    #[cfg(not(windows))]
     (KeyCode::KEY_RIGHTMETA.0, Key::Other(0xFFEC)), // XK_Super_R
+    #[cfg(windows)]
+    (KeyCode::KEY_RIGHTMETA.0, Key::RWin),
     // Function keys. F11/F12 are 87/88, not the two numbers after F10, because
     // 69 and 70 are Num Lock and Scroll Lock. F13-F24 stay in this table so the
     // X11 rung is no weaker than uinput, which will emit any code it declares.
@@ -105,7 +124,12 @@ const KEYCODE_MAP: &[(u16, Key)] = &[
     (KeyCode::KEY_PREVIOUSSONG.0, Key::MediaPrevTrack),
     // enigo calls the X `Menu` keysym `LMenu`; the application-keys key has no
     // left/right form. (evdev KEY_COMPOSE is 127, a different key.)
+    // X11 resolves `LMenu` to the Menu keysym; on Windows it is VK_LMENU, the
+    // left Alt, and the application key is `Apps`.
+    #[cfg(not(windows))]
     (KeyCode::KEY_MENU.0, Key::LMenu),
+    #[cfg(windows)]
+    (KeyCode::KEY_MENU.0, Key::Apps),
     // The dialpad's star and plus are keypad codes, so they get the keypad
     // keysyms; the plain '*' and '+' characters reach the same codes through
     // `char_to_keycode`.
@@ -168,11 +192,13 @@ enum InputBackend {
     /// enigo (X11/XWayland via XTEST)
     Enigo(Box<Mutex<Enigo>>),
     /// uinput (universal, kernel-level)
+    #[cfg(target_os = "linux")]
     Uinput(Mutex<UinputState>),
 }
 
 /// Kernel-level backend state: the keyboard/mouse device plus an
 /// absolute-pointer device used for absolute (normalized) pointer injection.
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 struct UinputState {
     main: VirtualDevice,
@@ -182,6 +208,7 @@ struct UinputState {
     abs: Option<VirtualDevice>,
 }
 
+#[cfg(target_os = "linux")]
 const EV_ABS: u16 = 0x03;
 /// Direct-touch axis range; normalized wire coordinates (0..=65535) map 1:1.
 const ABS_MAX_COORD: i32 = 65535;
@@ -237,6 +264,7 @@ impl Drop for InputInjector {
     fn drop(&mut self) {
         let backend_type = match &self.backend {
             InputBackend::Enigo(_) => "enigo",
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(_) => "uinput",
         };
         info!(backend = %backend_type, "InputInjector dropped, closing backend resources");
@@ -252,8 +280,8 @@ impl InputInjector {
     /// Otherwise (bare X11) or if /dev/uinput is inaccessible, enigo is
     /// tried first with uinput as the fallback.
     pub fn new() -> Result<Self> {
-        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
-        if wayland {
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
             match Self::new_uinput() {
                 Ok(inj) => return Ok(inj),
                 Err(e) => {
@@ -262,19 +290,31 @@ impl InputInjector {
             }
         }
 
-        if let Ok(enigo) = Enigo::new(&Settings::default()) {
-            info!("Input injector: using enigo (X11/XWayland)");
-            return Ok(Self {
-                backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
-                gamepad_buttons: 0,
-            });
-        }
+        let enigo_err = match Enigo::new(&Settings::default()) {
+            Ok(enigo) => {
+                info!("Input injector: using enigo (X11/XWayland, or SendInput on Windows)");
+                return Ok(Self {
+                    backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
+                    gamepad_buttons: 0,
+                });
+            }
+            Err(e) => e,
+        };
 
         // Fall back to uinput
-        Self::new_uinput()
+        #[cfg(target_os = "linux")]
+        {
+            let _ = enigo_err;
+            Self::new_uinput()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            anyhow::bail!("no input injection backend: enigo failed ({enigo_err})")
+        }
     }
 
     /// Create a uinput-based input injector.
+    #[cfg(target_os = "linux")]
     fn new_uinput() -> Result<Self> {
         if !Path::new("/dev/uinput").exists() {
             anyhow::bail!(
@@ -312,6 +352,7 @@ impl InputInjector {
                     .context("enigo mouse move failed")?;
                 Ok(())
             }
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -341,6 +382,7 @@ impl InputInjector {
                 .context("enigo absolute mouse move failed")?;
                 Ok(())
             }
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -367,6 +409,7 @@ impl InputInjector {
                 }
                 Ok(())
             }
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let key = button.as_evdev_key();
@@ -395,6 +438,7 @@ impl InputInjector {
                 }
                 Ok(())
             }
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -418,6 +462,7 @@ impl InputInjector {
     /// phone can name is already registrable here.
     fn inject_keycode(&mut self, code: u16, pressed: bool) -> Result<()> {
         match &mut self.backend {
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -450,6 +495,7 @@ impl InputInjector {
                 }
                 Ok(())
             }
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let evdev_key = key_to_evdev(key);
@@ -471,6 +517,7 @@ impl InputInjector {
                 e.text(text).context("enigo text input failed")?;
                 Ok(())
             }
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 // For uinput, fall back to keycode simulation for ASCII.
                 // This is a best-effort approach and does not handle Unicode.
@@ -564,6 +611,7 @@ impl InputInjector {
                 }
 
                 // SYN_REPORT
+                #[cfg(target_os = "linux")]
                 if let InputBackend::Uinput(state) = &mut self.backend {
                     let guard = state.get_mut().unwrap();
                     emit_uinput(
@@ -589,6 +637,7 @@ impl InputInjector {
 /// letter/digit/punctuation rows of `KEYCODE_MAP`), so what reaches the desktop
 /// is only what the phone meant when the desktop agrees. Roadmap 2065 names that
 /// assumption; honouring it on any other layout is 2665.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[derive(Debug, PartialEq, Eq)]
 enum KeyboardLayout {
     /// The layout the injector's codes are chosen for.
@@ -604,6 +653,7 @@ enum KeyboardLayout {
 /// Both probes report comma-separated per-group lists, and a variant is written
 /// `us(intl)`, so only the first group's base name decides: a `us` layout with
 /// any variant still binds the letters and punctuation this file emits.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn classify_layout(reported: Option<&str>) -> KeyboardLayout {
     let Some(first_group) = reported.and_then(|raw| raw.split(',').next()) else {
         return KeyboardLayout::Unknown;
@@ -620,6 +670,7 @@ fn classify_layout(reported: Option<&str>) -> KeyboardLayout {
 
 /// What the desktop's keyboard layout is, best effort, cheapest and most
 /// session-specific source first.
+#[cfg(target_os = "linux")]
 fn detect_keyboard_layout() -> KeyboardLayout {
     // What the compositor handed xkbcommon for this session.
     if let Ok(layout) = std::env::var("XKB_DEFAULT_LAYOUT") {
@@ -633,6 +684,7 @@ fn detect_keyboard_layout() -> KeyboardLayout {
 
 /// systemd's `X11 Layout:` line, or `None` on a host without `localectl` (runit,
 /// a container) or without that line.
+#[cfg(target_os = "linux")]
 fn localectl_x11_layout() -> Option<String> {
     let output = std::process::Command::new("localectl")
         .arg("status")
@@ -644,6 +696,7 @@ fn localectl_x11_layout() -> Option<String> {
     parse_localectl_layout(&String::from_utf8_lossy(&output.stdout))
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn parse_localectl_layout(status: &str) -> Option<String> {
     status.lines().find_map(|line| {
         let (key, value) = line.split_once(':')?;
@@ -656,6 +709,7 @@ fn parse_localectl_layout(status: &str) -> Option<String> {
 /// Deliberately a report, not a refusal: the phone's ordinary key events are
 /// position-based too, so rejecting a non-`us` layout would take the keyboard
 /// away from every non-US desktop rather than fix them.
+#[cfg(target_os = "linux")]
 fn report_layout_assumption() {
     match detect_keyboard_layout() {
         KeyboardLayout::Us => {
@@ -685,6 +739,7 @@ fn report_layout_assumption() {
 /// `UI_DEV_CREATE`d device asynchronously — the same reason both devices are
 /// built eagerly at startup rather than on first use. What the rebuild buys is
 /// recovery from the *next* event, not survival of the failing one.
+#[cfg(target_os = "linux")]
 fn emit_uinput(
     state: &mut UinputState,
     which: UinputDevice,
@@ -729,6 +784,7 @@ fn emit_uinput(
 }
 
 /// Which of the two uinput devices an emit is aimed at.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UinputDevice {
     /// Keyboard + relative pointer + buttons.
@@ -737,6 +793,7 @@ enum UinputDevice {
     Abs,
 }
 
+#[cfg(target_os = "linux")]
 impl UinputDevice {
     fn label(self) -> &'static str {
         match self {
@@ -746,6 +803,7 @@ impl UinputDevice {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn build_uinput(which: UinputDevice) -> Result<VirtualDevice> {
     match which {
         UinputDevice::Main => build_main_device(),
@@ -754,6 +812,7 @@ fn build_uinput(which: UinputDevice) -> Result<VirtualDevice> {
 }
 
 /// Build the keyboard + relative-pointer + button device.
+#[cfg(target_os = "linux")]
 fn build_main_device() -> Result<VirtualDevice> {
     let mut keys = AttributeSet::<KeyCode>::new();
     // Every common key; the virtual keyboard declares 0..255 so any code the
@@ -795,6 +854,7 @@ fn build_main_device() -> Result<VirtualDevice> {
 /// other obvious choice, but Hyprland's libinput silently drops uinput
 /// touchscreens on this box; the ABS pointer path is what verifiably moves
 /// the real cursor.)
+#[cfg(target_os = "linux")]
 fn build_abs_device() -> Result<VirtualDevice> {
     let mut keys = AttributeSet::<KeyCode>::new();
     // Buttons registered so the device classifies as a full pointer;
@@ -849,6 +909,7 @@ impl MouseKey {
         }
     }
 
+    #[cfg(target_os = "linux")]
     fn as_evdev_key(&self) -> KeyCode {
         match *self {
             MouseKey::Left => KeyCode::BTN_LEFT,
@@ -892,6 +953,7 @@ fn keycode_to_enigo(code: u16) -> Option<Key> {
 
 /// Map an enigo Key to an evdev KeyCode for uinput backend.
 /// Uses KEYCODE_MAP as the single source of truth (reverse lookup).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn key_to_evdev(key: Key) -> KeyCode {
     // Check the canonical table first
     if let Some(&(code, _)) = KEYCODE_MAP.iter().find(|&(_, k)| *k == key) {
@@ -912,6 +974,7 @@ fn key_to_evdev(key: Key) -> KeyCode {
 /// named, then handles the few characters the table spells as a named key rather
 /// than as themselves. Case is folded because this runs on the `text()` path,
 /// which sends no Shift, so an uppercase letter shares the lowercase key.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn char_to_keycode(ch: char) -> Option<u16> {
     if let Some(&(code, _)) = KEYCODE_MAP
         .iter()
@@ -998,21 +1061,18 @@ mod tests {
 
     #[test]
     fn test_char_to_keycode_lowercase() {
-        use evdev::KeyCode;
         assert_eq!(char_to_keycode('a'), Some(KeyCode::KEY_A.0));
         assert_eq!(char_to_keycode('z'), Some(KeyCode::KEY_Z.0));
     }
 
     #[test]
     fn test_char_to_keycode_uppercase() {
-        use evdev::KeyCode;
         assert_eq!(char_to_keycode('A'), Some(KeyCode::KEY_A.0));
         assert_eq!(char_to_keycode('Z'), Some(KeyCode::KEY_Z.0));
     }
 
     #[test]
     fn test_char_to_keycode_numbers() {
-        use evdev::KeyCode;
         assert_eq!(char_to_keycode('0'), Some(KeyCode::KEY_0.0));
         assert_eq!(char_to_keycode('1'), Some(KeyCode::KEY_1.0));
         assert_eq!(char_to_keycode('9'), Some(KeyCode::KEY_9.0));
@@ -1025,7 +1085,6 @@ mod tests {
 
     #[test]
     fn test_char_to_keycode_special() {
-        use evdev::KeyCode;
         assert_eq!(char_to_keycode('\n'), Some(KeyCode::KEY_ENTER.0));
         assert_eq!(char_to_keycode('\t'), Some(KeyCode::KEY_TAB.0));
     }
@@ -1110,19 +1169,23 @@ mod tests {
 
     #[test]
     fn modifiers_locks_and_media_keys_map_to_their_named_keys() {
+        #[cfg(not(windows))]
+        let (right_alt, right_super, menu) = (Key::Other(0xFFEA), Key::Other(0xFFEC), Key::LMenu);
+        #[cfg(windows)]
+        let (right_alt, right_super, menu) = (Key::RMenu, Key::RWin, Key::Apps);
         let named: [(u16, Key); 19] = [
             (42, Key::LShift),          // KEY_LEFTSHIFT
             (54, Key::RShift),          // KEY_RIGHTSHIFT
             (29, Key::LControl),        // KEY_LEFTCTRL
             (97, Key::RControl),        // KEY_RIGHTCTRL
             (56, Key::Alt),             // KEY_LEFTALT
-            (100, Key::Other(0xFFEA)),  // KEY_RIGHTALT, via XK_Alt_R
+            (100, right_alt),           // KEY_RIGHTALT (XK_Alt_R on X11)
             (125, Key::Meta),           // KEY_LEFTMETA
-            (126, Key::Other(0xFFEC)),  // KEY_RIGHTMETA, via XK_Super_R
+            (126, right_super),         // KEY_RIGHTMETA (XK_Super_R on X11)
             (58, Key::CapsLock),        // KEY_CAPSLOCK
             (69, Key::Numlock),         // KEY_NUMLOCK
             (99, Key::PrintScr),        // KEY_SYSRQ, the Print key
-            (139, Key::LMenu),          // KEY_MENU, the application key
+            (139, menu),                // KEY_MENU, the application key
             (114, Key::VolumeDown),     // KEY_VOLUMEDOWN
             (115, Key::VolumeUp),       // KEY_VOLUMEUP
             (163, Key::MediaNextTrack), // KEY_NEXTSONG
@@ -1159,6 +1222,19 @@ mod tests {
                 "evdev {code} should be '{ch}'"
             );
             assert_eq!(char_to_keycode(ch), Some(code), "'{ch}'");
+        }
+    }
+
+    /// The core shim names the wire's codes on OSes without the evdev crate;
+    /// a typo there would make Windows inject a different key than Linux.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_portable_key_code_names_agree_with_the_evdev_crate() {
+        use std::str::FromStr;
+        for &(name, code) in linux_link_core::input::evdev_codes::ALL_NAMED {
+            let real =
+                KeyCode::from_str(name).unwrap_or_else(|_| panic!("evdev has no key named {name}"));
+            assert_eq!(real.0, code.0, "{name}");
         }
     }
 
@@ -1311,6 +1387,7 @@ mod tests {
     ///
     /// Both devices are created for real, so this needs `/dev/uinput` and
     /// self-skips without it (the injector could not run on that host either).
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_faulted_uinput_device_is_rebuilt_and_the_packet_retried() {
         if !Path::new("/dev/uinput").exists() {
@@ -1353,6 +1430,7 @@ mod tests {
     /// valid for this process until the device itself drops it: nothing can be
     /// handed that number in between, so neither the rebuild nor the dropped
     /// old device can end up closing somebody else's file.
+    #[cfg(target_os = "linux")]
     fn fault_device(state: &mut UinputState, which: UinputDevice, events: &[InputEvent]) {
         use std::os::fd::AsRawFd;
         let device = match which {
