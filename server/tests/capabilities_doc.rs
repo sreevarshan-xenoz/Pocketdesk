@@ -18,9 +18,7 @@ fn capabilities_doc_matches_the_build_that_reports_it() {
         .unwrap_or_else(|e| panic!("cannot read {DOC}: {e} — regenerate it"))
         // A Windows checkout made with core.autocrlf=true has CRLF here even
         // though the committed file (and the renderer) are LF.
-        .replace("
-", "
-");
+        .replace("\r\n", "\n");
     assert_eq!(
         expected.trim_end(),
         actual.trim_end(),
