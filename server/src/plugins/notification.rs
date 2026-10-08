@@ -57,6 +57,7 @@ impl Plugin for NotificationPlugin {
 }
 
 /// Send a desktop notification via D-Bus (native, no external binary).
+#[cfg(target_os = "linux")]
 async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
     use zbus::Connection;
 
@@ -127,11 +128,14 @@ async fn show_desktop_notification(app: &str, title: &str, text: &str) -> Result
     }
 
     // Fall back to native D-Bus
+    #[cfg(target_os = "linux")]
     if let Err(e) = send_notification_dbus(&summary, text).await {
         tracing::warn!("Failed to send notification via D-Bus: {e}");
     } else {
         tracing::info!("Notification sent via D-Bus: {}", title);
     }
+    #[cfg(not(target_os = "linux"))]
+    tracing::warn!("No desktop notification backend on this OS; dropped: {title}");
 
     Ok(())
 }
