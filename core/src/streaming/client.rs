@@ -68,15 +68,20 @@ pub fn e2e_sample_ms(capture_age_us: u64, rtt: Duration) -> u64 {
 /// after [`reset_e2e_probe`] seeds it directly.
 pub fn record_e2e_sample(sample_ms: u64) {
     use std::sync::atomic::Ordering;
-    E2E_EWMA_MS
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |prev| {
-            Some(if prev == 0 {
-                sample_ms.max(1)
-            } else {
-                (3 * prev + sample_ms) / 4
-            })
-        })
-        .ok();
+    // A hand-rolled CAS loop rather than `fetch_update`, which rustc 1.99
+    // deprecates in favour of a `try_update` older toolchains lack.
+    let mut prev = E2E_EWMA_MS.load(Ordering::Relaxed);
+    loop {
+        let next = if prev == 0 {
+            sample_ms.max(1)
+        } else {
+            (3 * prev + sample_ms) / 4
+        };
+        match E2E_EWMA_MS.compare_exchange_weak(prev, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => break,
+            Err(actual) => prev = actual,
+        }
+    }
 }
 
 /// Smoothed compositor-true e2e estimate, ms. 0 until the first video
