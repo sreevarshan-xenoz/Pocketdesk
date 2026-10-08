@@ -1,0 +1,5 @@
+[env]
+# audiopus_sys vendors an Opus CMakeLists that declares a pre-3.5 minimum;
+# CMake 4 refuses that outright. This lets CMake 4 configure it (older CMake
+# ignores the variable), on Linux and Windows alike.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

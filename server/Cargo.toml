@@ -27,12 +27,6 @@ async-trait = "0.1"
 # Input handling
 enigo.workspace = true
 
-# D-Bus for notifications, battery
-zbus.workspace = true
-
-# Input injection via uinput (universal fallback)
-evdev.workspace = true
-
 # QUIC streaming
 quinn.workspace = true
 # WAN (iroh) streaming endpoint — R1 stage 3
@@ -46,7 +40,18 @@ uuid.workspace = true
 dashmap = "6.1.0"
 xcap.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# D-Bus for notifications, battery
+zbus.workspace = true
+# Input injection via uinput (universal fallback)
+evdev.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
 [dev-dependencies]
 rustls.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 # `dup2` in the uinput rebuild test, to fault a live device's descriptor.
 libc.workspace = true

@@ -6,9 +6,10 @@ edition.workspace = true
 [features]
 default = ["server"]
 
-# Linux server features
+# Desktop server features (Linux and Windows; the backends differ by target)
 server = ["capture", "encode", "injection", "opus"]
 capture = [
+    "dep:windows",
     "dep:ashpd",
     "dep:pipewire",
     "dep:libspa",
@@ -44,22 +45,6 @@ tracing.workspace = true
 uuid.workspace = true
 async-trait.workspace = true
 rand = "0.8"
-
-# Screen capture (Linux-only, optional)
-ashpd = { workspace = true, optional = true }
-pipewire = { workspace = true, optional = true }
-libspa = { workspace = true, optional = true }
-x11rb = { version = "0.13", features = ["shm"], optional = true }
-wayland-client = { version = "0.31", optional = true }
-wayland-protocols-wlr = { version = "0.3", default-features = false, features = [
-    "client",
-], optional = true }
-# R4 B2: in-crate code generation for hyprland-toplevel-export-v1
-# (core/protocols/*.xml, BSD-3 vendored). Generated bindings reference
-# `wayland_backend` and `bitflags` directly, so they must be in scope.
-wayland-scanner = { version = "0.31", optional = true }
-wayland-backend = { version = "0.3", optional = true }
-bitflags = { version = "2", optional = true }
 tokio-util.workspace = true
 
 # Audio coding (Opus). Server: desktop-audio encode + phone-mic decode (R4 E2).
@@ -67,9 +52,8 @@ tokio-util.workspace = true
 # the phone encodes mic audio with MediaCodec instead.
 opus = { workspace = true, optional = true }
 
-# Video encoding (Linux-only, optional)
+# Video encoding through a persistent ffmpeg child process (both OSes)
 ffmpeg-sidecar = { workspace = true, optional = true }
-ffmpeg-next = { workspace = true, optional = true }
 
 # mDNS service discovery
 mdns-sd = "0.13"
@@ -93,8 +77,34 @@ rustls.workspace = true
 # X11 screen capture fallback (optional)
 xcap = { workspace = true, optional = true }
 
-# Input injection via uinput (Linux-only, optional)
-evdev = { workspace = true, optional = true }
-
 # Directories / home paths
 dirs.workspace = true
+
+# Linux-only backends. The features above name them with `dep:`; on another
+# OS the dependency does not exist for the target, so the feature turns on
+# nothing and the code behind it is `cfg(target_os = "linux")`.
+[target.'cfg(target_os = "linux")'.dependencies]
+# Screen capture
+ashpd = { workspace = true, optional = true }
+pipewire = { workspace = true, optional = true }
+libspa = { workspace = true, optional = true }
+x11rb = { version = "0.13", features = ["shm"], optional = true }
+wayland-client = { version = "0.31", optional = true }
+wayland-protocols-wlr = { version = "0.3", default-features = false, features = [
+    "client",
+], optional = true }
+# R4 B2: in-crate code generation for hyprland-toplevel-export-v1
+# (core/protocols/*.xml, BSD-3 vendored). Generated bindings reference
+# `wayland_backend` and `bitflags` directly, so they must be in scope.
+wayland-scanner = { version = "0.31", optional = true }
+wayland-backend = { version = "0.3", optional = true }
+bitflags = { version = "2", optional = true }
+# In-process FFmpeg (software x264 + VAAPI). Windows encodes through the
+# ffmpeg sidecar only; see docs/superpowers/specs/2026-10-08-windows-host-design.md §4.
+ffmpeg-next = { workspace = true, optional = true }
+# Input injection via uinput
+evdev = { workspace = true, optional = true }
+
+# Windows backends (capture, audio): Win32 + WinRT bindings.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, optional = true }

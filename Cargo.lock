@@ -2615,6 +2615,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols-wlr",
  "wayland-scanner",
+ "windows 0.62.2",
  "x11rb",
  "xcap",
 ]
@@ -2643,6 +2644,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows 0.62.2",
  "xcap",
  "zbus",
 ]
