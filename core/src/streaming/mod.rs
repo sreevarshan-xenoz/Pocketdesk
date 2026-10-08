@@ -21,6 +21,8 @@ pub mod transport;
 // `target_os = "linux"` gates mark backends whose dependencies only exist there.
 #[cfg(feature = "capture")]
 pub mod audio_capture;
+#[cfg(all(feature = "capture", target_os = "linux"))]
+mod audio_capture_pipewire;
 #[cfg(feature = "encode")]
 pub mod bench;
 #[cfg(feature = "capture")]
