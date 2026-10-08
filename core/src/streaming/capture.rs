@@ -317,7 +317,7 @@ pub fn create_test_frame(width: u32, height: u32) -> VideoFrame {
         width,
         height,
         stride,
-        timestamp: Instant::now(),
+        timestamp: std::time::Instant::now(),
     }
 }
 
