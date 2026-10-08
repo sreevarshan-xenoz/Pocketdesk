@@ -17,26 +17,29 @@ pub mod session_telemetry;
 pub mod sessions;
 pub mod transport;
 
-// Server-only modules — these require Linux-specific dependencies
+// Server-only modules. Feature gates say *what* is built; the
+// `target_os = "linux"` gates mark backends whose dependencies only exist there.
 #[cfg(feature = "capture")]
 pub mod audio_capture;
 #[cfg(feature = "encode")]
 pub mod bench;
 #[cfg(feature = "capture")]
 pub mod capture;
-#[cfg(feature = "capture")]
+#[cfg(all(feature = "capture", target_os = "linux"))]
+pub mod capture_linux;
+#[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_screencopy;
 #[cfg(feature = "capture")]
 pub mod capture_x11;
 #[cfg(feature = "encode")]
 pub mod encoder;
-#[cfg(feature = "encode")]
+#[cfg(all(feature = "encode", target_os = "linux"))]
 pub mod encoder_inproc;
-#[cfg(feature = "encode")]
+#[cfg(all(feature = "encode", target_os = "linux"))]
 pub mod encoder_vaapi;
 #[cfg(feature = "encode")]
 pub mod nvenc_power;
-#[cfg(feature = "capture")]
+#[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod shield;
 #[cfg(feature = "server")]
 pub mod streamer;
