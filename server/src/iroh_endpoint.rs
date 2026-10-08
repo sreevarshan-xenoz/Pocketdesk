@@ -12,6 +12,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::SocketAddr;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -65,11 +66,11 @@ pub fn load_or_create_secret_key(path: &Path) -> Result<SecretKey> {
     let key = SecretKey::generate();
     // create_new: if a second server instance won the race, adopt its key
     // rather than silently diverging identities.
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path);
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let file = options.open(path);
     match file {
         Ok(mut file) => {
             file.write_all(&key.to_bytes())
@@ -202,7 +203,6 @@ pub async fn spawn_wan_endpoint(
 mod tests {
     use super::*;
     use iroh::TransportAddr;
-    use std::os::unix::fs::PermissionsExt;
 
     fn temp_key_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -224,8 +224,12 @@ mod tests {
             "identity must be stable across restarts"
         );
 
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "secret key must be owner-only");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "secret key must be owner-only");
+        }
 
         std::fs::remove_file(&path).ok();
     }
