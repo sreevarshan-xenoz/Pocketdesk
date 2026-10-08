@@ -1,0 +1,14 @@
+# Pin LF in the working tree on every OS. A Windows checkout with
+# core.autocrlf=true would otherwise hand rustfmt and the shell scripts CRLF
+# files, and a commit from there could push CRLF churn back to Linux.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF; cmd.exe needs it.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.jar binary
+*.png binary
+*.webp binary
+*.wav binary
+*.ico binary
