@@ -28,6 +28,7 @@ pub struct CaptureSession {
 
 impl CaptureSession {
     /// Create a new capture session.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn new(config: StreamingConfig, cancel: CancellationToken) -> Self {
         Self { config, cancel }
     }
@@ -49,6 +50,7 @@ impl Drop for CaptureSession {
 /// server's monitors plugin reports to clients, so a phone-side picker index
 /// and the server capture target agree. `None` when enumeration fails or the
 /// index is out of range; callers then keep the legacy whole-screen behaviour.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(super) fn monitor_rect(index: u32) -> Option<(i32, i32, u32, u32)> {
     let monitors = xcap::Monitor::all().ok()?;
     let monitor = monitors.get(index as usize)?;
@@ -191,6 +193,8 @@ impl CaptureBackend {
 /// silently switching. Split from [`capture_attempts`] so the ordering is
 /// unit-testable without touching real capture.
 #[allow(clippy::too_many_arguments)]
+// Off Linux every parameter feeds a backend that this build does not have yet.
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
 pub async fn start_capture_auto(
     config: StreamingConfig,
     frame_tx: mpsc::Sender<VideoFrame>,

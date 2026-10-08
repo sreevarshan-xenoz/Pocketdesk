@@ -28,7 +28,9 @@ use ffmpeg_sidecar::command::FfmpegCommand;
 use tracing::{debug, error, info, trace, warn};
 
 use super::encoder_detect::HardwareEncoder;
+#[cfg(target_os = "linux")]
 use super::encoder_inproc::InProcessEncoder;
+#[cfg(target_os = "linux")]
 use super::encoder_vaapi::VaapiEncoder;
 use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCodec, VideoFrame};
 
@@ -128,8 +130,10 @@ pub enum VideoEncoder {
     /// Persistent FFmpeg child process over stdio pipes (VAAPI/NVENC).
     Sidecar(SidecarEncoder),
     /// In-process libx264/libx265 via `ffmpeg-next` (software path).
+    #[cfg(target_os = "linux")]
     InProcess(InProcessEncoder),
     /// In-process VAAPI (`h264_vaapi`/`hevc_vaapi`) via raw FFmpeg FFI (C4).
+    #[cfg(target_os = "linux")]
     VaapiInProcess(VaapiEncoder),
 }
 
@@ -200,7 +204,9 @@ impl VideoEncoder {
     pub fn backend_name(&self) -> &'static str {
         match self {
             Self::Sidecar(_) => "ffmpeg-sidecar",
+            #[cfg(target_os = "linux")]
             Self::InProcess(_) => "in-process",
+            #[cfg(target_os = "linux")]
             Self::VaapiInProcess(_) => "in-process-vaapi",
         }
     }
@@ -209,7 +215,9 @@ impl VideoEncoder {
     pub fn encode_frame(&mut self, frame: &VideoFrame) -> anyhow::Result<Option<EncodedPacket>> {
         match self {
             Self::Sidecar(e) => e.encode_frame(frame),
+            #[cfg(target_os = "linux")]
             Self::InProcess(e) => e.encode_frame(frame),
+            #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.encode_frame(frame),
         }
     }
@@ -218,7 +226,9 @@ impl VideoEncoder {
     pub fn drain(&mut self) -> anyhow::Result<Vec<EncodedPacket>> {
         match self {
             Self::Sidecar(e) => e.drain(),
+            #[cfg(target_os = "linux")]
             Self::InProcess(e) => e.drain(),
+            #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.drain(),
         }
     }
@@ -227,7 +237,9 @@ impl VideoEncoder {
     pub fn request_keyframe(&mut self) {
         match self {
             Self::Sidecar(e) => e.request_keyframe(),
+            #[cfg(target_os = "linux")]
             Self::InProcess(e) => e.request_keyframe(),
+            #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.request_keyframe(),
         }
     }
@@ -236,7 +248,9 @@ impl VideoEncoder {
     pub fn sequence(&self) -> u64 {
         match self {
             Self::Sidecar(e) => e.sequence(),
+            #[cfg(target_os = "linux")]
             Self::InProcess(e) => e.sequence(),
+            #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.sequence(),
         }
     }
@@ -245,7 +259,9 @@ impl VideoEncoder {
     pub fn config(&self) -> &StreamingConfig {
         match self {
             Self::Sidecar(e) => e.config(),
+            #[cfg(target_os = "linux")]
             Self::InProcess(e) => e.config(),
+            #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.config(),
         }
     }
@@ -260,8 +276,10 @@ pub fn degrade_to_software(config: &mut StreamingConfig) {
     config.codec = VideoCodec::H264;
 }
 
-/// Open the software rung: in-process libx264 first, sidecar as last resort.
+/// Open the software rung: in-process libx264 first (Linux), sidecar as last
+/// resort — and as the only software path where in-process FFmpeg is not built.
 fn open_software(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
+    #[cfg(target_os = "linux")]
     match InProcessEncoder::new(config.clone()) {
         Ok(encoder) => {
             info!("Video encoder: in-process FFmpeg (software)");
@@ -285,13 +303,14 @@ fn open_sidecar_verified(config: StreamingConfig) -> anyhow::Result<VideoEncoder
 
 /// The VAAPI rung: in-process first (C4), verified sidecar as fallback.
 fn open_vaapi_verified(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
+    #[cfg(target_os = "linux")]
     match VaapiEncoder::new(config.clone()) {
-        Ok(encoder) => Ok(VideoEncoder::VaapiInProcess(encoder)),
+        Ok(encoder) => return Ok(VideoEncoder::VaapiInProcess(encoder)),
         Err(e) => {
             warn!("In-process VAAPI unavailable ({e:#}); trying sidecar (C2/C4)");
-            open_sidecar_verified(config)
         }
     }
+    open_sidecar_verified(config)
 }
 
 /// How long to keep probing a sidecar child before trusting it (C2).
@@ -787,7 +806,10 @@ pub(crate) fn vbv_kbit_bounds(bitrate_bps: u32, fps: u32) -> (u64, u64) {
 /// degrade instead of killing the session (the in-process path tests each
 /// node's actual VAAPI usability).
 fn vaapi_device_node() -> String {
+    #[cfg(target_os = "linux")]
     use super::encoder_vaapi::VAAPI_DEVICE_ENV;
+    #[cfg(not(target_os = "linux"))]
+    const VAAPI_DEVICE_ENV: &str = "LINUX_LINK_VAAPI_DEVICE";
     if let Ok(node) = std::env::var(VAAPI_DEVICE_ENV)
         && !node.is_empty()
     {
