@@ -153,7 +153,8 @@ impl CertManager {
         } else {
             let (cert, key) = generate_identity()?;
             std::fs::write(&cert_path, &cert)?;
-            std::fs::write(&key_path, &key)?;
+            // The private half of the TOFU-pinned identity: owner-only.
+            crate::secure_fs::write_private(&key_path, &key)?;
             (cert, key)
         };
 
