@@ -9,7 +9,6 @@ default = ["server"]
 # Desktop server features (Linux and Windows; the backends differ by target)
 server = ["capture", "encode", "injection", "opus"]
 capture = [
-    "dep:windows",
     "dep:ashpd",
     "dep:pipewire",
     "dep:libspa",
@@ -105,9 +104,10 @@ ffmpeg-next = { workspace = true, optional = true }
 # Input injection via uinput
 evdev = { workspace = true, optional = true }
 
-# Windows backends (capture, audio): Win32 + WinRT bindings.
+# Windows: capture backends, and owner-only file ACLs (secure_fs) on every
+# Windows build.
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, optional = true }
+windows.workspace = true
 
 # Adapter enumeration for get_local_ips() off Linux (no `hostname -I`); already
 # in the graph through mdns-sd.

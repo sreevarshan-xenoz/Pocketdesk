@@ -7,6 +7,7 @@ pub mod error;
 pub mod input;
 pub mod metrics;
 pub mod protocol;
+pub mod secure_fs;
 pub mod streaming;
 pub mod tailscale;
 
