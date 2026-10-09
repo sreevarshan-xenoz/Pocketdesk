@@ -270,8 +270,25 @@ pub async fn scan_lan_once() -> Vec<PeerInfo> {
 
 /// Get all local IP addresses of the current machine.
 ///
-/// Uses `hostname -I` on Linux to get all IPv4 and IPv6 addresses.
+/// Uses `hostname -I` on Linux to get all IPv4 and IPv6 addresses. Elsewhere
+/// (Windows has no `hostname -I`) the adapters are enumerated directly, with
+/// the same exclusions: no loopback, no link-local.
 pub async fn get_local_ips() -> Vec<String> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        return match if_addrs::get_if_addrs() {
+            Ok(interfaces) => interfaces
+                .iter()
+                .filter(|iface| !iface.is_loopback() && !iface.is_link_local())
+                .map(|iface| iface.ip().to_string())
+                .collect(),
+            Err(e) => {
+                debug!("Enumerating network adapters failed: {e}");
+                Vec::new()
+            }
+        };
+    }
+    #[cfg_attr(not(target_os = "linux"), allow(unreachable_code))]
     let output = Command::new("hostname").arg("-I").output().await;
     if let Ok(output) = output {
         String::from_utf8_lossy(&output.stdout)
@@ -286,6 +303,19 @@ pub async fn get_local_ips() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn local_ips_are_routable_addresses() {
+        // Every listed address parses and is neither loopback nor link-local
+        // (a CI box may have none at all, which is also fine).
+        for ip in get_local_ips().await {
+            let ip: std::net::IpAddr = ip.parse().expect("an IP address");
+            assert!(!ip.is_loopback(), "{ip}");
+            if let std::net::IpAddr::V6(v6) = ip {
+                assert_ne!(v6.segments()[0] & 0xffc0, 0xfe80, "{ip} is link-local");
+            }
+        }
+    }
 
     #[test]
     fn test_lan_discovery_service_new() {

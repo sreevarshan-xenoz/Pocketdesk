@@ -108,3 +108,8 @@ evdev = { workspace = true, optional = true }
 # Windows backends (capture, audio): Win32 + WinRT bindings.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, optional = true }
+
+# Adapter enumeration for get_local_ips() off Linux (no `hostname -I`); already
+# in the graph through mdns-sd.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+if-addrs = "0.13"

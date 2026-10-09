@@ -2593,6 +2593,7 @@ dependencies = [
  "evdev",
  "ffmpeg-next",
  "ffmpeg-sidecar",
+ "if-addrs",
  "iroh",
  "libc",
  "libspa",
