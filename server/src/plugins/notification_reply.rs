@@ -92,6 +92,19 @@ fn record_reply(id: &str, reply: &str) -> Result<()> {
 /// Put the reply text on the desktop clipboard via wl-copy (Wayland) or
 /// xclip (X11). Best-effort: no clipboard tool, no clipboard.
 async fn copy_to_clipboard(text: &str) {
+    #[cfg(windows)]
+    {
+        let text = text.to_string();
+        let set = tokio::task::spawn_blocking(move || {
+            crate::platform::clipboard_windows::set_text(&text)
+        })
+        .await;
+        if !matches!(set, Ok(Ok(()))) {
+            tracing::debug!("Could not put the notification reply on the clipboard");
+        }
+        return;
+    }
+    #[cfg_attr(windows, allow(unreachable_code))]
     for (cmd, args) in [
         ("wl-copy", vec!["--foreground"]),
         ("xclip", vec!["-selection", "clipboard"]),

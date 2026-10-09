@@ -61,7 +61,28 @@ impl Plugin for ClipboardPlugin {
     }
 }
 
+/// Set the system clipboard: the Win32 clipboard on Windows.
+#[cfg(windows)]
+async fn set_clipboard(content: &str) -> Result<()> {
+    let content = content.to_string();
+    tokio::task::spawn_blocking(move || crate::platform::clipboard_windows::set_text(&content))
+        .await
+        .map_err(|e| std::io::Error::other(e.to_string()))??;
+    Ok(())
+}
+
+/// Get the system clipboard's text: the Win32 clipboard on Windows.
+#[cfg(windows)]
+async fn get_clipboard() -> Result<String> {
+    Ok(
+        tokio::task::spawn_blocking(crate::platform::clipboard_windows::get_text)
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))??,
+    )
+}
+
 /// Set system clipboard using `wl-copy`.
+#[cfg(not(windows))]
 async fn set_clipboard(content: &str) -> Result<()> {
     use tokio::io::AsyncWriteExt;
     // wl-copy forks into the background to retain clipboard ownership, so it
@@ -88,6 +109,7 @@ async fn set_clipboard(content: &str) -> Result<()> {
 }
 
 /// Get system clipboard using `wl-paste`.
+#[cfg(not(windows))]
 async fn get_clipboard() -> Result<String> {
     let output = tokio::process::Command::new("wl-paste")
         .arg("--no-newline")

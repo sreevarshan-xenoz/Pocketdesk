@@ -7,6 +7,8 @@
 use std::time::Duration;
 
 #[cfg(windows)]
+pub(crate) mod clipboard_windows;
+#[cfg(windows)]
 mod windows;
 
 /// One-time process setup, before anything enumerates monitors, windows or
