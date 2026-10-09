@@ -1,9 +1,9 @@
 //! Desktop audio capture: what the user hears, as 48 kHz PCM for Opus.
 //!
-//! [`start_audio_capture`] picks the OS backend. On Linux that is a PipeWire
-//! loopback stream on the default sink (`audio_capture_pipewire.rs`); other
-//! targets report that no backend exists, and the streamer carries on without
-//! audio.
+//! [`start_audio_capture`] picks the OS backend: a PipeWire loopback stream on
+//! the default sink on Linux (`audio_capture_pipewire.rs`), WASAPI loopback on
+//! the default output on Windows (`audio_capture_wasapi.rs`). Other targets
+//! report that no backend exists, and the streamer carries on without audio.
 
 use std::time::Instant;
 
@@ -62,7 +62,18 @@ pub async fn start_audio_capture(
         )?;
         Ok(AudioCaptureSession { cancel })
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        super::audio_capture_wasapi::spawn_capture_thread(
+            sample_rate,
+            channels,
+            frame_duration_ms,
+            pcm_tx,
+            cancel.clone(),
+        )?;
+        Ok(AudioCaptureSession { cancel })
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         drop((pcm_tx, cancel));
         anyhow::bail!("this build has no desktop audio capture backend for this OS")

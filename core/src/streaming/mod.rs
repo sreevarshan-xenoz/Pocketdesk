@@ -23,6 +23,8 @@ pub mod transport;
 pub mod audio_capture;
 #[cfg(all(feature = "capture", target_os = "linux"))]
 mod audio_capture_pipewire;
+#[cfg(all(feature = "capture", windows))]
+mod audio_capture_wasapi;
 #[cfg(feature = "encode")]
 pub mod bench;
 #[cfg(feature = "capture")]
