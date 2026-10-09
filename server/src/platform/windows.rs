@@ -22,6 +22,21 @@ use windows::core::{HSTRING, PCWSTR, w};
 /// under `HKCU\Software\Classes\AppUserModelId` for Windows to display them.
 const AUMID: &str = "LinuxLink.Server";
 
+/// A tool in the real System32, located by asking Windows (not `%SystemRoot%`,
+/// which the user can point anywhere).
+pub(crate) fn system32(tool: &str) -> std::path::PathBuf {
+    let mut buffer = [0u16; 260];
+    let len = unsafe {
+        windows::Win32::System::SystemInformation::GetSystemDirectoryW(Some(&mut buffer))
+    } as usize;
+    let dir = if len > 0 && len < buffer.len() {
+        std::path::PathBuf::from(String::from_utf16_lossy(&buffer[..len]))
+    } else {
+        std::path::PathBuf::from(r"C:\Windows\System32")
+    };
+    dir.join(tool)
+}
+
 pub(super) fn init_process() {
     // Fails harmlessly when awareness was already set (e.g. by a manifest),
     // which is the only way it can fail on a supported Windows.

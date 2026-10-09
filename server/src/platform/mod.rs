@@ -12,6 +12,8 @@ pub(crate) mod audio_windows;
 pub(crate) mod clipboard_windows;
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+pub(crate) use windows::system32;
 
 /// One-time process setup, before anything enumerates monitors, windows or
 /// injects input.

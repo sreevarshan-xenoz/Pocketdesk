@@ -30,6 +30,29 @@ impl Default for ExecPlugin {
     }
 }
 
+/// The command-line shell: `sh -c` on Unix; on Windows the real
+/// `System32\cmd.exe /C` (located through the OS, never `PATH`), with no
+/// console window and the command passed verbatim, since cmd does its own
+/// parsing and Rust's argument quoting would corrupt it.
+fn shell(cmd: &str) -> Command {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut command = Command::new(crate::platform::system32("cmd.exe"));
+        command
+            .arg("/C")
+            .raw_arg(cmd)
+            .creation_flags(CREATE_NO_WINDOW);
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(cmd);
+        command
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for ExecPlugin {
     fn name(&self) -> &'static str {
@@ -51,8 +74,7 @@ impl Plugin for ExecPlugin {
             if let Some(cmd) = command {
                 tracing::info!("Executing remote command: {}", cmd);
 
-                // Run the command using sh -c
-                let output = Command::new("sh").arg("-c").arg(cmd).output().await;
+                let output = shell(cmd).output().await;
 
                 match output {
                     Ok(out) => {
@@ -81,5 +103,20 @@ impl Plugin for ExecPlugin {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    /// cmd.exe sees the command exactly as typed: quotes, `&` chaining and
+    /// all — the reason for `raw_arg`.
+    #[tokio::test]
+    async fn cmd_receives_the_command_verbatim() {
+        let out = shell(r#"echo "a  b"&echo c"#).output().await.unwrap();
+        assert!(out.status.success());
+        let text = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+        assert_eq!(text, "\"a  b\"\nc\n");
     }
 }

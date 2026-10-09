@@ -23,12 +23,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+
+use crate::platform::system32;
 use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegDeleteTreeW};
-use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows::Win32::System::TaskScheduler::{
     ITaskService, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN, TaskScheduler,
 };
@@ -59,19 +60,6 @@ const PORTS: [(&str, u16, &str); 3] = [
 
 /// Tailscale's address ranges (IPv4 CGNAT block and its IPv6 ULA prefix).
 const TAILNET: &str = "100.64.0.0/10,fd7a:115c:a1e0::/48";
-
-/// A tool in the real System32, located by asking Windows (not `%SystemRoot%`,
-/// which the user can point anywhere).
-fn system32(tool: &str) -> PathBuf {
-    let mut buffer = [0u16; 260];
-    let len = unsafe { GetSystemDirectoryW(Some(&mut buffer)) } as usize;
-    let dir = if len > 0 && len < buffer.len() {
-        PathBuf::from(String::from_utf16_lossy(&buffer[..len]))
-    } else {
-        PathBuf::from(r"C:\Windows\System32")
-    };
-    dir.join(tool)
-}
 
 fn known_folder(id: &GUID) -> Option<PathBuf> {
     let path = unsafe { SHGetKnownFolderPath(id, KNOWN_FOLDER_FLAG(0), None) }.ok()?;
