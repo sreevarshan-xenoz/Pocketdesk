@@ -160,13 +160,27 @@ pub enum CaptureBackend {
     Portal,
     /// Direct X11 `GetImage` (works on Wayland only through XWayland's root).
     X11,
+    /// Windows.Graphics.Capture (Windows 10 1903+): monitor or single window.
+    Wgc,
 }
 
 impl CaptureBackend {
     /// Every backend this build can drive, in `Auto`'s preference order.
     /// `linux-link capabilities` enumerates from here (roadmap item 4).
-    pub const ALL: [CaptureBackend; 4] = [
+    #[cfg(not(windows))]
+    pub const ALL: &'static [CaptureBackend] = &[
         CaptureBackend::Auto,
+        CaptureBackend::Screencopy,
+        CaptureBackend::Portal,
+        CaptureBackend::X11,
+    ];
+    /// Every backend this build can drive, in `Auto`'s preference order.
+    /// `linux-link capabilities` enumerates from here (roadmap item 4).
+    #[cfg(windows)]
+    pub const ALL: &'static [CaptureBackend] = &[CaptureBackend::Auto, CaptureBackend::Wgc];
+
+    /// The Linux backends, which a config file may name on any OS.
+    pub const LINUX: [CaptureBackend; 3] = [
         CaptureBackend::Screencopy,
         CaptureBackend::Portal,
         CaptureBackend::X11,
@@ -180,6 +194,7 @@ impl CaptureBackend {
             CaptureBackend::Screencopy => "screencopy",
             CaptureBackend::Portal => "portal",
             CaptureBackend::X11 => "x11",
+            CaptureBackend::Wgc => "wgc",
         }
     }
 }
@@ -232,6 +247,16 @@ pub async fn start_capture_auto(
             CaptureBackend::Screencopy | CaptureBackend::Portal | CaptureBackend::X11 => {
                 Err(anyhow::anyhow!("{attempt:?} capture is Linux-only"))
             }
+            #[cfg(windows)]
+            CaptureBackend::Wgc => super::capture_wgc::start_wgc_capture(
+                config.clone(),
+                frame_tx.clone(),
+                cancel.clone(),
+                window_rx.clone(),
+                window_mode.clone(),
+            ),
+            #[cfg(not(windows))]
+            CaptureBackend::Wgc => Err(anyhow::anyhow!("WGC capture is Windows-only")),
         };
         match result {
             Ok(session) => {
@@ -258,13 +283,13 @@ pub fn capture_attempts(
     if detected == DisplayServer::Windows {
         // A config.toml written on Linux must still load here; it fails at
         // capture with a reason instead of at parse.
-        match backend {
-            CaptureBackend::Auto => bail!("This build has no Windows capture backend"),
+        return match backend {
+            CaptureBackend::Auto | CaptureBackend::Wgc => Ok(vec![CaptureBackend::Wgc]),
             other => bail!(
                 "capture_backend = \"{}\" is a Linux backend and is not available on Windows",
                 other.config_key()
             ),
-        }
+        };
     }
     let wayland = detected == DisplayServer::Wayland;
     let x11 = detected == DisplayServer::X11;
@@ -301,6 +326,9 @@ pub fn capture_attempts(
             } else {
                 bail!("capture_backend = \"x11\" requires an X11 (or XWayland) display");
             }
+        }
+        CaptureBackend::Wgc => {
+            bail!("capture_backend = \"wgc\" is a Windows backend and is not available here")
         }
     };
     Ok(list)
@@ -379,14 +407,34 @@ mod tests {
 
     #[test]
     fn linux_backends_are_refused_on_windows_with_their_config_name() {
-        for backend in CaptureBackend::ALL {
+        for backend in CaptureBackend::LINUX {
             let err = capture_attempts(backend, DisplayServer::Windows).unwrap_err();
-            if backend != CaptureBackend::Auto {
-                assert!(
-                    err.to_string().contains(backend.config_key()),
-                    "{backend:?}: {err}"
-                );
-            }
+            assert!(
+                err.to_string().contains(backend.config_key()),
+                "{backend:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_auto_and_pinned_wgc_both_use_wgc() {
+        for backend in [CaptureBackend::Auto, CaptureBackend::Wgc] {
+            assert_eq!(
+                capture_attempts(backend, DisplayServer::Windows).unwrap(),
+                vec![CaptureBackend::Wgc]
+            );
+        }
+    }
+
+    #[test]
+    fn wgc_is_refused_off_windows_with_its_config_name() {
+        for server in [
+            DisplayServer::Wayland,
+            DisplayServer::X11,
+            DisplayServer::None,
+        ] {
+            let err = capture_attempts(CaptureBackend::Wgc, server).unwrap_err();
+            assert!(err.to_string().contains("wgc"), "{server:?}: {err}");
         }
     }
 

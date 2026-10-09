@@ -79,6 +79,9 @@ pub struct CaptureBackendInfo {
     /// means `Auto` never tries it there.
     pub auto_order_wayland: Option<usize>,
     pub auto_order_x11: Option<usize>,
+    /// Same, on a Windows build (absent from a Linux report).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_order_windows: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +93,9 @@ pub struct CaptureInfo {
     /// the same function the capture pipeline calls.
     pub auto_order_wayland: Vec<String>,
     pub auto_order_x11: Vec<String>,
+    /// What `Auto` tries on a Windows build (absent from a Linux report).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub auto_order_windows: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -222,9 +228,10 @@ impl Capabilities {
                         bitrate_bps: None,
                         frame_duration_ms: out.frame_duration_ms,
                         this_build_encodes: cfg!(feature = "opus"),
-                        // The desktop plays it: `mic_relay.rs` decodes and feeds a
-                        // virtual `pw-loopback` source named "Linux Link Mic".
-                        played_on_the_receiving_end: true,
+                        // The Linux desktop plays it: `mic_relay.rs` decodes and
+                        // feeds a virtual `pw-loopback` source named "Linux Link
+                        // Mic". Windows has no relay sink yet.
+                        played_on_the_receiving_end: cfg!(target_os = "linux"),
                     },
                 ]
             },
@@ -241,8 +248,17 @@ impl Capabilities {
                 .collect::<Vec<_>>(),
             Err(_) => Vec::new(),
         };
-        let wayland = order(DisplayServer::Wayland);
-        let x11 = order(DisplayServer::X11);
+        // A build reports the display servers it can run on: the Linux pair,
+        // or Windows.
+        let (wayland, x11, windows) = if cfg!(windows) {
+            (Vec::new(), Vec::new(), order(DisplayServer::Windows))
+        } else {
+            (
+                order(DisplayServer::Wayland),
+                order(DisplayServer::X11),
+                Vec::new(),
+            )
+        };
         let position =
             |list: &[String], key: &str| list.iter().position(|k| k == key).map(|index| index + 1);
         CaptureInfo {
@@ -256,14 +272,17 @@ impl Capabilities {
                         CaptureBackend::Screencopy => "Screencopy",
                         CaptureBackend::Portal => "Portal",
                         CaptureBackend::X11 => "X11",
+                        CaptureBackend::Wgc => "Wgc",
                     },
                     config_key: backend.config_key(),
                     auto_order_wayland: position(&wayland, backend.config_key()),
                     auto_order_x11: position(&x11, backend.config_key()),
+                    auto_order_windows: position(&windows, backend.config_key()),
                 })
                 .collect(),
             auto_order_wayland: wayland,
             auto_order_x11: x11,
+            auto_order_windows: windows,
         }
     }
 
@@ -274,6 +293,7 @@ impl Capabilities {
             backends: Vec::new(),
             auto_order_wayland: Vec::new(),
             auto_order_x11: Vec::new(),
+            auto_order_windows: Vec::new(),
         }
     }
 
@@ -325,7 +345,18 @@ impl Capabilities {
         }
 
         out.push_str("\nCapture backends\n");
-        if self.capture.available {
+        if self.capture.available && !self.capture.auto_order_windows.is_empty() {
+            out.push_str(&format!(
+                "  Auto on Windows: {}\n",
+                self.capture.auto_order_windows.join(" -> ")
+            ));
+            for backend in &self.capture.backends {
+                out.push_str(&format!(
+                    "  {:<12} config `capture_backend = \"{}\"`\n",
+                    backend.id, backend.config_key
+                ));
+            }
+        } else if self.capture.available {
             out.push_str(&format!(
                 "  Auto on Wayland: {}\n",
                 if self.capture.auto_order_wayland.is_empty() {
@@ -462,7 +493,26 @@ impl Capabilities {
         }
 
         out.push_str("\n## Capture backends\n\n");
-        if self.capture.available {
+        if self.capture.available && !self.capture.auto_order_windows.is_empty() {
+            out.push_str(&format!(
+                "`Auto` attempts, in order: Windows `{}`. A config file may still name a Linux backend; it is refused at capture time with its name.\n\n",
+                self.capture.auto_order_windows.join(" -> ")
+            ));
+            out.push_str(
+                "| Backend | `capture_backend` value | Auto rank (Windows) |\n| --- | --- | --- |\n",
+            );
+            for backend in &self.capture.backends {
+                out.push_str(&format!(
+                    "| `{}` | `\"{}\"` | {} |\n",
+                    backend.id,
+                    backend.config_key,
+                    backend
+                        .auto_order_windows
+                        .map(|p| p.to_string())
+                        .unwrap_or_else(|| "not tried".to_string()),
+                ));
+            }
+        } else if self.capture.available {
             out.push_str(&format!(
                 "`Auto` attempts, in order: Wayland `{}`, X11 `{}`.\n\n",
                 self.capture.auto_order_wayland.join(" -> "),
@@ -624,7 +674,9 @@ mod tests {
                 .unwrap_or_else(|| panic!("no `{direction}` row in the audio table"))
         };
         assert!(!played("desktop -> phone"));
-        assert!(played("phone -> desktop"));
+        // Linux plays the phone's mic into a pw-loopback source; Windows has
+        // no relay sink yet.
+        assert_eq!(played("phone -> desktop"), cfg!(target_os = "linux"));
         // The generated doc says it out loud, not just in the JSON.
         assert!(
             caps.render_markdown().contains("no playout path for it"),
@@ -632,7 +684,17 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "capture")]
+    #[cfg(all(feature = "capture", windows))]
+    #[test]
+    fn a_windows_build_reports_windows_capture_only() {
+        let caps = Capabilities::collect();
+        assert_eq!(caps.capture.auto_order_windows, vec!["wgc".to_string()]);
+        assert!(caps.capture.auto_order_wayland.is_empty());
+        assert!(caps.capture.auto_order_x11.is_empty());
+        assert!(caps.render_markdown().contains("Auto rank (Windows)"));
+    }
+
+    #[cfg(all(feature = "capture", not(windows)))]
     #[test]
     fn auto_order_matches_the_capture_decision_table() {
         let caps = Capabilities::collect();

@@ -9,7 +9,14 @@
 
 use linux_link_core::capabilities::Capabilities;
 
+/// Each OS's build reports what *it* can do, so each has its own committed doc.
+#[cfg(not(windows))]
 const DOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/capabilities.md");
+#[cfg(windows)]
+const DOC: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../docs/capabilities-windows.md"
+);
 
 #[test]
 fn capabilities_doc_matches_the_build_that_reports_it() {
@@ -22,7 +29,8 @@ fn capabilities_doc_matches_the_build_that_reports_it() {
     assert_eq!(
         expected.trim_end(),
         actual.trim_end(),
-        "docs/capabilities.md is stale. Regenerate with:\n    \
-         cargo run -q -p linux-link-server -- capabilities --markdown > docs/capabilities.md"
+        "{DOC} is stale. Regenerate it on the OS it describes (capabilities.md on Linux, \
+         capabilities-windows.md on Windows) with:\n    \
+         cargo run -q -p linux-link-server -- capabilities --markdown > <that file>"
     );
 }
