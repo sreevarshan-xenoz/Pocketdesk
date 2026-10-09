@@ -27,11 +27,12 @@
 
 ## Capture backends
 
-`Auto` attempts, in order: Windows `wgc`. A config file may still name a Linux backend; it is refused at capture time with its name.
+`Auto` attempts, in order: Windows `wgc -> dxgi`. A config file may still name a Linux backend; it is refused at capture time with its name.
 
 | Backend | `capture_backend` value | Auto rank (Windows) |
 | --- | --- | --- |
 | `Wgc` | `"wgc"` | 1 |
+| `Dxgi` | `"dxgi"` | 2 |
 
 ## Codecs
 

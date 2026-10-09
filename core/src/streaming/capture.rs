@@ -162,6 +162,8 @@ pub enum CaptureBackend {
     X11,
     /// Windows.Graphics.Capture (Windows 10 1903+): monitor or single window.
     Wgc,
+    /// DXGI Desktop Duplication: Windows fallback, monitors only, no cursor.
+    Dxgi,
 }
 
 impl CaptureBackend {
@@ -177,7 +179,11 @@ impl CaptureBackend {
     /// Every backend this build can drive, in `Auto`'s preference order.
     /// `linux-link capabilities` enumerates from here (roadmap item 4).
     #[cfg(windows)]
-    pub const ALL: &'static [CaptureBackend] = &[CaptureBackend::Auto, CaptureBackend::Wgc];
+    pub const ALL: &'static [CaptureBackend] = &[
+        CaptureBackend::Auto,
+        CaptureBackend::Wgc,
+        CaptureBackend::Dxgi,
+    ];
 
     /// The Linux backends, which a config file may name on any OS.
     pub const LINUX: [CaptureBackend; 3] = [
@@ -195,6 +201,7 @@ impl CaptureBackend {
             CaptureBackend::Portal => "portal",
             CaptureBackend::X11 => "x11",
             CaptureBackend::Wgc => "wgc",
+            CaptureBackend::Dxgi => "dxgi",
         }
     }
 }
@@ -255,8 +262,18 @@ pub async fn start_capture_auto(
                 window_rx.clone(),
                 window_mode.clone(),
             ),
+            #[cfg(windows)]
+            CaptureBackend::Dxgi => super::capture_dxgi::start_dxgi_capture(
+                config.clone(),
+                frame_tx.clone(),
+                cancel.clone(),
+                window_rx.clone(),
+                window_mode.clone(),
+            ),
             #[cfg(not(windows))]
-            CaptureBackend::Wgc => Err(anyhow::anyhow!("WGC capture is Windows-only")),
+            CaptureBackend::Wgc | CaptureBackend::Dxgi => {
+                Err(anyhow::anyhow!("{attempt:?} capture is Windows-only"))
+            }
         };
         match result {
             Ok(session) => {
@@ -284,7 +301,9 @@ pub fn capture_attempts(
         // A config.toml written on Linux must still load here; it fails at
         // capture with a reason instead of at parse.
         return match backend {
-            CaptureBackend::Auto | CaptureBackend::Wgc => Ok(vec![CaptureBackend::Wgc]),
+            CaptureBackend::Auto => Ok(vec![CaptureBackend::Wgc, CaptureBackend::Dxgi]),
+            CaptureBackend::Wgc => Ok(vec![CaptureBackend::Wgc]),
+            CaptureBackend::Dxgi => Ok(vec![CaptureBackend::Dxgi]),
             other => bail!(
                 "capture_backend = \"{}\" is a Linux backend and is not available on Windows",
                 other.config_key()
@@ -327,9 +346,10 @@ pub fn capture_attempts(
                 bail!("capture_backend = \"x11\" requires an X11 (or XWayland) display");
             }
         }
-        CaptureBackend::Wgc => {
-            bail!("capture_backend = \"wgc\" is a Windows backend and is not available here")
-        }
+        CaptureBackend::Wgc | CaptureBackend::Dxgi => bail!(
+            "capture_backend = \"{}\" is a Windows backend and is not available here",
+            backend.config_key()
+        ),
     };
     Ok(list)
 }
@@ -417,24 +437,36 @@ mod tests {
     }
 
     #[test]
-    fn windows_auto_and_pinned_wgc_both_use_wgc() {
-        for backend in [CaptureBackend::Auto, CaptureBackend::Wgc] {
-            assert_eq!(
-                capture_attempts(backend, DisplayServer::Windows).unwrap(),
-                vec![CaptureBackend::Wgc]
-            );
-        }
+    fn windows_auto_tries_wgc_then_dxgi_and_a_pin_holds() {
+        use CaptureBackend::{Auto, Dxgi, Wgc};
+        assert_eq!(
+            capture_attempts(Auto, DisplayServer::Windows).unwrap(),
+            vec![Wgc, Dxgi]
+        );
+        assert_eq!(
+            capture_attempts(Wgc, DisplayServer::Windows).unwrap(),
+            vec![Wgc]
+        );
+        assert_eq!(
+            capture_attempts(Dxgi, DisplayServer::Windows).unwrap(),
+            vec![Dxgi]
+        );
     }
 
     #[test]
-    fn wgc_is_refused_off_windows_with_its_config_name() {
-        for server in [
-            DisplayServer::Wayland,
-            DisplayServer::X11,
-            DisplayServer::None,
-        ] {
-            let err = capture_attempts(CaptureBackend::Wgc, server).unwrap_err();
-            assert!(err.to_string().contains("wgc"), "{server:?}: {err}");
+    fn windows_backends_are_refused_off_windows_with_their_config_name() {
+        for backend in [CaptureBackend::Wgc, CaptureBackend::Dxgi] {
+            for server in [
+                DisplayServer::Wayland,
+                DisplayServer::X11,
+                DisplayServer::None,
+            ] {
+                let err = capture_attempts(backend, server).unwrap_err();
+                assert!(
+                    err.to_string().contains(backend.config_key()),
+                    "{backend:?} on {server:?}: {err}"
+                );
+            }
         }
     }
 

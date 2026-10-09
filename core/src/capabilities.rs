@@ -273,6 +273,7 @@ impl Capabilities {
                         CaptureBackend::Portal => "Portal",
                         CaptureBackend::X11 => "X11",
                         CaptureBackend::Wgc => "Wgc",
+                        CaptureBackend::Dxgi => "Dxgi",
                     },
                     config_key: backend.config_key(),
                     auto_order_wayland: position(&wayland, backend.config_key()),
@@ -688,7 +689,10 @@ mod tests {
     #[test]
     fn a_windows_build_reports_windows_capture_only() {
         let caps = Capabilities::collect();
-        assert_eq!(caps.capture.auto_order_windows, vec!["wgc".to_string()]);
+        assert_eq!(
+            caps.capture.auto_order_windows,
+            vec!["wgc".to_string(), "dxgi".to_string()]
+        );
         assert!(caps.capture.auto_order_wayland.is_empty());
         assert!(caps.capture.auto_order_x11.is_empty());
         assert!(caps.render_markdown().contains("Auto rank (Windows)"));
