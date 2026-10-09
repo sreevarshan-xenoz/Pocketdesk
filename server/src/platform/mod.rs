@@ -58,8 +58,8 @@ pub type ShutdownReason = &'static str;
 /// Every way this OS can ask a running server to stop, as one channel.
 ///
 /// Call once, at startup, and keep the receiver: it is fed by Ctrl-C on every
-/// OS and, on Windows, by the named event [`request_stop`] signals (Windows has
-/// no SIGTERM for `linux-link stop` to send).
+/// OS, by SIGTERM on Unix, and on Windows by the named event [`request_stop`]
+/// signals (Windows has no SIGTERM for `linux-link stop` to send).
 pub fn shutdown_requests() -> tokio::sync::mpsc::Receiver<ShutdownReason> {
     let (tx, rx) = tokio::sync::mpsc::channel(4);
     let ctrl_c = tx.clone();
@@ -70,8 +70,20 @@ pub fn shutdown_requests() -> tokio::sync::mpsc::Receiver<ShutdownReason> {
     });
     #[cfg(windows)]
     windows::listen_for_stop_event(tx);
-    #[cfg(not(windows))]
-    drop(tx);
+    // `linux-link stop` sends SIGTERM; without a handler the default action
+    // killed the server before its PID-file guard could run.
+    #[cfg(unix)]
+    tokio::spawn(async move {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                if term.recv().await.is_some() {
+                    let _ = tx.send("SIGTERM").await;
+                }
+            }
+            Err(e) => tracing::warn!("cannot listen for SIGTERM: {e}"),
+        }
+    });
     rx
 }
 
