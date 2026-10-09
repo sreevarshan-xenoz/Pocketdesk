@@ -2,13 +2,15 @@
 
 use windows::Data::Xml::Dom::XmlDocument;
 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
-use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
     RegCreateKeyExW, RegSetValueExW,
 };
 use windows::Win32::System::Threading::{
-    CreateEventW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, SetEvent, WaitForSingleObject,
+    CreateEventW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, OpenProcess, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW, SetEvent,
+    TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::Win32::UI::HiDpi::{
@@ -95,7 +97,8 @@ pub(super) fn notify(summary: &str, body: &str) -> bool {
 }
 
 /// The event a server waits on and `linux-link stop` signals. Session-local,
-/// so only the same user's processes can reach it.
+/// so other logon sessions cannot reach it; [`listen_for_stop_event`] refuses
+/// one that already exists, so a squatter cannot hand us its own.
 fn stop_event_name(pid: u32) -> HSTRING {
     HSTRING::from(format!(r"Local\LinuxLink-{pid}-stop"))
 }
@@ -110,6 +113,16 @@ pub(super) fn listen_for_stop_event(tx: tokio::sync::mpsc::Sender<super::Shutdow
             return;
         }
     };
+    // CreateEventW also "succeeds" by opening an event someone else made. One
+    // that predates this process was planted, and whoever planted it controls
+    // its security and can fire it: do not listen to it.
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        let _ = unsafe { CloseHandle(event) };
+        tracing::warn!(
+            "a stop event for this pid already existed (planted?); ignoring it, so              `linux-link stop` will fall back to terminating the process"
+        );
+        return;
+    }
     // HANDLE is a raw pointer; the value crosses to the waiting thread.
     let raw = event.0 as isize;
     let spawned = std::thread::Builder::new()
@@ -135,6 +148,57 @@ pub(super) fn signal_stop_event(pid: u32) -> bool {
     let set = unsafe { SetEvent(event) }.is_ok();
     let _ = unsafe { CloseHandle(event) };
     set
+}
+
+/// Whether two executable paths name the same program file (Windows paths
+/// compare case-insensitively).
+fn same_program(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.file_name(), b.file_name()) {
+        (Some(a), Some(b)) => a
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&b.to_string_lossy()),
+        _ => false,
+    }
+}
+
+/// Terminate `pid`, but only if it is running this same program: a PID file
+/// left behind by a crash may by now name an unrelated process.
+pub(super) fn force_stop(pid: u32) -> std::io::Result<bool> {
+    let os_err = |e: windows::core::Error| std::io::Error::from_raw_os_error(e.code().0 & 0xFFFF);
+    let process = unsafe {
+        OpenProcess(
+            PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+            false,
+            pid,
+        )
+    }
+    .map_err(os_err)?;
+    let mut buffer = [0u16; 1024];
+    let mut len = buffer.len() as u32;
+    let named = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut len,
+        )
+    };
+    let image = std::path::PathBuf::from(String::from_utf16_lossy(&buffer[..len as usize]));
+    let ours = std::env::current_exe()?;
+    let result = if named.is_ok() && same_program(&image, &ours) {
+        unsafe { TerminateProcess(process, 1) }
+            .map(|()| true)
+            .map_err(os_err)
+    } else {
+        tracing::warn!(
+            pid,
+            image = %image.display(),
+            "not terminating: that pid is not a Linux Link server"
+        );
+        Ok(false)
+    };
+    let _ = unsafe { CloseHandle(process) };
+    result
 }
 
 #[cfg(test)]
@@ -170,6 +234,23 @@ mod tests {
             !signal_stop_event(u32::MAX),
             "no event for a pid that is not running"
         );
+    }
+
+    #[test]
+    fn only_the_same_program_counts_as_a_server() {
+        use std::path::Path;
+        assert!(same_program(
+            Path::new(r"C:\Program Files\Linux Link\linux-link.exe"),
+            Path::new(r"E:\build\LINUX-LINK.EXE")
+        ));
+        assert!(!same_program(
+            Path::new(r"C:\Windows\explorer.exe"),
+            Path::new(r"E:\build\linux-link.exe")
+        ));
+        assert!(!same_program(
+            Path::new(""),
+            Path::new(r"E:\linux-link.exe")
+        ));
     }
 
     #[test]

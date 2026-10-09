@@ -87,6 +87,13 @@ pub fn shutdown_requests() -> tokio::sync::mpsc::Receiver<ShutdownReason> {
     rx
 }
 
+/// Terminate the server running as `pid` when it cannot be asked: Windows
+/// only, and only if `pid` really is this program. `Ok(false)` means refused.
+#[cfg(windows)]
+pub fn force_stop(pid: u32) -> std::io::Result<bool> {
+    windows::force_stop(pid)
+}
+
 /// Ask the server running as `pid` to shut down gracefully. Returns `false`
 /// when no graceful path exists, so the caller can fall back to force.
 pub async fn request_stop(pid: u32) -> std::io::Result<bool> {

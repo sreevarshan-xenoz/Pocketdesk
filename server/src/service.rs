@@ -493,13 +493,10 @@ pub async fn stop() -> Result<()> {
 
     #[cfg(windows)]
     {
-        // No stop event: an older or wedged server. Force it.
-        let status = tokio::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .status()
-            .await
-            .context("failed to execute taskkill")?;
-        if status.success() {
+        // No stop event: an older or wedged server. Terminate it in-process
+        // (no `taskkill` to resolve off PATH), and only if the pid is still
+        // a Linux Link server rather than whatever reused it.
+        if crate::platform::force_stop(pid).context("failed to terminate the server")? {
             let _ = std::fs::remove_file(&pid_file);
             println!("Linux Link server (pid {pid}) force-stopped");
             return Ok(());
