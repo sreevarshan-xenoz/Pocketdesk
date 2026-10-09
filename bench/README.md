@@ -21,6 +21,17 @@ asked for VAAPI and silently degraded to software is recorded as software.
 Encode time only. Decode and render happen on the phone and are not in this file; a benchmark
 that claimed to cover them would be lying about the half that matters most on a bad session.
 
+### What it cannot measure yet: sidecar rungs
+
+The clock wraps `encode_frame`. For the in-process encoders (`software` on Linux, `vaapi`) that
+call *is* the encode. For every sidecar rung — NVENC, AMF, Quick Sync and Media Foundation, and
+the software rung on Windows, all `ffmpeg-sidecar*` backends — it only writes the frame into the
+FFmpeg child's stdin and collects whatever output has already arrived, so the recorded "encode
+time" is a pipe write: on an RTX 3060 / Radeon box every one of them reports p50 0 ms. Such a
+record cannot regress and so is not committed as a baseline. Measuring a sidecar honestly needs
+the packets matched back to the frame that produced them (submit-to-first-slice latency), which
+the per-NAL packetizer does not track yet.
+
 ## Reading a run
 
 ```
