@@ -75,6 +75,13 @@ pub fn load_or_create_secret_key(path: &Path) -> Result<SecretKey> {
         Ok(mut file) => {
             file.write_all(&key.to_bytes())
                 .with_context(|| format!("failed writing {}", path.display()))?;
+            // Unix got 0600 at creation; Windows gets the owner-only DACL.
+            #[cfg(windows)]
+            {
+                drop(file);
+                linux_link_core::secure_fs::restrict_to_owner(path)
+                    .with_context(|| format!("failed restricting {}", path.display()))?;
+            }
             Ok(key)
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
