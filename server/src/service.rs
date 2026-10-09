@@ -33,6 +33,7 @@ pub async fn run(config: Config) -> Result<()> {
     let pid_file = state::pid_file_path()?;
     state::write_pid_file(&pid_file)?;
     let _pid_guard = PidFileGuard { path: pid_file };
+    let mut shutdown = crate::platform::shutdown_requests();
 
     let tailscale = TailscaleClient::new().context("failed to initialize Tailscale client")?;
     let tailscale_ready = match tailscale.wait_for_ready(Duration::from_secs(5)).await {
@@ -427,8 +428,8 @@ pub async fn run(config: Config) -> Result<()> {
                     });
                 }
             }
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("Shutdown signal received");
+            Some(reason) = shutdown.recv() => {
+                tracing::info!("Shutdown requested ({reason})");
                 break;
             }
             event = discovery_rx.recv() => {
@@ -469,25 +470,42 @@ pub async fn stop() -> Result<()> {
 
     let raw_pid = std::fs::read_to_string(&pid_file)
         .with_context(|| format!("failed reading {}", pid_file.display()))?;
-    let pid: i32 = raw_pid
+    let pid: u32 = raw_pid
         .trim()
         .parse()
         .context("invalid PID file contents")?;
 
-    let status = tokio::process::Command::new("kill")
-        .arg("-TERM")
-        .arg(pid.to_string())
-        .status()
+    let asked = crate::platform::request_stop(pid)
         .await
-        .context("failed to execute kill command")?;
-
-    if !status.success() {
-        bail!("failed to stop process {}", pid);
+        .context("failed to ask the server to stop")?;
+    if asked {
+        // A graceful exit removes the PID file itself.
+        for _ in 0..100 {
+            if !pid_file.exists() {
+                println!("Linux Link server (pid {pid}) stopped");
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        println!("Stop requested from pid {pid}; it has not exited yet");
+        return Ok(());
     }
 
-    let _ = std::fs::remove_file(&pid_file);
-    println!("Stop signal sent to pid {}", pid);
-    Ok(())
+    #[cfg(windows)]
+    {
+        // No stop event: an older or wedged server. Force it.
+        let status = tokio::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .status()
+            .await
+            .context("failed to execute taskkill")?;
+        if status.success() {
+            let _ = std::fs::remove_file(&pid_file);
+            println!("Linux Link server (pid {pid}) force-stopped");
+            return Ok(());
+        }
+    }
+    bail!("failed to stop process {}", pid)
 }
 
 pub async fn print_status() -> Result<()> {

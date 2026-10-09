@@ -2,9 +2,13 @@
 
 use windows::Data::Xml::Dom::XmlDocument;
 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
     RegCreateKeyExW, RegSetValueExW,
+};
+use windows::Win32::System::Threading::{
+    CreateEventW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, SetEvent, WaitForSingleObject,
 };
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::Win32::UI::HiDpi::{
@@ -90,6 +94,49 @@ pub(super) fn notify(summary: &str, body: &str) -> bool {
     }
 }
 
+/// The event a server waits on and `linux-link stop` signals. Session-local,
+/// so only the same user's processes can reach it.
+fn stop_event_name(pid: u32) -> HSTRING {
+    HSTRING::from(format!(r"Local\LinuxLink-{pid}-stop"))
+}
+
+/// Create this process's stop event and forward its signal to `tx`.
+pub(super) fn listen_for_stop_event(tx: tokio::sync::mpsc::Sender<super::ShutdownReason>) {
+    let name = stop_event_name(std::process::id());
+    let event = match unsafe { CreateEventW(None, true, false, &name) } {
+        Ok(event) => event,
+        Err(e) => {
+            tracing::warn!("cannot create the stop event; `linux-link stop` will force-kill: {e}");
+            return;
+        }
+    };
+    // HANDLE is a raw pointer; the value crosses to the waiting thread.
+    let raw = event.0 as isize;
+    let spawned = std::thread::Builder::new()
+        .name("stop-event".into())
+        .spawn(move || {
+            let event = windows::Win32::Foundation::HANDLE(raw as *mut _);
+            unsafe { WaitForSingleObject(event, INFINITE) };
+            let _ = tx.blocking_send("linux-link stop");
+            let _ = unsafe { CloseHandle(event) };
+        });
+    if let Err(e) = spawned {
+        tracing::warn!("cannot wait on the stop event: {e}");
+    }
+}
+
+/// Signal the stop event of the server running as `pid`; `false` when there
+/// is none (an older or wedged server).
+pub(super) fn signal_stop_event(pid: u32) -> bool {
+    let Ok(event) = (unsafe { OpenEventW(EVENT_MODIFY_STATE, false, &stop_event_name(pid)) })
+    else {
+        return false;
+    };
+    let set = unsafe { SetEvent(event) }.is_ok();
+    let _ = unsafe { CloseHandle(event) };
+    set
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +151,24 @@ mod tests {
                 AreDpiAwarenessContextsEqual(current, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
             }
             .as_bool()
+        );
+    }
+
+    /// Signals only this test process's own event, but it exercises the
+    /// server-shutdown path, so it stays opt-in.
+    #[tokio::test]
+    #[ignore = "exercises the shutdown path; opt-in only"]
+    async fn the_stop_event_reaches_the_shutdown_channel() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        listen_for_stop_event(tx);
+        assert!(signal_stop_event(std::process::id()));
+        let reason = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("stop request delivered");
+        assert_eq!(reason, Some("linux-link stop"));
+        assert!(
+            !signal_stop_event(u32::MAX),
+            "no event for a pid that is not running"
         );
     }
 

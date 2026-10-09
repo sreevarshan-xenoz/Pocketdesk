@@ -51,3 +51,44 @@ pub fn notify(summary: &str, body: &str, expire: Duration) -> bool {
             .unwrap_or(false)
     }
 }
+
+/// Why the server is shutting down.
+pub type ShutdownReason = &'static str;
+
+/// Every way this OS can ask a running server to stop, as one channel.
+///
+/// Call once, at startup, and keep the receiver: it is fed by Ctrl-C on every
+/// OS and, on Windows, by the named event [`request_stop`] signals (Windows has
+/// no SIGTERM for `linux-link stop` to send).
+pub fn shutdown_requests() -> tokio::sync::mpsc::Receiver<ShutdownReason> {
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
+    let ctrl_c = tx.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            let _ = ctrl_c.send("Ctrl-C").await;
+        }
+    });
+    #[cfg(windows)]
+    windows::listen_for_stop_event(tx);
+    #[cfg(not(windows))]
+    drop(tx);
+    rx
+}
+
+/// Ask the server running as `pid` to shut down gracefully. Returns `false`
+/// when no graceful path exists, so the caller can fall back to force.
+pub async fn request_stop(pid: u32) -> std::io::Result<bool> {
+    #[cfg(windows)]
+    {
+        Ok(windows::signal_stop_event(pid))
+    }
+    #[cfg(not(windows))]
+    {
+        let status = tokio::process::Command::new("kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .status()
+            .await?;
+        Ok(status.success())
+    }
+}
