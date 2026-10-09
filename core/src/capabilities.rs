@@ -228,10 +228,11 @@ impl Capabilities {
                         bitrate_bps: None,
                         frame_duration_ms: out.frame_duration_ms,
                         this_build_encodes: cfg!(feature = "opus"),
-                        // The Linux desktop plays it: `mic_relay.rs` decodes and
-                        // feeds a virtual `pw-loopback` source named "Linux Link
-                        // Mic". Windows has no relay sink yet.
-                        played_on_the_receiving_end: cfg!(target_os = "linux"),
+                        // The desktop plays it: on Linux `mic_relay.rs` feeds a
+                        // `pw-loopback` source named "Linux Link Mic"; on Windows
+                        // `mic_relay_windows.rs` plays into a virtual audio cable
+                        // (the note below says that one needs installing).
+                        played_on_the_receiving_end: cfg!(any(target_os = "linux", windows)),
                     },
                 ]
             },
@@ -606,6 +607,15 @@ impl Capabilities {
                 unplayed.join("`, `")
             ));
         }
+        if cfg!(windows) {
+            out.push_str(
+                "\nOn Windows the `phone -> desktop` direction plays into a virtual audio cable \
+                 (VB-CABLE's \"CABLE Input\" by default, or `mic_relay_device` in config.toml), \
+                 since a program cannot create a microphone without a driver; apps record from \
+                 the cable's other end. With no cable installed the relay says so and drops the \
+                 audio.\n",
+            );
+        }
         out
     }
 }
@@ -675,9 +685,9 @@ mod tests {
                 .unwrap_or_else(|| panic!("no `{direction}` row in the audio table"))
         };
         assert!(!played("desktop -> phone"));
-        // Linux plays the phone's mic into a pw-loopback source; Windows has
-        // no relay sink yet.
-        assert_eq!(played("phone -> desktop"), cfg!(target_os = "linux"));
+        // Linux plays the phone's mic into a pw-loopback source, Windows into a
+        // virtual audio cable.
+        assert!(played("phone -> desktop"));
         // The generated doc says it out loud, not just in the JSON.
         assert!(
             caps.render_markdown().contains("no playout path for it"),

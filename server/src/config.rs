@@ -33,6 +33,11 @@ pub struct Config {
     /// XWayland capture.
     #[serde(default)]
     pub capture_backend: CaptureBackend,
+    /// Windows only: the playback device the phone's mic is played into, by
+    /// (part of) its name. Default "CABLE Input" — a stock VB-CABLE install.
+    /// Apps then record from the cable's other end ("CABLE Output").
+    #[serde(default)]
+    pub mic_relay_device: Option<String>,
 }
 
 fn default_pairing_required() -> bool {
@@ -49,6 +54,7 @@ impl Default for Config {
             pairing_required: true,
             allow_hevc: false,
             capture_backend: CaptureBackend::Auto,
+            mic_relay_device: None,
         }
     }
 }

@@ -112,7 +112,9 @@ impl MicNode {
     }
 }
 
-pub async fn run_mic_relay(rx: Receiver<InputPacket>) {
+/// Relay the session's mic frames into a pw-loopback virtual source. The
+/// device hint only matters on Windows (which cable to play into).
+pub async fn run_mic_relay(rx: Receiver<InputPacket>, _device: Option<String>) {
     run_mic_relay_with("pw-loopback", &pw_loopback_args(), rx).await;
 }
 

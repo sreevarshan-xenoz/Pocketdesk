@@ -16,6 +16,10 @@ pub mod install_windows;
 pub mod iroh_endpoint;
 pub mod kde;
 pub mod live_sessions;
+#[cfg(not(windows))]
+pub mod mic_relay;
+#[cfg(windows)]
+#[path = "mic_relay_windows.rs"]
 pub mod mic_relay;
 pub mod notification_monitor;
 pub mod platform;

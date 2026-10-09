@@ -128,6 +128,7 @@ pub async fn spawn_wan_endpoint(
     pairing_required: bool,
     allow_hevc: bool,
     capture_backend: linux_link_core::streaming::CaptureBackend,
+    mic_relay_device: Option<String>,
 ) -> Result<Endpoint> {
     let secret_key =
         load_or_create_secret_key(&key_path()?).context("failed to load iroh identity key")?;
@@ -162,6 +163,7 @@ pub async fn spawn_wan_endpoint(
             let config = config.clone();
             let input_tx = input_tx.clone();
             let cert_manager = Arc::clone(&cert_manager);
+            let mic_relay_device = mic_relay_device.clone();
             tokio::spawn(async move {
                 let conn = match incoming.accept() {
                     Ok(accepting) => match accepting.await {
@@ -181,7 +183,7 @@ pub async fn spawn_wan_endpoint(
                 streaming_server.set_input_channel(input_tx);
                 // R4 E2: WAN sessions get the same phone-mic relay as LAN.
                 let (mic_tx, mic_rx) = tokio::sync::mpsc::channel(64);
-                tokio::spawn(crate::mic_relay::run_mic_relay(mic_rx));
+                tokio::spawn(crate::mic_relay::run_mic_relay(mic_rx, mic_relay_device));
                 streaming_server.set_mic_channel(mic_tx);
                 streaming_server.set_session_telemetry(true);
                 streaming_server.set_hevc_allowed(allow_hevc);

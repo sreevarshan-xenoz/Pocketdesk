@@ -21,3 +21,9 @@ video_quality = "balanced"
 # Default false: sessions stay H.264. Only turn this on if the box actually
 # has a working HEVC encoder (libx265 or a hardware hevc path).
 # allow_hevc = false
+
+# Windows only: the playback device the phone's microphone is played into,
+# matched by (part of) its name. Windows needs a virtual audio cable for a
+# program to provide a microphone; apps then record from its other end.
+# Default "CABLE Input" (a stock VB-CABLE install).
+# mic_relay_device = "CABLE Input"
