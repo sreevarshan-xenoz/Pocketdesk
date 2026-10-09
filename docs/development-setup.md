@@ -45,7 +45,36 @@ It applies to both the server and client endpoints.
 LINUX_LINK_CC=bbr cargo run --bin linux-link -- start
 ```
 
-## 4. Android Client (Kotlin + Rust JNI bridge)
+## 4. Windows server (the Windows host)
+
+The server builds and runs on Windows 10 1903+ / 11 with the **GNU** toolchain
+(`x86_64-pc-windows-gnu`, MinGW-w64 — e.g. WinLibs via winget). MSVC also
+works where the Windows SDK is installed; the dev box this was written on has
+no SDK, so GNU is the one that is exercised.
+
+- **ffmpeg on `PATH`**: the encoder runs as a sidecar (`ffmpeg.exe`), and
+  hardware encoders are runtime-verified against it (NVENC, AMF, Quick Sync,
+  Media Foundation). A "full" build such as `winget install Gyan.FFmpeg` has
+  all of them. In-process FFmpeg (`ffmpeg-next`) is Linux-only for now.
+- **cmake** (ships with WinLibs) builds the vendored Opus; `.cargo/config.toml`
+  sets `CMAKE_POLICY_VERSION_MINIMUM` so CMake 4 accepts it, and passes
+  `--exclude-libs,ALL` to the MinGW linker (see the comment there).
+- The Android bridge and the iroh spike are not part of the Windows build:
+
+```powershell
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --exclude linux-link-android-bridge --exclude iroh-spike -- -D warnings
+cargo test --workspace --exclude linux-link-android-bridge --exclude iroh-spike
+# live tests that need this desktop / GPU (capture, encoders, input, clipboard, toast):
+cargo test -p linux-link-core --lib -- --ignored wgc_ dxgi_ windows_rung_roundtrip
+cargo test -p linux-link-server --lib -- --ignored sendinput_drives clipboard_round_trips a_toast_is_shown
+```
+
+Run it with `cargo run --bin linux-link -- start`, or register it at logon
+with `linux-link install`. Config lives in `%APPDATA%\linux-link\config.toml`,
+state (pairing, trust store, certs, logs) in `%LOCALAPPDATA%\linux-link\`.
+
+## 5. Android Client (Kotlin + Rust JNI bridge)
 
 - `android/app` — Kotlin/Compose app.
 - `android/bridge` — Rust cdylib (`liblinux_link_android_bridge.so`) loaded via JNI by

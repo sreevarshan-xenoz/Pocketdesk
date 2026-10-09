@@ -156,6 +156,26 @@ cargo fmt --check
 cargo clippy --workspace -- -D warnings
 ```
 
+### Windows (preview)
+
+The server also runs on Windows 10 1903+ / 11, so the same Android app can
+view and control a Windows PC: Windows.Graphics.Capture (DXGI duplication as
+fallback), NVENC/AMF/Quick Sync/Media Foundation through `ffmpeg.exe`,
+`SendInput` with scancodes, the Win32 clipboard and toasts. Put `ffmpeg.exe`
+on `PATH`, then:
+
+```powershell
+linux-link.exe install   # start at logon + open the firewall (one UAC prompt)
+linux-link.exe pair      # pairing PIN, also shown as a toast
+```
+
+`install` registers a per-user logon task (Windows' answer to the systemd user
+unit; a Windows service cannot see the desktop), `uninstall` removes it. Audio,
+privacy mode, power and the remaining plugins are being ported; until then
+they answer "unsupported on this OS". Input cannot reach elevated windows or
+the UAC/lock screen unless the server runs elevated (`install --elevated`).
+Build notes: [docs/development-setup.md](docs/development-setup.md) §4.
+
 ### AUR (Arch Linux)
 
 ```bash
@@ -236,6 +256,9 @@ lingering first: `sudo loginctl enable-linger $USER`.
 | `linux-link bench [--target software\|vaapi] [--baseline PATH] [--record PATH]` | Run the pinned 720p encode clip on this machine; with `--baseline`, exit non-zero if a percentile regressed past `--tolerance-pct` (exit 3 means no baseline matches this host, which is a skip, not a pass) |
 | `linux-link capabilities [--json\|--markdown]` | Show the negotiated protocol versions, transports, capture backends and codecs this build actually speaks, plus its KDE Connect capability sets |
 | `linux-link kick <id\|prefix\|peer-ip\|all>` | Drop a live streaming session (R4 D2) |
+| `linux-link start --background` | Run detached, logging to daily files under the state directory (what the Windows logon task runs) |
+| `linux-link install [--elevated]` | *Windows:* register the logon task, start it, and open the firewall ports |
+| `linux-link uninstall` | *Windows:* remove the logon task, firewall rules and notification identity |
 
 ### Capabilities Are Generated, Not Written
 

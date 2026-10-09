@@ -483,6 +483,43 @@ Recording these here so a tester does not file them as regressions:
 - Notification per-app channels, grouping, icons, privacy modes (**2898-2905**).
 - Every K (virtual display) and L (macro/automation) behaviour — neither subsystem exists.
 
+## 23. Windows host (W1: core remote desktop)
+
+Built on `feat/windows-host`; plan `docs/superpowers/plans/2026-10-09-windows-host.md`. Box-verified
+already (ignored live tests, run on the dev PC): WGC and DXGI capture of a real frame, NVENC/AMF/MF
+encodes, SendInput pointer + key, clipboard round-trip, toast accepted. Everything below needs the
+phone or touches system settings, so it has not been run.
+
+Setup, once, from the build output or the release zip:
+
+```powershell
+linux-link.exe install          # logon task + firewall rules (one UAC prompt)
+linux-link.exe pair             # prints the PIN (also shown as a toast)
+Get-Content "$env:LOCALAPPDATA\linux-link\logs\linux-link.*.log" -Wait
+```
+
+- [ ] `install` registers the "Linux Link" task (Task Scheduler → Task Scheduler Library), starts the
+      server with no console window, and the log file appears under `%LOCALAPPDATA%\linux-link\logs`.
+- [ ] A toast "Linux Link pairing PIN: …" appears for `pair` (the `a_toast_is_shown` test only proves
+      Windows accepted it).
+- [ ] The phone discovers the PC on the LAN (mDNS) and over the tailnet, pairs with the PIN, and the
+      log shows `Auto-detect: selecting NVENC` (or AMF/MF on other GPUs) and `WGC capture started`.
+- [ ] Video is live and correct-sized on a 100 % and on a scaled (125/150 %) display; a still desktop
+      keeps the HUD alive (the 1 s heartbeat) instead of tripping the 10 s dead-link card.
+- [ ] Taps land on the pixel tapped, on a single monitor and on a secondary monitor left of/above the
+      primary (negative origin); drag selects text.
+- [ ] Phone keyboard: letters, digits, shifted capitals, arrows, F11/F12, Esc, Super (Start menu),
+      right Alt, the app key; pasted text with capitals, accents and an emoji arrives intact.
+- [ ] Focusing an elevated window (e.g. an admin terminal) makes input stop with one `Windows refused
+      injected input` log line, and input resumes on returning to a normal window.
+- [ ] Clipboard: phone → PC paste and PC → phone fetch, including non-ASCII.
+- [ ] Window crop: picking a window streams just that window; closing it returns to the monitor.
+- [ ] A UAC prompt or Win+L mid-session: the stream recovers after it is dismissed (WGC keeps running; on
+      the DXGI fallback, access-lost rebuilds the duplication).
+- [ ] `linux-link stop` from a second terminal stops the server cleanly (the log ends with
+      `Shutdown requested (linux-link stop)`) — run this yourself; it is deliberately not automated.
+- [ ] `uninstall` removes the task and the firewall rules (`wf.msc`).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
