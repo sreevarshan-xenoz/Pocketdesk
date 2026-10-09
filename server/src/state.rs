@@ -97,10 +97,35 @@ pub async fn unregister_client(connection_id: &str) {
     );
 }
 
-/// Clone the current client list (for iteration without holding the lock).
+/// Whether pushes are restricted to paired clients (`pairing_required`).
+/// Defaults to the safe side until the service sets it from config.
+static PAIRING_REQUIRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Record `pairing_required` from config, once, at service start.
+pub fn set_pairing_required(required: bool) {
+    PAIRING_REQUIRED.store(required, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether `device_id` may be sent desktop state: always with pairing off,
+/// otherwise only once it has paired.
+pub fn may_receive_pushes(device_id: &str) -> bool {
+    !PAIRING_REQUIRED.load(std::sync::atomic::Ordering::Relaxed)
+        || crate::plugins::pair::is_trusted(device_id)
+}
+
+/// The clients that may receive pushed desktop state (notifications, window
+/// titles, the WAN endpoint), cloned so the lock is not held while sending.
+///
+/// A client registers the moment its handshake completes, before it pairs;
+/// handing it the broadcast list unfiltered would show an unpaired device
+/// everything the desktop pushes. Pairing is enforced on what a client
+/// *sends* by the packet loop, and on what it *receives* here.
 pub async fn clone_clients() -> Vec<Arc<dyn DeviceSender>> {
-    let clients = ACTIVE_CLIENTS.lock().await;
-    clients.clone()
+    let clients = ACTIVE_CLIENTS.lock().await.clone();
+    clients
+        .into_iter()
+        .filter(|c| may_receive_pushes(c.device_id()))
+        .collect()
 }
 
 /// Remove clients whose `connection_id` appears in `dead_ids`.

@@ -34,6 +34,7 @@ pub async fn run(config: Config) -> Result<()> {
     state::write_pid_file(&pid_file)?;
     let _pid_guard = PidFileGuard { path: pid_file };
     let mut shutdown = crate::platform::shutdown_requests();
+    state::set_pairing_required(config.pairing_required);
 
     let tailscale = TailscaleClient::new().context("failed to initialize Tailscale client")?;
     let tailscale_ready = match tailscale.wait_for_ready(Duration::from_secs(5)).await {
@@ -755,18 +756,24 @@ async fn handle_connection_with_kde(
         // Register this client for notification broadcasting and enforce single-session rule
         state::register_client(sender.clone()).await;
 
-        // Seed the Workspace HUD with the current compositor state (R3#8)
-        if let Some(ipc) = hypr_ipc {
-            hypr_events::push_state_to(&sender, ipc).await;
-        }
-        #[cfg(windows)]
-        let _ = sender
-            .send_packet(&hypr_events::windows_state_packet().await)
-            .await;
+        // Seed the Workspace HUD and the WAN identity — only for a peer that
+        // has already paired (or with pairing off): window titles and the
+        // endpoint address are not for an unpaired device. One that pairs
+        // later gets both from the periodic pushes.
+        if state::may_receive_pushes(&device_id) {
+            // Workspace HUD with the current compositor state (R3#8)
+            if let Some(ipc) = hypr_ipc {
+                hypr_events::push_state_to(&sender, ipc).await;
+            }
+            #[cfg(windows)]
+            let _ = sender
+                .send_packet(&hypr_events::windows_state_packet().await)
+                .await;
 
-        // Seed the WAN identity so the phone can cache it for iroh dialing (R1 stage 3)
-        if let Some(endpoint) = wan_endpoint {
-            iroh_endpoint::push_endpoint_to(&sender, endpoint).await;
+            // WAN identity so the phone can cache it for iroh dialing (R1 stage 3)
+            if let Some(endpoint) = wan_endpoint {
+                iroh_endpoint::push_endpoint_to(&sender, endpoint).await;
+            }
         }
 
         tracing::info!("Entering main packet loop");
