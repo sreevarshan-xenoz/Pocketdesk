@@ -7,6 +7,8 @@
 use std::time::Duration;
 
 #[cfg(windows)]
+pub(crate) mod audio_windows;
+#[cfg(windows)]
 pub(crate) mod clipboard_windows;
 #[cfg(windows)]
 mod windows;

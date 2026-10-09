@@ -50,6 +50,8 @@ evdev.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
+# The `#[interface]` macro (IPolicyConfig) expands to `::windows_core` paths.
+windows-core = "0.62"
 
 [dev-dependencies]
 rustls.workspace = true
