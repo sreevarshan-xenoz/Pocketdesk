@@ -32,6 +32,10 @@ pub(super) fn init_process() {
     }
 }
 
+pub(super) fn detach_console() {
+    let _ = unsafe { windows::Win32::System::Console::FreeConsole() };
+}
+
 /// Register [`AUMID`] for the current user with a display name. Idempotent.
 fn register_aumid() -> windows::core::Result<()> {
     let subkey = HSTRING::from(format!(r"Software\Classes\AppUserModelId\{AUMID}"));

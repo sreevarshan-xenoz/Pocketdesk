@@ -22,6 +22,13 @@ pub fn init_process() {
     windows::init_process();
 }
 
+/// Leave the console this process was started with, so a background server
+/// launched at logon shows no window. No-op off Windows.
+pub fn detach_console() {
+    #[cfg(windows)]
+    windows::detach_console();
+}
+
 /// Show a desktop notification. Blocking; returns whether one was shown, so
 /// callers can fall back to the log (the PIN, for one, must reach the user
 /// somehow).

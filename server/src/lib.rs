@@ -11,6 +11,8 @@ pub mod hyprland;
 pub mod input_injector;
 #[cfg(windows)]
 mod input_sendinput;
+#[cfg(windows)]
+pub mod install_windows;
 pub mod iroh_endpoint;
 pub mod kde;
 pub mod live_sessions;

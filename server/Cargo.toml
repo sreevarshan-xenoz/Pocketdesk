@@ -18,6 +18,8 @@ serde.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# Daily-rolling log files for `start --background`
+tracing-appender = "0.2"
 dirs.workspace = true
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }

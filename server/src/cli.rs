@@ -14,7 +14,32 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     /// Start the server daemon
-    Start,
+    Start {
+        /// Run detached: no console window on Windows, and logs go to daily
+        /// files under the state directory instead of stderr. The logon task
+        /// `install` registers starts the server this way.
+        #[arg(long)]
+        background: bool,
+    },
+    /// Register Linux Link to start at logon, start it now, and open its
+    /// firewall ports (asks for administrator rights once, for the firewall)
+    #[cfg(windows)]
+    Install {
+        /// Run the server elevated so input reaches elevated windows too
+        #[arg(long)]
+        elevated: bool,
+    },
+    /// Remove the logon task, the firewall rules and the notification identity
+    #[cfg(windows)]
+    Uninstall,
+    /// Add the firewall rules (needs administrator rights; `install` runs it)
+    #[cfg(windows)]
+    #[command(hide = true)]
+    FirewallAdd,
+    /// Remove the firewall rules (needs administrator rights; `uninstall` runs it)
+    #[cfg(windows)]
+    #[command(hide = true)]
+    FirewallRemove,
     /// Stop a running server process started with `linux-link start`
     Stop,
     /// Print local tailscale status
