@@ -155,6 +155,10 @@ impl VideoEncoder {
 
         let mut hw_config = config.clone();
         hw_config.hardware_encoder = resolved;
+        if hw_config.codec == VideoCodec::H265 && !resolved.supports_hevc() {
+            info!("{resolved:?} cannot encode HEVC; using H.264 on this rung");
+            hw_config.codec = VideoCodec::H264;
+        }
 
         // C4: VAAPI prefers the in-process hardware path (no child process, no
         // stdio pipes, device-node auto-detect). On failure fall to the
@@ -175,15 +179,8 @@ impl VideoEncoder {
             Ok(encoder) => Ok(encoder),
             Err(e) => {
                 warn!("Hardware encoder unavailable ({e:#}) (C2)");
-                // A failed NVENC rung still has hardware left in the tank on
-                // hybrid boxes: try the VAAPI ladder before the software rung.
-                if !matches!(resolved, HardwareEncoder::Vaapi) {
-                    let mut va_config = config.clone();
-                    va_config.hardware_encoder = HardwareEncoder::Vaapi;
-                    if let Ok(encoder) = open_vaapi_verified(va_config) {
-                        info!("Recovered on the VAAPI rung after {resolved:?} failed (C2/C4)");
-                        return Ok(encoder);
-                    }
+                if let Some(encoder) = recover_on_other_hardware(&config, resolved) {
+                    return Ok(encoder);
                 }
                 let mut soft = config.clone();
                 degrade_to_software(&mut soft);
@@ -264,6 +261,57 @@ impl VideoEncoder {
             #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.config(),
         }
+    }
+}
+
+/// C2: a failed hardware rung may still have hardware below it before the
+/// software rung.
+///
+/// On Linux that is the VAAPI ladder after a failed NVENC (hybrid laptops). On
+/// Windows it is every other runtime-verified encoder, in Auto's order.
+fn recover_on_other_hardware(
+    config: &StreamingConfig,
+    failed: HardwareEncoder,
+) -> Option<VideoEncoder> {
+    #[cfg(not(windows))]
+    {
+        if !matches!(failed, HardwareEncoder::Vaapi) {
+            let mut va_config = config.clone();
+            va_config.hardware_encoder = HardwareEncoder::Vaapi;
+            if let Ok(encoder) = open_vaapi_verified(va_config) {
+                info!("Recovered on the VAAPI rung after {failed:?} failed (C2/C4)");
+                return Some(encoder);
+            }
+        }
+        None
+    }
+    #[cfg(windows)]
+    {
+        let available = super::encoder_detect::probe_encoders();
+        let rungs = [
+            (HardwareEncoder::Nvenc, available.nvenc),
+            (HardwareEncoder::Amf, available.amf),
+            (HardwareEncoder::Qsv, available.qsv),
+            (HardwareEncoder::MediaFoundation, available.media_foundation),
+        ];
+        for (rung, works) in rungs {
+            if rung == failed || !works {
+                continue;
+            }
+            let mut rung_config = config.clone();
+            rung_config.hardware_encoder = rung;
+            if !rung.supports_hevc() {
+                rung_config.codec = VideoCodec::H264;
+            }
+            match open_sidecar_verified(rung_config) {
+                Ok(encoder) => {
+                    info!("Recovered on the {rung:?} rung after {failed:?} failed (C2)");
+                    return Some(encoder);
+                }
+                Err(e) => warn!("{rung:?} rung failed too ({e:#}) (C2)"),
+            }
+        }
+        None
     }
 }
 
@@ -870,6 +918,33 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
         EncoderPreset::Slow => "p7",
     };
 
+    // AMF has three quality levels; Quick Sync uses x264-style names but has
+    // nothing faster than veryfast.
+    let amf_quality = match config.preset {
+        EncoderPreset::UltraFast
+        | EncoderPreset::SuperFast
+        | EncoderPreset::VeryFast
+        | EncoderPreset::Faster => "speed",
+        EncoderPreset::Fast | EncoderPreset::Medium => "balanced",
+        EncoderPreset::Slow => "quality",
+    };
+    // AMF, Quick Sync and Media Foundation frame each picture with an access
+    // unit delimiter (and MF pads with filler); neither carries picture data,
+    // and the packetizer below ships every NAL as its own packet. Dropping them
+    // gives the same stream shape as NVENC: SPS, PPS, SEI, slices.
+    let strip_non_picture_units = if is_hevc {
+        "filter_units=remove_types=35|38"
+    } else {
+        "filter_units=remove_types=9|12"
+    };
+    let qsv_preset = match config.preset {
+        EncoderPreset::UltraFast | EncoderPreset::SuperFast | EncoderPreset::VeryFast => "veryfast",
+        EncoderPreset::Faster => "faster",
+        EncoderPreset::Fast => "fast",
+        EncoderPreset::Medium => "medium",
+        EncoderPreset::Slow => "slow",
+    };
+
     // Resolve Auto to the best available hardware encoder
     use super::encoder_detect::{probe_encoders, resolve_encoder};
     let resolved = if config.hardware_encoder == HardwareEncoder::Auto {
@@ -884,12 +959,18 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
         match resolved {
             HardwareEncoder::Vaapi => ("hevc_vaapi", "hevc"),
             HardwareEncoder::Nvenc => ("hevc_nvenc", "hevc"),
+            HardwareEncoder::Amf | HardwareEncoder::Qsv | HardwareEncoder::MediaFoundation => {
+                (resolved.ffmpeg_encoder_hevc(), "hevc")
+            }
             _ => ("libx265", "hevc"),
         }
     } else {
         match resolved {
             HardwareEncoder::Vaapi => ("h264_vaapi", "h264"),
             HardwareEncoder::Nvenc => ("h264_nvenc", "h264"),
+            HardwareEncoder::Amf | HardwareEncoder::Qsv | HardwareEncoder::MediaFoundation => {
+                (resolved.ffmpeg_encoder(), "h264")
+            }
             _ => ("libx264", "h264"),
         }
     };
@@ -947,6 +1028,85 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
                 "0".to_string(),
                 "-pix_fmt".to_string(),
                 "yuv420p".to_string(),
+            ]
+        }
+        // Windows rungs. Every set is no-B-frame (the phone pairs decoder output
+        // with input in order, R2#1) and CBR-bounded, verified against FFmpeg
+        // 8.0 on an RTX 3060 (NVENC) and a Radeon iGPU (AMF, MF).
+        HardwareEncoder::Amf => {
+            vec![
+                "-c:v".to_string(),
+                codec_name.to_string(),
+                "-usage".to_string(),
+                "ultralowlatency".to_string(),
+                "-quality".to_string(),
+                amf_quality.to_string(),
+                "-rc".to_string(),
+                "cbr".to_string(),
+                // SPS/PPS on every IDR, so a phone that (re)joins mid-stream
+                // can start decoding at the next keyframe.
+                "-header_insertion_mode".to_string(),
+                "idr".to_string(),
+                "-b:v".to_string(),
+                config.bitrate_bps.to_string(),
+                "-maxrate".to_string(),
+                config.bitrate_bps.to_string(),
+                "-bufsize".to_string(),
+                vbv_bufsize_bits.to_string(),
+                "-g".to_string(),
+                keyframe_interval.to_string(),
+                "-bf".to_string(),
+                "0".to_string(),
+                "-bsf:v".to_string(),
+                strip_non_picture_units.to_string(),
+                "-pix_fmt".to_string(),
+                "nv12".to_string(),
+            ]
+        }
+        HardwareEncoder::Qsv => {
+            vec![
+                "-c:v".to_string(),
+                codec_name.to_string(),
+                "-preset".to_string(),
+                qsv_preset.to_string(),
+                // One frame in flight: QSV's default queue depth is latency.
+                "-async_depth".to_string(),
+                "1".to_string(),
+                "-b:v".to_string(),
+                config.bitrate_bps.to_string(),
+                "-maxrate".to_string(),
+                config.bitrate_bps.to_string(),
+                "-bufsize".to_string(),
+                vbv_bufsize_bits.to_string(),
+                "-g".to_string(),
+                keyframe_interval.to_string(),
+                "-bf".to_string(),
+                "0".to_string(),
+                "-bsf:v".to_string(),
+                strip_non_picture_units.to_string(),
+                "-pix_fmt".to_string(),
+                "nv12".to_string(),
+            ]
+        }
+        HardwareEncoder::MediaFoundation => {
+            vec![
+                "-c:v".to_string(),
+                codec_name.to_string(),
+                // The MFT's own remote-desktop tuning: low latency, no reorder.
+                "-scenario".to_string(),
+                "display_remoting".to_string(),
+                "-rate_control".to_string(),
+                "cbr".to_string(),
+                "-b:v".to_string(),
+                config.bitrate_bps.to_string(),
+                "-g".to_string(),
+                keyframe_interval.to_string(),
+                "-bf".to_string(),
+                "0".to_string(),
+                "-bsf:v".to_string(),
+                strip_non_picture_units.to_string(),
+                "-pix_fmt".to_string(),
+                "nv12".to_string(),
             ]
         }
         HardwareEncoder::Auto | HardwareEncoder::Software => {
@@ -1512,6 +1672,136 @@ mod tests {
     /// with an encoder that produces a packet quickly — either the real VAAPI
     /// path (healthy GPU box) or the software fallback (this box's broken
     /// VAAPI init). Never a dead sidecar, never an error.
+    fn windows_rung_config(hardware_encoder: HardwareEncoder) -> StreamingConfig {
+        StreamingConfig {
+            width: 1280,
+            height: 720,
+            fps: 60,
+            bitrate_bps: 8_000_000,
+            codec: VideoCodec::H264,
+            profile: H264Profile::Main,
+            preset: EncoderPreset::VeryFast,
+            hardware_encoder,
+            monitor_index: 0,
+        }
+    }
+
+    fn arg_after<'a>(args: &'a [String], flag: &str) -> &'a str {
+        let at = args
+            .iter()
+            .position(|a| a == flag)
+            .unwrap_or_else(|| panic!("{flag} missing from {args:?}"));
+        &args[at + 1]
+    }
+
+    #[test]
+    fn every_windows_rung_is_low_latency_and_b_frame_free() {
+        for (encoder, name) in [
+            (HardwareEncoder::Amf, "h264_amf"),
+            (HardwareEncoder::Qsv, "h264_qsv"),
+            (HardwareEncoder::MediaFoundation, "h264_mf"),
+        ] {
+            let args = build_ffmpeg_args(&windows_rung_config(encoder), 120);
+            assert_eq!(arg_after(&args, "-c:v"), name);
+            assert_eq!(arg_after(&args, "-bf"), "0", "{name}");
+            assert_eq!(arg_after(&args, "-g"), "120", "{name}");
+            assert_eq!(arg_after(&args, "-b:v"), "8000000", "{name}");
+            assert_eq!(arg_after(&args, "-f"), "rawvideo", "{name}");
+            assert_eq!(args.last().map(String::as_str), Some("pipe:1"));
+        }
+        let amf = build_ffmpeg_args(&windows_rung_config(HardwareEncoder::Amf), 120);
+        assert_eq!(arg_after(&amf, "-usage"), "ultralowlatency");
+        assert_eq!(arg_after(&amf, "-header_insertion_mode"), "idr");
+        let qsv = build_ffmpeg_args(&windows_rung_config(HardwareEncoder::Qsv), 120);
+        assert_eq!(arg_after(&qsv, "-async_depth"), "1");
+        let mf = build_ffmpeg_args(&windows_rung_config(HardwareEncoder::MediaFoundation), 120);
+        assert_eq!(arg_after(&mf, "-scenario"), "display_remoting");
+        assert_eq!(arg_after(&mf, "-bsf:v"), "filter_units=remove_types=9|12");
+    }
+
+    #[test]
+    fn hevc_on_amf_uses_the_hevc_encoder_and_stream_format() {
+        let mut config = windows_rung_config(HardwareEncoder::Amf);
+        config.codec = VideoCodec::H265;
+        let args = build_ffmpeg_args(&config, 120);
+        assert_eq!(arg_after(&args, "-c:v"), "hevc_amf");
+        assert_eq!(args[args.len() - 2], "hevc");
+    }
+
+    /// Push 60 moving frames through one Windows rung's real sidecar and
+    /// require bits out, the first of them a keyframe. Run on a box with the
+    /// GPU: `cargo test -p linux-link-core --lib windows_rung_roundtrip -- --ignored`.
+    #[cfg(windows)]
+    fn windows_rung_roundtrip(encoder: HardwareEncoder) {
+        let config = windows_rung_config(encoder);
+        let mut sidecar = SidecarEncoder::new(config.clone()).expect("spawn ffmpeg");
+        sidecar
+            .verify_startup(DEFAULT_STARTUP_VERIFY)
+            .unwrap_or_else(|e| panic!("{encoder:?} did not survive startup: {e:#}"));
+        let stride = config.width * 4;
+        let mut packets = Vec::new();
+        for i in 0..60u32 {
+            let mut data = vec![0u8; (stride * config.height) as usize];
+            for (n, px) in data.chunks_exact_mut(4).enumerate() {
+                px[0] = (n as u32 + i * 7) as u8;
+                px[1] = (n as u32 / 1280) as u8;
+                px[3] = 255;
+            }
+            let frame = VideoFrame {
+                data,
+                width: config.width,
+                height: config.height,
+                stride,
+                timestamp: Instant::now(),
+            };
+            if let Some(packet) = sidecar.encode_frame(&frame).expect("encode") {
+                packets.push(packet);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        packets.extend(sidecar.drain().expect("drain"));
+        assert!(
+            packets.len() > 10,
+            "{encoder:?}: only {} packets",
+            packets.len()
+        );
+        // Output is split per NAL: the stream opens on its SPS (type 7), and an
+        // IDR follows, so a phone joining here can decode.
+        let first_nal = packets[0]
+            .data
+            .iter()
+            .skip_while(|&&b| b == 0)
+            .nth(1)
+            .map(|b| b & NAL_TYPE_MASK);
+        assert_eq!(first_nal, Some(7), "{encoder:?}: stream must open on SPS");
+        assert!(
+            packets.iter().any(|p| p.is_keyframe),
+            "{encoder:?}: no IDR in {} packets",
+            packets.len()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "needs an NVIDIA GPU and ffmpeg on PATH"]
+    fn windows_rung_roundtrip_nvenc() {
+        windows_rung_roundtrip(HardwareEncoder::Nvenc);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "needs an AMD GPU and ffmpeg on PATH"]
+    fn windows_rung_roundtrip_amf() {
+        windows_rung_roundtrip(HardwareEncoder::Amf);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "needs a Media Foundation H.264 encoder and ffmpeg on PATH"]
+    fn windows_rung_roundtrip_media_foundation() {
+        windows_rung_roundtrip(HardwareEncoder::MediaFoundation);
+    }
+
     #[test]
     #[ignore = "spawns real FFmpeg/x264 encoders"]
     fn forced_hardware_rung_lands_on_a_working_encoder() {
