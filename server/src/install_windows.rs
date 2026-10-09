@@ -4,28 +4,51 @@
 //! Windows services live, has no desktop to capture or inject into), so it is
 //! registered as a per-user Scheduled Task that starts at logon — the Windows
 //! counterpart of the Linux `graphical-session.target` user unit. The task is
-//! defined in XML because the `schtasks` flags cannot express restart-on-failure
+//! registered through the Task Scheduler COM API from an in-memory XML
+//! definition: no temp file sits between writing the definition and
+//! registering it, and XML is the only form that can express restart-on-failure
 //! or "keep running on battery".
 //!
 //! Firewall rules need administrator rights, so only that step is re-launched
-//! elevated (one UAC prompt). Every system tool is invoked by its absolute
-//! `System32` path, never resolved off `PATH`.
+//! elevated (one UAC prompt). The rules admit the phone from the local subnet
+//! on private/domain networks, and from the tailnet only *through the Tailscale
+//! adapter* — an address range alone would also match carrier-grade NAT on a
+//! public network.
+//!
+//! Every path that decides what runs (or what counts as administrator-owned) is
+//! asked of the OS, never read from an environment variable the user controls
+//! and an elevated child would inherit.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegDeleteTreeW};
+use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+use windows::Win32::System::TaskScheduler::{
+    ITaskService, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN, TaskScheduler,
+};
 use windows::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::{
-    IsUserAnAdmin, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, IsUserAnAdmin, KNOWN_FOLDER_FLAG,
+    SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, SHGetKnownFolderPath, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
-use windows::core::{HSTRING, w};
+use windows::core::{BSTR, GUID, HSTRING, PCWSTR, w};
 
 /// The Scheduled Task's name.
 pub const TASK_NAME: &str = "Linux Link";
+
+/// The firewall rule group; removal deletes the whole group.
+const RULE_GROUP: &str = "Linux Link";
+
+/// The adapter Tailscale installs.
+const TAILSCALE_ADAPTER: &str = "Tailscale";
 
 /// Ports the phone reaches, with the protocol and what each carries.
 const PORTS: [(&str, u16, &str); 3] = [
@@ -34,13 +57,27 @@ const PORTS: [(&str, u16, &str); 3] = [
     ("UDP", 4716, "media"),
 ];
 
-/// Tailscale's address ranges: rules for these apply on any network profile,
-/// because Windows often files the Tailscale adapter under "Public".
+/// Tailscale's address ranges (IPv4 CGNAT block and its IPv6 ULA prefix).
 const TAILNET: &str = "100.64.0.0/10,fd7a:115c:a1e0::/48";
 
+/// A tool in the real System32, located by asking Windows (not `%SystemRoot%`,
+/// which the user can point anywhere).
 fn system32(tool: &str) -> PathBuf {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    PathBuf::from(root).join("System32").join(tool)
+    let mut buffer = [0u16; 260];
+    let len = unsafe { GetSystemDirectoryW(Some(&mut buffer)) } as usize;
+    let dir = if len > 0 && len < buffer.len() {
+        PathBuf::from(String::from_utf16_lossy(&buffer[..len]))
+    } else {
+        PathBuf::from(r"C:\Windows\System32")
+    };
+    dir.join(tool)
+}
+
+fn known_folder(id: &GUID) -> Option<PathBuf> {
+    let path = unsafe { SHGetKnownFolderPath(id, KNOWN_FOLDER_FLAG(0), None) }.ok()?;
+    let text = unsafe { path.to_string() }.ok();
+    unsafe { CoTaskMemFree(Some(path.0 as *const _)) };
+    text.map(PathBuf::from)
 }
 
 fn xml_escape(text: &str) -> String {
@@ -105,53 +142,69 @@ pub fn task_xml(exe: &Path, user: &str, elevated: bool) -> String {
     )
 }
 
-fn rule_name(protocol: &str, port: u16, what: &str, tailnet: bool) -> String {
-    let scope = if tailnet { " (tailnet)" } else { "" };
-    format!("Linux Link {what} ({protocol} {port}){scope}")
+/// A PowerShell single-quoted string literal.
+fn ps_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
 }
 
-/// `netsh` argument lists that open the server's ports to `exe` only: on
-/// private/domain networks from anywhere, and on any network from the tailnet.
-pub fn firewall_add_args(exe: &Path) -> Vec<Vec<String>> {
-    let mut all = Vec::new();
+/// The PowerShell that replaces the group's rules with the current set.
+///
+/// LAN rules: private/domain profiles, local subnet only. Tailnet rules: bound
+/// to the Tailscale adapter (any profile, since Windows usually files that
+/// adapter as Public) and to Tailscale's ranges; skipped, with a note, when the
+/// adapter is absent.
+pub fn firewall_add_script(exe: &Path) -> String {
+    let group = ps_quote(RULE_GROUP);
+    let program = ps_quote(&exe.display().to_string());
+    let mut script = format!(
+        "$ErrorActionPreference = 'Stop'\n\
+         Get-NetFirewallRule -Group {group} -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n"
+    );
     for (protocol, port, what) in PORTS {
-        for tailnet in [false, true] {
-            let mut args: Vec<String> = ["advfirewall", "firewall", "add", "rule"]
-                .map(String::from)
-                .to_vec();
-            args.push(format!("name={}", rule_name(protocol, port, what, tailnet)));
-            args.push("dir=in".into());
-            args.push("action=allow".into());
-            args.push(format!("protocol={protocol}"));
-            args.push(format!("localport={port}"));
-            args.push(format!("program={}", exe.display()));
-            if tailnet {
-                args.push("profile=any".into());
-                args.push(format!("remoteip={TAILNET}"));
-            } else {
-                args.push("profile=private,domain".into());
-            }
-            all.push(args);
-        }
+        let name = ps_quote(&format!("Linux Link {what} ({protocol} {port})"));
+        script.push_str(&format!(
+            "New-NetFirewallRule -Group {group} -DisplayName {name} -Direction Inbound -Action Allow \
+             -Protocol {protocol} -LocalPort {port} -Program {program} -Profile Private,Domain \
+             -RemoteAddress LocalSubnet | Out-Null\n"
+        ));
     }
-    all
+    let adapter = ps_quote(TAILSCALE_ADAPTER);
+    script.push_str(&format!(
+        "if (Get-NetAdapter -Name {adapter} -ErrorAction SilentlyContinue) {{\n"
+    ));
+    for (protocol, port, what) in PORTS {
+        let name = ps_quote(&format!("Linux Link {what} ({protocol} {port}) (tailnet)"));
+        script.push_str(&format!(
+            "  New-NetFirewallRule -Group {group} -DisplayName {name} -Direction Inbound -Action Allow \
+             -Protocol {protocol} -LocalPort {port} -Program {program} -Profile Any \
+             -InterfaceAlias {adapter} -RemoteAddress {TAILNET} | Out-Null\n"
+        ));
+    }
+    script.push_str("} else { Write-Output 'no Tailscale adapter: tailnet rules skipped' }\n");
+    script
 }
 
-/// `netsh` argument lists that remove every rule [`firewall_add_args`] adds.
-pub fn firewall_delete_args() -> Vec<Vec<String>> {
-    let mut all = Vec::new();
-    for (protocol, port, what) in PORTS {
-        for tailnet in [false, true] {
-            all.push(vec![
-                "advfirewall".into(),
-                "firewall".into(),
-                "delete".into(),
-                "rule".into(),
-                format!("name={}", rule_name(protocol, port, what, tailnet)),
-            ]);
-        }
+/// The PowerShell that removes every rule [`firewall_add_script`] adds.
+pub fn firewall_remove_script() -> String {
+    format!(
+        "Get-NetFirewallRule -Group {} -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n",
+        ps_quote(RULE_GROUP)
+    )
+}
+
+fn powershell(script: &str) -> Result<String> {
+    let exe = system32(r"WindowsPowerShell\v1.0\powershell.exe");
+    let output = Command::new(exe)
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .context("running PowerShell")?;
+    if !output.status.success() {
+        bail!(
+            "PowerShell failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
-    all
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Apply or remove the firewall rules. Must already be elevated; this is what
@@ -160,32 +213,20 @@ pub fn apply_firewall(add: bool) -> Result<()> {
     if !unsafe { IsUserAnAdmin() }.as_bool() {
         bail!("changing firewall rules needs administrator rights");
     }
-    let exe = std::env::current_exe()?;
-    let commands = if add {
-        // Start from a clean slate so re-running install never duplicates.
-        let mut all = firewall_delete_args();
-        all.extend(firewall_add_args(&exe));
-        all
+    let script = if add {
+        firewall_add_script(&std::env::current_exe()?)
     } else {
-        firewall_delete_args()
+        firewall_remove_script()
     };
-    let netsh = system32("netsh.exe");
-    for args in commands {
-        let deleting = args[2] == "delete";
-        let output = Command::new(&netsh).args(&args).output()?;
-        // Deleting a rule that is not there is not an error worth stopping on.
-        if !output.status.success() && !deleting {
-            bail!(
-                "netsh {} failed: {}",
-                args.join(" "),
-                String::from_utf8_lossy(&output.stdout).trim()
-            );
-        }
+    let said = powershell(&script)?;
+    if !said.is_empty() {
+        println!("{said}");
     }
     Ok(())
 }
 
-/// Re-run this program elevated with `args` (one UAC prompt) and wait for it.
+/// Re-run this program elevated with `args` (one UAC prompt, which names the
+/// binary) and wait for it.
 fn run_elevated(args: &str) -> Result<u32> {
     let exe = HSTRING::from(std::env::current_exe()?.as_os_str());
     let params = HSTRING::from(args);
@@ -193,8 +234,8 @@ fn run_elevated(args: &str) -> Result<u32> {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
         fMask: SEE_MASK_NOCLOSEPROCESS,
         lpVerb: w!("runas"),
-        lpFile: windows::core::PCWSTR(exe.as_ptr()),
-        lpParameters: windows::core::PCWSTR(params.as_ptr()),
+        lpFile: PCWSTR(exe.as_ptr()),
+        lpParameters: PCWSTR(params.as_ptr()),
         nShow: SW_HIDE.0,
         ..Default::default()
     };
@@ -218,63 +259,102 @@ fn current_user() -> Result<String> {
     })
 }
 
-fn write_utf16_with_bom(path: &Path, text: &str) -> Result<()> {
-    let mut bytes = vec![0xFF, 0xFE];
-    bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
-    std::fs::write(path, bytes).with_context(|| format!("writing {}", path.display()))
+/// Whether `exe` sits under a Program Files directory, which only
+/// administrators can write — the precondition for an elevated task, whose
+/// binary must not be replaceable by the (unelevated) user's own processes.
+fn in_program_files(exe: &Path) -> bool {
+    let exe = exe.to_string_lossy().to_ascii_lowercase();
+    [FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86]
+        .iter()
+        .filter_map(known_folder)
+        .map(|dir| {
+            let mut dir = dir.to_string_lossy().to_ascii_lowercase();
+            if !dir.ends_with('\\') {
+                dir.push('\\');
+            }
+            dir
+        })
+        .any(|dir| exe.starts_with(&dir))
+}
+
+fn task_service() -> Result<ITaskService> {
+    let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    let service: ITaskService =
+        unsafe { CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER) }
+            .context("opening the Task Scheduler")?;
+    let none = VARIANT::default();
+    unsafe { service.Connect(&none, &none, &none, &none) }
+        .context("connecting to the Task Scheduler")?;
+    Ok(service)
 }
 
 /// Register the logon task, start it, and open the firewall.
 pub fn install(elevated: bool) -> Result<()> {
-    let exe = std::env::current_exe()?;
-    let xml = task_xml(&exe, &current_user()?, elevated);
-    let xml_path = std::env::temp_dir().join(format!("linux-link-task-{}.xml", std::process::id()));
-    write_utf16_with_bom(&xml_path, &xml)?;
-    let created = Command::new(system32("schtasks.exe"))
-        .args(["/Create", "/TN", TASK_NAME, "/XML"])
-        .arg(&xml_path)
-        .arg("/F")
-        .output();
-    let _ = std::fs::remove_file(&xml_path);
-    let created = created.context("running schtasks")?;
-    if !created.status.success() {
-        bail!(
-            "schtasks could not register the task: {}",
-            String::from_utf8_lossy(&created.stderr).trim()
-        );
+    let exe = std::env::current_exe()?.canonicalize()?;
+    if elevated {
+        if !unsafe { IsUserAnAdmin() }.as_bool() {
+            bail!("`install --elevated` must itself run elevated (from an administrator terminal)");
+        }
+        if !in_program_files(&exe) {
+            bail!(
+                "`install --elevated` needs linux-link.exe under Program Files: an elevated task \
+                 that starts a file the user can replace ({}) is a privilege escalation",
+                exe.display()
+            );
+        }
     }
-    println!("Registered the \"{TASK_NAME}\" logon task for {exe:?}");
+    let xml = task_xml(&exe, &current_user()?, elevated);
+    let none = VARIANT::default();
+    let task = unsafe {
+        task_service()?.GetFolder(&BSTR::from("\\"))?.RegisterTask(
+            &BSTR::from(TASK_NAME),
+            &BSTR::from(xml),
+            TASK_CREATE_OR_UPDATE.0,
+            &none,
+            &none,
+            TASK_LOGON_INTERACTIVE_TOKEN,
+            &none,
+        )
+    }
+    .context("registering the logon task")?;
+    println!(
+        "Registered the \"{TASK_NAME}\" logon task for {}",
+        exe.display()
+    );
 
     match run_elevated("firewall-add") {
-        Ok(0) => println!("Opened TCP 1716, UDP 1716 and UDP 4716 for this program"),
+        Ok(0) => println!(
+            "Opened TCP 1716, UDP 1716 and UDP 4716 to this program (local subnet + tailnet)"
+        ),
         Ok(code) => println!(
-            "Firewall rules were not added (helper exited {code}); add them as admin with `linux-link firewall-add`"
+            "Firewall rules were not added (helper exited {code}); add them from an administrator terminal with `linux-link firewall-add`"
         ),
         Err(e) => {
             println!("Firewall rules were not added ({e:#}); the phone may not reach this PC")
         }
     }
 
-    let started = Command::new(system32("schtasks.exe"))
-        .args(["/Run", "/TN", TASK_NAME])
-        .output()
-        .context("running schtasks")?;
-    if started.status.success() {
-        println!("Started Linux Link; it will start again at every logon");
+    match unsafe { task.Run(&none) } {
+        Ok(_) => println!("Started Linux Link; it will start again at every logon"),
+        Err(e) => {
+            println!("Registered, but could not start it now ({e}); it will start at next logon")
+        }
     }
     Ok(())
 }
 
 /// Remove the logon task, the firewall rules and the notification identity.
 pub fn uninstall() -> Result<()> {
-    let deleted = Command::new(system32("schtasks.exe"))
-        .args(["/Delete", "/TN", TASK_NAME, "/F"])
-        .output()
-        .context("running schtasks")?;
-    if deleted.status.success() {
-        println!(
+    let removed = unsafe {
+        task_service()?
+            .GetFolder(&BSTR::from("\\"))?
+            .DeleteTask(&BSTR::from(TASK_NAME), 0)
+    };
+    match removed {
+        Ok(()) => println!(
             "Removed the \"{TASK_NAME}\" logon task (a running server keeps running until `linux-link stop`)"
-        );
+        ),
+        Err(e) => println!("No logon task removed ({e})"),
     }
     match run_elevated("firewall-remove") {
         Ok(0) => println!("Removed the firewall rules"),
@@ -312,50 +392,64 @@ mod tests {
     }
 
     #[test]
-    fn every_port_is_opened_on_private_networks_and_to_the_tailnet() {
-        let rules = firewall_add_args(Path::new(r"C:\ll\linux-link.exe"));
+    fn lan_rules_are_local_subnet_and_tailnet_rules_are_bound_to_its_adapter() {
+        let script = firewall_add_script(Path::new(r"C:\Program Files\Linux Link\linux-link.exe"));
+        let rules: Vec<&str> = script
+            .lines()
+            .filter(|l| l.contains("New-NetFirewallRule"))
+            .collect();
         assert_eq!(rules.len(), PORTS.len() * 2);
         for rule in &rules {
-            assert!(rule.contains(&r"program=C:\ll\linux-link.exe".to_string()));
-            assert!(rule.contains(&"dir=in".to_string()));
-            let tailnet = rule.iter().any(|a| a.starts_with("remoteip="));
-            let profile = rule.iter().find(|a| a.starts_with("profile=")).unwrap();
-            if tailnet {
-                assert_eq!(profile, "profile=any");
+            assert!(rule.contains(r"-Program 'C:\Program Files\Linux Link\linux-link.exe'"));
+            assert!(rule.contains("-Direction Inbound"));
+            if rule.contains("(tailnet)") {
+                assert!(rule.contains("-InterfaceAlias 'Tailscale'"), "{rule}");
+                assert!(
+                    rule.contains(&format!("-RemoteAddress {TAILNET}")),
+                    "{rule}"
+                );
             } else {
-                assert_eq!(profile, "profile=private,domain");
+                assert!(rule.contains("-Profile Private,Domain"), "{rule}");
+                assert!(rule.contains("-RemoteAddress LocalSubnet"), "{rule}");
             }
         }
-        for (protocol, port, _) in PORTS {
-            let local = format!("localport={port}");
-            let proto = format!("protocol={protocol}");
-            assert_eq!(
-                rules
-                    .iter()
-                    .filter(|r| r.contains(&local) && r.contains(&proto))
-                    .count(),
-                2
-            );
-        }
+        // The tailnet rules only exist when the adapter does.
+        assert!(script.contains("if (Get-NetAdapter -Name 'Tailscale'"));
+        // Re-running install replaces the group instead of duplicating it.
+        assert!(script.starts_with(
+            "$ErrorActionPreference = 'Stop'\nGet-NetFirewallRule -Group 'Linux Link'"
+        ));
     }
 
     #[test]
-    fn uninstall_deletes_exactly_the_rules_install_adds() {
-        let added: Vec<String> = firewall_add_args(Path::new("x.exe"))
-            .iter()
-            .map(|r| r.iter().find(|a| a.starts_with("name=")).unwrap().clone())
-            .collect();
-        let deleted: Vec<String> = firewall_delete_args()
-            .iter()
-            .map(|r| r[4].clone())
-            .collect();
-        assert_eq!(added, deleted);
+    fn uninstall_removes_the_group_install_creates() {
+        assert!(firewall_remove_script().contains("-Group 'Linux Link'"));
+        assert!(firewall_add_script(Path::new("x.exe")).contains("-Group 'Linux Link'"));
     }
 
     #[test]
-    fn system_tools_are_resolved_inside_system32() {
-        let netsh = system32("netsh.exe");
-        assert!(netsh.is_absolute());
-        assert!(netsh.ends_with(r"System32\netsh.exe"));
+    fn powershell_strings_cannot_be_broken_out_of() {
+        assert_eq!(ps_quote("it's"), "'it''s'");
+        let script = firewall_add_script(Path::new(r"C:\a'b\linux-link.exe"));
+        assert!(script.contains(r"-Program 'C:\a''b\linux-link.exe'"));
+    }
+
+    #[test]
+    fn only_program_files_counts_as_admin_owned_and_env_cannot_move_it() {
+        let pf = known_folder(&FOLDERID_ProgramFiles).expect("Program Files exists");
+        assert!(in_program_files(&pf.join(r"Linux Link\linux-link.exe")));
+        assert!(!in_program_files(Path::new(
+            r"C:\Users\me\Downloads\linux-link.exe"
+        )));
+        assert!(!in_program_files(Path::new(
+            r"E:\Linux-Link\target\debug\linux-link.exe"
+        )));
+    }
+
+    #[test]
+    fn system_tools_are_resolved_from_the_os_not_the_environment() {
+        let ps = system32(r"WindowsPowerShell\v1.0\powershell.exe");
+        assert!(ps.is_absolute());
+        assert!(ps.exists(), "{}", ps.display());
     }
 }
