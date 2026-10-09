@@ -73,19 +73,30 @@ pub async fn state_packet(ipc: &HyprlandIpc) -> Option<NetworkPacket> {
     // lose crop geometry (single-monitor offset 0,0 is what entries() falls
     // back to). Same tolerance the windows plugin response uses.
     let monitors = ipc.monitors().await.unwrap_or_default();
-    Some(
+    Some(state_packet_from(&workspaces, clients, active, &monitors))
+}
+
+/// The HUD state packet from an already-taken snapshot — shared with the
+/// Windows desktop source, which has windows and monitors but no workspaces.
+pub fn state_packet_from(
+    workspaces: &[crate::hyprland::HyprWorkspace],
+    clients: Vec<crate::hyprland::HyprWindow>,
+    active: Option<crate::hyprland::HyprWindow>,
+    monitors: &[crate::hyprland::HyprMonitor],
+) -> NetworkPacket {
+    {
         NetworkPacket::new(STATE_PACKET).with_body(serde_json::json!({
             "workspaces": workspaces
                 .iter()
                 .map(|w| serde_json::json!({"id": w.id, "name": w.name, "active": w.active}))
                 .collect::<Vec<_>>(),
             "activeWorkspace": workspaces.iter().find(|w| w.active).map(|w| w.id),
-            "windows": entries(clients, &monitors),
-            "screen": screen_box(&monitors),
+            "windows": entries(clients, monitors),
+            "screen": screen_box(monitors),
             "activeAddress": active.as_ref().map(|a| a.address.clone()),
             "activeTitle": active.as_ref().map(|a| a.title.clone()),
-        })),
-    )
+        }))
+    }
 }
 
 /// Send the current snapshot to one freshly-registered client. Best-effort.
@@ -144,6 +155,47 @@ async fn run_monitor(ipc: HyprlandIpc, tx: tokio::sync::broadcast::Sender<HyprEv
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
+}
+
+/// The Windows desktop's HUD state: windows and monitors, no workspaces.
+#[cfg(windows)]
+pub async fn windows_state_packet() -> NetworkPacket {
+    let (windows, active, monitors) =
+        tokio::task::spawn_blocking(crate::windows_desktop::visible_windows)
+            .await
+            .unwrap_or_default();
+    state_packet_from(&[], windows, active, &monitors)
+}
+
+/// Keep every client's HUD current on Windows: snapshot once a second and
+/// push when anything changed (focus, a window opening/closing/moving, a
+/// display coming or going), plus the same 4 s refresh the Hyprland path
+/// sends for clients that missed a push.
+#[cfg(windows)]
+pub fn start_windows_hud() {
+    tokio::spawn(async {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_body = String::new();
+        let mut last_push = std::time::Instant::now();
+        loop {
+            tick.tick().await;
+            let clients = crate::state::clone_clients().await;
+            if clients.is_empty() {
+                continue;
+            }
+            let packet = windows_state_packet().await;
+            let body = packet.body.to_string();
+            if body == last_body && last_push.elapsed() < Duration::from_secs(4) {
+                continue;
+            }
+            last_body = body;
+            last_push = std::time::Instant::now();
+            for sender in clients.iter() {
+                let _ = sender.send_packet(&packet).await;
+            }
+        }
+    });
 }
 
 #[cfg(test)]

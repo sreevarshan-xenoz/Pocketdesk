@@ -2,7 +2,9 @@ use linux_link_core::error::Result;
 use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use tracing::info;
 
-use crate::hyprland::{HyprMonitor, HyprWindow, HyprlandIpc};
+#[cfg(not(windows))]
+use crate::hyprland::HyprlandIpc;
+use crate::hyprland::{HyprMonitor, HyprWindow};
 
 /// A window plus the monitor context the phone needs to drive window-crop:
 /// `local_at` is the crop rect origin in the monitor's own coordinate space
@@ -73,6 +75,21 @@ impl Plugin for WindowsPlugin {
             return Ok(());
         }
 
+        #[cfg(windows)]
+        let body = {
+            let (windows, active, monitors) =
+                tokio::task::spawn_blocking(crate::windows_desktop::visible_windows)
+                    .await
+                    .unwrap_or_default();
+            info!("Windows queried: {} visible", windows.len());
+            serde_json::json!({
+                "available": true,
+                "activeAddress": active.map(|w| w.address),
+                "screen": screen_box(&monitors),
+                "windows": entries(windows, &monitors),
+            })
+        };
+        #[cfg(not(windows))]
         let body = match HyprlandIpc::from_env() {
             Ok(ipc) => match ipc.visible_windows().await {
                 Ok(windows) => {

@@ -29,3 +29,5 @@ pub mod service;
 pub mod session_telemetry;
 pub mod state;
 pub mod v2_multiplexer;
+#[cfg(windows)]
+pub mod windows_desktop;

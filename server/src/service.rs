@@ -252,6 +252,10 @@ pub async fn run(config: Config) -> Result<()> {
         });
     }
 
+    // The Windows desktop has no compositor IPC; its HUD is fed by snapshots.
+    #[cfg(windows)]
+    hypr_events::start_windows_hud();
+
     // Input injection channel shared between v1 and v2
     let (input_tx, mut input_rx) = tokio::sync::broadcast::channel::<InputPacket>(16);
     let streaming_config = config.video_quality.to_streaming_config();
@@ -755,6 +759,10 @@ async fn handle_connection_with_kde(
         if let Some(ipc) = hypr_ipc {
             hypr_events::push_state_to(&sender, ipc).await;
         }
+        #[cfg(windows)]
+        let _ = sender
+            .send_packet(&hypr_events::windows_state_packet().await)
+            .await;
 
         // Seed the WAN identity so the phone can cache it for iroh dialing (R1 stage 3)
         if let Some(endpoint) = wan_endpoint {
