@@ -1742,10 +1742,10 @@ mod tests {
         let mut packets = Vec::new();
         for i in 0..60u32 {
             let mut data = vec![0u8; (stride * config.height) as usize];
-            for (n, px) in data.chunks_exact_mut(4).enumerate() {
-                px[0] = (n as u32 + i * 7) as u8;
-                px[1] = (n as u32 / 1280) as u8;
-                px[3] = 255;
+            for n in 0..(config.width * config.height) as usize {
+                data[n * 4] = (n as u32 + i * 7) as u8;
+                data[n * 4 + 1] = (n as u32 / config.width) as u8;
+                data[n * 4 + 3] = 255;
             }
             let frame = VideoFrame {
                 data,
