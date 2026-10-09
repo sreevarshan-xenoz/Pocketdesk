@@ -3,9 +3,14 @@
 //! Tries enigo first (works on X11 and XWayland sessions).
 //! Falls back to evdev/uinput (works on ALL compositors, requires /dev/uinput access).
 //! uinput creates virtual HID devices at the kernel level, so every compositor sees them as real input devices.
+//!
+//! On Windows the only backend is `SendInput` (`input_sendinput.rs`): scancodes
+//! for keys, UTF-16 for text, virtual-desktop coordinates for absolute moves.
 
 use anyhow::{Context, Result};
-use enigo::{Coordinate, Enigo, Key, Keyboard, Mouse, Settings};
+#[cfg(not(windows))]
+use enigo::Settings;
+use enigo::{Coordinate, Enigo, Key, Keyboard, Mouse};
 #[cfg(target_os = "linux")]
 use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
 #[cfg(target_os = "linux")]
@@ -190,7 +195,11 @@ const KEYCODE_MAP: &[(u16, Key)] = &[
 #[derive(Debug)]
 enum InputBackend {
     /// enigo (X11/XWayland via XTEST)
+    #[cfg_attr(windows, allow(dead_code))]
     Enigo(Box<Mutex<Enigo>>),
+    /// Windows `SendInput`
+    #[cfg(windows)]
+    SendInput(crate::input_sendinput::SendInputBackend),
     /// uinput (universal, kernel-level)
     #[cfg(target_os = "linux")]
     Uinput(Mutex<UinputState>),
@@ -266,6 +275,8 @@ impl Drop for InputInjector {
             InputBackend::Enigo(_) => "enigo",
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(_) => "uinput",
+            #[cfg(windows)]
+            InputBackend::SendInput(_) => "sendinput",
         };
         info!(backend = %backend_type, "InputInjector dropped, closing backend resources");
     }
@@ -280,6 +291,21 @@ impl InputInjector {
     /// Otherwise (bare X11) or if /dev/uinput is inaccessible, enigo is
     /// tried first with uinput as the fallback.
     pub fn new() -> Result<Self> {
+        #[cfg(windows)]
+        {
+            info!("Input injector: using SendInput");
+            Ok(Self {
+                backend: InputBackend::SendInput(crate::input_sendinput::SendInputBackend::new()),
+                gamepad_buttons: 0,
+            })
+        }
+        #[cfg(not(windows))]
+        Self::new_desktop()
+    }
+
+    /// The Linux/X11 constructor: uinput under Wayland, else enigo, else uinput.
+    #[cfg(not(windows))]
+    fn new_desktop() -> Result<Self> {
         #[cfg(target_os = "linux")]
         if std::env::var_os("WAYLAND_DISPLAY").is_some() {
             match Self::new_uinput() {
@@ -346,6 +372,8 @@ impl InputInjector {
     /// Move mouse by relative delta
     pub fn move_mouse_relative(&mut self, dx: i32, dy: i32) -> Result<()> {
         match &mut self.backend {
+            #[cfg(windows)]
+            InputBackend::SendInput(backend) => backend.move_relative(dx, dy),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
                 e.move_mouse(dx, dy, Coordinate::Rel)
@@ -371,6 +399,8 @@ impl InputInjector {
     /// display resolution is needed on either side of the wire.
     pub fn move_mouse_normalized_abs(&mut self, x_norm: u16, y_norm: u16) -> Result<()> {
         match &mut self.backend {
+            #[cfg(windows)]
+            InputBackend::SendInput(backend) => backend.move_absolute(x_norm, y_norm),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
                 let (w, h) = e.main_display().context("enigo main_display failed")?;
@@ -398,6 +428,10 @@ impl InputInjector {
     /// Press or release a mouse button
     pub fn mouse_button(&mut self, button: MouseKey, pressed: bool) -> Result<()> {
         match &mut self.backend {
+            #[cfg(windows)]
+            InputBackend::SendInput(backend) => {
+                backend.button(button.as_sendinput_button(), pressed)
+            }
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
                 if pressed {
@@ -426,6 +460,8 @@ impl InputInjector {
     /// Scroll the mouse wheel
     pub fn scroll(&mut self, x: i32, y: i32) -> Result<()> {
         match &mut self.backend {
+            #[cfg(windows)]
+            InputBackend::SendInput(backend) => backend.scroll(x, y),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
                 if y != 0 {
@@ -462,6 +498,8 @@ impl InputInjector {
     /// phone can name is already registrable here.
     fn inject_keycode(&mut self, code: u16, pressed: bool) -> Result<()> {
         match &mut self.backend {
+            #[cfg(windows)]
+            InputBackend::SendInput(backend) => backend.key(code, pressed),
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
@@ -484,6 +522,15 @@ impl InputInjector {
     /// Press and release a single key
     pub fn key(&mut self, key: Key, pressed: bool) -> Result<()> {
         match &mut self.backend {
+            #[cfg(windows)]
+            InputBackend::SendInput(backend) => match key_to_evdev(key) {
+                KeyCode::KEY_UNKNOWN => match key {
+                    // A character the table cannot place still types.
+                    Key::Unicode(ch) if pressed => backend.text(&ch.to_string()),
+                    _ => Ok(()),
+                },
+                code => backend.key(code.0, pressed),
+            },
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
                 if pressed {
@@ -512,6 +559,8 @@ impl InputInjector {
     /// Type text by entering it as unicode characters
     pub fn text(&mut self, text: &str) -> Result<()> {
         match &mut self.backend {
+            #[cfg(windows)]
+            InputBackend::SendInput(backend) => backend.text(text),
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
                 e.text(text).context("enigo text input failed")?;
@@ -909,6 +958,18 @@ impl MouseKey {
         }
     }
 
+    #[cfg(windows)]
+    fn as_sendinput_button(&self) -> crate::input_sendinput::Button {
+        use crate::input_sendinput::Button;
+        match *self {
+            MouseKey::Left => Button::Left,
+            MouseKey::Middle => Button::Middle,
+            MouseKey::Right => Button::Right,
+            MouseKey::Button4 => Button::Back,
+            MouseKey::Button5 => Button::Forward,
+        }
+    }
+
     #[cfg(target_os = "linux")]
     fn as_evdev_key(&self) -> KeyCode {
         match *self {
@@ -953,7 +1014,7 @@ fn keycode_to_enigo(code: u16) -> Option<Key> {
 
 /// Map an enigo Key to an evdev KeyCode for uinput backend.
 /// Uses KEYCODE_MAP as the single source of truth (reverse lookup).
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 fn key_to_evdev(key: Key) -> KeyCode {
     // Check the canonical table first
     if let Some(&(code, _)) = KEYCODE_MAP.iter().find(|&(_, k)| *k == key) {
@@ -974,7 +1035,7 @@ fn key_to_evdev(key: Key) -> KeyCode {
 /// named, then handles the few characters the table spells as a named key rather
 /// than as themselves. Case is folded because this runs on the `text()` path,
 /// which sends no Shift, so an uppercase letter shares the lowercase key.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 fn char_to_keycode(ch: char) -> Option<u16> {
     if let Some(&(code, _)) = KEYCODE_MAP
         .iter()

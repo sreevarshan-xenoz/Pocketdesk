@@ -9,6 +9,8 @@ pub mod config;
 pub mod hypr_events;
 pub mod hyprland;
 pub mod input_injector;
+#[cfg(windows)]
+mod input_sendinput;
 pub mod iroh_endpoint;
 pub mod kde;
 pub mod live_sessions;
