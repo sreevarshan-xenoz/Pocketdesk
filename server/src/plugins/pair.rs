@@ -283,26 +283,12 @@ async fn respond_pair(sender: &dyn DeviceSender, paired: bool, server_id: &str) 
     }
 }
 
-/// Show the PIN on the desktop. notify-send first, log fallback — never
-/// fails the pairing flow.
+/// Show the PIN on the desktop, log fallback — never fails the pairing flow.
 fn show_pin_notification(pin: &str) {
     let summary = format!("Linux Link pairing PIN: {pin}");
     let body = "Enter it on your phone. It expires in 5 minutes.";
     let handle = std::thread::spawn(move || {
-        std::process::Command::new("notify-send")
-            .args([
-                "--app-name",
-                "Linux Link",
-                "--expire",
-                "300000",
-                &summary,
-                body,
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        crate::platform::notify(&summary, body, std::time::Duration::from_secs(300))
     });
     if !handle.join().unwrap_or(false) {
         tracing::info!("No desktop notification available; PIN is only in the log");

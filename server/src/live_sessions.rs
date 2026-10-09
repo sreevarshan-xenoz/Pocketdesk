@@ -85,7 +85,7 @@ fn write_live_json(json: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// "phone is watching this desktop" — notify-send first, log fallback
+/// "phone is watching this desktop" — desktop notification, log fallback
 /// (same delivery discipline as the pairing PIN notification).
 fn notify_session_started(session: &LiveSession) {
     let who = match &session.device_id {
@@ -99,20 +99,7 @@ fn notify_session_started(session: &LiveSession) {
         peer = session.peer
     );
     tokio::task::spawn_blocking(move || {
-        let ok = std::process::Command::new("notify-send")
-            .args([
-                "--app-name",
-                "Linux Link",
-                "--expire",
-                "10000",
-                summary,
-                &body,
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+        let ok = crate::platform::notify(summary, &body, std::time::Duration::from_secs(10));
         if !ok {
             tracing::info!("{summary} — {body}");
         }

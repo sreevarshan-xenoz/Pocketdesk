@@ -114,24 +114,13 @@ async fn copy_to_clipboard(text: &str) {
     tracing::debug!("No clipboard tool (wl-copy/xclip) available for notification reply");
 }
 
-/// Confirmation desktop notification (notify-send, log fallback).
+/// Confirmation desktop notification (best effort).
 fn notify_desktop_reply(id: &str, reply: &str, from: &str) {
     let app = id.split('|').next().unwrap_or("notification");
     let summary = format!("Replied to {app} ({from})");
     let body = reply.to_string();
     std::thread::spawn(move || {
-        let _ = std::process::Command::new("notify-send")
-            .args([
-                "--app-name",
-                "Linux Link",
-                "--expire",
-                "5000",
-                &summary,
-                &body,
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        crate::platform::notify(&summary, &body, std::time::Duration::from_secs(5));
     });
 }
 

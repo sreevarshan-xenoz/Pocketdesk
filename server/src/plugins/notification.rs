@@ -100,32 +100,26 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
     Ok(())
 }
 
-/// Show a desktop notification via `notify-send` first, falling back to native D-Bus.
+/// Show a desktop notification (notify-send / a Windows toast), falling back
+/// to native D-Bus on Linux.
 async fn show_desktop_notification(app: &str, title: &str, text: &str) -> Result<()> {
     let summary = format!("{}: {}", app, title);
 
-    // Try notify-send first
-    let result = tokio::process::Command::new("notify-send")
-        .args([
-            &summary,
-            text,
-            "--app-name",
-            "Linux Link",
-            "--expire",
-            "5000",
-        ])
-        .output()
-        .await;
-
-    match result {
-        Ok(output) if output.status.success() => {
-            tracing::info!("Notification sent via notify-send: {}", title);
-            return Ok(());
-        }
-        _ => {
-            tracing::debug!("notify-send failed, trying D-Bus");
-        }
+    let (toast_summary, toast_text) = (summary.clone(), text.to_string());
+    let shown = tokio::task::spawn_blocking(move || {
+        crate::platform::notify(
+            &toast_summary,
+            &toast_text,
+            std::time::Duration::from_secs(5),
+        )
+    })
+    .await
+    .unwrap_or(false);
+    if shown {
+        tracing::info!("Desktop notification shown: {}", title);
+        return Ok(());
     }
+    tracing::debug!("desktop notification failed, trying D-Bus");
 
     // Fall back to native D-Bus
     #[cfg(target_os = "linux")]
@@ -135,7 +129,7 @@ async fn show_desktop_notification(app: &str, title: &str, text: &str) -> Result
         tracing::info!("Notification sent via D-Bus: {}", title);
     }
     #[cfg(not(target_os = "linux"))]
-    tracing::warn!("No desktop notification backend on this OS; dropped: {title}");
+    tracing::warn!("Desktop notification could not be shown; dropped: {title}");
 
     Ok(())
 }
