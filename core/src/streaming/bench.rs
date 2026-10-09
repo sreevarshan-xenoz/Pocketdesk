@@ -84,6 +84,10 @@ pub fn scene_frame(width: u32, height: u32, index: u32) -> VideoFrame {
 pub enum BenchTarget {
     Software,
     Vaapi,
+    Nvenc,
+    Amf,
+    Qsv,
+    MediaFoundation,
 }
 
 impl BenchTarget {
@@ -91,6 +95,10 @@ impl BenchTarget {
         match self {
             BenchTarget::Software => "software",
             BenchTarget::Vaapi => "vaapi",
+            BenchTarget::Nvenc => "nvenc",
+            BenchTarget::Amf => "amf",
+            BenchTarget::Qsv => "qsv",
+            BenchTarget::MediaFoundation => "mf",
         }
     }
 
@@ -98,6 +106,10 @@ impl BenchTarget {
         match self {
             BenchTarget::Software => HardwareEncoder::Software,
             BenchTarget::Vaapi => HardwareEncoder::Vaapi,
+            BenchTarget::Nvenc => HardwareEncoder::Nvenc,
+            BenchTarget::Amf => HardwareEncoder::Amf,
+            BenchTarget::Qsv => HardwareEncoder::Qsv,
+            BenchTarget::MediaFoundation => HardwareEncoder::MediaFoundation,
         }
     }
 
@@ -105,6 +117,10 @@ impl BenchTarget {
         match value {
             "software" | "x264" => Some(BenchTarget::Software),
             "vaapi" => Some(BenchTarget::Vaapi),
+            "nvenc" => Some(BenchTarget::Nvenc),
+            "amf" => Some(BenchTarget::Amf),
+            "qsv" => Some(BenchTarget::Qsv),
+            "mf" => Some(BenchTarget::MediaFoundation),
             _ => None,
         }
     }
@@ -310,6 +326,17 @@ pub fn compare(
 /// CPU model + kernel release, best effort. A missing `/proc` (a container with
 /// a masked procfs, or a non-Linux dev box) yields `unknown`, which makes every
 /// cross-host comparison incomparable — the safe direction for a mistake.
+///
+/// On Windows: CPU model, Windows build, and the GPUs — a hardware rung's
+/// throughput is the GPU's, so two boxes with one CPU but different GPUs must
+/// not compare.
+#[cfg(windows)]
+pub fn host_identity() -> String {
+    windows_host::identity()
+}
+
+/// CPU model + kernel release (see the Windows variant for that OS).
+#[cfg(not(windows))]
 pub fn host_identity() -> String {
     let cpu = std::fs::read_to_string("/proc/cpuinfo")
         .ok()
@@ -326,9 +353,106 @@ pub fn host_identity() -> String {
     format!("{cpu} / {kernel}")
 }
 
+#[cfg(windows)]
+mod windows_host {
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    use windows::core::HSTRING;
+
+    fn registry_string(subkey: &str, value: &str) -> Option<String> {
+        let mut buffer = [0u16; 256];
+        let mut bytes = (buffer.len() * 2) as u32;
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                &HSTRING::from(subkey),
+                &HSTRING::from(value),
+                RRF_RT_REG_SZ,
+                None,
+                Some(buffer.as_mut_ptr().cast()),
+                Some(&mut bytes),
+            )
+        };
+        if status.is_err() {
+            return None;
+        }
+        let units = (bytes as usize / 2).saturating_sub(1);
+        Some(
+            String::from_utf16_lossy(&buffer[..units])
+                .trim()
+                .to_string(),
+        )
+    }
+
+    fn gpus() -> Vec<String> {
+        let Ok(factory) = (unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }) else {
+            return Vec::new();
+        };
+        let mut names = Vec::new();
+        let mut index = 0;
+        while let Ok(adapter) = unsafe { factory.EnumAdapters1(index) } {
+            index += 1;
+            let Ok(desc) = (unsafe { adapter.GetDesc1() }) else {
+                continue;
+            };
+            let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(128);
+            let name = String::from_utf16_lossy(&desc.Description[..len]);
+            // The software rasterizer is present on every machine.
+            if name != "Microsoft Basic Render Driver" && !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    pub(super) fn identity() -> String {
+        let cpu = registry_string(
+            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            "ProcessorNameString",
+        )
+        .unwrap_or_else(|| "unknown-cpu".into());
+        let build = registry_string(
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            "CurrentBuildNumber",
+        )
+        .map(|b| format!("Windows build {b}"))
+        .unwrap_or_else(|| "unknown-windows".into());
+        let gpus = gpus();
+        let gpus = if gpus.is_empty() {
+            "unknown-gpu".to_string()
+        } else {
+            gpus.join(" + ")
+        };
+        format!("{cpu} / {build} / {gpus}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_host_names_its_cpu_build_and_gpu() {
+        let id = host_identity();
+        assert!(!id.contains("unknown-cpu"), "{id}");
+        assert!(id.contains("Windows build "), "{id}");
+        assert_eq!(id.matches(" / ").count(), 2, "{id}");
+    }
+
+    #[test]
+    fn every_target_round_trips_through_its_name() {
+        for target in [
+            BenchTarget::Software,
+            BenchTarget::Vaapi,
+            BenchTarget::Nvenc,
+            BenchTarget::Amf,
+            BenchTarget::Qsv,
+            BenchTarget::MediaFoundation,
+        ] {
+            assert_eq!(BenchTarget::parse(target.as_str()), Some(target));
+        }
+    }
 
     fn record_with(backend: &str, host: &str, p: u64) -> BenchRecord {
         BenchRecord {

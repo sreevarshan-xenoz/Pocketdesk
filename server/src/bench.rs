@@ -48,7 +48,7 @@ pub fn run(
     tolerance_pct: u64,
 ) -> i32 {
     let Some(target) = BenchTarget::parse(target) else {
-        eprintln!("unknown benchmark target; expected software or vaapi");
+        eprintln!("unknown benchmark target; expected software, vaapi, nvenc, amf, qsv or mf");
         return EXIT_USAGE;
     };
     let options = Options {

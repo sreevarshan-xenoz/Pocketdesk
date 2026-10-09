@@ -200,7 +200,7 @@ impl VideoEncoder {
     /// Human-readable backend name, for the "encoder switched" telemetry/UX.
     pub fn backend_name(&self) -> &'static str {
         match self {
-            Self::Sidecar(_) => "ffmpeg-sidecar",
+            Self::Sidecar(e) => e.backend_name(),
             #[cfg(target_os = "linux")]
             Self::InProcess(_) => "in-process",
             #[cfg(target_os = "linux")]
@@ -643,6 +643,19 @@ impl SidecarEncoder {
     /// Get the current sequence number.
     pub fn sequence(&self) -> u64 {
         self.sequence
+    }
+
+    /// Which FFmpeg encoder this child runs, for telemetry and benchmark
+    /// records: a hardware rung that fell back must not read like another.
+    pub fn backend_name(&self) -> &'static str {
+        match self.config.hardware_encoder {
+            HardwareEncoder::Auto | HardwareEncoder::Software => "ffmpeg-sidecar",
+            HardwareEncoder::Vaapi => "ffmpeg-sidecar-vaapi",
+            HardwareEncoder::Nvenc => "ffmpeg-sidecar-nvenc",
+            HardwareEncoder::Amf => "ffmpeg-sidecar-amf",
+            HardwareEncoder::Qsv => "ffmpeg-sidecar-qsv",
+            HardwareEncoder::MediaFoundation => "ffmpeg-sidecar-mf",
+        }
     }
 
     /// Get the encoding configuration.
