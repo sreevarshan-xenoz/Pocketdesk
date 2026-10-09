@@ -9,6 +9,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    platform::init_process();
     let cli = cli::Cli::parse();
 
     // Load configuration first

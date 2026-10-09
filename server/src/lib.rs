@@ -14,6 +14,7 @@ pub mod kde;
 pub mod live_sessions;
 pub mod mic_relay;
 pub mod notification_monitor;
+pub mod platform;
 pub mod plugins;
 pub mod privacy;
 pub mod service;
