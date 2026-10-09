@@ -32,6 +32,8 @@ pub mod capture_linux;
 #[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod capture_screencopy;
 #[cfg(all(feature = "capture", windows))]
+mod capture_d3d;
+#[cfg(all(feature = "capture", windows))]
 pub mod capture_wgc;
 #[cfg(feature = "capture")]
 pub mod capture_x11;

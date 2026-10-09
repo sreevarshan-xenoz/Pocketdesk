@@ -26,32 +26,31 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
-    Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
+    Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
 };
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
 use windows::Graphics::SizeInt32;
-use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{HMODULE, HWND};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
+    ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
-use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITOR_DEFAULTTOPRIMARY, MONITORINFO,
-    MonitorFromPoint,
-};
+use windows::Win32::Graphics::Gdi::HMONITOR;
 use windows::Win32::System::WinRT::Direct3D11::{
     CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
 };
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::Win32::UI::WindowsAndMessaging::IsWindow;
-use windows::core::{BOOL, IInspectable, Interface};
+use windows::core::{IInspectable, Interface};
 
-use super::capture::{CaptureSession, monitor_rect};
+use super::capture::CaptureSession;
+#[cfg(test)]
+use super::capture_d3d::enumerate_monitors;
+use super::capture_d3d::{StagingCopy, clone_frame, pick_monitor};
 use super::{StreamingConfig, VideoFrame};
 
 /// How long [`start_wgc_capture`] waits for the first frame before reporting
@@ -137,12 +136,10 @@ impl Drop for Capture {
     }
 }
 
-/// The D3D device pair the capture copies through.
+/// The D3D device the capture copies through, and its WinRT face.
 struct Gpu {
-    device: ID3D11Device,
-    context: ID3D11DeviceContext,
+    copier: StagingCopy,
     winrt_device: IDirect3DDevice,
-    staging: Option<(ID3D11Texture2D, u32, u32)>,
 }
 
 fn run_capture_loop(
@@ -242,7 +239,9 @@ fn run_capture_loop(
                     capture.size = content;
                     continue; // the next frame arrives at the new size
                 }
-                let video = copy_frame(&mut gpu, &frame)?;
+                let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
+                let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
+                let video = gpu.copier.copy(&texture)?;
                 last_frame = Some(clone_frame(&video));
                 video
             }
@@ -276,16 +275,6 @@ fn run_capture_loop(
     Ok(())
 }
 
-fn clone_frame(frame: &VideoFrame) -> VideoFrame {
-    VideoFrame {
-        data: frame.data.clone(),
-        width: frame.width,
-        height: frame.height,
-        stride: frame.stride,
-        timestamp: Instant::now(),
-    }
-}
-
 fn create_gpu() -> Result<Gpu> {
     let mut device = None;
     let mut context = None;
@@ -309,10 +298,8 @@ fn create_gpu() -> Result<Gpu> {
     let inspectable: IInspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }
         .context("CreateDirect3D11DeviceFromDXGIDevice")?;
     Ok(Gpu {
-        device,
-        context,
+        copier: StagingCopy::new(device, context),
         winrt_device: inspectable.cast()?,
-        staging: None,
     })
 }
 
@@ -362,142 +349,9 @@ fn start_item(
     })
 }
 
-/// Copy one captured frame through the staging texture into a tightly strided
-/// BGRA [`VideoFrame`].
-fn copy_frame(gpu: &mut Gpu, frame: &Direct3D11CaptureFrame) -> Result<VideoFrame> {
-    let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
-    let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
-    let mut desc = D3D11_TEXTURE2D_DESC::default();
-    unsafe { texture.GetDesc(&mut desc) };
-    let (width, height) = (desc.Width, desc.Height);
-
-    let staging = match &gpu.staging {
-        Some((tex, w, h)) if *w == width && *h == height => tex.clone(),
-        _ => {
-            let staging_desc = D3D11_TEXTURE2D_DESC {
-                Width: width,
-                Height: height,
-                MipLevels: 1,
-                ArraySize: 1,
-                Format: desc.Format,
-                SampleDesc: desc.SampleDesc,
-                Usage: D3D11_USAGE_STAGING,
-                BindFlags: 0,
-                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-                MiscFlags: 0,
-            };
-            let mut tex = None;
-            unsafe {
-                gpu.device
-                    .CreateTexture2D(&staging_desc, None, Some(&mut tex))
-            }
-            .context("CreateTexture2D (staging)")?;
-            let tex = tex.ok_or_else(|| anyhow!("no staging texture"))?;
-            gpu.staging = Some((tex.clone(), width, height));
-            tex
-        }
-    };
-
-    unsafe { gpu.context.CopyResource(&staging, &texture) };
-    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-    unsafe {
-        gpu.context
-            .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-    }
-    .context("Map (staging)")?;
-    let row = width as usize * 4;
-    let mut data = vec![0u8; row * height as usize];
-    let src = mapped.pData as *const u8;
-    for y in 0..height as usize {
-        // SAFETY: the mapped staging texture holds `height` rows of
-        // `RowPitch` bytes, each at least `row` long.
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                src.add(y * mapped.RowPitch as usize),
-                data.as_mut_ptr().add(y * row),
-                row,
-            );
-        }
-    }
-    unsafe { gpu.context.Unmap(&staging, 0) };
-
-    Ok(VideoFrame {
-        data,
-        width,
-        height,
-        stride: width * 4,
-        timestamp: Instant::now(),
-    })
-}
-
-/// All monitors in `EnumDisplayMonitors` order, with their desktop rects.
-pub(super) fn enumerate_monitors() -> Vec<(HMONITOR, RECT)> {
-    unsafe extern "system" fn collect(
-        monitor: HMONITOR,
-        _: HDC,
-        rect: *mut RECT,
-        data: LPARAM,
-    ) -> BOOL {
-        // SAFETY: `data` is the Vec passed below, alive for the whole call.
-        let list = unsafe { &mut *(data.0 as *mut Vec<(HMONITOR, RECT)>) };
-        list.push((monitor, unsafe { *rect }));
-        BOOL(1)
-    }
-    let mut list: Vec<(HMONITOR, RECT)> = Vec::new();
-    unsafe {
-        let _ = EnumDisplayMonitors(
-            None,
-            None,
-            Some(collect),
-            LPARAM(&mut list as *mut _ as isize),
-        );
-    }
-    list
-}
-
-/// The monitor for `index` in the order the monitors plugin reports (xcap's).
-///
-/// Matched by desktop rect rather than by position in our own enumeration, so
-/// the phone's picker and the captured monitor agree even if the two
-/// enumerations ever order differently; the primary monitor is the fallback.
-fn pick_monitor(index: u32) -> HMONITOR {
-    let monitors = enumerate_monitors();
-    if let Some((x, y, w, h)) = monitor_rect(index)
-        && let Some((monitor, _)) = monitors.iter().find(|(_, r)| {
-            r.left == x
-                && r.top == y
-                && (r.right - r.left) as u32 == w
-                && (r.bottom - r.top) as u32 == h
-        })
-    {
-        return *monitor;
-    }
-    if let Some((monitor, _)) = monitors.get(index as usize) {
-        return *monitor;
-    }
-    let mut info = MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-        ..Default::default()
-    };
-    let primary = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
-    let _ = unsafe { GetMonitorInfoW(primary, &mut info) };
-    warn!(
-        index,
-        "Monitor index not found; capturing the primary monitor"
-    );
-    primary
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn there_is_at_least_one_monitor_to_capture() {
-        // Every interactive Windows session has a desktop; CI's headless
-        // runners still enumerate a virtual display.
-        assert!(!enumerate_monitors().is_empty());
-    }
 
     /// Live: capture one real frame of the primary monitor and check it is
     /// the monitor's size and not uniformly black. Run on a desktop session:
