@@ -53,10 +53,13 @@ fn host_device_id() -> String {
 }
 
 fn host_device_name() -> String {
-    if let Ok(name) = std::env::var("HOSTNAME")
-        && !name.is_empty()
-    {
-        return name;
+    // Linux shells export HOSTNAME; Windows sets COMPUTERNAME for every process.
+    for var in ["HOSTNAME", "COMPUTERNAME"] {
+        if let Ok(name) = std::env::var(var)
+            && !name.is_empty()
+        {
+            return name;
+        }
     }
 
     "linux-link-host".to_string()
