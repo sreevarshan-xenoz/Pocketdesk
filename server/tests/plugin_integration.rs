@@ -166,7 +166,8 @@ async fn test_exec_plugin() {
     );
     if let Some(pkt) = response {
         let stdout = pkt.body.get("stdout").and_then(|v| v.as_str());
-        assert_eq!(stdout, Some("hello\n"));
+        // sh ends the line with LF, cmd.exe with CRLF.
+        assert_eq!(stdout.map(str::trim_end), Some("hello"));
     }
 }
 
