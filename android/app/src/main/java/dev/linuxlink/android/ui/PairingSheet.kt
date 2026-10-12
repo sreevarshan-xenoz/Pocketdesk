@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -18,6 +21,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +37,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -105,6 +110,25 @@ fun PairingSheet(
         }
     }
 
+    fun submitPin() {
+        if (pinEntry.length != 6 || waiting || success) return
+        keyboard?.hide()
+        val pin = pinEntry
+        scope.launch {
+            val result =
+                withContext(Dispatchers.IO) {
+                    RustCore.pairWithPin(address, controlPort, pin)
+                }
+            val serverId = result.getOrNull()
+            if (serverId != null) {
+                onPairedNow(serverId)
+            } else {
+                val error = result.exceptionOrNull()?.message
+                if (error != null) setStatus(R.string.pair_error, error) else setStatus(R.string.pair_wrong_pin)
+            }
+        }
+    }
+
     // Desktop said "type the PIN it is showing" → put the cursor where the
     // thumb already is.
     LaunchedEffect(statusRes) {
@@ -114,10 +138,16 @@ fun PairingSheet(
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // Fully expanded and scrollable: on a phone held in landscape the
+    // half-height sheet cut the PIN buttons off below the screen edge.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -169,7 +199,10 @@ fun PairingSheet(
                 value = pinEntry,
                 onValueChange = { pinEntry = it.filter(Char::isDigit).take(6) },
                 label = { Text(stringResource(R.string.pair_pin_label)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions =
+                    KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                // The keyboard's Done key pairs, as the button does.
+                keyboardActions = KeyboardActions(onDone = { submitPin() }),
                 visualTransformation =
                     if (revealed) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
@@ -187,23 +220,7 @@ fun PairingSheet(
             )
             OutlinedButton(
                 enabled = pinEntry.length == 6 && !waiting && !success,
-                onClick = {
-                    keyboard?.hide()
-                    val pin = pinEntry
-                    scope.launch {
-                        val result =
-                            withContext(Dispatchers.IO) {
-                                RustCore.pairWithPin(address, controlPort, pin)
-                            }
-                        val serverId = result.getOrNull()
-                        if (serverId != null) {
-                            onPairedNow(serverId)
-                        } else {
-                            val error = result.exceptionOrNull()?.message
-                            if (error != null) setStatus(R.string.pair_error, error) else setStatus(R.string.pair_wrong_pin)
-                        }
-                    }
-                },
+                onClick = { submitPin() },
             ) {
                 Text(stringResource(R.string.pair_enter_pin))
             }
