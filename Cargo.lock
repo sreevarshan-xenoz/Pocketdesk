@@ -2645,6 +2645,7 @@ dependencies = [
  "libc",
  "linux-link-core",
  "quinn",
+ "rand 0.8.6",
  "rustls",
  "serde",
  "serde_json",

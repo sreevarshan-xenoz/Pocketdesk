@@ -1039,25 +1039,14 @@ pub(crate) fn is_valid_pin(pin: &str) -> bool {
     pin.len() == 6 && pin.chars().all(|c| c.is_ascii_digit())
 }
 
+/// A six-digit pairing PIN from the OS CSPRNG, uniform over 000000-999999.
+///
+/// This used to read `/dev/urandom` and fall back to the clock's nanoseconds
+/// when the file was missing — which it always is on Windows, so every
+/// Windows PIN was the low six digits of the time it was minted.
 pub(crate) fn generate_pin() -> String {
-    use std::io::Read;
-    // Use OS-level CSPRNG for secure PIN generation.
-    // Falls back to nanosecond entropy if /dev/urandom is unavailable.
-    let mut buf = [0u8; 4];
-    let val = if std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut buf))
-        .is_ok()
-    {
-        u32::from_ne_bytes(buf) % 1_000_000
-    } else {
-        // Fallback: timestamp-based entropy (less secure but non-zero)
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        nanos % 1_000_000
-    };
-    format!("{:06}", val)
+    use rand::Rng;
+    format!("{:06}", rand::rngs::OsRng.gen_range(0..1_000_000u32))
 }
 
 /// Handle an `InputPacket` received over the QUIC streaming channel by injecting
@@ -1078,5 +1067,29 @@ struct PidFileGuard {
 impl Drop for PidFileGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod pin_tests {
+    use super::*;
+
+    #[test]
+    fn pins_are_six_digits_and_do_not_follow_the_clock() {
+        let pins: Vec<u32> = (0..256)
+            .map(|_| {
+                let pin = generate_pin();
+                assert!(is_valid_pin(&pin), "{pin}");
+                pin.parse().unwrap()
+            })
+            .collect();
+        // Minted back to back, clock-derived PINs mostly rise; random ones
+        // rise about half the time.
+        let rising = pins.windows(2).filter(|w| w[1] > w[0]).count();
+        assert!((64..192).contains(&rising), "{rising} of 255 steps rose");
+        let mut distinct = pins.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert!(distinct.len() > 240, "only {} distinct", distinct.len());
     }
 }
