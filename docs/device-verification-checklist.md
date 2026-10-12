@@ -280,7 +280,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 
 - [ ] "Mic: off" tap → RECORD_AUDIO permission dialog; denying it toasts "Microphone permission denied" and the toggle stays off.
 - [ ] Granting it → button reads "Mic: on" (amber) and the desktop gains a source: `pactl list short sources | grep linux_link_mic` (or pavucontrol → Recording).
-- [ ] Speaking moves the pavucontrol input meter for "Linux Link Mic"; `pw-record --target linux_link_mic /tmp/mic.wav` captures audible speech (play it back).
+- [ ] Speaking moves the pavucontrol input meter for "Pocketdesk Mic"; `pw-record --target linux_link_mic /tmp/mic.wav` captures audible speech (play it back).
 - [ ] "Mic: on" tap → source disappears immediately; `pgrep -f linux_link_mic` empty (no leaked pw-loopback children after repeated toggling).
 - [ ] View-only latched → mic keeps flowing (it is session media, not injected input); input is still dropped.
 - [ ] Exit the session while mic is on → source disappears (release-on-dispose); force-killing the phone app → source gone within the QUIC idle timeout (~45 s).
@@ -511,9 +511,10 @@ linux-link.exe pair             # prints the PIN (also shown as a toast)
 Get-Content "$env:LOCALAPPDATA\linux-link\logs\linux-link.*.log" -Wait
 ```
 
-- [ ] `install` registers the "Linux Link" task (Task Scheduler → Task Scheduler Library), starts the
-      server with no console window, and the log file appears under `%LOCALAPPDATA%\linux-link\logs`.
-- [ ] A toast "Linux Link pairing PIN: …" appears for `pair` (the `a_toast_is_shown` test only proves
+- [ ] `install` registers the "Pocketdesk" task (Task Scheduler → Task Scheduler Library), removes a
+      "Linux Link" task an older version left, starts the server with no console window, and the log
+      file appears under `%LOCALAPPDATA%\linux-link\logs`.
+- [ ] A toast "Pocketdesk pairing PIN: …" appears for `pair` (the `a_toast_is_shown` test only proves
       Windows accepted it).
 - [ ] The phone discovers the PC on the LAN (mDNS) and over the tailnet, pairs with the PIN, and the
       log shows `Auto-detect: selecting NVENC` (or AMF/MF on other GPUs) and `WGC capture started`.
@@ -538,7 +539,8 @@ Get-Content "$env:LOCALAPPDATA\linux-link\logs\linux-link.*.log" -Wait
       the DXGI fallback, access-lost rebuilds the duplication).
 - [ ] `linux-link stop` from a second terminal stops the server cleanly (the log ends with
       `Shutdown requested (linux-link stop)`) — run this yourself; it is deliberately not automated.
-- [ ] `uninstall` removes the task and the firewall rules (`wf.msc`).
+- [ ] `uninstall` removes the task and the firewall rules (`wf.msc`), including the "Linux Link" ones an
+      older version created.
 
 ## Recording results
 

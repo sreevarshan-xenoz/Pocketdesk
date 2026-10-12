@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
         None
     };
 
-    tracing::info!("Linux Link Server starting");
+    tracing::info!("Pocketdesk server starting");
 
     match cli
         .command

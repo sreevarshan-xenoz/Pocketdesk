@@ -2329,7 +2329,7 @@ async fn send_mic_frame(
 }
 
 /// Open the phone→desktop mic: sends the start frame, which makes the
-/// server create its "Linux Link Mic" PipeWire source. Pairs with
+/// server create its "Pocketdesk Mic" PipeWire source. Pairs with
 /// `send_mic_opus`/`stop_mic`.
 pub async fn start_mic() -> Result<(), String> {
     let conn = stream_connection().await?;

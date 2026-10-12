@@ -84,7 +84,7 @@ impl Plugin for SharePlugin {
                     NetworkPacket::new("kdeconnect.notification").with_body(serde_json::json!({
                         "title": "URL Received",
                         "text": url,
-                        "app": "Linux Link",
+                        "app": "Pocketdesk",
                     }));
                 sender.send_packet(&notification).await?;
             }

@@ -92,7 +92,7 @@ fn notify_session_started(session: &LiveSession) {
         Some(id) => id.clone(),
         None => session.peer.ip().to_string(),
     };
-    let summary = "Linux Link: a device is streaming this desktop";
+    let summary = "Pocketdesk: a device is streaming this desktop";
     let body = format!(
         "device {who} · {} · {peer}",
         if session.lan { "LAN" } else { "WAN" },

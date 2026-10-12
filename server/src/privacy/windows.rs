@@ -133,7 +133,7 @@ fn show_shield(instance: HINSTANCE) -> Vec<HWND> {
                     | WS_EX_NOACTIVATE
                     | WS_EX_TOOLWINDOW,
                 w!("LinuxLinkPrivacyShield"),
-                w!("Linux Link session active"),
+                w!("Pocketdesk session active"),
                 WS_POPUP,
                 monitor.x,
                 monitor.y,

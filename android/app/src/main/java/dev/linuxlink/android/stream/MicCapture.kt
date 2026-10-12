@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 /**
  * R4 E2 phone-mic share: capture the phone microphone, encode it to Opus
  * with MediaCodec, and stream 20 ms packets to the desktop, where the
- * server's mic relay feeds a pw-loopback virtual source ("Linux Link Mic")
+ * server's mic relay feeds a pw-loopback virtual source ("Pocketdesk Mic")
  * apps can select.
  *
  * Opus encoding lives here, not in the Rust bridge, deliberately: the

@@ -554,7 +554,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeRecordSa
 }
 
 /// Open the R4 E2 phone→desktop mic (start frame; the server creates its
-/// "Linux Link Mic" PipeWire source). Opus encoding happens in Kotlin.
+/// "Pocketdesk Mic" PipeWire source). Opus encoding happens in Kotlin.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStartMic(
     mut env: JNIEnv<'_>,

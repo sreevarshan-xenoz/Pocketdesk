@@ -5,7 +5,7 @@
 //! the receiving end. Frames carry 20 ms Opus packets (48 kHz mono). The relay
 //! decodes them to float32 PCM and pipes the bytes into a `pw-loopback`
 //! capture client, which registers an `Audio/Source/Virtual` node named
-//! "Linux Link Mic" — a normal microphone from the desktop's point of view
+//! "Pocketdesk Mic" — a normal microphone from the desktop's point of view
 //! (meetings, recorders, `pactl set-default-source`).
 //!
 //! Format note (verified against PipeWire 1.6.8 on this box): pw-loopback
@@ -40,8 +40,8 @@ pub use linux_link_core::streaming::audio::{MIC_CHANNELS, MIC_SAMPLE_RATE};
 const SPAWN_RETRY: Duration = Duration::from_secs(5);
 
 pub fn mic_node_props() -> String {
-    "node.name=linux_link_mic node.description=\"Linux Link Mic\" \
-     node.nick=\"Linux Link Mic\" media.class=Audio/Source/Virtual"
+    "node.name=linux_link_mic node.description=\"Pocketdesk Mic\" \
+     node.nick=\"Pocketdesk Mic\" media.class=Audio/Source/Virtual"
         .to_string()
 }
 
@@ -128,7 +128,7 @@ async fn run_mic_relay_with(program: &str, args: &[String], mut rx: Receiver<Inp
         };
         if !enabled {
             if let Some(n) = node.take() {
-                info!("Phone mic off — removing Linux Link Mic source");
+                info!("Phone mic off — removing Pocketdesk Mic source");
                 n.stop().await;
             }
             continue;
@@ -137,7 +137,7 @@ async fn run_mic_relay_with(program: &str, args: &[String], mut rx: Receiver<Inp
         if node.is_none() && retry_after.is_none_or(|t| Instant::now() >= t) {
             match MicNode::spawn(program, args).await {
                 Ok(n) => {
-                    info!("Phone mic on — Linux Link Mic source live ({program})");
+                    info!("Phone mic on — Pocketdesk Mic source live ({program})");
                     node = Some(n);
                     retry_after = None;
                 }
@@ -164,7 +164,7 @@ async fn run_mic_relay_with(program: &str, args: &[String], mut rx: Receiver<Inp
     }
 
     if let Some(n) = node.take() {
-        info!("Mic session ended — removing Linux Link Mic source");
+        info!("Mic session ended — removing Pocketdesk Mic source");
         n.stop().await;
     }
 }
@@ -184,7 +184,7 @@ mod tests {
         let props = mic_node_props();
         assert!(props.contains("node.name=linux_link_mic"));
         assert!(props.contains("media.class=Audio/Source/Virtual"));
-        assert!(props.contains("node.description=\"Linux Link Mic\""));
+        assert!(props.contains("node.description=\"Pocketdesk Mic\""));
     }
 
     #[test]

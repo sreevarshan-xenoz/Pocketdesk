@@ -646,7 +646,7 @@ object RustCore {
 
     /**
      * R4 E2 reverse audio (phone mic → desktop): open the mic channel — the
-     * server creates a "Linux Link Mic" PipeWire source apps can select.
+     * server creates a "Pocketdesk Mic" PipeWire source apps can select.
      * Then feed encoded frames with [sendMicOpus] (48 kHz mono, 20 ms Opus
      * packets from MediaCodec) and close with [stopMic]. QUIC-only: needs a
      * live streaming session.

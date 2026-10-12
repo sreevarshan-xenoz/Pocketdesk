@@ -88,7 +88,7 @@ fn listen(tx: &broadcast::Sender<ForwardedNotification>) -> Result<()> {
     let access = listener.GetAccessStatus()?;
     if access != UserNotificationListenerAccessStatus::Allowed {
         bail!(
-            "notification access is not granted; allow Linux Link under \
+            "notification access is not granted; allow Pocketdesk under \
              Settings > Privacy & security > Notifications"
         );
     }

@@ -285,7 +285,7 @@ async fn respond_pair(sender: &dyn DeviceSender, paired: bool, server_id: &str) 
 
 /// Show the PIN on the desktop, log fallback — never fails the pairing flow.
 fn show_pin_notification(pin: &str) {
-    let summary = format!("Linux Link pairing PIN: {pin}");
+    let summary = format!("Pocketdesk pairing PIN: {pin}");
     let body = "Enter it on your phone. It expires in 5 minutes.";
     let handle = std::thread::spawn(move || {
         crate::platform::notify(&summary, body, std::time::Duration::from_secs(300))

@@ -43,10 +43,16 @@ use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 use windows::core::{BSTR, GUID, HSTRING, PCWSTR, w};
 
 /// The Scheduled Task's name.
-pub const TASK_NAME: &str = "Linux Link";
+pub const TASK_NAME: &str = "Pocketdesk";
 
 /// The firewall rule group; removal deletes the whole group.
-const RULE_GROUP: &str = "Linux Link";
+const RULE_GROUP: &str = "Pocketdesk";
+
+/// What the task and the rule group were called before the rename. An old
+/// install's task would otherwise start a second server at every logon next
+/// to the new one, and its rules would stay open after `uninstall`, so both
+/// are removed wherever the current names are.
+const LEGACY_NAME: &str = "Linux Link";
 
 /// The adapter Tailscale installs.
 const TAILSCALE_ADAPTER: &str = "Tailscale";
@@ -89,7 +95,7 @@ pub fn task_xml(exe: &Path, user: &str, elevated: bool) -> String {
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Linux Link desktop server: lets your paired phone view and control this PC.</Description>
+    <Description>Pocketdesk desktop server: lets your paired phone view and control this PC.</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
@@ -145,11 +151,11 @@ pub fn firewall_add_script(exe: &Path) -> String {
     let group = ps_quote(RULE_GROUP);
     let program = ps_quote(&exe.display().to_string());
     let mut script = format!(
-        "$ErrorActionPreference = 'Stop'\n\
-         Get-NetFirewallRule -Group {group} -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n"
+        "$ErrorActionPreference = 'Stop'\n{}",
+        firewall_remove_script()
     );
     for (protocol, port, what) in PORTS {
-        let name = ps_quote(&format!("Linux Link {what} ({protocol} {port})"));
+        let name = ps_quote(&format!("Pocketdesk {what} ({protocol} {port})"));
         script.push_str(&format!(
             "New-NetFirewallRule -Group {group} -DisplayName {name} -Direction Inbound -Action Allow \
              -Protocol {protocol} -LocalPort {port} -Program {program} -Profile Private,Domain \
@@ -161,7 +167,7 @@ pub fn firewall_add_script(exe: &Path) -> String {
         "if (Get-NetAdapter -Name {adapter} -ErrorAction SilentlyContinue) {{\n"
     ));
     for (protocol, port, what) in PORTS {
-        let name = ps_quote(&format!("Linux Link {what} ({protocol} {port}) (tailnet)"));
+        let name = ps_quote(&format!("Pocketdesk {what} ({protocol} {port}) (tailnet)"));
         script.push_str(&format!(
             "  New-NetFirewallRule -Group {group} -DisplayName {name} -Direction Inbound -Action Allow \
              -Protocol {protocol} -LocalPort {port} -Program {program} -Profile Any \
@@ -172,12 +178,18 @@ pub fn firewall_add_script(exe: &Path) -> String {
     script
 }
 
-/// The PowerShell that removes every rule [`firewall_add_script`] adds.
+/// The PowerShell that removes every rule [`firewall_add_script`] adds, and
+/// those an install from before the rename added.
 pub fn firewall_remove_script() -> String {
-    format!(
-        "Get-NetFirewallRule -Group {} -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n",
-        ps_quote(RULE_GROUP)
-    )
+    [RULE_GROUP, LEGACY_NAME]
+        .iter()
+        .map(|group| {
+            format!(
+                "Get-NetFirewallRule -Group {} -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n",
+                ps_quote(group)
+            )
+        })
+        .collect()
 }
 
 fn powershell(script: &str) -> Result<String> {
@@ -309,6 +321,9 @@ pub fn install(elevated: bool) -> Result<()> {
         "Registered the \"{TASK_NAME}\" logon task for {}",
         exe.display()
     );
+    if delete_task(LEGACY_NAME).is_ok() {
+        println!("Removed the \"{LEGACY_NAME}\" logon task an earlier version registered");
+    }
 
     match run_elevated("firewall-add") {
         Ok(0) => println!(
@@ -323,7 +338,7 @@ pub fn install(elevated: bool) -> Result<()> {
     }
 
     match unsafe { task.Run(&none) } {
-        Ok(_) => println!("Started Linux Link; it will start again at every logon"),
+        Ok(_) => println!("Started Pocketdesk; it will start again at every logon"),
         Err(e) => {
             println!("Registered, but could not start it now ({e}); it will start at next logon")
         }
@@ -331,13 +346,22 @@ pub fn install(elevated: bool) -> Result<()> {
     Ok(())
 }
 
-/// Remove the logon task, the firewall rules and the notification identity.
-pub fn uninstall() -> Result<()> {
-    let removed = unsafe {
+/// Delete the logon task called `name`.
+fn delete_task(name: &str) -> Result<()> {
+    unsafe {
         task_service()?
             .GetFolder(&BSTR::from("\\"))?
-            .DeleteTask(&BSTR::from(TASK_NAME), 0)
-    };
+            .DeleteTask(&BSTR::from(name), 0)?;
+    }
+    Ok(())
+}
+
+/// Remove the logon task, the firewall rules and the notification identity.
+pub fn uninstall() -> Result<()> {
+    if delete_task(LEGACY_NAME).is_ok() {
+        println!("Removed the \"{LEGACY_NAME}\" logon task an earlier version registered");
+    }
+    let removed = delete_task(TASK_NAME);
     match removed {
         Ok(()) => println!(
             "Removed the \"{TASK_NAME}\" logon task (a running server keeps running until `linux-link stop`)"
@@ -405,14 +429,31 @@ mod tests {
         assert!(script.contains("if (Get-NetAdapter -Name 'Tailscale'"));
         // Re-running install replaces the group instead of duplicating it.
         assert!(script.starts_with(
-            "$ErrorActionPreference = 'Stop'\nGet-NetFirewallRule -Group 'Linux Link'"
+            "$ErrorActionPreference = 'Stop'\nGet-NetFirewallRule -Group 'Pocketdesk'"
         ));
     }
 
     #[test]
     fn uninstall_removes_the_group_install_creates() {
-        assert!(firewall_remove_script().contains("-Group 'Linux Link'"));
-        assert!(firewall_add_script(Path::new("x.exe")).contains("-Group 'Linux Link'"));
+        assert!(firewall_remove_script().contains("-Group 'Pocketdesk'"));
+        assert!(firewall_add_script(Path::new("x.exe")).contains("-Group 'Pocketdesk'"));
+    }
+
+    #[test]
+    fn rules_from_before_the_rename_are_removed_too() {
+        // Both install (which replaces the group) and uninstall clear the
+        // old "Linux Link" group, or its ports stay open forever.
+        let legacy = "Get-NetFirewallRule -Group 'Linux Link' -ErrorAction SilentlyContinue \
+                      | Remove-NetFirewallRule";
+        let add = firewall_add_script(Path::new("x.exe"));
+        assert!(firewall_remove_script().contains(legacy));
+        assert!(add.contains(legacy));
+        // New rules are only ever created in the new group.
+        assert!(
+            add.lines()
+                .filter(|l| l.contains("New-NetFirewallRule"))
+                .all(|l| l.contains("-Group 'Pocketdesk'"))
+        );
     }
 
     #[test]

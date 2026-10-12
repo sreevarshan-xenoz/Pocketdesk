@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "linux-link")]
-#[command(about = "Linux Link - secure remote desktop over Tailscale")]
+#[command(about = "Pocketdesk - your desktop from your phone, over LAN, Tailscale or iroh")]
 pub struct Cli {
     #[arg(short, long)]
     pub verbose: bool,

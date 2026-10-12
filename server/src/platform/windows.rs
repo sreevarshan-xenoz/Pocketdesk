@@ -68,7 +68,7 @@ fn register_aumid() -> windows::core::Result<()> {
             None,
         )
         .ok()?;
-        let name: Vec<u8> = "Linux Link\0"
+        let name: Vec<u8> = "Pocketdesk\0"
             .encode_utf16()
             .flat_map(u16::to_le_bytes)
             .collect();
@@ -212,7 +212,7 @@ pub(super) fn force_stop(pid: u32) -> std::io::Result<bool> {
         tracing::warn!(
             pid,
             image = %image.display(),
-            "not terminating: that pid is not a Linux Link server"
+            "not terminating: that pid is not a Pocketdesk server"
         );
         Ok(false)
     };

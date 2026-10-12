@@ -52,7 +52,7 @@ Linux Link is a **pure Rust** remote desktop solution built specifically for Lin
 - **View-only mode** — one tap makes the phone a pure viewer: the *server* drops all remote input for the session (video, clipboard and HUDs keep working), so nothing slips through from a stale tap queue; re-arms automatically after a stream reconnect
 - **Relay bandwidth courtesy** — a WAN session riding a relay automatically drops to a conservative video bitrate (relay bandwidth is shared, not ours to saturate) and restores full quality the moment it punches through to direct; one tap on the "Full quality" toggle overrides the floor if you want every bit of it
 - **Desktop audio control** — adjust the desktop's volume, mute, and default output device (headphones/speakers) from the phone (wpctl/pactl under the hood)
-- **Phone mic share** — one tap turns the phone's microphone into a desktop input device ("Linux Link Mic" PipeWire source, Opus over the session stream): take calls on the PC from the phone; stays live in view-only mode and dies with the session
+- **Phone mic share** — one tap turns the phone's microphone into a desktop input device ("Pocketdesk Mic" PipeWire source, Opus over the session stream): take calls on the PC from the phone; stays live in view-only mode and dies with the session
 - **Wake-on-LAN relay** — wake a sleeping desktop from WAN by asking an always-on Linux peer on its LAN to emit the magic packet ("Send Wake-on-LAN" in the app)
 - **Input control** — remote mouse/keyboard via trackpad gestures
 - **Battery info** — monitor Android device battery from Linux

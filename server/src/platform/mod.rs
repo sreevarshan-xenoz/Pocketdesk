@@ -51,7 +51,7 @@ pub fn notify(summary: &str, body: &str, expire: Duration) -> bool {
         std::process::Command::new("notify-send")
             .args([
                 "--app-name",
-                "Linux Link",
+                "Pocketdesk",
                 "--expire",
                 &expire.as_millis().to_string(),
                 summary,

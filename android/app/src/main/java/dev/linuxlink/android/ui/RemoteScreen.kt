@@ -322,7 +322,7 @@ fun RemoteScreen(
     }
 
     // R4 E2 phone-mic share: MediaCodec-encodes the mic to Opus and streams
-    // it to the desktop's "Linux Link Mic" PipeWire source. Independent of
+    // it to the desktop's "Pocketdesk Mic" PipeWire source. Independent of
     // view-only — the server routes mic packets before the input drop.
     var mic by remember { mutableStateOf<MicCapture?>(null) }
     var micError by remember { mutableStateOf<String?>(null) }

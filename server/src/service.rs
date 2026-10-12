@@ -474,7 +474,7 @@ pub async fn run(config: Config) -> Result<()> {
 pub async fn stop() -> Result<()> {
     let pid_file = state::pid_file_path()?;
     if !pid_file.exists() {
-        println!("No running Linux Link server found");
+        println!("No running Pocketdesk server found");
         return Ok(());
     }
 
@@ -492,7 +492,7 @@ pub async fn stop() -> Result<()> {
         // A graceful exit removes the PID file itself.
         for _ in 0..100 {
             if !pid_file.exists() {
-                println!("Linux Link server (pid {pid}) stopped");
+                println!("Pocketdesk server (pid {pid}) stopped");
                 return Ok(());
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -508,7 +508,7 @@ pub async fn stop() -> Result<()> {
         // a Linux Link server rather than whatever reused it.
         if crate::platform::force_stop(pid).context("failed to terminate the server")? {
             let _ = std::fs::remove_file(&pid_file);
-            println!("Linux Link server (pid {pid}) force-stopped");
+            println!("Pocketdesk server (pid {pid}) force-stopped");
             return Ok(());
         }
     }
@@ -550,7 +550,7 @@ pub async fn print_status() -> Result<()> {
 pub async fn kick(device: String) -> Result<()> {
     let pid_file = state::pid_file_path()?;
     if !pid_file.exists() {
-        bail!("no running Linux Link server to kick through");
+        bail!("no running Pocketdesk server to kick through");
     }
     let target = device.trim().to_string();
     if target.is_empty() {
