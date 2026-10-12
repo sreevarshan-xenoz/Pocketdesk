@@ -7,12 +7,12 @@ use linux_link_core::streaming::transport::{
     CertManager, StreamClient, StreamServer, StreamTransportConfig,
 };
 
-// We need to access handle_v2_session and ACTIVE_CLIENTS
-use linux_link_server::state::ACTIVE_CLIENTS;
+// We need to access handle_v2_session and the push registry
+use linux_link_server::state::{self, ACTIVE_CLIENTS};
 use linux_link_server::v2_multiplexer::handle_v2_session;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_reconnect_storm_kills_stale_sessions() -> anyhow::Result<()> {
+async fn test_reconnect_storm_pushes_to_one_connection() -> anyhow::Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cert_manager = Arc::new(CertManager::new()?);
     let registry = Arc::new(PluginRegistry::new());
@@ -45,6 +45,10 @@ async fn test_reconnect_storm_kills_stale_sessions() -> anyhow::Result<()> {
             });
         }
     });
+
+    // The storm clients never pair; with pairing off they may receive
+    // pushes, which is what this test counts.
+    state::set_pairing_required(false);
 
     // Clear active clients list to ensure clean state
     {
@@ -90,15 +94,29 @@ async fn test_reconnect_storm_kills_stale_sessions() -> anyhow::Result<()> {
     // Wait for all handshakes to theoretically complete and overlap
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // Check ACTIVE_CLIENTS. Even though 10 clients connected and are holding
-    // their connection open, only 1 should be in the active list!
+    // Ten overlapping connections from one device: every live one stays
+    // registered (closing one must not orphan the others), but pushes go to
+    // exactly one of them — the newest — so the device is never pushed to
+    // twice.
     {
-        let clients = ACTIVE_CLIENTS.lock().await;
+        let registered = ACTIVE_CLIENTS.lock().await.len();
+        assert!(registered > 1, "live connections must stay registered");
+        let newest = ACTIVE_CLIENTS
+            .lock()
+            .await
+            .last()
+            .map(|c| c.connection_id().to_string());
+        let targets = state::clone_clients().await;
         assert_eq!(
-            clients.len(),
+            targets.len(),
             1,
-            "Reconnect storm failed! Found {} parallel brains",
-            clients.len()
+            "Reconnect storm failed! {} parallel brains",
+            targets.len()
+        );
+        assert_eq!(
+            Some(targets[0].connection_id().to_string()),
+            newest,
+            "pushes must go to the newest connection"
         );
     }
 
