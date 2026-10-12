@@ -86,6 +86,20 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSetDataD
     }
 }
 
+/// Pin a desktop's certificate for `address` from a scanned pairing code.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePinPeerCertificate(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    fingerprint: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let fingerprint = jstring_to_string(&mut env, &fingerprint);
+    let json = envelope_unit(api::pin_peer_certificate(address, fingerprint));
+    to_jstring(&mut env, json)
+}
+
 /// Whether LAN (mDNS) discovery is currently active.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeIsDiscoveryActive(

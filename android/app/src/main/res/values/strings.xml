@@ -194,4 +194,9 @@
     <string name="connecting_still">Still trying… check that the desktop is awake and running Pocketdesk.</string>
     <string name="repair_pairing">Pair again</string>
     <string name="session_menu">Session menu</string>
+    <string name="pair_link_title">Pairing with %1$s…</string>
+    <string name="pair_link_trying">Trying %1$s</string>
+    <string name="pair_link_expired">This code has expired — show a new one on the desktop and scan again.</string>
+    <string name="pair_link_unreachable">Could not reach the desktop at any of its addresses. Is this phone on the same network or tailnet? (%1$s)</string>
+    <string name="pair_link_invalid">That is not a Pocketdesk pairing code.</string>
 </resources>

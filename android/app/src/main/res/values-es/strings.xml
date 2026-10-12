@@ -187,4 +187,9 @@
     <string name="connecting_still">Siguiendo intentándolo… verifica que el escritorio esté despierto con Pocketdesk activo.</string>
     <string name="repair_pairing">Emparejar de nuevo</string>
     <string name="session_menu">Menú de sesión</string>
+    <string name="pair_link_title">Emparejando con %1$s…</string>
+    <string name="pair_link_trying">Probando %1$s</string>
+    <string name="pair_link_expired">Este código caducó: muestra uno nuevo en el escritorio y vuelve a escanear.</string>
+    <string name="pair_link_unreachable">No se pudo llegar al escritorio en ninguna de sus direcciones. ¿Está este teléfono en la misma red o tailnet? (%1$s)</string>
+    <string name="pair_link_invalid">Eso no es un código de emparejamiento de Pocketdesk.</string>
 </resources>

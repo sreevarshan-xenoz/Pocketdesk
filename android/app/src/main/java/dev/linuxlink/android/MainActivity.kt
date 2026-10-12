@@ -33,6 +33,7 @@ import dev.linuxlink.android.bridge.RustCore
 import dev.linuxlink.android.ui.ConnectScreen
 import dev.linuxlink.android.ui.HomeScreen
 import dev.linuxlink.android.ui.RemoteScreen
+import dev.linuxlink.android.ui.PairLinkScreen
 import dev.linuxlink.android.ui.SettingsScreen
 import dev.linuxlink.android.ui.theme.LinuxLinkTheme
 
@@ -53,6 +54,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private val disconnectSignal = mutableIntStateOf(0)
+
+    /** A desktop pairing code to act on (pocketdesk://pair?...), opened by a scan. */
+    private val pairLink = mutableStateOf<String?>(null)
+
+    private fun pairUriFrom(intent: Intent?): String? =
+        intent?.data?.takeIf { it.scheme == "pocketdesk" && it.host == "pair" }?.toString()
 
     /** PiP state (Tier-3 #14), read by the composition to hide chrome. */
     private val inPictureInPicture = mutableStateOf(false)
@@ -92,6 +99,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         RustCore.start(filesDir)
+        pairLink.value = pairUriFrom(intent)
         setContent {
             LinuxLinkTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -114,6 +122,29 @@ class MainActivity : ComponentActivity() {
                         if (disconnectSignal.intValue > 0) {
                             sessionKey = null
                         }
+                    }
+
+                    val pairing = pairLink.value
+                    if (pairing != null) {
+                        Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                            PairLinkScreen(
+                                uri = pairing,
+                                onPaired = { link, address, serverId ->
+                                    val ctx = this@MainActivity
+                                    HostStore.save(
+                                        ctx,
+                                        HostStore.Host(address, link.streamPort, link.controlPort),
+                                    )
+                                    HostStore.savePairedDesktop(ctx, address, serverId)
+                                    link.endpoint?.let { HostStore.saveWanIdentity(ctx, address, it) }
+                                    pairLink.value = null
+                                    maybeRequestNotificationPermission()
+                                    sessionKey = "$address|${link.streamPort}|${link.controlPort}"
+                                },
+                                onBack = { pairLink.value = null },
+                            )
+                        }
+                        return@Surface
                     }
 
                     when (val session = parseSession(sessionKey)) {
@@ -185,6 +216,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        pairUriFrom(intent)?.let { pairLink.value = it }
         if (intent.getBooleanExtra(EXTRA_DISCONNECT, false)) {
             Thread { runCatching { RustCore.stopStreaming() } }.start()
             disconnectSignal.intValue += 1

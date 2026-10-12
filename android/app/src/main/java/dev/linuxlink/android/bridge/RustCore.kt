@@ -23,6 +23,7 @@ object RustCore {
     private external fun nativeVersion(): String
     private external fun nativeInit()
     private external fun nativeSetDataDir(path: String)
+    private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
     private external fun nativeIsDiscoveryActive(): Boolean
     private external fun nativeCheckTailscaleStatus(): String
     private external fun nativeGetPeers(): String
@@ -172,6 +173,13 @@ object RustCore {
     fun pollIncomingPackets(): List<String> = parseStringArray(nativePollIncomingPackets())
 
     // ---- Clipboard ----
+
+    /**
+     * Pin the desktop certificate for [address] from a scanned pairing code,
+     * so the first connection is verified instead of trusted on first use.
+     */
+    fun pinPeerCertificate(address: String, fingerprintHex: String): Result<Unit> =
+        envelope(nativePinPeerCertificate(address, fingerprintHex)).map { }
 
     fun sendClipboard(address: String, port: Int, content: String): Result<Unit> =
         envelope(nativeSendClipboard(address, port, content)).map { }

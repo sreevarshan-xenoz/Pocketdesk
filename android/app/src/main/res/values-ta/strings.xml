@@ -187,4 +187,9 @@
     <string name="connecting_still">முயற்சி தொடர்கிறது… டெஸ்க்டாப் விழிப்புடன் Pocketdesk-உடன் உள்ளதா பார்க்கவும்.</string>
     <string name="repair_pairing">மீண்டும் இணையுங்கள்</string>
     <string name="session_menu">அமர்வு பட்டியல்</string>
+    <string name="pair_link_title">%1$s உடன் இணைக்கிறது…</string>
+    <string name="pair_link_trying">%1$s முயற்சிக்கிறது</string>
+    <string name="pair_link_expired">இந்தக் குறியீடு காலாவதியானது — டெஸ்க்டாப்பில் புதியதைக் காட்டி மீண்டும் ஸ்கேன் செய்யுங்கள்.</string>
+    <string name="pair_link_unreachable">டெஸ்க்டாப்பை அதன் எந்த முகவரியிலும் அடைய முடியவில்லை. இந்த ஃபோன் அதே பிணையம் அல்லது tailnet-இல் உள்ளதா? (%1$s)</string>
+    <string name="pair_link_invalid">அது Pocketdesk இணைப்புக் குறியீடு அல்ல.</string>
 </resources>

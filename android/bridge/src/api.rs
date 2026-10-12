@@ -39,6 +39,49 @@ pub fn set_data_dir(path: String) {
     tracing::info!("Data directory set to: {path}");
 }
 
+/// Pin a desktop's certificate before the first connection to `address`,
+/// from a scanned pairing code (`fp`: hex SHA-256 of its certificate). The
+/// code is shown on the desktop's own screen, so this replaces trust on
+/// first use for that address.
+pub fn pin_peer_certificate(address: String, fingerprint_hex: String) -> Result<(), String> {
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    pin_peer_certificate_in(&dir, &address, &fingerprint_hex)
+}
+
+pub(crate) fn pin_peer_certificate_in(
+    cert_dir: &std::path::Path,
+    address: &str,
+    fingerprint_hex: &str,
+) -> Result<(), String> {
+    let ip: std::net::IpAddr = address
+        .trim()
+        .parse()
+        .map_err(|_| format!("not an IP address: {address}"))?;
+    let hex = fingerprint_hex.trim();
+    if hex.len() != 64 {
+        return Err("a certificate fingerprint is 64 hex digits".to_string());
+    }
+    let mut hash = [0u8; 32];
+    for (i, byte) in hash.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+            .map_err(|_| "the fingerprint is not hex".to_string())?;
+    }
+    let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
+        .map_err(|e| e.to_string())?;
+    manager
+        .pin_peer(
+            &linux_link_core::streaming::transport::peer_label_for_ip(ip),
+            hash,
+        )
+        .map_err(|e| e.to_string())?;
+    tracing::info!("Pinned the certificate of {ip} from a pairing code");
+    Ok(())
+}
+
 /// Check if the LAN discovery service is active.
 pub fn is_discovery_active() -> bool {
     crate::MDNS_ACTIVE.load(Ordering::Acquire)
@@ -2724,5 +2767,30 @@ mod keymap_tests {
     #[test]
     fn unknown_codes_are_reserved() {
         assert_eq!(k(9999), 0);
+    }
+}
+
+#[cfg(test)]
+mod pin_certificate_tests {
+    use super::pin_peer_certificate_in;
+    use linux_link_core::streaming::transport::{CertManager, peer_label_for_ip};
+
+    #[test]
+    fn a_pairing_code_fingerprint_is_pinned_under_the_verifiers_label() {
+        let dir = std::env::temp_dir().join(format!("bridge-pin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let hex = "ab".repeat(32);
+        pin_peer_certificate_in(&dir, "192.168.1.101", &hex).unwrap();
+        let label = peer_label_for_ip("192.168.1.101".parse().unwrap());
+        let peers = CertManager::load_or_create(&dir).unwrap().known_peers();
+        assert!(peers.contains(&(label, [0xab; 32])));
+    }
+
+    #[test]
+    fn malformed_input_is_refused() {
+        let dir = std::env::temp_dir().join(format!("bridge-pin-bad-{}", std::process::id()));
+        assert!(pin_peer_certificate_in(&dir, "not-an-ip", &"ab".repeat(32)).is_err());
+        assert!(pin_peer_certificate_in(&dir, "10.0.0.1", "abcd").is_err());
+        assert!(pin_peer_certificate_in(&dir, "10.0.0.1", &"zz".repeat(32)).is_err());
     }
 }

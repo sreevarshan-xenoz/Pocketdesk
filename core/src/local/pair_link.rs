@@ -227,6 +227,15 @@ mod tests {
         assert_eq!(PairLink::from_uri(&uri).unwrap(), link);
     }
 
+    /// The phone's parser (android PairLinkTest) reads this exact string;
+    /// if the encoding changes, both tests must change together.
+    pub(crate) const FIXTURE: &str = "pocketdesk://pair?v=1&name=Desk%20%26%20Co&id=d-1&a=192.168.1.5,100.80.1.2&cp=1716&sp=4716&pin=012345&fp=abababababababababababababababababababababababababababababababab&ep=eyJlbmRwb2ludElkIjoieCIsInJlbGF5VXJscyI6W10sImRpcmVjdEFkZHJzIjpbXX0";
+
+    #[test]
+    fn the_encoding_matches_the_cross_language_fixture() {
+        assert_eq!(sample().to_uri(), FIXTURE);
+    }
+
     #[test]
     fn optional_parts_may_be_absent() {
         let link = PairLink {

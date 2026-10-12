@@ -254,6 +254,17 @@ impl CertManager {
         self.known_peers.lock().unwrap().contains_key(label)
     }
 
+    /// Trust `hash` for the peer `label`, replacing whatever was pinned, and
+    /// save. A pairing code shown on the desktop's own screen is an
+    /// authenticated channel, so its fingerprint outranks trust on first use.
+    pub fn pin_peer(&self, label: &str, hash: [u8; 32]) -> Result<()> {
+        self.known_peers
+            .lock()
+            .unwrap()
+            .insert(label.to_string(), hash);
+        self.save_known_peers()
+    }
+
     /// Remove a known peer by label. Returns true if the peer was found and removed.
     pub fn remove_peer(&self, label: &str) -> bool {
         let mut peers = self.known_peers.lock().unwrap();
@@ -283,6 +294,23 @@ fn generate_identity() -> Result<(Vec<u8>, Vec<u8>)> {
     Ok((cert.der().to_vec(), key_pair.serialize_der()))
 }
 
+/// The label a peer's certificate pin is stored under: the server name the
+/// connection was made to. ServerName has no Display; its DNS name is a
+/// string and its IP's Debug output is stable.
+fn peer_label(server_name: &ServerName<'_>) -> String {
+    match server_name {
+        ServerName::DnsName(dns) => dns.as_ref().to_string(),
+        ServerName::IpAddress(addr) => format!("{:?}", addr),
+        _ => format!("{:?}", server_name),
+    }
+}
+
+/// [`peer_label`] for a connection made to `ip` (the client connects with
+/// the IP as its server name).
+pub fn peer_label_for_ip(ip: std::net::IpAddr) -> String {
+    peer_label(&ServerName::IpAddress(ip.into()))
+}
+
 /// TOFU (Trust On First Use) certificate verifier.
 ///
 /// - **First connection:** auto-accepts any server certificate and stores its
@@ -306,16 +334,7 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
         _now: rustls::pki_types::UnixTime,
     ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         let hash = CertManager::cert_hash(end_entity);
-        // Use the server-name representation for TOFU key lookup.
-        // ServerName doesn't implement Display, so we convert through its
-        // inner types since both DNS names and IPs implement Display.
-        let label = match server_name {
-            ServerName::DnsName(dns) => dns.as_ref().to_string(),
-            // IpAddr in pki-types doesn't impl Display; Debug output is stable
-            ServerName::IpAddress(addr) => format!("{:?}", addr),
-            // Fallback for any future ServerName variants
-            _ => format!("{:?}", server_name),
-        };
+        let label = peer_label(server_name);
 
         let mut peers = self.known_peers.lock().unwrap();
 
@@ -626,6 +645,27 @@ impl PacketHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pairing code pins the desktop's certificate before the phone ever
+    /// connects; the pin must sit under the exact label the verifier looks up
+    /// for a connection made to that IP.
+    #[test]
+    fn a_pinned_ip_is_trusted_under_the_verifiers_label() {
+        let dir = std::env::temp_dir().join(format!("ll-pin-peer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ip: std::net::IpAddr = "192.168.1.101".parse().unwrap();
+        let label = peer_label_for_ip(ip);
+        assert_eq!(
+            label,
+            peer_label(&ServerName::try_from(ip.to_string()).unwrap())
+        );
+        let manager = CertManager::load_or_create(&dir).unwrap();
+        manager.pin_peer(&label, [7u8; 32]).unwrap();
+        assert!(manager.is_peer_trusted(&label));
+        // Persisted: a manager made for the next connection sees it.
+        let next = CertManager::load_or_create(&dir).unwrap();
+        assert!(next.known_peers().contains(&(label, [7u8; 32])));
+    }
 
     #[test]
     fn test_packet_header_roundtrip() {

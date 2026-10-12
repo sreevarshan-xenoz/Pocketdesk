@@ -55,4 +55,5 @@ dependencies {
     // R4 E6: foldable / large-screen posture (FoldingFeature) for the dual-pane layout.
     implementation("androidx.window:window:1.5.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
 }
