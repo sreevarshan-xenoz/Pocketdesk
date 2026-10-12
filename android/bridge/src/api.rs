@@ -66,7 +66,10 @@ pub(crate) fn pin_peer_certificate_in(
         .parse()
         .map_err(|_| format!("not an IP address: {address}"))?;
     let hex = fingerprint_hex.trim();
-    if hex.len() != 64 {
+    // ASCII hex only, checked before any slicing: the length is in bytes, so
+    // a multi-byte character could put a slice boundary inside it, and a
+    // panic here would abort the app (this runs under a JNI export).
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("a certificate fingerprint is 64 hex digits".to_string());
     }
     let mut hash = [0u8; 32];
@@ -2878,5 +2881,10 @@ mod pin_certificate_tests {
         assert!(pin_peer_certificate_in(&dir, "not-an-ip", &"ab".repeat(32)).is_err());
         assert!(pin_peer_certificate_in(&dir, "10.0.0.1", "abcd").is_err());
         assert!(pin_peer_certificate_in(&dir, "10.0.0.1", &"zz".repeat(32)).is_err());
+        // 64 bytes, but a two-byte character straddles a hex-pair boundary:
+        // slicing it would panic, and a panic in a JNI export aborts the app.
+        let straddling = format!("{}é{}", "a".repeat(61), "b");
+        assert_eq!(straddling.len(), 64);
+        assert!(pin_peer_certificate_in(&dir, "10.0.0.1", &straddling).is_err());
     }
 }

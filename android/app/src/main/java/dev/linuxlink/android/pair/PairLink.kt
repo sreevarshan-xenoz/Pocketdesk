@@ -66,7 +66,11 @@ data class PairLink(
                 controlPort = port("cp", DEFAULT_CONTROL_PORT),
                 streamPort = port("sp", DEFAULT_STREAM_PORT),
                 pin = pin,
-                fingerprint = fields["fp"]?.takeIf { it.isNotEmpty() },
+                fingerprint = fields["fp"]?.takeIf { it.isNotEmpty() }?.also { fp ->
+                    require(fp.length == 64 && fp.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                        "the certificate fingerprint must be 64 hex digits"
+                    }
+                },
                 endpoint = fields["ep"]?.let { encoded ->
                     String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8)
                 },

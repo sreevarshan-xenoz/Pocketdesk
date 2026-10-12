@@ -44,6 +44,10 @@ class PairLinkTest {
             "pocketdesk://pair?v=1&pin=123456",
             "pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&cp=x",
             "pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&ep=%%%",
+            // A fingerprint must be exactly 64 hex digits.
+            "pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&fp=" + "zz".repeat(32),
+            "pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&fp=abcd",
+            "pocketdesk://pair?v=1&a=1.2.3.4&pin=123456&fp=" + "a".repeat(61) + "%C3%A9b",
         )) {
             assertTrue(bad, PairLink.parse(bad).isFailure)
         }
