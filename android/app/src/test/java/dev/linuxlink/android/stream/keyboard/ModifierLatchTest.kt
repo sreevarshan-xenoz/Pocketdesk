@@ -7,39 +7,39 @@ class ModifierLatchTest {
     @Test
     fun aTapLatchesForOneKey() {
         val latch = ModifierLatch()
-        latch.tap(Modifier.Ctrl)
-        assertEquals(LatchState.Once, latch.state(Modifier.Ctrl))
-        assertEquals(listOf(Modifier.Ctrl), latch.consume())
-        assertEquals(LatchState.Off, latch.state(Modifier.Ctrl))
-        assertEquals(emptyList<Modifier>(), latch.consume())
+        latch.tap(KeyModifier.Ctrl)
+        assertEquals(LatchState.Once, latch.state(KeyModifier.Ctrl))
+        assertEquals(listOf(KeyModifier.Ctrl), latch.consume())
+        assertEquals(LatchState.Off, latch.state(KeyModifier.Ctrl))
+        assertEquals(emptyList<KeyModifier>(), latch.consume())
     }
 
     @Test
     fun aSecondTapUnlatches() {
         val latch = ModifierLatch()
-        latch.tap(Modifier.Alt)
-        latch.tap(Modifier.Alt)
-        assertEquals(LatchState.Off, latch.state(Modifier.Alt))
+        latch.tap(KeyModifier.Alt)
+        latch.tap(KeyModifier.Alt)
+        assertEquals(LatchState.Off, latch.state(KeyModifier.Alt))
     }
 
     @Test
     fun aLockLastsUntilTappedOff() {
         val latch = ModifierLatch()
-        latch.lock(Modifier.Shift)
-        assertEquals(listOf(Modifier.Shift), latch.consume())
-        assertEquals(listOf(Modifier.Shift), latch.consume())
-        latch.tap(Modifier.Shift)
-        assertEquals(LatchState.Off, latch.state(Modifier.Shift))
+        latch.lock(KeyModifier.Shift)
+        assertEquals(listOf(KeyModifier.Shift), latch.consume())
+        assertEquals(listOf(KeyModifier.Shift), latch.consume())
+        latch.tap(KeyModifier.Shift)
+        assertEquals(LatchState.Off, latch.state(KeyModifier.Shift))
     }
 
     @Test
     fun modifiersComeOutInAFixedOrder() {
         val latch = ModifierLatch()
-        latch.tap(Modifier.Super)
-        latch.lock(Modifier.Shift)
-        latch.tap(Modifier.Ctrl)
-        assertEquals(listOf(Modifier.Ctrl, Modifier.Shift, Modifier.Super), latch.consume())
-        assertEquals("only the lock survives", listOf(Modifier.Shift), latch.active())
+        latch.tap(KeyModifier.Super)
+        latch.lock(KeyModifier.Shift)
+        latch.tap(KeyModifier.Ctrl)
+        assertEquals(listOf(KeyModifier.Ctrl, KeyModifier.Shift, KeyModifier.Super), latch.consume())
+        assertEquals("only the lock survives", listOf(KeyModifier.Shift), latch.active())
     }
 
     @Test
@@ -47,9 +47,9 @@ class ModifierLatchTest {
         val latch = ModifierLatch()
         var changes = 0
         latch.onChange = { changes++ }
-        latch.lock(Modifier.Ctrl)
+        latch.lock(KeyModifier.Ctrl)
         latch.reset()
-        assertEquals(emptyList<Modifier>(), latch.active())
+        assertEquals(emptyList<KeyModifier>(), latch.active())
         assertEquals(2, changes)
     }
 }

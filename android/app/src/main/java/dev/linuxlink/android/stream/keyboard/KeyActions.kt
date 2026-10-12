@@ -14,7 +14,7 @@ sealed interface KeyAction {
 
 /** How edits and keys become [KeyAction]s (spec K3, K5, K6). */
 object KeyActions {
-    fun forKey(keyCode: Int, modifiers: List<Modifier>): KeyAction =
+    fun forKey(keyCode: Int, modifiers: List<KeyModifier>): KeyAction =
         if (modifiers.isEmpty()) KeyAction.Tap(keyCode) else KeyAction.Combo(modifiers.map { it.keyCode }, keyCode)
 
     /**
@@ -23,7 +23,7 @@ object KeyActions {
      * each character with a key of its own becomes a combo (Ctrl + c is the
      * shortcut, not the letter); one without a key is still typed.
      */
-    fun forEdit(edit: Edit, modifiers: List<Modifier>): List<KeyAction> {
+    fun forEdit(edit: Edit, modifiers: List<KeyModifier>): List<KeyAction> {
         val actions = mutableListOf<KeyAction>()
         repeat(edit.backspaces) { actions += forKey(KeyEvent.KEYCODE_DEL, modifiers) }
         val pending = StringBuilder()

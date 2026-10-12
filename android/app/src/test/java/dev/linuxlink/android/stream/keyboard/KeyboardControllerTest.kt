@@ -19,22 +19,22 @@ class KeyboardControllerTest {
 
     @Test
     fun aLatchedCtrlTurnsTheNextLetterIntoAShortcutAndResetsTheIme() {
-        latch.tap(Modifier.Ctrl)
+        latch.tap(KeyModifier.Ctrl)
         keyboard.setComposing("c")
-        assertEquals(listOf(KeyAction.Combo(listOf(Modifier.Ctrl.keyCode), KeyEvent.KEYCODE_C)), sent)
+        assertEquals(listOf(KeyAction.Combo(listOf(KeyModifier.Ctrl.keyCode), KeyEvent.KEYCODE_C)), sent)
         assertEquals(1, imeResets)
-        assertEquals("the latch was used up", LatchState.Off, latch.state(Modifier.Ctrl))
+        assertEquals("the latch was used up", LatchState.Off, latch.state(KeyModifier.Ctrl))
         keyboard.setComposing("x")
         assertEquals("the IME's composing word was forgotten", KeyAction.Text("x"), sent.last())
     }
 
     @Test
     fun barKeysUseAndConsumeTheLatch() {
-        latch.tap(Modifier.Alt)
+        latch.tap(KeyModifier.Alt)
         keyboard.key(KeyEvent.KEYCODE_TAB)
         keyboard.key(KeyEvent.KEYCODE_TAB)
         assertEquals(
-            listOf(KeyAction.Combo(listOf(Modifier.Alt.keyCode), KeyEvent.KEYCODE_TAB), KeyAction.Tap(KeyEvent.KEYCODE_TAB)),
+            listOf(KeyAction.Combo(listOf(KeyModifier.Alt.keyCode), KeyEvent.KEYCODE_TAB), KeyAction.Tap(KeyEvent.KEYCODE_TAB)),
             sent,
         )
     }
@@ -49,13 +49,13 @@ class KeyboardControllerTest {
 
     @Test
     fun hardwareCharactersAreTextUnlessAShortcutModifierIsHeld() {
-        keyboard.hardwareKey(KeyEvent.KEYCODE_A, 'A', held = listOf(Modifier.Shift))
-        keyboard.hardwareKey(KeyEvent.KEYCODE_C, 'c', held = listOf(Modifier.Ctrl))
+        keyboard.hardwareKey(KeyEvent.KEYCODE_A, 'A', held = listOf(KeyModifier.Shift))
+        keyboard.hardwareKey(KeyEvent.KEYCODE_C, 'c', held = listOf(KeyModifier.Ctrl))
         keyboard.hardwareKey(KeyEvent.KEYCODE_F5, null, held = emptyList())
         assertEquals(
             listOf(
                 KeyAction.Text("A"),
-                KeyAction.Combo(listOf(Modifier.Ctrl.keyCode), KeyEvent.KEYCODE_C),
+                KeyAction.Combo(listOf(KeyModifier.Ctrl.keyCode), KeyEvent.KEYCODE_C),
                 KeyAction.Tap(KeyEvent.KEYCODE_F5),
             ),
             sent,

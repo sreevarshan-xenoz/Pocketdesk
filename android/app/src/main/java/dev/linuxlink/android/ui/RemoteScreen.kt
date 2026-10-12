@@ -33,6 +33,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -49,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,6 +89,12 @@ import dev.linuxlink.android.stream.ShortcutBar
 import dev.linuxlink.android.stream.StatsHud
 import dev.linuxlink.android.stream.StreamStatus
 import dev.linuxlink.android.stream.StreamTransportKind
+import dev.linuxlink.android.stream.keyboard.KeyAction
+import dev.linuxlink.android.stream.keyboard.KeyboardBar
+import dev.linuxlink.android.stream.keyboard.KeyboardBarHeight
+import dev.linuxlink.android.stream.keyboard.KeyboardSession
+import dev.linuxlink.android.stream.keyboard.KeyboardSinkView
+import androidx.compose.ui.viewinterop.AndroidView
 import dev.linuxlink.android.ui.theme.Space
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -98,6 +108,7 @@ import kotlinx.coroutines.withContext
  * QuickSettingsSheet, the input-mode toggle, shortcut bar, and the
  * foreground-service + keep-screen-on lifecycle around it.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RemoteScreen(
     address: String,
@@ -112,6 +123,40 @@ fun RemoteScreen(
     // old toast spam (they inherit the theme and stay clear of the video).
     val snackbar = remember { SnackbarHostState() }
     val haptics = rememberLlHaptics()
+    // F1: the in-session keyboard. The phone's IME types into an invisible
+    // sink view; keys and text reach the desktop in order on one worker.
+    val keyboardScope = rememberCoroutineScope()
+    val keyboard = remember(address, port) {
+        KeyboardSession(context, keyboardScope) { action ->
+            when (action) {
+                is KeyAction.Text -> RustCore.sendText(address, port, action.text)
+                is KeyAction.Tap -> RustCore.tapKey(address, port, action.keyCode)
+                is KeyAction.Combo ->
+                    RustCore.hotkey(address, port, action.keyCode, *action.modifiers.toIntArray())
+            }
+        }
+    }
+    var keyboardOpen by remember { mutableStateOf(false) }
+    var latchVersion by remember { mutableIntStateOf(0) }
+    DisposableEffect(keyboard) {
+        keyboard.latch.onChange = { latchVersion++ }
+        onDispose { keyboard.latch.onChange = null }
+    }
+    // The bar follows the IME: once the keyboard has shown, its going away
+    // (Back, or the IME's own hide key) closes the bar too.
+    val imeVisible = WindowInsets.isImeVisible
+    var imeSeen by remember { mutableStateOf(false) }
+    LaunchedEffect(keyboardOpen, imeVisible) {
+        when {
+            !keyboardOpen -> imeSeen = false
+            imeVisible -> imeSeen = true
+            imeSeen -> {
+                keyboardOpen = false
+                imeSeen = false
+                keyboard.latch.reset()
+            }
+        }
+    }
     var mode by remember { mutableStateOf(InputMode.DirectTouch) }
     // R4 E6: foldable / tablet dual-pane. Auto-follows the hinge posture (or a
     // large window); the "Pane" button cycles Auto → Dual → Single → Auto.
@@ -636,6 +681,8 @@ fun RemoteScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+            // With the keyboard open the session sits above it (spec K9).
+            .then(if (keyboardOpen) Modifier.imePadding() else Modifier)
             .background(androidx.compose.ui.graphics.Color.Black),
     ) {
         // A hinge (FoldingFeature) or a large window splits the session into a
@@ -667,7 +714,9 @@ fun RemoteScreen(
         // gesture handlers and never consumes it, so the tap still reaches the
         // desktop — no swallowed input, no invisible edge strip to hunt for.
         Box(
-            modifier = streamMod.pointerInput(Unit) {
+            modifier = streamMod
+                .then(if (keyboardOpen) Modifier.padding(bottom = KeyboardBarHeight) else Modifier)
+                .pointerInput(Unit) {
                 awaitEachGesture {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -699,7 +748,7 @@ fun RemoteScreen(
         // permanent control surface, and fading the stream chrome next to it
         // would look broken, not immersive.
         val chromeSticky = showQuick || showPicker || showMonitorPicker ||
-            showPairing || showAudio || showHistory || dualPane
+            showPairing || showAudio || showHistory || dualPane || keyboardOpen
         LaunchedEffect(chromeVisible, status, chromeSticky) {
             if (chromeVisible && !chromeSticky && status is StreamStatus.Up) {
                 delay(6_000)
@@ -894,7 +943,8 @@ fun RemoteScreen(
             // Bottom chrome group: mode toggle, the action disc opening
             // QuickSettingsSheet, and (single-pane) the shortcut bar.
             AnimatedVisibility(
-                visible = chromeVisible,
+                // The keyboard bar takes this place while the keyboard is open.
+                visible = chromeVisible && !keyboardOpen,
                 enter = fadeIn(tween(160)) + slideInVertically(tween(240)) { it / 3 },
                 exit = fadeOut(tween(240)) + slideOutVertically(tween(240)) { it / 3 },
                 modifier = Modifier
@@ -923,6 +973,10 @@ fun RemoteScreen(
                             stringResource(R.string.mode_trackpad)
                         }
                         Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                        Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(18.dp))
                                 .background(Color.White.copy(alpha = 0.16f))
@@ -938,6 +992,28 @@ fun RemoteScreen(
                                 size = 16.dp,
                             )
                             Text(modeLabel, color = Color.White, fontSize = 13.sp)
+                        }
+                        // F1: always visible while the chrome is, because a
+                        // gesture alone is unreliable (phone skins steal
+                        // three-finger gestures).
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color.White.copy(alpha = 0.16f))
+                                .clickable {
+                                    haptics.tap()
+                                    keyboardOpen = true
+                                    keyboard.open()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                        ) {
+                            LlIcon(
+                                LlIcons.Keyboard,
+                                stringResource(R.string.keyboard_open),
+                                tint = Color.White,
+                                size = 16.dp,
+                            )
+                        }
                         }
                         FloatingActionButton(
                             onClick = { haptics.tap(); showQuick = true },
@@ -978,6 +1054,24 @@ fun RemoteScreen(
                     Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.BottomCenter)
                 }
             ControlDock(address = address, port = port, modifier = dockMod)
+        }
+
+        // F1: the IME's target (1 dp, invisible) and the bar above the keyboard.
+        AndroidView(
+            factory = { KeyboardSinkView(it).also(keyboard::attach) },
+            modifier = Modifier.size(1.dp).align(Alignment.TopStart),
+        )
+        if (keyboardOpen && !inPictureInPicture) {
+            KeyboardBar(
+                keyboard = keyboard,
+                latchVersion = latchVersion,
+                haptics = haptics,
+                onHide = {
+                    keyboard.close()
+                    keyboardOpen = false
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
 
         // Blackout overlay: last child = topmost. Opaque black covers the

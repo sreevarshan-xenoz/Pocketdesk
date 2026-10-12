@@ -48,9 +48,9 @@ class KeyboardController(
      * printable character is typed as text unless a shortcut modifier (not
      * Shift alone) is held or latched.
      */
-    fun hardwareKey(keyCode: Int, char: Char?, held: List<Modifier>) {
+    fun hardwareKey(keyCode: Int, char: Char?, held: List<KeyModifier>) {
         val modifiers = (held + latch.consume()).distinct().sortedBy { it.ordinal }
-        val shortcut = modifiers.any { it != Modifier.Shift }
+        val shortcut = modifiers.any { it != KeyModifier.Shift }
         if (char != null && !shortcut) {
             shadow.finishComposing()
             shadow.commit(char.toString())

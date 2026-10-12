@@ -6,8 +6,8 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class KeyActionsTest {
-    private val ctrl = Modifier.Ctrl.keyCode
-    private val shift = Modifier.Shift.keyCode
+    private val ctrl = KeyModifier.Ctrl.keyCode
+    private val shift = KeyModifier.Shift.keyCode
 
     @Test
     fun plainTextIsTextAndBackspacesAreDeleteTaps() {
@@ -34,17 +34,17 @@ class KeyActionsTest {
     fun latchedModifiersTurnTypedCharactersIntoCombos() {
         assertEquals(
             listOf(KeyAction.Combo(listOf(ctrl), KeyEvent.KEYCODE_C)),
-            KeyActions.forEdit(Edit(0, "c"), listOf(Modifier.Ctrl)),
+            KeyActions.forEdit(Edit(0, "c"), listOf(KeyModifier.Ctrl)),
         )
         assertEquals(
             "Shift+Enter, e.g. a newline in a chat box",
             listOf(KeyAction.Combo(listOf(shift), KeyEvent.KEYCODE_ENTER)),
-            KeyActions.forEdit(Edit(0, "\n"), listOf(Modifier.Shift)),
+            KeyActions.forEdit(Edit(0, "\n"), listOf(KeyModifier.Shift)),
         )
         assertEquals(
             "a character with no key of its own is still typed",
             listOf(KeyAction.Text("é")),
-            KeyActions.forEdit(Edit(0, "é"), listOf(Modifier.Ctrl)),
+            KeyActions.forEdit(Edit(0, "é"), listOf(KeyModifier.Ctrl)),
         )
     }
 
@@ -53,7 +53,7 @@ class KeyActionsTest {
         assertEquals(KeyAction.Tap(KeyEvent.KEYCODE_ESCAPE), KeyActions.forKey(KeyEvent.KEYCODE_ESCAPE, emptyList()))
         assertEquals(
             KeyAction.Combo(listOf(ctrl, shift), KeyEvent.KEYCODE_TAB),
-            KeyActions.forKey(KeyEvent.KEYCODE_TAB, listOf(Modifier.Ctrl, Modifier.Shift)),
+            KeyActions.forKey(KeyEvent.KEYCODE_TAB, listOf(KeyModifier.Ctrl, KeyModifier.Shift)),
         )
     }
 
