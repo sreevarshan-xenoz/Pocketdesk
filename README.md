@@ -1,6 +1,8 @@
-# Linux Link
+# Pocketdesk
 
-**Remote desktop for Linux with Wayland-native screen streaming + full KDE Connect feature set — all over Tailscale. No port forwarding required.**
+**Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale or a hole-punched iroh path. No port forwarding required.**
+
+> Formerly *Linux Link*. The product name changed when Windows support landed; the repository, the `linux-link` command, its config/state paths and the wire protocol keep the old name, so existing installs and pairings carry over.
 
 [![Rust](https://img.shields.io/badge/Rust-Pure%20Rust-orange?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue)](LICENSE)
@@ -10,9 +12,9 @@
 
 > **Target:** Sub-100ms latency screen streaming + KDE Connect integration + zero-config Tailscale connectivity
 
-## What is Linux Link?
+## What is Pocketdesk?
 
-Linux Link is a **pure Rust** remote desktop solution built specifically for Linux (Wayland/Hyprland). It combines:
+Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wayland/Hyprland) and now also for Windows 10/11. It combines:
 
 - **Low-latency screen streaming** — wlroots/PipeWire capture → FFmpeg H.264 encoding → QUIC transport → Android MediaCodec decode
 - **Full KDE Connect feature parity** — clipboard sync, file transfer, notifications, input control, battery info, remote file browsing
@@ -20,7 +22,7 @@ Linux Link is a **pure Rust** remote desktop solution built specifically for Lin
 
 ### Key Differentiators
 
-| Feature | Linux Link | RustDesk | Sunshine/Moonlight | KDE Connect |
+| Feature | Pocketdesk | RustDesk | Sunshine/Moonlight | KDE Connect |
 |---------|:----------:|:--------:|:-------------------:|:-----------:|
 | Tailscale-native | ✅ | ❌ | ❌ | ❌ |
 | Wayland-native | ✅ | ⚠️ Partial | ⚠️ Partial | ✅ |
@@ -405,7 +407,7 @@ Linux-Link/
 
 ## Contributing
 
-Linux Link is actively developed and looking for contributors!
+Pocketdesk is actively developed and looking for contributors!
 
 ### Prerequisites
 
@@ -455,4 +457,4 @@ development journal.
 
 ---
 
-**Stars, forks, and PRs are welcome!** If Linux Link sounds interesting to you, drop a ⭐ and say hi.
+**Stars, forks, and PRs are welcome!** If Pocketdesk sounds interesting to you, drop a ⭐ and say hi.
