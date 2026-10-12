@@ -23,6 +23,8 @@
     <string name="settings_reveal_pin_summary">கண் ஐகானைத் தொடாமல் இணைப்பு எண்கள் தெரியும்</string>
     <string name="settings_haptics">அதிர்வு</string>
     <string name="settings_haptics_summary">பொத்தான்கள்/தேர்வுகளில் முடுக்கம்</string>
+    <string name="settings_trackpad_speed">தொடுதிண்டு வேகம்</string>
+    <string name="settings_trackpad_speed_summary">தொடுதிண்டு முறையில் விரல் நகர்வுக்கு சுட்டி எவ்வளவு நகரும்</string>
     <string name="settings_system">சிஸ்டம்</string>
     <string name="settings_about">பற்றி</string>
     <string name="app_version">பதிப்பு %1$s</string>

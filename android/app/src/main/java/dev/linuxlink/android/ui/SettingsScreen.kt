@@ -13,9 +13,14 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -131,6 +136,32 @@ fun SettingsScreen(onBack: () -> Unit) {
                 stringResource(R.string.settings_haptics_summary),
                 Prefs.haptics(context),
             ) { Prefs.setHaptics(context, it) }
+            // F3: trackpad speed, saved when the thumb is let go.
+            var speed by remember { mutableFloatStateOf(Prefs.trackpadSensitivity(context)) }
+            ListItem(
+                headlineContent = {
+                    Text(stringResource(R.string.settings_trackpad_speed), style = MaterialTheme.typography.bodyLarge)
+                },
+                supportingContent = {
+                    Column {
+                        Text(
+                            stringResource(R.string.settings_trackpad_speed_summary),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = speed,
+                            onValueChange = { speed = it },
+                            onValueChangeFinished = { Prefs.setTrackpadSensitivity(context, speed) },
+                            valueRange = Prefs.TRACKPAD_SENSITIVITY_MIN..Prefs.TRACKPAD_SENSITIVITY_MAX,
+                            // 0.25 apart.
+                            steps = 9,
+                        )
+                    }
+                },
+                leadingContent = { LlIcon(LlIcons.Mouse, null) },
+                trailingContent = { Text("%.2f×".format(speed), style = MaterialTheme.typography.labelLarge) },
+            )
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 Header(stringResource(R.string.settings_system))

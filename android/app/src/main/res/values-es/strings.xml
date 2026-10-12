@@ -23,6 +23,8 @@
     <string name="settings_reveal_pin_summary">Dígitos de emparejamiento visibles sin tocar el ojo</string>
     <string name="settings_haptics">Vibración</string>
     <string name="settings_haptics_summary">Vibrar con botones y selecciones</string>
+    <string name="settings_trackpad_speed">Velocidad del trackpad</string>
+    <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo trackpad</string>
     <string name="settings_system">Sistema</string>
     <string name="settings_about">Acerca de</string>
     <string name="app_version">Versión %1$s</string>

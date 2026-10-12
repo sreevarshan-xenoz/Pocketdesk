@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.linuxlink.android.HostStore
+import dev.linuxlink.android.Prefs
+import androidx.compose.ui.platform.LocalContext
 import dev.linuxlink.android.bridge.RustCore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -230,6 +232,8 @@ fun RemoteDesktopView(
             )
         }
 
+        Prefs.observedVersion()
+        val context = LocalContext.current
         InputOverlay(
             address = address,
             port = port,
@@ -237,6 +241,7 @@ fun RemoteDesktopView(
             zoom = zoom,
             layout = videoLayout,
             mapping = mapping,
+            sensitivity = Prefs.trackpadSensitivity(context),
             modifier = Modifier
                 .matchParentSize()
                 .pointerInput(zoomGesturesEnabled) {
@@ -309,6 +314,7 @@ private fun InputOverlay(
     zoom: ViewportZoom,
     layout: VideoLayout,
     mapping: DesktopMapping?,
+    sensitivity: Float,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -317,7 +323,7 @@ private fun InputOverlay(
     fun send(block: () -> Unit) = scope.launch(ordered) { block() }
 
     Box(
-        modifier.pointerInput(address to port to mode to layout to mapping) {
+        modifier.pointerInput(address to port to mode to layout to mapping to sensitivity) {
             fun mappedPoint(pos: Offset): Pair<Int, Int> {
                 // Viewport -> scale-1 content space -> letterboxed video
                 // pixel -> desktop coordinate -> normalized axis value.
@@ -347,6 +353,12 @@ private fun InputOverlay(
                 val (xNorm, yNorm) = mappedPoint(pos)
                 send { RustCore.sendMouseAbs(xNorm, yNorm) }
             }
+
+            // F3: one engine for the whole input session, so a tap and the touch
+            // after it can make a drag.
+            val pad = TrackpadGesture(slop = viewConfiguration.touchSlop, sensitivity = sensitivity)
+
+            fun sendPad(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { send(it) }
 
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
@@ -408,70 +420,34 @@ private fun InputOverlay(
                     }
 
                     InputMode.Trackpad -> {
+                        // F3: the gestures live in TrackpadGesture; this loop
+                        // only feeds it the fingers and sends what it returns.
+                        pad.down(down.uptimeMillis)
+                        var tracked = down.id
                         var last = down.position
-                        var dragged = 0f
-                        var pending = Offset.Zero
-                        var twoFinger = false
-                        var done = false
-                        while (!done) {
+                        // Cursor motion maps view px to video px (the
+                        // letterbox fit may scale them apart); scrolling
+                        // stays in view px.
+                        val travel =
+                            if (layout.displayW > 0f) layout.videoW / layout.displayW else 1f
+                        while (true) {
                             val event = awaitPointerEvent()
-                            if (event.changes.size >= 2) twoFinger = true
+                            val fingers = event.changes.count { it.pressed }
                             val change = event.changes.firstOrNull { it.pressed }
                             if (change == null) {
-                                if (!twoFinger && dragged <= viewConfiguration.touchSlop) {
-                                    send {
-                                        RustCore.sendMouseClick(0, true)
-                                        RustCore.sendMouseClick(0, false)
-                                    }
-                                }
-                                done = true
-                                continue
+                                sendPad(pad.up(event.changes.first().uptimeMillis))
+                                break
                             }
-                            val pos = change.position
-                            // Divide by zoom so cursor travel matches the
-                            // on-screen distance the finger covered, then
-                            // convert view px to video px (letterbox fit may
-                            // scale them apart; relative motion is unaffected
-                            // by the letterbox offset itself).
-                            val travel =
-                                if (layout.displayW > 0f) layout.videoW / layout.displayW else 1f
-                            val delta = (pos - last) / zoom.scale
-                            last = pos
-                            dragged += delta.getDistance()
-                            if (twoFinger) {
-                                pending += delta
-                                val sx = pending.x.roundToInt()
-                                // Finger down == content down == negative wheel.
-                                val sy = (-pending.y).roundToInt()
-                                if (sx != 0 || sy != 0) {
-                                    pending = Offset(pending.x - sx, pending.y + sy)
-                                    send {
-                                        RustCore.sendMouseEvent(
-                                            address,
-                                            port,
-                                            sx.toFloat(),
-                                            sy.toFloat(),
-                                            2,
-                                            false,
-                                        )
-                                    }
-                                }
-                            } else if (dragged > viewConfiguration.touchSlop) {
-                                val dx = (delta.x * travel).roundToInt()
-                                val dy = (delta.y * travel).roundToInt()
-                                if (dx != 0 || dy != 0) {
-                                    send {
-                                        RustCore.sendMouseEvent(
-                                            address,
-                                            port,
-                                            dx.toFloat(),
-                                            dy.toFloat(),
-                                            0,
-                                            false,
-                                        )
-                                    }
-                                }
+                            // A different finger leading is not motion.
+                            if (change.id != tracked) {
+                                tracked = change.id
+                                last = change.position
                             }
+                            // Divide by zoom so the cursor's travel matches
+                            // the on-screen distance the finger covered.
+                            val delta = (change.position - last) / zoom.scale
+                            last = change.position
+                            sendPad(pad.move(delta.x, delta.y, fingers, cursorScale = travel))
                         }
                     }
                 }

@@ -24,6 +24,12 @@ object Prefs {
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
+    private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
+
+    /** The trackpad speed slider's range and default (F3). */
+    const val TRACKPAD_SENSITIVITY_MIN = 0.5f
+    const val TRACKPAD_SENSITIVITY_MAX = 3f
+    const val TRACKPAD_SENSITIVITY_DEFAULT = 1f
 
     const val THEME_SYSTEM = "system"
     const val THEME_LIGHT = "light"
@@ -91,6 +97,18 @@ object Prefs {
 
     fun setDesktopSound(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_DESKTOP_SOUND, enabled) }
+        bump()
+    }
+
+    /** How far the cursor moves per finger pixel on the trackpad. */
+    fun trackpadSensitivity(ctx: Context): Float =
+        prefs(ctx).getFloat(KEY_TRACKPAD_SENSITIVITY, TRACKPAD_SENSITIVITY_DEFAULT)
+            .coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)
+
+    fun setTrackpadSensitivity(ctx: Context, value: Float) {
+        prefs(ctx).edit {
+            putFloat(KEY_TRACKPAD_SENSITIVITY, value.coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX))
+        }
         bump()
     }
 }

@@ -20,7 +20,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -29,11 +28,13 @@ import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
 import dev.linuxlink.android.R
-import dev.linuxlink.android.bridge.RustCore
+import dev.linuxlink.android.Prefs
 import dev.linuxlink.android.stream.ShortcutBar
+import dev.linuxlink.android.stream.TrackpadGesture
+import dev.linuxlink.android.stream.sendPadOutputs
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /**
  * How a session splits the window when the dual-pane layout is active:
@@ -96,6 +97,8 @@ fun TrackpadDock(
     val scope = rememberCoroutineScope()
     val ordered = remember { Dispatchers.IO.limitedParallelism(1) }
     fun send(block: () -> Unit) = scope.launch(ordered) { block() }
+    Prefs.observedVersion()
+    val sensitivity = Prefs.trackpadSensitivity(LocalContext.current)
 
     Surface(
         modifier = modifier,
@@ -114,64 +117,36 @@ fun TrackpadDock(
                 modifier =
                     Modifier
                         .fillMaxSize()
-                        .pointerInput(address to port) {
+                        .pointerInput(address to port to sensitivity) {
+                            // F3: the in-stream trackpad's gesture engine, so
+                            // taps by finger count, tap-and-drag and speed
+                            // behave the same here.
+                            val pad = TrackpadGesture(slop = viewConfiguration.touchSlop, sensitivity = sensitivity)
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
+                                pad.down(down.uptimeMillis)
+                                var tracked = down.id
                                 var last = down.position
-                                var dragged = 0f
-                                var twoFinger = false
-                                var pending = Offset.Zero
                                 while (true) {
                                     val event = awaitPointerEvent()
-                                    if (event.changes.size >= 2) twoFinger = true
+                                    event.changes.forEach { it.consume() }
+                                    val fingers = event.changes.count { it.pressed }
                                     val change = event.changes.firstOrNull { it.pressed }
                                     if (change == null) {
-                                        if (!twoFinger && dragged <= viewConfiguration.touchSlop) {
-                                            send {
-                                                RustCore.sendMouseClick(0, true)
-                                                RustCore.sendMouseClick(0, false)
-                                            }
+                                        sendPadOutputs(address, port, pad.up(event.changes.first().uptimeMillis)) {
+                                            send(it)
                                         }
                                         break
                                     }
-                                    val pos = change.position
-                                    val delta = pos - last
-                                    last = pos
-                                    dragged += delta.getDistance()
-                                    event.changes.forEach { it.consume() }
-                                    if (twoFinger) {
-                                        pending += delta
-                                        val sx = pending.x.roundToInt()
-                                        // Finger down == content down == negative wheel.
-                                        val sy = (-pending.y).roundToInt()
-                                        if (sx != 0 || sy != 0) {
-                                            pending = Offset(pending.x - sx, pending.y + sy)
-                                            send {
-                                                RustCore.sendMouseEvent(
-                                                    address,
-                                                    port,
-                                                    sx.toFloat(),
-                                                    sy.toFloat(),
-                                                    2,
-                                                    false,
-                                                )
-                                            }
-                                        }
-                                    } else if (dragged > viewConfiguration.touchSlop) {
-                                        val dx = delta.x.roundToInt()
-                                        val dy = delta.y.roundToInt()
-                                        if (dx != 0 || dy != 0) {
-                                            send {
-                                                RustCore.sendMouseEvent(
-                                                    address,
-                                                    port,
-                                                    dx.toFloat(),
-                                                    dy.toFloat(),
-                                                    0,
-                                                    false,
-                                                )
-                                            }
-                                        }
+                                    // A different finger leading is not motion.
+                                    if (change.id != tracked) {
+                                        tracked = change.id
+                                        last = change.position
+                                    }
+                                    val delta = change.position - last
+                                    last = change.position
+                                    sendPadOutputs(address, port, pad.move(delta.x, delta.y, fingers)) {
+                                        send(it)
                                     }
                                 }
                             }

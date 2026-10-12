@@ -30,6 +30,8 @@
     <string name="settings_reveal_pin_summary">Pairing digits visible without tapping the eye</string>
     <string name="settings_haptics">Haptics</string>
     <string name="settings_haptics_summary">Vibrate on buttons and picks</string>
+    <string name="settings_trackpad_speed">Trackpad speed</string>
+    <string name="settings_trackpad_speed_summary">How far the cursor moves for each finger movement in trackpad mode</string>
     <string name="settings_system">System</string>
     <string name="settings_about">About</string>
     <string name="app_version">Version %1$s</string>
