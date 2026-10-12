@@ -939,8 +939,12 @@ pub async fn pair(pin: Option<String>, grant: Option<u64>) -> Result<()> {
         Some(secs) => format!("{secs}\n"),
         None => String::new(),
     };
-    std::fs::write(&path, format!("{pin_value}\n{stamp}\n{grant_line}"))
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    // Owner-only: anyone who can read this file can pair a phone.
+    linux_link_core::secure_fs::write_private(
+        &path,
+        format!("{pin_value}\n{stamp}\n{grant_line}").as_bytes(),
+    )
+    .with_context(|| format!("failed to write {}", path.display()))?;
 
     println!("Pairing PIN: {}", pin_value);
     match grant {
