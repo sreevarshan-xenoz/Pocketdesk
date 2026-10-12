@@ -16,6 +16,7 @@ pub const START_ARGS: [&str; 2] = ["start", "--background"];
 pub const STOP_ARGS: [&str; 1] = ["stop"];
 
 /// The logon task `linux-link install` registers on Windows.
+#[cfg(windows)]
 const TASK_NAME: &str = "Pocketdesk";
 /// The systemd user unit on Linux.
 const UNIT_NAME: &str = "linux-link";
