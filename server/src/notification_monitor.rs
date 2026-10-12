@@ -1,3 +1,4 @@
+#[cfg(not(windows))]
 use anyhow::{Context, Result};
 use tokio::sync::broadcast;
 
@@ -45,6 +46,9 @@ pub fn start_notification_monitor() -> broadcast::Sender<ForwardedNotification> 
     let (tx, _rx) = broadcast::channel::<ForwardedNotification>(128);
 
     let monitor_tx = tx.clone();
+    #[cfg(windows)]
+    crate::notification_listener_windows::spawn(monitor_tx);
+    #[cfg(not(windows))]
     tokio::spawn(async move {
         if let Err(e) = run_dbus_monitor(monitor_tx).await {
             tracing::warn!("Notification monitor exited: {e}");
@@ -54,6 +58,7 @@ pub fn start_notification_monitor() -> broadcast::Sender<ForwardedNotification> 
     tx
 }
 
+#[cfg(not(windows))]
 async fn run_dbus_monitor(tx: broadcast::Sender<ForwardedNotification>) -> Result<()> {
     // Try dbus-monitor first (most reliable)
     if let Err(e) = try_dbus_monitor_subprocess(&tx).await {
@@ -64,6 +69,7 @@ async fn run_dbus_monitor(tx: broadcast::Sender<ForwardedNotification>) -> Resul
     Ok(())
 }
 
+#[cfg(not(windows))]
 async fn try_dbus_monitor_subprocess(tx: &broadcast::Sender<ForwardedNotification>) -> Result<()> {
     use tokio::io::AsyncBufReadExt;
 
@@ -153,6 +159,7 @@ async fn try_dbus_monitor_subprocess(tx: &broadcast::Sender<ForwardedNotificatio
     Ok(())
 }
 
+#[cfg(not(windows))]
 async fn try_gdbus_monitor_subprocess(tx: &broadcast::Sender<ForwardedNotification>) -> Result<()> {
     use anyhow::Context;
     use tokio::io::AsyncBufReadExt;
@@ -238,6 +245,7 @@ async fn try_gdbus_monitor_subprocess(tx: &broadcast::Sender<ForwardedNotificati
     Ok(())
 }
 
+#[cfg(not(windows))]
 /// Unescape D-Bus monitor string output.
 ///
 /// dbus-monitor uses C-style escape sequences: \n, \r, \t, \\, \", etc.
@@ -276,6 +284,7 @@ fn unescape_dbus_string(s: &str) -> String {
     result
 }
 
+#[cfg(not(windows))]
 /// Extract a string value from gdbus monitor output.
 fn extract_gdbus_string(line: &str) -> Option<String> {
     // gdbus outputs: "string 'value'" or "string \"value\""
