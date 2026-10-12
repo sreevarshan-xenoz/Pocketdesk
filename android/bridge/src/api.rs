@@ -703,13 +703,26 @@ impl From<NoReply> for String {
 /// server never answered.
 async fn control_request(
     address: &str,
+    port: u16,
     request: &NetworkPacket,
     reply_type: &str,
     timeout: Duration,
 ) -> Result<Option<serde_json::Value>, NoReply> {
+    // Only the live connection *to this desktop* may carry the request: with
+    // another computer connected, reusing it would send this desktop's query -
+    // or its pairing PIN - to the wrong machine, and record that machine's
+    // answer as this one's. Locked writer-then-peer, like the control reader.
     let writer = {
         let guard = (*CONTROL_WRITER).lock().await;
-        guard.as_ref().cloned()
+        let peer = (*CONTROL_PEER).lock().await;
+        let same_desktop = peer
+            .as_ref()
+            .is_some_and(|(host, live_port)| host == address && *live_port == port);
+        if same_desktop {
+            guard.as_ref().cloned()
+        } else {
+            None
+        }
     };
     // Subscribe before sending: the answer can otherwise land in the broadcast
     // before there is anyone listening for it.
@@ -818,7 +831,7 @@ async fn query_peer(
     reply_type: &str,
     timeout: Duration,
 ) -> Result<serde_json::Value, String> {
-    match control_request(address, request, reply_type, timeout).await? {
+    match control_request(address, port, request, reply_type, timeout).await? {
         Some(body) => Ok(body),
         None => oneshot_request(address, port, request, reply_type, timeout).await,
     }
