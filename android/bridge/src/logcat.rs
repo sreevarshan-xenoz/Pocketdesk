@@ -15,13 +15,19 @@ pub(crate) fn init() {
         let filter = tracing_subscriber::EnvFilter::new(
             "info,linux_link_core=info,linux_link_android_bridge=debug",
         );
-        let _ = tracing_subscriber::fmt()
+        let installed = tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_ansi(false)
             .without_time() // logcat stamps every line itself
             .with_target(true)
             .with_writer(|| LineWriter(Vec::new()))
             .try_init();
+        // Said straight through liblog: if the subscriber did not install,
+        // nothing else will ever explain why the bridge is silent.
+        match installed {
+            Ok(()) => write_logcat(4, "INFO bridge logging to logcat"),
+            Err(e) => write_logcat(6, &format!("ERROR bridge logging not installed: {e}")),
+        }
     });
 }
 

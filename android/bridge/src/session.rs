@@ -10,18 +10,12 @@ use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::broadcast;
 
-// Initialize logging for Android
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-/// Initialize the Linux Link backend (internal, called from api::init_app)
+/// Initialize the Linux Link backend (internal, called from api::init_app).
+///
+/// Logging goes to logcat. This used to install a stdout subscriber, which on
+/// Android writes nowhere; being first, it also kept the logcat one out.
 pub(crate) fn init_app_impl() {
-    static DONE: std::sync::Once = std::sync::Once::new();
-    DONE.call_once(|| {
-        let _ = tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer())
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .try_init();
-    });
+    crate::logcat::init();
 }
 
 /// Maximum number of H.264 frames to drain per `receive_frames` call.
