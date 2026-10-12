@@ -35,6 +35,8 @@ pub struct LossCeiling {
     ceiling: u32,
     prev_lost: u64,
     prev_sent: u64,
+    /// Whether a first reading has set the baseline.
+    primed: bool,
 }
 
 /// Under this many datagrams in one tick, a loss ratio is noise. A still
@@ -72,17 +74,27 @@ impl LossCeiling {
             ceiling: u32::MAX,
             prev_lost: 0,
             prev_sent: 0,
+            primed: false,
         }
     }
 
     /// Fold one tick of cumulative transport counters into the ceiling.
     /// Counters that go backwards yield a zero delta, which the sample floor
     /// turns into "no information" rather than a negative loss ratio.
+    ///
+    /// The first reading only sets the baseline. The counters run from the
+    /// handshake, so it also holds whatever the connection lost before the
+    /// stream existed — iroh's path probing above all — and judging that as
+    /// stream loss cut every WAN session's rate on its first tick, then
+    /// rebuilt a sidecar encoder on each of the four ticks that climbed back.
     pub fn sample(&mut self, lost_packets: u64, datagrams_sent: u64) {
         let lost_delta = lost_packets.saturating_sub(self.prev_lost);
         let sent_delta = datagrams_sent.saturating_sub(self.prev_sent);
         self.prev_lost = lost_packets;
         self.prev_sent = datagrams_sent;
+        if !std::mem::replace(&mut self.primed, true) {
+            return;
+        }
         self.ceiling = next_loss_ceiling(self.configured, self.ceiling, sent_delta, lost_delta);
     }
 
@@ -143,6 +155,7 @@ mod tests {
         // Counters are cumulative since the handshake, which is what `sample`
         // is fed; each call below therefore only raises them.
         let mut ceiling = LossCeiling::new(8_000_000);
+        ceiling.sample(0, 0); // baseline
         // A quiet tick: nothing sent, so nothing known.
         ceiling.sample(0, 0);
         assert_eq!(ceiling.ceiling(), u32::MAX, "an idle tick is not a signal");
@@ -161,11 +174,31 @@ mod tests {
     }
 
     #[test]
+    fn loss_from_before_the_first_reading_is_history_not_congestion() {
+        // The first tick of a WAN session: 600 of 2000 datagrams lost while
+        // iroh probed paths, before a single frame was sent.
+        let mut ceiling = LossCeiling::new(5_000_000);
+        ceiling.sample(600, 2_000);
+        assert_eq!(
+            ceiling.ceiling(),
+            u32::MAX,
+            "the first reading is a baseline"
+        );
+        // A clean tick after it: nothing to undo, nothing rebuilt.
+        ceiling.sample(600, 2_500);
+        assert_eq!(ceiling.ceiling(), u32::MAX);
+        // Loss that happens while streaming still counts.
+        ceiling.sample(700, 3_000);
+        assert_eq!(ceiling.ceiling(), 4_000_000);
+    }
+
+    #[test]
     fn a_still_desktops_tiny_sample_cannot_cut_the_rate() {
         // Damage-driven capture sends almost nothing when nothing moves, and
         // one lost packet out of four is 25 % by ratio. Acting on that would
         // floor a healthy LAN link the moment the user stops moving windows.
         let mut ceiling = LossCeiling::new(8_000_000);
+        ceiling.sample(0, 0); // baseline
         ceiling.sample(1, 4);
         assert_eq!(ceiling.ceiling(), u32::MAX);
     }
@@ -186,6 +219,7 @@ mod tests {
     #[test]
     fn a_configured_rate_below_the_floor_is_never_raised() {
         let mut ceiling = LossCeiling::new(500_000);
+        ceiling.sample(0, 0); // baseline
         ceiling.sample(1_000, 1_000);
         assert_eq!(
             ceiling.ceiling(),
@@ -197,6 +231,7 @@ mod tests {
     #[test]
     fn loss_recovers_stepwise_and_disengages_at_the_configured_rate() {
         let mut ceiling = LossCeiling::new(8_000_000);
+        ceiling.sample(0, 0); // baseline
         ceiling.sample(20, 200);
         let cut = ceiling.ceiling();
         assert_eq!(cut, 6_400_000);
@@ -237,6 +272,7 @@ mod tests {
         // *un*-lost packets, and must not be mistaken for a clean link either
         // — the sample floor holds the ceiling where it was.
         let mut ceiling = LossCeiling::new(8_000_000);
+        ceiling.sample(0, 0); // baseline
         ceiling.sample(500, 1_000);
         let after_cut = ceiling.ceiling();
         assert!(after_cut < 8_000_000);
