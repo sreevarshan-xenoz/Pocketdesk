@@ -339,9 +339,9 @@ fn a_link_round_trips_through_its_uri() {
 fn virtual_adapters_and_link_local_are_ordered_or_dropped() {
     let ordered = order_addresses(vec![
         "100.82.1.9".into(), "172.20.240.1".into(), "169.254.3.4".into(),
-        "192.168.1.101".into(), "127.0.0.1".into(), "fe80::1".into(),
+        "192.168.1.20".into(), "127.0.0.1".into(), "fe80::1".into(),
     ]);
-    assert_eq!(ordered, ["192.168.1.101", "172.20.240.1", "100.82.1.9"]);
+    assert_eq!(ordered, ["192.168.1.20", "172.20.240.1", "100.82.1.9"]);
 }
 
 #[test]

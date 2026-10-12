@@ -653,7 +653,7 @@ mod tests {
     fn a_pinned_ip_is_trusted_under_the_verifiers_label() {
         let dir = std::env::temp_dir().join(format!("ll-pin-peer-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let ip: std::net::IpAddr = "192.168.1.101".parse().unwrap();
+        let ip: std::net::IpAddr = "192.168.1.20".parse().unwrap();
         let label = peer_label_for_ip(ip);
         assert_eq!(
             label,

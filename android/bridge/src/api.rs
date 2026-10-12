@@ -2827,8 +2827,8 @@ mod pin_certificate_tests {
         let dir = std::env::temp_dir().join(format!("bridge-pin-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let hex = "ab".repeat(32);
-        pin_peer_certificate_in(&dir, "192.168.1.101", &hex).unwrap();
-        let label = peer_label_for_ip("192.168.1.101".parse().unwrap());
+        pin_peer_certificate_in(&dir, "192.168.1.20", &hex).unwrap();
+        let label = peer_label_for_ip("192.168.1.20".parse().unwrap());
         let peers = CertManager::load_or_create(&dir).unwrap().known_peers();
         assert!(peers.contains(&(label, [0xab; 32])));
     }

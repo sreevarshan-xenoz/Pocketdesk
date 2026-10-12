@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn long_ids_are_shortened_on_a_char_boundary() {
         assert_eq!(short("abcdef"), "abcdef");
-        assert_eq!(short("4f18245c-b2fa-44e6"), "4f18245c-b2f…");
+        assert_eq!(short("0a1b2c3d-4e5f-6789"), "0a1b2c3d-4e5…");
         assert_eq!(short("ééééééééééééé"), "éééééééééééé…");
     }
 }
