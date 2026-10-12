@@ -4,46 +4,35 @@ import android.content.Context
 import dev.linuxlink.android.Prefs
 
 /**
- * Plays the desktop's sound exactly while a video stream is up and the
- * user's switch is on (spec A8/A9). The stream reports up/down from
- * DecoderHost; the switch calls [setEnabled].
+ * The app's one [AudioLifecycle]: DecoderHost reports each stream's
+ * generation up and down, and the switch calls [setEnabled].
  */
 object DesktopAudio {
-    private var appContext: Context? = null
-    private var streamUp = false
-    private var player: DesktopAudioPlayer? = null
+    private var lifecycle: AudioLifecycle? = null
 
     @Synchronized
-    fun streamUp(context: Context) {
-        appContext = context.applicationContext
-        streamUp = true
-        apply()
-    }
-
-    @Synchronized
-    fun streamDown() {
-        streamUp = false
-        apply()
-    }
-
-    @Synchronized
-    fun setEnabled(context: Context, enabled: Boolean) {
-        appContext = context.applicationContext
-        Prefs.setDesktopSound(context, enabled)
-        apply()
-    }
-
-    private fun apply() {
-        val context = appContext
-        val wanted = streamUp && context != null && Prefs.desktopSound(context)
-        if (wanted && player == null) {
-            player = DesktopAudioPlayer().also { it.start(context!!) }
-        } else if (!wanted) {
-            val stopping = player ?: return
-            player = null
+    private fun lifecycle(context: Context): AudioLifecycle {
+        lifecycle?.let { return it }
+        val app = context.applicationContext
+        return AudioLifecycle(Prefs.desktopSound(app)) {
+            val player = DesktopAudioPlayer().also { it.start(app) }
             // Off the caller's thread: the switch is on the UI thread, and
             // the player may take a write's worth of time to wind down.
-            Thread({ stopping.stop() }, "desktop-audio-stop").start()
-        }
+            Stoppable { Thread({ player.stop() }, "desktop-audio-stop").start() }
+        }.also { lifecycle = it }
+    }
+
+    fun newGeneration(context: Context): Long = lifecycle(context).newGeneration()
+
+    fun streamUp(context: Context, generation: Long) = lifecycle(context).streamUp(generation)
+
+    /** A stream that never got a generation has nothing to stop. */
+    fun streamDown(generation: Long) {
+        synchronized(this) { lifecycle }?.streamDown(generation)
+    }
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        Prefs.setDesktopSound(context, enabled)
+        lifecycle(context).setEnabled(enabled)
     }
 }

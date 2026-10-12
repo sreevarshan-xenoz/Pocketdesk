@@ -510,6 +510,10 @@ private class DecoderHost {
     @Volatile
     private var thread: Thread? = null
 
+    /** The generation this host's stream reports to [DesktopAudio]. */
+    @Volatile
+    private var generation = 0L
+
     fun start(
         context: android.content.Context,
         surface: android.view.Surface,
@@ -527,6 +531,8 @@ private class DecoderHost {
         if (thread != null) return
         val active = H264Decoder(surface, width, height, onVideoSize, onCodec)
         decoder = active
+        val gen = DesktopAudio.newGeneration(context)
+        generation = gen
         // Stale reports from a stopped generation must not clobber a newer
         // attempt's status.
         val report: (StreamStatus) -> Unit = { if (decoder === active) onStatus(it) }
@@ -563,9 +569,14 @@ private class DecoderHost {
             }
             report(status)
             if (connected) {
-                active.start()
-                // Not for a generation that stop() already ended.
-                if (decoder === active) DesktopAudio.streamUp(context)
+                // Before start(), which is the decode loop and returns only when
+                // the stream ends; a stop() that got here first wins by generation.
+                DesktopAudio.streamUp(context, gen)
+                try {
+                    active.start()
+                } finally {
+                    DesktopAudio.streamDown(gen)
+                }
             }
         }, "h264-decode").apply {
             isDaemon = true
@@ -577,7 +588,7 @@ private class DecoderHost {
     fun stop() {
         val active = decoder ?: return
         decoder = null
-        DesktopAudio.streamDown()
+        DesktopAudio.streamDown(generation)
         active.stop()
         runCatching { RustCore.stopStreaming() }
         thread?.let { t ->
