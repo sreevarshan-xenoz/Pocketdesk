@@ -542,6 +542,25 @@ Get-Content "$env:LOCALAPPDATA\linux-link\logs\linux-link.*.log" -Wait
 - [ ] `uninstall` removes the task and the firewall rules (`wf.msc`), including the "Linux Link" ones an
       older version created.
 
+## 24. Desktop app and QR pairing
+
+Built on `feat/pocketdesk`; spec `docs/superpowers/specs/2026-10-12-pocketdesk-desktop-app-design.md`.
+
+Checked on the Windows dev box on 2026-10-12, with a Galaxy A71 over USB:
+- every tab against the live server;
+- close-to-tray, and re-show by relaunch;
+- the on-screen QR decodes to the expected `pocketdesk://pair` URI;
+- that URI opened on the phone, with the address swapped to `127.0.0.1` for `adb reverse`: it confirms, pins, pairs and streams;
+- a forged link with a different fingerprint is refused;
+- the scanner screen opens, with camera preview and analysis running.
+
+- [ ] Scan the desktop app's code with the phone camera (the USB-tethered phone could not see the screen).
+- [ ] Pair over the LAN address in the code, not `adb reverse` (needs the firewall rules `install` adds).
+- [ ] Tray: Open, Pair a phone… and Quit from the tray menu itself.
+- [ ] Start / Restart server from the app, on Windows (logon task) and Linux (systemd user unit). This is not run on the developer box by rule.
+- [ ] Linux: the app builds with the GTK/appindicator packages above, its tray icon appears (StatusNotifier host needed on Hyprland, e.g. waybar's tray), and the single-instance socket works.
+- [ ] Settings → Save on a real `config.toml` keeps comments; the server picks the change up after Restart.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

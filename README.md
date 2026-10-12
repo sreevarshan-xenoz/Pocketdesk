@@ -213,6 +213,25 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/linux-link/confi
 (default `~/.config/linux-link/config.toml`) if present, and falls back to built-in defaults.
 `-v`/`--verbose` and `RUST_LOG` control logging.
 
+### Desktop App
+
+`pocketdesk` is the companion window for the server; it runs on Linux and Windows. It works through the files the server already uses, so it runs whether or not the server is up, and it opens no port.
+
+- **Status**: whether the server runs, with Start and Restart.
+- **Pair**: a QR code and the same PIN in digits. The phone's "Scan pairing code" reads it and pins the desktop's certificate before its first streaming connection.
+- **Devices**: paired phones, which one is connected, and Remove.
+- **Sessions**: live sessions, with End.
+- **Settings**: edits `config.toml`, keeping your comments and unknown keys.
+- **Logs**: the server's log.
+
+Closing the window keeps it in the tray.
+
+```bash
+cargo run --release -p pocketdesk-desktop   # or run the installed pocketdesk / pocketdesk.exe
+```
+
+A phone always asks before it acts on a pairing code (a `pocketdesk://pair` link can come from anywhere). A code can never replace the certificate the phone already trusts for an address; remove that computer in the app first. The PIN still travels over the control channel, which is not encrypted, the same as typing it by hand.
+
 ### Configuration
 
 Copy the example config and customize:
@@ -372,9 +391,11 @@ Pocketdesk/
 ├── core/                   # Shared Rust library
 │   └── src/
 │       ├── protocol/       # KDE Connect protocol + connection handling
+│       ├── local/          # Files the server and the desktop app share (config, PIN, sessions)
 │       ├── streaming/      # Capture, encoder, QUIC transport, adaptive bitrate
 │       └── tailscale/      # Tailscale integration
-├── server/                 # Linux server daemon
+├── desktop/                # Pocketdesk desktop app (egui): pair, devices, sessions, settings, logs
+├── server/                 # Server daemon (Linux and Windows)
 │   └── src/
 │       ├── plugins/        # KDE plugins (5 + file browse)
 │       ├── cli.rs          # CLI argument parsing

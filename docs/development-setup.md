@@ -11,6 +11,10 @@ This guide covers the Rust workspace and the native Android (Kotlin) client.
   in-process): on Debian/Ubuntu `libavcodec-dev libavdevice-dev
   libavfilter-dev libavformat-dev libavutil-dev libswresample-dev
   libswscale-dev`; on Arch, the `ffmpeg` package ships them.
+- For the desktop app (`desktop/`, built by `cargo build --workspace`): GTK 3,
+  the Ayatana app indicator and libxdo for its tray icon. On Debian/Ubuntu
+  `libgtk-3-dev libayatana-appindicator3-dev libxdo-dev`; on Arch
+  `gtk3 libayatana-appindicator xdotool`. Windows needs nothing extra.
 
 ## 2. Rust Workspace Validation
 
