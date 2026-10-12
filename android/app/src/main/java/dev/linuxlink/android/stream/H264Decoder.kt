@@ -65,8 +65,21 @@ class H264Decoder(
     private var configH = height
     private var mime = MIME_AVC
 
-    /** Latest keyframe bytes, kept for reconfigure re-seeding. */
-    private var lastKeyframe: ByteArray? = null
+    /**
+     * The run since the latest keyframe: that keyframe and every frame fed
+     * after it. A reconfigure restarts the codec, and re-feeding only the
+     * keyframe left the next P-frame referring to frames the new run never
+     * saw — the decoder rejects that as a frame-number gap and shows nothing
+     * useful until the next IDR, seconds away on a quiet desktop.
+     */
+    private val run = ArrayList<ByteArray>()
+    private var runBytes = 0L
+
+    /**
+     * Set when a frame could not be fed: until the next keyframe, every
+     * P-frame would decode against a missing reference, so they are skipped.
+     */
+    private var awaitingKeyframe = false
 
     /**
      * When each fed-but-not-yet-rendered access unit went in, and the moment the
@@ -215,9 +228,22 @@ class H264Decoder(
         data: ByteArray,
         isKeyframe: Boolean,
     ) {
-        if (isKeyframe) lastKeyframe = data.copyOf()
-        val inIndex = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
-        if (inIndex < 0) return
+        if (isKeyframe) {
+            awaitingKeyframe = false
+            run.clear()
+            runBytes = 0
+        } else if (awaitingKeyframe) {
+            return
+        }
+        val inIndex = dequeueInput(codec, info)
+        if (inIndex < 0) {
+            Log.w(TAG, "decoder took no input; skipping to the next keyframe")
+            awaitingKeyframe = true
+            run.clear()
+            runBytes = 0
+            return
+        }
+        remember(data)
         val inputBuffer: ByteBuffer = codec.getInputBuffer(inIndex) ?: run {
             codec.queueInputBuffer(inIndex, 0, 0, 0, 0)
             return
@@ -237,6 +263,34 @@ class H264Decoder(
         fedAtUs.addLast(nowMicros())
 
         drain(codec, info)
+    }
+
+    /** Keep [data] in the current run while the run stays a sane size. */
+    private fun remember(data: ByteArray) {
+        if (runBytes + data.size > MAX_RUN_BYTES) {
+            // A run this long only re-seeds partially; the keyframe is still
+            // worth keeping, the tail is not.
+            while (run.size > 1) runBytes -= run.removeAt(run.size - 1).size
+            return
+        }
+        run.add(data)
+        runBytes += data.size
+    }
+
+    /**
+     * An input buffer, draining output while waiting so a decoder holding
+     * full output buffers can free its input side. -1 if none came.
+     */
+    private fun dequeueInput(
+        codec: MediaCodec,
+        info: MediaCodec.BufferInfo,
+    ): Int {
+        repeat(INPUT_ATTEMPTS) {
+            val inIndex = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+            if (inIndex >= 0) return inIndex
+            drain(codec, info)
+        }
+        return -1
     }
 
     private fun drain(
@@ -282,26 +336,44 @@ class H264Decoder(
             codec.start()
         }.onFailure { return true }
         onVideoSize?.invoke(w, h)
-        // Re-seed: the decoder needs an IDR to start the new run.
-        lastKeyframe?.let { seed ->
-            runCatching {
-                val inIndex = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
-                if (inIndex >= 0) {
-                    codec.getInputBuffer(inIndex)?.let { buf ->
-                        buf.clear()
-                        buf.put(seed)
-                    }
-                    codec.queueInputBuffer(
-                        inIndex,
-                        0,
-                        seed.size,
-                        System.nanoTime() / 1000,
-                        MediaCodec.BUFFER_FLAG_KEY_FRAME,
-                    )
+        // Re-seed: the new run needs the keyframe and every frame since, in
+        // order, or the next live P-frame has nothing to refer to. Output is
+        // released unrendered; only the newest picture is worth showing.
+        val seeds = run.toList()
+        runCatching {
+            for ((i, seed) in seeds.withIndex()) {
+                var inIndex = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+                var attempts = 1
+                while (inIndex < 0 && attempts < INPUT_ATTEMPTS) {
+                    discardOutput(codec)
+                    inIndex = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+                    attempts++
                 }
+                if (inIndex < 0) {
+                    Log.w(TAG, "re-seed stalled after $i of ${seeds.size} frames")
+                    awaitingKeyframe = true
+                    break
+                }
+                codec.getInputBuffer(inIndex)?.let { buf ->
+                    buf.clear()
+                    buf.put(seed)
+                }
+                val flags = if (i == 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                codec.queueInputBuffer(inIndex, 0, seed.size, System.nanoTime() / 1000, flags)
+                discardOutput(codec)
             }
-        }
+        }.onFailure { awaitingKeyframe = true }
         return true
+    }
+
+    /** Release ready output without drawing it (re-seed frames are stale). */
+    private fun discardOutput(codec: MediaCodec) {
+        val info = MediaCodec.BufferInfo()
+        var outIndex = codec.dequeueOutputBuffer(info, 0)
+        while (outIndex >= 0) {
+            codec.releaseOutputBuffer(outIndex, false)
+            outIndex = codec.dequeueOutputBuffer(info, 0)
+        }
     }
 
     companion object {
@@ -311,6 +383,12 @@ class H264Decoder(
         private const val MAX_INPUT_SIZE = 4 * 1024 * 1024
         private const val POLL_TIMEOUT_MS = 50
         private const val INPUT_TIMEOUT_US = 10_000L
+
+        /** Waits for an input buffer before a frame is given up (~50 ms). */
+        private const val INPUT_ATTEMPTS = 5
+
+        /** Bound on the run kept for re-seeding (a few seconds at desktop rates). */
+        private const val MAX_RUN_BYTES = 16L * 1024 * 1024
 
         /**
          * Monotonic microseconds, deep sleep included. `elapsedRealtimeNanos` is
