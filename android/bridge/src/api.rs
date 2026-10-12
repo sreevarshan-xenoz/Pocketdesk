@@ -19,10 +19,10 @@ use linux_link_core::streaming::InputPacket;
 use linux_link_core::streaming::{SAMPLE_DECODE, SAMPLE_RENDER, report_samples};
 
 use crate::{
-    CONNECTION_STATE, CONTROL_PEER, CONTROL_WRITER, DECODE_SAMPLES, MAX_AUDIO_PACKETS_PER_RECEIVE,
-    MAX_FRAMES_PER_RECEIVE, RATE_SNAPSHOTS, RENDER_SAMPLES, RTT_HISTORY, STREAMING_ACTIVE,
-    STREAMING_BYTE_COUNT, STREAMING_FRAME_COUNT, STREAMING_HANDLE, StreamingHandle, VIDEO_RX,
-    update_streaming_rtt,
+    AUDIO_RX, CONNECTION_STATE, CONTROL_PEER, CONTROL_WRITER, DECODE_SAMPLES,
+    MAX_AUDIO_PACKETS_PER_RECEIVE, MAX_FRAMES_PER_RECEIVE, RATE_SNAPSHOTS, RENDER_SAMPLES,
+    RTT_HISTORY, STREAMING_ACTIVE, STREAMING_BYTE_COUNT, STREAMING_FRAME_COUNT, STREAMING_HANDLE,
+    StreamingHandle, VIDEO_RX, update_streaming_rtt,
 };
 
 /// Initialize the Linux Link backend
@@ -1293,6 +1293,7 @@ pub async fn connect_streaming_wan(
 /// endpoint if it owns one (iroh endpoints must be closed, never dropped).
 async fn teardown_streaming_handle(handle: StreamingHandle) {
     VIDEO_RX.lock().await.take();
+    AUDIO_RX.lock().await.take();
     handle.cancel.cancel();
     let _ = handle.task.await;
     let _ = handle.rtt_task.await;
@@ -1398,6 +1399,7 @@ async fn install_streaming(
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Active;
 
     *VIDEO_RX.lock().await = Some(packet_rx);
+    *AUDIO_RX.lock().await = Some(audio_rx);
     let mut handle = (*STREAMING_HANDLE).lock().await;
     *handle = Some(StreamingHandle {
         address: address.clone(),
@@ -1405,7 +1407,6 @@ async fn install_streaming(
         cancel: client_cancel,
         task,
         rtt_task,
-        audio_rx,
         connection: connection.clone(),
         wan_dial,
     });
@@ -1955,35 +1956,41 @@ pub async fn execute_remote_command(
     ))
 }
 
-/// Receive queued audio packets from the streaming client (F1: Audio Streaming).
-///
-/// Each audio packet contains raw Opus-encoded data (typically 20ms @ 48kHz stereo).
-/// Returns up to `MAX_AUDIO_PACKETS_PER_RECEIVE` packets.
-pub async fn receive_audio(timeout_ms: u64) -> Vec<Vec<u8>> {
+/// Receive queued audio packets from the streaming client: each one raw
+/// Opus (20 ms @ 48 kHz stereo) with the sequence the desktop gave it, so
+/// the player can drop one that arrives late. Up to
+/// `MAX_AUDIO_PACKETS_PER_RECEIVE`; waits on `AUDIO_RX` only.
+pub async fn receive_audio(timeout_ms: u64) -> Vec<(u64, Vec<u8>)> {
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     let mut packets = Vec::with_capacity(MAX_AUDIO_PACKETS_PER_RECEIVE);
-    {
-        let mut guard = (*STREAMING_HANDLE).lock().await;
-        let Some(handle) = guard.as_mut() else {
-            return packets;
-        };
-        match tokio::time::timeout_at(deadline, handle.audio_rx.recv()).await {
-            Ok(Some(packet)) => {
-                packets.push(packet.data);
-                while packets.len() < MAX_AUDIO_PACKETS_PER_RECEIVE {
-                    match handle.audio_rx.try_recv() {
-                        Ok(packet) => {
-                            packets.push(packet.data);
-                        }
-                        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-                        | Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
-                    }
-                }
-                packets
+    let mut guard = AUDIO_RX.lock().await;
+    let Some(rx) = guard.as_mut() else {
+        return packets;
+    };
+    if let Ok(Some(packet)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+        packets.push((packet.sequence, packet.data));
+        while packets.len() < MAX_AUDIO_PACKETS_PER_RECEIVE {
+            match rx.try_recv() {
+                Ok(packet) => packets.push((packet.sequence, packet.data)),
+                Err(_) => break,
             }
-            _ => packets,
         }
     }
+    packets
+}
+
+/// `receive_audio`'s packets as the JNI payload, big-endian: `u32 count`,
+/// then per packet `u64 sequence`, `u32 len`, `len` bytes.
+pub fn audio_payload(packets: &[(u64, Vec<u8>)]) -> Vec<u8> {
+    let total: usize = packets.iter().map(|(_, data)| 12 + data.len()).sum();
+    let mut buf = Vec::with_capacity(4 + total);
+    buf.extend_from_slice(&(packets.len() as u32).to_be_bytes());
+    for (sequence, data) in packets {
+        buf.extend_from_slice(&sequence.to_be_bytes());
+        buf.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        buf.extend_from_slice(data);
+    }
+    buf
 }
 
 /// Receive queued H.264 frames from the streaming client.
@@ -2925,6 +2932,53 @@ mod receive_tests {
         let frames = waiting.await.unwrap();
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].sequence, 7);
+        *crate::VIDEO_RX.lock().await = None;
+    }
+
+    /// The bytes AudioPayloadTest.kt parses; both tests pin this string.
+    const AUDIO_FIXTURE_HEX: &str =
+        "00000002000000000000000700000003010203000000000000000800000000";
+
+    #[test]
+    fn the_audio_payload_carries_each_sequence() {
+        let bytes = audio_payload(&[(7, vec![1, 2, 3]), (8, vec![])]);
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, AUDIO_FIXTURE_HEX);
+    }
+
+    #[tokio::test]
+    async fn a_waiting_audio_receive_blocks_neither_video_nor_input() {
+        let _serial = SESSION_STATICS.lock().await;
+        let (audio_tx, audio_rx) = tokio::sync::mpsc::channel(4);
+        let (video_tx, video_rx) = tokio::sync::mpsc::channel(4);
+        *crate::AUDIO_RX.lock().await = Some(audio_rx);
+        *crate::VIDEO_RX.lock().await = Some(video_rx);
+        let waiting = tokio::spawn(receive_audio(500));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        video_tx.send(frame(1)).await.unwrap();
+        let frames = tokio::time::timeout(Duration::from_millis(200), receive_frames(50))
+            .await
+            .expect("video waited on the audio poll");
+        assert_eq!(frames.len(), 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), (*STREAMING_HANDLE).lock())
+                .await
+                .is_ok(),
+            "input waited on the audio poll"
+        );
+
+        audio_tx
+            .send(linux_link_core::streaming::AudioPacket {
+                data: vec![9],
+                sequence: 41,
+                timestamp: std::time::Instant::now(),
+                is_config: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(waiting.await.unwrap(), vec![(41, vec![9])]);
+        *crate::AUDIO_RX.lock().await = None;
         *crate::VIDEO_RX.lock().await = None;
     }
 }

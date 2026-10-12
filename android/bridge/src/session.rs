@@ -115,6 +115,12 @@ pub(crate) static VIDEO_RX: LazyLock<
     TokioMutex<Option<tokio::sync::mpsc::Receiver<linux_link_core::streaming::EncodedPacket>>>,
 > = LazyLock::new(|| TokioMutex::new(None));
 
+/// The live session's audio receiver, apart from [`STREAMING_HANDLE`] and
+/// [`VIDEO_RX`] for the same reason: `receive_audio` waits on it.
+pub(crate) static AUDIO_RX: LazyLock<
+    TokioMutex<Option<tokio::sync::mpsc::Receiver<linux_link_core::streaming::AudioPacket>>>,
+> = LazyLock::new(|| TokioMutex::new(None));
+
 /// Global handle for the active v2 unified connection.
 pub(crate) static V2_HANDLE: LazyLock<TokioMutex<Option<V2Handle>>> =
     LazyLock::new(|| TokioMutex::new(None));
@@ -186,9 +192,6 @@ pub(crate) struct StreamingHandle {
     pub(crate) task: tokio::task::JoinHandle<()>,
     /// JoinHandle of the background RTT polling task.
     pub(crate) rtt_task: tokio::task::JoinHandle<()>,
-    /// Receiver for decoded audio packets (F1: Audio Streaming).
-    #[allow(dead_code)]
-    pub(crate) audio_rx: tokio::sync::mpsc::Receiver<linux_link_core::streaming::AudioPacket>,
     /// The streaming connection (transport-agnostic handle), kept alive for
     /// sending input events.
     pub(crate) connection: linux_link_core::streaming::SharedConnection,

@@ -424,9 +424,8 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReceiveF
     }
 }
 
-/// Drain up to 32 Opus audio packets as a binary blob.
-///
-/// Wire format: `u32 count`, then per packet `u32 len`, `len` bytes.
+/// Drain up to 32 Opus audio packets as a binary blob; see
+/// [`api::audio_payload`] for the layout.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReceiveAudio(
     env: JNIEnv<'_>,
@@ -434,14 +433,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReceiveA
     timeout_ms: jint,
 ) -> jbyteArray {
     let packets = RUNTIME.block_on(api::receive_audio(timeout_ms.max(0) as u64));
-    let total: usize = packets.iter().map(|p| 4 + p.len()).sum();
-    let mut buf = Vec::with_capacity(4 + total);
-    buf.extend_from_slice(&(packets.len() as u32).to_be_bytes());
-    for packet in &packets {
-        buf.extend_from_slice(&(packet.len() as u32).to_be_bytes());
-        buf.extend_from_slice(packet);
-    }
-    match env.byte_array_from_slice(&buf) {
+    match env.byte_array_from_slice(&api::audio_payload(&packets)) {
         Ok(arr) => arr.into_raw(),
         Err(_) => std::ptr::null_mut(),
     }

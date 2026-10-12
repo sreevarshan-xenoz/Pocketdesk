@@ -371,22 +371,9 @@ object RustCore {
         return frames
     }
 
-    /** Drain Opus audio packets (raw payloads, typically 20 ms @ 48 kHz stereo). */
-    fun receiveAudio(timeoutMs: Int = 50): List<ByteArray> {
-        val buf = ByteBuffer.wrap(nativeReceiveAudio(timeoutMs)).order(ByteOrder.BIG_ENDIAN)
-        if (buf.remaining() < 4) return emptyList()
-        val count = buf.int
-        val packets = ArrayList<ByteArray>(count.coerceAtMost(32))
-        repeat(count) {
-            if (buf.remaining() < 4) return packets
-            val len = buf.int
-            if (len < 0 || buf.remaining() < len) return packets
-            val data = ByteArray(len)
-            buf.get(data)
-            packets += data
-        }
-        return packets
-    }
+    /** Drain the desktop's Opus packets (20 ms @ 48 kHz stereo each), with sequences. */
+    fun receiveAudio(timeoutMs: Int = 20): List<AudioChunk> =
+        AudioPayload.parse(nativeReceiveAudio(timeoutMs))
 
     // ---- Input ----
 
