@@ -89,6 +89,23 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
     })
 }
 
+/// Delete the PIN file if it still holds `pin` (a newer PIN written since is
+/// left alone). Returns whether a file was removed. Used to make a PIN
+/// one-shot once it has paired a phone, to discard it after too many wrong
+/// guesses, and when the desktop app stops showing it.
+pub fn remove_if(state_dir: &Path, pin: &str) -> io::Result<bool> {
+    let path = state_dir.join(PIN_FILE);
+    let held = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw.lines().next().map(str::trim) == Some(pin),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if held {
+        std::fs::remove_file(&path)?;
+    }
+    Ok(held)
+}
+
 /// How much longer `pin` is valid at `now_unix`; `None` when it never expires.
 pub fn remaining(pin: &FilePin, now_unix: u64) -> Option<Duration> {
     let minted = pin.minted_unix?;
@@ -146,6 +163,23 @@ mod tests {
         write(&dir, "123456", 10_000, None).unwrap();
         assert!(read(&dir, 9_990).is_some(), "small clock skew is fine");
         assert!(read(&dir, 9_000).is_none(), "far-future stamps are refused");
+    }
+
+    #[test]
+    fn a_pin_is_removed_only_while_it_is_still_the_one_on_file() {
+        let dir = temp_dir("remove");
+        write(&dir, "123456", 10, None).unwrap();
+        assert!(
+            !remove_if(&dir, "654321").unwrap(),
+            "a different PIN is left alone"
+        );
+        assert!(read(&dir, 11).is_some());
+        assert!(remove_if(&dir, "123456").unwrap());
+        assert!(read(&dir, 11).is_none());
+        assert!(
+            !remove_if(&dir, "123456").unwrap(),
+            "nothing left to remove"
+        );
     }
 
     #[test]

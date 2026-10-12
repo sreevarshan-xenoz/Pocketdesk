@@ -203,6 +203,47 @@ async fn request_pin(conn: &str, sender: &dyn DeviceSender) {
     let _ = sender.send_packet(&response).await;
 }
 
+/// Wrong guesses allowed against one PIN before it is discarded.
+const MAX_WRONG_GUESSES: u32 = 5;
+
+/// Wrong guesses against the current PIN. A six-digit PIN is 10^6 guesses,
+/// and nothing else stops one connection from trying them all inside the
+/// PIN's 300 s window, so after [`MAX_WRONG_GUESSES`] the PIN is discarded
+/// and the person pairing shows a new one.
+#[derive(Debug, Default)]
+struct Guesses {
+    /// The CLI/app PIN the count is for; a different one restarts it.
+    pin: Option<String>,
+    wrong: u32,
+}
+
+impl Guesses {
+    /// Count a wrong guess while `current` is the live CLI/app PIN. True
+    /// when the PIN must now be discarded (the count then starts over).
+    fn wrong(&mut self, current: Option<&str>) -> bool {
+        if self.pin.as_deref() != current {
+            self.pin = current.map(str::to_string);
+            self.wrong = 0;
+        }
+        self.wrong += 1;
+        if self.wrong >= MAX_WRONG_GUESSES {
+            self.wrong = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn reset(&mut self) {
+        self.wrong = 0;
+    }
+}
+
+fn guesses() -> &'static Mutex<Guesses> {
+    static GUESSES: OnceLock<Mutex<Guesses>> = OnceLock::new();
+    GUESSES.get_or_init(|| Mutex::new(Guesses::default()))
+}
+
 async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSender) {
     let Some(pin) = packet.body.get("pin").and_then(|v| v.as_str()) else {
         return;
@@ -227,6 +268,12 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
 
     if matches_pending || matches_cli {
         pins().lock().expect("pair state").remove(conn);
+        guesses().lock().expect("pair state").reset();
+        // One PIN, one phone: a CLI/app PIN that has paired is spent, so a
+        // code still on screen (or photographed) cannot pair another.
+        if matches_cli && let Ok(dir) = state::state_dir() {
+            let _ = local_pin::remove_if(&dir, pin);
+        }
         let grant_secs = cli_grant.flatten();
         let outcome = TrustStore::load_or_create(state::trust_store_path().expect("state dir"))
             .and_then(|mut store| match grant_secs {
@@ -256,6 +303,20 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         }
     } else {
         tracing::warn!("Pairing attempt from {conn} with a wrong/expired PIN");
+        let current = cli_pin().map(|(cli, _)| cli);
+        let discard = guesses()
+            .lock()
+            .expect("pair state")
+            .wrong(current.as_deref());
+        if discard {
+            tracing::warn!(
+                "{MAX_WRONG_GUESSES} wrong PIN guesses: the current PIN is discarded; show a new one to pair"
+            );
+            pins().lock().expect("pair state").clear();
+            if let (Some(cli), Ok(dir)) = (current, state::state_dir()) {
+                let _ = local_pin::remove_if(&dir, &cli);
+            }
+        }
         respond_pair(sender, false, "").await;
     }
 }
@@ -285,6 +346,33 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A six-digit PIN is 10^6 guesses; without a limit, one TCP connection
+    /// can try them all inside the 300 s window.
+    #[test]
+    fn five_wrong_guesses_discard_the_pin_and_a_new_pin_starts_over() {
+        let mut guesses = Guesses::default();
+        for _ in 0..MAX_WRONG_GUESSES - 1 {
+            assert!(!guesses.wrong(Some("123456")));
+        }
+        assert!(
+            guesses.wrong(Some("123456")),
+            "the fifth wrong guess discards it"
+        );
+        assert!(
+            !guesses.wrong(Some("123456")),
+            "the count starts over after a discard"
+        );
+        for _ in 0..MAX_WRONG_GUESSES - 2 {
+            guesses.wrong(Some("123456"));
+        }
+        assert!(
+            !guesses.wrong(Some("654321")),
+            "a new PIN gets its own five"
+        );
+        guesses.reset();
+        assert_eq!(guesses.wrong, 0);
+    }
 
     #[test]
     fn expired_pin_is_rejected() {

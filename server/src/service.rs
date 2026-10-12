@@ -932,11 +932,14 @@ pub async fn pair(pin: Option<String>, grant: Option<u64>) -> Result<()> {
     println!("Pairing PIN: {}", pin_value);
     match grant {
         Some(secs) => println!(
-            "Stored at {} (valid 5 minutes; pairing grants {} of trust)",
+            "Stored at {} (valid 5 minutes, for one phone; pairing grants {} of trust)",
             path.display(),
             humantime(secs)
         ),
-        None => println!("Stored at {} (valid 5 minutes)", path.display()),
+        None => println!(
+            "Stored at {} (valid 5 minutes, for one phone)",
+            path.display()
+        ),
     }
     Ok(())
 }
