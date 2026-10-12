@@ -58,7 +58,7 @@ pub async fn handle_v2_session(
             session_id.clone(),
         ));
 
-        // Register v2 client for broadcasts and enforce single-session rule
+        // Register v2 client for pushes (one target per device: its newest connection)
         state::register_client(Arc::clone(&sender)).await;
 
         // Spawn a dedicated task for the control stream (Stream 0) to ensure cancellation safety

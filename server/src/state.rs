@@ -58,23 +58,28 @@ pub fn write_pid_file(path: &PathBuf) -> Result<()> {
 pub static ACTIVE_CLIENTS: LazyLock<Mutex<Vec<Arc<dyn DeviceSender>>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
-/// Register a client, evicting any stale session with the same `device_id`.
+/// Register a client for pushed desktop state.
 ///
-/// Returns the number of stale sessions that were evicted (for logging).
+/// Every live connection stays registered; pushes go only to each device's
+/// newest one (see [`newest_per_device`]), so a device is never pushed to
+/// twice. Registering used to evict the device's older connections instead,
+/// and the phone opens short query connections alongside its long-lived
+/// control one: the first query evicted the control connection, closed a
+/// moment later, and left the device with nothing registered — no window
+/// titles, no notifications, for the rest of the session. Returns how many
+/// other connections the device already had.
 pub async fn register_client(sender: Arc<dyn DeviceSender>) -> usize {
     let mut clients = ACTIVE_CLIENTS.lock().await;
     let device_id = sender.device_id().to_string();
-
-    // Kick out any existing clients with the same device_id to prevent Parallel Brain
-    let old_len = clients.len();
-    clients.retain(|c| c.device_id() != device_id);
-    let kicked = old_len - clients.len();
-
-    if kicked > 0 {
-        tracing::warn!(
+    let others = clients
+        .iter()
+        .filter(|c| c.device_id() == device_id)
+        .count();
+    if others > 0 {
+        tracing::debug!(
             device_id = %device_id,
-            "Kicked {} stale session(s) due to reconnect storm",
-            kicked
+            others,
+            "Device has other live connections; pushes go to the newest"
         );
     }
 
@@ -84,7 +89,22 @@ pub async fn register_client(sender: Arc<dyn DeviceSender>) -> usize {
         "Client registered for broadcasts"
     );
 
-    kicked
+    others
+}
+
+/// One push target per device: its most recently registered live connection
+/// (a reconnecting phone's new connection wins over a half-open old one; when
+/// a short query connection closes, the long-lived one is the target again).
+/// `clients` is in registration order.
+fn newest_per_device(clients: Vec<Arc<dyn DeviceSender>>) -> Vec<Arc<dyn DeviceSender>> {
+    let mut newest: Vec<Arc<dyn DeviceSender>> = Vec::new();
+    for client in clients.into_iter().rev() {
+        if !newest.iter().any(|c| c.device_id() == client.device_id()) {
+            newest.push(client);
+        }
+    }
+    newest.reverse();
+    newest
 }
 
 /// Remove a client by its connection ID.
@@ -122,7 +142,7 @@ pub fn may_receive_pushes(device_id: &str) -> bool {
 /// *sends* by the packet loop, and on what it *receives* here.
 pub async fn clone_clients() -> Vec<Arc<dyn DeviceSender>> {
     let clients = ACTIVE_CLIENTS.lock().await.clone();
-    clients
+    newest_per_device(clients)
         .into_iter()
         .filter(|c| may_receive_pushes(c.device_id()))
         .collect()
@@ -132,4 +152,45 @@ pub async fn clone_clients() -> Vec<Arc<dyn DeviceSender>> {
 pub async fn prune_dead_clients(dead_ids: &[String]) {
     let mut clients = ACTIVE_CLIENTS.lock().await;
     clients.retain(|c| !dead_ids.iter().any(|d| d == c.connection_id()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linux_link_core::error::Result;
+    use linux_link_core::protocol::kdeconnect::NetworkPacket;
+
+    struct Conn(&'static str, &'static str);
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Conn {
+        fn device_id(&self) -> &str {
+            self.0
+        }
+        fn connection_id(&self) -> &str {
+            self.1
+        }
+        async fn send_packet(&self, _packet: &NetworkPacket) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn ids(clients: &[Arc<dyn DeviceSender>]) -> Vec<&str> {
+        clients.iter().map(|c| c.connection_id()).collect()
+    }
+
+    #[test]
+    fn each_device_is_pushed_to_once_on_its_newest_connection() {
+        let control: Arc<dyn DeviceSender> = Arc::new(Conn("phone", "control"));
+        let query: Arc<dyn DeviceSender> = Arc::new(Conn("phone", "query"));
+        let laptop: Arc<dyn DeviceSender> = Arc::new(Conn("laptop", "l1"));
+        let all = vec![control.clone(), laptop.clone(), query.clone()];
+        assert_eq!(ids(&newest_per_device(all)), ["l1", "query"]);
+        // The query connection closes: the control connection is the target
+        // again, instead of the phone having none.
+        assert_eq!(
+            ids(&newest_per_device(vec![control, laptop])),
+            ["control", "l1"]
+        );
+    }
 }

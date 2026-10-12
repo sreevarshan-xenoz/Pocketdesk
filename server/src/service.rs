@@ -774,7 +774,7 @@ async fn handle_connection_with_kde(
         // Update span with device_id
         tracing::Span::current().record("peer", &device_id);
 
-        // Register this client for notification broadcasting and enforce single-session rule
+        // Register this client for pushes (one target per device: its newest connection)
         state::register_client(sender.clone()).await;
 
         // Seed the Workspace HUD and the WAN identity — only once the peer
