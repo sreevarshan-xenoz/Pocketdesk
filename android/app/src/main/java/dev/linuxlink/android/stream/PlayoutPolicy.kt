@@ -47,8 +47,19 @@ class PlayoutPolicy {
         const val START_MS = 60
         const val CAP_MS = 150
 
+        /** How long one poll of the bridge waits for audio. */
+        const val POLL_MS = 20
+
         /** 5 s of 20 ms packets: further back than any reorder. */
         const val RESTART_GAP = 250L
+
+        /**
+         * How long to sleep after a poll that took [elapsedMs]. An empty poll
+         * that returned early (the session is gone, or the desktop closed it)
+         * waits out the rest of its slot, so the playout thread cannot spin.
+         */
+        fun idlePauseMs(elapsedMs: Long, empty: Boolean): Long =
+            if (empty) (POLL_MS - elapsedMs).coerceAtLeast(0) else 0
 
         private const val FRAMES_PER_MS = 48
         private const val MASK = 0xFFFF_FFFFL

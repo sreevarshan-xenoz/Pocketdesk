@@ -58,6 +58,16 @@ class PlayoutPolicyTest {
     }
 
     @Test
+    fun anEmptyPollThatReturnedAtOnceWaitsOutTheRestOfItsSlot() {
+        // The bridge returns at once when the session is gone or closed;
+        // without this the playout thread spins at full priority.
+        assertEquals(20, PlayoutPolicy.idlePauseMs(elapsedMs = 0, empty = true))
+        assertEquals(5, PlayoutPolicy.idlePauseMs(elapsedMs = 15, empty = true))
+        assertEquals("a poll that waited its timeout", 0, PlayoutPolicy.idlePauseMs(elapsedMs = 20, empty = true))
+        assertEquals("packets came", 0, PlayoutPolicy.idlePauseMs(elapsedMs = 0, empty = false))
+    }
+
+    @Test
     fun queuedTimeIsRightAcrossTheHeadWrap() {
         assertEquals(60, PlayoutPolicy.queuedMs(framesWritten = 48 * 60L, headPosition = 0))
         // Written count has wrapped past 2^32; the head has not yet.

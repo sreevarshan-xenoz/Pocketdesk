@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.MediaCodec
 import android.media.MediaFormat
+import android.os.SystemClock
 import android.util.Log
 import dev.linuxlink.android.bridge.RustCore
 import java.nio.ByteBuffer
@@ -148,13 +149,17 @@ class DesktopAudioPlayer {
                     framesWritten = track.playbackHeadPosition.toLong() and 0xFFFF_FFFFL
                     policy.rebuffer()
                 }
-                RustCore.receiveAudio(POLL_MS) // drained and dropped while unheard
+                val polledAt = SystemClock.elapsedRealtime()
+                val dropped = RustCore.receiveAudio(PlayoutPolicy.POLL_MS) // drained, unheard
+                idle(polledAt, dropped.isEmpty())
                 continue
             }
             heard = true
             track.setVolume(if (state == FOCUS_DUCKED) DUCKED_VOLUME else 1f)
 
-            for (chunk in RustCore.receiveAudio(POLL_MS)) {
+            val polledAt = SystemClock.elapsedRealtime()
+            val chunks = RustCore.receiveAudio(PlayoutPolicy.POLL_MS)
+            for (chunk in chunks) {
                 if (!policy.accept(chunk.sequence)) continue
                 val index = codec.dequeueInputBuffer(INPUT_WAIT_US)
                 if (index < 0) continue // the decoder is full: drop this packet
@@ -191,7 +196,13 @@ class DesktopAudioPlayer {
                     playing = true
                 }
             }
+            idle(polledAt, chunks.isEmpty())
         }
+    }
+
+    private fun idle(polledAt: Long, empty: Boolean) {
+        val pause = PlayoutPolicy.idlePauseMs(SystemClock.elapsedRealtime() - polledAt, empty)
+        if (pause > 0) Thread.sleep(pause)
     }
 
     private companion object {
@@ -200,7 +211,6 @@ class DesktopAudioPlayer {
         const val FOCUS_FULL = 1
         const val FOCUS_DUCKED = 2
         const val DUCKED_VOLUME = 0.3f
-        const val POLL_MS = 20
         const val INPUT_WAIT_US = 10_000L
         const val FRAME_US = 20_000L
         const val BYTES_PER_FRAME = 4 // 16-bit stereo
