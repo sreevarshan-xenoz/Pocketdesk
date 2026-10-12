@@ -73,9 +73,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import dev.linuxlink.android.HostStore
+import dev.linuxlink.android.Prefs
 import dev.linuxlink.android.R
 import dev.linuxlink.android.bridge.RustCore
 import dev.linuxlink.android.service.SessionForegroundService
+import dev.linuxlink.android.stream.DesktopAudio
 import dev.linuxlink.android.stream.InputMode
 import dev.linuxlink.android.stream.MicCapture
 import dev.linuxlink.android.stream.RemoteDesktopView
@@ -124,6 +126,7 @@ fun RemoteScreen(
         }
     }
     var clipboardSync by remember { mutableStateOf(true) }
+    var desktopSound by remember { mutableStateOf(Prefs.desktopSound(context)) }
     var showHistory by remember { mutableStateOf(false) }
     // UI refresh: the old 16-button bottom bar became a floating action disc
     // opening this grouped sheet; only the input-mode toggle stayed outside.
@@ -1110,6 +1113,11 @@ fun RemoteScreen(
                 },
             ),
             onCyclePane = ::cyclePane,
+            desktopSound = desktopSound,
+            onSetDesktopSound = {
+                desktopSound = it
+                DesktopAudio.setEnabled(context, it)
+            },
             clipboardSync = clipboardSync,
             onSetClipboardSync = { clipboardSync = it },
             onOpenHistory = {

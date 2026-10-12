@@ -97,6 +97,7 @@
     <string name="row_history">Clipboard history</string>
     <string name="row_audio">Audio control</string>
     <string name="row_mic">Phone mic share</string>
+    <string name="row_desktop_sound">Desktop sound on this phone</string>
     <string name="row_privacy">Privacy grab</string>
     <string name="row_pairing">Pairing</string>
     <string name="value_direct_touch">Direct touch</string>

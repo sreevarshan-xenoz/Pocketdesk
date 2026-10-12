@@ -44,6 +44,8 @@ fun QuickSettingsSheet(
     onPickMonitor: () -> Unit,
     paneValue: String,
     onCyclePane: () -> Unit,
+    desktopSound: Boolean,
+    onSetDesktopSound: (Boolean) -> Unit,
     clipboardSync: Boolean,
     onSetClipboardSync: (Boolean) -> Unit,
     onOpenHistory: () -> Unit,
@@ -82,6 +84,7 @@ fun QuickSettingsSheet(
             ValueRow(LlIcons.Desktop, stringResource(R.string.row_window), windowValue, onPickWindow)
             ValueRow(LlIcons.Monitor, stringResource(R.string.row_monitor), monitorValue, onPickMonitor)
             ValueRow(LlIcons.Lan, stringResource(R.string.row_pane), paneValue, onCyclePane)
+            ToggleRow(LlIcons.Volume, stringResource(R.string.row_desktop_sound), desktopSound, onSetDesktopSound)
 
             GroupHeader(stringResource(R.string.group_desktop))
             ToggleRow(LlIcons.Clipboard, stringResource(R.string.row_clipboard), clipboardSync, onSetClipboardSync)

@@ -90,6 +90,7 @@
     <string name="row_history">கிளிப்போர்ட் வரலாறு</string>
     <string name="row_audio">ஒலிக் கட்டுப்பாடு</string>
     <string name="row_mic">கைபேசி ஒலிவாங்கி</string>
+    <string name="row_desktop_sound">கணினியின் ஒலி இந்தக் கைபேசியில்</string>
     <string name="row_privacy">தனியுரிமைப் பூட்டு</string>
     <string name="row_pairing">இணைப்பு</string>
     <string name="value_direct_touch">நேரடித் தொடுதல்</string>

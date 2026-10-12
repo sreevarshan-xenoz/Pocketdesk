@@ -90,6 +90,7 @@
     <string name="row_history">Historial del portapapeles</string>
     <string name="row_audio">Control de audio</string>
     <string name="row_mic">Micrófono del teléfono</string>
+    <string name="row_desktop_sound">Sonido del escritorio en el teléfono</string>
     <string name="row_privacy">Bloqueo de privacidad</string>
     <string name="row_pairing">Emparejamiento</string>
     <string name="value_direct_touch">Toque directo</string>
