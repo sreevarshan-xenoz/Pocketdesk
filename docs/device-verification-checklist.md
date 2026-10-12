@@ -599,6 +599,20 @@ Checked on 2026-10-12 with the Galaxy A71 against the Windows host, typing into 
 - [ ] Linux host: ASCII typing over uinput. Non-ASCII and capitals in pasted text wait for roadmap F4 (2666).
 - [ ] Tamil and Spanish keyboards: composing text arrives whole and correct.
 
+## 27. Trackpad gestures
+
+Built on `feat/trackpad-gestures`; roadmap F3 (`docs/superpowers/specs/2026-10-12-feature-roadmap.md`).
+
+Checked on 2026-10-12 with the Galaxy A71 against Windows:
+- a tap, then a touch-and-drag within 300 ms, selected a Notepad line (read back through UI Automation);
+- the Trackpad speed slider renders and its value survives an app restart.
+
+- [ ] Two-finger tap opens a context menu; three-finger tap middle-clicks (e.g. opens a link in a new tab). adb cannot make multi-finger touches.
+- [ ] Two fingers resting without moving do not right-click.
+- [ ] A drag survives a second finger landing mid-drag and releases on lift.
+- [ ] Speed 0.5× and 3× feel right; slow movements still move the cursor.
+- [ ] The foldable dock's trackpad behaves the same.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
