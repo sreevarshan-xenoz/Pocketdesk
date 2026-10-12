@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-linux-link-core = { path = "../core", features = ["wan"] }
+linux-link-core = { path = "../core", features = ["wan", "local"] }
 serde.workspace = true
 # Same version core already uses: the OS CSPRNG for pairing PINs.
 rand = "0.8"
@@ -23,7 +23,6 @@ tracing-subscriber.workspace = true
 # Daily-rolling log files for `start --background`
 tracing-appender = "0.2"
 dirs.workspace = true
-toml = "0.8"
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 async-trait = "0.1"

@@ -29,6 +29,7 @@ mod audio_capture_wasapi;
 pub mod bench;
 #[cfg(feature = "capture")]
 pub mod capture;
+pub mod capture_backend;
 #[cfg(all(feature = "capture", windows))]
 mod capture_d3d;
 #[cfg(all(feature = "capture", windows))]
@@ -61,7 +62,8 @@ pub use audio::{AudioConfig, AudioPacket};
 pub use audio::{AudioDecoder, AudioEncoder};
 pub use bitrate::LossCeiling;
 #[cfg(feature = "capture")]
-pub use capture::{CaptureBackend, start_capture_auto};
+pub use capture::start_capture_auto;
+pub use capture_backend::CaptureBackend;
 #[cfg(feature = "capture")]
 pub use capture_x11::{check_x11_availability, start_x11_capture};
 pub use client::DEFAULT_STREAMING_PORT;
@@ -211,7 +213,7 @@ impl VideoCodec {
 }
 
 /// User-facing video quality preset with concrete encoding parameters.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VideoQualityPreset {
     /// 720p, 2 Mbps, veryfast encoder preset
     Low,

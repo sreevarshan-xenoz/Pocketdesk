@@ -5,6 +5,8 @@
 pub mod capabilities;
 pub mod error;
 pub mod input;
+#[cfg(feature = "local")]
+pub mod local;
 pub mod metrics;
 pub mod protocol;
 pub mod secure_fs;

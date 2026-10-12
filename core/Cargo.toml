@@ -34,8 +34,15 @@ client = []
 # bridge pulls iroh into the graph.
 wan = ["dep:iroh"]
 
+# The files the server and the desktop app share (config, pairing PIN, live
+# sessions, identity): `core::local`. No tokio, no transport.
+local = ["dep:toml", "dep:toml_edit", "dep:base64"]
+
 [dependencies]
 anyhow.workspace = true
+base64 = { version = "0.22", optional = true }
+toml = { version = "0.8", optional = true }
+toml_edit = { version = "0.22", optional = true }
 serde.workspace = true
 tokio.workspace = true
 serde_json = "1"
