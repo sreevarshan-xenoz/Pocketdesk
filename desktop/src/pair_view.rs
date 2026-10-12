@@ -3,6 +3,7 @@
 
 use std::io;
 use std::path::Path;
+use std::sync::mpsc;
 
 use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
 use linux_link_core::local::config::Config;
@@ -48,11 +49,18 @@ pub fn link_for(
     })
 }
 
-/// [`link_for`] with this machine's addresses and Tailscale IP.
-pub fn current_link(state_dir: &Path, config: &Config, now_unix: u64) -> io::Result<PairLink> {
-    let mut addresses = network::local_ips();
-    addresses.extend(network::tailscale_ip());
-    link_for(state_dir, config, now_unix, addresses)
+/// This machine's addresses and Tailscale IP, looked up on a thread: the
+/// lookup runs external commands that may take up to their time limit, and
+/// the UI must not stall on them. `ctx` is repainted when the answer is in.
+fn look_up_addresses(ctx: egui::Context) -> mpsc::Receiver<Vec<String>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut addresses = network::local_ips();
+        addresses.extend(network::tailscale_ip());
+        let _ = tx.send(addresses);
+        ctx.request_repaint();
+    });
+    rx
 }
 
 /// The name a phone shows for this desktop.
@@ -149,6 +157,10 @@ pub struct PairView {
     /// The app should re-read the trust store now rather than at its next
     /// tick: a PIN that left early may have just paired a phone.
     refresh_wanted: bool,
+    /// The address lookup for the next code, while it runs. The PIN is minted
+    /// only once it answers, on this thread, so a tab left mid-lookup leaves
+    /// no PIN behind.
+    lookup: Option<mpsc::Receiver<Vec<String>>>,
 }
 
 impl PairView {
@@ -219,27 +231,23 @@ impl PairView {
                     self.withdraw(state_dir);
                 }
                 Next::Refresh => {
-                    let config = config.cloned().unwrap_or_default();
-                    match current_link(state_dir, &config, now_unix) {
-                        Ok(link) => match qr_modules(&link.to_uri()) {
-                            Ok(modules) => {
-                                self.texture = Some(ui.ctx().load_texture(
-                                    "pair-qr",
-                                    qr_image(&modules, 6),
-                                    TextureOptions::NEAREST,
-                                ));
-                                let expires_unix = pin::read(state_dir, now_unix)
-                                    .and_then(|p| p.minted_unix)
-                                    .map(|t| t + pin::PIN_TTL.as_secs());
-                                self.shown = Some(Shown {
-                                    pin: link.pin.clone(),
-                                    expires_unix,
-                                });
-                                self.link = Some(link);
-                            }
-                            Err(e) => self.error = Some(format!("Could not draw the code: {e}")),
+                    let addresses = match &self.lookup {
+                        None => {
+                            // The old code (expired or replaced) goes while
+                            // the new one is prepared.
+                            self.withdraw(state_dir);
+                            self.lookup = Some(look_up_addresses(ui.ctx().clone()));
+                            None
+                        }
+                        Some(lookup) => match lookup.try_recv() {
+                            Ok(addresses) => Some(addresses),
+                            Err(mpsc::TryRecvError::Empty) => None,
+                            Err(mpsc::TryRecvError::Disconnected) => Some(Vec::new()),
                         },
-                        Err(e) => self.error = Some(format!("Could not make a pairing code: {e}")),
+                    };
+                    if let Some(addresses) = addresses {
+                        self.lookup = None;
+                        self.make_code(ui, state_dir, config, now_unix, addresses);
                     }
                 }
             }
@@ -256,6 +264,13 @@ impl PairView {
             if ui.button("Show a new code").clicked() {
                 self.reset(state_dir);
             }
+            return;
+        }
+        if self.lookup.is_some() && self.error.is_none() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Preparing a pairing code…");
+            });
             return;
         }
         if let Some(error) = &self.error {
@@ -312,6 +327,39 @@ impl PairView {
                 }
             });
         });
+    }
+
+    /// Mint (or reuse) the PIN and draw the code for `addresses`.
+    fn make_code(
+        &mut self,
+        ui: &egui::Ui,
+        state_dir: &Path,
+        config: Option<&Config>,
+        now_unix: u64,
+        addresses: Vec<String>,
+    ) {
+        let config = config.cloned().unwrap_or_default();
+        match link_for(state_dir, &config, now_unix, addresses) {
+            Ok(link) => match qr_modules(&link.to_uri()) {
+                Ok(modules) => {
+                    self.texture = Some(ui.ctx().load_texture(
+                        "pair-qr",
+                        qr_image(&modules, 6),
+                        TextureOptions::NEAREST,
+                    ));
+                    let expires_unix = pin::read(state_dir, now_unix)
+                        .and_then(|p| p.minted_unix)
+                        .map(|t| t + pin::PIN_TTL.as_secs());
+                    self.shown = Some(Shown {
+                        pin: link.pin.clone(),
+                        expires_unix,
+                    });
+                    self.link = Some(link);
+                }
+                Err(e) => self.error = Some(format!("Could not draw the code: {e}")),
+            },
+            Err(e) => self.error = Some(format!("Could not make a pairing code: {e}")),
+        }
     }
 }
 
@@ -446,6 +494,44 @@ mod tests {
             "a PIN `linux-link pair` wrote since is left alone"
         );
         assert!(view.shown.is_none() && !view.stopped);
+    }
+
+    /// One frame of the Pair tab, headless.
+    fn frame(ctx: &egui::Context, view: &mut PairView, dir: &std::path::Path, now: u64) {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            view.show(ui, dir, None, &[], now);
+        });
+        // No renderer uploads the QR texture here.
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn the_code_is_minted_only_after_the_address_lookup_and_not_if_the_tab_is_left() {
+        let ctx = egui::Context::default();
+        let dir = temp_dir("lookup");
+        let mut view = PairView::default();
+        frame(&ctx, &mut view, &dir, 1_000);
+        assert!(view.lookup.is_some(), "the lookup runs off the UI thread");
+        assert!(pin::read(&dir, 1_000).is_none(), "nothing minted yet");
+        view.reset(&dir);
+        assert!(pin::read(&dir, 1_000).is_none(), "a left tab leaves no PIN");
+
+        let mut view = PairView::default();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while view.link.is_none() && view.error.is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the lookup never answered"
+            );
+            frame(&ctx, &mut view, &dir, 1_000);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        match &view.link {
+            // A machine with a usable address shows the code it minted.
+            Some(link) => assert_eq!(pin::read(&dir, 1_000).unwrap().pin, link.pin),
+            // One with none says so and mints nothing.
+            None => assert!(pin::read(&dir, 1_000).is_none()),
+        }
     }
 
     #[test]
