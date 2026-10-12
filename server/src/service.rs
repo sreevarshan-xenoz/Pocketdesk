@@ -662,6 +662,27 @@ pub async fn connect_peer(peer: String, port: u16, identity: &DeviceIdentity) ->
     Ok(())
 }
 
+/// Send a peer the desktop state it should not have to wait for: the Workspace
+/// HUD snapshot and the WAN (iroh) identity it dials when the LAN path fails.
+async fn seed_desktop_state(
+    sender: &Arc<dyn DeviceSender>,
+    hypr_ipc: Option<&HyprlandIpc>,
+    wan_endpoint: Option<&iroh::Endpoint>,
+) {
+    // Workspace HUD with the current compositor state (R3#8)
+    if let Some(ipc) = hypr_ipc {
+        hypr_events::push_state_to(sender, ipc).await;
+    }
+    #[cfg(windows)]
+    let _ = sender
+        .send_packet(&hypr_events::windows_state_packet().await)
+        .await;
+    // WAN identity so the phone can cache it for iroh dialing (R1 stage 3)
+    if let Some(endpoint) = wan_endpoint {
+        iroh_endpoint::push_endpoint_to(sender, endpoint).await;
+    }
+}
+
 /// Handle a TCP connection with KDE Connect protocol support.
 ///
 /// After the initial handshake, this sends our identity packet and then
@@ -756,24 +777,15 @@ async fn handle_connection_with_kde(
         // Register this client for notification broadcasting and enforce single-session rule
         state::register_client(sender.clone()).await;
 
-        // Seed the Workspace HUD and the WAN identity — only for a peer that
-        // has already paired (or with pairing off): window titles and the
-        // endpoint address are not for an unpaired device. One that pairs
-        // later gets both from the periodic pushes.
+        // Seed the Workspace HUD and the WAN identity — only once the peer
+        // may receive pushes (paired, or pairing off): window titles and the
+        // endpoint address are not for an unpaired device. A peer that pairs
+        // on this connection is seeded the moment it does (below), rather
+        // than waiting for the periodic pushes.
+        let mut seeded = false;
         if state::may_receive_pushes(&device_id) {
-            // Workspace HUD with the current compositor state (R3#8)
-            if let Some(ipc) = hypr_ipc {
-                hypr_events::push_state_to(&sender, ipc).await;
-            }
-            #[cfg(windows)]
-            let _ = sender
-                .send_packet(&hypr_events::windows_state_packet().await)
-                .await;
-
-            // WAN identity so the phone can cache it for iroh dialing (R1 stage 3)
-            if let Some(endpoint) = wan_endpoint {
-                iroh_endpoint::push_endpoint_to(&sender, endpoint).await;
-            }
+            seed_desktop_state(&sender, hypr_ipc, wan_endpoint).await;
+            seeded = true;
         }
 
         tracing::info!("Entering main packet loop");
@@ -824,6 +836,13 @@ async fn handle_connection_with_kde(
                             }
                             .instrument(packet_span)
                             .await;
+                            if pairing_packet && !seeded && state::may_receive_pushes(&device_id) {
+                                tracing::info!(
+                                    "Peer paired on this connection; seeding desktop state"
+                                );
+                                seed_desktop_state(&sender, hypr_ipc, wan_endpoint).await;
+                                seeded = true;
+                            }
                         }
                         Err(e) => {
                             tracing::warn!("Malformed packet received: {}", e);
