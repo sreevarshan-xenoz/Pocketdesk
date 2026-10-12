@@ -194,6 +194,7 @@ fun RemoteDesktopView(
                                 override fun surfaceCreated(holder: android.view.SurfaceHolder) {
                                     declareFrameRate(holder, display)
                                     decoderHost.start(
+                                        context,
                                         holder.surface,
                                         address,
                                         port,
@@ -510,6 +511,7 @@ private class DecoderHost {
     private var thread: Thread? = null
 
     fun start(
+        context: android.content.Context,
         surface: android.view.Surface,
         address: String,
         port: Int,
@@ -560,7 +562,11 @@ private class DecoderHost {
                 }
             }
             report(status)
-            if (connected) active.start()
+            if (connected) {
+                active.start()
+                // Not for a generation that stop() already ended.
+                if (decoder === active) DesktopAudio.streamUp(context)
+            }
         }, "h264-decode").apply {
             isDaemon = true
             priority = Thread.MAX_PRIORITY
@@ -571,6 +577,7 @@ private class DecoderHost {
     fun stop() {
         val active = decoder ?: return
         decoder = null
+        DesktopAudio.streamDown()
         active.stop()
         runCatching { RustCore.stopStreaming() }
         thread?.let { t ->

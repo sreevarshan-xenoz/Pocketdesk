@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
+    private const val KEY_DESKTOP_SOUND = "desktop_sound"
 
     const val THEME_SYSTEM = "system"
     const val THEME_LIGHT = "light"
@@ -81,6 +82,15 @@ object Prefs {
 
     fun setHaptics(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_HAPTICS, enabled) }
+        bump()
+    }
+
+    /** Whether the desktop's sound plays on the phone during a session. */
+    fun desktopSound(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_DESKTOP_SOUND, true)
+
+    fun setDesktopSound(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_DESKTOP_SOUND, enabled) }
         bump()
     }
 }
