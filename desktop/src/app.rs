@@ -11,6 +11,8 @@ use linux_link_core::local::sessions;
 use linux_link_core::protocol::kdeconnect::TrustStore;
 
 use crate::model::{self, Snapshot};
+use crate::pair_view::PairView;
+use crate::settings_view::SettingsForm;
 use crate::tray::{Tray, TrayAction};
 
 const REFRESH: Duration = Duration::from_secs(1);
@@ -20,8 +22,10 @@ const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Status,
+    Pair,
     Devices,
     Sessions,
+    Settings,
     Logs,
 }
 
@@ -38,6 +42,10 @@ pub struct PocketdeskApp {
     /// The last action's outcome, shown under the tabs.
     notice: Option<String>,
     quitting: bool,
+    pair: PairView,
+    /// Loaded when the Settings tab opens; an unreadable file is shown, not
+    /// overwritten.
+    settings: Option<Result<SettingsForm, String>>,
 }
 
 impl PocketdeskApp {
@@ -53,7 +61,24 @@ impl PocketdeskApp {
             confirm_revoke: None,
             notice: None,
             quitting: false,
+            pair: PairView::default(),
+            settings: None,
         }
+    }
+
+    fn switch_to(&mut self, tab: Tab) {
+        if self.tab == Tab::Pair && tab != Tab::Pair {
+            self.pair.reset();
+        }
+        if tab == Tab::Settings && self.settings.is_none() {
+            self.settings = Some(
+                Config::load()
+                    .map(SettingsForm::from_config)
+                    .map_err(|e| e.to_string()),
+            );
+        }
+        self.tab = tab;
+        self.refreshed = None;
     }
 
     fn refresh(&mut self) {
@@ -70,6 +95,9 @@ impl PocketdeskApp {
         for action in tray.take_actions() {
             match action {
                 TrayAction::Open | TrayAction::Pair => {
+                    if action == TrayAction::Pair {
+                        self.switch_to(Tab::Pair);
+                    }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
@@ -233,6 +261,34 @@ impl PocketdeskApp {
         }
     }
 
+    fn settings_tab(&mut self, ui: &mut egui::Ui) {
+        let form = match &mut self.settings {
+            Some(Ok(form)) => form,
+            Some(Err(error)) => {
+                ui.label(
+                    RichText::new(format!("config.toml could not be read: {error}"))
+                        .color(Color32::from_rgb(0xd9, 0x5c, 0x4a)),
+                );
+                ui.label("Fix or remove the file, then reopen this tab. Nothing is saved over it.");
+                return;
+            }
+            None => return,
+        };
+        if form.show(ui) {
+            match Config::path() {
+                Ok(path) => match form.save_to(&path) {
+                    Ok(()) => self.notice = Some("Saved.".to_string()),
+                    Err(e) => self.notice = Some(format!("Not saved: {e}")),
+                },
+                Err(e) => self.notice = Some(format!("Not saved: {e}")),
+            }
+        }
+        if form.restart_needed {
+            ui.add_space(8.0);
+            ui.label(RichText::new("Restart the server to apply the saved settings.").strong());
+        }
+    }
+
     fn logs_tab(&self, ui: &mut egui::Ui) {
         if self.log.is_empty() {
             ui.label(
@@ -274,12 +330,14 @@ impl eframe::App for PocketdeskApp {
                 ui.add_space(12.0);
                 for (tab, label) in [
                     (Tab::Status, "Status"),
+                    (Tab::Pair, "Pair"),
                     (Tab::Devices, "Devices"),
                     (Tab::Sessions, "Sessions"),
+                    (Tab::Settings, "Settings"),
                     (Tab::Logs, "Logs"),
                 ] {
-                    if ui.selectable_value(&mut self.tab, tab, label).clicked() {
-                        self.refreshed = None;
+                    if ui.selectable_label(self.tab == tab, label).clicked() {
+                        self.switch_to(tab);
                     }
                 }
             });
@@ -290,8 +348,16 @@ impl eframe::App for PocketdeskApp {
         });
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Status => self.status_tab(ui),
+            Tab::Pair => self.pair.show(
+                ui,
+                &self.state_dir,
+                self.config.as_ref(),
+                &self.snapshot.devices,
+                now_unix(),
+            ),
             Tab::Devices => self.devices_tab(ui),
             Tab::Sessions => self.sessions_tab(ui),
+            Tab::Settings => self.settings_tab(ui),
             Tab::Logs => self.logs_tab(ui),
         });
     }

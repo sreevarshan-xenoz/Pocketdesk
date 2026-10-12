@@ -7,6 +7,7 @@
 
 pub mod config;
 pub mod identity;
+pub mod network;
 pub mod pair_link;
 pub mod paths;
 pub mod pin;
