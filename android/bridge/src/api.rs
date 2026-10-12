@@ -2682,7 +2682,9 @@ fn android_to_evdev_keycode(android_keycode: i32) -> u16 {
         93 => 109,  // PAGE_DOWN
         111 => 1,   // ESCAPE
         120 => 99,  // SYSRQ
+        122 => 102, // MOVE_HOME -> KEY_HOME (a keyboard's Home key; KEYCODE_HOME is the phone's)
         123 => 107, // END
+        124 => 110, // INSERT
         323 => 99,  // PRINT -> KEY_SYSRQ
         // Editing
         61 => 15,   // TAB
@@ -2722,6 +2724,7 @@ fn android_to_evdev_keycode(android_keycode: i32) -> u16 {
         72 => 27, // RIGHT_BRACKET
         74 => 39, // SEMICOLON
         75 => 40, // APOSTROPHE
+        73 => 43, // BACKSLASH
         76 => 53, // SLASH
         78 => 69, // NUM -> KEY_NUMLOCK
         81 => 78, // PLUS -> KEY_KPPLUS

@@ -189,6 +189,7 @@ const KEYCODE_MAP: &[(u16, Key)] = &[
     (KeyCode::KEY_COMMA.0, Key::Unicode(',')),
     (KeyCode::KEY_DOT.0, Key::Unicode('.')),
     (KeyCode::KEY_SLASH.0, Key::Unicode('/')),
+    (KeyCode::KEY_BACKSLASH.0, Key::Unicode('\\')),
 ];
 
 /// Backend for input injection.
@@ -1262,7 +1263,7 @@ mod tests {
 
     #[test]
     fn letters_digits_and_punctuation_map_to_their_own_characters() {
-        let characters: [(u16, char); 12] = [
+        let characters: [(u16, char); 13] = [
             (30, 'a'),  // KEY_A
             (44, 'z'),  // KEY_Z
             (50, 'm'),  // KEY_M
@@ -1275,6 +1276,7 @@ mod tests {
             (52, '.'),  // KEY_DOT
             (53, '/'),  // KEY_SLASH
             (26, '['),  // KEY_LEFTBRACE
+            (43, '\\'), // KEY_BACKSLASH
         ];
         for (code, ch) in characters {
             assert_eq!(

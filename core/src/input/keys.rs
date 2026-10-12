@@ -23,14 +23,15 @@
 /// bridge's own test walks every Android keycode and fails if this list stops
 /// covering what it produces.
 pub const PHONE_EVDEV_KEY_RANGES: &[(u16, u16)] = &[
-    (1, 42),  // Esc, 1-0, Minus, Equal, BackSpace, Tab, Q..P, [ ], Enter, Ctrl, A..L, ; ' ` Shift
-    (44, 69), // Z..M through Comma/Dot/Slash, Shift, KP Multiply, Alt, Space, Caps Lock, F1-F10, Num Lock
-    (78, 78), // KP Plus
-    (87, 88), // F11, F12
-    (97, 97), // Right Ctrl
-    (99, 100), // SysRq (the Print key), Right Alt
-    (102, 109), // Home, Up, Page Up, Left, Right, End, Down, Page Down
-    (111, 111), // Delete (forward delete)
+    // Esc, 1-0, Minus, Equal, BackSpace, Tab, Q..P, [ ], Enter, Ctrl, A..L,
+    // ; ' `, Shift, Backslash, Z..M through Comma/Dot/Slash, Shift, KP
+    // Multiply, Alt, Space, Caps Lock, F1-F10, Num Lock
+    (1, 69),
+    (78, 78),   // KP Plus
+    (87, 88),   // F11, F12
+    (97, 97),   // Right Ctrl
+    (99, 100),  // SysRq (the Print key), Right Alt
+    (102, 111), // Home, Up, Page Up, Left, Right, End, Down, Page Down, Insert, Delete
     (114, 115), // Volume Down, Volume Up
     (125, 126), // Left Meta (Super), Right Meta (Super)
     (139, 139), // Menu (the application-keys key)
@@ -77,7 +78,6 @@ mod tests {
     #[test]
     fn reserved_and_out_of_range_codes_are_not_emittable() {
         assert!(!phone_can_emit(0));
-        assert!(!phone_can_emit(43)); // KEY_BACKSLASH: no Android keycode maps to it
         assert!(!phone_can_emit(255));
         assert!(!phone_can_emit(u16::MAX));
     }
@@ -85,8 +85,11 @@ mod tests {
     #[test]
     fn the_flattened_set_matches_the_ranges() {
         let codes = phone_emittable_codes();
-        assert_eq!(codes.len(), 91);
+        assert_eq!(codes.len(), 93);
         assert!(codes.iter().all(|&c| phone_can_emit(c)));
-        assert!(!codes.contains(&43));
+        assert!(
+            codes.contains(&43) && codes.contains(&110),
+            "Backslash and Insert"
+        );
     }
 }
