@@ -60,11 +60,9 @@ pub struct AudioFormat {
     pub this_build_encodes: bool,
     /// Whether the device on the *receiving* end turns this stream into sound.
     ///
-    /// Encoding and sending is half a feature. The desktop's mic sink plays what
-    /// the phone sends (`mic_relay.rs` → `pw-loopback`); the phone has no Opus
-    /// playout path at all (`receiveAudio` has no caller), so `desktop -> phone`
-    /// is a stream the wire delivers and nobody listens to — roadmap 2054, with
-    /// the playout path itself as 2791-2800.
+    /// Encoding and sending is half a feature (roadmap 2054). The desktop's mic
+    /// sink plays what the phone sends (`mic_relay.rs` → `pw-loopback`), and the
+    /// phone plays the desktop's sound (`DesktopAudioPlayer.kt`, roadmap 2791).
     pub played_on_the_receiving_end: bool,
 }
 
@@ -216,9 +214,10 @@ impl Capabilities {
                         bitrate_bps: Some(out.bitrate_bps),
                         frame_duration_ms: out.frame_duration_ms,
                         this_build_encodes: cfg!(feature = "opus"),
-                        // No caller of `receiveAudio`, no MediaCodec Opus decoder
-                        // instance, no speaker. Roadmap 2054.
-                        played_on_the_receiving_end: false,
+                        // The Android app plays it: a MediaCodec Opus decoder into a
+                        // low-latency AudioTrack (`DesktopAudioPlayer.kt`), on by
+                        // default behind a Quick Settings switch.
+                        played_on_the_receiving_end: true,
                     },
                     AudioFormat {
                         direction: "phone -> desktop",
@@ -674,8 +673,7 @@ mod tests {
     #[test]
     fn audio_rows_say_which_end_can_hear_them() {
         // Roadmap 2054: an audio direction is only a feature if the device at
-        // the far end turns it into sound. The phone cannot, so the report must
-        // not imply that it does.
+        // the far end turns it into sound. Both ends now do (2791).
         let caps = Capabilities::collect();
         let played = |direction: &str| {
             caps.audio
@@ -684,14 +682,14 @@ mod tests {
                 .map(|format| format.played_on_the_receiving_end)
                 .unwrap_or_else(|| panic!("no `{direction}` row in the audio table"))
         };
-        assert!(!played("desktop -> phone"));
+        assert!(played("desktop -> phone"));
         // Linux plays the phone's mic into a pw-loopback source, Windows into a
         // virtual audio cable.
         assert!(played("phone -> desktop"));
-        // The generated doc says it out loud, not just in the JSON.
+        // With every row played, the doc has no unplayed note to explain.
         assert!(
-            caps.render_markdown().contains("no playout path for it"),
-            "the table must explain its own `**no**`"
+            !caps.render_markdown().contains("no playout path for it"),
+            "the doc still says a played direction is not heard"
         );
     }
 

@@ -44,7 +44,5 @@
 
 | Audio direction | Codec | This build encodes | Rate | Channels | Bitrate | Frame | Receiving end plays it |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| desktop -> phone | Opus | yes | 48000 Hz | 2 | 64000 bit/s | 20 ms | **no** |
+| desktop -> phone | Opus | yes | 48000 Hz | 2 | 64000 bit/s | 20 ms | yes |
 | phone -> desktop | Opus | yes | 48000 Hz | 1 | set by the sender | 20 ms | yes |
-
-The `desktop -> phone` direction is on the wire but not in the air: the receiving end has no playout path for it, so read that row as what the sender does, not as a feature you can hear (roadmap 2054 / 2791-2800).
