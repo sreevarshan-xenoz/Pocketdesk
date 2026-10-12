@@ -44,58 +44,68 @@ built, `cfg(target_os)` decides *how*.
 ## Phase W0 — cfg skeleton (Windows compiles; everything unsupported)
 
 ### Task W0.1: LF line endings
-- [ ] Add `.gitattributes` with `* text=auto eol=lf` (+ `*.bat text eol=crlf`, binary types).
-- [ ] `git add --renormalize .` must show no content change for tracked files; commit `chore: pin LF line endings`.
+- [x] Add `.gitattributes` with `* text=auto eol=lf` (+ `*.bat text eol=crlf`, binary types).
+- [x] `git add --renormalize .` must show no content change for tracked files; commit `chore: pin LF line endings`.
 
 ### Task W0.2: Target-specific dependency tables
 **Files:** `Cargo.toml`, `core/Cargo.toml`, `server/Cargo.toml`
-- [ ] Move ashpd, pipewire, libspa, x11rb, wayland-*, bitflags, evdev, ffmpeg-next to `[target.'cfg(target_os = "linux")'.dependencies]` (still optional in core).
-- [ ] Add `windows` (workspace dep) under `[target.'cfg(windows)'.dependencies]`.
-- [ ] `encode` keeps `dep:ffmpeg-next`; on Windows it resolves to nothing.
+- [x] Move ashpd, pipewire, libspa, x11rb, wayland-*, bitflags, evdev, ffmpeg-next to `[target.'cfg(target_os = "linux")'.dependencies]` (still optional in core).
+- [x] Add `windows` (workspace dep) under `[target.'cfg(windows)'.dependencies]`.
+- [x] `encode` keeps `dep:ffmpeg-next`; on Windows it resolves to nothing.
 
 ### Task W0.3: core compiles on Windows
 **Files:** `core/src/streaming/{mod.rs,capture.rs,capture_linux.rs (new, moved bodies),encoder.rs,encoder_detect.rs,audio_capture.rs,streamer.rs,capabilities.rs,bench.rs}`
-- [ ] Linux-only modules gated `#[cfg(target_os = "linux")]`: capture_screencopy, shield (Wayland), encoder_inproc, encoder_vaapi, PipeWire audio body, portal/x11rb capture bodies.
-- [ ] `DisplayServer::Windows`; `capture_attempts(Auto, Windows)` → error "no Windows capture backend in this build" (replaced in W1).
-- [ ] Encoder: InProcess/VaapiInProcess variants linux-only; `set_nonblocking` unix-only (Windows sidecar replaced in W1).
-- [ ] Unit test: `capture_attempts` returns Err for every backend on `DisplayServer::Windows` in W0.
+- [x] Linux-only modules gated `#[cfg(target_os = "linux")]`: capture_screencopy, shield (Wayland), encoder_inproc, encoder_vaapi, PipeWire audio body, portal/x11rb capture bodies.
+- [x] `DisplayServer::Windows`; `capture_attempts(Auto, Windows)` → error "no Windows capture backend in this build" (replaced in W1).
+- [x] Encoder: InProcess/VaapiInProcess variants linux-only; `set_nonblocking` unix-only (Windows sidecar replaced in W1).
+- [x] Unit test: `capture_attempts` returns Err for every backend on `DisplayServer::Windows` in W0.
 
 ### Task W0.4: server compiles on Windows
 **Files:** `server/src/{lib.rs,input_injector.rs,privacy.rs,hyprland.rs,iroh_endpoint.rs,mic_relay.rs,audio_control.rs,notification_monitor.rs,service.rs}`, plugins as needed
-- [ ] uinput backend + evdev table linux-only; enigo backend shared (works on Windows until W1's SendInput).
-- [ ] privacy evdev grab linux-only; Windows stubs return `Err("unsupported on this OS")`.
-- [ ] Hyprland socket code unix-only; `is_available()` false elsewhere.
-- [ ] iroh key: `0o600` on unix, plain write elsewhere (DACL in W1).
-- [ ] Gates green on Windows; commit per module group.
+- [x] uinput backend + evdev table linux-only; enigo backend shared (works on Windows until W1's SendInput).
+- [x] privacy evdev grab linux-only; Windows stubs return `Err("unsupported on this OS")`.
+- [x] Hyprland socket code unix-only; `is_available()` false elsewhere.
+- [x] iroh key: `0o600` on unix, plain write elsewhere (DACL in W1).
+- [x] Gates green on Windows; commit per module group.
 
 ## Phase W1 — core remote desktop
 
-- [ ] W1.1 Sidecar stdout/stderr reader threads on every OS (replaces fcntl); encoder tests.
-- [ ] W1.2 `HardwareEncoder::{Amf,Qsv,MediaFoundation}`, Windows probe + arg sets + Auto order; NVENC/AMF live roundtrip tests.
-- [ ] W1.3 WGC capture (`capture_wgc.rs`): monitor + HWND, BGRA VideoFrame; live test.
-- [ ] W1.4 DXGI duplication fallback (`capture_dxgi.rs`); live test; `capture_attempts(Auto, Windows) = [Wgc, Dxgi]`.
-- [ ] W1.5 DPI awareness at startup.
-- [ ] W1.6 SendInput backend: scancode map over `PHONE_EVDEV_KEY_RANGES`, unicode text, absolute virtual-desk mapping; unit + live tests.
-- [ ] W1.7 platform helpers: local_ips, hostname, secure_write (DACL), stop event, notify (toast).
-- [ ] W1.8 clipboard plugin (Win32) + listener.
-- [ ] W1.9 `install`/`uninstall` verbs: logon task, shortcut/AUMID, firewall; `--background` + file logs.
-- [ ] W1.10 capabilities-windows.md + test; README/dev-setup/AGENTS docs.
+- [x] W1.1 Sidecar stdout/stderr reader threads on every OS (replaces fcntl); encoder tests.
+- [x] W1.2 `HardwareEncoder::{Amf,Qsv,MediaFoundation}`, Windows probe + arg sets + Auto order; NVENC/AMF live roundtrip tests.
+- [x] W1.3 WGC capture (`capture_wgc.rs`): monitor + HWND, BGRA VideoFrame; live test.
+- [x] W1.4 DXGI duplication fallback (`capture_dxgi.rs`); live test; `capture_attempts(Auto, Windows) = [Wgc, Dxgi]`.
+- [x] W1.5 DPI awareness at startup.
+- [x] W1.6 SendInput backend: scancode map over `PHONE_EVDEV_KEY_RANGES`, unicode text, absolute virtual-desk mapping; unit + live tests. Whole-monitor taps are remapped from the captured monitor onto the layout in the streamer (found on the phone with two monitors).
+- [x] W1.7 platform helpers: local_ips, hostname, secure_write (DACL), stop event, notify (toast).
+- [x] W1.8 clipboard plugin (Win32). No change listener: the phone pulls the desktop clipboard every 4 s, as on Linux.
+- [x] W1.9 `install`/`uninstall` verbs: logon task, shortcut/AUMID, firewall; `--background` + file logs.
+- [x] W1.10 capabilities-windows.md + test; README/dev-setup/AGENTS docs.
 
 ## Phase W2 — audio
-- [ ] W2.1 WASAPI loopback → PcmBuffer (convert + resample) + tests.
-- [ ] W2.2 audio_control (endpoint volume, enumerate, IPolicyConfig switch).
-- [ ] W2.3 mic relay into virtual cable endpoint.
+- [x] W2.1 WASAPI loopback → PcmBuffer (convert + resample) + tests.
+- [x] W2.2 audio_control (endpoint volume, enumerate, IPolicyConfig switch).
+- [x] W2.3 mic relay into virtual cable endpoint.
 
 ## Phase W3 — plugins
-- [ ] battery, power, exec, windows list/activate/close, WinEvent HUD feed, monitors, drive roots, siren.
+- [x] battery, power, exec, windows list, HUD feed, monitors, siren.
+  - The HUD feed is a 1 s diff poll plus a 4 s refresh, not WinEvent hooks.
+  - Window activate/close is not built: no OS has it (the picker crops, it does not focus).
+  - Drive roots dropped: file browse stays confined to the home directory on every OS, by design.
 
 ## Phase W4 — privacy
-- [ ] LL hooks + TTL watchdog, blackout window, lock; capture-excluded shield.
+- [x] LL hooks + TTL watchdog, blackout window, lock; capture-excluded shield.
 
 ## Phase W5 — finish
-- [ ] notification mirror (sparse MSIX identity, optional), CI windows job, release zip, checklist §22, AGENTS status.
+- [x] Notification mirror: `UserNotificationListener`, gated on a package identity and granted access; reports why and stops otherwise.
+- [ ] Sparse MSIX package that gives `linux-link.exe` that identity (optional; without it the mirror is off).
+- [x] Device checklist §23 (Windows host).
+- [ ] CI windows job.
+- [ ] Release zip.
+- [x] AGENTS status.
 
 ## Owed by the user (cannot be done from this box)
 - Linux gate run on the Arch box for every W0 move commit.
-- Phone verification of W1–W4 exit gates.
+- Phone verification of W1–W4 exit gates. Done on 2026-10-12 with a Galaxy A71 (Android 16) over USB (`adb reverse`, iroh direct):
+  - pairing, video, taps on two monitors, phone ↔ PC clipboard both ways, the HUD's window titles and battery.
+  - Not covered: keyboard typing (the app has no in-session keyboard), the LAN QUIC path (`adb reverse` carries TCP only), `install`/`stop`, and power/lock (never run on this box).
 - Push / CI first run.

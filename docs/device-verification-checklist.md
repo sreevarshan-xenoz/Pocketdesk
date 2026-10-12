@@ -487,8 +487,21 @@ Recording these here so a tester does not file them as regressions:
 
 Built on `feat/windows-host`; plan `docs/superpowers/plans/2026-10-09-windows-host.md`. Box-verified
 already (ignored live tests, run on the dev PC): WGC and DXGI capture of a real frame, NVENC/AMF/MF
-encodes, SendInput pointer + key, clipboard round-trip, toast accepted. Everything below needs the
-phone or touches system settings, so it has not been run.
+encodes, SendInput pointer + key, clipboard round-trip, toast accepted.
+
+**Run 1, 2026-10-12 — Galaxy A71 (Android 16), USB.** Control rode `adb reverse tcp:1716`; video
+fell back to iroh with a punched direct path, because `adb reverse` carries no UDP. The PC has an
+RTX 3060 + Radeon iGPU, a 2560x1080 primary, and a 2048x1152 screen to its right, 91 px higher.
+Defects found here are fixed on the branch:
+- black video (sidecar NAL framing; the bridge dropping the last frame of every batch);
+- frame-number gaps after a decoder reconfigure;
+- taps landing on the wrong monitor;
+- four encoder rebuilds at every session start;
+- HUD window titles lost to connection eviction;
+- silent bridge logs.
+
+Video ran at 11–16 fps (damage-driven) with e2e 13–19 ms and rtt ~10 ms. Ticked items below were seen
+on this run; the rest are still open.
 
 Setup, once, from the build output or the release zip:
 
@@ -504,15 +517,22 @@ Get-Content "$env:LOCALAPPDATA\linux-link\logs\linux-link.*.log" -Wait
       Windows accepted it).
 - [ ] The phone discovers the PC on the LAN (mDNS) and over the tailnet, pairs with the PIN, and the
       log shows `Auto-detect: selecting NVENC` (or AMF/MF on other GPUs) and `WGC capture started`.
+      *Run 1: PIN pairing, NVENC and WGC confirmed over USB; LAN discovery and the tailnet not tried.*
 - [ ] Video is live and correct-sized on a 100 % and on a scaled (125/150 %) display; a still desktop
       keeps the HUD alive (the 1 s heartbeat) instead of tripping the 10 s dead-link card.
+      *Run 1: live, correct-sized and kept alive on a still desktop at 100 %; no scaled display tried.*
 - [ ] Taps land on the pixel tapped, on a single monitor and on a secondary monitor left of/above the
       primary (negative origin); drag selects text.
+      *Run 1: taps on the primary land within 5 px with a second screen present, after the monitor →
+      layout remap fix. Not tried: streaming the secondary, a monitor left of the primary, drag.*
 - [ ] Phone keyboard: letters, digits, shifted capitals, arrows, F11/F12, Esc, Super (Start menu),
       right Alt, the app key; pasted text with capitals, accents and an emoji arrives intact.
+      *Run 1: not testable — the app has no in-session keyboard (only the shortcut bar); Android
+      Share sends text to the PC clipboard, not as typing.*
 - [ ] Focusing an elevated window (e.g. an admin terminal) makes input stop with one `Windows refused
       injected input` log line, and input resumes on returning to a normal window.
-- [ ] Clipboard: phone → PC paste and PC → phone fetch, including non-ASCII.
+- [x] Clipboard: phone → PC paste and PC → phone fetch, including non-ASCII. *Run 1: `äö` and `✓`
+      both ways; the PC → phone direction is the app's 4 s poll.*
 - [ ] Window crop: picking a window streams just that window; closing it returns to the monitor.
 - [ ] A UAC prompt or Win+L mid-session: the stream recovers after it is dismissed (WGC keeps running; on
       the DXGI fallback, access-lost rebuilds the duplication).
