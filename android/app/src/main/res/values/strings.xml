@@ -7,14 +7,14 @@
   remote content. Locales must stay in sync with res/xml/locales_config.xml.
 -->
 <resources>
-    <string name="share_target_label">Send to Linux Link</string>
-    <string name="app_name">Linux Link</string>
+    <string name="share_target_label">Send to Pocketdesk</string>
+    <string name="app_name">Pocketdesk</string>
 
     <!-- ConnectScreen -->
     <string name="host_address">Host address</string>
     <string name="home_subtitle">Your saved computers</string>
     <string name="no_computers">No computers yet.</string>
-    <string name="home_explainer">Needs a Linux computer running the Linux Link service on your network.</string>
+    <string name="home_explainer">Needs a Linux or Windows computer running the Pocketdesk service on your network.</string>
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
     <string name="settings_appearance">Appearance</string>
@@ -125,7 +125,7 @@
     <string name="reply_to">Reply to %1$s</string>
 
     <!-- ShareActivity -->
-    <string name="share_no_host">Linux Link: no saved host. Connect once from the app first.</string>
+    <string name="share_no_host">Pocketdesk: no saved host. Connect once from the app first.</string>
     <string name="share_nothing">Nothing shareable in this intent.</string>
     <string name="share_sending_text">Sending text to %1$s…</string>
     <string name="share_sent_clipboard">Sent to clipboard.</string>
@@ -184,14 +184,14 @@
     <string name="output_device">Output device</string>
     <string name="audio_rejected">Desktop rejected the request</string>
     <string name="audio_failed">Audio control failed</string>
-    <string name="err_host_unreachable">Nothing answered on that address. Is Linux Link running on the desktop?</string>
+    <string name="err_host_unreachable">Nothing answered on that address. Is Pocketdesk running on the desktop?</string>
     <string name="err_timeout">The desktop took too long to answer. Make sure it is awake and reachable.</string>
     <string name="err_lan_only">Not reachable over LAN, and this desktop has no saved internet (WAN) identity yet. Connect once from the same network first.</string>
     <string name="err_trust_mismatch">Security credentials no longer match this desktop. Pair again to continue.</string>
     <string name="err_pairing_declined">The desktop declined pairing — the PIN was wrong or expired.</string>
     <string name="err_link_dropped">The video link dropped. The desktop may have slept or left the network.</string>
     <string name="err_generic">Something went wrong reaching the desktop.</string>
-    <string name="connecting_still">Still trying… check that the desktop is awake and running Linux Link.</string>
+    <string name="connecting_still">Still trying… check that the desktop is awake and running Pocketdesk.</string>
     <string name="repair_pairing">Pair again</string>
     <string name="session_menu">Session menu</string>
 </resources>

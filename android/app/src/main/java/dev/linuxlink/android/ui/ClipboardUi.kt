@@ -79,7 +79,7 @@ fun localClipboardText(ctx: Context): String? =
 fun writeLocalClipboard(ctx: Context, text: String) {
     val cm = ctx.getSystemService(ClipboardManager::class.java) ?: return
     if (localClipboardText(ctx) == text) return
-    cm.setPrimaryClip(ClipData.newPlainText("Linux Link", text))
+    cm.setPrimaryClip(ClipData.newPlainText("Pocketdesk", text))
 }
 
 /**

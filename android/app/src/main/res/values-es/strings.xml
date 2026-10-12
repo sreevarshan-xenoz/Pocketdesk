@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="share_target_label">Enviar a Linux Link</string>
-    <string name="app_name">Linux Link</string>
+    <string name="share_target_label">Enviar a Pocketdesk</string>
+    <string name="app_name">Pocketdesk</string>
 
     <!-- ConnectScreen -->
     <string name="host_address">Dirección del host</string>
     <string name="home_subtitle">Tus equipos guardados</string>
     <string name="no_computers">Aún no hay equipos.</string>
-    <string name="home_explainer">Necesita un equipo Linux con el servicio Linux Link en su red.</string>
+    <string name="home_explainer">Necesita un equipo Linux o Windows con el servicio Pocketdesk en su red.</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_back">Atrás</string>
     <string name="settings_appearance">Apariencia</string>
@@ -118,7 +118,7 @@
     <string name="reply_to">Responder a %1$s</string>
 
     <!-- ShareActivity -->
-    <string name="share_no_host">Linux Link: no hay host guardado. Conéctate una vez desde la app.</string>
+    <string name="share_no_host">Pocketdesk: no hay host guardado. Conéctate una vez desde la app.</string>
     <string name="share_nothing">No hay nada compartible en esta intent.</string>
     <string name="share_sending_text">Enviando texto a %1$s…</string>
     <string name="share_sent_clipboard">Enviado al portapapeles.</string>
@@ -177,14 +177,14 @@
     <string name="output_device">Dispositivo de salida</string>
     <string name="audio_rejected">El escritorio rechazó la solicitud</string>
         <string name="audio_failed">Error de control de audio</string>
-    <string name="err_host_unreachable">Nadie respondió en esa dirección. ¿Está Linux Link activo en el escritorio?</string>
+    <string name="err_host_unreachable">Nadie respondió en esa dirección. ¿Está Pocketdesk activo en el escritorio?</string>
     <string name="err_timeout">El escritorio tardó demasiado en responder. Asegúrate de que esté despierto y accesible.</string>
     <string name="err_lan_only">No es alcanzable por LAN y este escritorio aún no tiene identidad de internet (WAN) guardada. Conéctate primero desde la misma red.</string>
     <string name="err_trust_mismatch">Las credenciales de seguridad ya no coinciden con este escritorio. Vuelve a emparejar para continuar.</string>
     <string name="err_pairing_declined">El escritorio rechazó el emparejamiento: el PIN era incorrecto o expiró.</string>
     <string name="err_link_dropped">Se cayó el enlace de video. El escritorio puede haberse dormido o salido de la red.</string>
     <string name="err_generic">Algo salió mal al contactar el escritorio.</string>
-    <string name="connecting_still">Siguiendo intentándolo… verifica que el escritorio esté despierto con Linux Link activo.</string>
+    <string name="connecting_still">Siguiendo intentándolo… verifica que el escritorio esté despierto con Pocketdesk activo.</string>
     <string name="repair_pairing">Emparejar de nuevo</string>
     <string name="session_menu">Menú de sesión</string>
 </resources>

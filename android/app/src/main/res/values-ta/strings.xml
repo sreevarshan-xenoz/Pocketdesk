@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="share_target_label">Linux Link-க்கு அனுப்பு</string>
-    <string name="app_name">Linux Link</string>
+    <string name="share_target_label">Pocketdesk-க்கு அனுப்பு</string>
+    <string name="app_name">Pocketdesk</string>
 
     <!-- ConnectScreen -->
     <string name="host_address">ஹோஸ்ட் முகவரி</string>
     <string name="home_subtitle">உங்கள் சேமித்த கணினிகள்</string>
     <string name="no_computers">இன்னும் கணினிகள் இல்லை.</string>
-    <string name="home_explainer">உங்கள் பிணையத்தில் Linux Link சேவையை இயக்கும் ஒரு Linux கணினி தேவை.</string>
+    <string name="home_explainer">உங்கள் பிணையத்தில் Pocketdesk சேவையை இயக்கும் ஒரு Linux அல்லது Windows கணினி தேவை.</string>
     <string name="settings_title">அமைப்புகள்</string>
     <string name="settings_back">பின்செல்</string>
     <string name="settings_appearance">தோற்றம்</string>
@@ -118,7 +118,7 @@
     <string name="reply_to">%1$s க்கு பதிலளி</string>
 
     <!-- ShareActivity -->
-    <string name="share_no_host">Linux Link: சேமித்த ஹோஸ்ட் இல்லை. முதலில் செயலியிலிருந்து ஒருமுறை இணையுங்கள்.</string>
+    <string name="share_no_host">Pocketdesk: சேமித்த ஹோஸ்ட் இல்லை. முதலில் செயலியிலிருந்து ஒருமுறை இணையுங்கள்.</string>
     <string name="share_nothing">இந்த intent-ல் பகிர ஏதும் இல்லை.</string>
     <string name="share_sending_text">%1$s க்கு உரை அனுப்புகிறது…</string>
     <string name="share_sent_clipboard">க்ளிப் போர்டுக்கு அனுப்பப்பட்டது.</string>
@@ -177,14 +177,14 @@
     <string name="output_device">வெளியீட்டுச் சாதனம்</string>
     <string name="audio_rejected">டெஸ்க்டாப் கோரிக்கையை மறுத்தது</string>
     <string name="audio_failed">ஒலிக் கட்டுப்பாடு தோல்வி</string>
-    <string name="err_host_unreachable">அந்த முகவரியில் எதுவும் பதிலளிக்கவில்லை. டெஸ்க்டாப்பில் Linux Link இயங்குகிறதா?</string>
+    <string name="err_host_unreachable">அந்த முகவரியில் எதுவும் பதிலளிக்கவில்லை. டெஸ்க்டாப்பில் Pocketdesk இயங்குகிறதா?</string>
     <string name="err_timeout">டெஸ்க்டாப் பதிலளிக்க அதிக நேரம் எடுத்தது. அது விழிப்பிலும் அணுகக்கூடிய நிலையிலும் உள்ளதா பார்க்கவும்.</string>
     <string name="err_lan_only">LAN மூலம் அணுக முடியவில்லை; இந்த டெஸ்க்டாப்பில் சேமித்த இணைய (WAN) அடையாளம் இல்லை. முதலில் ஒரே வலையத்தில் இருந்து இணையுங்கள்.</string>
     <string name="err_trust_mismatch">பாதுகாப்பு நற்சான்றங்கள் இந்த டெஸ்க்டாப்புடன் பொருந்தவில்லை. தொடர மீண்டும் இணையுங்கள்.</string>
     <string name="err_pairing_declined">டெஸ்க்டாப் இணைவை மறுத்தது — PIN தவறு அல்லது காலாவதியானது.</string>
     <string name="err_link_dropped">வீடியோ இணைப்பு அறுந்தது. டெஸ்க்டாப் உறங்கியிருக்கலாம் அல்லது வலையத்தை விட்டு வெளியேறியிருக்கலாம்.</string>
     <string name="err_generic">டெஸ்க்டாப்பை அணுகும்போது ஏதோ தவறு நடந்தது.</string>
-    <string name="connecting_still">முயற்சி தொடர்கிறது… டெஸ்க்டாப் விழிப்புடன் Linux Link-உடன் உள்ளதா பார்க்கவும்.</string>
+    <string name="connecting_still">முயற்சி தொடர்கிறது… டெஸ்க்டாப் விழிப்புடன் Pocketdesk-உடன் உள்ளதா பார்க்கவும்.</string>
     <string name="repair_pairing">மீண்டும் இணையுங்கள்</string>
     <string name="session_menu">அமர்வு பட்டியல்</string>
 </resources>
