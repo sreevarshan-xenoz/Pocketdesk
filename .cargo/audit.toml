@@ -1,0 +1,18 @@
+# cargo audit (CI's `audit` job) reads this file.
+#
+# Ignored advisories must each say why they cannot reach a running
+# Pocketdesk, and when to drop them.
+[advisories]
+ignore = [
+    # quick-xml < 0.41 (two copies): quadratic duplicate-attribute check
+    # (0194) and unbounded namespace allocation in NsReader (0195), both
+    # denial of service on hostile XML. Neither is reachable at run time:
+    # - quick-xml 0.30 is a build-dependency of xcb (parsing the XCB
+    #   protocol XML in its build script);
+    # - quick-xml 0.39 runs inside the wayland-scanner proc-macro, on the
+    #   Wayland protocol XML compiled into the binary.
+    # The only XML either parses is in the dependencies' own sources.
+    # Drop these once xcb and wayland-scanner release on quick-xml >= 0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
