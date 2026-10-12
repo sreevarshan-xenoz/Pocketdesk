@@ -93,11 +93,18 @@ class ShadowText(private val keep: Int = 1024) {
         return true
     }
 
+    /**
+     * Forget everything. Always paired with an IME restart, which counts its
+     * positions from 0 again, so the offset starts over too.
+     */
     fun clear() {
-        dropped += committed.length
+        dropped = 0
         committed.setLength(0)
         composing = ""
     }
+
+    /** The cursor, counted the way the IME counts it. */
+    fun cursor(): Int = dropped + committed.length + composing.length
 
     private fun append(text: String) {
         committed.append(text)

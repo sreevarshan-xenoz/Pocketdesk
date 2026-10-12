@@ -444,8 +444,12 @@ object RustCore {
      * key, release modifiers in reverse. Modifiers use `KEYCODE_*` constants.
      */
     fun hotkey(address: String, port: Int, key: Int, vararg modifiers: Int): Result<Unit> {
-        for (mod in modifiers) {
-            holdKey(address, port, mod).onFailure { return Result.failure(it) }
+        for ((index, mod) in modifiers.withIndex()) {
+            holdKey(address, port, mod).onFailure { failure ->
+                // Let go of what is already held, or it stays down on the desktop.
+                for (held in modifiers.take(index).reversed()) releaseKey(address, port, held)
+                return Result.failure(failure)
+            }
         }
         val tapped = tapKey(address, port, key)
         for (mod in modifiers.reversed()) {

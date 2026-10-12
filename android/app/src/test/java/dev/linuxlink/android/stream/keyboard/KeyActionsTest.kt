@@ -49,6 +49,24 @@ class KeyActionsTest {
     }
 
     @Test
+    fun modifiersApplyToTheFirstKeyOfAnEditOnly() {
+        assertEquals(
+            listOf(KeyAction.Combo(listOf(ctrl), KeyEvent.KEYCODE_W), KeyAction.Text("hat")),
+            KeyActions.forEdit(Edit(0, "what"), listOf(KeyModifier.Ctrl)),
+        )
+        assertEquals(
+            "a replacement's backspaces are bookkeeping, never shortcuts",
+            listOf(KeyAction.Tap(KeyEvent.KEYCODE_DEL), KeyAction.Combo(listOf(ctrl), KeyEvent.KEYCODE_X)),
+            KeyActions.forEdit(Edit(1, "x"), listOf(KeyModifier.Ctrl)),
+        )
+        assertEquals(
+            "a plain delete is the user's key: Ctrl+Backspace once",
+            listOf(KeyAction.Combo(listOf(ctrl), KeyEvent.KEYCODE_DEL), KeyAction.Tap(KeyEvent.KEYCODE_DEL)),
+            KeyActions.forEdit(Edit(2, ""), listOf(KeyModifier.Ctrl)),
+        )
+    }
+
+    @Test
     fun aKeyWithModifiersIsACombo() {
         assertEquals(KeyAction.Tap(KeyEvent.KEYCODE_ESCAPE), KeyActions.forKey(KeyEvent.KEYCODE_ESCAPE, emptyList()))
         assertEquals(

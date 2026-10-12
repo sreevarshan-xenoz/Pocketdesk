@@ -52,6 +52,8 @@ class KeyboardSession(
     fun open() {
         val view = sink ?: return
         controller.reset()
+        view.isFocusable = true
+        view.isFocusableInTouchMode = true
         view.requestFocus()
         imm.restartInput(view)
         imm.showSoftInput(view, 0)
@@ -61,6 +63,8 @@ class KeyboardSession(
         val view = sink ?: return
         imm.hideSoftInputFromWindow(view.windowToken, 0)
         view.clearFocus()
+        view.isFocusable = false
+        view.isFocusableInTouchMode = false
         latch.reset()
     }
 

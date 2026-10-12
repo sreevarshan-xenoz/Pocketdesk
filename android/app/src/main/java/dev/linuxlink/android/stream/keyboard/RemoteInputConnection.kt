@@ -75,7 +75,10 @@ class RemoteInputConnection(
         return TextUtils.getCapsMode(before, before.length, reqModes)
     }
 
-    override fun setSelection(start: Int, end: Int): Boolean = true
+    override fun setSelection(start: Int, end: Int): Boolean {
+        keyboard.selectionMoved(start, end)
+        return true
+    }
 
     override fun getExtractedText(request: ExtractedTextRequest?, flags: Int): ExtractedText? = null
 

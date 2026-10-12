@@ -75,6 +75,18 @@ class ShadowTextTest {
     }
 
     @Test
+    fun afterAClearTheRestartedImeCountsFromZeroAgain() {
+        // clear() pairs with restartInput, which starts the IME at offset 0.
+        val shadow = ShadowText()
+        shadow.commit("hello ")
+        shadow.clear()
+        shadow.commit("world")
+        assertTrue(shadow.recompose(start = 0, end = 5))
+        assertEquals(Edit(1, ""), shadow.setComposing("worl"))
+        assertEquals("the cursor in the IME's own count", 4, shadow.cursor())
+    }
+
+    @Test
     fun clearForgetsEverything() {
         val shadow = ShadowText()
         shadow.commit("abc")

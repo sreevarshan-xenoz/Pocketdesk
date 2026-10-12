@@ -93,6 +93,9 @@
     <string name="row_desktop_sound">Sonido del escritorio en el teléfono</string>
     <string name="keyboard_open">Teclado</string>
     <string name="keyboard_hide">Ocultar teclado</string>
+    <string name="keyboard_mod_off">desactivado</string>
+    <string name="keyboard_mod_once">para la siguiente tecla</string>
+    <string name="keyboard_mod_locked">bloqueado</string>
     <string name="row_privacy">Bloqueo de privacidad</string>
     <string name="row_pairing">Emparejamiento</string>
     <string name="value_direct_touch">Toque directo</string>

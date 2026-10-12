@@ -100,6 +100,9 @@
     <string name="row_desktop_sound">Desktop sound on this phone</string>
     <string name="keyboard_open">Keyboard</string>
     <string name="keyboard_hide">Hide keyboard</string>
+    <string name="keyboard_mod_off">off</string>
+    <string name="keyboard_mod_once">for the next key</string>
+    <string name="keyboard_mod_locked">locked</string>
     <string name="row_privacy">Privacy grab</string>
     <string name="row_pairing">Pairing</string>
     <string name="value_direct_touch">Direct touch</string>

@@ -17,8 +17,10 @@ class KeyboardSinkView(context: Context) : View(context) {
     var keyboard: KeyboardController? = null
 
     init {
-        isFocusable = true
-        isFocusableInTouchMode = true
+        // Focusable only while the keyboard is open (KeyboardSession), so
+        // a hardware keyboard cannot reach the desktop with no bar showing.
+        isFocusable = false
+        isFocusableInTouchMode = false
     }
 
     override fun onCheckIsTextEditor(): Boolean = true
@@ -26,8 +28,11 @@ class KeyboardSinkView(context: Context) : View(context) {
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         val keyboard = keyboard ?: return null
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        // Remote logins and website passwords are typed through here: the
+        // phone keyboard must not learn them.
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or
             EditorInfo.IME_FLAG_NO_FULLSCREEN or
+            EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or
             EditorInfo.IME_ACTION_NONE
         outAttrs.initialSelStart = 0
         outAttrs.initialSelEnd = 0

@@ -7,7 +7,7 @@ class ModifierLatchTest {
     @Test
     fun aTapLatchesForOneKey() {
         val latch = ModifierLatch()
-        latch.tap(KeyModifier.Ctrl)
+        latch.tap(KeyModifier.Ctrl, nowMs = 0)
         assertEquals(LatchState.Once, latch.state(KeyModifier.Ctrl))
         assertEquals(listOf(KeyModifier.Ctrl), latch.consume())
         assertEquals(LatchState.Off, latch.state(KeyModifier.Ctrl))
@@ -17,9 +17,18 @@ class ModifierLatchTest {
     @Test
     fun aSecondTapUnlatches() {
         val latch = ModifierLatch()
-        latch.tap(KeyModifier.Alt)
-        latch.tap(KeyModifier.Alt)
+        latch.tap(KeyModifier.Alt, nowMs = 0)
+        latch.tap(KeyModifier.Alt, nowMs = 1_000)
         assertEquals(LatchState.Off, latch.state(KeyModifier.Alt))
+    }
+
+    @Test
+    fun aQuickSecondTapLocksAndTheFirstLatchesAtOnce() {
+        val latch = ModifierLatch()
+        latch.tap(KeyModifier.Ctrl, nowMs = 1_000)
+        assertEquals("latched immediately, not after a double-tap timeout", LatchState.Once, latch.state(KeyModifier.Ctrl))
+        latch.tap(KeyModifier.Ctrl, nowMs = 1_200)
+        assertEquals(LatchState.Locked, latch.state(KeyModifier.Ctrl))
     }
 
     @Test
@@ -28,16 +37,16 @@ class ModifierLatchTest {
         latch.lock(KeyModifier.Shift)
         assertEquals(listOf(KeyModifier.Shift), latch.consume())
         assertEquals(listOf(KeyModifier.Shift), latch.consume())
-        latch.tap(KeyModifier.Shift)
+        latch.tap(KeyModifier.Shift, nowMs = 5_000)
         assertEquals(LatchState.Off, latch.state(KeyModifier.Shift))
     }
 
     @Test
     fun modifiersComeOutInAFixedOrder() {
         val latch = ModifierLatch()
-        latch.tap(KeyModifier.Super)
+        latch.tap(KeyModifier.Super, nowMs = 0)
         latch.lock(KeyModifier.Shift)
-        latch.tap(KeyModifier.Ctrl)
+        latch.tap(KeyModifier.Ctrl, nowMs = 0)
         assertEquals(listOf(KeyModifier.Ctrl, KeyModifier.Shift, KeyModifier.Super), latch.consume())
         assertEquals("only the lock survives", listOf(KeyModifier.Shift), latch.active())
     }

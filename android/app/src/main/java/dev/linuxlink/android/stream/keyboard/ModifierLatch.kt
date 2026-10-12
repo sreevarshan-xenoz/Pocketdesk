@@ -21,14 +21,30 @@ enum class LatchState { Off, Once, Locked }
  */
 class ModifierLatch {
     private val states = Array(KeyModifier.entries.size) { LatchState.Off }
+    private val lastTapMs = LongArray(KeyModifier.entries.size) { Long.MIN_VALUE / 2 }
 
     /** Called after any change, so the bar can redraw. */
     var onChange: (() -> Unit)? = null
 
     fun state(modifier: KeyModifier): LatchState = states[modifier.ordinal]
 
-    fun tap(modifier: KeyModifier) {
-        set(modifier, if (state(modifier) == LatchState.Off) LatchState.Once else LatchState.Off)
+    /**
+     * A tap at [nowMs]: off latches for one key at once (no waiting to see
+     * whether a double tap follows), a second tap within [DOUBLE_TAP_MS]
+     * locks, and any later tap turns it off.
+     */
+    fun tap(modifier: KeyModifier, nowMs: Long) {
+        val index = modifier.ordinal
+        val quick = nowMs - lastTapMs[index] <= DOUBLE_TAP_MS
+        lastTapMs[index] = nowMs
+        set(
+            modifier,
+            when (state(modifier)) {
+                LatchState.Off -> LatchState.Once
+                LatchState.Once -> if (quick) LatchState.Locked else LatchState.Off
+                LatchState.Locked -> LatchState.Off
+            },
+        )
     }
 
     fun lock(modifier: KeyModifier) = set(modifier, LatchState.Locked)
@@ -54,5 +70,9 @@ class ModifierLatch {
     private fun set(modifier: KeyModifier, value: LatchState) {
         states[modifier.ordinal] = value
         onChange?.invoke()
+    }
+
+    companion object {
+        const val DOUBLE_TAP_MS = 300L
     }
 }

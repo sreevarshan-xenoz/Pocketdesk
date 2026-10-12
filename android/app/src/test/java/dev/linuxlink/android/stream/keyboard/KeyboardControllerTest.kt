@@ -19,7 +19,7 @@ class KeyboardControllerTest {
 
     @Test
     fun aLatchedCtrlTurnsTheNextLetterIntoAShortcutAndResetsTheIme() {
-        latch.tap(KeyModifier.Ctrl)
+        latch.tap(KeyModifier.Ctrl, nowMs = 0)
         keyboard.setComposing("c")
         assertEquals(listOf(KeyAction.Combo(listOf(KeyModifier.Ctrl.keyCode), KeyEvent.KEYCODE_C)), sent)
         assertEquals(1, imeResets)
@@ -30,7 +30,7 @@ class KeyboardControllerTest {
 
     @Test
     fun barKeysUseAndConsumeTheLatch() {
-        latch.tap(KeyModifier.Alt)
+        latch.tap(KeyModifier.Alt, nowMs = 0)
         keyboard.key(KeyEvent.KEYCODE_TAB)
         keyboard.key(KeyEvent.KEYCODE_TAB)
         assertEquals(
@@ -45,6 +45,60 @@ class KeyboardControllerTest {
         keyboard.key(KeyEvent.KEYCODE_DEL)
         assertEquals("a", keyboard.textBefore(10))
         assertEquals(KeyAction.Tap(KeyEvent.KEYCODE_DEL), sent.last())
+    }
+
+    @Test
+    fun aRecomposeTheShadowCannotHonourResyncsInsteadOfDuplicating() {
+        keyboard.commit("hello ")
+        keyboard.recompose(start = 100, end = 105)
+        assertEquals(1, imeResets)
+        sent.clear()
+        keyboard.setComposing("worl")
+        assertEquals("diffed against nothing, not a stale word", listOf(KeyAction.Text("worl")), sent)
+    }
+
+    @Test
+    fun movingTheCaretResyncsTheIme() {
+        keyboard.setComposing("hel")
+        keyboard.key(KeyEvent.KEYCODE_DPAD_LEFT)
+        assertEquals(1, imeResets)
+        keyboard.setComposing("p")
+        assertEquals(KeyAction.Text("p"), sent.last())
+        keyboard.selectionMoved(start = 0, end = 0)
+        assertEquals("a selection away from the end resyncs", 2, imeResets)
+        keyboard.contextLost()
+        assertEquals(3, imeResets)
+    }
+
+    @Test
+    fun imeKeyEventsKeepTheShadowInStep() {
+        keyboard.commit("ab")
+        keyboard.hardwareKey(KeyEvent.KEYCODE_DEL, null, held = emptyList())
+        assertEquals("a", keyboard.textBefore(10))
+        keyboard.hardwareKey(KeyEvent.KEYCODE_ENTER, null, held = emptyList())
+        assertEquals("a\n", keyboard.textBefore(10))
+        assertEquals(0, imeResets)
+    }
+
+    @Test
+    fun aOnceLatchIsOneKeyEvenForAWholeSwipedWord() {
+        latch.tap(KeyModifier.Ctrl, nowMs = 0)
+        keyboard.setComposing("what")
+        assertEquals(
+            listOf(KeyAction.Combo(listOf(KeyModifier.Ctrl.keyCode), KeyEvent.KEYCODE_W), KeyAction.Text("hat")),
+            sent,
+        )
+        assertEquals(1, imeResets)
+    }
+
+    @Test
+    fun anAutocorrectWithALatchSendsPlainBackspaces() {
+        keyboard.setComposing("teh")
+        sent.clear()
+        latch.tap(KeyModifier.Ctrl, nowMs = 0)
+        keyboard.commit("the ")
+        assertEquals(KeyAction.Tap(KeyEvent.KEYCODE_DEL), sent.first())
+        assertEquals(1, imeResets)
     }
 
     @Test

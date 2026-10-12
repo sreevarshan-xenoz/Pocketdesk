@@ -64,6 +64,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
@@ -91,7 +93,7 @@ import dev.linuxlink.android.stream.StreamStatus
 import dev.linuxlink.android.stream.StreamTransportKind
 import dev.linuxlink.android.stream.keyboard.KeyAction
 import dev.linuxlink.android.stream.keyboard.KeyboardBar
-import dev.linuxlink.android.stream.keyboard.KeyboardBarHeight
+import dev.linuxlink.android.stream.keyboard.keyboardBarHeight
 import dev.linuxlink.android.stream.keyboard.KeyboardSession
 import dev.linuxlink.android.stream.keyboard.KeyboardSinkView
 import androidx.compose.ui.viewinterop.AndroidView
@@ -137,10 +139,17 @@ fun RemoteScreen(
         }
     }
     var keyboardOpen by remember { mutableStateOf(false) }
+    // A short window (landscape) gets the one-row bar, so the stream keeps room.
+    val compactBar = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() } <
+        COMPACT_BAR_BELOW_DP.dp
     var latchVersion by remember { mutableIntStateOf(0) }
     DisposableEffect(keyboard) {
         keyboard.latch.onChange = { latchVersion++ }
-        onDispose { keyboard.latch.onChange = null }
+        onDispose {
+            keyboard.latch.onChange = null
+            // Leaving the session must not leave the IME up over Home.
+            keyboard.close()
+        }
     }
     // The bar follows the IME: once the keyboard has shown, its going away
     // (Back, or the IME's own hide key) closes the bar too.
@@ -151,9 +160,11 @@ fun RemoteScreen(
             !keyboardOpen -> imeSeen = false
             imeVisible -> imeSeen = true
             imeSeen -> {
+                // Back or the IME's own hide key: close fully, so the sink
+                // stops taking hardware keys.
                 keyboardOpen = false
                 imeSeen = false
-                keyboard.latch.reset()
+                keyboard.close()
             }
         }
     }
@@ -715,12 +726,17 @@ fun RemoteScreen(
         // desktop — no swallowed input, no invisible edge strip to hunt for.
         Box(
             modifier = streamMod
-                .then(if (keyboardOpen) Modifier.padding(bottom = KeyboardBarHeight) else Modifier)
+                .then(if (keyboardOpen) Modifier.padding(bottom = keyboardBarHeight(compactBar)) else Modifier)
                 .pointerInput(Unit) {
                 awaitEachGesture {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         if (event.changes.any { it.pressed }) chromeVisible = true
+                        // A touch on the desktop may move its caret: the
+                        // keyboard's idea of the field is stale.
+                        if (keyboardOpen && event.changes.any { it.pressed && !it.previousPressed }) {
+                            keyboard.controller.contextLost()
+                        }
                         if (event.changes.all { !it.pressed }) break
                     }
                 }
@@ -1058,7 +1074,8 @@ fun RemoteScreen(
 
         // F1: the IME's target (1 dp, invisible) and the bar above the keyboard.
         AndroidView(
-            factory = { KeyboardSinkView(it).also(keyboard::attach) },
+            factory = { KeyboardSinkView(it) },
+            update = { keyboard.attach(it) },
             modifier = Modifier.size(1.dp).align(Alignment.TopStart),
         )
         if (keyboardOpen && !inPictureInPicture) {
@@ -1066,6 +1083,7 @@ fun RemoteScreen(
                 keyboard = keyboard,
                 latchVersion = latchVersion,
                 haptics = haptics,
+                compact = compactBar,
                 onHide = {
                     keyboard.close()
                     keyboardOpen = false
@@ -1261,3 +1279,6 @@ private tailrec fun Context.findActivity(): Activity? =
         is ContextWrapper -> baseContext?.findActivity()
         else -> null
     }
+
+/** Below this window height (dp) the keyboard bar uses one row. */
+private const val COMPACT_BAR_BELOW_DP = 500

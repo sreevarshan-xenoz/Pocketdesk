@@ -19,13 +19,25 @@ object KeyActions {
 
     /**
      * Backspaces become Delete taps. Text is typed as text, except that a
-     * newline is an Enter tap and a tab a Tab tap. With [modifiers] latched,
-     * each character with a key of its own becomes a combo (Ctrl + c is the
-     * shortcut, not the letter); one without a key is still typed.
+     * newline is an Enter tap and a tab a Tab tap. [modifiers] (the latch)
+     * apply to the edit's first key only, because a latch is one key: the
+     * first character, when it has a key of its own (Ctrl + c is the
+     * shortcut, not the letter), or the first Backspace of a plain delete.
+     * A replacement's backspaces are the IME's bookkeeping and never take
+     * modifiers, so a swiped word or an autocorrect with Ctrl latched cannot
+     * fire a string of shortcuts.
      */
     fun forEdit(edit: Edit, modifiers: List<KeyModifier>): List<KeyAction> {
         val actions = mutableListOf<KeyAction>()
-        repeat(edit.backspaces) { actions += forKey(KeyEvent.KEYCODE_DEL, modifiers) }
+        var pendingModifiers = modifiers
+        repeat(edit.backspaces) {
+            if (edit.text.isEmpty()) {
+                actions += forKey(KeyEvent.KEYCODE_DEL, pendingModifiers)
+                pendingModifiers = emptyList()
+            } else {
+                actions += KeyAction.Tap(KeyEvent.KEYCODE_DEL)
+            }
+        }
         val pending = StringBuilder()
         fun flush() {
             if (pending.isNotEmpty()) actions += KeyAction.Text(pending.toString())
@@ -39,15 +51,16 @@ object KeyActions {
             val keyCode = when {
                 char == "\n" -> KeyEvent.KEYCODE_ENTER
                 char == "\t" -> KeyEvent.KEYCODE_TAB
-                modifiers.isNotEmpty() && char.length == 1 -> keyCodeFor(char[0])
+                pendingModifiers.isNotEmpty() && char.length == 1 -> keyCodeFor(char[0])
                 else -> null
             }
             if (keyCode == null) {
                 pending.append(char)
             } else {
                 flush()
-                actions += forKey(keyCode, modifiers)
+                actions += forKey(keyCode, pendingModifiers)
             }
+            pendingModifiers = emptyList()
         }
         flush()
         return actions

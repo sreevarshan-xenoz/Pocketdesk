@@ -93,6 +93,9 @@
     <string name="row_desktop_sound">கணினியின் ஒலி இந்தக் கைபேசியில்</string>
     <string name="keyboard_open">விசைப்பலகை</string>
     <string name="keyboard_hide">விசைப்பலகையை மறை</string>
+    <string name="keyboard_mod_off">அணைந்தது</string>
+    <string name="keyboard_mod_once">அடுத்த விசைக்கு</string>
+    <string name="keyboard_mod_locked">பூட்டப்பட்டது</string>
     <string name="row_privacy">தனியுரிமைப் பூட்டு</string>
     <string name="row_pairing">இணைப்பு</string>
     <string name="value_direct_touch">நேரடித் தொடுதல்</string>
