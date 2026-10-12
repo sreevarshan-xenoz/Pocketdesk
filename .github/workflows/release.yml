@@ -64,8 +64,67 @@ jobs:
           name: checksums
           path: release/linux-link-*-checksums.txt
 
+  # The Windows server is one self-contained exe: it imports only system DLLs
+  # and the Windows 10+ UCRT, so the zip carries no runtime. FFmpeg is not
+  # bundled (the encoder sidecar finds it on PATH; README says how to get it).
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The GNU host toolchain, as on the dev box: it builds without a Windows
+      # SDK, which is why AGENTS.md's Windows gates name this target.
+      - name: Install Rust (x86_64-pc-windows-gnu)
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --component clippy,rustfmt
+          rustup default stable-x86_64-pc-windows-gnu
+
+      # MSYS2's UCRT64 gcc, CMake and NASM stand in for the WinLibs build used
+      # locally: the C parts (aws-lc, Opus) need a MinGW compiler and CMake.
+      - name: Install MinGW (gcc, CMake, NASM)
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-nasm
+
+      - name: Put MinGW on PATH
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --bin linux-link
+
+      - name: Run tests
+        run: cargo test --workspace --exclude linux-link-android-bridge --exclude iroh-spike
+
+      - name: Create release archive
+        shell: pwsh
+        run: |
+          $name = "linux-link-${{ github.ref_name }}-x86_64-pc-windows-gnu"
+          New-Item -ItemType Directory -Force "release/linux-link" | Out-Null
+          Copy-Item target/release/linux-link.exe, config.toml.example, README.md, LICENSE release/linux-link/
+          Compress-Archive -Path release/linux-link -DestinationPath "release/$name.zip"
+          $hash = (Get-FileHash "release/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "release/$name-checksums.txt" -Value "$hash  $name.zip" -Encoding ascii
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: |
+            release/linux-link-*.zip
+            release/linux-link-*-checksums.txt
+
   create-release:
-    needs: [build-linux]
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,11 +139,16 @@ jobs:
         with:
           name: checksums
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-binary
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: CHANGELOG.md
           files: |
             linux-link-*.tar.gz
+            linux-link-*.zip
             linux-link-*-checksums.txt
           draft: true

@@ -100,7 +100,7 @@ built, `cfg(target_os)` decides *how*.
 - [ ] Sparse MSIX package that gives `linux-link.exe` that identity (optional; without it the mirror is off).
 - [x] Device checklist §23 (Windows host).
 - [x] CI windows job: fmt, clippy, tests on `x86_64-pc-windows-gnu` with MSYS2 MinGW. Written, not yet run — CI runs on pushes and PRs to `main`.
-- [ ] Release zip.
+- [x] Release zip: `build-windows` in release.yml ships `linux-link.exe` + config example + README + LICENSE with a SHA-256 file. The exe imports only system DLLs and the UCRT, and FFmpeg is not bundled. The archive step was dry-run locally; the job has not run.
 - [x] AGENTS status.
 
 ## Owed by the user (cannot be done from this box)
