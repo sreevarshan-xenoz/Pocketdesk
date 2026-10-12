@@ -1451,8 +1451,10 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn a_faulted_uinput_device_is_rebuilt_and_the_packet_retried() {
-        if !Path::new("/dev/uinput").exists() {
-            eprintln!("skipping uinput rebuild test: no /dev/uinput on this host");
+        // Building a device needs /dev/uinput open for writing, not just
+        // present: CI runners have the node but no access to it.
+        if let Err(error) = std::fs::OpenOptions::new().write(true).open("/dev/uinput") {
+            eprintln!("skipping uinput rebuild test: /dev/uinput not writable here ({error})");
             return;
         }
         let mut state = UinputState {
