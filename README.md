@@ -161,8 +161,15 @@ cargo clippy --workspace -- -D warnings
 The server also runs on Windows 10 1903+ / 11, so the same Android app can
 view and control a Windows PC: Windows.Graphics.Capture (DXGI duplication as
 fallback), NVENC/AMF/Quick Sync/Media Foundation through `ffmpeg.exe`,
-`SendInput` with scancodes, the Win32 clipboard and toasts. Put `ffmpeg.exe`
-on `PATH`, then:
+`SendInput` with scancodes, the Win32 clipboard and toasts. It also covers:
+- desktop audio (WASAPI loopback) and volume/output control;
+- the phone's mic, through a virtual audio cable;
+- privacy mode: local input blocked, plus a ring that does not appear in the stream;
+- battery, power, exec, siren and the window HUD.
+
+Unzip `linux-link-<version>-x86_64-pc-windows-gnu.zip` from the releases page
+(one self-contained exe), install FFmpeg (`winget install Gyan.FFmpeg`, which
+puts `ffmpeg.exe` on `PATH`), then:
 
 ```powershell
 linux-link.exe install   # start at logon + open the firewall (one UAC prompt)
@@ -170,11 +177,11 @@ linux-link.exe pair      # pairing PIN, also shown as a toast
 ```
 
 `install` registers a per-user logon task (Windows' answer to the systemd user
-unit; a Windows service cannot see the desktop), `uninstall` removes it. Audio,
-privacy mode, power and the remaining plugins are being ported; until then
-they answer "unsupported on this OS". Input cannot reach elevated windows or
-the UAC/lock screen unless the server runs elevated (`install --elevated`).
-Build notes: [docs/development-setup.md](docs/development-setup.md) §4.
+unit; a Windows service cannot see the desktop), `uninstall` removes it. Input
+cannot reach elevated windows or the UAC/lock screen unless the server runs
+elevated (`install --elevated`). Mirroring desktop notifications to the phone
+needs a package identity that the plain exe does not have, so it stays off and
+says so in the log. Build notes: [docs/development-setup.md](docs/development-setup.md) §4.
 
 ### AUR (Arch Linux)
 
