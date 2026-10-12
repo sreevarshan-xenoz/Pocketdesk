@@ -793,58 +793,63 @@ fun RemoteScreen(
                     .windowInsetsPadding(WindowInsets.systemBars),
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // A live WAN link keeps a small badge reporting *how* it
-                    // is connected (R4 A1) — punched-direct vs relayed, since
-                    // relayed is a normal first-class state iroh keeps trying
-                    // to upgrade, not an error.
-                    if (status is StreamStatus.Up && status.kind == StreamTransportKind.Wan) {
-                        val label = when (linkState) {
-                            "wan_direct" -> stringResource(R.string.wan_link_direct)
-                            "wan_relayed" -> stringResource(R.string.wan_link_relayed)
-                            else -> stringResource(R.string.wan_link_punching)
-                        }
-                        Column(
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .padding(top = 34.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text(
-                                label,
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                            // One-tap escape hatch from the server's relay bitrate
-                            // floor (R4 A3): relaying is shared bandwidth, but the
-                            // user may still want every bit of it.
-                            if (linkState == "wan_relayed") {
-                                TextButton(
-                                    onClick = {
-                                        val next = !fullQuality
-                                        fullQuality = next
-                                        scope.launch(Dispatchers.IO) {
-                                            RustCore.setFullQuality(next)
-                                                .onFailure { fullQualityError = it.message }
-                                        }
-                                    },
-                                ) {
-                                    val fqLabel = if (fullQuality) {
-                                        stringResource(R.string.full_quality_on)
-                                    } else {
-                                        stringResource(R.string.full_quality_off)
-                                    }
-                                    Text(
-                                        fqLabel,
-                                        color = if (fullQuality) Color(0xFFFFC080) else Color.White,
-                                        style = MaterialTheme.typography.labelSmall,
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        StatsHud(address = address, controlPort = controlPort)
+                        // A live WAN link keeps a small badge reporting *how* it
+                        // is connected (R4 A1) — punched-direct vs relayed, since
+                        // relayed is a normal first-class state iroh keeps trying
+                        // to upgrade, not an error. It sits under the stats panel:
+                        // centred over the top edge it ran into the HUD caption
+                        // whenever the stream pane was narrow.
+                        if (status is StreamStatus.Up && status.kind == StreamTransportKind.Wan) {
+                            val label = when (linkState) {
+                                "wan_direct" -> stringResource(R.string.wan_link_direct)
+                                "wan_relayed" -> stringResource(R.string.wan_link_relayed)
+                                else -> stringResource(R.string.wan_link_punching)
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .padding(top = 6.dp)
+                                    .background(
+                                        Color.Black.copy(alpha = 0.55f),
+                                        RoundedCornerShape(8.dp),
                                     )
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    label,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                                // One-tap escape hatch from the server's relay bitrate
+                                // floor (R4 A3): relaying is shared bandwidth, but the
+                                // user may still want every bit of it.
+                                if (linkState == "wan_relayed") {
+                                    TextButton(
+                                        onClick = {
+                                            val next = !fullQuality
+                                            fullQuality = next
+                                            scope.launch(Dispatchers.IO) {
+                                                RustCore.setFullQuality(next)
+                                                    .onFailure { fullQualityError = it.message }
+                                            }
+                                        },
+                                    ) {
+                                        val fqLabel = if (fullQuality) {
+                                            stringResource(R.string.full_quality_on)
+                                        } else {
+                                            stringResource(R.string.full_quality_off)
+                                        }
+                                        Text(
+                                            fqLabel,
+                                            color = if (fullQuality) Color(0xFFFFC080) else Color.White,
+                                            style = MaterialTheme.typography.labelSmall,
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        StatsHud(address = address, controlPort = controlPort)
                         WorkspaceHud(
                             address = address,
                             port = port,
