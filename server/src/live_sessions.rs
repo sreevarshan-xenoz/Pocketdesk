@@ -20,11 +20,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use linux_link_core::local::sessions::{self as shared, MirrorSession};
 use linux_link_core::streaming::sessions::LiveSession;
 
 /// A kick request older than this is dropped unexecuted — the operator
 /// meant it for a session that is no longer (or not yet) live.
-pub const KICK_TTL_SECS: u64 = 60;
+pub const KICK_TTL_SECS: u64 = shared::KICK_TTL_SECS;
 
 fn state_file(name: &str) -> anyhow::Result<PathBuf> {
     Ok(crate::state::state_dir()?.join(name))
@@ -39,38 +40,25 @@ pub fn kick_file_path() -> anyhow::Result<PathBuf> {
 }
 
 /// Parse the CLI-written kick file: `<target>\n<unix-secs>`. Returns the
-/// target only if the request is well-formed and fresh.
+/// target only if the request is well-formed and fresh (shared with the
+/// desktop app: `core::local::sessions`).
 pub fn parse_kick_file(raw: &str, now_unix: u64) -> Option<String> {
-    let mut lines = raw.lines().map(str::trim);
-    let target = lines.next()?.to_string();
-    if target.is_empty() {
-        return None;
-    }
-    let stamp = lines.next()?.parse::<u64>().ok()?;
-    // Wrap-safe freshness check: future stamps are treated as fresh.
-    let age = now_unix.saturating_sub(stamp);
-    if age > KICK_TTL_SECS {
-        return None;
-    }
-    Some(target)
+    shared::parse_kick(raw, now_unix)
 }
 
-/// Serialize the registry snapshot. Hand-rolled JSON via serde_json keeps
-/// the schema exactly what `status` prints — array of session objects with
-/// an `updated_unix` envelope.
+/// Serialize the registry snapshot in the mirror format the CLI's `status`
+/// and the desktop app read.
 pub fn render_json(live: &[LiveSession], now_unix: u64) -> String {
-    let items: Vec<serde_json::Value> = live
+    let sessions: Vec<MirrorSession> = live
         .iter()
-        .map(|s| {
-            serde_json::json!({
-                "device_id": s.device_id,
-                "peer": s.peer.to_string(),
-                "transport": if s.lan { "lan" } else { "wan" },
-                "started_unix": s.started_unix,
-            })
+        .map(|s| MirrorSession {
+            device_id: s.device_id.clone(),
+            peer: s.peer.to_string(),
+            transport: if s.lan { "lan" } else { "wan" }.to_string(),
+            started_unix: s.started_unix,
         })
         .collect();
-    serde_json::json!({ "updated_unix": now_unix, "sessions": items }).to_string()
+    shared::render_mirror(&sessions, now_unix)
 }
 
 /// Atomic mirror write: tmp + rename, so `status` never sees a torn file.
@@ -168,26 +156,25 @@ pub async fn run_watcher() {
 /// Returns `None` when the file is absent or unreadable (daemon not
 /// running, or predates D2).
 pub fn format_status_lines(raw: &str, now_unix: u64) -> Option<Vec<String>> {
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    let items = value.get("sessions")?.as_array()?;
-    let mut out = Vec::new();
-    for s in items {
-        let short = match s.get("device_id").and_then(|v| v.as_str()) {
-            Some(device) if device.len() > 12 => format!("{}…", &device[..12]),
-            Some(device) => device.to_string(),
-            None => "<unannounced>".to_string(),
-        };
-        let transport = s.get("transport").and_then(|v| v.as_str()).unwrap_or("?");
-        let peer = s.get("peer").and_then(|v| v.as_str()).unwrap_or("?");
-        let age = s
-            .get("started_unix")
-            .and_then(|v| v.as_u64())
-            .and_then(|started| now_unix.checked_sub(started))
-            .map(|secs| format!("{secs}s"))
-            .unwrap_or_else(|| "?".into());
-        out.push(format!("{short}  {transport}  {peer}  up {age}"));
-    }
-    Some(out)
+    let mirror = shared::parse_mirror(raw)?;
+    Some(
+        mirror
+            .sessions
+            .iter()
+            .map(|s| {
+                let short = match &s.device_id {
+                    Some(device) if device.len() > 12 => format!("{}…", &device[..12]),
+                    Some(device) => device.clone(),
+                    None => "<unannounced>".to_string(),
+                };
+                let age = now_unix
+                    .checked_sub(s.started_unix)
+                    .map(|secs| format!("{secs}s"))
+                    .unwrap_or_else(|| "?".into());
+                format!("{short}  {}  {}  up {age}", s.transport, s.peer)
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

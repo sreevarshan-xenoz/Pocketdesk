@@ -458,8 +458,15 @@ impl TrustStore {
             grants: self.grants.clone(),
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
-        std::fs::write(&self.path, bytes)
-            .with_context(|| format!("failed to write {}", self.path.display()))?;
+        // Whole-file replace: the server and the desktop app both write this
+        // file, and a reader must never see one of them halfway through.
+        let mut tmp = self.path.clone().into_os_string();
+        tmp.push(".tmp");
+        let tmp = std::path::PathBuf::from(tmp);
+        std::fs::write(&tmp, bytes)
+            .with_context(|| format!("failed to write {}", tmp.display()))?;
+        std::fs::rename(&tmp, &self.path)
+            .with_context(|| format!("failed to replace {}", self.path.display()))?;
         Ok(())
     }
 }
@@ -509,6 +516,32 @@ impl KdeConnectService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The server and the desktop app both write the trust store; a save must
+    /// replace the file whole (temp + rename) rather than rewrite it in place,
+    /// or the other side can read it half-written. A hard link to the old
+    /// file tells the two apart: a rename leaves the link on the old bytes,
+    /// an in-place write changes them under it.
+    #[test]
+    fn trust_store_saves_replace_the_file_instead_of_rewriting_it() {
+        let dir = std::env::temp_dir().join(format!("ll-trust-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("trusted_devices.json");
+        let mut store = TrustStore::load_or_create(&path).unwrap();
+        store.trust_device("first").unwrap();
+        let link = dir.join("before.json");
+        std::fs::hard_link(&path, &link).unwrap();
+        store.trust_device("second").unwrap();
+        let before = std::fs::read_to_string(&link).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("second"));
+        assert!(
+            !before.contains("second"),
+            "the save rewrote the file in place"
+        );
+        assert!(!dir.join("trusted_devices.json.tmp").exists());
+    }
 
     struct ClipboardPlugin;
 

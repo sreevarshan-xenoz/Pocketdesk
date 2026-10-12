@@ -557,17 +557,12 @@ pub async fn kick(device: String) -> Result<()> {
     if target.is_empty() {
         bail!("kick target is empty");
     }
-    let path = crate::live_sessions::kick_file_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    std::fs::write(&path, format!("{target}\n{stamp}\n"))
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    linux_link_core::local::sessions::request_kick(
+        &state::state_dir()?,
+        &target,
+        local_pin::now_unix(),
+    )
+    .context("failed to write the kick request")?;
     println!(
         "Kick request sent for '{target}' — matching sessions end within ~1 s \
          (verify with: linux-link status)"
