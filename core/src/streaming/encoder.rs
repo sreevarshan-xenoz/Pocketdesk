@@ -16,10 +16,11 @@
 //! cannot survive it. The encode task in `streamer.rs` watches a live
 //! encoder for stalls/Err storms and rebuilds along the same ladder.
 
+use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{ChildStderr, ChildStdin, ChildStdout};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -32,6 +33,7 @@ use super::encoder_detect::HardwareEncoder;
 use super::encoder_inproc::InProcessEncoder;
 #[cfg(target_os = "linux")]
 use super::encoder_vaapi::VaapiEncoder;
+use super::flv_demux::FlvDemux;
 use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCodec, VideoFrame};
 
 /// Encoded chunks in flight from the stdout reader thread. Bounded so a
@@ -115,14 +117,19 @@ fn spawn_stderr_logger(stderr: ChildStderr, tail: Arc<StderrTail>) -> io::Result
     Ok(())
 }
 
-/// Magic bytes for H.264 NAL unit start codes.
+/// Magic bytes for H.264 NAL unit start codes. The sidecar's output is
+/// framed by FLV; these NAL scanners serve the in-process encoders.
+#[cfg(any(target_os = "linux", test))]
 const START_CODE_4: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
+#[cfg(any(target_os = "linux", test))]
 const START_CODE_3: [u8; 3] = [0x00, 0x00, 0x01];
 
 /// NAL unit type for IDR (instantaneous decoder refresh / keyframe).
+#[cfg(any(target_os = "linux", test))]
 const NAL_TYPE_IDR: u8 = 5;
 
 /// Mask to extract NAL unit type from the first byte.
+#[cfg(any(target_os = "linux", test))]
 const NAL_TYPE_MASK: u8 = 0x1F;
 
 /// Video encoder facade over the FFmpeg backends.
@@ -208,14 +215,15 @@ impl VideoEncoder {
         }
     }
 
-    /// Encode a single raw frame; `None` means the encoder has no output yet.
-    pub fn encode_frame(&mut self, frame: &VideoFrame) -> anyhow::Result<Option<EncodedPacket>> {
+    /// Encode a single raw frame and return every packet now ready, oldest
+    /// first; empty means the encoder has no output yet.
+    pub fn encode_frame(&mut self, frame: &VideoFrame) -> anyhow::Result<Vec<EncodedPacket>> {
         match self {
             Self::Sidecar(e) => e.encode_frame(frame),
             #[cfg(target_os = "linux")]
-            Self::InProcess(e) => e.encode_frame(frame),
+            Self::InProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
             #[cfg(target_os = "linux")]
-            Self::VaapiInProcess(e) => e.encode_frame(frame),
+            Self::VaapiInProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
         }
     }
 
@@ -366,15 +374,25 @@ fn open_vaapi_verified(config: StreamingConfig) -> anyhow::Result<VideoEncoder> 
 /// output or die — broken VAAPI on this box dies within ~700 ms of spawn.
 pub const DEFAULT_STARTUP_VERIFY: std::time::Duration = std::time::Duration::from_millis(600);
 
-/// H.264 encoder wrapper using a persistent FFmpeg sidecar process.
+/// How long `encode_frame` waits for the frame it was just given. Hardware
+/// encoders answer in a few milliseconds; without the wait every frame would
+/// leave one call late, behind the next capture.
+const FRAME_WAIT: std::time::Duration = std::time::Duration::from_millis(30);
+
+/// H.264/H.265 encoder wrapper using a persistent FFmpeg sidecar process.
 ///
 /// The encoder spawns a single long-running FFmpeg process on creation.
-/// Raw BGRA frames are written to stdin and H.264 NAL units are read from stdout.
+/// Raw BGRA frames are written to stdin; FLV is read from stdout and turned
+/// back into one Annex-B access unit per frame.
 pub struct SidecarEncoder {
     config: StreamingConfig,
     sequence: u64,
     keyframe_interval: u64,
     frames_since_keyframe: u64,
+    /// (sequence, capture time) of frames written but not yet emitted.
+    submitted: VecDeque<(u64, Instant)>,
+    /// Frames this encoder keeps until more input arrives (learned).
+    encoder_lag: usize,
     /// The FFmpeg child process.
     process: FfmpegChild,
     /// Stdin pipe for submitting raw frames. Wrapped in Option for clean shutdown.
@@ -383,8 +401,10 @@ pub struct SidecarEncoder {
     stdout: Receiver<io::Result<Vec<u8>>>,
     /// What the stderr logger thread has seen (for exit reasons).
     stderr: Arc<StderrTail>,
-    /// Accumulated output buffer from stdout.
-    output_buffer: Vec<u8>,
+    /// Splits stdout into access units.
+    demux: FlvDemux,
+    /// Whether the child has written anything yet (startup liveness proof).
+    produced_output: bool,
     /// NVENC high-power pin (R4 C3) — held only when the clock lock actually
     /// took; Drop restores, so both session end and a degraded-dropped
     /// encoder clean up.
@@ -445,11 +465,14 @@ impl SidecarEncoder {
             sequence: 0,
             keyframe_interval,
             frames_since_keyframe: 0,
+            submitted: VecDeque::new(),
+            encoder_lag: 0,
             process,
             stdin: Some(stdin),
             stdout,
             stderr: stderr_tail,
-            output_buffer: Vec::with_capacity(64 * 1024), // 64 KB initial capacity
+            demux: FlvDemux::new(),
+            produced_output: false,
             // C3: only NVENC sessions get the GPU pinned; every other backend
             // (and non-NVIDIA / unprivileged hosts, where acquire() self-
             // declines) leaves this None.
@@ -483,7 +506,10 @@ impl SidecarEncoder {
             // are the strongest liveness proof there is.
             loop {
                 match self.stdout.try_recv() {
-                    Ok(Ok(chunk)) => self.output_buffer.extend_from_slice(&chunk),
+                    Ok(Ok(chunk)) => {
+                        self.demux.push(&chunk);
+                        self.produced_output = true;
+                    }
                     Ok(Err(e)) => return Err(e.into()),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
@@ -491,7 +517,7 @@ impl SidecarEncoder {
                     }
                 }
             }
-            if !self.output_buffer.is_empty() {
+            if self.produced_output {
                 return Ok(());
             }
 
@@ -513,6 +539,10 @@ impl SidecarEncoder {
                     .map_err(|e| {
                         anyhow::anyhow!("FFmpeg encoder rejected a startup probe ({e})")
                     })?;
+                // Probe frames are real frames of the stream (black, the
+                // first a keyframe): they ship with the first real one.
+                self.submitted.push_back((self.sequence, Instant::now()));
+                self.sequence += 1;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
@@ -544,19 +574,27 @@ impl SidecarEncoder {
         }
     }
 
-    /// Encode a single raw frame to H.264.
+    /// Encode a single raw frame.
     ///
-    /// Writes the frame data to FFmpeg stdin and reads any available encoded
-    /// packets from stdout. Returns `None` if no output is ready yet (encoder latency).
-    pub fn encode_frame(&mut self, frame: &VideoFrame) -> anyhow::Result<Option<EncodedPacket>> {
+    /// Writes the frame to FFmpeg stdin, waits up to [`FRAME_WAIT`] for its
+    /// access unit, and returns every access unit ready by then, oldest
+    /// first — so output never queues up behind the frames feeding it. An
+    /// encoder that only releases a frame when the next one arrives is
+    /// learned (`encoder_lag`) and not waited on again.
+    pub fn encode_frame(&mut self, frame: &VideoFrame) -> anyhow::Result<Vec<EncodedPacket>> {
         self.frames_since_keyframe += 1;
-        let is_keyframe_requested = self.frames_since_keyframe >= self.keyframe_interval;
-
-        if is_keyframe_requested {
+        if self.frames_since_keyframe >= self.keyframe_interval {
             self.frames_since_keyframe = 0;
         }
 
         let frame_sequence = self.sequence;
+
+        // Output that arrived since the last call. If frames the lag estimate
+        // expected to stay held came out on their own, the estimate was a
+        // slow frame, not the encoder's shape: shrink it.
+        self.read_available_output()?;
+        let mut packets = self.ready_packets();
+        self.encoder_lag = self.encoder_lag.min(self.submitted.len());
 
         let stdin = self.stdin.as_mut().expect("stdin closed");
         stdin.write_all(&frame.data).map_err(|e| {
@@ -575,69 +613,100 @@ impl SidecarEncoder {
             frame.data.len()
         );
 
+        self.submitted.push_back((frame_sequence, frame.timestamp));
         self.sequence += 1;
 
-        // Read any available encoded output from stdout (non-blocking)
-        self.read_available_output()?;
+        let deadline = Instant::now() + FRAME_WAIT;
+        loop {
+            self.read_available_output()?;
+            packets.extend(self.ready_packets());
+            if self.submitted.len() <= self.encoder_lag {
+                break;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                // This encoder keeps frames until more input arrives (AMF
+                // holds one, Media Foundation many): stop waiting for them.
+                self.encoder_lag = self.submitted.len();
+                debug!(
+                    "{} holds {} frame(s) until the next input",
+                    self.backend_name(),
+                    self.encoder_lag
+                );
+                break;
+            }
+            match self.stdout.recv_timeout(deadline - now) {
+                Ok(Ok(chunk)) => {
+                    self.demux.push(&chunk);
+                    self.produced_output = true;
+                }
+                Ok(Err(e)) => {
+                    error!("Error reading from FFmpeg stdout: {}", e);
+                    return Err(anyhow::anyhow!("FFmpeg stdout read error: {}", e));
+                }
+                // The deadline check above records the encoder's lag.
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
 
-        // Parse the output buffer into NAL-delimited packets
-        if let Some(packet_data) = self.extract_next_packet() {
-            let is_keyframe = is_keyframe_requested || detect_keyframe(&packet_data);
-
-            let packet = EncodedPacket {
-                data: packet_data,
-                is_keyframe,
-                timestamp: frame.timestamp,
-                sequence: frame_sequence,
-            };
-
+        for packet in &packets {
             trace!(
                 "Encoded packet for frame #{}: {} bytes, keyframe={}",
-                frame_sequence,
+                packet.sequence,
                 packet.data.len(),
                 packet.is_keyframe
             );
-
-            return Ok(Some(packet));
         }
-
-        // No output ready yet — FFmpeg may have internal buffering latency
-        trace!(
-            "No encoded output ready for frame #{} (encoder latency)",
-            frame_sequence
-        );
-        Ok(None)
+        if packets.is_empty() {
+            trace!(
+                "No encoded output ready for frame #{} (encoder latency)",
+                frame_sequence
+            );
+        }
+        Ok(packets)
     }
 
     /// Drain remaining output from the FFmpeg process.
     ///
     /// Reads all available data from stdout and returns any complete packets.
     pub fn drain(&mut self) -> anyhow::Result<Vec<EncodedPacket>> {
-        let mut packets = Vec::new();
-
-        // Read all remaining stdout data
         self.read_all_output()?;
-
-        // Extract all complete packets from the buffer
-        while let Some(packet_data) = self.extract_next_packet() {
-            let is_keyframe = detect_keyframe(&packet_data);
-            let packet = EncodedPacket {
-                data: packet_data,
-                is_keyframe,
-                timestamp: Instant::now(),
-                sequence: self.sequence,
-            };
-            self.sequence += 1;
-            packets.push(packet);
-        }
-
+        let packets = self.ready_packets();
         debug!("Drained {} remaining packets from encoder", packets.len());
         Ok(packets)
     }
 
-    /// Request a keyframe on the next encode.
+    /// Every complete access unit in the demuxer, paired with the frame it
+    /// encodes (B-frame-free, so output order is input order).
+    fn ready_packets(&mut self) -> Vec<EncodedPacket> {
+        let mut packets = Vec::new();
+        while let Some(unit) = self.demux.next_access_unit() {
+            let (sequence, timestamp) = self.submitted.pop_front().unwrap_or_else(|| {
+                let sequence = self.sequence;
+                self.sequence += 1;
+                (sequence, Instant::now())
+            });
+            packets.push(EncodedPacket {
+                data: unit.data,
+                is_keyframe: unit.keyframe,
+                timestamp,
+                sequence,
+            });
+        }
+        packets
+    }
+
+    /// Ask for a keyframe. A running FFmpeg child cannot be told to emit one
+    /// (stdin carries the frames), so this cannot be honoured early: the
+    /// next scheduled IDR, at most `keyframe_interval` frames away, is the
+    /// recovery point. Packets are labelled from the bitstream, never from
+    /// the request, so a P-frame is never sent as a keyframe.
     pub fn request_keyframe(&mut self) {
-        self.frames_since_keyframe = self.keyframe_interval;
+        debug!(
+            "Keyframe requested; the sidecar's next IDR is at most {} frames away",
+            self.keyframe_interval - self.frames_since_keyframe
+        );
     }
 
     /// Get the current sequence number.
@@ -668,12 +737,9 @@ impl SidecarEncoder {
         loop {
             match self.stdout.try_recv() {
                 Ok(Ok(chunk)) => {
-                    self.output_buffer.extend_from_slice(&chunk);
-                    trace!(
-                        "Read {} bytes from FFmpeg stdout (total buffer: {})",
-                        chunk.len(),
-                        self.output_buffer.len()
-                    );
+                    trace!("Read {} bytes from FFmpeg stdout", chunk.len());
+                    self.demux.push(&chunk);
+                    self.produced_output = true;
                 }
                 Ok(Err(e)) => {
                     // Other errors may indicate process issues.
@@ -695,7 +761,7 @@ impl SidecarEncoder {
     fn read_all_output(&mut self) -> anyhow::Result<()> {
         loop {
             match self.stdout.try_recv() {
-                Ok(Ok(chunk)) => self.output_buffer.extend_from_slice(&chunk),
+                Ok(Ok(chunk)) => self.demux.push(&chunk),
                 Ok(Err(e)) => {
                     warn!("Error draining FFmpeg stdout: {}", e);
                     break;
@@ -704,43 +770,6 @@ impl SidecarEncoder {
             }
         }
         Ok(())
-    }
-
-    /// Extract the next complete H.264 packet from the output buffer.
-    ///
-    /// H.264 NAL units are delimited by start codes. This function finds
-    /// the first complete NAL unit (or group of NAL units) and removes
-    /// it from the buffer, returning the raw data.
-    fn extract_next_packet(&mut self) -> Option<Vec<u8>> {
-        if self.output_buffer.is_empty() {
-            return None;
-        }
-
-        // Find the first start code in the buffer
-        let first_start = find_start_code(&self.output_buffer, 0)?;
-
-        // Find the next start code after the first one
-        let second_start = find_start_code(&self.output_buffer, first_start.0 + first_start.1);
-
-        if let Some((second_pos, _)) = second_start {
-            // We have a complete NAL unit (or group) from first_start to second_pos
-            let packet_data = self.output_buffer[first_start.0..second_pos].to_vec();
-            self.output_buffer.drain(..second_pos);
-            Some(packet_data)
-        } else {
-            // Check if we have enough data for at least a start code + NAL header
-            let remaining = &self.output_buffer[first_start.0 + first_start.1..];
-            if remaining.len() >= 2 {
-                // We have at least the start code and NAL header — extract what we have
-                // This handles the case where FFmpeg outputs a single NAL unit at EOF
-                let packet_data = self.output_buffer[first_start.0..].to_vec();
-                self.output_buffer.clear();
-                Some(packet_data)
-            } else {
-                // Not enough data yet — wait for more output
-                None
-            }
-        }
     }
 }
 
@@ -788,6 +817,7 @@ impl Drop for SidecarEncoder {
 /// Detect if the encoded data contains an IDR (keyframe) NAL unit.
 ///
 /// Scans for start codes and checks if any following NAL unit has type 5.
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn detect_keyframe(data: &[u8]) -> bool {
     let mut pos = 0;
     while pos < data.len() {
@@ -814,6 +844,7 @@ pub(crate) fn detect_keyframe(data: &[u8]) -> bool {
 /// Returns `Some((position, length))` where position is the offset of the start
 /// code and length is either 4 (for 00 00 00 01) or 3 (for 00 00 01).
 /// Returns `None` if no start code is found.
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn find_start_code(data: &[u8], from: usize) -> Option<(usize, usize)> {
     if from >= data.len() || from + 2 >= data.len() {
         return None;
@@ -901,7 +932,7 @@ fn vaapi_device_node() -> String {
 }
 
 /// Input: raw BGRA frames via stdin (pipe:0)
-/// Output: H.264/H.265 NAL units via stdout (pipe:1)
+/// Output: H.264/H.265 access units in FLV tags via stdout (pipe:1)
 fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<String> {
     // Determine codec type
     let is_hevc = matches!(config.codec, VideoCodec::H265);
@@ -942,9 +973,9 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
         EncoderPreset::Slow => "quality",
     };
     // AMF, Quick Sync and Media Foundation frame each picture with an access
-    // unit delimiter (and MF pads with filler); neither carries picture data,
-    // and the packetizer below ships every NAL as its own packet. Dropping them
-    // gives the same stream shape as NVENC: SPS, PPS, SEI, slices.
+    // unit delimiter (and MF pads with filler); neither carries picture data.
+    // Dropping them gives every rung NVENC's stream shape: SPS, PPS, SEI,
+    // slices — fewer bytes, and one shape for the phone's decoder to meet.
     let strip_non_picture_units = if is_hevc {
         "filter_units=remove_types=35|38"
     } else {
@@ -968,23 +999,23 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
     };
 
     // Determine encoder name based on resolved encoder and codec
-    let (codec_name, output_fmt) = if is_hevc {
+    let codec_name = if is_hevc {
         match resolved {
-            HardwareEncoder::Vaapi => ("hevc_vaapi", "hevc"),
-            HardwareEncoder::Nvenc => ("hevc_nvenc", "hevc"),
+            HardwareEncoder::Vaapi => "hevc_vaapi",
+            HardwareEncoder::Nvenc => "hevc_nvenc",
             HardwareEncoder::Amf | HardwareEncoder::Qsv | HardwareEncoder::MediaFoundation => {
-                (resolved.ffmpeg_encoder_hevc(), "hevc")
+                resolved.ffmpeg_encoder_hevc()
             }
-            _ => ("libx265", "hevc"),
+            _ => "libx265",
         }
     } else {
         match resolved {
-            HardwareEncoder::Vaapi => ("h264_vaapi", "h264"),
-            HardwareEncoder::Nvenc => ("h264_nvenc", "h264"),
+            HardwareEncoder::Vaapi => "h264_vaapi",
+            HardwareEncoder::Nvenc => "h264_nvenc",
             HardwareEncoder::Amf | HardwareEncoder::Qsv | HardwareEncoder::MediaFoundation => {
-                (resolved.ffmpeg_encoder(), "h264")
+                resolved.ffmpeg_encoder()
             }
-            _ => ("libx264", "h264"),
+            _ => "libx264",
         }
     };
 
@@ -1027,6 +1058,12 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
                 // shaping (Sunshine's llhp profile equivalent).
                 "-tune".to_string(),
                 "ll".to_string(),
+                // Hand each frame back as soon as it is encoded: by default
+                // NVENC keeps a queue of surfaces in flight (frames of lag).
+                "-delay".to_string(),
+                "0".to_string(),
+                "-zerolatency".to_string(),
+                "1".to_string(),
                 "-rc".to_string(),
                 "vbr".to_string(),
                 "-b:v".to_string(),
@@ -1052,6 +1089,11 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
                 codec_name.to_string(),
                 "-usage".to_string(),
                 "ultralowlatency".to_string(),
+                // One frame in flight, not the default sixteen.
+                "-async_depth".to_string(),
+                "1".to_string(),
+                "-latency".to_string(),
+                "1".to_string(),
                 "-quality".to_string(),
                 amf_quality.to_string(),
                 "-rc".to_string(),
@@ -1184,10 +1226,19 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
     // Append encoder-specific args
     args.extend(encoder_args);
 
-    // Output format: raw codec bitstream to stdout
+    // Output: FLV on stdout, flushed per packet. A raw elementary stream has
+    // no frame boundaries (a frame ends only when the next one begins); an FLV
+    // tag states its length and keyframe flag, so every access unit can ship
+    // the moment it is written (see `flv_demux`).
     args.extend(vec![
+        "-fps_mode".to_string(),
+        "passthrough".to_string(),
+        "-flush_packets".to_string(),
+        "1".to_string(),
         "-f".to_string(),
-        output_fmt.to_string(),
+        "flv".to_string(),
+        "-flvflags".to_string(),
+        "no_duration_filesize".to_string(),
         "pipe:1".to_string(),
     ]);
 
@@ -1445,21 +1496,23 @@ mod tests {
             timestamp: Instant::now(),
         };
 
-        // Encode several frames — first few may be None due to encoder latency
+        // Encode several frames — first few may be empty due to encoder latency
         let mut encoded_count = 0;
+        let mut last_sequence = None;
         for frame_idx in 0..30 {
-            let result = encoder.encode_frame(&frame).unwrap();
-            if let Some(packet) = result {
+            for packet in encoder.encode_frame(&frame).unwrap() {
                 assert!(
                     !packet.data.is_empty(),
                     "Packet {} should have data",
                     encoded_count
                 );
-                // Sequence should match the frame index that was submitted
-                assert_eq!(
-                    packet.sequence, frame_idx as u64,
-                    "Packet sequence should match frame index"
+                // One packet per frame, in order (startup probe frames, if
+                // the encoder was verified with any, come first).
+                assert!(
+                    last_sequence.is_none_or(|last| packet.sequence == last + 1),
+                    "Packet sequences must be consecutive"
                 );
+                last_sequence = Some(packet.sequence);
                 debug!(
                     "Frame {} -> packet #{}: {} bytes, keyframe={}",
                     frame_idx,
@@ -1477,7 +1530,7 @@ mod tests {
         );
 
         // Sequence should have advanced for all 30 encode calls
-        assert_eq!(encoder.sequence(), 30);
+        assert!(encoder.sequence() >= 30);
     }
 
     #[test]
@@ -1549,11 +1602,12 @@ mod tests {
         // Encode enough frames to trigger the keyframe interval (2 seconds = 60 frames)
         let mut keyframe_count = 0;
         for _ in 0..90 {
-            if let Some(packet) = encoder.encode_frame(&frame).unwrap()
-                && packet.is_keyframe
-            {
-                keyframe_count += 1;
-            }
+            keyframe_count += encoder
+                .encode_frame(&frame)
+                .unwrap()
+                .iter()
+                .filter(|p| p.is_keyframe)
+                .count();
         }
 
         // Should have seen at least one keyframe within 90 frames
@@ -1597,13 +1651,21 @@ mod tests {
 
         encoder.request_keyframe();
 
-        // Next encoded packet should be a keyframe
-        if let Some(packet) = encoder.encode_frame(&frame).unwrap() {
-            assert!(
-                packet.is_keyframe,
-                "Packet after request_keyframe should be a keyframe"
-            );
-        }
+        // A keyframe follows within one keyframe interval (in-process
+        // encoders honour the request at once; a sidecar's next IDR is the
+        // scheduled one).
+        let interval = 30 * 2;
+        let keyframe_seen = (0..=interval).any(|_| {
+            encoder
+                .encode_frame(&frame)
+                .unwrap()
+                .iter()
+                .any(|p| p.is_keyframe)
+        });
+        assert!(
+            keyframe_seen,
+            "no keyframe within {interval} frames of the request"
+        );
     }
 
     #[test]
@@ -1738,7 +1800,8 @@ mod tests {
         config.codec = VideoCodec::H265;
         let args = build_ffmpeg_args(&config, 120);
         assert_eq!(arg_after(&args, "-c:v"), "hevc_amf");
-        assert_eq!(args[args.len() - 2], "hevc");
+        assert_eq!(arg_after(&args, "-f"), "rawvideo");
+        assert_eq!(args[args.len() - 4], "flv");
     }
 
     /// Push 60 moving frames through one Windows rung's real sidecar and
@@ -1767,9 +1830,7 @@ mod tests {
                 stride,
                 timestamp: Instant::now(),
             };
-            if let Some(packet) = sidecar.encode_frame(&frame).expect("encode") {
-                packets.push(packet);
-            }
+            packets.extend(sidecar.encode_frame(&frame).expect("encode"));
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
         packets.extend(sidecar.drain().expect("drain"));
@@ -1778,19 +1839,50 @@ mod tests {
             "{encoder:?}: only {} packets",
             packets.len()
         );
-        // Output is split per NAL: the stream opens on its SPS (type 7), and an
-        // IDR follows, so a phone joining here can decode.
-        let first_nal = packets[0]
-            .data
-            .iter()
-            .skip_while(|&&b| b == 0)
-            .nth(1)
-            .map(|b| b & NAL_TYPE_MASK);
-        assert_eq!(first_nal, Some(7), "{encoder:?}: stream must open on SPS");
+        // One packet per frame, each a whole access unit: the stream opens on
+        // a keyframe that carries its SPS and PPS ahead of the IDR slice, so a
+        // phone joining here can decode it alone.
+        // (The only frames missing are the ones the encoder still holds for
+        // more input; drain() does not close the pipe.)
+        assert_eq!(
+            packets.len() + sidecar.submitted.len(),
+            sidecar.sequence() as usize,
+            "{encoder:?}: every submitted frame must come out as one packet"
+        );
+        assert!(sidecar.submitted.len() <= sidecar.encoder_lag);
+        if encoder == HardwareEncoder::Nvenc {
+            assert_eq!(
+                sidecar.encoder_lag, 0,
+                "NVENC must return each frame at once"
+            );
+        }
+        let first = &packets[0];
         assert!(
-            packets.iter().any(|p| p.is_keyframe),
-            "{encoder:?}: no IDR in {} packets",
-            packets.len()
+            first.is_keyframe,
+            "{encoder:?}: stream must open on a keyframe"
+        );
+        let nal_types: Vec<u8> = (0..first.data.len().saturating_sub(4))
+            .filter(|&i| first.data[i..i + 4] == [0, 0, 0, 1])
+            .map(|i| first.data[i + 4] & NAL_TYPE_MASK)
+            .collect();
+        assert_eq!(
+            nal_types.first(),
+            Some(&7),
+            "{encoder:?}: keyframe must open on SPS"
+        );
+        assert!(
+            nal_types.contains(&8),
+            "{encoder:?}: keyframe lacks its PPS"
+        );
+        assert!(
+            nal_types.contains(&NAL_TYPE_IDR),
+            "{encoder:?}: keyframe lacks its IDR slice"
+        );
+        assert!(
+            packets[1..]
+                .iter()
+                .all(|p| !p.is_keyframe || p.data.len() > 4),
+            "{encoder:?}: empty packet"
         );
     }
 
@@ -1848,10 +1940,10 @@ mod tests {
         };
 
         for _ in 0..60 {
-            if encoder
+            if !encoder
                 .encode_frame(&frame)
                 .expect("working encoder must not Err on plain frames")
-                .is_some()
+                .is_empty()
             {
                 return; // packet produced — ladder landed on a live backend
             }

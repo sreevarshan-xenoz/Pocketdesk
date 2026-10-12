@@ -48,6 +48,8 @@ pub mod encoder_inproc;
 #[cfg(all(feature = "encode", target_os = "linux"))]
 pub mod encoder_vaapi;
 #[cfg(feature = "encode")]
+mod flv_demux;
+#[cfg(feature = "encode")]
 pub mod nvenc_power;
 #[cfg(all(feature = "capture", target_os = "linux"))]
 pub mod shield;

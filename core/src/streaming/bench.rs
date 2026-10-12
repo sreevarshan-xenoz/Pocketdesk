@@ -216,18 +216,18 @@ pub fn run(target: BenchTarget, frames: u32) -> Result<BenchRecord> {
     for index in 0..frames {
         let frame = scene_frame(BENCH_WIDTH, BENCH_HEIGHT, index);
         let encode_started = Instant::now();
-        let packet = encoder.encode_frame(&frame)?;
+        let packets = encoder.encode_frame(&frame)?;
         if index >= WARMUP_FRAMES {
             samples.push_micros(encode_started.elapsed().as_micros() as u64);
         }
-        match packet {
-            Some(packet) => {
-                output_bytes += packet.data.len() as u64;
-                if packet.is_keyframe {
-                    keyframes += 1;
-                }
+        if packets.is_empty() {
+            without_packet += 1;
+        }
+        for packet in packets {
+            output_bytes += packet.data.len() as u64;
+            if packet.is_keyframe {
+                keyframes += 1;
             }
-            None => without_packet += 1,
         }
     }
 

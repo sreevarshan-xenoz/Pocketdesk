@@ -25,12 +25,13 @@ that claimed to cover them would be lying about the half that matters most on a 
 
 The clock wraps `encode_frame`. For the in-process encoders (`software` on Linux, `vaapi`) that
 call *is* the encode. For every sidecar rung — NVENC, AMF, Quick Sync and Media Foundation, and
-the software rung on Windows, all `ffmpeg-sidecar*` backends — it only writes the frame into the
-FFmpeg child's stdin and collects whatever output has already arrived, so the recorded "encode
-time" is a pipe write: on an RTX 3060 / Radeon box every one of them reports p50 0 ms. Such a
-record cannot regress and so is not committed as a baseline. Measuring a sidecar honestly needs
-the packets matched back to the frame that produced them (submit-to-first-slice latency), which
-the per-NAL packetizer does not track yet.
+the software rung on Windows, all `ffmpeg-sidecar*` backends — the call writes the frame into the
+FFmpeg child and waits (up to 30 ms) for the access unit it produces, read back out of FLV framing,
+so for an encoder that answers each frame (NVENC with `-delay 0`: ~4 ms at 720p on an RTX 3060)
+the recorded time is submit-to-frame latency. An encoder that keeps frames until more input
+arrives is learned and no longer waited on — AMF holds one frame, Media Foundation sixteen — and
+for those the record is the time to the frame released by this input, not this frame's own. No
+sidecar baseline is committed yet.
 
 ## Reading a run
 

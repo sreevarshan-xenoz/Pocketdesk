@@ -580,26 +580,33 @@ impl StreamingServer {
                         // the C2 ladder's story, not the frame-pacing story.
                         let encode_started = Instant::now();
                         match encoder.encode_frame(&frame) {
-                            Ok(Some(packet)) => {
+                            Ok(packets) if !packets.is_empty() => {
                                 if let Some(recorder) = &encode_recorder {
                                     recorder.record_encode(encode_started.elapsed());
                                 }
-                                packets_encoded += 1;
+                                packets_encoded += packets.len() as u64;
                                 encode_errs = 0;
                                 frames_since_packet = 0;
                                 last_packet_at = Instant::now();
-                                if packet.is_keyframe {
-                                    debug!("Keyframe encoded (seq={}, size={} bytes)", packet.sequence, packet.data.len());
-                                }
-                                trace_packet_stats(&packet);
+                                let mut receiver_gone = false;
+                                for packet in packets {
+                                    if packet.is_keyframe {
+                                        debug!("Keyframe encoded (seq={}, size={} bytes)", packet.sequence, packet.data.len());
+                                    }
+                                    trace_packet_stats(&packet);
 
-                                // Send packet to transport
-                                if packet_tx.send(packet).await.is_err() {
+                                    // Send packet to transport
+                                    if packet_tx.send(packet).await.is_err() {
+                                        receiver_gone = true;
+                                        break;
+                                    }
+                                }
+                                if receiver_gone {
                                     warn!("Packet receiver dropped, stopping encoder");
                                     break;
                                 }
                             }
-                            Ok(None) => {
+                            Ok(_) => {
                                 // Encoder has no output yet (latency/drain phase)
                                 frames_dropped += 1;
                                 frames_since_packet += 1;
