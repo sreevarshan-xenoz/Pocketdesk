@@ -7,6 +7,7 @@
 mod app;
 mod model;
 mod pair_view;
+mod restart;
 mod settings_view;
 mod single_instance;
 mod tray;

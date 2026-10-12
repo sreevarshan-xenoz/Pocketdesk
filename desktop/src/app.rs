@@ -46,6 +46,10 @@ pub struct PocketdeskApp {
     /// Loaded when the Settings tab opens; an unreadable file is shown, not
     /// overwritten.
     settings: Option<Result<SettingsForm, String>>,
+    /// A start or restart running off the UI thread.
+    job: Option<(&'static str, std::thread::JoinHandle<Result<(), String>>)>,
+    /// Restart was asked for while phones are connected; awaiting a yes.
+    confirm_restart: bool,
 }
 
 impl PocketdeskApp {
@@ -63,6 +67,73 @@ impl PocketdeskApp {
             quitting: false,
             pair: PairView::default(),
             settings: None,
+            job: None,
+            confirm_restart: false,
+        }
+    }
+
+    /// Run a start or restart off the UI thread; one at a time.
+    fn run_job(
+        &mut self,
+        what: &'static str,
+        job: impl FnOnce() -> Result<(), String> + Send + 'static,
+    ) {
+        if self.job.is_some() {
+            return;
+        }
+        self.notice = Some(format!("{what}…"));
+        self.job = Some((what, std::thread::spawn(job)));
+    }
+
+    fn finish_job(&mut self) {
+        if !self.job.as_ref().is_some_and(|(_, h)| h.is_finished()) {
+            return;
+        }
+        let Some((what, handle)) = self.job.take() else {
+            return;
+        };
+        self.notice = Some(match handle.join() {
+            Ok(Ok(())) => format!("{what}: done."),
+            Ok(Err(e)) => format!("{what}: {e}"),
+            Err(_) => format!("{what}: failed."),
+        });
+        if let Some(Ok(form)) = &mut self.settings {
+            form.restart_needed = false;
+        }
+        self.refreshed = None;
+    }
+
+    fn restart_button(&mut self, ui: &mut egui::Ui) {
+        let busy = self.job.is_some();
+        if self.confirm_restart {
+            ui.label(format!(
+                "{} phone(s) are connected; restarting ends their sessions.",
+                self.snapshot.sessions.len()
+            ));
+            ui.horizontal(|ui| {
+                if ui.button("Restart anyway").clicked() {
+                    self.confirm_restart = false;
+                    let dir = self.state_dir.clone();
+                    self.run_job("Restarting the server", move || {
+                        crate::restart::restart(&dir)
+                    });
+                }
+                if ui.button("Cancel").clicked() {
+                    self.confirm_restart = false;
+                }
+            });
+        } else if ui
+            .add_enabled(!busy, egui::Button::new("Restart server"))
+            .clicked()
+        {
+            if self.snapshot.sessions.is_empty() {
+                let dir = self.state_dir.clone();
+                self.run_job("Restarting the server", move || {
+                    crate::restart::restart(&dir)
+                });
+            } else {
+                self.confirm_restart = true;
+            }
         }
     }
 
@@ -136,16 +207,23 @@ impl PocketdeskApp {
         );
     }
 
-    fn status_tab(&self, ui: &mut egui::Ui) {
+    fn status_tab(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         if self.snapshot.running {
             status_line(ui, GOOD, "The server is running");
+            self.restart_button(ui);
         } else {
             status_line(ui, MUTED, "The server is not running");
             ui.label(
                 "Phones cannot connect until it starts. It starts at logon once \
                  installed (`linux-link install` on Windows, the systemd user unit on Linux).",
             );
+            if ui
+                .add_enabled(self.job.is_none(), egui::Button::new("Start server"))
+                .clicked()
+            {
+                self.run_job("Starting the server", crate::restart::start);
+            }
         }
         ui.add_space(8.0);
         egui::Grid::new("status")
@@ -286,6 +364,9 @@ impl PocketdeskApp {
         if form.restart_needed {
             ui.add_space(8.0);
             ui.label(RichText::new("Restart the server to apply the saved settings.").strong());
+            if self.snapshot.running {
+                self.restart_button(ui);
+            }
         }
     }
 
@@ -311,6 +392,7 @@ impl PocketdeskApp {
 impl eframe::App for PocketdeskApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_tray(ctx);
+        self.finish_job();
         // Closing hides to the tray; Quit (or no tray to come back from) exits.
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.tray.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
