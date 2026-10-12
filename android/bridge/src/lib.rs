@@ -775,7 +775,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeRequestP
     port: jint,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
-    let json = envelope(api::request_pair_pin(&address, port as u16));
+    let json = envelope(RUNTIME.block_on(api::request_pair_pin(address, port as u16)));
     to_jstring(&mut env, json)
 }
 
@@ -791,7 +791,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePairWith
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let pin = jstring_to_string(&mut env, &pin);
-    let json = envelope(api::pair_with_pin(&address, port as u16, &pin));
+    let json = envelope(RUNTIME.block_on(api::pair_with_pin(address, port as u16, pin)));
     to_jstring(&mut env, json)
 }
 

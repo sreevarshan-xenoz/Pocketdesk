@@ -542,82 +542,27 @@ fn remember_paired_server(server_id: &str) {
     }
 }
 
-/// Open a control socket, do the LINUX_LINK handshake, and announce our
-/// identity (the server needs our deviceId to trust us).
-fn paired_channel(
-    address: &str,
-    port: u16,
-) -> Result<(std::net::TcpStream, std::net::TcpStream), String> {
-    use std::io::{BufRead, Write};
-    let sock = std::net::TcpStream::connect(format!("{address}:{port}"))
-        .map_err(|e| format!("Connection failed: {e}"))?;
-    let mut writer = sock.try_clone().map_err(|e| e.to_string())?;
-    let mut reader = std::io::BufReader::new(sock.try_clone().map_err(|e| e.to_string())?);
-    writer
-        .write_all(format!("{}\n", linux_link_core::protocol::HANDSHAKE_HELLO).as_bytes())
-        .map_err(|e| e.to_string())?;
-    writer.flush().map_err(|e| e.to_string())?;
-    let mut ok = String::new();
-    reader.read_line(&mut ok).map_err(|e| e.to_string())?;
-    if ok.trim() != linux_link_core::protocol::HANDSHAKE_OK {
-        return Err(format!("Bad handshake response: {}", ok.trim()));
-    }
-    let identity = client_identity();
-    write_packet(&mut writer, &identity.as_identity_packet())?;
-    Ok((sock, writer))
-}
-
-fn write_packet(writer: &mut std::net::TcpStream, packet: &NetworkPacket) -> Result<(), String> {
-    use std::io::Write;
-    writer
-        .write_all(&packet.to_wire().map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    writer.flush().map_err(|e| e.to_string())
-}
-
-/// Read newline packets until one matches `types` or the deadline passes.
-/// Returns its body JSON, or an error string.
-fn read_pair_packet(
-    reader: &mut std::net::TcpStream,
-    types: &[&str],
-    wait: Duration,
-) -> Result<Option<serde_json::Value>, String> {
-    use std::io::BufRead;
-    reader
-        .set_read_timeout(Some(wait))
-        .map_err(|e| e.to_string())?;
-    let mut lines = std::io::BufReader::new(&mut *reader);
-    loop {
-        let mut line = String::new();
-        match lines.read_line(&mut line) {
-            Ok(0) => return Err("Connection closed by peer".to_string()),
-            Ok(_) => {
-                if let Ok(pkt) = NetworkPacket::from_wire(line.trim())
-                    && types.contains(&pkt.packet_type.as_str())
-                {
-                    return Ok(Some(pkt.body));
-                }
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-}
-
-/// Request a pairing PIN from the desktop (show-the-PIN flow). Returns
+/// Request a pairing PIN from the desktop (show-the-PIN flow).
+///
+/// Pairing rides the live control connection when there is one. A second
+/// connection from the same address evicts the live one from the desktop's
+/// client registry (it is keyed by peer address), and the evicted session
+/// then receives no pushes - HUD, notifications, WAN identity - until the
+/// app reconnects. Returns
 /// `"pinSent"` when the desktop displayed a PIN to read off it, `"pinReady"`
 /// when `linux-link pair` already put a PIN up for manual entry, or `"error"`.
-pub fn request_pair_pin(address: &str, port: u16) -> Result<String, String> {
-    let (mut reader, mut writer) = paired_channel(address, port)?;
+pub async fn request_pair_pin(address: String, port: u16) -> Result<String, String> {
     let request = NetworkPacket::new("kdeconnect.linuxlink.pair")
         .with_body(serde_json::json!({ "requestPin": true }));
-    write_packet(&mut writer, &request)?;
-    let body = read_pair_packet(
-        &mut reader,
-        &["kdeconnect.linuxlink.pair"],
+    let body = query_peer(
+        &address,
+        port,
+        &request,
+        "kdeconnect.linuxlink.pair",
         Duration::from_secs(5),
-    )?
-    .ok_or_else(|| "Desktop did not respond to the PIN request".to_string())?;
+    )
+    .await
+    .map_err(|_| "Desktop did not respond to the PIN request".to_string())?;
     Ok(body
         .get("pairStatus")
         .and_then(|v| v.as_str())
@@ -628,16 +573,25 @@ pub fn request_pair_pin(address: &str, port: u16) -> Result<String, String> {
 /// Submit an externally-entered pairing PIN (`linux-link pair` flow, or the
 /// code the desktop just displayed). Blocks briefly for the desktop's
 /// decision; `Some(desktopDeviceId)` = paired (persisted phone-side).
-pub fn pair_with_pin(address: &str, port: u16, pin: &str) -> Result<Option<String>, String> {
+pub async fn pair_with_pin(
+    address: String,
+    port: u16,
+    pin: String,
+) -> Result<Option<String>, String> {
     if pin.len() != 6 || !pin.chars().all(|c| c.is_ascii_digit()) {
         return Err("PIN must be exactly 6 digits".to_string());
     }
-    let (mut reader, mut writer) = paired_channel(address, port)?;
     let request =
         NetworkPacket::new("kdeconnect.pair").with_body(serde_json::json!({ "pin": pin }));
-    write_packet(&mut writer, &request)?;
-    let body = read_pair_packet(&mut reader, &["kdeconnect.pair"], Duration::from_secs(8))?
-        .ok_or_else(|| "Desktop did not answer the PIN in time".to_string())?;
+    let body = query_peer(
+        &address,
+        port,
+        &request,
+        "kdeconnect.pair",
+        Duration::from_secs(8),
+    )
+    .await
+    .map_err(|_| "Desktop did not answer the PIN in time".to_string())?;
     if body.get("pair").and_then(|v| v.as_bool()).unwrap_or(false) {
         let id = body
             .get("serverId")
