@@ -88,7 +88,8 @@ fn listen(tx: &broadcast::Sender<ForwardedNotification>) -> Result<()> {
     let access = listener.GetAccessStatus()?;
     if access != UserNotificationListenerAccessStatus::Allowed {
         bail!(
-            "notification access is not granted; allow Linux Link under              Settings > Privacy & security > Notifications"
+            "notification access is not granted; allow Linux Link under \
+             Settings > Privacy & security > Notifications"
         );
     }
     tracing::info!("Mirroring Windows notifications to the phone");
