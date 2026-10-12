@@ -578,6 +578,27 @@ Built on `feat/phone-audio`; spec `docs/superpowers/specs/2026-10-12-phone-audio
 - [ ] With sound on, the HUD's fps and e2e match a session with it off, and taps on a still desktop feel immediate (the bridge lock fixes).
 - [ ] `adb logcat -s DesktopAudio`: "desktop sound started", and on exit "stopped (N underruns)" with N small.
 
+## 26. In-session keyboard
+
+Built on `feat/in-session-keyboard`; spec `docs/superpowers/specs/2026-10-12-in-session-keyboard-design.md`.
+
+Checked on 2026-10-12 with the Galaxy A71 against the Windows host, typing into Notepad and reading it back through UI Automation:
+- the keyboard chip opens Gboard on the sink view, the bar docks above it, and the stream sits above both;
+- "hello world" typed letter by letter;
+- autocorrect "teh" → "the";
+- `adb shell input text` (the hardware-key path);
+- Ctrl latched + a, then Ctrl latched + c (the Windows clipboard held the text);
+- Backspace, then Home, Del and End from the bar;
+- Back closes the keyboard and the bar.
+
+- [ ] Swipe typing a word, and voice dictation.
+- [ ] Double-tap locks a modifier (ringed cap); typing with Shift locked; Super latched + a key on the desktop.
+- [ ] F-keys, Ins, PgUp/PgDn and Ctrl+Alt+Del from the bar.
+- [ ] A Bluetooth or USB keyboard on the phone: letters, Ctrl shortcuts, arrows, F-keys.
+- [ ] Landscape: the stream stays visible above the keyboard, and zoom survives opening and closing it.
+- [ ] Linux host: ASCII typing over uinput. Non-ASCII and capitals in pasted text wait for roadmap F4 (2666).
+- [ ] Tamil and Spanish keyboards: composing text arrives whole and correct.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

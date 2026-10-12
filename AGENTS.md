@@ -42,6 +42,23 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-12: **Feature roadmap and the in-session keyboard (branch `feat/in-session-keyboard`; research `docs/research/2026-10-12-competitor-features.md`, roadmap `docs/superpowers/specs/2026-10-12-feature-roadmap.md`, spec `docs/superpowers/specs/2026-10-12-in-session-keyboard-design.md`).**
+  - **Roadmap.** A competitor survey (RustDesk, Moonlight/Apollo, Parsec, Jump, Chrome and Microsoft RD, KDE Connect, scrcpy, Phone Link) ranks eleven features for the phone and desktop apps:
+    - F1 keyboard;
+    - F2 send-text;
+    - F3 trackpad gestures;
+    - F4 Linux text path;
+    - F5 approvals and permissions;
+    - F6 discovery;
+    - F7 file transfer;
+    - F8 image clipboard;
+    - F9 session polish;
+    - F10 diagnostics;
+    - F11 launcher shortcuts.
+  - **F1, the keyboard.** The phone's IME types into an invisible sink view through a shadow model of the composing text, so typing is live and swipe or autocorrect rewrites become backspaces plus text. Modifiers latch on the phone only and go out as press-tap-release combos, so none can stick on the desktop. An accessory bar holds the modifiers, Esc/Tab/arrows, Home/End/PgUp/PgDn/Del/Ins, F1–F12 and Ctrl+Alt+Del. A keyboard chip opens it, and Back closes it. The phone↔server key contract grew to 93 codes (Home/MOVE_HOME, Insert, Backslash).
+  - **Verified on the Galaxy A71 → Windows** (Notepad read back through UI Automation): typing, autocorrect, the hardware-key path, Ctrl-latch shortcuts, Backspace, Home/Del/End, Back to close. Owed in checklist §26: swipe and dictation, locks, F-keys, a hardware keyboard, landscape, the Linux host, and non-English keyboards.
+  - **The server segfault reproduced (exit 139).** It came right after codec negotiation, on a LAN session, after about an hour of uptime that included a relay outage. The server now runs under gdb (`thread apply all bt` on crash) for every device session. No backtrace yet: the next run under gdb did not crash.
+  - Gates: 23 new keyboard JVM tests (Kotlin 57 total), lint at 21, bridge clippy + 23 tests, core and server key-contract tests.
 - 2026-10-12: **The phone plays the desktop's sound (branch `feat/phone-audio`, cut from `feat/pocketdesk`; spec `docs/superpowers/specs/2026-10-12-phone-audio-playback-design.md`, plan `docs/superpowers/plans/2026-10-12-phone-audio-playback.md`).**
   - A MediaCodec Opus decoder feeds a low-latency AudioTrack, with a fixed 60/150 ms budget, audio focus and a live "Desktop sound on this phone" switch (on by default). It follows the video stream's lifetime. The decisions it makes (late/restart sequences, prebuffer, cap hysteresis, starvation refill, the 32-bit head wrap) are in `PlayoutPolicy` under JVM tests; `OpusHead` builds the csd the bare packets need.
   - Fixed on the way: the bridge's frame and audio receives waited while holding `STREAMING_HANDLE`, which every input send locks first, so a still screen delayed every tap by up to 50 ms. Both receivers now have their own locks (`VIDEO_RX`, `AUDIO_RX`), and audio packets carry their sequence to Kotlin.
