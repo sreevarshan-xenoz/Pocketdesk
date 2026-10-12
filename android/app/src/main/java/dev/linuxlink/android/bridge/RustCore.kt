@@ -343,9 +343,10 @@ object RustCore {
         val count = buf.int
         val frames = ArrayList<EncodedFrame>(count.coerceAtMost(16))
         repeat(count) {
-            if (buf.remaining() < 17) return frames
+            // Per frame: u32 len + u8 flags + u64 sequence (13 bytes), then len.
+            if (buf.remaining() < 13) return frames
             val len = buf.int
-            if (len < 0 || buf.remaining() < 13 + len) return frames
+            if (len < 0 || buf.remaining() < 9 + len) return frames
             val flags = buf.get()
             val sequence = buf.long
             val data = ByteArray(len)
