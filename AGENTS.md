@@ -67,7 +67,7 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     The trust store now writes temp-then-rename.
   - **Desktop app** (`desktop/`, binary `pocketdesk`, eframe 0.36 + tray-icon):
     - Status with Start/Restart; Restart runs `linux-link stop` and then starts the way the server is installed;
-    - Pair: a QR plus the PIN in digits with a countdown, verified to decode;
+    - Pair: a QR plus the PIN in digits with a countdown, verified to decode; one code pairs one phone;
     - Devices with Remove; Sessions with End; Settings; Logs;
     - close-to-tray and single instance.
 
@@ -83,6 +83,13 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - A link may never replace a different pin for an address. Removing a computer forgets its pin.
     - A pin added by an attempt that fails to pair is taken back.
     - Honest limit: the fingerprint protects the QUIC stream only; the PIN rides the control channel, which is plain TCP.
+  - **Final branch review (2 Critical, 6 Important) — fixed, one commit each:**
+    - The Linux build of the app: eframe lacked its x11/wayland features. Linux now ships without a tray (closing quits) instead of panicking on GTK.
+    - A non-ASCII fingerprint could crash the app through the JNI pin call.
+    - A PIN was reusable and unlimited for its 5 minutes. Now it pairs one phone, and the server discards it after 5 wrong guesses. The Pair tab never re-mints on its own after a discard (that would hand a guesser fresh tries), and it withdraws its code when left, hidden or quit.
+    - The scanner now releases the camera; a pairing link is offered once, not again on recreation.
+    - `tailscale ip` has a 2 s limit and opens no console window, and runs off the app's UI thread.
+    - The 16 Minor findings are deferred in the ledger.
   - **Verified on device (Galaxy A71, USB):**
     - a code from the app → opened on the phone → confirm → pinned → paired → streaming;
     - a forged link is refused or rolled back.
@@ -91,9 +98,10 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - LAN pairing without `adb reverse`;
     - the tray menu itself;
     - Start/Restart (never run on this box);
-    - the Linux build of the app (it runs there without a tray; checklist §24).
+    - the Linux build of the app (it runs there without a tray);
+    - the fix pass's phone behavior: camera release, the link not re-offered, the one-code UI (checklist §24; no phone was attached).
   - **Open:** one server segfault (exit 139, no WER record), right after codec negotiation on a WAN session. It did not reproduce in 5 more sessions under gdb, and its cause is unknown.
-  - Windows gates green: workspace clippy `-D warnings` incl. `desktop`, `cargo test` (core lib 277+, server lib, desktop 19), bridge clippy + 20 tests, `assembleDebug` + `lintDebug` at 21 findings, 13 Kotlin tests.
+  - Windows gates green: workspace clippy `-D warnings` incl. `desktop`, `cargo test` (core lib 279, server lib 116, desktop 22, 0 failed), bridge clippy + 20 tests, `assembleDebug` + `lintDebug` at 21 findings, 13 Kotlin tests.
 - 2026-10-12: **Windows host W2–W4 landed and the first phone run happened (Galaxy A71, Android 16, over USB) — the run found that video had never rendered from a sidecar encoder.**
   - **Landed:**
     - W2 audio: WASAPI loopback into the shared Opus path; endpoint volume/mute/switch via `IPolicyConfig`; the mic relay into a virtual-cable endpoint (`mic_relay_device`).
