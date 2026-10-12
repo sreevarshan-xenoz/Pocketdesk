@@ -2,12 +2,12 @@
 
 **Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale or a hole-punched iroh path. No port forwarding required.**
 
-> Formerly *Linux Link*. The product name changed when Windows support landed; the repository, the `linux-link` command, its config/state paths and the wire protocol keep the old name, so existing installs and pairings carry over.
+> Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). The name changed when Windows support landed. The `linux-link` command, its config/state paths and the wire protocol keep the old name, so existing installs and pairings carry over.
 
 [![Rust](https://img.shields.io/badge/Rust-Pure%20Rust-orange?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue)](LICENSE)
-[![CI](https://github.com/sreevarshan-xenoz/Linux-Link/actions/workflows/ci.yml/badge.svg)](https://github.com/sreevarshan-xenoz/Linux-Link/actions)
-[![Issues](https://img.shields.io/github/issues/sreevarshan-xenoz/Linux-Link)](https://github.com/sreevarshan-xenoz/Linux-Link/issues)
+[![CI](https://github.com/sreevarshan-xenoz/Pocketdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/sreevarshan-xenoz/Pocketdesk/actions)
+[![Issues](https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk)](https://github.com/sreevarshan-xenoz/Pocketdesk/issues)
 [![Status](https://img.shields.io/badge/status-beta%20-%20feature%20complete%2C%20gates%20green-orange)](#roadmap)
 
 > **Target:** Sub-100ms latency screen streaming + KDE Connect integration + zero-config Tailscale connectivity
@@ -85,19 +85,19 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 
 ```bash
 # Install latest release
-curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Linux-Link/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash
 
 # Install specific version
-curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Linux-Link/main/scripts/install.sh | bash -s -- v0.1.0
+curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- v0.1.0
 
 # Non-interactive install (no prompts)
-curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Linux-Link/main/scripts/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --yes
 
 # Install to custom prefix
-curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Linux-Link/main/scripts/install.sh | bash -s -- --prefix /opt
+curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --prefix /opt
 
 # Preview without changes
-curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Linux-Link/main/scripts/install.sh | bash -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --dry-run
 ```
 
 ### Install Script Options
@@ -144,8 +144,8 @@ The update/rollback/uninstall verbs belong to the install script, not the binary
 
 ```bash
 # Clone the repo
-git clone https://github.com/sreevarshan-xenoz/Linux-Link.git
-cd Linux-Link
+git clone https://github.com/sreevarshan-xenoz/Pocketdesk.git
+cd Pocketdesk
 
 # Build the workspace
 cargo build --release
@@ -368,7 +368,7 @@ Touch Gesture → Rust FFI → QUIC/TCP → KDE mousepad packet → enigo → Wa
 ## Project Structure
 
 ```
-Linux-Link/
+Pocketdesk/
 ├── core/                   # Shared Rust library
 │   └── src/
 │       ├── protocol/       # KDE Connect protocol + connection handling
