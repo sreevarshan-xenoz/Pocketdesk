@@ -153,7 +153,7 @@ jobs:
         run: |
           # Platform 37 has its own licence prompt. `(yes || true)` because the
           # step runs under pipefail and `yes` dies of SIGPIPE when sdkmanager ends.
-          (yes || true) | sdkmanager --install "platforms;android-37" "build-tools;37.0.0" >/dev/null
+          (yes || true) | sdkmanager --install "platforms;android-37.0" "build-tools;36.1.0" >/dev/null
           # NDK package names carry the full revision, so discover the r29 one
           # instead of pinning a string that silently rots.
           NDK=$(sdkmanager --list 2>/dev/null | awk '/ndk;29\./ { print $1; exit }')
