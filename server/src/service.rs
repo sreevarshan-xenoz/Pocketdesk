@@ -8,6 +8,7 @@ use crate::notification_monitor::start_notification_monitor;
 use crate::state;
 use crate::v2_multiplexer::handle_v2_session;
 use anyhow::{Context, Result, bail};
+use linux_link_core::local::pin as local_pin;
 use linux_link_core::protocol::ALPN_V1_STREAM;
 use linux_link_core::protocol::connection::ConnectionManager;
 use linux_link_core::protocol::kdeconnect::{
@@ -918,33 +919,20 @@ pub async fn print_capabilities(json: bool, markdown: bool) -> Result<()> {
 pub async fn pair(pin: Option<String>, grant: Option<u64>) -> Result<()> {
     let pin_value = match pin {
         Some(value) => {
-            if !is_valid_pin(&value) {
+            if !local_pin::is_valid(&value) {
                 bail!("PIN must be exactly 6 numeric digits");
             }
             value
         }
-        None => generate_pin(),
+        None => local_pin::mint_value(),
     };
 
+    // R4 D3: an optional grant (secs) caps how long pairing with this PIN
+    // trusts the phone — the PIN file itself still lives 5 minutes.
+    let dir = state::state_dir()?;
+    local_pin::write(&dir, &pin_value, local_pin::now_unix(), grant)
+        .with_context(|| format!("failed to write the PIN file in {}", dir.display()))?;
     let path = state::pair_pin_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let stamp = cli_pin_timestamp();
-    // R4 D3: an optional third line carries the grant TTL (secs) that
-    // pairing with this PIN stores in the TrustStore — the PIN file itself
-    // still lives 5 minutes like always.
-    let grant_line = match grant {
-        Some(secs) => format!("{secs}\n"),
-        None => String::new(),
-    };
-    // Owner-only: anyone who can read this file can pair a phone.
-    linux_link_core::secure_fs::write_private(
-        &path,
-        format!("{pin_value}\n{stamp}\n{grant_line}").as_bytes(),
-    )
-    .with_context(|| format!("failed to write {}", path.display()))?;
 
     println!("Pairing PIN: {}", pin_value);
     match grant {
@@ -969,15 +957,6 @@ fn humantime(secs: u64) -> String {
     } else {
         format!("{}s", secs)
     }
-}
-
-/// Unix seconds stamp paired with a CLI PIN file, so the daemon's
-/// PairPlugin can expire it (Tier-2 #11b).
-fn cli_pin_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// Remove devices from the persistent trust store (`linux-link unpair`).
@@ -1039,20 +1018,6 @@ async fn resolve_peer_address(client: &TailscaleClient, peer_hint: &str) -> Resu
     bail!("peer not found on tailnet: {}", peer_hint)
 }
 
-pub(crate) fn is_valid_pin(pin: &str) -> bool {
-    pin.len() == 6 && pin.chars().all(|c| c.is_ascii_digit())
-}
-
-/// A six-digit pairing PIN from the OS CSPRNG, uniform over 000000-999999.
-///
-/// This used to read `/dev/urandom` and fall back to the clock's nanoseconds
-/// when the file was missing — which it always is on Windows, so every
-/// Windows PIN was the low six digits of the time it was minted.
-pub(crate) fn generate_pin() -> String {
-    use rand::Rng;
-    format!("{:06}", rand::rngs::OsRng.gen_range(0..1_000_000u32))
-}
-
 /// Handle an `InputPacket` received over the QUIC streaming channel by injecting
 /// it into the host system via the `InputInjector`.
 ///
@@ -1071,29 +1036,5 @@ struct PidFileGuard {
 impl Drop for PidFileGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-#[cfg(test)]
-mod pin_tests {
-    use super::*;
-
-    #[test]
-    fn pins_are_six_digits_and_do_not_follow_the_clock() {
-        let pins: Vec<u32> = (0..256)
-            .map(|_| {
-                let pin = generate_pin();
-                assert!(is_valid_pin(&pin), "{pin}");
-                pin.parse().unwrap()
-            })
-            .collect();
-        // Minted back to back, clock-derived PINs mostly rise; random ones
-        // rise about half the time.
-        let rising = pins.windows(2).filter(|w| w[1] > w[0]).count();
-        assert!((64..192).contains(&rising), "{rising} of 255 steps rose");
-        let mut distinct = pins.clone();
-        distinct.sort_unstable();
-        distinct.dedup();
-        assert!(distinct.len() > 240, "only {} distinct", distinct.len());
     }
 }

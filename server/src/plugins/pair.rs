@@ -6,8 +6,8 @@ use linux_link_core::error::Result;
 use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin, TrustStore};
 use serde_json::json;
 
-use crate::service;
 use crate::state;
+use linux_link_core::local::pin as local_pin;
 
 // PIN pairing (KDE Connect parity, R3 Tier-2 #11b).
 //
@@ -26,7 +26,7 @@ use crate::state;
 // in-band identity carry the real deviceId directly).
 
 /// How long a generated/CLI PIN stays valid.
-const PIN_TTL: Duration = Duration::from_secs(300);
+const PIN_TTL: Duration = local_pin::PIN_TTL;
 
 #[derive(Clone)]
 struct PinEntry {
@@ -100,25 +100,12 @@ fn pin_expired(entry: &PinEntry) -> bool {
     entry.created.elapsed() > PIN_TTL
 }
 
-/// Read the CLI-written PIN file: `<pin>\n<unix-secs>[\n<grant-secs>]`
-/// (a bare PIN with no timestamp line never expires so old CLI output keeps
-/// working; the R4 D3 third line time-boxes the trust pairing grants).
-/// Returns `(pin, grant_secs)`.
+/// The live PIN file written by `linux-link pair` or the desktop app, as
+/// `(pin, grant_secs)` (format and expiry: `core::local::pin`).
 fn cli_pin() -> Option<(String, Option<u64>)> {
-    let raw = std::fs::read_to_string(state::pair_pin_path().ok()?).ok()?;
-    let mut lines = raw.lines().map(str::trim);
-    let pin = lines.next()?.to_string();
-    if !service::is_valid_pin(&pin) {
-        return None;
-    }
-    if let Some(secs) = lines.next().and_then(|s| s.parse::<u64>().ok()) {
-        let then = std::time::UNIX_EPOCH + Duration::from_secs(secs);
-        if then.elapsed().ok()? > PIN_TTL {
-            return None;
-        }
-    }
-    let grant = lines.next().and_then(|s| s.parse::<u64>().ok());
-    Some((pin, grant))
+    let dir = state::state_dir().ok()?;
+    let file = local_pin::read(&dir, local_pin::now_unix())?;
+    Some((file.pin, file.grant_secs))
 }
 
 fn desktop_id_field() -> String {
@@ -196,7 +183,7 @@ async fn request_pin(conn: &str, sender: &dyn DeviceSender) {
         return;
     }
 
-    let pin = service::generate_pin();
+    let pin = local_pin::mint_value();
     pins().lock().expect("pair state").insert(
         conn.to_string(),
         PinEntry {
@@ -298,20 +285,6 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cli_pin_format_roundtrip() {
-        // Format written by `linux-link pair`: PIN line + unix-secs line
-        // (+ optional D3 grant-secs line, parsed by cli_pin's `lines` walk).
-        let raw = "123456\n9999999999\n";
-        let mut lines = raw.lines().map(str::trim);
-        let pin = lines.next().unwrap();
-        let secs: u64 = lines.next().unwrap().parse().unwrap();
-        assert!(service::is_valid_pin(pin));
-        // Far-future timestamp must read as fresh once the file exists.
-        let then = std::time::UNIX_EPOCH + Duration::from_secs(secs);
-        assert!(then.elapsed().is_err() || then.elapsed().unwrap() < PIN_TTL);
-    }
 
     #[test]
     fn expired_pin_is_rejected() {
