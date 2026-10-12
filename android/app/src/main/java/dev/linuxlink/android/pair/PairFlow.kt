@@ -22,17 +22,27 @@ sealed interface PairOutcome {
 }
 
 /**
- * Pair with the desktop a code describes. Addresses are tried best first;
- * each is pinned to the code's certificate fingerprint before the phone
- * connects, so even the first connection is verified. A desktop that
- * answers and refuses the PIN ends the attempt: every address is the same
- * desktop, and the fix is a fresh code on its screen.
+ * Pair with the desktop a code describes. Addresses are tried best first.
+ * Each is first pinned to the code's certificate fingerprint, so the phone's
+ * streaming (QUIC) connections to it are verified from the start instead of
+ * trusted on first use; an address whose pin is refused (this phone already
+ * trusts a different computer there) is skipped, never contacted. The PIN
+ * itself still travels over the control channel, which is not encrypted —
+ * the same exposure as typing the PIN by hand.
+ *
+ * A desktop that answers and refuses the PIN ends the attempt: every
+ * address is the same desktop, and the fix is a fresh code on its screen.
  */
 fun runPairing(link: PairLink, ops: PairOps): PairOutcome {
     var lastError = "no address to try"
     for (address in link.addresses) {
-        link.fingerprint?.let { fp ->
-            ops.pinCertificate(address, fp).onFailure { lastError = it.message ?: "could not pin" }
+        val fp = link.fingerprint
+        if (fp != null) {
+            val pinned = ops.pinCertificate(address, fp)
+            if (pinned.isFailure) {
+                lastError = pinned.exceptionOrNull()?.message ?: "could not pin"
+                continue
+            }
         }
         val connected = ops.connect(address, link.controlPort)
         if (connected.isFailure) {

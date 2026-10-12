@@ -11,12 +11,16 @@ class PairFlowTest {
         fingerprint = "ab".repeat(32), endpoint = null,
     )
 
-    /** Records calls; [reachable] answers, [accept] decides the PIN. */
-    private class Fake(val reachable: Set<String>, val accept: Boolean = true) : PairOps {
+    /** Records calls; [reachable] answers, [accept] decides the PIN, [pinRefused] fail pinning. */
+    private class Fake(
+        val reachable: Set<String>,
+        val accept: Boolean = true,
+        val pinRefused: Set<String> = emptySet(),
+    ) : PairOps {
         val calls = mutableListOf<String>()
         override fun pinCertificate(address: String, fingerprint: String): Result<Unit> {
             calls += "pin $address"
-            return Result.success(Unit)
+            return if (address in pinRefused) Result.failure(Exception("trusts a different computer")) else Result.success(Unit)
         }
         override fun connect(address: String, controlPort: Int): Result<Unit> {
             calls += "connect $address"
@@ -49,6 +53,23 @@ class PairFlowTest {
     fun noReachableAddressIsUnreachable() {
         val outcome = runPairing(link, Fake(reachable = emptySet()))
         assertEquals(PairOutcome.Unreachable("timeout"), outcome)
+    }
+
+    @Test
+    fun anAddressWhosePinIsRefusedIsNeverConnectedTo() {
+        val ops = Fake(reachable = setOf("172.20.0.1", "192.168.1.5"), pinRefused = setOf("172.20.0.1"))
+        assertEquals(PairOutcome.Paired("192.168.1.5", "server-1"), runPairing(link, ops))
+        assertEquals(
+            listOf("pin 172.20.0.1", "pin 192.168.1.5", "connect 192.168.1.5", "pair 192.168.1.5"),
+            ops.calls,
+        )
+    }
+
+    @Test
+    fun whenEveryPinIsRefusedNothingIsContacted() {
+        val ops = Fake(reachable = setOf("172.20.0.1", "192.168.1.5"), pinRefused = setOf("172.20.0.1", "192.168.1.5"))
+        assertEquals(PairOutcome.Unreachable("trusts a different computer"), runPairing(link, ops))
+        assertEquals(listOf("pin 172.20.0.1", "pin 192.168.1.5"), ops.calls)
     }
 
     @Test

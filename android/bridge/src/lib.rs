@@ -100,6 +100,18 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePinPeerC
     to_jstring(&mut env, json)
 }
 
+/// Forget the certificate trusted for `address` (the computer was removed).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeForgetPeerCertificate(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope_unit(api::forget_peer_certificate(address).map(|_| ()));
+    to_jstring(&mut env, json)
+}
+
 /// Whether LAN (mDNS) discovery is currently active.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeIsDiscoveryActive(

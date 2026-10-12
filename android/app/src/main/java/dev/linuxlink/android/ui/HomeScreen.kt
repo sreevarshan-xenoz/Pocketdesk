@@ -185,6 +185,9 @@ fun HomeScreen(
                 TextButton(
                     onClick = {
                         HostStore.remove(context, host.address)
+                        // Forget its certificate too, so a new pairing code
+                        // for this address can be trusted again.
+                        scope.launch(Dispatchers.IO) { RustCore.forgetPeerCertificate(host.address) }
                         hosts = HostStore.hosts(context)
                         removing = null
                     },

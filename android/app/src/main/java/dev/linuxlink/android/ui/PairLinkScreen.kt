@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,8 +32,12 @@ import kotlinx.coroutines.withContext
 
 /**
  * Pairs with the desktop a scanned (or opened) pairing code describes, then
- * hands over to [onPaired]. Every address is pinned to the code's
- * certificate fingerprint before the phone connects to it.
+ * hands over to [onPaired].
+ *
+ * Nothing happens until the user confirms: a pocketdesk:// link can be
+ * opened by any web page or app, so the screen first says which computer
+ * and which addresses the code names and waits for "Pair". Every address is
+ * then pinned to the code's certificate fingerprint before it is contacted.
  */
 @Composable
 fun PairLinkScreen(
@@ -42,10 +47,11 @@ fun PairLinkScreen(
 ) {
     val parsed = remember(uri) { PairLink.parse(uri) }
     var outcome by remember(uri) { mutableStateOf<PairOutcome?>(null) }
+    var confirmed by remember(uri) { mutableStateOf(false) }
     val link = parsed.getOrNull()
 
-    LaunchedEffect(uri) {
-        if (link == null) return@LaunchedEffect
+    LaunchedEffect(uri, confirmed) {
+        if (link == null || !confirmed) return@LaunchedEffect
         val result = withContext(Dispatchers.IO) { runPairing(link, RustPairOps) }
         if (result is PairOutcome.Paired) {
             onPaired(link, result.address, result.serverId)
@@ -64,6 +70,20 @@ fun PairLinkScreen(
                 stringResource(R.string.pair_link_invalid),
                 textAlign = TextAlign.Center,
             )
+            !confirmed -> {
+                Text(
+                    stringResource(R.string.pair_link_confirm_title, link.name.ifBlank { link.addresses.first() }),
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.pair_link_confirm_body, link.addresses.joinToString(", ")),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = { confirmed = true }) { Text(stringResource(R.string.pair_link_confirm)) }
+            }
             outcome == null -> {
                 CircularProgressIndicator()
                 Spacer(Modifier.height(16.dp))
@@ -88,7 +108,7 @@ fun PairLinkScreen(
                 textAlign = TextAlign.Center,
             )
         }
-        if (link == null || outcome != null) {
+        if (link == null || outcome != null || !confirmed) {
             Spacer(Modifier.height(16.dp))
             TextButton(onClick = onBack) { Text(stringResource(R.string.exit)) }
         }

@@ -255,8 +255,8 @@ impl CertManager {
     }
 
     /// Trust `hash` for the peer `label`, replacing whatever was pinned, and
-    /// save. A pairing code shown on the desktop's own screen is an
-    /// authenticated channel, so its fingerprint outranks trust on first use.
+    /// save. Callers decide whether replacing is allowed: the Android bridge
+    /// refuses to replace a different pin from an (unauthenticated) link.
     pub fn pin_peer(&self, label: &str, hash: [u8; 32]) -> Result<()> {
         self.known_peers
             .lock()

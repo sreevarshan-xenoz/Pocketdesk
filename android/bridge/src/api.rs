@@ -39,10 +39,12 @@ pub fn set_data_dir(path: String) {
     tracing::info!("Data directory set to: {path}");
 }
 
-/// Pin a desktop's certificate before the first connection to `address`,
-/// from a scanned pairing code (`fp`: hex SHA-256 of its certificate). The
-/// code is shown on the desktop's own screen, so this replaces trust on
-/// first use for that address.
+/// Pin a desktop's certificate before the first streaming connection to
+/// `address`, from a scanned pairing code (`fp`: hex SHA-256 of its
+/// certificate), so that connection is verified rather than trusted on first
+/// use. Only the QUIC streaming channel is covered: the control channel the
+/// PIN rides is not encrypted. Refused when a different certificate is
+/// already trusted for the address (see below).
 pub fn pin_peer_certificate(address: String, fingerprint_hex: String) -> Result<(), String> {
     let dir = crate::CERT_DIR
         .lock()
@@ -72,14 +74,53 @@ pub(crate) fn pin_peer_certificate_in(
     }
     let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
         .map_err(|e| e.to_string())?;
-    manager
-        .pin_peer(
-            &linux_link_core::streaming::transport::peer_label_for_ip(ip),
-            hash,
-        )
-        .map_err(|e| e.to_string())?;
+    let label = linux_link_core::streaming::transport::peer_label_for_ip(ip);
+    // Anything can open a pairing link, so one must never replace the
+    // certificate this phone already trusts for an address: a different
+    // fingerprint there is a different computer. Removing the computer in
+    // the app clears the old trust first.
+    if manager
+        .known_peers()
+        .iter()
+        .any(|(known, pinned)| *known == label && *pinned != hash)
+    {
+        return Err(format!(
+            "this phone already trusts a different computer at {ip}; remove it first"
+        ));
+    }
+    manager.pin_peer(&label, hash).map_err(|e| e.to_string())?;
     tracing::info!("Pinned the certificate of {ip} from a pairing code");
     Ok(())
+}
+
+/// Forget the certificate this phone trusts for `address` (the computer was
+/// removed). Returns whether one was pinned.
+pub fn forget_peer_certificate(address: String) -> Result<bool, String> {
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    forget_peer_certificate_in(&dir, &address)
+}
+
+pub(crate) fn forget_peer_certificate_in(
+    cert_dir: &std::path::Path,
+    address: &str,
+) -> Result<bool, String> {
+    let Ok(ip) = address.trim().parse::<std::net::IpAddr>() else {
+        // Hosts saved by name were never pinned by IP.
+        return Ok(false);
+    };
+    let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
+        .map_err(|e| e.to_string())?;
+    let removed = manager.remove_peer(&linux_link_core::streaming::transport::peer_label_for_ip(
+        ip,
+    ));
+    if removed {
+        manager.save_known_peers().map_err(|e| e.to_string())?;
+    }
+    Ok(removed)
 }
 
 /// Check if the LAN discovery service is active.
@@ -2772,7 +2813,7 @@ mod keymap_tests {
 
 #[cfg(test)]
 mod pin_certificate_tests {
-    use super::pin_peer_certificate_in;
+    use super::{forget_peer_certificate_in, pin_peer_certificate_in};
     use linux_link_core::streaming::transport::{CertManager, peer_label_for_ip};
 
     #[test]
@@ -2784,6 +2825,39 @@ mod pin_certificate_tests {
         let label = peer_label_for_ip("192.168.1.101".parse().unwrap());
         let peers = CertManager::load_or_create(&dir).unwrap().known_peers();
         assert!(peers.contains(&(label, [0xab; 32])));
+    }
+
+    /// A pairing link must not silently replace the certificate this phone
+    /// already trusts for an address: anything can open a link, and a
+    /// different fingerprint there means a different (possibly hostile)
+    /// computer. The same fingerprint again is fine.
+    #[test]
+    fn a_link_cannot_replace_the_certificate_already_trusted_for_an_address() {
+        let dir = std::env::temp_dir().join(format!("bridge-pin-conflict-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        pin_peer_certificate_in(&dir, "10.0.0.7", &"ab".repeat(32)).unwrap();
+        pin_peer_certificate_in(&dir, "10.0.0.7", &"ab".repeat(32)).unwrap();
+        let err = pin_peer_certificate_in(&dir, "10.0.0.7", &"cd".repeat(32)).unwrap_err();
+        assert!(err.contains("different"), "{err}");
+        let label = peer_label_for_ip("10.0.0.7".parse().unwrap());
+        let peers = CertManager::load_or_create(&dir).unwrap().known_peers();
+        assert!(
+            peers.contains(&(label, [0xab; 32])),
+            "the trusted pin is kept"
+        );
+    }
+
+    #[test]
+    fn removing_a_computer_lets_a_new_code_pin_its_address_again() {
+        let dir = std::env::temp_dir().join(format!("bridge-pin-forget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        pin_peer_certificate_in(&dir, "10.0.0.8", &"ab".repeat(32)).unwrap();
+        assert!(forget_peer_certificate_in(&dir, "10.0.0.8").unwrap());
+        pin_peer_certificate_in(&dir, "10.0.0.8", &"cd".repeat(32)).unwrap();
+        assert!(
+            !forget_peer_certificate_in(&dir, "10.0.0.9").unwrap(),
+            "nothing pinned there"
+        );
     }
 
     #[test]

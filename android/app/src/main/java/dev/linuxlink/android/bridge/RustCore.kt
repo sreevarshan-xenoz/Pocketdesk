@@ -24,6 +24,7 @@ object RustCore {
     private external fun nativeInit()
     private external fun nativeSetDataDir(path: String)
     private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
+    private external fun nativeForgetPeerCertificate(address: String): String
     private external fun nativeIsDiscoveryActive(): Boolean
     private external fun nativeCheckTailscaleStatus(): String
     private external fun nativeGetPeers(): String
@@ -176,10 +177,15 @@ object RustCore {
 
     /**
      * Pin the desktop certificate for [address] from a scanned pairing code,
-     * so the first connection is verified instead of trusted on first use.
+     * so the streaming (QUIC) connection is verified from the first one on.
+     * Refused when this phone already trusts a different certificate there.
      */
     fun pinPeerCertificate(address: String, fingerprintHex: String): Result<Unit> =
         envelope(nativePinPeerCertificate(address, fingerprintHex)).map { }
+
+    /** Forget the certificate trusted for [address] (the computer was removed). */
+    fun forgetPeerCertificate(address: String): Result<Unit> =
+        envelope(nativeForgetPeerCertificate(address)).map { }
 
     fun sendClipboard(address: String, port: Int, content: String): Result<Unit> =
         envelope(nativeSendClipboard(address, port, content)).map { }
