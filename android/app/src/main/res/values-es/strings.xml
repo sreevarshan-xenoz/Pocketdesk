@@ -192,4 +192,8 @@
     <string name="pair_link_expired">Este código caducó: muestra uno nuevo en el escritorio y vuelve a escanear.</string>
     <string name="pair_link_unreachable">No se pudo llegar al escritorio en ninguna de sus direcciones. ¿Está este teléfono en la misma red o tailnet? (%1$s)</string>
     <string name="pair_link_invalid">Eso no es un código de emparejamiento de Pocketdesk.</string>
+    <string name="scan_pairing_code">Escanear código de emparejamiento</string>
+    <string name="scan_hint">Apunta la cámara al código de la app de escritorio Pocketdesk (pestaña Pair).</string>
+    <string name="scan_need_camera">Pocketdesk necesita la cámara para leer el código. También puedes añadir el equipo por dirección y PIN.</string>
+    <string name="scan_allow_camera">Permitir cámara</string>
 </resources>

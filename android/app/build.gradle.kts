@@ -54,6 +54,12 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     // R4 E6: foldable / large-screen posture (FoldingFeature) for the dual-pane layout.
     implementation("androidx.window:window:1.5.0")
+    // Pairing-code scanner: CameraX preview + ML Kit's bundled QR model
+    // (no Google Play services needed).
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }

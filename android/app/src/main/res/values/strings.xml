@@ -199,4 +199,8 @@
     <string name="pair_link_expired">This code has expired — show a new one on the desktop and scan again.</string>
     <string name="pair_link_unreachable">Could not reach the desktop at any of its addresses. Is this phone on the same network or tailnet? (%1$s)</string>
     <string name="pair_link_invalid">That is not a Pocketdesk pairing code.</string>
+    <string name="scan_pairing_code">Scan pairing code</string>
+    <string name="scan_hint">Point the camera at the code in the Pocketdesk desktop app (Pair tab).</string>
+    <string name="scan_need_camera">Pocketdesk needs the camera to read the pairing code. You can also add the computer by address and PIN.</string>
+    <string name="scan_allow_camera">Allow camera</string>
 </resources>

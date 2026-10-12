@@ -34,6 +34,7 @@ import dev.linuxlink.android.ui.ConnectScreen
 import dev.linuxlink.android.ui.HomeScreen
 import dev.linuxlink.android.ui.RemoteScreen
 import dev.linuxlink.android.ui.PairLinkScreen
+import dev.linuxlink.android.ui.QrScanScreen
 import dev.linuxlink.android.ui.SettingsScreen
 import dev.linuxlink.android.ui.theme.LinuxLinkTheme
 
@@ -42,6 +43,7 @@ private object Route {
     const val HOME = "home"
     const val FORM = "form"
     const val SETTINGS = "settings"
+    const val SCAN = "scan"
 }
 
 class MainActivity : ComponentActivity() {
@@ -186,6 +188,14 @@ class MainActivity : ComponentActivity() {
                                         onBack = { route = Route.HOME },
                                     )
 
+                                    Route.SCAN -> QrScanScreen(
+                                        onCode = { uri ->
+                                            route = Route.HOME
+                                            pairLink.value = uri
+                                        },
+                                        onBack = { route = Route.HOME },
+                                    )
+
                                     else -> HomeScreen(
                                         onConnect = { host ->
                                             HostStore.save(this@MainActivity, host)
@@ -194,6 +204,7 @@ class MainActivity : ComponentActivity() {
                                                 "${host.address}|${host.port}|${host.controlPort}"
                                         },
                                         onAdd = { route = Route.FORM },
+                                        onScan = { route = Route.SCAN },
                                         onOpenSettings = { route = Route.SETTINGS },
                                     )
                                 }

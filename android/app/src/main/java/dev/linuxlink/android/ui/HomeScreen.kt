@@ -15,6 +15,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,6 +47,7 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     onConnect: (HostStore.Host) -> Unit,
     onAdd: () -> Unit,
+    onScan: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -113,6 +115,10 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(16.dp))
+                Button(onClick = onScan) {
+                    Text(stringResource(R.string.scan_pairing_code))
+                }
+                Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = onAdd) {
                     Text(stringResource(R.string.add_computer))
                 }
@@ -149,11 +155,13 @@ fun HomeScreen(
                     )
                 }
                 item {
-                    TextButton(
-                        onClick = onAdd,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.add_computer))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        TextButton(onClick = onScan) {
+                            Text(stringResource(R.string.scan_pairing_code))
+                        }
+                        TextButton(onClick = onAdd) {
+                            Text(stringResource(R.string.add_computer))
+                        }
                     }
                 }
             }

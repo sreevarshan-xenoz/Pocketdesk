@@ -80,3 +80,7 @@ data class PairLink(
         }
     }
 }
+
+/** The first Pocketdesk pairing code among the codes a camera frame holds. */
+fun firstPairingCode(values: List<String?>): String? =
+    values.firstOrNull { it?.startsWith("pocketdesk://pair?") == true }
