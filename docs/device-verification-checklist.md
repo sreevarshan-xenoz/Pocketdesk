@@ -567,12 +567,12 @@ Checked on the Windows dev box on 2026-10-12, with a Galaxy A71 over USB:
 
 ## 25. Desktop sound on the phone
 
-Built on `feat/phone-audio`; spec `docs/superpowers/specs/2026-10-12-phone-audio-playback-design.md`. Nothing here has run on a phone yet.
+Built on `feat/phone-audio`; spec `docs/superpowers/specs/2026-10-12-phone-audio-playback-design.md`. First device run 2026-10-12 (Galaxy A71, USB + WAN direct, Windows desktop): the player starts with the session, a 48 kHz stereo low-latency AudioTrack reaches `state:started` and keeps serving frames, and the playout thread averages about 4.5 % of a core. Not yet checked by ear: how it sounds, latency, the switch, focus with calls or other apps, PiP.
 
 - [ ] Play a video on the desktop during a session: the phone plays its sound, and the lag behind the picture is small (≤ ~150 ms by ear).
 - [ ] Quick Settings → "Desktop sound on this phone" off: silent at once; on again: sound returns within a second. The setting survives an app restart.
 - [ ] Pause the desktop's audio for 10 s, then resume: it comes back cleanly, without a crackle burst.
-- [ ] Connecting to a silent desktop does not pause music already playing on the phone; the first desktop sound takes over.
+- [ ] Connecting to a silent desktop does not pause music already playing on the phone; the first desktop sound takes over. "Silent" means no app holds an audio stream open: Windows loopback sends packets of silence while any app has one (seen on the A71 with a browser open: focus was taken 1.3 s after connect), and focus follows packets, not loudness.
 - [ ] A phone call silences it, and it resumes after the call. Another app starting music takes over for good: switching "Desktop sound on this phone" off and on brings it back.
 - [ ] In PiP the sound continues; Exit stops it.
 - [ ] With sound on, the HUD's fps and e2e match a session with it off, and taps on a still desktop feel immediate (the bridge lock fixes).
