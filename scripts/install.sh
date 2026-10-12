@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Linux Link Installer
-# Downloads and installs Linux Link from GitHub Releases.
+# Pocketdesk Installer
+# Downloads and installs Pocketdesk (the linux-link server) from GitHub Releases.
 #
 # Usage: ./install.sh [VERSION] [OPTIONS]
 #
@@ -171,7 +171,7 @@ parse_args() {
 
 show_help() {
   cat <<'EOF'
-Linux Link Installer — Installation and management tool
+Pocketdesk Installer — Installation and management tool
 
 USAGE
     install.sh [VERSION] [OPTIONS]
@@ -366,7 +366,7 @@ cmd_check_updates() {
   resolve_paths
 
   if [ ! -f "${INSTALL_PREFIX}/bin/${BINARY_NAME}" ]; then
-    fatal "Linux Link is not installed. Run '$0' to install."
+    fatal "Pocketdesk is not installed. Run '$0' to install."
   fi
 
   local current
@@ -399,7 +399,7 @@ cmd_rollback() {
   fi
 
   section "Rollback to ${prev_version}"
-  warn "This will reinstall Linux Link ${prev_version}."
+  warn "This will reinstall Pocketdesk ${prev_version}."
   echo ""
 
   if [ "$NON_INTERACTIVE" != true ]; then
@@ -434,7 +434,7 @@ fetch_latest_version() {
 
 cmd_uninstall() {
   resolve_paths
-  section "Removing Linux Link"
+  section "Removing Pocketdesk"
 
   if [ "$DRY_RUN" = true ]; then
     info "DRY RUN — showing what would be removed."

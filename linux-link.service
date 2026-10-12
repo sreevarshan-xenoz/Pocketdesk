@@ -1,5 +1,5 @@
 [Unit]
-Description=Linux Link — remote Linux desktop server (KDE Connect + QUIC streaming)
+Description=Pocketdesk — remote desktop server (KDE Connect + QUIC streaming)
 Documentation=https://github.com/sreevarshan/linux-link
 # A USER service, installed to ~/.config/systemd/user/. The server captures the
 # Wayland/X11 session and talks to PipeWire, so it must live and die with the

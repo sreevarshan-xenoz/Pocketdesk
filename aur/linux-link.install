@@ -1,5 +1,5 @@
 post_install() {
-  echo ">>> Linux Link has been installed."
+  echo ">>> Pocketdesk has been installed."
   echo ">>> Configuration: ~/.config/linux-link/config.toml"
   echo ">>> Copy config.toml.example to ~/.config/linux-link/config.toml"
   echo ">>> Enable with: systemctl --user enable --now linux-link.service"
