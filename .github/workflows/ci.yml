@@ -77,6 +77,52 @@ jobs:
         if: matrix.features == 'wan' || matrix.features == 'encode'
         run: cargo test -p linux-link-core --features ${{ matrix.features }}
 
+  # The Windows host (W0-W5, feat/windows-host). The Android bridge and the
+  # iroh spike are not Windows targets. Live tests — GPU encoders, capture,
+  # SendInput, toasts, power — are #[ignore]d: a hosted runner has no desktop
+  # session or GPU, so they stay owed to a real machine (checklist §23). The
+  # suite needs no FFmpeg; only those ignored tests do.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The GNU host toolchain, as on the dev box: it builds without a Windows
+      # SDK, which is why AGENTS.md's Windows gates name this target.
+      - name: Install Rust (x86_64-pc-windows-gnu)
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --component clippy,rustfmt
+          rustup default stable-x86_64-pc-windows-gnu
+
+      # MSYS2's UCRT64 gcc, CMake and NASM stand in for the WinLibs build used
+      # locally: the C parts (aws-lc, Opus) need a MinGW compiler and CMake.
+      - name: Install MinGW (gcc, CMake, NASM)
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-nasm
+
+      - name: Put MinGW on PATH
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (workspace, all targets)
+        run: cargo clippy --workspace --all-targets --exclude linux-link-android-bridge --exclude iroh-spike -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --exclude linux-link-android-bridge --exclude iroh-spike
+
   # The bridge .so is gitignored, so the app build has to produce it first —
   # assembleDebug alone would link whatever stale binary was last copied in,
   # which is exactly the artifact that hid a broken video link on device.

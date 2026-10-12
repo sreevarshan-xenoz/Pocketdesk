@@ -99,7 +99,7 @@ built, `cfg(target_os)` decides *how*.
 - [x] Notification mirror: `UserNotificationListener`, gated on a package identity and granted access; reports why and stops otherwise.
 - [ ] Sparse MSIX package that gives `linux-link.exe` that identity (optional; without it the mirror is off).
 - [x] Device checklist §23 (Windows host).
-- [ ] CI windows job.
+- [x] CI windows job: fmt, clippy, tests on `x86_64-pc-windows-gnu` with MSYS2 MinGW. Written, not yet run — CI runs on pushes and PRs to `main`.
 - [ ] Release zip.
 - [x] AGENTS status.
 
