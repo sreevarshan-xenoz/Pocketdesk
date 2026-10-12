@@ -21,7 +21,7 @@ use linux_link_core::streaming::{SAMPLE_DECODE, SAMPLE_RENDER, report_samples};
 use crate::{
     CONNECTION_STATE, CONTROL_PEER, CONTROL_WRITER, DECODE_SAMPLES, MAX_AUDIO_PACKETS_PER_RECEIVE,
     MAX_FRAMES_PER_RECEIVE, RATE_SNAPSHOTS, RENDER_SAMPLES, RTT_HISTORY, STREAMING_ACTIVE,
-    STREAMING_BYTE_COUNT, STREAMING_FRAME_COUNT, STREAMING_HANDLE, StreamingHandle,
+    STREAMING_BYTE_COUNT, STREAMING_FRAME_COUNT, STREAMING_HANDLE, StreamingHandle, VIDEO_RX,
     update_streaming_rtt,
 };
 
@@ -1292,6 +1292,7 @@ pub async fn connect_streaming_wan(
 /// Cleanly stop a streaming session: cancel its tasks and close the WAN dial
 /// endpoint if it owns one (iroh endpoints must be closed, never dropped).
 async fn teardown_streaming_handle(handle: StreamingHandle) {
+    VIDEO_RX.lock().await.take();
     handle.cancel.cancel();
     let _ = handle.task.await;
     let _ = handle.rtt_task.await;
@@ -1396,6 +1397,7 @@ async fn install_streaming(
     );
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Active;
 
+    *VIDEO_RX.lock().await = Some(packet_rx);
     let mut handle = (*STREAMING_HANDLE).lock().await;
     *handle = Some(StreamingHandle {
         address: address.clone(),
@@ -1403,7 +1405,6 @@ async fn install_streaming(
         cancel: client_cancel,
         task,
         rtt_task,
-        packet_rx,
         audio_rx,
         connection: connection.clone(),
         wan_dial,
@@ -1995,11 +1996,11 @@ pub async fn receive_frames(timeout_ms: u64) -> Vec<FrameDto> {
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     let mut frames = Vec::with_capacity(MAX_FRAMES_PER_RECEIVE);
     {
-        let mut guard = (*STREAMING_HANDLE).lock().await;
-        let Some(handle) = guard.as_mut() else {
+        let mut guard = VIDEO_RX.lock().await;
+        let Some(rx) = guard.as_mut() else {
             return frames;
         };
-        match tokio::time::timeout_at(deadline, handle.packet_rx.recv()).await {
+        match tokio::time::timeout_at(deadline, rx.recv()).await {
             Ok(Some(packet)) => {
                 STREAMING_FRAME_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 STREAMING_BYTE_COUNT.fetch_add(
@@ -2012,7 +2013,7 @@ pub async fn receive_frames(timeout_ms: u64) -> Vec<FrameDto> {
                     sequence: packet.sequence,
                 });
                 while frames.len() < MAX_FRAMES_PER_RECEIVE {
-                    match handle.packet_rx.try_recv() {
+                    match rx.try_recv() {
                         Ok(packet) => {
                             STREAMING_FRAME_COUNT
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2886,5 +2887,44 @@ mod pin_certificate_tests {
         let straddling = format!("{}é{}", "a".repeat(61), "b");
         assert_eq!(straddling.len(), 64);
         assert!(pin_peer_certificate_in(&dir, "10.0.0.1", &straddling).is_err());
+    }
+}
+
+#[cfg(test)]
+mod receive_tests {
+    use super::*;
+
+    /// Tests that swap the session statics run one at a time.
+    static SESSION_STATICS: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+    fn frame(sequence: u64) -> linux_link_core::streaming::EncodedPacket {
+        linux_link_core::streaming::EncodedPacket {
+            data: vec![0, 0, 0, 1],
+            is_keyframe: true,
+            timestamp: std::time::Instant::now(),
+            sequence,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_waiting_frame_receive_does_not_hold_the_session_lock() {
+        let _serial = SESSION_STATICS.lock().await;
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        *crate::VIDEO_RX.lock().await = Some(rx);
+        let waiting = tokio::spawn(receive_frames(500));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        // What every input send does first: take the session handle.
+        let locked =
+            tokio::time::timeout(Duration::from_millis(100), (*STREAMING_HANDLE).lock()).await;
+        assert!(locked.is_ok(), "an input send waited on the frame poll");
+        drop(locked);
+
+        tx.send(frame(7)).await.unwrap();
+        let frames = waiting.await.unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].sequence, 7);
+        *crate::VIDEO_RX.lock().await = None;
     }
 }

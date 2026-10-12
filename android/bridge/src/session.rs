@@ -108,6 +108,13 @@ pub(crate) static STREAMING_BYTE_COUNT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static STREAMING_HANDLE: LazyLock<TokioMutex<Option<StreamingHandle>>> =
     LazyLock::new(|| TokioMutex::new(None));
 
+/// The live session's video receiver, kept apart from [`STREAMING_HANDLE`]:
+/// `receive_frames` waits on it for up to its timeout, and holding the
+/// session handle that long held up every input send behind it.
+pub(crate) static VIDEO_RX: LazyLock<
+    TokioMutex<Option<tokio::sync::mpsc::Receiver<linux_link_core::streaming::EncodedPacket>>>,
+> = LazyLock::new(|| TokioMutex::new(None));
+
 /// Global handle for the active v2 unified connection.
 pub(crate) static V2_HANDLE: LazyLock<TokioMutex<Option<V2Handle>>> =
     LazyLock::new(|| TokioMutex::new(None));
@@ -179,9 +186,6 @@ pub(crate) struct StreamingHandle {
     pub(crate) task: tokio::task::JoinHandle<()>,
     /// JoinHandle of the background RTT polling task.
     pub(crate) rtt_task: tokio::task::JoinHandle<()>,
-    /// Receiver so the consumer consumer (Kotlin) can receive packets.
-    #[allow(dead_code)]
-    pub(crate) packet_rx: tokio::sync::mpsc::Receiver<linux_link_core::streaming::EncodedPacket>,
     /// Receiver for decoded audio packets (F1: Audio Streaming).
     #[allow(dead_code)]
     pub(crate) audio_rx: tokio::sync::mpsc::Receiver<linux_link_core::streaming::AudioPacket>,
