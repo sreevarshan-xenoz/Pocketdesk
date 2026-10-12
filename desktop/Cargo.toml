@@ -13,9 +13,13 @@ path = "src/main.rs"
 [dependencies]
 linux-link-core = { path = "../core", default-features = false, features = ["local"] }
 eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
-tray-icon = "0.26"
 qrcode = { version = "0.14", default-features = false }
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
+
+# The tray. Linux has none yet (see src/tray_none.rs): its backend needs a
+# GTK main loop the app does not run, so GTK stays out of the Linux build.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = "0.26"

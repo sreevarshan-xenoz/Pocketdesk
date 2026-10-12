@@ -5,11 +5,16 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod icon;
 mod model;
 mod pair_view;
 mod restart;
 mod settings_view;
 mod single_instance;
+#[cfg(not(target_os = "linux"))]
+mod tray;
+#[cfg(target_os = "linux")]
+#[path = "tray_none.rs"]
 mod tray;
 
 use eframe::egui;
@@ -46,7 +51,7 @@ fn main() -> eframe::Result {
             .with_inner_size([720.0, 480.0])
             .with_min_inner_size([520.0, 360.0])
             .with_icon(egui::IconData {
-                rgba: tray::icon_rgba(64),
+                rgba: icon::icon_rgba(64),
                 width: 64,
                 height: 64,
             }),
@@ -63,3 +68,8 @@ fn main() -> eframe::Result {
         }),
     )
 }
+
+/// Type-check the Linux stub on the build hosts that cannot build Linux.
+#[cfg(all(test, not(target_os = "linux")))]
+#[path = "tray_none.rs"]
+mod tray_none_check;

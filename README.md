@@ -224,7 +224,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/linux-link/confi
 - **Settings**: edits `config.toml`, keeping your comments and unknown keys.
 - **Logs**: the server's log.
 
-Closing the window keeps it in the tray.
+Closing the window keeps it in the tray on Windows; Linux has no tray yet, so there closing it quits.
 
 ```bash
 cargo run --release -p pocketdesk-desktop   # or run the installed pocketdesk / pocketdesk.exe

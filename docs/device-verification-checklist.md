@@ -558,7 +558,8 @@ Checked on the Windows dev box on 2026-10-12, with a Galaxy A71 over USB:
 - [ ] Pair over the LAN address in the code, not `adb reverse` (needs the firewall rules `install` adds).
 - [ ] Tray: Open, Pair a phone… and Quit from the tray menu itself.
 - [ ] Start / Restart server from the app, on Windows (logon task) and Linux (systemd user unit). This is not run on the developer box by rule.
-- [ ] Linux: the app builds with the GTK/appindicator packages above, its tray icon appears (StatusNotifier host needed on Hyprland, e.g. waybar's tray), and the single-instance socket works.
+- [ ] Linux: the app builds and opens on X11 and on Wayland (Hyprland), closing it quits (no tray on Linux yet), and the single-instance socket works.
+- [ ] Linux tray: build one on a GTK thread (or tray-icon's ksni backend) and verify it with a StatusNotifier host, e.g. waybar's tray.
 - [ ] Settings → Save on a real `config.toml` keeps comments; the server picks the change up after Restart.
 
 ## Recording results

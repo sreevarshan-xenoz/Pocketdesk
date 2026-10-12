@@ -12,7 +12,7 @@ This file provides guidance to the AI agent when working with code in this repos
 
 ## Build / test / lint
 
-- Rust workspace members: `core`, `server`, `desktop` (the Pocketdesk egui app; on Linux it needs GTK 3 + libayatana-appindicator + libxdo dev packages for its tray), `android/bridge`, `spike/iroh` (edition 2024; the spike is a throwaway research crate, `publish = false`).
+- Rust workspace members: `core`, `server`, `desktop` (the Pocketdesk egui app; no tray on Linux yet, so it needs no GTK there), `android/bridge`, `spike/iroh` (edition 2024; the spike is a throwaway research crate, `publish = false`).
 - Kotlin unit tests: `cd android && ./gradlew testDebugUnitTest` (JVM tests under `app/src/test`, started with the pairing-link work).
 - The bridge builds `linux-link-core` with `default-features = false, features = ["client"]`. Every change in `core` must compile and pass clippy under BOTH profiles:
   - `cargo clippy --workspace --all-targets -- -D warnings`
@@ -91,7 +91,7 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - LAN pairing without `adb reverse`;
     - the tray menu itself;
     - Start/Restart (never run on this box);
-    - the Linux build of the app (GTK/appindicator; checklist §24).
+    - the Linux build of the app (it runs there without a tray; checklist §24).
   - **Open:** one server segfault (exit 139, no WER record), right after codec negotiation on a WAN session. It did not reproduce in 5 more sessions under gdb, and its cause is unknown.
   - Windows gates green: workspace clippy `-D warnings` incl. `desktop`, `cargo test` (core lib 277+, server lib, desktop 19), bridge clippy + 20 tests, `assembleDebug` + `lintDebug` at 21 findings, 13 Kotlin tests.
 - 2026-10-12: **Windows host W2–W4 landed and the first phone run happened (Galaxy A71, Android 16, over USB) — the run found that video had never rendered from a sidecar encoder.**

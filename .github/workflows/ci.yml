@@ -23,10 +23,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # The last three are the desktop app's tray icon (tray-icon: GTK 3 +
-      # the Ayatana app indicator + libxdo), built with the workspace.
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
