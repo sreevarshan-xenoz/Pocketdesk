@@ -6,6 +6,8 @@
 //! and needs no socket of its own. Everything here is plain std + serde.
 
 pub mod config;
+pub mod identity;
+pub mod pair_link;
 pub mod paths;
 pub mod pin;
 pub mod server;

@@ -106,6 +106,45 @@ pub fn endpoint_packet(addr: &EndpointAddr, id: EndpointId) -> NetworkPacket {
     }))
 }
 
+/// Write the endpoint body to `<state_dir>/endpoint.json` if it differs from
+/// `last`; returns whether it wrote. The desktop app's pairing code reads it.
+pub fn record_endpoint_in(
+    state_dir: &Path,
+    addr: &EndpointAddr,
+    id: EndpointId,
+    last: &mut Option<serde_json::Value>,
+) -> bool {
+    let body = endpoint_packet(addr, id).body;
+    if last.as_ref() == Some(&body) {
+        return false;
+    }
+    match linux_link_core::local::identity::write_endpoint(state_dir, &body) {
+        Ok(()) => {
+            *last = Some(body);
+            true
+        }
+        Err(e) => {
+            tracing::debug!("could not record the WAN endpoint: {e}");
+            false
+        }
+    }
+}
+
+/// Keep `endpoint.json` current: the relay URL only appears once iroh has
+/// reached its home relay, and direct addresses change with the network.
+fn spawn_endpoint_recorder(endpoint: Endpoint) {
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    tokio::spawn(async move {
+        let mut last = None;
+        loop {
+            record_endpoint_in(&dir, &endpoint.addr(), endpoint.id(), &mut last);
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        }
+    });
+}
+
 /// Push the current WAN identity to one freshly-registered client.
 pub async fn push_endpoint_to(sender: &Arc<dyn DeviceSender>, endpoint: &Endpoint) {
     let _ = sender
@@ -152,6 +191,7 @@ pub async fn spawn_wan_endpoint(
         .context("iroh endpoint bind failed")?;
 
     tracing::info!(id = %endpoint.id(), "WAN (iroh) endpoint ready");
+    spawn_endpoint_recorder(endpoint.clone());
 
     let accept = endpoint.clone();
     tokio::spawn(async move {
@@ -268,5 +308,30 @@ mod tests {
         assert_eq!(body["endpointId"], id.to_string());
         assert_eq!(body["directAddrs"][0], "203.0.113.7:4501");
         assert!(body["relayUrls"].as_array().unwrap().is_empty());
+    }
+
+    /// The desktop app's pairing code carries `endpoint.json`; it must be
+    /// exactly the body phones already receive, and rewritten only on change.
+    #[test]
+    fn the_recorded_endpoint_is_the_packet_body() {
+        let dir = std::env::temp_dir().join(format!("ll-ep-record-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let id: EndpointId = SecretKey::from_bytes(&[9u8; 32]).public();
+        let addr = EndpointAddr::from_parts(
+            id,
+            [TransportAddr::Ip(
+                "198.51.100.4:7".parse::<SocketAddr>().unwrap(),
+            )],
+        );
+        let mut last = None;
+        assert!(record_endpoint_in(&dir, &addr, id, &mut last));
+        assert_eq!(
+            linux_link_core::local::identity::read_endpoint(&dir),
+            Some(endpoint_packet(&addr, id).body)
+        );
+        assert!(
+            !record_endpoint_in(&dir, &addr, id, &mut last),
+            "an unchanged address is not rewritten"
+        );
     }
 }
