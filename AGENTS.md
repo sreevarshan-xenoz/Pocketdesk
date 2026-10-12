@@ -12,7 +12,8 @@ This file provides guidance to the AI agent when working with code in this repos
 
 ## Build / test / lint
 
-- Rust workspace members: `core`, `server`, `android/bridge`, `spike/iroh` (edition 2024; the spike is a throwaway research crate, `publish = false`).
+- Rust workspace members: `core`, `server`, `desktop` (the Pocketdesk egui app; on Linux it needs GTK 3 + libayatana-appindicator + libxdo dev packages for its tray), `android/bridge`, `spike/iroh` (edition 2024; the spike is a throwaway research crate, `publish = false`).
+- Kotlin unit tests: `cd android && ./gradlew testDebugUnitTest` (JVM tests under `app/src/test`, started with the pairing-link work).
 - The bridge builds `linux-link-core` with `default-features = false, features = ["client"]`. Every change in `core` must compile and pass clippy under BOTH profiles:
   - `cargo clippy --workspace --all-targets -- -D warnings`
   - `cargo clippy -p linux-link-core --no-default-features --features client -- -D warnings`
@@ -45,6 +46,54 @@ The detailed build journal lives in `git log` — one conventional commit per lo
 - 2026-09-22: **Phase-C remediated on-device (OPPO CPH2359, tailnet) — the first build the user actually ran, and it looked broken.** The headline bug was the icon layer: the runtime-Canvas `LlGlyph` set rendered as a tiny dot in the corner of its box on device, so the session action disc was a blank square and every sheet row lost its affordance. `ui/Icons.kt` now wraps 28 hand-authored `res/drawable/ic_ll_*.xml` Material vectors (24x24, black fill) drawn through `Image` + `painterResource` + `ColorFilter.tint` — the same framework path the notification icons already proved works here, and the `LlIcon` call sites are unchanged. Three more fixes only a real screen surfaced: `StatsHud` became a `FlowRow` (a six-item `Row` is wider than a portrait phone, which squashed the trailing metrics into a one-character-per-line column), session chrome became inset-aware and self-describing (light mode chip with its mode glyph, scrimmed circular Exit, bordered HUD panels, a dark floating `ShortcutBar` pill instead of a surfaceVariant sheet that vanished over video), and **any** touch on the stream now summons the faded chrome via `PointerEventPass.Initial` — the old design had only invisible 30 dp edge strips, which made the menu practically unreachable after the 6 s fade, and observing on the Initial pass means the summon tap still reaches the desktop instead of being swallowed. The app also shipped with no launcher icon (the launcher drew its default blob): `mipmap-anydpi/ic_launcher*.xml` is an adaptive icon on the brand pine plate, and its foreground had to be **filled** paths inside a scaled group — ColorOS refuses to rasterize stroke-only adaptive foregrounds (it substitutes a placeholder) and zooms the layer past the 108 dp safe zone. Verified live on device: session chrome, QuickSettings sheet, pickers, Home, Settings (theme radios apply and persist), Exit, and the launcher icon. Strings stay **161/161/161** en/es/ta (the `Mode:` prefix dropped from the chip label). Lint 19 → 18 findings (`MissingApplicationIcon` cleared, none added). Kotlin-only — no Rust/JNI/wire change.
 - 2026-09-22: **Dead video link no longer looks like a healthy session.** A desktop-side teardown (server kick, sleep, Wi-Fi loss) left the phone showing the last frame under normal chrome with no way out: the bridge clears its `STREAMING_ACTIVE` flag only on a *client-initiated* `stop_streaming`, so nothing ever reported the drop and the HUD kept quoting a lifetime-average fps (the frame counter and start time are reset by that same explicit stop, and by nothing else). Fixed in Kotlin where the truth is visible — `H264Decoder`'s pull loop now treats a 10 s frame gap as a dead link (`keyint=60` guarantees packets far faster than that, so it cannot trip on a still desktop) and calls back through `RemoteDesktopView` onto the existing error card; Retry was verified end to end (kick → card in 10 s → Retry → new QUIC session in the server log → 25 s of live HUD with no false positive). The card also gained the warning glyph + centred copy the design called for. Device-confirmed alongside: the session notification ships the real `ic_stat_linux_link` monitor icon and iconed Disconnect / Lock-desktop actions with a channel description. **Open, NOT mine and actively being worked elsewhere:** the server journal shows the phone's v1 TCP control connection flapping (baseline ~4 reconnects/min, 18-36/min while the session sheets are used, each dying in ~20 ms on a `Broken pipe` in the clipboard/battery plugin), and the server's own `Kicked 1 stale session(s) due to reconnect storm` fires on it — the installed bridge `.so` is a mid-edit build of the uncommitted `core/src/protocol/{backoff,connection,v2}.rs` work, so re-check this against a clean tree before treating it as a shipping regression. Kotlin-only again — no Rust/JNI/wire change. **Superseded 2026-09-24:** the flapping is root-caused to the Android bridge opening a throwaway control connection per query, not to the in-flight `core/src/protocol/*` work — see the control-connection bullet below.
 - 2026-10-09: **Windows host W0 + W1 landed on `feat/windows-host` (spec `docs/superpowers/specs/2026-10-08-windows-host-design.md`, plan `docs/superpowers/plans/2026-10-09-windows-host.md`).** The server now builds, lints and tests on Windows (`x86_64-pc-windows-gnu`): W0 split every Linux backend behind target-specific deps and cfg (capture → `capture_linux.rs`, PipeWire audio → `audio_capture_pipewire.rs`, privacy → `privacy/{linux,unsupported}.rs`, Hyprland sockets behind one helper, uinput gated, an evdev key-name shim in `core::input::evdev_codes` held to the evdev crate by a Linux test). W1 added the Windows backends: Windows.Graphics.Capture with a 1 s idle heartbeat + DXGI duplication fallback (`CaptureBackend::{Wgc,Dxgi}`), AMF/Quick Sync/Media Foundation encoder rungs runtime-verified like NVENC (Auto: NVENC → AMF → QSV → MF → x264, AUD/filler NALs filtered so the per-NAL packetizer sees NVENC's shape), SendInput with set-1 scancodes / UTF-16 text / virtual-desktop absolute moves, per-monitor-v2 DPI awareness, Win32 clipboard, WinRT toasts, `if-addrs` local IPs, `COMPUTERNAME`, owner-only DACLs via `core::secure_fs` (which also fixed Linux writing `identity.key` 0644), a graceful `linux-link stop` over a named event (hardened after a security review: no squatted event, no PATH-resolved `taskkill`, no killing a reused pid) plus SIGTERM handling on Linux, and `linux-link install/uninstall` (per-user logon task + firewall rules) with `start --background` file logs. The sidecar's stdout/stderr moved from `O_NONBLOCK` to reader threads on **every** OS. **Box-verified** with ignored live tests on this PC (RTX 3060 + Radeon iGPU): WGC + DXGI real frames, NVENC/AMF/MF 60-frame encodes opening on SPS with an IDR, SendInput pointer landing on the computed pixel + a held key, clipboard Unicode round-trip, toast accepted. **Not yet run:** the phone end-to-end (checklist §23), `install`, `stop`; and **no Linux gate has run on any of these commits** — owed on the Arch box before merge. Windows gates green: fmt, clippy `-D warnings`, `cargo test` (core lib 232 + 12 ignored, server lib 105 + 4 ignored, 0 failed).
+- 2026-10-12: **Pocketdesk: user-facing rename, a desktop app, and QR pairing (branch `feat/pocketdesk`, cut from `feat/windows-host`; spec `docs/superpowers/specs/2026-10-12-pocketdesk-desktop-app-design.md`, plan `docs/superpowers/plans/2026-10-12-pocketdesk-desktop-app.md`).**
+  - **Rename.** Everything a person sees now says Pocketdesk: app strings (en/es/ta), toasts, CLI help, the Windows task and firewall group (install/uninstall also remove the legacy "Linux Link" ones), "Pocketdesk Mic", README and packaging. The GitHub repo is now `sreevarshan-xenoz/Pocketdesk`; old URLs redirect. Kept on purpose:
+    - the `linux-link` binary and its config/state paths;
+    - the `dev.linuxlink.android` package;
+    - the `kdeconnect.linuxlink.*` packets and ALPNs;
+    - the toast app id;
+    - the uinput device names (the Linux privacy grab matches the "Linux Link" prefix).
+  - **`core::local`** (feature `local`) holds the files the server and the app share:
+    - paths;
+    - `Config`, now savable through `toml_edit` (keeps comments and unknown keys; an unchanged save writes nothing);
+    - the PIN file (OS-RNG mint, owner-only, 300 s TTL, far-future stamps refused);
+    - the live-session mirror with a 5 s freshness rule;
+    - kick requests;
+    - pid-plus-image liveness;
+    - the certificate fingerprint;
+    - `endpoint.json`, which the server now keeps current;
+    - the `pocketdesk://pair` link and synchronous local IPs.
+
+    The trust store now writes temp-then-rename.
+  - **Desktop app** (`desktop/`, binary `pocketdesk`, eframe 0.36 + tray-icon):
+    - Status with Start/Restart; Restart runs `linux-link stop` and then starts the way the server is installed;
+    - Pair: a QR plus the PIN in digits with a countdown, verified to decode;
+    - Devices with Remove; Sessions with End; Settings; Logs;
+    - close-to-tray and single instance.
+
+    It has its own unit tests and was checked against the live server on this box.
+  - **Phone.**
+    - A `pocketdesk://pair` deep link and a CameraX 1.6 + ML Kit (bundled) scanner, both feeding one pairing flow.
+    - The flow pins the code's certificate fingerprint before it contacts each address, then pairs, then saves the host and endpoint and opens the session.
+    - The app's first JVM unit tests (13) cover it, plus a shared fixture URI that holds the Rust encoder and the Kotlin parser together.
+  - **Security review (three rounds) — fixed, and claims corrected:**
+    - Windows PINs were derived from the clock: there is no `/dev/urandom`, and the fallback used nanoseconds. Now OS RNG.
+    - The PIN file was world-readable on Linux.
+    - A link could silently override trust. Now the phone always confirms first, leading with the addresses, the name shown only as "calls itself" and sanitized, plus a warning when the code was not scanned.
+    - A link may never replace a different pin for an address. Removing a computer forgets its pin.
+    - A pin added by an attempt that fails to pair is taken back.
+    - Honest limit: the fingerprint protects the QUIC stream only; the PIN rides the control channel, which is plain TCP.
+  - **Verified on device (Galaxy A71, USB):**
+    - a code from the app → opened on the phone → confirm → pinned → paired → streaming;
+    - a forged link is refused or rolled back.
+  - **Not verified:**
+    - a camera scan of a real code;
+    - LAN pairing without `adb reverse`;
+    - the tray menu itself;
+    - Start/Restart (never run on this box);
+    - the Linux build of the app (GTK/appindicator; checklist §24).
+  - **Open:** one server segfault (exit 139, no WER record), right after codec negotiation on a WAN session. It did not reproduce in 5 more sessions under gdb, and its cause is unknown.
+  - Windows gates green: workspace clippy `-D warnings` incl. `desktop`, `cargo test` (core lib 277+, server lib, desktop 19), bridge clippy + 20 tests, `assembleDebug` + `lintDebug` at 21 findings, 13 Kotlin tests.
 - 2026-10-12: **Windows host W2–W4 landed and the first phone run happened (Galaxy A71, Android 16, over USB) — the run found that video had never rendered from a sidecar encoder.**
   - **Landed:**
     - W2 audio: WASAPI loopback into the shared Opus path; endpoint volume/mute/switch via `IPolicyConfig`; the mic relay into a virtual-cable endpoint (`mic_relay_device`).
