@@ -553,15 +553,41 @@ mod tests {
         assert_eq!(back.encode_ms.p99_ms, 8);
     }
 
+    /// Whether every "unknown" in a host identity is one of the explicit
+    /// markers: a half-known host string would silently widen a comparison.
+    fn unknowns_are_explicit(id: &str) -> bool {
+        // Linux names CPU and kernel; Windows names CPU, build and GPU.
+        let markers = [
+            "unknown-cpu",
+            "unknown-kernel",
+            "unknown-windows",
+            "unknown-gpu",
+        ];
+        !markers
+            .iter()
+            .fold(id.to_string(), |rest, marker| rest.replace(marker, ""))
+            .contains("unknown")
+    }
+
     #[test]
     fn host_identity_names_the_machine_instead_of_guessing() {
         let id = host_identity();
         assert!(!id.is_empty());
-        // Either both halves resolved or both are the explicit unknown marker;
-        // a half-known host string would silently widen a comparison.
         assert!(
-            id.contains("unknown") == (id.contains("unknown-cpu") || id.contains("unknown-kernel")),
+            unknowns_are_explicit(&id),
             "unexpected host identity {id:?}"
+        );
+    }
+
+    #[test]
+    fn a_gpu_less_windows_host_is_an_explicit_unknown() {
+        // What GitHub's Windows runner reports: a CPU and build, no GPU.
+        assert!(unknowns_are_explicit(
+            "Intel(R) Xeon(R) 6973P-C / Windows build 26100 / unknown-gpu"
+        ));
+        assert!(
+            !unknowns_are_explicit("i7 / unknown"),
+            "a bare unknown is not a marker"
         );
     }
 
