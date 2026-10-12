@@ -12,7 +12,6 @@ import android.os.SystemClock
 import android.util.Log
 import dev.linuxlink.android.bridge.RustCore
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Plays the desktop's sound on the phone: one thread polls the bridge for
@@ -57,7 +56,7 @@ class DesktopAudioPlayer {
     }
 
     private fun playUntilStopped(context: Context) {
-        val focus = AtomicInteger(FOCUS_NONE)
+        val focus = FocusPolicy()
         val attributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
@@ -65,19 +64,9 @@ class DesktopAudioPlayer {
         val audioManager = context.getSystemService(AudioManager::class.java)
         val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(attributes)
-            .setOnAudioFocusChangeListener { change ->
-                focus.set(
-                    when (change) {
-                        AudioManager.AUDIOFOCUS_GAIN -> FOCUS_FULL
-                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> FOCUS_DUCKED
-                        else -> FOCUS_NONE
-                    },
-                )
-            }
+            .setAcceptsDelayedFocusGain(true)
+            .setOnAudioFocusChangeListener { change -> focus.onChange(change) }
             .build()
-        if (audioManager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            focus.set(FOCUS_FULL)
-        }
 
         val codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
         var track: AudioTrack? = null
@@ -118,7 +107,7 @@ class DesktopAudioPlayer {
                 .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                 .build()
             Log.i(TAG, "desktop sound started")
-            loop(codec, track, focus)
+            loop(codec, track, focus) { audioManager.requestAudioFocus(focusRequest) }
         } finally {
             runCatching { codec.stop() }
             runCatching { codec.release() }
@@ -132,15 +121,23 @@ class DesktopAudioPlayer {
         }
     }
 
-    private fun loop(codec: MediaCodec, track: AudioTrack, focus: AtomicInteger) {
+    private fun loop(
+        codec: MediaCodec,
+        track: AudioTrack,
+        focus: FocusPolicy,
+        requestFocus: () -> Int,
+    ) {
         val policy = PlayoutPolicy()
         val info = MediaCodec.BufferInfo()
         var framesWritten = 0L
         var playing = false
-        var heard = true
+        var heard = false
         while (running) {
-            val state = focus.get()
-            if (state == FOCUS_NONE) {
+            val polledAt = SystemClock.elapsedRealtime()
+            val chunks = RustCore.receiveAudio(PlayoutPolicy.POLL_MS)
+            // Focus only once the desktop actually makes a sound.
+            if (chunks.isNotEmpty() && focus.wantsRequest()) focus.onRequestResult(requestFocus())
+            if (!focus.audible()) {
                 if (heard) {
                     track.pause()
                     track.flush()
@@ -149,16 +146,12 @@ class DesktopAudioPlayer {
                     framesWritten = track.playbackHeadPosition.toLong() and 0xFFFF_FFFFL
                     policy.rebuffer()
                 }
-                val polledAt = SystemClock.elapsedRealtime()
-                val dropped = RustCore.receiveAudio(PlayoutPolicy.POLL_MS) // drained, unheard
-                idle(polledAt, dropped.isEmpty())
+                idle(polledAt, chunks.isEmpty()) // dropped, unheard
                 continue
             }
             heard = true
-            track.setVolume(if (state == FOCUS_DUCKED) DUCKED_VOLUME else 1f)
+            track.setVolume(focus.volume())
 
-            val polledAt = SystemClock.elapsedRealtime()
-            val chunks = RustCore.receiveAudio(PlayoutPolicy.POLL_MS)
             for (chunk in chunks) {
                 if (!policy.accept(chunk.sequence)) continue
                 val index = codec.dequeueInputBuffer(INPUT_WAIT_US)
@@ -207,10 +200,6 @@ class DesktopAudioPlayer {
 
     private companion object {
         const val TAG = "DesktopAudio"
-        const val FOCUS_NONE = 0
-        const val FOCUS_FULL = 1
-        const val FOCUS_DUCKED = 2
-        const val DUCKED_VOLUME = 0.3f
         const val INPUT_WAIT_US = 10_000L
         const val FRAME_US = 20_000L
         const val BYTES_PER_FRAME = 4 // 16-bit stereo

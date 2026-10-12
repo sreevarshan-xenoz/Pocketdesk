@@ -572,7 +572,8 @@ Built on `feat/phone-audio`; spec `docs/superpowers/specs/2026-10-12-phone-audio
 - [ ] Play a video on the desktop during a session: the phone plays its sound, and the lag behind the picture is small (≤ ~150 ms by ear).
 - [ ] Quick Settings → "Desktop sound on this phone" off: silent at once; on again: sound returns within a second. The setting survives an app restart.
 - [ ] Pause the desktop's audio for 10 s, then resume: it comes back cleanly, without a crackle burst.
-- [ ] A phone call (or another app playing music) silences it; afterwards it resumes.
+- [ ] Connecting to a silent desktop does not pause music already playing on the phone; the first desktop sound takes over.
+- [ ] A phone call silences it, and it resumes after the call. Another app starting music takes over for good: switching "Desktop sound on this phone" off and on brings it back.
 - [ ] In PiP the sound continues; Exit stops it.
 - [ ] With sound on, the HUD's fps and e2e match a session with it off, and taps on a still desktop feel immediate (the bridge lock fixes).
 - [ ] `adb logcat -s DesktopAudio`: "desktop sound started", and on exit "stopped (N underruns)" with N small.
