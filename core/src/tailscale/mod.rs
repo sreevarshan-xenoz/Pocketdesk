@@ -318,8 +318,19 @@ struct TailscaleStatus {
     backend_state: Option<String>,
     #[serde(rename = "Self")]
     self_node: Option<StatusPeer>,
-    #[serde(rename = "Peer", default)]
+    #[serde(rename = "Peer", default, deserialize_with = "null_as_default")]
     peer: HashMap<String, StatusPeer>,
+}
+
+/// `tailscale status --json` writes `null`, not an empty collection, for
+/// lists it has nothing in — `Peer` and `TailscaleIPs` while the daemon is
+/// stopped — and `#[serde(default)]` only covers a field that is absent.
+fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, Deserialize)]
@@ -328,8 +339,30 @@ struct StatusPeer {
     host_name: Option<String>,
     #[serde(rename = "DNSName")]
     dns_name: Option<String>,
-    #[serde(rename = "TailscaleIPs", default)]
+    #[serde(rename = "TailscaleIPs", default, deserialize_with = "null_as_default")]
     tailscale_ips: Vec<String>,
     #[serde(rename = "Active")]
     active: Option<bool>,
+}
+
+#[cfg(test)]
+mod status_json_tests {
+    use super::*;
+
+    /// The shape `tailscale status --json` has while the daemon is stopped
+    /// (fields trimmed): empty lists come out as `null`. Parsing it used to
+    /// fail every discovery tick with a warning.
+    #[test]
+    fn a_stopped_daemons_null_lists_parse_as_empty() {
+        let json = r#"{
+            "BackendState": "NoState",
+            "TailscaleIPs": null,
+            "Self": {"HostName": "desk", "DNSName": "", "TailscaleIPs": null, "Active": false},
+            "Peer": null
+        }"#;
+        let status: TailscaleStatus = serde_json::from_str(json).expect("stopped status parses");
+        assert_eq!(status.backend_state.as_deref(), Some("NoState"));
+        assert!(status.peer.is_empty());
+        assert!(status.self_node.expect("self").tailscale_ips.is_empty());
+    }
 }
