@@ -64,8 +64,9 @@ jobs:
           name: checksums
           path: release/linux-link-*-checksums.txt
 
-  # The Windows server is one self-contained exe: it imports only system DLLs
-  # and the Windows 10+ UCRT, so the zip carries no runtime. FFmpeg is not
+  # The Windows server (and the Pocketdesk desktop app beside it) are
+  # self-contained exes importing only system DLLs and the Windows 10+ UCRT,
+  # so the zip carries no runtime. FFmpeg is not
   # bundled (the encoder sidecar finds it on PATH; README says how to get it).
   build-windows:
     runs-on: windows-latest
@@ -99,8 +100,8 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Build release binary
-        run: cargo build --release --bin linux-link
+      - name: Build release binaries
+        run: cargo build --release --bin linux-link --bin pocketdesk
 
       - name: Run tests
         run: cargo test --workspace --exclude linux-link-android-bridge --exclude iroh-spike
@@ -110,7 +111,7 @@ jobs:
         run: |
           $name = "linux-link-${{ github.ref_name }}-x86_64-pc-windows-gnu"
           New-Item -ItemType Directory -Force "release/linux-link" | Out-Null
-          Copy-Item target/release/linux-link.exe, config.toml.example, README.md, LICENSE release/linux-link/
+          Copy-Item target/release/linux-link.exe, target/release/pocketdesk.exe, config.toml.example, README.md, LICENSE release/linux-link/
           Compress-Archive -Path release/linux-link -DestinationPath "release/$name.zip"
           $hash = (Get-FileHash "release/$name.zip" -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path "release/$name-checksums.txt" -Value "$hash  $name.zip" -Encoding ascii
