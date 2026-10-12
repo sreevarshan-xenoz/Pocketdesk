@@ -11,16 +11,27 @@ class PairFlowTest {
         fingerprint = "ab".repeat(32), endpoint = null,
     )
 
-    /** Records calls; [reachable] answers, [accept] decides the PIN, [pinRefused] fail pinning. */
+    /**
+     * Records calls; [reachable] answers, [accept] decides the PIN, [pinRefused]
+     * fail pinning, [alreadyPinned] were pinned (same fingerprint) before.
+     */
     private class Fake(
         val reachable: Set<String>,
         val accept: Boolean = true,
         val pinRefused: Set<String> = emptySet(),
+        val alreadyPinned: Set<String> = emptySet(),
     ) : PairOps {
         val calls = mutableListOf<String>()
-        override fun pinCertificate(address: String, fingerprint: String): Result<Unit> {
+        override fun pinCertificate(address: String, fingerprint: String): Result<Boolean> {
             calls += "pin $address"
-            return if (address in pinRefused) Result.failure(Exception("trusts a different computer")) else Result.success(Unit)
+            return if (address in pinRefused) {
+                Result.failure(Exception("trusts a different computer"))
+            } else {
+                Result.success(address !in alreadyPinned)
+            }
+        }
+        override fun forgetCertificate(address: String) {
+            calls += "forget $address"
         }
         override fun connect(address: String, controlPort: Int): Result<Unit> {
             calls += "connect $address"
@@ -37,16 +48,33 @@ class PairFlowTest {
         val ops = Fake(reachable = setOf("192.168.1.5"))
         assertEquals(PairOutcome.Paired("192.168.1.5", "server-1"), runPairing(link, ops))
         assertEquals(
-            listOf("pin 172.20.0.1", "connect 172.20.0.1", "pin 192.168.1.5", "connect 192.168.1.5", "pair 192.168.1.5"),
+            listOf(
+                "pin 172.20.0.1", "connect 172.20.0.1", "forget 172.20.0.1",
+                "pin 192.168.1.5", "connect 192.168.1.5", "pair 192.168.1.5",
+            ),
             ops.calls,
         )
+    }
+
+    @Test
+    fun aPinMadeForAFailedAttemptIsRemovedButAnOlderOneIsKept() {
+        val refused = Fake(reachable = setOf("172.20.0.1"), accept = false)
+        assertEquals(PairOutcome.Expired, runPairing(link, refused))
+        assertEquals(listOf("pin 172.20.0.1", "connect 172.20.0.1", "pair 172.20.0.1", "forget 172.20.0.1"), refused.calls)
+
+        val known = Fake(reachable = emptySet(), alreadyPinned = setOf("172.20.0.1", "192.168.1.5"))
+        runPairing(link, known)
+        assertEquals(false, known.calls.any { it.startsWith("forget") })
     }
 
     @Test
     fun aRejectedPinIsAnExpiredCodeAndStopsTrying() {
         val ops = Fake(reachable = setOf("172.20.0.1", "192.168.1.5"), accept = false)
         assertEquals(PairOutcome.Expired, runPairing(link, ops))
-        assertEquals(listOf("pin 172.20.0.1", "connect 172.20.0.1", "pair 172.20.0.1"), ops.calls)
+        assertEquals(
+            listOf("pin 172.20.0.1", "connect 172.20.0.1", "pair 172.20.0.1", "forget 172.20.0.1"),
+            ops.calls,
+        )
     }
 
     @Test

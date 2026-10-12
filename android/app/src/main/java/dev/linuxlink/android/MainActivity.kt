@@ -57,8 +57,11 @@ class MainActivity : ComponentActivity() {
 
     private val disconnectSignal = mutableIntStateOf(0)
 
-    /** A desktop pairing code to act on (pocketdesk://pair?...), opened by a scan. */
+    /** A desktop pairing code to act on (pocketdesk://pair?...). */
     private val pairLink = mutableStateOf<String?>(null)
+
+    /** Whether [pairLink] came from this app's scanner rather than a link. */
+    private val pairLinkScanned = mutableStateOf(false)
 
     private fun pairUriFrom(intent: Intent?): String? =
         intent?.data?.takeIf { it.scheme == "pocketdesk" && it.host == "pair" }?.toString()
@@ -102,6 +105,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         RustCore.start(filesDir)
         pairLink.value = pairUriFrom(intent)
+        pairLinkScanned.value = false
         setContent {
             LinuxLinkTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -131,6 +135,7 @@ class MainActivity : ComponentActivity() {
                         Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
                             PairLinkScreen(
                                 uri = pairing,
+                                scanned = pairLinkScanned.value,
                                 onPaired = { link, address, serverId ->
                                     val ctx = this@MainActivity
                                     HostStore.save(
@@ -191,6 +196,7 @@ class MainActivity : ComponentActivity() {
                                     Route.SCAN -> QrScanScreen(
                                         onCode = { uri ->
                                             route = Route.HOME
+                                            pairLinkScanned.value = true
                                             pairLink.value = uri
                                         },
                                         onBack = { route = Route.HOME },
@@ -227,7 +233,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pairUriFrom(intent)?.let { pairLink.value = it }
+        pairUriFrom(intent)?.let {
+            pairLinkScanned.value = false
+            pairLink.value = it
+        }
         if (intent.getBooleanExtra(EXTRA_DISCONNECT, false)) {
             Thread { runCatching { RustCore.stopStreaming() } }.start()
             disconnectSignal.intValue += 1

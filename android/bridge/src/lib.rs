@@ -96,7 +96,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePinPeerC
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let fingerprint = jstring_to_string(&mut env, &fingerprint);
-    let json = envelope_unit(api::pin_peer_certificate(address, fingerprint));
+    let json = envelope(api::pin_peer_certificate(address, fingerprint));
     to_jstring(&mut env, json)
 }
 

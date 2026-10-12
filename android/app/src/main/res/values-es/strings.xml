@@ -196,7 +196,9 @@
     <string name="scan_hint">Apunta la cámara al código de la app de escritorio Pocketdesk (pestaña Pair).</string>
     <string name="scan_need_camera">Pocketdesk necesita la cámara para leer el código. También puedes añadir el equipo por dirección y PIN.</string>
     <string name="scan_allow_camera">Permitir cámara</string>
-    <string name="pair_link_confirm_title">¿Emparejar con %1$s?</string>
-    <string name="pair_link_confirm_body">Continúa solo si este código se muestra ahora mismo en la pantalla de ese equipo. Indica %1$s.</string>
+    <string name="pair_link_confirm_title">¿Emparejar con el equipo en %1$s?</string>
+    <string name="pair_link_confirm_body">Continúa solo si este código se muestra ahora mismo en la pantalla de ese equipo.</string>
     <string name="pair_link_confirm">Emparejar</string>
+    <string name="pair_link_calls_itself">Se hace llamar «%1$s».</string>
+    <string name="pair_link_not_scanned">Este código lo abrió otra app o una página web, no lo escaneaste tú.</string>
 </resources>

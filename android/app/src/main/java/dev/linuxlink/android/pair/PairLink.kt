@@ -26,6 +26,23 @@ data class PairLink(
         private const val PREFIX = "pocketdesk://pair?"
         private const val DEFAULT_CONTROL_PORT = 1716
         private const val DEFAULT_STREAM_PORT = 4716
+        private const val MAX_NAME = 32
+
+        /**
+         * A desktop name fit to show: the link chooses it, so control and
+         * formatting characters (a right-to-left override could make one name
+         * read as another) are dropped and it is cut to a sane length.
+         */
+        fun displayName(raw: String): String {
+            val clean = raw.filter { c ->
+                val type = Character.getType(c)
+                type != Character.CONTROL.toInt() &&
+                    type != Character.FORMAT.toInt() &&
+                    type != Character.UNASSIGNED.toInt() &&
+                    type != Character.PRIVATE_USE.toInt()
+            }.trim()
+            return if (clean.length > MAX_NAME) clean.take(MAX_NAME) + "…" else clean
+        }
 
         fun parse(uri: String): Result<PairLink> = runCatching {
             val query = uri.trim().removePrefix(PREFIX)

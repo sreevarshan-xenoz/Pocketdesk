@@ -35,13 +35,17 @@ import kotlinx.coroutines.withContext
  * hands over to [onPaired].
  *
  * Nothing happens until the user confirms: a pocketdesk:// link can be
- * opened by any web page or app, so the screen first says which computer
- * and which addresses the code names and waits for "Pair". Every address is
- * then pinned to the code's certificate fingerprint before it is contacted.
+ * opened by any web page or app, so the screen first shows the addresses
+ * that would be contacted (the name is the link's own claim, shown as such
+ * and sanitized), warns when the code was not scanned here, and waits for
+ * "Pair". Every address is then pinned to the code's certificate fingerprint
+ * before it is contacted.
  */
 @Composable
 fun PairLinkScreen(
     uri: String,
+    /** False when another app or a web page opened the link (not scanned here). */
+    scanned: Boolean,
     onPaired: (link: PairLink, address: String, serverId: String) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -72,15 +76,24 @@ fun PairLinkScreen(
             )
             !confirmed -> {
                 Text(
-                    stringResource(R.string.pair_link_confirm_title, link.name.ifBlank { link.addresses.first() }),
+                    stringResource(R.string.pair_link_confirm_title, link.addresses.joinToString(", ")),
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center,
                 )
+                val name = PairLink.displayName(link.name)
+                if (name.isNotEmpty()) {
+                    Text(stringResource(R.string.pair_link_calls_itself, name), textAlign = TextAlign.Center)
+                }
+                if (!scanned) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.pair_link_not_scanned),
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    stringResource(R.string.pair_link_confirm_body, link.addresses.joinToString(", ")),
-                    textAlign = TextAlign.Center,
-                )
+                Text(stringResource(R.string.pair_link_confirm_body), textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = { confirmed = true }) { Text(stringResource(R.string.pair_link_confirm)) }
             }
@@ -88,7 +101,10 @@ fun PairLinkScreen(
                 CircularProgressIndicator()
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    stringResource(R.string.pair_link_title, link.name.ifBlank { link.addresses.first() }),
+                    stringResource(
+                        R.string.pair_link_title,
+                        PairLink.displayName(link.name).ifBlank { link.addresses.first() },
+                    ),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(

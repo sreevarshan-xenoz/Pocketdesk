@@ -4,7 +4,12 @@ import dev.linuxlink.android.bridge.RustCore
 
 /** What pairing from a [PairLink] needs from the bridge; faked in tests. */
 interface PairOps {
-    fun pinCertificate(address: String, fingerprint: String): Result<Unit>
+    /** Pin [fingerprint] for [address]; true when the pin is new (not already there). */
+    fun pinCertificate(address: String, fingerprint: String): Result<Boolean>
+
+    /** Take back a pin this attempt added. */
+    fun forgetCertificate(address: String)
+
     fun connect(address: String, controlPort: Int): Result<Unit>
 
     /** The desktop's device id once paired; null when the PIN was refused. */
@@ -26,7 +31,9 @@ sealed interface PairOutcome {
  * Each is first pinned to the code's certificate fingerprint, so the phone's
  * streaming (QUIC) connections to it are verified from the start instead of
  * trusted on first use; an address whose pin is refused (this phone already
- * trusts a different computer there) is skipped, never contacted. The PIN
+ * trusts a different computer there) is skipped, never contacted, and a pin
+ * this attempt added is taken back when pairing at that address does not
+ * succeed — a code that did not pair leaves no trust behind. The PIN
  * itself still travels over the control channel, which is not encrypted —
  * the same exposure as typing the PIN by hand.
  *
@@ -36,6 +43,7 @@ sealed interface PairOutcome {
 fun runPairing(link: PairLink, ops: PairOps): PairOutcome {
     var lastError = "no address to try"
     for (address in link.addresses) {
+        var added = false
         val fp = link.fingerprint
         if (fp != null) {
             val pinned = ops.pinCertificate(address, fp)
@@ -43,18 +51,21 @@ fun runPairing(link: PairLink, ops: PairOps): PairOutcome {
                 lastError = pinned.exceptionOrNull()?.message ?: "could not pin"
                 continue
             }
+            added = pinned.getOrDefault(false)
         }
+        val undo = { if (added) ops.forgetCertificate(address) }
         val connected = ops.connect(address, link.controlPort)
         if (connected.isFailure) {
             lastError = connected.exceptionOrNull()?.message ?: "unreachable"
+            undo()
             continue
         }
         val paired = ops.pair(address, link.controlPort, link.pin)
-        paired.onFailure {
-            lastError = it.message ?: "pairing failed"
-        }.onSuccess { serverId ->
-            return if (serverId != null) PairOutcome.Paired(address, serverId) else PairOutcome.Expired
-        }
+        val serverId = paired.getOrNull()
+        if (serverId != null) return PairOutcome.Paired(address, serverId)
+        undo()
+        if (paired.isSuccess) return PairOutcome.Expired
+        lastError = paired.exceptionOrNull()?.message ?: "pairing failed"
     }
     return PairOutcome.Unreachable(lastError)
 }
@@ -63,6 +74,10 @@ fun runPairing(link: PairLink, ops: PairOps): PairOutcome {
 object RustPairOps : PairOps {
     override fun pinCertificate(address: String, fingerprint: String) =
         RustCore.pinPeerCertificate(address, fingerprint)
+
+    override fun forgetCertificate(address: String) {
+        RustCore.forgetPeerCertificate(address)
+    }
 
     override fun connect(address: String, controlPort: Int): Result<Unit> =
         RustCore.connectToPeer(address, controlPort).map { }

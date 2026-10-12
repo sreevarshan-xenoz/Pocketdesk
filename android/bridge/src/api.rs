@@ -45,7 +45,7 @@ pub fn set_data_dir(path: String) {
 /// use. Only the QUIC streaming channel is covered: the control channel the
 /// PIN rides is not encrypted. Refused when a different certificate is
 /// already trusted for the address (see below).
-pub fn pin_peer_certificate(address: String, fingerprint_hex: String) -> Result<(), String> {
+pub fn pin_peer_certificate(address: String, fingerprint_hex: String) -> Result<bool, String> {
     let dir = crate::CERT_DIR
         .lock()
         .unwrap()
@@ -54,11 +54,13 @@ pub fn pin_peer_certificate(address: String, fingerprint_hex: String) -> Result<
     pin_peer_certificate_in(&dir, &address, &fingerprint_hex)
 }
 
+/// Returns whether the pin is new (`false`: this exact pin was already
+/// there), so a failed pairing can take back only what it added.
 pub(crate) fn pin_peer_certificate_in(
     cert_dir: &std::path::Path,
     address: &str,
     fingerprint_hex: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let ip: std::net::IpAddr = address
         .trim()
         .parse()
@@ -79,18 +81,22 @@ pub(crate) fn pin_peer_certificate_in(
     // certificate this phone already trusts for an address: a different
     // fingerprint there is a different computer. Removing the computer in
     // the app clears the old trust first.
-    if manager
+    match manager
         .known_peers()
         .iter()
-        .any(|(known, pinned)| *known == label && *pinned != hash)
+        .find(|(known, _)| *known == label)
     {
-        return Err(format!(
-            "this phone already trusts a different computer at {ip}; remove it first"
-        ));
+        Some((_, pinned)) if *pinned == hash => return Ok(false),
+        Some(_) => {
+            return Err(format!(
+                "this phone already trusts a different computer at {ip}; remove it first"
+            ));
+        }
+        None => {}
     }
     manager.pin_peer(&label, hash).map_err(|e| e.to_string())?;
     tracing::info!("Pinned the certificate of {ip} from a pairing code");
-    Ok(())
+    Ok(true)
 }
 
 /// Forget the certificate this phone trusts for `address` (the computer was
@@ -2835,8 +2841,14 @@ mod pin_certificate_tests {
     fn a_link_cannot_replace_the_certificate_already_trusted_for_an_address() {
         let dir = std::env::temp_dir().join(format!("bridge-pin-conflict-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        pin_peer_certificate_in(&dir, "10.0.0.7", &"ab".repeat(32)).unwrap();
-        pin_peer_certificate_in(&dir, "10.0.0.7", &"ab".repeat(32)).unwrap();
+        assert!(
+            pin_peer_certificate_in(&dir, "10.0.0.7", &"ab".repeat(32)).unwrap(),
+            "new pin"
+        );
+        assert!(
+            !pin_peer_certificate_in(&dir, "10.0.0.7", &"ab".repeat(32)).unwrap(),
+            "the same pin again adds nothing"
+        );
         let err = pin_peer_certificate_in(&dir, "10.0.0.7", &"cd".repeat(32)).unwrap_err();
         assert!(err.contains("different"), "{err}");
         let label = peer_label_for_ip("10.0.0.7".parse().unwrap());

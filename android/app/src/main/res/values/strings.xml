@@ -203,7 +203,9 @@
     <string name="scan_hint">Point the camera at the code in the Pocketdesk desktop app (Pair tab).</string>
     <string name="scan_need_camera">Pocketdesk needs the camera to read the pairing code. You can also add the computer by address and PIN.</string>
     <string name="scan_allow_camera">Allow camera</string>
-    <string name="pair_link_confirm_title">Pair with %1$s?</string>
-    <string name="pair_link_confirm_body">Only continue if this code is showing on that computer\'s screen right now. It names %1$s.</string>
+    <string name="pair_link_confirm_title">Pair with the computer at %1$s?</string>
+    <string name="pair_link_confirm_body">Only continue if this code is showing on that computer\'s screen right now.</string>
     <string name="pair_link_confirm">Pair</string>
+    <string name="pair_link_calls_itself">It calls itself “%1$s”.</string>
+    <string name="pair_link_not_scanned">This code was opened by another app or a web page, not scanned by you.</string>
 </resources>

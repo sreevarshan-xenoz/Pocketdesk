@@ -196,7 +196,9 @@
     <string name="scan_hint">Pocketdesk டெஸ்க்டாப் செயலியில் உள்ள குறியீட்டை நோக்கி கேமராவைக் காட்டுங்கள் (Pair தாவல்).</string>
     <string name="scan_need_camera">குறியீட்டைப் படிக்க Pocketdesk-க்கு கேமரா தேவை. முகவரி மற்றும் PIN மூலமும் கணினியைச் சேர்க்கலாம்.</string>
     <string name="scan_allow_camera">கேமராவை அனுமதி</string>
-    <string name="pair_link_confirm_title">%1$s உடன் இணைக்கவா?</string>
-    <string name="pair_link_confirm_body">இந்தக் குறியீடு இப்போது அந்தக் கணினியின் திரையில் தெரிந்தால் மட்டும் தொடருங்கள். அது %1$s என்பதைக் குறிப்பிடுகிறது.</string>
+    <string name="pair_link_confirm_title">%1$s இல் உள்ள கணினியுடன் இணைக்கவா?</string>
+    <string name="pair_link_confirm_body">இந்தக் குறியீடு இப்போது அந்தக் கணினியின் திரையில் தெரிந்தால் மட்டும் தொடருங்கள்.</string>
     <string name="pair_link_confirm">இணை</string>
+    <string name="pair_link_calls_itself">அது தன்னை “%1$s” என்று அழைக்கிறது.</string>
+    <string name="pair_link_not_scanned">இந்தக் குறியீட்டை நீங்கள் ஸ்கேன் செய்யவில்லை; வேறு செயலி அல்லது இணையப் பக்கம் திறந்தது.</string>
 </resources>

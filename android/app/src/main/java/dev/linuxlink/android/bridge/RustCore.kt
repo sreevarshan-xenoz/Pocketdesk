@@ -178,10 +178,11 @@ object RustCore {
     /**
      * Pin the desktop certificate for [address] from a scanned pairing code,
      * so the streaming (QUIC) connection is verified from the first one on.
-     * Refused when this phone already trusts a different certificate there.
+     * Refused when this phone already trusts a different certificate there;
+     * true when the pin is new.
      */
-    fun pinPeerCertificate(address: String, fingerprintHex: String): Result<Unit> =
-        envelope(nativePinPeerCertificate(address, fingerprintHex)).map { }
+    fun pinPeerCertificate(address: String, fingerprintHex: String): Result<Boolean> =
+        envelope(nativePinPeerCertificate(address, fingerprintHex)).map { it.toBooleanStrictOrNull() == true }
 
     /** Forget the certificate trusted for [address] (the computer was removed). */
     fun forgetPeerCertificate(address: String): Result<Unit> =
