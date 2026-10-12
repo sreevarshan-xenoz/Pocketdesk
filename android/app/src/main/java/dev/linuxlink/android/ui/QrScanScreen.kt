@@ -110,8 +110,16 @@ private fun CameraPreview(onCode: (String) -> Unit) {
         )
     }
     val delivered = remember { AtomicBoolean(false) }
+    // The camera binds to the Activity, which outlives this screen: without
+    // an explicit unbind it stays on (and keeps analysing into a closed
+    // scanner) after the user leaves. `provider` is touched on the main thread
+    // only; the analyser also reads `disposed`.
+    val camera = remember { CameraHold() }
     DisposableEffect(Unit) {
         onDispose {
+            camera.disposed = true
+            camera.provider?.unbindAll()
+            camera.provider = null
             scanner.close()
             analysisExecutor.shutdown()
         }
@@ -122,6 +130,8 @@ private fun CameraPreview(onCode: (String) -> Unit) {
             val view = PreviewView(ctx)
             val providerFuture = ProcessCameraProvider.getInstance(ctx)
             providerFuture.addListener({
+                // The screen may have gone before the provider was ready.
+                if (camera.disposed) return@addListener
                 val provider = providerFuture.get()
                 val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
                 val analysis = ImageAnalysis.Builder()
@@ -129,12 +139,17 @@ private fun CameraPreview(onCode: (String) -> Unit) {
                     .build()
                 analysis.setAnalyzer(analysisExecutor) { proxy ->
                     val media = proxy.image
-                    if (media == null || delivered.get()) {
+                    if (media == null || delivered.get() || camera.disposed) {
                         proxy.close()
                         return@setAnalyzer
                     }
                     val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
-                    scanner.process(image)
+                    // A frame already in flight when the screen left meets a closed scanner.
+                    val task = runCatching { scanner.process(image) }.getOrElse {
+                        proxy.close()
+                        return@setAnalyzer
+                    }
+                    task
                         .addOnSuccessListener { codes ->
                             val code = firstPairingCode(codes.map { it.rawValue })
                             if (code != null && delivered.compareAndSet(false, true)) {
@@ -150,8 +165,15 @@ private fun CameraPreview(onCode: (String) -> Unit) {
                     preview,
                     analysis,
                 )
+                camera.provider = provider
             }, ContextCompat.getMainExecutor(context))
             view
         },
     )
+}
+
+/** The camera this screen bound, so it can let go of it. */
+private class CameraHold {
+    @Volatile var disposed = false
+    var provider: ProcessCameraProvider? = null
 }
