@@ -24,6 +24,50 @@ use super::session_telemetry::{SessionOutcome, SessionRecorder};
 use super::transport::{self, CertManager, StreamServer, StreamTransportConfig};
 use super::{EncodedPacket, StreamingConfig, VideoCodec, VideoFrame};
 
+/// Where a whole-monitor session's absolute pointer input has to land.
+///
+/// The phone normalizes such a tap over the video frame, which is one
+/// monitor. Windows injects absolute moves over the whole desktop layout,
+/// so with two monitors a tap in the middle of the stream landed in the
+/// middle of *both* screens. A cropped (single-window) session needs no
+/// remap: the phone already normalizes those over the layout box the
+/// server reports. Linux keeps the frame-normalized value — whether its
+/// uinput absolute device spans the layout on a multi-monitor desktop has
+/// not been measured.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PointerSpace {
+    monitor: (i32, i32, u32, u32),
+    layout: (i32, i32, u32, u32),
+}
+
+impl PointerSpace {
+    /// The space for a session capturing monitor `index`; `None` when the
+    /// injector's space already is the frame.
+    fn for_monitor(index: u32) -> Option<Self> {
+        if !cfg!(windows) {
+            return None;
+        }
+        let space = Self {
+            monitor: capture::monitor_rect(index)?,
+            layout: capture::layout_rect()?,
+        };
+        (space.monitor != space.layout).then_some(space)
+    }
+
+    /// A frame-normalized point (0..=65535 per axis) as a layout-normalized one.
+    fn remap(&self, x_norm: u16, y_norm: u16) -> (u16, u16) {
+        fn axis(norm: u16, start: i32, len: u32, space_start: i32, space_len: u32) -> u16 {
+            let max = f64::from(u16::MAX);
+            let pixel = f64::from(start) + f64::from(norm) / max * f64::from(len);
+            let scaled = (pixel - f64::from(space_start)) / f64::from(space_len.max(1)) * max;
+            scaled.round().clamp(0.0, max) as u16
+        }
+        let (mx, my, mw, mh) = self.monitor;
+        let (lx, ly, lw, lh) = self.layout;
+        (axis(x_norm, mx, mw, lx, lw), axis(y_norm, my, mh, ly, lh))
+    }
+}
+
 /// R4 A3: bitrate ceiling applied while an iroh session rides a relay —
 /// relay bandwidth is shared and not ours to saturate. Conservative on
 /// purpose: a punched-direct path restores the configured rate.
@@ -804,12 +848,21 @@ impl StreamingServer {
         let monitor_full_quality = self.full_quality.clone();
         let monitor_preset = self.preset.clone();
         let monitor_mic_tx = self.mic_tx.clone();
+        let pointer_space = PointerSpace::for_monitor(self.config.monitor_index);
+        if let Some(space) = pointer_space {
+            info!(
+                ?space,
+                "Absolute input is remapped from the monitor onto the desktop layout"
+            );
+        }
         // The client's own measurements land in the session record, so the
         // monitor needs the recorder the encode task shares.
         let monitor_recorder = telemetry.as_ref().map(|t| t.0.clone());
         let monitor_span = tracing::info_span!("connection_monitor");
         tasks.spawn(async move {
             info!("Connection monitor started");
+            // A cropped session's taps arrive layout-normalized already.
+            let mut cropped = false;
 
             loop {
                 tokio::select! {
@@ -858,6 +911,7 @@ impl StreamingServer {
                                                     let rect = packet.crop_rect();
                                                     let addr = packet.window_handle().unwrap_or(0);
                                                     info!(?rect, addr, "Client set window crop");
+                                                    cropped = rect.is_some();
                                                     let _ = monitor_crop_tx.send(rect);
                                                     let _ = monitor_window_tx.send(addr);
                                                     continue;
@@ -910,6 +964,16 @@ impl StreamingServer {
                                                     debug!("View-only: dropping input packet");
                                                     continue;
                                                 }
+                                                let packet = match (packet, pointer_space) {
+                                                    (
+                                                        InputPacket::MouseMoveAbs { x_norm, y_norm },
+                                                        Some(space),
+                                                    ) if !cropped => {
+                                                        let (x_norm, y_norm) = space.remap(x_norm, y_norm);
+                                                        InputPacket::MouseMoveAbs { x_norm, y_norm }
+                                                    }
+                                                    (packet, _) => packet,
+                                                };
                                                 // Forward to input injector via channel
                                                 if let Some(ref tx) = input_tx {
                                                    // Use send() without await (broadcast is sync).
@@ -1337,6 +1401,49 @@ async fn send_audio_packet(
 mod tests {
     use super::*;
     use crate::streaming::{EncoderPreset, H264Profile, HardwareEncoder, VideoCodec};
+
+    /// This PC's layout: a 2560x1080 primary at the origin and a 2048x1152
+    /// screen to its right, 91 px higher.
+    const TWO_SCREENS: PointerSpace = PointerSpace {
+        monitor: (0, 0, 2560, 1080),
+        layout: (0, -91, 4608, 1171),
+    };
+
+    fn to_pixel(norm: (u16, u16), layout: (i32, i32, u32, u32)) -> (i32, i32) {
+        let (lx, ly, lw, lh) = layout;
+        let px = |n: u16, start: i32, len: u32| {
+            start + (f64::from(n) / 65535.0 * f64::from(len)).round() as i32
+        };
+        (px(norm.0, lx, lw), px(norm.1, ly, lh))
+    }
+
+    #[test]
+    fn a_frame_point_lands_on_the_same_pixel_of_the_captured_monitor() {
+        // The tap that missed on the device: the middle of the stream went to
+        // (2560, 281) instead of the monitor's own middle.
+        let centre = TWO_SCREENS.remap(32768, 32768);
+        let (x, y) = to_pixel(centre, TWO_SCREENS.layout);
+        assert!((x - 1280).abs() <= 1 && (y - 540).abs() <= 1, "{x},{y}");
+        // The frame's corners are the monitor's corners, not the layout's.
+        assert_eq!(
+            to_pixel(TWO_SCREENS.remap(0, 0), TWO_SCREENS.layout),
+            (0, 0)
+        );
+        let (x, y) = to_pixel(TWO_SCREENS.remap(65535, 65535), TWO_SCREENS.layout);
+        assert!((x - 2560).abs() <= 1 && (y - 1080).abs() <= 1, "{x},{y}");
+    }
+
+    #[test]
+    fn a_monitor_right_of_the_primary_maps_inside_its_own_rect() {
+        let right = PointerSpace {
+            monitor: (2560, -91, 2048, 1152),
+            ..TWO_SCREENS
+        };
+        let (x, y) = to_pixel(right.remap(0, 0), right.layout);
+        assert_eq!((x, y), (2560, -91));
+        let (x, y) = to_pixel(right.remap(65535, 65535), right.layout);
+        assert!((x - 4608).abs() <= 1 && (y - 1061).abs() <= 1, "{x},{y}");
+    }
 
     #[test]
     fn test_streaming_server_creation() {

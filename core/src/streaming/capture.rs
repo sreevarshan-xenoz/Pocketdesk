@@ -62,6 +62,30 @@ pub(super) fn monitor_rect(index: u32) -> Option<(i32, i32, u32, u32)> {
     ))
 }
 
+/// The bounding box of every monitor: the whole desktop layout, which is
+/// the space Windows' absolute `SendInput` (`MOUSEEVENTF_VIRTUALDESK`)
+/// normalizes over.
+pub(super) fn layout_rect() -> Option<(i32, i32, u32, u32)> {
+    let monitors = xcap::Monitor::all().ok()?;
+    let rects: Vec<(i32, i32, i32, i32)> = monitors
+        .iter()
+        .filter_map(|m| {
+            let (x, y) = (m.x().ok()?, m.y().ok()?);
+            Some((
+                x,
+                y,
+                x + m.width().ok()? as i32,
+                y + m.height().ok()? as i32,
+            ))
+        })
+        .collect();
+    let left = rects.iter().map(|r| r.0).min()?;
+    let top = rects.iter().map(|r| r.1).min()?;
+    let right = rects.iter().map(|r| r.2).max()?;
+    let bottom = rects.iter().map(|r| r.3).max()?;
+    Some((left, top, (right - left) as u32, (bottom - top) as u32))
+}
+
 /// Which display server is currently running
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayServer {
