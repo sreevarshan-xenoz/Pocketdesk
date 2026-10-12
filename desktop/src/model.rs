@@ -1,0 +1,151 @@
+//! What the app shows, read from the files the server keeps — plain data,
+//! no window, so it is tested directly.
+
+use std::path::Path;
+
+use linux_link_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
+use linux_link_core::local::{server, sessions};
+use linux_link_core::protocol::kdeconnect::TrustStore;
+
+/// A paired phone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Device {
+    pub id: String,
+    /// Seconds left on a time-boxed grant; `None` is permanent.
+    pub grant_remaining: Option<u64>,
+    /// Whether it has a live streaming session right now.
+    pub connected: bool,
+}
+
+/// Everything the window shows, read once per refresh.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Snapshot {
+    pub running: bool,
+    pub devices: Vec<Device>,
+    pub sessions: Vec<sessions::MirrorSession>,
+}
+
+/// The state under `state_dir` at `now_unix`.
+pub fn snapshot(state_dir: &Path, now_unix: u64) -> Snapshot {
+    snapshot_with(state_dir, now_unix, server::is_running(state_dir))
+}
+
+/// [`snapshot`] with the liveness answer supplied, so it is testable without
+/// a server process.
+pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot {
+    // A mirror is believed only while the server that writes it is alive
+    // and has written it recently; a crash leaves the last one behind.
+    let sessions = std::fs::read_to_string(state_dir.join(LIVE_FILE))
+        .ok()
+        .and_then(|raw| sessions::parse_mirror(&raw))
+        .filter(|m| running && m.is_fresh(now_unix))
+        .map(|m| m.sessions)
+        .unwrap_or_default();
+    let devices = match TrustStore::load_or_create(state_dir.join(TRUST_FILE)) {
+        Ok(store) => store
+            .trusted_devices()
+            .into_iter()
+            .map(|id| Device {
+                grant_remaining: store.grant_remaining(&id),
+                connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
+                id,
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    Snapshot {
+        running,
+        devices,
+        sessions,
+    }
+}
+
+/// The last `lines` lines of the newest daily server log
+/// (`<state>/logs/linux-link.<date>.log`, written by `start --background`).
+pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(state_dir.join(LOG_DIR)) else {
+        return Vec::new();
+    };
+    let newest = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("linux-link.") && n.ends_with(".log"))
+        })
+        .max();
+    let Some(raw) = newest.and_then(|p| std::fs::read(p).ok()) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&raw);
+    let all: Vec<&str> = text.lines().collect();
+    all[all.len().saturating_sub(lines)..]
+        .iter()
+        .map(|l| l.to_string())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linux_link_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
+    use linux_link_core::protocol::kdeconnect::TrustStore;
+    use std::time::Duration;
+
+    pub(crate) fn temp_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("pd-model-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    const ONE_SESSION: &str = r#"{"updated_unix":100,"sessions":[{"device_id":"a","peer":"1.2.3.4:5","transport":"lan","started_unix":90}]}"#;
+
+    #[test]
+    fn a_dead_server_shows_no_sessions_even_with_a_mirror_left_behind() {
+        let dir = temp_dir("dead");
+        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
+        let snap = snapshot_with(&dir, 101, false);
+        assert!(!snap.running && snap.sessions.is_empty());
+    }
+
+    #[test]
+    fn a_stale_mirror_shows_no_sessions_even_while_running() {
+        let dir = temp_dir("stale");
+        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
+        assert!(snapshot_with(&dir, 200, true).sessions.is_empty());
+        assert_eq!(snapshot_with(&dir, 101, true).sessions.len(), 1);
+    }
+
+    #[test]
+    fn devices_list_permanent_and_granted_and_mark_the_connected_one() {
+        let dir = temp_dir("devices");
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("a").unwrap();
+        store
+            .trust_device_with_ttl("b", Duration::from_secs(60))
+            .unwrap();
+        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
+        let snap = snapshot_with(&dir, 101, true);
+        let a = snap.devices.iter().find(|d| d.id == "a").unwrap();
+        let b = snap.devices.iter().find(|d| d.id == "b").unwrap();
+        assert!(a.connected && a.grant_remaining.is_none());
+        assert!(!b.connected && b.grant_remaining.is_some_and(|s| s <= 60));
+    }
+
+    #[test]
+    fn the_log_tail_reads_the_newest_daily_file_last_lines() {
+        let dir = temp_dir("logs");
+        let logs = dir.join(LOG_DIR);
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("linux-link.2026-10-11.log"), "old\n").unwrap();
+        let lines: String = (0..250).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(logs.join("linux-link.2026-10-12.log"), lines).unwrap();
+        let tail = log_tail(&dir, 200);
+        assert_eq!(tail.len(), 200);
+        assert_eq!(tail.first().map(String::as_str), Some("line 50"));
+        assert_eq!(tail.last().map(String::as_str), Some("line 249"));
+        assert!(log_tail(&temp_dir("nologs"), 10).is_empty());
+    }
+}
