@@ -6,6 +6,7 @@
 //! polls; there is no callback channel yet.
 
 mod api;
+mod logcat;
 mod rates;
 mod session;
 
@@ -18,6 +19,9 @@ use std::sync::LazyLock;
 
 /// Shared Tokio runtime used to `block_on` the async client API.
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    // Every bridge call goes through this runtime, so this is the first
+    // moment a log line can exist; install the logcat subscriber here.
+    logcat::init();
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
