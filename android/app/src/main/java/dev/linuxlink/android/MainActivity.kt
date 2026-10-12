@@ -53,6 +53,9 @@ class MainActivity : ComponentActivity() {
 
         /** Set by the notification's Lock-desktop action (Tier-3 #15). */
         const val EXTRA_LOCK_DESKTOP = "dev.linuxlink.android.LOCK_DESKTOP"
+
+        private const val STATE_PAIR_LINK = "pair_link"
+        private const val STATE_PAIR_SCANNED = "pair_link_scanned"
     }
 
     private val disconnectSignal = mutableIntStateOf(0)
@@ -65,6 +68,19 @@ class MainActivity : ComponentActivity() {
 
     private fun pairUriFrom(intent: Intent?): String? =
         intent?.data?.takeIf { it.scheme == "pocketdesk" && it.host == "pair" }?.toString()
+
+    /**
+     * The pairing link [intent] carries, taken once: the data is cleared so a
+     * recreated activity (theme or locale change, process death) does not
+     * offer a pairing the user already finished or dismissed. A launch from
+     * Recents replays the original intent, so it carries no new link.
+     */
+    private fun takePairUri(intent: Intent): String? {
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return null
+        val uri = pairUriFrom(intent) ?: return null
+        setIntent(Intent(intent).setData(null))
+        return uri
+    }
 
     /** PiP state (Tier-3 #14), read by the composition to hide chrome. */
     private val inPictureInPicture = mutableStateOf(false)
@@ -104,8 +120,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         RustCore.start(filesDir)
-        pairLink.value = pairUriFrom(intent)
-        pairLinkScanned.value = false
+        if (savedInstanceState == null) {
+            pairLink.value = takePairUri(intent)
+            pairLinkScanned.value = false
+        } else {
+            pairLink.value = savedInstanceState.getString(STATE_PAIR_LINK)
+            pairLinkScanned.value = savedInstanceState.getBoolean(STATE_PAIR_SCANNED)
+        }
         setContent {
             LinuxLinkTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -230,10 +251,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_PAIR_LINK, pairLink.value)
+        outState.putBoolean(STATE_PAIR_SCANNED, pairLinkScanned.value)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pairUriFrom(intent)?.let {
+        takePairUri(intent)?.let {
             pairLinkScanned.value = false
             pairLink.value = it
         }
