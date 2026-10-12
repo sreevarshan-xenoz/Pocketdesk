@@ -98,22 +98,80 @@ fn qr_image(modules: &[Vec<bool>], scale: usize) -> ColorImage {
     ColorImage::new([side, side], pixels)
 }
 
+/// What the Pair tab does with the code it shows, given the PIN on file.
+#[derive(Debug, PartialEq, Eq)]
+enum Next {
+    /// The code on screen is still the live PIN.
+    Keep,
+    /// Show a code for the PIN on file, minting one if there is none: the
+    /// tab is fresh, the shown PIN ran out of time, or `linux-link pair`
+    /// replaced it.
+    Refresh,
+    /// The shown PIN left the file before its time: it paired a phone, or
+    /// the server discarded it after too many wrong guesses. Minting another
+    /// on its own would hand whoever was guessing a fresh five tries, so the
+    /// tab waits for a click.
+    Stop,
+}
+
+/// The PIN behind the code on screen.
+struct Shown {
+    pin: String,
+    /// When it runs out; `None` for a PIN that never expires.
+    expires_unix: Option<u64>,
+}
+
+fn next_step(shown: Option<&Shown>, on_file: Option<&pin::FilePin>, now_unix: u64) -> Next {
+    let Some(shown) = shown else {
+        return Next::Refresh;
+    };
+    match on_file {
+        Some(file) if file.pin == shown.pin => Next::Keep,
+        Some(_) => Next::Refresh,
+        None if shown.expires_unix.is_some_and(|t| now_unix >= t) => Next::Refresh,
+        None => Next::Stop,
+    }
+}
+
 /// The Pair tab's state between frames.
 #[derive(Default)]
 pub struct PairView {
     link: Option<PairLink>,
+    shown: Option<Shown>,
     texture: Option<TextureHandle>,
     error: Option<String>,
+    /// The shown code was used up or discarded early (see [`Next::Stop`]).
+    stopped: bool,
     /// Devices paired before this code was shown; a new one is the phone
     /// that just scanned it.
     known: Option<Vec<String>>,
     paired: Option<String>,
+    /// The app should re-read the trust store now rather than at its next
+    /// tick: a PIN that left early may have just paired a phone.
+    refresh_wanted: bool,
 }
 
 impl PairView {
-    /// Forget the current code (the tab was left); a fresh look starts over.
-    pub fn reset(&mut self) {
+    /// Forget the current code (the tab was left, or the window hidden or
+    /// closed) and take its PIN off file, so no code stays live that nobody
+    /// is looking at; a fresh look starts over.
+    pub fn reset(&mut self, state_dir: &Path) {
+        self.withdraw(state_dir);
         *self = Self::default();
+    }
+
+    /// Whether the app should refresh its snapshot now (asked once).
+    pub fn take_refresh_request(&mut self) -> bool {
+        std::mem::take(&mut self.refresh_wanted)
+    }
+
+    /// Delete the shown PIN from file if it is still the one there.
+    fn withdraw(&mut self, state_dir: &Path) {
+        if let Some(shown) = self.shown.take() {
+            let _ = pin::remove_if(state_dir, &shown.pin);
+        }
+        self.link = None;
+        self.texture = None;
     }
 
     pub fn show(
@@ -127,33 +185,13 @@ impl PairView {
         let known = self
             .known
             .get_or_insert_with(|| devices.iter().map(|d| d.id.clone()).collect());
-        if let Some(new) = devices.iter().find(|d| !known.contains(&d.id)) {
+        if self.paired.is_none()
+            && let Some(new) = devices.iter().find(|d| !known.contains(&d.id))
+        {
+            // One code, one phone: the server already deleted the PIN; make
+            // sure a code minted in the meantime goes too.
             self.paired = Some(new.id.clone());
-        }
-
-        // A new code when there is none, or when the PIN behind it expired
-        // (or was replaced by `linux-link pair`).
-        let live_pin = pin::read(state_dir, now_unix).map(|p| p.pin);
-        let stale = self
-            .link
-            .as_ref()
-            .is_none_or(|link| live_pin.as_deref() != Some(link.pin.as_str()));
-        if stale && self.error.is_none() {
-            let config = config.cloned().unwrap_or_default();
-            match current_link(state_dir, &config, now_unix) {
-                Ok(link) => match qr_modules(&link.to_uri()) {
-                    Ok(modules) => {
-                        self.texture = Some(ui.ctx().load_texture(
-                            "pair-qr",
-                            qr_image(&modules, 6),
-                            TextureOptions::NEAREST,
-                        ));
-                        self.link = Some(link);
-                    }
-                    Err(e) => self.error = Some(format!("Could not draw the code: {e}")),
-                },
-                Err(e) => self.error = Some(format!("Could not make a pairing code: {e}")),
-            }
+            self.withdraw(state_dir);
         }
 
         if let Some(id) = &self.paired {
@@ -163,8 +201,62 @@ impl PairView {
                     .strong()
                     .size(18.0),
             );
-            ui.label("The phone can connect now. Close this tab or pair another phone.");
+            ui.label("The phone can connect now.");
             ui.add_space(8.0);
+            if ui.button("Pair another phone").clicked() {
+                self.reset(state_dir);
+            }
+            return;
+        }
+
+        let on_file = pin::read(state_dir, now_unix);
+        if !self.stopped && self.error.is_none() {
+            match next_step(self.shown.as_ref(), on_file.as_ref(), now_unix) {
+                Next::Keep => {}
+                Next::Stop => {
+                    self.stopped = true;
+                    self.refresh_wanted = true;
+                    self.withdraw(state_dir);
+                }
+                Next::Refresh => {
+                    let config = config.cloned().unwrap_or_default();
+                    match current_link(state_dir, &config, now_unix) {
+                        Ok(link) => match qr_modules(&link.to_uri()) {
+                            Ok(modules) => {
+                                self.texture = Some(ui.ctx().load_texture(
+                                    "pair-qr",
+                                    qr_image(&modules, 6),
+                                    TextureOptions::NEAREST,
+                                ));
+                                let expires_unix = pin::read(state_dir, now_unix)
+                                    .and_then(|p| p.minted_unix)
+                                    .map(|t| t + pin::PIN_TTL.as_secs());
+                                self.shown = Some(Shown {
+                                    pin: link.pin.clone(),
+                                    expires_unix,
+                                });
+                                self.link = Some(link);
+                            }
+                            Err(e) => self.error = Some(format!("Could not draw the code: {e}")),
+                        },
+                        Err(e) => self.error = Some(format!("Could not make a pairing code: {e}")),
+                    }
+                }
+            }
+        }
+
+        if self.stopped {
+            ui.label(RichText::new("This code no longer works").heading());
+            ui.label(
+                "It was used, or the server discarded it after 5 wrong PIN guesses. \
+                 If nobody here was pairing a phone, someone on your network may have been \
+                 guessing.",
+            );
+            ui.add_space(8.0);
+            if ui.button("Show a new code").clicked() {
+                self.reset(state_dir);
+            }
+            return;
         }
         if let Some(error) = &self.error {
             ui.label(RichText::new(error).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
@@ -288,6 +380,72 @@ mod tests {
     fn no_usable_address_is_an_error_not_an_unscannable_code() {
         let dir = temp_dir("noaddr");
         assert!(link_for(&dir, &Config::default(), 5, vec!["127.0.0.1".into()]).is_err());
+    }
+
+    fn file_pin(pin: &str) -> pin::FilePin {
+        pin::FilePin {
+            pin: pin.to_string(),
+            minted_unix: Some(1_000),
+            grant_secs: None,
+        }
+    }
+
+    #[test]
+    fn a_code_that_leaves_early_stops_the_tab_instead_of_minting_another() {
+        let shown = Shown {
+            pin: "123456".into(),
+            expires_unix: Some(1_300),
+        };
+        assert_eq!(next_step(None, None, 1_000), Next::Refresh, "fresh tab");
+        assert_eq!(
+            next_step(Some(&shown), Some(&file_pin("123456")), 1_100),
+            Next::Keep
+        );
+        assert_eq!(
+            next_step(Some(&shown), Some(&file_pin("654321")), 1_100),
+            Next::Refresh,
+            "`linux-link pair` replaced it"
+        );
+        assert_eq!(
+            next_step(Some(&shown), None, 1_100),
+            Next::Stop,
+            "paired or discarded after wrong guesses: no fresh five tries"
+        );
+        assert_eq!(
+            next_step(Some(&shown), None, 1_300),
+            Next::Refresh,
+            "ran out of time"
+        );
+        let forever = Shown {
+            pin: "123456".into(),
+            expires_unix: None,
+        };
+        assert_eq!(next_step(Some(&forever), None, u64::MAX), Next::Stop);
+    }
+
+    #[test]
+    fn leaving_the_tab_takes_its_pin_off_file_but_not_a_newer_one() {
+        let dir = temp_dir("withdraw");
+        let mut view = PairView::default();
+        pin::write(&dir, "123456", 1_000, None).unwrap();
+        view.shown = Some(Shown {
+            pin: "123456".into(),
+            expires_unix: Some(1_300),
+        });
+        view.reset(&dir);
+        assert!(pin::read(&dir, 1_001).is_none(), "the shown PIN is gone");
+
+        view.shown = Some(Shown {
+            pin: "123456".into(),
+            expires_unix: Some(1_300),
+        });
+        pin::write(&dir, "654321", 1_000, None).unwrap();
+        view.reset(&dir);
+        assert!(
+            pin::read(&dir, 1_001).is_some_and(|p| p.pin == "654321"),
+            "a PIN `linux-link pair` wrote since is left alone"
+        );
+        assert!(view.shown.is_none() && !view.stopped);
     }
 
     #[test]

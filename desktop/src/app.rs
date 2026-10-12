@@ -139,7 +139,7 @@ impl PocketdeskApp {
 
     fn switch_to(&mut self, tab: Tab) {
         if self.tab == Tab::Pair && tab != Tab::Pair {
-            self.pair.reset();
+            self.pair.reset(&self.state_dir);
         }
         if tab == Tab::Settings && self.settings.is_none() {
             self.settings = Some(
@@ -390,6 +390,10 @@ impl PocketdeskApp {
 }
 
 impl eframe::App for PocketdeskApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.pair.reset(&self.state_dir);
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_tray(ctx);
         self.finish_job();
@@ -397,6 +401,13 @@ impl eframe::App for PocketdeskApp {
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.tray.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            // Nobody sees a hidden window, so it must not keep (or, on its
+            // next repaint, mint) a live pairing code.
+            self.switch_to(Tab::Status);
+        }
+        if self.pair.take_refresh_request() {
+            self.refreshed = None;
+            ctx.request_repaint();
         }
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
             self.refresh();
