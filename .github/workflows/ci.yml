@@ -144,15 +144,21 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The default also asks for `tools`, which current command-line tools
+          # no longer ship, so sdkmanager exited 1 and the job never built.
+          packages: platform-tools
 
       - name: Install platform, build-tools and NDK
         run: |
-          sdkmanager --install "platforms;android-37" "build-tools;37.0.0" >/dev/null
+          # Platform 37 has its own licence prompt. `(yes || true)` because the
+          # step runs under pipefail and `yes` dies of SIGPIPE when sdkmanager ends.
+          (yes || true) | sdkmanager --install "platforms;android-37" "build-tools;37.0.0" >/dev/null
           # NDK package names carry the full revision, so discover the r29 one
           # instead of pinning a string that silently rots.
           NDK=$(sdkmanager --list 2>/dev/null | awk '/ndk;29\./ { print $1; exit }')
           test -n "$NDK" || { echo "no NDK r29 in sdkmanager --list" >&2; exit 1; }
-          yes | sdkmanager --install "$NDK" >/dev/null
+          (yes || true) | sdkmanager --install "$NDK" >/dev/null
           echo "installed $NDK"
 
       - name: Cache cargo
