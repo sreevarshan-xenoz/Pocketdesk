@@ -35,7 +35,8 @@ enigo.workspace = true
 quinn.workspace = true
 # WAN (iroh) streaming endpoint — R1 stage 3
 # unstable-net-report: the NAT and UDP facts the Diagnostics tab shows (N1).
-iroh = { version = "1.2", features = ["unstable-net-report"] }
+# Pinned to 1.2.x: unstable-net-report is outside semver.
+iroh = { version = "~1.2", features = ["unstable-net-report"] }
 
 # Cancellation tokens and utilities
 tokio-util.workspace = true

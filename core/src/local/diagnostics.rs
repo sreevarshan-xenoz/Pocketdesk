@@ -67,11 +67,11 @@ pub struct WanStatus {
     pub unix_secs: u64,
     /// UDP reaches the internet (direct connections are possible at all).
     pub udp: bool,
-    /// The public address changes with the destination (a "symmetric" NAT,
-    /// which defeats hole punching). `None` until measured.
+    /// The public IPv4 address changes with the destination (a "symmetric"
+    /// NAT, which defeats hole punching). `None` until measured.
     pub nat_varies: Option<bool>,
-    /// A public IPv4 or IPv6 address was seen.
-    pub public_v4: bool,
+    /// A public IPv6 address was seen (an outbound round trip; inbound may
+    /// still be firewalled, and hole punching then usually gets through).
     pub public_v6: bool,
     /// A sign-in page holds the network.
     pub captive_portal: Option<bool>,
@@ -109,7 +109,7 @@ pub fn check_outside(status: Option<&WanStatus>, state: ServerState) -> Vec<Find
                 Status::Info,
                 "the server has not measured its network yet",
             ),
-            "Run the checks again in a minute.",
+            "Run the checks again in a minute; if it stays like this, see Internet path above.",
         )];
     };
     let mut findings = Vec::new();
@@ -128,11 +128,11 @@ pub fn check_outside(status: Option<&WanStatus>, state: ServerState) -> Vec<Find
             Some(false) => finding(
                 check,
                 Status::Good,
-                "friendly NAT: phones away from home can usually connect directly",
+                "this computer's NAT allows direct connections (the phone's network decides the rest)",
             ),
             Some(true) => with_hint(
-                finding(check, Status::Warn, "strict NAT: phones away from home will usually go through the relay"),
-                "Turning on UPnP (or NAT-PMP) on the router lets them connect directly.",
+                finding(check, Status::Warn, "strict NAT: phones away from home may need the relay"),
+                "If UPnP or NAT-PMP is off on the router, turning it on lets phones connect directly.",
             ),
             None => finding(check, Status::Info, "the NAT type is not measured yet"),
         }
@@ -141,7 +141,7 @@ pub fn check_outside(status: Option<&WanStatus>, state: ServerState) -> Vec<Find
         finding(
             "IPv6",
             Status::Good,
-            "a public IPv6 address: phones on IPv6 networks can connect directly",
+            "a public IPv6 address: phones on IPv6 networks can usually connect directly",
         )
     } else {
         finding("IPv6", Status::Info, "no public IPv6 address")
@@ -687,7 +687,6 @@ mod tests {
             unix_secs: 1,
             udp,
             nat_varies,
-            public_v4: true,
             public_v6,
             captive_portal: Some(false),
         }
@@ -734,11 +733,6 @@ mod tests {
         let status = wan(true, Some(false), true);
         write_wan_status(&dir, &status).unwrap();
         assert_eq!(read_wan_status(&dir), Some(status));
-        let raw = std::fs::read_to_string(dir.join(WAN_STATUS_FILE)).unwrap();
-        assert!(
-            !raw.contains('.') || !raw.contains(':'),
-            "no address in it: {raw}"
-        );
     }
 
     #[test]

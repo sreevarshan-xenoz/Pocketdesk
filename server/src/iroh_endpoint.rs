@@ -139,8 +139,9 @@ pub fn wan_status_from(
     linux_link_core::local::diagnostics::WanStatus {
         unix_secs,
         udp: report.has_udp(),
-        nat_varies: report.mapping_varies_by_dest(),
-        public_v4: report.global_v4.is_some(),
+        // The NAT verdict is IPv4's: an IPv6 address that rotates is not a
+        // NAT, and IPv6 has its own line.
+        nat_varies: report.mapping_varies_by_dest_ipv4,
         public_v6: report.global_v6.is_some(),
         captive_portal: report.captive_portal,
     }
@@ -169,7 +170,6 @@ fn spawn_endpoint_recorder(endpoint: Endpoint) {
                 let facts = (
                     status.udp,
                     status.nat_varies,
-                    status.public_v4,
                     status.public_v6,
                     status.captive_portal,
                 );
@@ -209,6 +209,17 @@ pub async fn spawn_wan_endpoint(
     capture_backend: linux_link_core::streaming::CaptureBackend,
     mic_relay_device: Option<String>,
 ) -> Result<Endpoint> {
+    // What an earlier run recorded about its internet path is not this
+    // run's: dropped before anything can fail, so a run whose endpoint never
+    // binds shows nothing measured rather than the last network's facts.
+    if let Ok(dir) = crate::state::state_dir() {
+        for stale in [
+            linux_link_core::local::paths::WAN_STATUS_FILE,
+            linux_link_core::local::paths::ENDPOINT_FILE,
+        ] {
+            let _ = std::fs::remove_file(dir.join(stale));
+        }
+    }
     let secret_key =
         load_or_create_secret_key(&key_path()?).context("failed to load iroh identity key")?;
 
@@ -286,6 +297,28 @@ pub async fn spawn_wan_endpoint(
     });
 
     Ok(endpoint)
+}
+
+#[cfg(test)]
+mod wan_status_tests {
+    #[test]
+    fn the_wan_status_takes_ipv4_for_the_nat_and_no_address() {
+        let mut report = iroh::unstable_net_report::NetReport::default();
+        report.udp_v4 = true;
+        report.mapping_varies_by_dest_ipv4 = Some(false);
+        report.mapping_varies_by_dest_ipv6 = Some(true);
+        report.global_v6 = Some("[2001:db8::5]:4000".parse().unwrap());
+        let status = super::wan_status_from(&report, 7);
+        assert!(status.udp);
+        assert_eq!(
+            status.nat_varies,
+            Some(false),
+            "a rotating IPv6 address is not a NAT"
+        );
+        assert!(status.public_v6);
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(!json.contains("2001:db8"), "no address is written: {json}");
+    }
 }
 
 #[cfg(test)]
