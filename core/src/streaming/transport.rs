@@ -195,6 +195,31 @@ impl CertManager {
 
     /// The TLS half of [`CertManager::server_config`].
     fn tls_server_config(&self) -> Result<rustls::ServerConfig> {
+        // A phone proves its own key here (device keys, phase A): the
+        // certificate is offered for, not required, so a session without one
+        // is refused by the session gate with a reason instead of failing
+        // the handshake.
+        self.tls_server_config_with(AnyClientCert { mandatory: false })
+    }
+
+    /// The control channel's TLS server configuration (phase B): this
+    /// device's certificate, and a client certificate required of every
+    /// connection, since the control channel holds each device to its key.
+    pub fn control_server_config(&self) -> Result<Arc<rustls::ServerConfig>> {
+        let mut config = self.tls_server_config_with(AnyClientCert { mandatory: true })?;
+        config.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        Ok(Arc::new(config))
+    }
+
+    /// The control channel's TLS client configuration (phase B): the same
+    /// certificate pins as the stream, and this device's certificate.
+    pub fn control_client_config(&self) -> Arc<rustls::ClientConfig> {
+        let mut config = self.tls_client_config();
+        config.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        Arc::new(config)
+    }
+
+    fn tls_server_config_with(&self, verifier: AnyClientCert) -> Result<rustls::ServerConfig> {
         let cert = CertificateDer::from(self.cert_der.clone());
         let key = PrivateKeyDer::try_from(self.key_der.clone())
             .map_err(|_| anyhow::anyhow!("Failed to parse private key"))?;
@@ -203,12 +228,8 @@ impl CertManager {
         // server binaries, so rustls cannot auto-pick a process-level provider.
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        // A phone proves its own key here (device keys, phase A): the
-        // certificate is offered for, not required, so a session without one
-        // is refused by the session gate with a reason instead of failing
-        // the handshake.
         rustls::ServerConfig::builder()
-            .with_client_cert_verifier(Arc::new(AnyClientCert))
+            .with_client_cert_verifier(Arc::new(verifier))
             .with_single_cert(vec![cert], key)
             .context("Failed to configure TLS server")
     }
@@ -435,9 +456,12 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
 /// The server's view of a client certificate (device keys, phase A): any
 /// certificate is welcome, since the session gate decides whether it is the
 /// one bound to the device that claims it, but the handshake signature must
-/// prove the client holds its key.
+/// prove the client holds its key. `mandatory` refuses a client that sends
+/// no certificate at all (the control channel).
 #[derive(Debug)]
-struct AnyClientCert;
+struct AnyClientCert {
+    mandatory: bool,
+}
 
 impl rustls::server::danger::ClientCertVerifier for AnyClientCert {
     fn offer_client_auth(&self) -> bool {
@@ -445,7 +469,7 @@ impl rustls::server::danger::ClientCertVerifier for AnyClientCert {
     }
 
     fn client_auth_mandatory(&self) -> bool {
-        false
+        self.mandatory
     }
 
     fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
@@ -983,5 +1007,87 @@ mod tests {
             rendered.contains("max_idle_timeout: Some(45000)"),
             "idle timeout missing: {rendered}"
         );
+    }
+
+    /// A TLS handshake over a loopback TCP socket with the control channel's
+    /// configurations; what each end learned of the other.
+    async fn control_handshake(
+        server: Arc<rustls::ServerConfig>,
+        client: Arc<rustls::ClientConfig>,
+    ) -> (
+        std::result::Result<Option<super::super::PeerKey>, std::io::Error>,
+        std::result::Result<Option<Vec<u8>>, std::io::Error>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_side = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await?;
+            let tls = tokio_rustls::TlsAcceptor::from(server).accept(tcp).await?;
+            let (_, session) = tls.get_ref();
+            assert_eq!(session.alpn_protocol(), Some(crate::protocol::ALPN_CONTROL));
+            Ok(session
+                .peer_certificates()
+                .and_then(super::super::PeerKey::from_tls_certs))
+        });
+        let client_side = async {
+            let tcp = tokio::net::TcpStream::connect(addr).await?;
+            let name = ServerName::IpAddress(addr.ip().into());
+            let mut tls = tokio_rustls::TlsConnector::from(client)
+                .connect(name, tcp)
+                .await?;
+            // TLS 1.3 settles the client's certificate after the client's
+            // handshake ends; a read is where a refusal surfaces.
+            use tokio::io::AsyncReadExt;
+            let mut byte = [0u8; 1];
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_millis(300), tls.read(&mut byte))
+                    .await;
+            let (_, session) = tls.get_ref();
+            Ok(session
+                .peer_certificates()
+                .and_then(|c| c.first())
+                .map(|c| c.as_ref().to_vec()))
+        };
+        let client_seen = client_side.await;
+        let server_seen = server_side.await.unwrap();
+        (server_seen, client_seen)
+    }
+
+    #[tokio::test]
+    async fn each_end_of_the_control_channel_proves_its_key() {
+        let desktop = CertManager::new().unwrap();
+        let phone = CertManager::new().unwrap();
+        let (server_seen, client_seen) = control_handshake(
+            desktop.control_server_config().unwrap(),
+            phone.control_client_config(),
+        )
+        .await;
+        assert_eq!(
+            server_seen.unwrap(),
+            Some(super::super::PeerKey::Tls(phone.cert_fingerprint())),
+            "the desktop knows the phone's key"
+        );
+        assert_eq!(client_seen.unwrap().as_deref(), Some(&desktop.cert_der[..]));
+    }
+
+    #[tokio::test]
+    async fn the_control_channel_refuses_a_client_without_a_certificate() {
+        let desktop = CertManager::new().unwrap();
+        let phone = CertManager::new().unwrap();
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut anonymous = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(TofuVerifier {
+                known_peers: phone.known_peers.clone(),
+                peers_path: None,
+            }))
+            .with_no_client_auth();
+        anonymous.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        let (server_seen, _) = control_handshake(
+            desktop.control_server_config().unwrap(),
+            Arc::new(anonymous),
+        )
+        .await;
+        assert!(server_seen.is_err(), "no certificate, no control channel");
     }
 }

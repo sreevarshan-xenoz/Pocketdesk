@@ -17,3 +17,7 @@ pub const PROTOCOL_VERSION: &str = "1";
 /// multiplexer negotiates [`v2::ALPN_V2`] on the same UDP port; the server offers
 /// both and dispatches on what the peer picks.
 pub const ALPN_V1_STREAM: &[u8] = b"linux-link-stream";
+
+/// ALPN for the TLS control channel on the control port (phase B). Inside
+/// it runs the same handshake and packets the control channel always had.
+pub const ALPN_CONTROL: &[u8] = b"linux-link-control/1";

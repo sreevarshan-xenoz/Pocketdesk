@@ -121,6 +121,15 @@ pub enum PeerKey {
     Iroh(String),
 }
 
+impl PeerKey {
+    /// The key of a TLS peer whose certificate chain is `certs` (leaf first).
+    pub fn from_tls_certs(certs: &[rustls::pki_types::CertificateDer<'_>]) -> Option<Self> {
+        use sha2::{Digest, Sha256};
+        let leaf = certs.first()?;
+        Some(PeerKey::Tls(Sha256::digest(leaf.as_ref()).into()))
+    }
+}
+
 impl std::fmt::Display for PeerKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -229,14 +238,12 @@ impl Connection for QuinnConnection {
     }
 
     fn peer_key(&self) -> Option<PeerKey> {
-        use sha2::{Digest, Sha256};
         let certs = self
             .inner
             .peer_identity()?
             .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
             .ok()?;
-        let leaf = certs.first()?;
-        Some(PeerKey::Tls(Sha256::digest(leaf.as_ref()).into()))
+        PeerKey::from_tls_certs(&certs)
     }
 
     fn stats(&self) -> ConnectionStats {
