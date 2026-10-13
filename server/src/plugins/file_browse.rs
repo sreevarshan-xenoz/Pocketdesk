@@ -54,7 +54,7 @@ fn resolve_in_with(
     if requested.is_empty() || requested == "/" {
         return Some((real_home, home.to_path_buf()));
     }
-    if !lexically_inside(home, requested) {
+    if !lexically_inside(home, requested) || names_a_device(home, requested) {
         return None;
     }
     let real = Path::new(requested).canonicalize().ok()?;
@@ -89,6 +89,23 @@ fn resolve_in_with(
 fn lexically_inside(home: &Path, requested: &str) -> bool {
     let path = Path::new(requested);
     path.starts_with(home) && !path.components().any(|c| matches!(c, Component::ParentDir))
+}
+
+/// Whether a part of `requested` below home is a Windows device name (COM1,
+/// NUL, CONIN$...), which names a device in any folder: opening it opens
+/// the device. Checked as text, like [`lexically_inside`].
+fn names_a_device(home: &Path, requested: &str) -> bool {
+    Path::new(requested)
+        .strip_prefix(home)
+        .map(|rest| {
+            rest.components().any(|c| match c {
+                Component::Normal(name) => {
+                    crate::plugins::share::is_reserved_name(&name.to_string_lossy())
+                }
+                _ => false,
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// The folder above `shown`, or `None` at (or above) home.
@@ -381,6 +398,21 @@ mod tests {
         assert!(resolve_in_with(&home, state.to_str().unwrap(), &private).is_none());
         let docs = home.join("docs");
         assert!(resolve_in_with(&home, docs.to_str().unwrap(), &private).is_some());
+    }
+
+    #[test]
+    fn a_windows_device_name_below_home_is_refused_as_text() {
+        let home = temp_home("devices");
+        for name in ["COM1", "lpt1.txt", "CONIN$", "nul"] {
+            let path = home.join("docs").join(name);
+            assert!(names_a_device(&home, path.to_str().unwrap()), "{name}");
+            assert!(
+                resolve_in(&home, path.to_str().unwrap()).is_none(),
+                "{name}"
+            );
+        }
+        let fine = home.join("docs").join("COM10.txt");
+        assert!(!names_a_device(&home, fine.to_str().unwrap()));
     }
 
     #[test]

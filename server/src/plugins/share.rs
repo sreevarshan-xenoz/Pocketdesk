@@ -526,7 +526,7 @@ fn fit_name(name: &str) -> String {
 /// Windows device names, which name a device in any folder and with any
 /// extension: CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM0-9 and LPT0-9
 /// (superscript digits too), ignoring case and spaces before the dot.
-fn is_reserved_name(name: &str) -> bool {
+pub(crate) fn is_reserved_name(name: &str) -> bool {
     let stem = name
         .split('.')
         .next()
