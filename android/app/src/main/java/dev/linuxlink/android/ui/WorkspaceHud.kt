@@ -84,8 +84,10 @@ private fun parseState(body: JSONObject): WorkspaceHudState {
         }
     val activeId =
         if (body.isNull("activeWorkspace")) -1 else body.optInt("activeWorkspace", -1)
-    val title = body.optString("activeTitle").ifBlank { null }
-    val activeAddress = body.optString("activeAddress")
+    // optString turns a JSON null into the text "null": the server sends
+    // null for both while no window is focused.
+    val title = if (body.isNull("activeTitle")) null else body.optString("activeTitle").ifBlank { null }
+    val activeAddress = if (body.isNull("activeAddress")) null else body.optString("activeAddress")
     val windows =
         parseWindowArray(body).map { w ->
             if (w.address == activeAddress) w.copy(active = true) else w
