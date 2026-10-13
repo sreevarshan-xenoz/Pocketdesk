@@ -28,6 +28,28 @@ impl FileBrowsePlugin {
 /// The real path is resolved, so a symlink (or a Windows junction) inside
 /// home that points elsewhere cannot lead out of it.
 fn resolve_in(home: &Path, requested: &str) -> Option<(PathBuf, PathBuf)> {
+    resolve_in_with(home, requested, &private_dirs())
+}
+
+/// The server's own folders, as real paths: its state (keys, the trust
+/// store, the PIN) and its config. Both may lie inside home.
+fn private_dirs() -> Vec<PathBuf> {
+    [
+        linux_link_core::local::paths::state_dir(),
+        linux_link_core::local::paths::config_dir(),
+    ]
+    .into_iter()
+    .filter_map(|dir| dir.ok()?.canonicalize().ok())
+    .collect()
+}
+
+/// [`resolve_in`], also refusing anything at or below a folder in
+/// `private` (real paths): the server's own state and config.
+fn resolve_in_with(
+    home: &Path,
+    requested: &str,
+    private: &[PathBuf],
+) -> Option<(PathBuf, PathBuf)> {
     let real_home = home.canonicalize().ok()?;
     if requested.is_empty() || requested == "/" {
         return Some((real_home, home.to_path_buf()));
@@ -37,6 +59,20 @@ fn resolve_in(home: &Path, requested: &str) -> Option<(PathBuf, PathBuf)> {
     }
     let real = Path::new(requested).canonicalize().ok()?;
     let rest = real.strip_prefix(&real_home).ok()?;
+    // Nothing hidden is reachable, by path any more than by listing: home's
+    // hidden places hold its secrets (`.ssh`, `AppData`, this server's own
+    // keys), and a phone allowed files is not allowed those.
+    let mut at = real_home.clone();
+    for part in rest.components() {
+        at.push(part);
+        let name = part.as_os_str().to_string_lossy();
+        if is_hidden(&name, &std::fs::symlink_metadata(&at).ok()?) {
+            return None;
+        }
+    }
+    if private.iter().any(|p| real.starts_with(p)) {
+        return None;
+    }
     let shown = if rest.as_os_str().is_empty() {
         home.to_path_buf()
     } else {
@@ -301,6 +337,50 @@ mod tests {
             resolve_file_in(&home, file_path),
             Ok((home.join("docs").join("b.txt").canonicalize().unwrap(), 2))
         );
+    }
+
+    #[test]
+    fn nothing_hidden_can_be_opened_or_fetched_by_path() {
+        let home = temp_home("hiddenpath");
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        std::fs::write(home.join(".ssh").join("id_ed25519"), "secret").unwrap();
+        std::fs::write(home.join("docs").join(".env"), "secret").unwrap();
+        let key = home.join(".ssh").join("id_ed25519");
+        assert!(resolve_file_in(&home, key.to_str().unwrap()).is_err());
+        let env = home.join("docs").join(".env");
+        assert!(resolve_file_in(&home, env.to_str().unwrap()).is_err());
+        let ssh = browse_reply(&home, home.join(".ssh").to_str().unwrap());
+        assert!(ssh["error"].is_string(), "{ssh}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_windows_marks_hidden_cannot_be_opened_by_path() {
+        use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
+        use windows::core::HSTRING;
+        let home = temp_home("winhiddenpath");
+        let app_data = home.join("AppData");
+        std::fs::create_dir_all(app_data.join("Local")).unwrap();
+        std::fs::write(app_data.join("Local").join("key"), "secret").unwrap();
+        // SAFETY: a plain call with a valid, NUL-terminated path.
+        unsafe { SetFileAttributesW(&HSTRING::from(app_data.as_os_str()), FILE_ATTRIBUTE_HIDDEN) }
+            .unwrap();
+        let key = app_data.join("Local").join("key");
+        assert!(resolve_file_in(&home, key.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn the_servers_own_files_cannot_be_fetched() {
+        let home = temp_home("private");
+        let state = home.join("docs").join("linux-link");
+        std::fs::create_dir_all(state.join("certs")).unwrap();
+        std::fs::write(state.join("certs").join("identity.key"), "secret").unwrap();
+        let private = [state.canonicalize().unwrap()];
+        let key = state.join("certs").join("identity.key");
+        assert!(resolve_in_with(&home, key.to_str().unwrap(), &private).is_none());
+        assert!(resolve_in_with(&home, state.to_str().unwrap(), &private).is_none());
+        let docs = home.join("docs");
+        assert!(resolve_in_with(&home, docs.to_str().unwrap(), &private).is_some());
     }
 
     #[test]
