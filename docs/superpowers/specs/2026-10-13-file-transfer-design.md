@@ -23,6 +23,12 @@ Every comparable tool (KDE Connect, Phone Link, Quick Share) shows progress on t
 | T5 | The desktop raises a notification for each file received ("photo.jpg (2.1 MB) from your phone"), and appends it to `<state>/received.json` (last 50: name, path, size, time, sender). | The owner sees that something arrived, and from whom. |
 | T6 | The desktop app gains a **Files** tab listing received files, newest first, each with **Show in folder**. | The list is where "where did it go?" is answered. It shows the folder, never opens the file: the file came from another device, and Windows marks it so. |
 
+## As built (2026-10-13)
+
+- **Queueing.** Shares made back to back queue on one worker thread in the service, not just files within a single share: the desktop accepts two transfers at once, and the progress counters describe one transfer. The final notification sums everything sent since the queue was last empty.
+- **A share that arrives while the share screen is closing** comes in through `onNewIntent` and is handled. On the device, three shell intents fired within half a second still lost two to an activity pause timeout. Through the share sheet a person cannot do that; shares 1.5 s apart all went through.
+- **Names.** The phone sends the provider's display name as is. The desktop's `safe_file_name` is what makes it safe; the phone no longer turns non-ASCII names into underscores.
+
 ## Out of scope (F7b)
 
 - Sending from the desktop to the phone.

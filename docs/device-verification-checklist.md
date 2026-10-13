@@ -652,6 +652,18 @@ Checked on 2026-10-13 with the Galaxy A71 and the Windows host on the same Wi-Fi
 - [ ] The Linux host is found (Avahi may also be announcing on the same host).
 - [ ] "Visible on this network" in the desktop app, then a server restart: the computer no longer appears.
 
+## 30. Sending files to the desktop
+
+Built on `feat/file-transfer`; spec `docs/superpowers/specs/2026-10-13-file-transfer-design.md`.
+
+Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN. Three shares 1.5 s apart (2, 4 and 6 MB) queued on the phone and were sent one after another with matching MD5s. All three appear in `received.json`, and the final notification read "Sent 3 files to …".
+
+- [ ] Share several photos at once from the gallery (`SEND_MULTIPLE`): "Sending 2 of 3" with a moving progress bar.
+- [ ] The desktop shows a notification per file; the app's Files tab lists them, and Show in folder selects each in Explorer.
+- [ ] A file from a provider without a size (e.g. some cloud apps) still arrives (copied first).
+- [ ] A share with the desktop off or unreachable ends in "Not sent: 1 of 1" with the reason.
+- [ ] A non-English file name arrives with its name.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

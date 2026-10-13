@@ -42,6 +42,22 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **File transfer made safe, then F7a, phone to desktop (branches `fix/share-safety`, merged as PR #15, and `feat/file-transfer`; spec `docs/superpowers/specs/2026-10-13-file-transfer-design.md`).**
+  - **Never worked, and was unsafe.** Phone-to-desktop file sharing had never completed, because both ends listened and neither dialed.
+    - The server joined the phone's file name onto Downloads, so any paired device could write anywhere.
+    - It listened on 0.0.0.0 at a port the phone chose.
+    - The file browser could be coerced into NTLM authentication via UNC paths.
+  - **Fixes (PR #15, two security reviews):**
+    - safe names, no overwrite, a declared size of at most 8 GiB, and `.part` files with a drop guard;
+    - the desktop dials the transport's peer (`DeviceSender::peer_addr`), never loopback or link-local;
+    - a one-time transfer key authenticates the connection;
+    - at most two transfers at once, each with a deadline;
+    - Mark of the Web on Windows, and lexical-then-canonical browse paths.
+  - **F7a:**
+    - **Phone:** `SEND_MULTIPLE`; a `dataSync` foreground service that queues shares, streams from the provider's file descriptor (no cache copy) and shows a progress notification.
+    - **Desktop:** a notification per received file, `received.json` (the last 50), and the app's Files tab with Show in folder.
+  - **Device-verified (A71 → Windows, LAN):** 0.3, 1.5, 2, 4 and 6 MB files with matching MD5s; no overwrite; `ZoneId=3`; three queued shares; the final notification.
+  - **Limits:** LAN only (not `adb reverse`, the v2 channel or WAN). Desktop-to-phone and the remote browser are F7b.
 - 2026-10-13: **F6, computers on this network (branch `feat/lan-discovery`; spec `docs/superpowers/specs/2026-10-13-lan-discovery-design.md`).**
   - **Server.** The mDNS announcement (`_linux-link._tcp`) carries the device id and stream port in TXT. A new `lan_discovery` config key (on by default, "Visible on this network" in the desktop app) can turn it off. The announcement is withdrawn with an mDNS goodbye on a graceful stop.
   - **Phone.** Home browses with NsdManager while in front. Unsaved computers are listed under "On this network"; saved ones get a label, matched by address or paired id. The LAN IPv4 address is preferred, and a computer is listed only if its control port answers (mdns-sd's 75-minute cache otherwise shows ghosts).

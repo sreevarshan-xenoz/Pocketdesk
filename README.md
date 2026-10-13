@@ -73,7 +73,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **Picture-in-picture** — shrink the live session into a video-only PiP window (desktop aspect ratio, chrome hidden) and keep working in other apps; also enables DeX/docked windows
 - **Blackout / pocket mode** — black, touch-locked screen while the session keeps streaming: the phone and its video surface go secure (no screenshots or Recents leakage), brightness drops; double-tap or back to unlock
 - **Localized UI** — English, Spanish and Tamil; pick per-app language from the "Language" button on the connect screen (Android 13+)
-- **Share to the desktop** — share text (to the desktop clipboard) or a file (to its Downloads folder, over the LAN) from any app; a remote file browser is not built yet (roadmap F7)
+- **Share to the desktop** — share text (to the desktop clipboard) or one or more files (to its Downloads folder, over the LAN) from any app, with progress in a notification; the desktop shows a notification per file. A remote file browser and desktop-to-phone sending are not built yet (roadmap F7)
 - **Settings** with DataStore persistence
 
 ### Server
@@ -225,6 +225,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/linux-link/confi
 - **Devices**: paired phones, which one is connected, and Remove. Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
 - **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
 - **Sessions**: live sessions, with End.
+- **Files**: files received from phones, newest first, with Show in folder.
 - **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
 - **Logs**: the server's log.
 
