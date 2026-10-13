@@ -68,7 +68,6 @@ fn parent_of(home: &Path, shown: &Path) -> Option<String> {
 
 /// The file a phone may download: a regular file inside home, as its real
 /// path and its size.
-#[allow(dead_code)] // the download handler (F7b) is next
 pub(crate) fn resolve_file(requested: &str) -> std::result::Result<(PathBuf, u64), String> {
     let home = dirs::home_dir().ok_or("this computer has no home folder")?;
     resolve_file_in(&home, requested)
