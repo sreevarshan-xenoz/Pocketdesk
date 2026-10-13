@@ -325,12 +325,29 @@ fn transfer_tls(
         return Err("the phone's connection proved no key".to_string());
     };
     crate::plugins::pair::may_transfer(sender.device_id(), &key)?;
+    Ok(desktop_certs()?.transfer_client_config(phone))
+}
+
+/// This desktop's identity, read once: the one its control channel and
+/// stream present (loaded at start by the service from the same folder).
+fn desktop_certs()
+-> std::result::Result<std::sync::Arc<linux_link_core::streaming::transport::CertManager>, String> {
+    use linux_link_core::streaming::transport::CertManager;
+    static CERTS: std::sync::Mutex<Option<std::sync::Arc<CertManager>>> =
+        std::sync::Mutex::new(None);
+    let mut cached = CERTS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(certs) = cached.as_ref() {
+        return Ok(certs.clone());
+    }
     let dir = crate::state::state_dir()
         .map_err(|e| e.to_string())?
         .join("certs");
-    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(&dir)
-        .map_err(|e| format!("this desktop's certificate: {e}"))?;
-    Ok(certs.transfer_client_config(phone))
+    let certs = std::sync::Arc::new(
+        CertManager::load_or_create(&dir)
+            .map_err(|e| format!("this desktop's certificate: {e}"))?,
+    );
+    *cached = Some(certs.clone());
+    Ok(certs)
 }
 
 /// Dial the phone at `to` and open the transfer's TLS.
