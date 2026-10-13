@@ -6,6 +6,7 @@ use std::path::Path;
 use linux_link_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
 use linux_link_core::local::{server, sessions};
 use linux_link_core::protocol::kdeconnect::TrustStore;
+use linux_link_core::protocol::permissions::{Capability, DevicePermissions};
 
 /// A paired phone.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +16,8 @@ pub struct Device {
     pub grant_remaining: Option<u64>,
     /// Whether it has a live streaming session right now.
     pub connected: bool,
+    /// What the owner lets it do (roadmap F5).
+    pub permissions: DevicePermissions,
 }
 
 /// Everything the window shows, read once per refresh.
@@ -48,6 +51,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
             .map(|id| Device {
                 grant_remaining: store.grant_remaining(&id),
                 connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
+                permissions: store.permissions(&id),
                 id,
             })
             .collect(),
@@ -58,6 +62,29 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         devices,
         sessions,
     }
+}
+
+/// Allow or deny one capability for `id`, in the store the server reads.
+pub fn set_permission(
+    state_dir: &Path,
+    id: &str,
+    capability: Capability,
+    allowed: bool,
+) -> linux_link_core::error::Result<()> {
+    update_permissions(state_dir, id, |p| p.set(capability, allowed))
+}
+
+// Load, change, save in one go: the server writes the same file (pairing,
+// grants), so the copy read at the last refresh may be stale.
+fn update_permissions(
+    state_dir: &Path,
+    id: &str,
+    change: impl FnOnce(&mut DevicePermissions),
+) -> linux_link_core::error::Result<()> {
+    let mut store = TrustStore::load_or_create(state_dir.join(TRUST_FILE))?;
+    let mut permissions = store.permissions(id);
+    change(&mut permissions);
+    store.set_permissions(id, permissions)
 }
 
 /// The last `lines` lines of the newest daily server log
@@ -132,6 +159,34 @@ mod tests {
         let b = snap.devices.iter().find(|d| d.id == "b").unwrap();
         assert!(a.connected && a.grant_remaining.is_none());
         assert!(!b.connected && b.grant_remaining.is_some_and(|s| s <= 60));
+    }
+
+    #[test]
+    fn a_permission_set_here_shows_in_the_next_snapshot_and_reaches_the_store() {
+        use linux_link_core::protocol::permissions::Capability;
+        let dir = temp_dir("perms");
+        TrustStore::load_or_create(dir.join(TRUST_FILE))
+            .unwrap()
+            .trust_device("a")
+            .unwrap();
+        let before = snapshot_with(&dir, 101, false);
+        assert!(
+            !before.devices[0].permissions.allows(Capability::Exec),
+            "exec starts off"
+        );
+
+        set_permission(&dir, "a", Capability::Exec, true).unwrap();
+        set_permission(&dir, "a", Capability::Clipboard, false).unwrap();
+        let after = snapshot_with(&dir, 102, false);
+        let a = &after.devices[0].permissions;
+        assert!(a.allows(Capability::Exec) && !a.allows(Capability::Clipboard));
+        assert!(
+            TrustStore::load_or_create(dir.join(TRUST_FILE))
+                .unwrap()
+                .permissions("a")
+                .allows(Capability::Exec),
+            "the server reads the same file"
+        );
     }
 
     #[test]

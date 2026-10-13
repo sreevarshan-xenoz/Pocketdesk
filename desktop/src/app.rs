@@ -9,6 +9,7 @@ use linux_link_core::local::paths::TRUST_FILE;
 use linux_link_core::local::pin::now_unix;
 use linux_link_core::local::sessions;
 use linux_link_core::protocol::kdeconnect::TrustStore;
+use linux_link_core::protocol::permissions::Capability;
 
 use crate::model::{self, Snapshot};
 use crate::pair_view::PairView;
@@ -18,6 +19,45 @@ use crate::tray::{Tray, TrayAction};
 const REFRESH: Duration = Duration::from_secs(1);
 const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
+
+/// The Devices tab's switches, in the order a person thinks of them.
+const PERMISSIONS: [(Capability, &str, &str); 7] = [
+    (
+        Capability::Input,
+        "Control the mouse and keyboard",
+        "Off: the phone can watch the screen but not touch it.",
+    ),
+    (
+        Capability::Clipboard,
+        "Share the clipboard",
+        "Copy on one, paste on the other.",
+    ),
+    (
+        Capability::Files,
+        "Send and browse files",
+        "Send files to this computer and list its folders.",
+    ),
+    (
+        Capability::Audio,
+        "Hear and change this computer's sound",
+        "Plays desktop sound on the phone and sets the volume.",
+    ),
+    (
+        Capability::Mic,
+        "Use the phone as a microphone",
+        "The phone's microphone becomes \"Pocketdesk Mic\" here.",
+    ),
+    (
+        Capability::Power,
+        "Lock, sleep and privacy mode",
+        "Lock the screen, put the computer to sleep or shut it down, and blank it for privacy.",
+    ),
+    (
+        Capability::Exec,
+        "Run commands",
+        "Run any command line on this computer. Off unless you turn it on.",
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -190,6 +230,13 @@ impl PocketdeskApp {
         self.refresh();
     }
 
+    fn set_permission(&mut self, id: &str, capability: Capability, allowed: bool) {
+        if let Err(e) = model::set_permission(&self.state_dir, id, capability, allowed) {
+            self.notice = Some(format!("Could not change {}: {e}", short(id)));
+        }
+        self.refresh();
+    }
+
     fn end_session(&mut self, session: &sessions::MirrorSession) {
         // A device id names it exactly; a session that never announced one
         // is ended by its address.
@@ -288,6 +335,33 @@ impl PocketdeskApp {
                     ui.end_row();
                 }
             });
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new(
+                "A change applies at once, except to a session already running: its \n                 control, sound and microphone follow from the next one.",
+            )
+            .color(MUTED),
+        );
+        let mut change = None;
+        for device in &self.snapshot.devices {
+            egui::CollapsingHeader::new(format!("What {} may do", short(&device.id)))
+                .id_salt(("permissions", &device.id))
+                .show(ui, |ui| {
+                    for (capability, label, hint) in PERMISSIONS {
+                        let mut allowed = device.permissions.allows(capability);
+                        if ui
+                            .checkbox(&mut allowed, label)
+                            .on_hover_text(hint)
+                            .changed()
+                        {
+                            change = Some((device.id.clone(), capability, allowed));
+                        }
+                    }
+                });
+        }
+        if let Some((id, capability, allowed)) = change {
+            self.set_permission(&id, capability, allowed);
+        }
         if let Some(choice) = revoke {
             self.confirm_revoke = choice;
         }
