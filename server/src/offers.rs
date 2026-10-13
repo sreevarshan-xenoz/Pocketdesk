@@ -45,14 +45,22 @@ struct Offer {
     expires: Instant,
 }
 
-fn offers() -> &'static Mutex<HashMap<String, Offer>> {
-    static OFFERS: OnceLock<Mutex<HashMap<String, Offer>>> = OnceLock::new();
+/// Offers by id. The server has one ([`offers`]); a test that sweeps uses
+/// its own, so a sweep at a far-future instant cannot take another test's.
+type Table = Mutex<HashMap<String, Offer>>;
+
+fn offers() -> &'static Table {
+    static OFFERS: OnceLock<Table> = OnceLock::new();
     OFFERS.get_or_init(Default::default)
 }
 
 /// Offer `path` to `device_id` under `id` (the outbox request's id).
 pub(crate) fn offer_at(id: &str, path: PathBuf, device_id: &str, now: Instant) {
-    let mut offers = offers().lock().unwrap_or_else(|e| e.into_inner());
+    offer_in(offers(), id, path, device_id, now);
+}
+
+fn offer_in(table: &Table, id: &str, path: PathBuf, device_id: &str, now: Instant) {
+    let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
     offers.insert(
         id.to_string(),
         Offer {
@@ -76,7 +84,16 @@ pub fn redeem(id: &str, device_id: &str) -> Result<PathBuf, &'static str> {
 const OFFER_EXPIRED: &str = "the offer expired";
 
 fn redeem_at(id: &str, device_id: &str, now: Instant) -> Result<PathBuf, &'static str> {
-    let mut offers = offers().lock().unwrap_or_else(|e| e.into_inner());
+    redeem_in(offers(), id, device_id, now)
+}
+
+fn redeem_in(
+    table: &Table,
+    id: &str,
+    device_id: &str,
+    now: Instant,
+) -> Result<PathBuf, &'static str> {
+    let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
     let offer = offers.get(id).ok_or("the offer was used or is unknown")?;
     if offer.device_id != device_id {
         return Err("the file was offered to another phone");
@@ -92,7 +109,11 @@ fn redeem_at(id: &str, device_id: &str, now: Instant) -> Result<PathBuf, &'stati
 
 /// Take every offer whose time is up at `now`; their ids.
 fn sweep_at(now: Instant) -> Vec<String> {
-    let mut offers = offers().lock().unwrap_or_else(|e| e.into_inner());
+    sweep_in(offers(), now)
+}
+
+fn sweep_in(table: &Table, now: Instant) -> Vec<String> {
+    let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
     let expired: Vec<String> = offers
         .iter()
         .filter(|(_, o)| o.expires <= now)
@@ -352,13 +373,16 @@ mod tests {
 
     #[test]
     fn an_offer_whose_time_is_up_is_swept() {
+        // Its own table: a sweep this far ahead would take any offer the
+        // tests beside it just made in the server's.
+        let table = Table::default();
         let now = Instant::now();
-        offer_at("o-sweep", PathBuf::from("/a.pdf"), "phone-a", now);
-        assert!(!sweep_at(now).contains(&"o-sweep".to_string()));
+        offer_in(&table, "o-sweep", PathBuf::from("/a.pdf"), "phone-a", now);
+        assert!(sweep_in(&table, now).is_empty());
         let later = now + OFFER_TTL + Duration::from_secs(1);
-        assert!(sweep_at(later).contains(&"o-sweep".to_string()));
+        assert_eq!(sweep_in(&table, later), ["o-sweep"]);
         assert_eq!(
-            redeem_at("o-sweep", "phone-a", later),
+            redeem_in(&table, "o-sweep", "phone-a", later),
             Err("the offer was used or is unknown")
         );
     }

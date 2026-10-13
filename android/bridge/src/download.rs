@@ -491,6 +491,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_offer_on_a_transfers_own_connection_is_kept() {
+        let _offers = crate::OFFERS_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let desktop = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
@@ -533,6 +534,7 @@ mod tests {
 
     #[test]
     fn offers_are_kept_once_each_and_bounded() {
+        let _offers = crate::OFFERS_TEST_LOCK.blocking_lock();
         let _ = crate::take_file_offers_json();
         for n in 0..20 {
             let body = serde_json::json!({ "id": format!("o{n}"), "name": "a.pdf", "size": 3 });

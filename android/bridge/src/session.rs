@@ -194,6 +194,11 @@ pub(crate) fn queue_notification(body: &serde_json::Value, source: &str) {
 pub(crate) static PENDING_OFFERS: LazyLock<std::sync::Mutex<Vec<serde_json::Value>>> =
     LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
 
+/// Tests that touch the offer queue run one at a time: it is process-wide,
+/// and one test's drain or overflow would take another's offer.
+#[cfg(test)]
+pub(crate) static OFFERS_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Queue one offer `{id, name, size}`, once per id.
 pub(crate) fn queue_file_offer(body: &serde_json::Value) {
     let (Some(id), Some(name), Some(size)) = (
