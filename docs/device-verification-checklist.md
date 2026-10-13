@@ -615,6 +615,23 @@ Checked on 2026-10-12 with the Galaxy A71 against Windows:
 - [ ] Speed 0.5× and 3× feel right; slow movements still move the cursor.
 - [ ] The foldable dock's trackpad behaves the same.
 
+## 28. Permissions and session approval
+
+Built on `feat/approvals-permissions`; spec `docs/superpowers/specs/2026-10-13-approvals-permissions-design.md`.
+
+Checked on 2026-10-13 with the Galaxy A71 against the Windows host, over WAN. The answers were written to the answer file directly, as the app does; nobody clicked the prompt.
+- with "ask first" on, the session is held, the request appears in `pending_approvals.json`, and the phone shows "waiting for the picture" with the approval hint;
+- Allow once: the server logs `AllowOnce`, the list empties, and video plays;
+- Deny: the server logs `Deny` and `session refused`, and the phone shows the refusal card about 2 s later.
+
+- [ ] The desktop app's prompt: it comes to the front (also from the tray) and its three buttons work; Always allow turns the switch off.
+- [ ] No answer: the phone shows the refusal about 30 s after connecting.
+- [ ] Clipboard off: the phone's clipboard actions are dropped (`Denied … clipboard` in the log); turn it on again and they work at once.
+- [ ] Running commands: denied by default; allowed after the switch is turned on.
+- [ ] Control off: the session is view-only and the phone cannot lift it. Sound off: no desktop sound. Microphone off: the mic does not reach the desktop.
+- [ ] Turning control, sound or the microphone off during a session ends that session; Retry starts one with the change. Removing a connected phone ends its session.
+- [ ] LAN session: the prompt shows the phone's address.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

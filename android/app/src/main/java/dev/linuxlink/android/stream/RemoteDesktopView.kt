@@ -534,6 +534,9 @@ private class DecoderHost {
         active.onStalled = {
             report(StreamStatus.Down("video feed stalled — connection closed"))
         }
+        active.onClosed = { reason ->
+            report(StreamStatus.Down("stream closed by the desktop: $reason"))
+        }
         report(StreamStatus.Connecting)
         thread = Thread({
             // The Rust bridge blocks, so connect + drain share this thread.

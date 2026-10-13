@@ -4,11 +4,13 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText};
+use linux_link_core::local::approval::{ApprovalRequest, Verdict};
 use linux_link_core::local::config::Config;
 use linux_link_core::local::paths::TRUST_FILE;
 use linux_link_core::local::pin::now_unix;
 use linux_link_core::local::sessions;
 use linux_link_core::protocol::kdeconnect::TrustStore;
+use linux_link_core::protocol::permissions::Capability;
 
 use crate::model::{self, Snapshot};
 use crate::pair_view::PairView;
@@ -18,6 +20,45 @@ use crate::tray::{Tray, TrayAction};
 const REFRESH: Duration = Duration::from_secs(1);
 const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
+
+/// The Devices tab's switches, in the order a person thinks of them.
+const PERMISSIONS: [(Capability, &str, &str); 7] = [
+    (
+        Capability::Input,
+        "Control the mouse and keyboard",
+        "Off: the phone can watch the screen but not touch it.",
+    ),
+    (
+        Capability::Clipboard,
+        "Share the clipboard",
+        "Copy on one, paste on the other.",
+    ),
+    (
+        Capability::Files,
+        "Send and browse files",
+        "Send files to this computer and list its folders.",
+    ),
+    (
+        Capability::Audio,
+        "Hear and change this computer's sound",
+        "Plays desktop sound on the phone and sets the volume.",
+    ),
+    (
+        Capability::Mic,
+        "Use the phone as a microphone",
+        "The phone's microphone becomes \"Pocketdesk Mic\" here.",
+    ),
+    (
+        Capability::Power,
+        "Lock, sleep and privacy mode",
+        "Lock the screen, put the computer to sleep or shut it down, and blank it for privacy.",
+    ),
+    (
+        Capability::Exec,
+        "Run commands",
+        "Run any command line on this computer. Off unless you turn it on.",
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -50,6 +91,8 @@ pub struct PocketdeskApp {
     job: Option<(&'static str, std::thread::JoinHandle<Result<(), String>>)>,
     /// Restart was asked for while phones are connected; awaiting a yes.
     confirm_restart: bool,
+    /// Held sessions already brought to the owner's attention.
+    raised_approvals: Vec<String>,
 }
 
 impl PocketdeskApp {
@@ -69,6 +112,7 @@ impl PocketdeskApp {
             settings: None,
             job: None,
             confirm_restart: false,
+            raised_approvals: Vec::new(),
         }
     }
 
@@ -180,13 +224,145 @@ impl PocketdeskApp {
         }
     }
 
+    /// A phone the owner has not seen yet is waiting: show the window, even
+    /// from the tray, so the prompt is where they look.
+    fn raise_for_approvals(&mut self, ctx: &egui::Context) {
+        let ids: Vec<String> = self
+            .snapshot
+            .approvals
+            .iter()
+            .map(|r| r.id.clone())
+            .collect();
+        if ids.iter().any(|id| !self.raised_approvals.contains(id)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        self.raised_approvals = ids;
+    }
+
+    fn approval_prompt(&mut self, ui: &mut egui::Ui) {
+        let Some(request) = self.snapshot.approvals.first().cloned() else {
+            return;
+        };
+        let waiting = self.snapshot.approvals.len();
+        let mut verdict = None;
+        egui::Window::new("A phone wants to connect")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ui.ctx(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Phone");
+                    ui.monospace(short(&request.device_id))
+                        .on_hover_text(&request.device_id);
+                });
+                ui.label(format!("from {}", request.peer));
+                ui.label(
+                    RichText::new(format!(
+                        "Denied in {}s if you do nothing.",
+                        request.remaining(now_unix())
+                    ))
+                    .color(MUTED),
+                );
+                if waiting > 1 {
+                    ui.label(format!("{} more waiting.", waiting - 1));
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Allow once").clicked() {
+                        verdict = Some(Verdict::AllowOnce);
+                    }
+                    if ui
+                        .button("Always allow")
+                        .on_hover_text("Allow, and stop asking for this phone.")
+                        .clicked()
+                    {
+                        verdict = Some(Verdict::AlwaysAllow);
+                    }
+                    if ui.button("Deny").clicked() {
+                        verdict = Some(Verdict::Deny);
+                    }
+                });
+            });
+        if let Some(verdict) = verdict {
+            self.answer(&request, verdict);
+        }
+    }
+
+    fn answer(&mut self, request: &ApprovalRequest, verdict: Verdict) {
+        let who = short(&request.device_id);
+        // A phone that retried while it waited has several requests held;
+        // the owner's answer is about the phone, so it answers them all.
+        let ids: Vec<String> = self
+            .snapshot
+            .approvals
+            .iter()
+            .filter(|r| r.device_id == request.device_id)
+            .map(|r| r.id.clone())
+            .collect();
+        let result = ids
+            .iter()
+            .try_for_each(|id| model::answer_approval(&self.state_dir, id, verdict, now_unix()));
+        self.notice = Some(match result {
+            Ok(()) => match verdict {
+                Verdict::AllowOnce => format!("Allowed {who} this once."),
+                Verdict::AlwaysAllow => format!("Allowed {who}; it will not be asked again."),
+                Verdict::Deny => format!("Denied {who}."),
+            },
+            Err(e) => format!("Could not answer {who}: {e}"),
+        });
+        // Off the screen at once; the server drops it from the list when it
+        // takes the answer.
+        self.snapshot
+            .approvals
+            .retain(|r| r.device_id != request.device_id);
+    }
+
+    fn set_ask_first(&mut self, id: &str, ask_first: bool) {
+        if let Err(e) = model::set_ask_first(&self.state_dir, id, ask_first) {
+            self.notice = Some(format!("Could not change {}: {e}", short(id)));
+        }
+        self.refresh();
+    }
+
     fn revoke(&mut self, id: &str) {
-        let result = TrustStore::load_or_create(self.state_dir.join(TRUST_FILE))
-            .and_then(|mut store| store.untrust_device(id));
+        let result = TrustStore::update(self.state_dir.join(TRUST_FILE), |store| {
+            store.untrust_device(id)
+        });
         self.notice = Some(match result {
             Ok(()) => format!("Removed {} — it must pair again to connect.", short(id)),
             Err(e) => format!("Could not remove {}: {e}", short(id)),
         });
+        // Removing a phone must not leave it in control of a running session.
+        self.end_sessions_of(id);
+        self.refresh();
+    }
+
+    /// End `id`'s running session, if it has one: a session keeps the
+    /// permissions it started with, so a narrower one takes a new session.
+    fn end_sessions_of(&mut self, id: &str) {
+        let connected = self
+            .snapshot
+            .sessions
+            .iter()
+            .any(|s| s.device_id.as_deref() == Some(id));
+        if !connected {
+            return;
+        }
+        if let Err(e) = sessions::request_kick(&self.state_dir, id, now_unix()) {
+            self.notice = Some(format!("Could not end {}'s session: {e}", short(id)));
+        }
+    }
+
+    fn set_permission(&mut self, id: &str, capability: Capability, allowed: bool) {
+        match model::set_permission(&self.state_dir, id, capability, allowed) {
+            Ok(()) if !allowed && model::fixed_at_session_start(capability) => {
+                self.end_sessions_of(id);
+            }
+            Ok(()) => {}
+            Err(e) => self.notice = Some(format!("Could not change {}: {e}", short(id))),
+        }
         self.refresh();
     }
 
@@ -288,6 +464,48 @@ impl PocketdeskApp {
                     ui.end_row();
                 }
             });
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new(
+                "A change applies at once. Turning off control, sound or the microphone ends that phone's running session, so it reconnects with the change.",
+            )
+            .color(MUTED),
+        );
+        let mut change = None;
+        let mut ask = None;
+        for device in &self.snapshot.devices {
+            egui::CollapsingHeader::new(format!("What {} may do", short(&device.id)))
+                .id_salt(("permissions", &device.id))
+                .show(ui, |ui| {
+                    let mut ask_first = device.permissions.ask_first;
+                    if ui
+                        .checkbox(&mut ask_first, "Ask before each session")
+                        .on_hover_text(
+                            "Hold each session until you allow it here. Leave this off if \
+                             you connect to this computer when nobody is at it.",
+                        )
+                        .changed()
+                    {
+                        ask = Some((device.id.clone(), ask_first));
+                    }
+                    for (capability, label, hint) in PERMISSIONS {
+                        let mut allowed = device.permissions.allows(capability);
+                        if ui
+                            .checkbox(&mut allowed, label)
+                            .on_hover_text(hint)
+                            .changed()
+                        {
+                            change = Some((device.id.clone(), capability, allowed));
+                        }
+                    }
+                });
+        }
+        if let Some((id, capability, allowed)) = change {
+            self.set_permission(&id, capability, allowed);
+        }
+        if let Some((id, ask_first)) = ask {
+            self.set_ask_first(&id, ask_first);
+        }
         if let Some(choice) = revoke {
             self.confirm_revoke = choice;
         }
@@ -411,6 +629,7 @@ impl eframe::App for PocketdeskApp {
         }
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
             self.refresh();
+            self.raise_for_approvals(ctx);
         }
         ctx.request_repaint_after(REFRESH);
     }
@@ -453,6 +672,7 @@ impl eframe::App for PocketdeskApp {
             Tab::Settings => self.settings_tab(ui),
             Tab::Logs => self.logs_tab(ui),
         });
+        self.approval_prompt(ui);
     }
 }
 

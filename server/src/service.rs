@@ -415,16 +415,17 @@ pub async fn run(config: Config) -> Result<()> {
                                 streaming_server.set_session_telemetry(true);
                                 streaming_server.set_hevc_allowed(allow_hevc);
                                 streaming_server.set_capture_backend(capture_backend);
-                                if pairing_required {
-                                    // The stream transport's TLS is anonymous — the
-                                    // gate judges the deviceId the client announces
-                                    // in-band (see core client.rs DEVICE_ID_MARKER).
-                                    streaming_server.set_pairing_gate(|device_id| {
-                                        device_id
-                                            .as_deref()
-                                            .is_some_and(crate::plugins::pair::is_paired_device)
-                                    });
-                                }
+                                // The stream transport's TLS is anonymous — the gate judges the
+                                // deviceId the client announces in-band (see core client.rs
+                                // DEVICE_ID_MARKER). It runs with pairing off too, so a paired
+                                // device's own permissions still apply.
+                                streaming_server.set_session_gate(move |device_id, peer| {
+                                    Box::pin(crate::plugins::pair::session_gate(
+                                        device_id,
+                                        peer,
+                                        pairing_required,
+                                    ))
+                                });
                                 if let Err(e) = streaming_server
                                     .run_on_connection(QuinnConnection::shared(conn))
                                     .await
@@ -822,6 +823,15 @@ async fn handle_connection_with_kde(
                                 );
                                 continue;
                             }
+                            // F5: the owner's per-device permissions (spec P3).
+                            if !pairing_packet
+                                && !crate::plugins::pair::permits(&device_id, &packet_type)
+                            {
+                                tracing::info!(
+                                    "Denied {packet_type} from {device_id}: not permitted for this device"
+                                );
+                                continue;
+                            }
                             let packet_span = tracing::debug_span!("packet", type = %packet_type);
                             async {
                                 tracing::debug!("Processing packet");
@@ -959,19 +969,20 @@ fn humantime(secs: u64) -> String {
 
 /// Remove devices from the persistent trust store (`linux-link unpair`).
 pub async fn unpair(device_id: Option<String>) -> Result<()> {
-    let mut store = TrustStore::load_or_create(state::trust_store_path()?)?;
-    let targets: Vec<String> = match device_id {
-        Some(id) => vec![id],
-        None => store.trusted_devices(),
-    };
-    if targets.is_empty() {
-        println!("No trusted devices.");
-        return Ok(());
-    }
-    for id in &targets {
-        store.untrust_device(id)?;
-        println!("Untrusted {id}");
-    }
+    TrustStore::update(state::trust_store_path()?, |store| {
+        let targets: Vec<String> = match device_id {
+            Some(id) => vec![id],
+            None => store.trusted_devices(),
+        };
+        if targets.is_empty() {
+            println!("No trusted devices.");
+        }
+        for id in &targets {
+            store.untrust_device(id)?;
+            println!("Untrusted {id}");
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 

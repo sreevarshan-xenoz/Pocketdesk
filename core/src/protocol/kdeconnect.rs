@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::protocol::permissions::DevicePermissions;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -353,6 +354,9 @@ pub struct TrustStore {
     /// Entries here are trusted only until they expire; expiry is applied
     /// lazily at load, so no scheduler is required anywhere.
     grants: HashMap<String, u64>,
+    /// F5: deviceId -> what it may do. Only devices whose permissions differ
+    /// from the defaults have an entry.
+    permissions: HashMap<String, DevicePermissions>,
 }
 
 fn unix_now_secs() -> u64 {
@@ -362,7 +366,81 @@ fn unix_now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// A held lock on a trust store file: `<file>.lock`, created exclusively and
+/// removed on drop. The server and the desktop app both change the store, and
+/// each change is load, modify, save; without the lock one of two changes
+/// made at the same moment would be lost.
+struct StoreLock {
+    path: PathBuf,
+}
+
+impl StoreLock {
+    /// Give up after this long; a lock this old was left by a crash.
+    const STALE: std::time::Duration = std::time::Duration::from_secs(10);
+
+    fn acquire(store_path: &Path) -> Result<Self> {
+        let mut path = store_path.as_os_str().to_owned();
+        path.push(".lock");
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let started = std::time::Instant::now();
+        loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(_) => return Ok(Self { path }),
+                // Windows reports a lock file still being deleted as access
+                // denied rather than as existing: busy either way, for a while.
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::AlreadyExists
+                        || (e.kind() == std::io::ErrorKind::PermissionDenied
+                            && started.elapsed() < Self::STALE) =>
+                {
+                    let stale = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|age| age > Self::STALE);
+                    if stale || started.elapsed() > Self::STALE {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => {
+                    return Err(anyhow::Error::new(e)
+                        .context(format!("failed to lock {}", path.display()))
+                        .into());
+                }
+            }
+        }
+    }
+}
+
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 impl TrustStore {
+    /// Change the store at `path` under its lock: load it fresh, apply
+    /// `change` (whose mutations save as usual), release. Every writer goes
+    /// through here so the server and the desktop app never lose each
+    /// other's changes.
+    pub fn update<R>(
+        path: impl AsRef<Path>,
+        change: impl FnOnce(&mut TrustStore) -> Result<R>,
+    ) -> Result<R> {
+        let _lock = StoreLock::acquire(path.as_ref())?;
+        let mut store = Self::load_or_create(path)?;
+        change(&mut store)
+    }
+
     pub fn load_or_create(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
@@ -371,14 +449,14 @@ impl TrustStore {
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            let empty = TrustStoreFile::default();
-            std::fs::write(&path, serde_json::to_vec_pretty(&empty)?)
-                .with_context(|| format!("failed to initialize {}", path.display()))?;
-            return Ok(Self {
+            let empty = Self {
                 path,
                 trusted_device_ids: HashSet::new(),
                 grants: HashMap::new(),
-            });
+                permissions: HashMap::new(),
+            };
+            empty.persist()?;
+            return Ok(empty);
         }
 
         let bytes =
@@ -387,16 +465,26 @@ impl TrustStore {
             .with_context(|| format!("failed to parse {}", path.display()))?;
         let now = unix_now_secs();
 
+        let trusted_device_ids: HashSet<String> = decoded.trusted_device_ids.into_iter().collect();
+        // Load-time GC: an expired grant is simply not loaded, and the
+        // next persist drops it from the file.
+        let grants: HashMap<String, u64> = decoded
+            .grants
+            .into_iter()
+            .filter(|(_, expires)| *expires > now)
+            .collect();
+        // Permissions go with the device: an expired grant's must not wait
+        // for a later pairing of the same id.
+        let permissions = decoded
+            .permissions
+            .into_iter()
+            .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
+            .collect();
         Ok(Self {
             path,
-            trusted_device_ids: decoded.trusted_device_ids.into_iter().collect(),
-            // Load-time GC: an expired grant is simply not loaded, and the
-            // next persist drops it from the file.
-            grants: decoded
-                .grants
-                .into_iter()
-                .filter(|(_, expires)| *expires > now)
-                .collect(),
+            trusted_device_ids,
+            grants,
+            permissions,
         })
     }
 
@@ -431,6 +519,8 @@ impl TrustStore {
     pub fn untrust_device(&mut self, device_id: &str) -> Result<()> {
         self.trusted_device_ids.remove(device_id);
         self.grants.remove(device_id);
+        // A forgotten device that pairs again starts from the defaults.
+        self.permissions.remove(device_id);
         self.persist()
     }
 
@@ -440,6 +530,24 @@ impl TrustStore {
         values.sort();
         values.dedup();
         values
+    }
+
+    /// What [device_id] may do (F5). A device without an entry has the defaults.
+    pub fn permissions(&self, device_id: &str) -> DevicePermissions {
+        self.permissions.get(device_id).cloned().unwrap_or_default()
+    }
+
+    pub fn set_permissions(
+        &mut self,
+        device_id: &str,
+        permissions: DevicePermissions,
+    ) -> Result<()> {
+        if permissions.is_default() {
+            self.permissions.remove(device_id);
+        } else {
+            self.permissions.insert(device_id.to_string(), permissions);
+        }
+        self.persist()
     }
 
     /// Seconds remaining on a device's time-boxed grant (`None` = no grant:
@@ -456,12 +564,16 @@ impl TrustStore {
         let payload = TrustStoreFile {
             trusted_device_ids: permanent,
             grants: self.grants.clone(),
+            permissions: self.permissions.clone(),
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
         // Whole-file replace: the server and the desktop app both write this
         // file, and a reader must never see one of them halfway through.
+        // A temp name of its own per save, so two writers never share one.
+        static SAVES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SAVES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut tmp = self.path.clone().into_os_string();
-        tmp.push(".tmp");
+        tmp.push(format!(".{}.{n}.tmp", std::process::id()));
         let tmp = std::path::PathBuf::from(tmp);
         std::fs::write(&tmp, bytes)
             .with_context(|| format!("failed to write {}", tmp.display()))?;
@@ -477,6 +589,8 @@ struct TrustStoreFile {
     trusted_device_ids: Vec<String>,
     #[serde(default)]
     grants: HashMap<String, u64>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    permissions: HashMap<String, DevicePermissions>,
 }
 
 #[derive(Default)]
@@ -516,6 +630,44 @@ impl KdeConnectService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two writers changing different devices at the same moment both land.
+    #[test]
+    fn concurrent_updates_through_the_lock_lose_nothing() {
+        use crate::protocol::permissions::Capability;
+        let dir = std::env::temp_dir().join(format!("ll-trust-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("trusted_devices.json");
+        let writers: Vec<_> = (0..4)
+            .map(|w| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..25 {
+                        TrustStore::update(&path, |store| {
+                            store.trust_device(format!("d{w}-{i}"))?;
+                            let mut p = store.permissions("x");
+                            p.set(Capability::Exec, true);
+                            store.set_permissions(&format!("d{w}-{i}"), p)
+                        })
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        let store = TrustStore::load_or_create(&path).unwrap();
+        assert_eq!(store.trusted_devices().len(), 100);
+        assert!(
+            (0..4).all(|w| (0..25).all(|i| store
+                .permissions(&format!("d{w}-{i}"))
+                .allows(Capability::Exec))),
+            "every permission survived"
+        );
+        assert!(!dir.join("trusted_devices.json.lock").exists(), "released");
+    }
 
     /// The server and the desktop app both write the trust store; a save must
     /// replace the file whole (temp + rename) rather than rewrite it in place,
@@ -617,6 +769,54 @@ mod tests {
     }
 
     #[test]
+    fn permissions_are_stored_per_device_and_go_with_it() {
+        use crate::protocol::permissions::Capability;
+        let path = temp_store_path("perms");
+        let mut store = TrustStore::load_or_create(&path).expect("create");
+        store.trust_device("phone-p").unwrap();
+        assert!(store.permissions("phone-p").is_default());
+
+        let mut permissions = store.permissions("phone-p");
+        permissions.set(Capability::Clipboard, false);
+        permissions.ask_first = true;
+        store
+            .set_permissions("phone-p", permissions.clone())
+            .unwrap();
+
+        let reloaded = TrustStore::load_or_create(&path).expect("reload");
+        assert_eq!(reloaded.permissions("phone-p"), permissions);
+        assert!(
+            !reloaded
+                .permissions("phone-p")
+                .allows(Capability::Clipboard)
+        );
+
+        // Forgetting a device forgets its permissions; re-pairing starts clean.
+        let mut store = reloaded;
+        store.untrust_device("phone-p").unwrap();
+        store.trust_device("phone-p").unwrap();
+        assert!(store.permissions("phone-p").is_default());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_file_without_permissions_loads_and_defaults_are_not_written() {
+        let path = temp_store_path("perms-old");
+        std::fs::write(&path, r#"{"trusted_device_ids":["phone-o"],"grants":{}}"#).unwrap();
+        let mut store = TrustStore::load_or_create(&path).expect("old file");
+        assert!(store.permissions("phone-o").is_default());
+        store
+            .set_permissions(
+                "phone-o",
+                crate::protocol::permissions::DevicePermissions::default(),
+            )
+            .unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("permissions"), "{raw}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn grant_is_trusted_until_expiry() {
         let path = temp_store_path("grant");
         let mut store = TrustStore::load_or_create(&path).expect("create");
@@ -640,10 +840,18 @@ mod tests {
             "grants".into(),
             serde_json::json!({ id: unix_now_secs() - 1 }),
         );
+        expired.insert(
+            "permissions".into(),
+            serde_json::json!({ id: { "ask_first": true } }),
+        );
         std::fs::write(&path, serde_json::to_vec_pretty(&expired).unwrap()).unwrap();
         let stale = TrustStore::load_or_create(&path).expect("reload expired");
         assert!(!stale.is_trusted("phone-x"));
         assert!(stale.trusted_devices().is_empty());
+        assert!(
+            stale.permissions("phone-x").is_default(),
+            "its permissions expired with it"
+        );
 
         drop(store);
         let _ = std::fs::remove_file(path);

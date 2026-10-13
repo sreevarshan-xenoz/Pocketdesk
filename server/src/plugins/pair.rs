@@ -4,9 +4,11 @@ use std::time::{Duration, Instant};
 
 use linux_link_core::error::Result;
 use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin, TrustStore};
+use linux_link_core::protocol::permissions::DevicePermissions;
 use serde_json::json;
 
 use crate::state;
+use linux_link_core::local::approval::Verdict;
 use linux_link_core::local::pin as local_pin;
 
 // PIN pairing (KDE Connect parity, R3 Tier-2 #11b).
@@ -89,6 +91,115 @@ pub fn is_paired_device(device_id: &str) -> bool {
     TrustStore::load_or_create(path)
         .map(|store| store.is_trusted(device_id))
         .unwrap_or(false)
+}
+
+/// F5: may this device send `packet_type`? Packets that use no capability
+/// always pass. [conn_key] is a TCP connection's peer IP (resolved to the
+/// phone's deviceId learned from its identity) or, on QUIC, the deviceId.
+/// The store is re-read per check, so a change in the desktop app applies
+/// to the next packet.
+pub fn permits(conn_key: &str, packet_type: &str) -> bool {
+    let device_id = phone_ids()
+        .lock()
+        .expect("pair state")
+        .get(conn_key)
+        .cloned()
+        .unwrap_or_else(|| conn_key.to_string());
+    let store = state::trust_store_path()
+        .ok()
+        .and_then(|path| TrustStore::load_or_create(path).ok());
+    permits_in(store.as_ref(), &device_id, packet_type)
+}
+
+/// [`permits`] against a given store; without one, nothing that needs a
+/// permission is allowed.
+fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) -> bool {
+    let Some(capability) = linux_link_core::protocol::permissions::capability_for(packet_type)
+    else {
+        return true;
+    };
+    match store {
+        Some(store) => store.permissions(device_id).allows(capability),
+        // An unreadable store could be hiding a denial: refuse rather than
+        // fall back to the defaults (the stream gate refuses too).
+        None => false,
+    }
+}
+
+/// F5: what a stream from [device_id] may do, or `None` to reject it. Read
+/// when the session starts; a live session keeps what it started with.
+///
+/// With `pairing_required`, an unpaired device (or one that announced no
+/// id) is rejected. Without it, such a device gets the defaults, while a
+/// paired one still gets its own permissions. An unreadable store rejects
+/// either way, since it could be hiding a denial.
+pub fn session_permissions(
+    device_id: Option<&str>,
+    pairing_required: bool,
+) -> Option<DevicePermissions> {
+    let store = state::trust_store_path()
+        .ok()
+        .and_then(|path| TrustStore::load_or_create(path).ok());
+    session_permissions_in(store.as_ref(), device_id, pairing_required)
+}
+
+/// The stream gate (F5): [`session_permissions`], then, for a device whose
+/// owner asked to approve each session, the owner's answer at the desk.
+pub async fn session_gate(
+    device_id: Option<String>,
+    peer: std::net::SocketAddr,
+    pairing_required: bool,
+) -> Option<DevicePermissions> {
+    let permissions = session_permissions(device_id.as_deref(), pairing_required)?;
+    if !permissions.ask_first {
+        return Some(permissions);
+    }
+    let id = device_id?;
+    let verdict = crate::approvals::ask(&id, peer).await;
+    if verdict == Verdict::AlwaysAllow {
+        stop_asking(&id);
+    }
+    match verdict {
+        Verdict::Deny => None,
+        // Read again: the owner may have changed this phone's switches, or
+        // removed it, while the session waited.
+        Verdict::AllowOnce | Verdict::AlwaysAllow => {
+            session_permissions(Some(&id), pairing_required).map(|mut p| {
+                p.ask_first = false;
+                p
+            })
+        }
+    }
+}
+
+/// "Always allow": turn the device's "Ask before each session" off.
+fn stop_asking(device_id: &str) {
+    let result = state::trust_store_path()
+        .map_err(|e| e.to_string())
+        .and_then(|path| {
+            TrustStore::update(path, |store| {
+                let mut permissions = store.permissions(device_id);
+                permissions.ask_first = false;
+                store.set_permissions(device_id, permissions)
+            })
+            .map_err(|e| e.to_string())
+        });
+    if let Err(e) = result {
+        tracing::warn!("Could not stop asking for {device_id}: {e}");
+    }
+}
+
+fn session_permissions_in(
+    store: Option<&TrustStore>,
+    device_id: Option<&str>,
+    pairing_required: bool,
+) -> Option<DevicePermissions> {
+    let store = store?;
+    match device_id.filter(|id| store.is_trusted(id)) {
+        Some(id) => Some(store.permissions(id)),
+        None if pairing_required => None,
+        None => Some(DevicePermissions::default()),
+    }
 }
 
 /// The desktop's own device id, for phone-side trust persistence.
@@ -275,13 +386,14 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             let _ = local_pin::remove_if(&dir, pin);
         }
         let grant_secs = cli_grant.flatten();
-        let outcome = TrustStore::load_or_create(state::trust_store_path().expect("state dir"))
-            .and_then(|mut store| match grant_secs {
+        let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
+            match grant_secs {
                 Some(secs) => {
                     store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
                 }
                 None => store.trust_device(phone_id.clone()),
-            });
+            }
+        });
         match outcome {
             Ok(()) => {
                 match grant_secs {
@@ -346,6 +458,127 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_store(name: &str) -> TrustStore {
+        let path = std::env::temp_dir().join(format!("ll-perm-{name}-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        TrustStore::load_or_create(path).unwrap()
+    }
+
+    #[test]
+    fn a_denied_capability_blocks_its_packets_and_only_those() {
+        use linux_link_core::protocol::permissions::Capability;
+        let mut store = temp_store("deny");
+        store.trust_device("phone-1").unwrap();
+        let mut permissions = store.permissions("phone-1");
+        permissions.set(Capability::Clipboard, false);
+        store.set_permissions("phone-1", permissions).unwrap();
+
+        assert!(!permits_in(Some(&store), "phone-1", "kdeconnect.clipboard"));
+        assert!(
+            !permits_in(
+                Some(&store),
+                "phone-1",
+                "kdeconnect.linuxlink.notification_reply"
+            ),
+            "a reply lands on the desktop clipboard"
+        );
+        assert!(permits_in(
+            Some(&store),
+            "phone-1",
+            "kdeconnect.share.request"
+        ));
+        assert!(permits_in(
+            Some(&store),
+            "phone-1",
+            "kdeconnect.battery.request"
+        ));
+        assert!(
+            !permits_in(Some(&store), "phone-1", "kdeconnect.linuxlink.exec"),
+            "exec is off until granted"
+        );
+        assert!(
+            permits_in(Some(&store), "phone-2", "kdeconnect.clipboard"),
+            "another device keeps its defaults"
+        );
+        assert!(
+            !permits_in(None, "phone-1", "kdeconnect.clipboard"),
+            "no readable store denies what needs a permission"
+        );
+        assert!(
+            permits_in(None, "phone-1", "kdeconnect.battery.request"),
+            "and still answers what needs none"
+        );
+    }
+
+    #[test]
+    fn a_stream_gets_its_devices_permissions_and_an_unpaired_one_none() {
+        use linux_link_core::protocol::permissions::Capability;
+        let mut store = temp_store("session");
+        store.trust_device("phone-s").unwrap();
+        let mut permissions = store.permissions("phone-s");
+        permissions.set(Capability::Audio, false);
+        store
+            .set_permissions("phone-s", permissions.clone())
+            .unwrap();
+
+        for pairing_required in [true, false] {
+            assert_eq!(
+                session_permissions_in(Some(&store), Some("phone-s"), pairing_required),
+                Some(permissions.clone()),
+                "a paired device gets its own permissions either way"
+            );
+            assert_eq!(
+                session_permissions_in(None, Some("phone-s"), pairing_required),
+                None,
+                "no readable store rejects"
+            );
+        }
+        assert_eq!(
+            session_permissions_in(Some(&store), Some("stranger"), true),
+            None
+        );
+        assert_eq!(
+            session_permissions_in(Some(&store), None, true),
+            None,
+            "no id announced"
+        );
+        assert_eq!(
+            session_permissions_in(Some(&store), Some("stranger"), false),
+            Some(DevicePermissions::default()),
+            "pairing off: an unpaired device gets the defaults"
+        );
+    }
+
+    /// A plugin that adds a packet type must either map it to a capability
+    /// or be listed here as always allowed, so nothing slips past the gate.
+    #[test]
+    fn every_incoming_packet_type_is_mapped_or_deliberately_always_allowed() {
+        use linux_link_core::protocol::permissions::capability_for;
+        const ALWAYS_ALLOWED: &[&str] = &[
+            "kdeconnect.identity",
+            "kdeconnect.pair",
+            "kdeconnect.linuxlink.pair",
+            "kdeconnect.battery",
+            "kdeconnect.battery.request",
+            "kdeconnect.notification",
+            "kdeconnect.notification.request",
+            "kdeconnect.linuxlink.monitors",
+            "kdeconnect.linuxlink.windows",
+            "kdeconnect.linuxlink.wol",
+            "kdeconnect.findmydevice",
+            "kdeconnect.mousepad.echo",
+            "kdeconnect.filebrowse.response",
+        ];
+        let (incoming, _) = crate::plugins::register_all().capability_sets();
+        for packet_type in incoming {
+            assert!(
+                capability_for(&packet_type).is_some()
+                    || ALWAYS_ALLOWED.contains(&packet_type.as_str()),
+                "{packet_type} has no capability and is not listed as always allowed"
+            );
+        }
+    }
 
     /// A six-digit PIN is 10^6 guesses; without a limit, one TCP connection
     /// can try them all inside the 300 s window.

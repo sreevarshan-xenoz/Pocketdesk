@@ -211,6 +211,9 @@
     <string name="err_link_dropped">Se cayó el enlace de video. El escritorio puede haberse dormido o salido de la red.</string>
     <string name="err_generic">Algo salió mal al contactar el escritorio.</string>
     <string name="connecting_still">Siguiendo intentándolo… verifica que el escritorio esté despierto con Pocketdesk activo.</string>
+    <string name="waiting_for_picture">Conectado: esperando la imagen…</string>
+    <string name="waiting_for_approval">Si este ordenador pide permiso antes de cada sesión, acéptalo allí.</string>
+    <string name="err_session_refused">Este ordenador rechazó la sesión. Si pide permiso antes de cada sesión, acéptalo allí; si no, vuelve a emparejar.</string>
     <string name="repair_pairing">Emparejar de nuevo</string>
     <string name="session_menu">Menú de sesión</string>
     <string name="pair_link_title">Emparejando con %1$s…</string>

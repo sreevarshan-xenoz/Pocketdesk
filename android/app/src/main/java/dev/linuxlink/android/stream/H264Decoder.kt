@@ -60,6 +60,9 @@ class H264Decoder(
      */
     var onStalled: (() -> Unit)? = null
 
+    /** Fired from the decode thread when the desktop closes the stream, with its reason. */
+    var onClosed: ((String) -> Unit)? = null
+
     private var codec: MediaCodec? = null
     private var configW = width
     private var configH = height
@@ -158,12 +161,23 @@ class H264Decoder(
             // encoder runs keyint=60, so a live link delivers a packet every
             // couple of seconds — a long gap means the link is gone, not that
             // the desktop is still.
+            //
+            // The first frame gets longer: a desktop that asks before each
+            // session holds the stream until its owner answers (up to 30 s).
             var lastFrameAt = SystemClock.elapsedRealtime()
+            var sawFrame = false
             while (running.get()) {
                 val frames = RustCore.receiveFrames(timeoutMs = POLL_TIMEOUT_MS)
                 if (frames.isEmpty()) {
+                    // The desktop closed the stream (refused the session,
+                    // ended it): say so now rather than after the watchdog.
+                    RustCore.streamClosedReason?.let { reason ->
+                        Log.w(TAG, "stream closed by the desktop: $reason")
+                        onClosed?.invoke(reason)
+                        break
+                    }
                     val silentFor = SystemClock.elapsedRealtime() - lastFrameAt
-                    if (silentFor > STALL_MS) {
+                    if (silentFor > if (sawFrame) STALL_MS else FIRST_FRAME_MS) {
                         Log.w(TAG, "video feed silent for $silentFor ms — link dropped")
                         onStalled?.invoke()
                         break
@@ -171,6 +185,7 @@ class H264Decoder(
                     continue
                 }
                 lastFrameAt = SystemClock.elapsedRealtime()
+                sawFrame = true
                 for (frame in frames) {
                     if (!running.get()) break
                     if (mediaCodec == null) {
@@ -399,6 +414,9 @@ class H264Decoder(
 
         /** Frame gap that means the link is dead rather than the desktop idle. */
         private const val STALL_MS = 10_000L
+
+        /** The wait for a session's first frame: the desk's 30 s approval, and margin. */
+        private const val FIRST_FRAME_MS = 45_000L
 
         /** Pending feeds before the feed↔output pairing is considered lost. */
         private const val MAX_PENDING_FEEDS = 8

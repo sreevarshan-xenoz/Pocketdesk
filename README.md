@@ -222,7 +222,8 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/linux-link/confi
 
 - **Status**: whether the server runs, with Start and Restart.
 - **Pair**: a QR code and the same PIN in digits. The phone's "Scan pairing code" reads it and pins the desktop's certificate before its first streaming connection.
-- **Devices**: paired phones, which one is connected, and Remove.
+- **Devices**: paired phones, which one is connected, and Remove. Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
+- **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
 - **Sessions**: live sessions, with End.
 - **Settings**: edits `config.toml`, keeping your comments and unknown keys.
 - **Logs**: the server's log.

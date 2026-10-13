@@ -18,6 +18,7 @@ fun humanizeError(raw: String): Int {
         "no cached wan identity" in l -> R.string.err_lan_only
         "certificate" in l || "untrusted" in l || "handshake" in l ->
             R.string.err_trust_mismatch
+        "session refused" in l -> R.string.err_session_refused
         "declined" in l || "pairing" in l || "pin" in l -> R.string.err_pairing_declined
         "not connected" in l || "disconnected" in l || "closed" in l || "reset" in l ->
             R.string.err_link_dropped
@@ -29,5 +30,5 @@ fun humanizeError(raw: String): Int {
 fun errorSuggestsRepair(raw: String): Boolean {
     val l = raw.lowercase()
     return "certificate" in l || "untrusted" in l || "handshake" in l ||
-        "declined" in l || "pin" in l
+        "declined" in l || "pin" in l || "session refused" in l
 }
