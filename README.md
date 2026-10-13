@@ -17,7 +17,7 @@
 Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wayland/Hyprland) and now also for Windows 10/11. It combines:
 
 - **Low-latency screen streaming** — wlroots/PipeWire capture → FFmpeg H.264 encoding → QUIC transport → Android MediaCodec decode
-- **Full KDE Connect feature parity** — clipboard sync, file transfer, notifications, input control, battery info, remote file browsing
+- **KDE Connect-style features** — clipboard sync, sending files from the phone (LAN), notifications, input control, battery info
 - **Tailscale-native connectivity** — No manual port forwarding or NAT traversal; just pair and connect
 
 ### Key Differentiators
@@ -73,7 +73,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **Picture-in-picture** — shrink the live session into a video-only PiP window (desktop aspect ratio, chrome hidden) and keep working in other apps; also enables DeX/docked windows
 - **Blackout / pocket mode** — black, touch-locked screen while the session keeps streaming: the phone and its video surface go secure (no screenshots or Recents leakage), brightness drops; double-tap or back to unlock
 - **Localized UI** — English, Spanish and Tamil; pick per-app language from the "Language" button on the connect screen (Android 13+)
-- **File browser** with local and remote file tabs
+- **Share to the desktop** — share text (to the desktop clipboard) or a file (to its Downloads folder, over the LAN) from any app; a remote file browser is not built yet (roadmap F7)
 - **Settings** with DataStore persistence
 
 ### Server

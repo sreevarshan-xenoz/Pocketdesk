@@ -238,7 +238,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 - [ ] No echo loop (toggle sync off/on, paste both ways repeatedly).
 - [ ] History sheet: 20 entries survive app restart; pick restores local + pushes.
 - [ ] Share text to the app from any Android app → lands in desktop clipboard, toast "Sent to clipboard."
-- [ ] Share a file (EXTRA_STREAM) → appears in desktop `~/Downloads` (server Share plugin pulls over the staged socket).
+- [x] Share a file (EXTRA_STREAM) → appears in the desktop's Downloads folder. The desktop connects to the phone, which serves the bytes only to the desktop's address. Verified on 2026-10-13 against the Windows host over LAN: 300,000 bytes with matching MD5, and a second share of the same name saved as `name (1).ext`. Before this the phone and the server both listened and neither connected, so no file share had ever completed. It needs the TCP control channel on a LAN address; not over `adb reverse` (the desktop would dial itself), and not over the v2 channel or WAN.
 - [ ] Reboot phone → history + saved hosts survive.
 
 ## 8. Notifications + find-my-device (R3#11c, Tier-2 #11)
