@@ -114,6 +114,10 @@ fn sweep_answers(dir: &Path, held: &[ApprovalRequest]) {
         return;
     };
     for path in entries.filter_map(|e| e.ok()).map(|e| e.path()) {
+        // `<id>.json.tmp` is an answer the app is writing right now.
+        if path.extension().is_some_and(|e| e == "tmp") {
+            continue;
+        }
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         if !held.iter().any(|r| r.id == stem) {
             let _ = std::fs::remove_file(&path);
