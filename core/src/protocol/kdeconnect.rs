@@ -465,17 +465,26 @@ impl TrustStore {
             .with_context(|| format!("failed to parse {}", path.display()))?;
         let now = unix_now_secs();
 
+        let trusted_device_ids: HashSet<String> = decoded.trusted_device_ids.into_iter().collect();
+        // Load-time GC: an expired grant is simply not loaded, and the
+        // next persist drops it from the file.
+        let grants: HashMap<String, u64> = decoded
+            .grants
+            .into_iter()
+            .filter(|(_, expires)| *expires > now)
+            .collect();
+        // Permissions go with the device: an expired grant's must not wait
+        // for a later pairing of the same id.
+        let permissions = decoded
+            .permissions
+            .into_iter()
+            .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
+            .collect();
         Ok(Self {
             path,
-            trusted_device_ids: decoded.trusted_device_ids.into_iter().collect(),
-            // Load-time GC: an expired grant is simply not loaded, and the
-            // next persist drops it from the file.
-            grants: decoded
-                .grants
-                .into_iter()
-                .filter(|(_, expires)| *expires > now)
-                .collect(),
-            permissions: decoded.permissions,
+            trusted_device_ids,
+            grants,
+            permissions,
         })
     }
 
@@ -831,10 +840,18 @@ mod tests {
             "grants".into(),
             serde_json::json!({ id: unix_now_secs() - 1 }),
         );
+        expired.insert(
+            "permissions".into(),
+            serde_json::json!({ id: { "ask_first": true } }),
+        );
         std::fs::write(&path, serde_json::to_vec_pretty(&expired).unwrap()).unwrap();
         let stale = TrustStore::load_or_create(&path).expect("reload expired");
         assert!(!stale.is_trusted("phone-x"));
         assert!(stale.trusted_devices().is_empty());
+        assert!(
+            stale.permissions("phone-x").is_default(),
+            "its permissions expired with it"
+        );
 
         drop(store);
         let _ = std::fs::remove_file(path);
