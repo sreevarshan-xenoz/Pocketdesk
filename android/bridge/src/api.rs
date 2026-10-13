@@ -123,13 +123,11 @@ pub(crate) fn forget_peer_certificate_in(
     };
     let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
         .map_err(|e| e.to_string())?;
-    let removed = manager.remove_peer(&linux_link_core::streaming::transport::peer_label_for_ip(
-        ip,
-    ));
-    if removed {
-        manager.save_known_peers().map_err(|e| e.to_string())?;
-    }
-    Ok(removed)
+    manager
+        .remove_peer(&linux_link_core::streaming::transport::peer_label_for_ip(
+            ip,
+        ))
+        .map_err(|e| e.to_string())
 }
 
 /// Check if the LAN discovery service is active.
@@ -1985,13 +1983,10 @@ pub fn list_trusted_peers() -> Vec<String> {
 pub fn forget_trusted_peer(label: String) -> bool {
     let guard = crate::CERT_MANAGER.lock().unwrap();
     match guard.as_ref() {
-        Some(cm) => {
-            let removed = cm.remove_peer(&label);
-            if removed {
-                let _ = cm.save_known_peers();
-            }
-            removed
-        }
+        Some(cm) => cm.remove_peer(&label).unwrap_or_else(|e| {
+            tracing::warn!("Could not forget the certificate of {label}: {e}");
+            false
+        }),
         None => false,
     }
 }

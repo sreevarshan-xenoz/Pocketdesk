@@ -159,13 +159,10 @@ impl CertManager {
         };
 
         let peers_path = identity_dir.join("known_peers.json");
-        let known_peers = if peers_path.exists() {
-            let data =
-                std::fs::read_to_string(&peers_path).context("Failed to read known peers")?;
-            serde_json::from_str(&data).unwrap_or_default()
-        } else {
-            HashMap::new()
-        };
+        // A file that will not parse is an error: read as empty, it would
+        // trust any certificate for every address, and the next write would
+        // drop every pin.
+        let known_peers = read_pins(&peers_path)?;
 
         Ok(Self {
             cert_der,
@@ -255,15 +252,6 @@ impl CertManager {
     }
 
     /// Save the known peers map to the configured path.
-    pub fn save_known_peers(&self) -> Result<()> {
-        if let Some(path) = &self.peers_path {
-            let peers = self.known_peers.lock().unwrap();
-            let json = serde_json::to_string_pretty(&*peers)?;
-            std::fs::write(path, json)?;
-        }
-        Ok(())
-    }
-
     /// Return a copy of all known peer labels and their certificate hashes.
     pub fn known_peers(&self) -> Vec<(String, [u8; 32])> {
         let peers = self.known_peers.lock().unwrap();
@@ -283,13 +271,22 @@ impl CertManager {
             .lock()
             .unwrap()
             .insert(label.to_string(), hash);
-        self.save_known_peers()
+        if let Some(path) = &self.peers_path {
+            update_pins(path, |pins| {
+                pins.insert(label.to_string(), hash);
+            })?;
+        }
+        Ok(())
     }
 
-    /// Remove a known peer by label. Returns true if the peer was found and removed.
-    pub fn remove_peer(&self, label: &str) -> bool {
-        let mut peers = self.known_peers.lock().unwrap();
-        peers.remove(label).is_some()
+    /// Forget the peer `label`, here and on disk. Returns whether it was
+    /// pinned.
+    pub fn remove_peer(&self, label: &str) -> Result<bool> {
+        let mut removed = self.known_peers.lock().unwrap().remove(label).is_some();
+        if let Some(path) = &self.peers_path {
+            update_pins(path, |pins| removed |= pins.remove(label).is_some())?;
+        }
+        Ok(removed)
     }
 
     /// The TLS half of [`CertManager::client_config`]: TOFU certificate pins.
@@ -349,6 +346,44 @@ fn generate_identity() -> Result<(Vec<u8>, Vec<u8>)> {
     Ok((cert.der().to_vec(), key_pair.serialize_der()))
 }
 
+/// One writer of a pin file at a time, in this process. Each write re-reads
+/// the file and applies only its own change, so managers loaded at
+/// different times (one per connection) never drop each other's pins.
+static PINS_FILE: Mutex<()> = Mutex::new(());
+
+/// The pins in `path`; none if there is no file yet. A file that will not
+/// parse is an error.
+fn read_pins(path: &Path) -> Result<HashMap<String, [u8; 32]>> {
+    match std::fs::read_to_string(path) {
+        Ok(data) => serde_json::from_str(&data)
+            .with_context(|| format!("The certificate pins in {} are damaged", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+        Err(e) => Err(e).context("Failed to read known peers"),
+    }
+}
+
+/// Apply `change` to the pins on disk and replace the file whole (a temp
+/// file, then a rename). Returns the pins as written.
+fn update_pins(
+    path: &Path,
+    change: impl FnOnce(&mut HashMap<String, [u8; 32]>),
+) -> Result<HashMap<String, [u8; 32]>> {
+    let _one = PINS_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut pins = read_pins(path)?;
+    change(&mut pins);
+    let tmp = path.with_extension(format!(
+        "json.{}.{}.tmp",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&tmp, serde_json::to_string_pretty(&pins)?)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e).context("Failed to save known peers");
+    }
+    Ok(pins)
+}
+
 /// The label a peer's certificate pin is stored under: the server name the
 /// connection was made to. ServerName has no Display; its DNS name is a
 /// string and its IP's Debug output is stable.
@@ -392,6 +427,17 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
         let label = peer_label(server_name);
 
         let mut peers = self.known_peers.lock().unwrap();
+        // Not pinned here: it may have been pinned on disk since this
+        // manager loaded (another connection, a pairing code). The file
+        // decides before anything is accepted on first use.
+        if !peers.contains_key(&label)
+            && let Some(path) = &self.peers_path
+        {
+            let on_disk = read_pins(path).map_err(|e| rustls::Error::General(e.to_string()))?;
+            if let Some(pinned) = on_disk.get(&label) {
+                peers.insert(label.clone(), *pinned);
+            }
+        }
 
         match peers.get(&label) {
             Some(stored) if *stored == hash => {
@@ -411,15 +457,22 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
             }
             None => {
                 // New peer — TOFU: auto-accept and store.
+                // Persist first, merged with the file: if another connection
+                // pinned this address a moment ago, that pin wins.
+                if let Some(path) = &self.peers_path {
+                    let pins = update_pins(path, |pins| {
+                        pins.entry(label.clone()).or_insert(hash);
+                    })
+                    .map_err(|e| rustls::Error::General(e.to_string()))?;
+                    if pins.get(&label) != Some(&hash) {
+                        warn!("TOFU: {label} was pinned to another certificate meanwhile");
+                        return Err(rustls::Error::General(format!(
+                            "Certificate for {label} does not match its pin."
+                        )));
+                    }
+                }
                 info!("TOFU: first connection to {label}, accepting cert");
                 peers.insert(label, hash);
-                // Persist to disk so the trust survives restarts.
-                if let Some(path) = &self.peers_path
-                    && let Ok(json) = serde_json::to_string_pretty(&*peers)
-                    && let Err(e) = std::fs::write(path, json)
-                {
-                    warn!("TOFU: failed to persist known peers: {e}");
-                }
                 Ok(rustls::client::danger::ServerCertVerified::assertion())
             }
         }
@@ -955,6 +1008,81 @@ mod tests {
         // Persisted: a manager made for the next connection sees it.
         let next = CertManager::load_or_create(&dir).unwrap();
         assert!(next.known_peers().contains(&(label, [7u8; 32])));
+    }
+
+    fn pin_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ll-pins-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn a_pin_one_manager_writes_is_not_lost_by_another() {
+        let dir = pin_dir("merge");
+        let control = CertManager::load_or_create(&dir).unwrap();
+        let stream = CertManager::load_or_create(&dir).unwrap();
+        control.pin_peer("a", [1u8; 32]).unwrap();
+        stream.pin_peer("b", [2u8; 32]).unwrap();
+        let next = CertManager::load_or_create(&dir).unwrap();
+        let peers = next.known_peers();
+        assert!(peers.contains(&("a".to_string(), [1u8; 32])), "{peers:?}");
+        assert!(peers.contains(&("b".to_string(), [2u8; 32])), "{peers:?}");
+    }
+
+    #[test]
+    fn a_removed_pin_is_not_written_back_by_a_manager_that_still_holds_it() {
+        let dir = pin_dir("remove");
+        let old = CertManager::load_or_create(&dir).unwrap();
+        old.pin_peer("a", [1u8; 32]).unwrap();
+        let ui = CertManager::load_or_create(&dir).unwrap();
+        assert!(ui.remove_peer("a").unwrap());
+        old.pin_peer("b", [2u8; 32]).unwrap();
+        let peers = CertManager::load_or_create(&dir).unwrap().known_peers();
+        assert!(!peers.iter().any(|(label, _)| label == "a"), "{peers:?}");
+    }
+
+    #[test]
+    fn a_damaged_pin_file_is_an_error_not_an_empty_list() {
+        let dir = pin_dir("damaged");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("known_peers.json"), "{not json").unwrap();
+        assert!(
+            CertManager::load_or_create(&dir).is_err(),
+            "an empty list would trust any certificate for every address"
+        );
+    }
+
+    #[test]
+    fn a_manager_loaded_before_a_pin_does_not_accept_another_certificate_for_it() {
+        let dir = pin_dir("stale");
+        let stale = CertManager::load_or_create(&dir).unwrap();
+        let ip: std::net::IpAddr = "192.0.2.30".parse().unwrap();
+        let (desktop, _) = generate_identity().unwrap();
+        CertManager::load_or_create(&dir)
+            .unwrap()
+            .pin_peer(
+                &peer_label_for_ip(ip),
+                CertManager::cert_hash(&CertificateDer::from(desktop)),
+            )
+            .unwrap();
+        let (impostor, _) = generate_identity().unwrap();
+        let verifier = TofuVerifier {
+            known_peers: stale.known_peers.clone(),
+            peers_path: stale.peers_path.clone(),
+        };
+        use rustls::client::danger::ServerCertVerifier;
+        assert!(
+            verifier
+                .verify_server_cert(
+                    &CertificateDer::from(impostor),
+                    &[],
+                    &ServerName::IpAddress(ip.into()),
+                    &[],
+                    rustls::pki_types::UnixTime::now(),
+                )
+                .is_err(),
+            "the address was pinned since this manager loaded"
+        );
     }
 
     #[test]
