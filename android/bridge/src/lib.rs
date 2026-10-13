@@ -747,6 +747,24 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeFetchFil
     to_jstring(&mut env, json)
 }
 
+/// Tell the desktop the phone will not fetch offer `id` (F7b).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeDeclineOffer(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    id: JString<'_>,
+    reason: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let id = jstring_to_string(&mut env, &id);
+    let reason = jstring_to_string(&mut env, &reason);
+    let json =
+        envelope_unit(RUNTIME.block_on(download::decline_offer(address, port as u16, id, reason)));
+    to_jstring(&mut env, json)
+}
+
 /// Files the desktop offered since the last call: `{"ok": "[{id,name,size}]"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTakeFileOffers(

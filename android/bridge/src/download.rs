@@ -26,6 +26,8 @@ const FETCH: &str = "kdeconnect.linuxlink.file_fetch";
 const FETCH_REFUSED: &str = "kdeconnect.linuxlink.file_fetch_refused";
 /// The desktop's owner sent this phone a file: `{id, name, size}`.
 pub(crate) const FILE_OFFER: &str = "kdeconnect.linuxlink.file_offer";
+/// The phone will not fetch an offer: `{id, reason}`.
+const DECLINE: &str = "kdeconnect.linuxlink.file_offer_declined";
 /// The largest file the phone takes, as the desktop.
 const MAX_DOWNLOAD_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// A download that receives nothing for this long is abandoned.
@@ -174,6 +176,21 @@ async fn send_watching_replies(
         lines: tokio::io::BufReader::new(reader).lines(),
         _writer: writer,
     })
+}
+
+/// Tell the desktop the phone will not fetch offer `id`, and why (F7b), so
+/// its sent list does not wait on it.
+pub async fn decline_offer(
+    address: String,
+    port: u16,
+    id: String,
+    reason: String,
+) -> Result<(), String> {
+    crate::api::push_packet(&address, port, &decline_packet(&id, &reason)).await
+}
+
+fn decline_packet(id: &str, reason: &str) -> NetworkPacket {
+    NetworkPacket::new(DECLINE).with_body(serde_json::json!({ "id": id, "reason": reason }))
 }
 
 /// Resolves with the desktop's reason if it refuses the download keyed
@@ -453,6 +470,17 @@ mod tests {
         assert_eq!(refusal_for(&line(KEY), KEY), Some("no".to_string()));
         assert_eq!(refusal_for(&line("ffff"), KEY), None);
         assert_eq!(refusal_for("not a packet", KEY), None);
+    }
+
+    #[test]
+    fn a_decline_names_the_offer_and_why() {
+        let packet = super::decline_packet("o-1", "Not enough space for a.pdf");
+        assert_eq!(
+            packet.packet_type,
+            "kdeconnect.linuxlink.file_offer_declined"
+        );
+        assert_eq!(packet.body["id"], "o-1");
+        assert_eq!(packet.body["reason"], "Not enough space for a.pdf");
     }
 
     #[test]

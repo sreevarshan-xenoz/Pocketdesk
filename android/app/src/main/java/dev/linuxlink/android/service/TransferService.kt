@@ -245,10 +245,10 @@ class TransferService : Service() {
     /** Download one file into Downloads/Pocketdesk; the uri to open it, if any. */
     private fun receiveOne(job: Job.Receive, onProgress: (Int) -> Unit): Result<Uri?> {
         if (job.size > MAX_RECEIVE_BYTES || !DownloadTarget.hasRoomFor(this, job.size)) {
-            return Result.failure(IllegalStateException(getString(R.string.transfer_no_space, job.name)))
+            return refuse(job, getString(R.string.transfer_no_space, job.name))
         }
         val target = DownloadTarget.create(this, job.name)
-            ?: return Result.failure(IllegalStateException("cannot create ${job.name}"))
+            ?: return refuse(job, "cannot create ${job.name}")
         return try {
             val saved = withProgress({ job.size }, onProgress) {
                 RustCore.fetchFile(job.address, job.port, job.isOffer, job.value, target.descriptor.detachFd())
@@ -264,6 +264,18 @@ class TransferService : Service() {
             target.discard()
             Result.failure(t)
         }
+    }
+
+    /**
+     * Give up on [job] before fetching it. An offer is declined, so the
+     * desktop's sent list says why instead of waiting on it.
+     */
+    private fun refuse(job: Job.Receive, reason: String): Result<Uri?> {
+        if (job.isOffer) {
+            RustCore.declineOffer(job.address, job.port, job.value, reason)
+                .onFailure { Log.w(TAG, "could not decline ${job.value}: ${it.message}") }
+        }
+        return Result.failure(IllegalStateException(reason))
     }
 
     private fun sendCopy(address: String, port: Int, uri: Uri, name: String): Result<Unit> {

@@ -936,7 +936,11 @@ async fn query_peer(
 /// The dedicated connection is half-closed and drained rather than dropped, for
 /// the same reason [`oneshot_request`] is: an abrupt close with data still in
 /// flight shows up server-side as a `Broken pipe` plugin error.
-async fn push_packet(address: &str, port: u16, request: &NetworkPacket) -> Result<(), String> {
+pub(crate) async fn push_packet(
+    address: &str,
+    port: u16,
+    request: &NetworkPacket,
+) -> Result<(), String> {
     let writer = {
         let guard = (*CONTROL_WRITER).lock().await;
         guard.as_ref().cloned()
