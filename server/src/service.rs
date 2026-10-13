@@ -879,7 +879,9 @@ async fn handle_connection_with_kde(
         }
 
         let sender: Arc<dyn DeviceSender> = Arc::new(
-            TcpDeviceSender::from_arc(writer, device_id.clone()).with_peer(Some(peer_addr)),
+            TcpDeviceSender::from_arc(writer, device_id.clone())
+                .with_peer(Some(peer_addr))
+                .with_peer_key(peer_key),
         );
         let sender_ref = &*sender;
 

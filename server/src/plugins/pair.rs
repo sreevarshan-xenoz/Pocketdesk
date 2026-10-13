@@ -651,6 +651,23 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             let _ = local_pin::remove_if(&dir, pin);
         }
         let grant_secs = cli_grant.flatten();
+        // A guest grant binds the key that paired before anything is
+        // trusted, and never claims an id another phone has proved.
+        if grant_secs.is_some()
+            && let Ok(dir) = state::state_dir()
+            && !guest_may_pair_in(
+                &dir,
+                &phone_id,
+                sender.peer_key().as_ref(),
+                is_paired_device(&phone_id),
+            )
+        {
+            tracing::warn!(
+                "Guest pairing refused: {phone_id} is the id of a phone with another key"
+            );
+            respond_pair(sender, false, "").await;
+            return;
+        }
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
             match grant_secs {
                 Some(secs) => {
@@ -661,16 +678,14 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         });
         match outcome {
             Ok(()) => {
-                // Pairing again with the owner's own PIN (perhaps from a
-                // reinstalled phone, with new keys) lets the device bind the
-                // keys it proves next. A time-boxed guest PIN never does: the
-                // id it pairs under is only claimed, and clearing it would
-                // hand a guest someone else's phone.
+                // The owner's own PIN, inside TLS, binds the key that paired
+                // (phase B), replacing any older one (perhaps a reinstalled
+                // phone's). A guest's key was bound above.
                 if grant_secs.is_none()
                     && let Ok(dir) = state::state_dir()
-                    && let Err(e) = linux_link_core::local::device_keys::clear(&dir, &phone_id)
+                    && let Err(e) = owner_paired_in(&dir, &phone_id, sender.peer_key().as_ref())
                 {
-                    tracing::warn!("Could not clear the keys of {phone_id}: {e}");
+                    tracing::warn!("Could not bind the keys of {phone_id}: {e}");
                 }
                 match grant_secs {
                     Some(secs) => tracing::info!(
@@ -706,6 +721,55 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             }
         }
         respond_pair(sender, false, "").await;
+    }
+}
+
+/// The owner's PIN paired `phone_id` on a connection that proved `key`: that
+/// key becomes the device's only one. A connection that proved none (v2
+/// without a client certificate) clears the keys, so the next allowed LAN
+/// stream binds, as before phase B.
+fn owner_paired_in(
+    dir: &std::path::Path,
+    phone_id: &str,
+    key: Option<&linux_link_core::streaming::PeerKey>,
+) -> std::io::Result<()> {
+    use linux_link_core::local::device_keys;
+    match key {
+        Some(linux_link_core::streaming::PeerKey::Tls(hash)) => {
+            device_keys::replace(dir, phone_id, &hex(hash))
+        }
+        _ => device_keys::clear(dir, phone_id),
+    }
+}
+
+/// May a guest grant pair `phone_id` on a connection that proved `key`? Its
+/// key is bound if the id is free. An id bound to a different key, or one
+/// already paired (even before it has proved a key), belongs to another
+/// phone, and a guest never takes it over.
+fn guest_may_pair_in(
+    dir: &std::path::Path,
+    phone_id: &str,
+    key: Option<&linux_link_core::streaming::PeerKey>,
+    already_paired: bool,
+) -> bool {
+    use linux_link_core::local::device_keys::{self, Slot, Verdict};
+    if already_paired {
+        let presented = match key {
+            Some(linux_link_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
+            _ => None,
+        };
+        return device_keys::check(dir, phone_id, Slot::Tls, presented.as_deref())
+            == Verdict::Matches;
+    }
+    match key {
+        Some(linux_link_core::streaming::PeerKey::Tls(hash)) => {
+            device_keys::bind_first(dir, phone_id, &hex(hash)).unwrap_or(false)
+        }
+        // Nothing proved: allowed only while the id holds no key.
+        _ => matches!(
+            device_keys::check(dir, phone_id, Slot::Tls, None),
+            Verdict::Unbound
+        ),
     }
 }
 
@@ -795,6 +859,87 @@ mod tests {
                 .unwrap()
                 .get("phone")
                 .is_none_or(|k| k.tls.is_none() && k.iroh.is_none())
+        );
+    }
+
+    #[test]
+    fn pairing_with_the_owners_pin_binds_the_key_that_paired() {
+        let dir = key_dir("pair-owner");
+        assert!(allowed(
+            &dir,
+            &claim(Some(PeerKey::Tls([1; 32])), Some("old-wan"))
+        ));
+        let reinstalled = PeerKey::Tls([5; 32]);
+        owner_paired_in(&dir, "phone", Some(&reinstalled)).unwrap();
+        assert_eq!(
+            decide_control_identity_in(&dir, "phone", Some(&reinstalled), true),
+            Ok(())
+        );
+        assert!(
+            decide_control_identity_in(&dir, "phone", Some(&PeerKey::Tls([1; 32])), true).is_err(),
+            "the old key is gone"
+        );
+    }
+
+    #[test]
+    fn pairing_without_a_proved_key_leaves_the_device_to_bind_later() {
+        let dir = key_dir("pair-owner-nokey");
+        assert!(allowed(&dir, &claim(Some(PeerKey::Tls([1; 32])), None)));
+        owner_paired_in(&dir, "phone", None).unwrap();
+        assert_eq!(
+            decide_control_identity_in(&dir, "phone", Some(&PeerKey::Tls([2; 32])), true),
+            Ok(()),
+            "cleared, as before phase B"
+        );
+    }
+
+    #[test]
+    fn a_guest_pin_binds_a_free_id_but_never_another_phones() {
+        let dir = key_dir("pair-guest");
+        let guest = PeerKey::Tls([3; 32]);
+        assert!(
+            guest_may_pair_in(&dir, "guest", Some(&guest), false),
+            "a free id"
+        );
+        assert_eq!(
+            decide_control_identity_in(&dir, "guest", Some(&guest), true),
+            Ok(())
+        );
+        assert!(
+            guest_may_pair_in(&dir, "guest", Some(&guest), false),
+            "the same key again"
+        );
+        assert!(
+            allowed(&dir, &claim(Some(PeerKey::Tls([1; 32])), None)),
+            "the owner's phone"
+        );
+        assert!(
+            !guest_may_pair_in(&dir, "phone", Some(&guest), true),
+            "a guest claiming the owner's phone"
+        );
+        assert_eq!(
+            decide_control_identity_in(&dir, "phone", Some(&PeerKey::Tls([1; 32])), true),
+            Ok(()),
+            "the owner's phone keeps its key"
+        );
+    }
+
+    #[test]
+    fn a_guest_pin_never_takes_a_paired_phones_id_even_before_it_has_a_key() {
+        // A phone paired before device keys, that has not streamed on the
+        // LAN since, holds no key yet; its id is still its own.
+        let dir = key_dir("pair-guest-unbound");
+        assert!(!guest_may_pair_in(
+            &dir,
+            "phone",
+            Some(&PeerKey::Tls([3; 32])),
+            true
+        ));
+        assert!(
+            !linux_link_core::local::device_keys::read(&dir)
+                .unwrap()
+                .contains_key("phone"),
+            "nothing bound"
         );
     }
 

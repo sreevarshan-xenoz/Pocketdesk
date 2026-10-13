@@ -171,6 +171,12 @@ pub trait DeviceSender: Send + Sync {
         None
     }
 
+    /// The key the connection proved in its TLS handshake, when it did
+    /// (phase B: pairing binds it).
+    fn peer_key(&self) -> Option<crate::streaming::PeerKey> {
+        None
+    }
+
     async fn send_packet(&self, packet: &NetworkPacket) -> Result<()>;
 }
 
@@ -180,6 +186,7 @@ pub struct TcpDeviceSender<W> {
     device_id: String,
     connection_id: String,
     peer: Option<std::net::SocketAddr>,
+    peer_key: Option<crate::streaming::PeerKey>,
 }
 
 impl<W> Clone for TcpDeviceSender<W> {
@@ -189,6 +196,7 @@ impl<W> Clone for TcpDeviceSender<W> {
             device_id: self.device_id.clone(),
             connection_id: self.connection_id.clone(),
             peer: self.peer,
+            peer_key: self.peer_key.clone(),
         }
     }
 }
@@ -203,6 +211,7 @@ where
             device_id,
             connection_id: uuid::Uuid::new_v4().to_string(),
             peer: None,
+            peer_key: None,
         }
     }
 
@@ -212,7 +221,14 @@ where
             device_id,
             connection_id: uuid::Uuid::new_v4().to_string(),
             peer: None,
+            peer_key: None,
         }
+    }
+
+    /// The key the peer proved in the TLS handshake.
+    pub fn with_peer_key(mut self, key: Option<crate::streaming::PeerKey>) -> Self {
+        self.peer_key = key;
+        self
     }
 
     /// The socket's peer address, as the transport reports it.
@@ -242,6 +258,10 @@ where
 
     fn peer_addr(&self) -> Option<std::net::SocketAddr> {
         self.peer
+    }
+
+    fn peer_key(&self) -> Option<crate::streaming::PeerKey> {
+        self.peer_key.clone()
     }
 
     async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {

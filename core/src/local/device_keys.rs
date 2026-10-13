@@ -213,21 +213,44 @@ pub fn register(state_dir: &Path, device_id: &str, slot: Slot, key: &str) -> io:
 /// owner's own action, and it is the way back from a damaged file.
 pub fn clear(state_dir: &Path, device_id: &str) -> io::Result<()> {
     let _lock = lock(state_dir)?;
-    let path = state_dir.join(DEVICE_KEYS_FILE);
-    let mut devices = match read(state_dir) {
-        Ok(devices) => devices,
-        Err(_) => {
-            std::fs::rename(
-                &path,
-                state_dir.join(format!("{DEVICE_KEYS_FILE}.unreadable")),
-            )?;
-            HashMap::new()
-        }
-    };
-    if devices.remove(device_id).is_some() || !path.exists() {
+    let mut devices = read_or_set_aside(state_dir)?;
+    if devices.remove(device_id).is_some() || !state_dir.join(DEVICE_KEYS_FILE).exists() {
         write(state_dir, devices)?;
     }
     Ok(())
+}
+
+/// Make `tls_key` the device's only key (phase B: pairing with the owner's
+/// PIN, inside TLS, proves it). The WAN key is dropped until a LAN session
+/// that key authenticates registers one. Like [`clear`], this is the owner's
+/// own action, so an unreadable store is set aside.
+pub fn replace(state_dir: &Path, device_id: &str, tls_key: &str) -> io::Result<()> {
+    let _lock = lock(state_dir)?;
+    let mut devices = read_or_set_aside(state_dir)?;
+    devices.insert(
+        device_id.to_string(),
+        DeviceKeys {
+            tls: Some(tls_key.to_string()),
+            iroh: None,
+        },
+    );
+    write(state_dir, devices)
+}
+
+/// The store, or, if it cannot be read, an empty one with the damaged file
+/// set aside as `device_keys.json.unreadable`. Only for the owner's own
+/// actions (removing or pairing a device).
+fn read_or_set_aside(state_dir: &Path) -> io::Result<HashMap<String, DeviceKeys>> {
+    match read(state_dir) {
+        Ok(devices) => Ok(devices),
+        Err(_) => {
+            std::fs::rename(
+                state_dir.join(DEVICE_KEYS_FILE),
+                state_dir.join(format!("{DEVICE_KEYS_FILE}.unreadable")),
+            )?;
+            Ok(HashMap::new())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -342,6 +365,45 @@ mod tests {
             check(&dir, "other", Slot::Tls, Some("other-key")),
             Verdict::Matches,
             "untouched"
+        );
+    }
+
+    #[test]
+    fn pairing_with_the_owners_pin_makes_the_proved_key_the_only_one() {
+        let dir = temp_dir("replace");
+        bind_first(&dir, "phone", "old").unwrap();
+        register(&dir, "phone", Slot::Iroh, "old-wan").unwrap();
+        bind_first(&dir, "other", "other-key").unwrap();
+        replace(&dir, "phone", "new").unwrap();
+        assert_eq!(
+            check(&dir, "phone", Slot::Tls, Some("new")),
+            Verdict::Matches
+        );
+        assert_eq!(
+            check(&dir, "phone", Slot::Tls, Some("old")),
+            Verdict::Refused(Refusal::WrongKey)
+        );
+        assert_eq!(
+            read(&dir).unwrap()["phone"].iroh,
+            None,
+            "the WAN key waits for an authenticated LAN session"
+        );
+        assert_eq!(
+            check(&dir, "other", Slot::Tls, Some("other-key")),
+            Verdict::Matches,
+            "untouched"
+        );
+    }
+
+    #[test]
+    fn pairing_again_recovers_an_unreadable_store() {
+        let dir = temp_dir("replace-corrupt");
+        std::fs::write(dir.join(DEVICE_KEYS_FILE), "{not json").unwrap();
+        replace(&dir, "phone", "new").unwrap();
+        assert!(dir.join(format!("{DEVICE_KEYS_FILE}.unreadable")).exists());
+        assert_eq!(
+            check(&dir, "phone", Slot::Tls, Some("new")),
+            Verdict::Matches
         );
     }
 

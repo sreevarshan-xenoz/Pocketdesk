@@ -54,13 +54,14 @@ pub async fn handle_v2_session(
         // Device keys: the id in the handshake is only a claim; the TLS
         // client certificate is the proof, held to the one bound to that
         // device.
+        let peer_key = {
+            use linux_link_core::streaming::Connection as _;
+            linux_link_core::streaming::QuinnConnection::new(conn.clone()).peer_key()
+        };
         let claim = linux_link_core::streaming::SessionClaim {
             device_id: Some(peer_identity.device_id.clone()),
             peer: peer_addr,
-            peer_key: {
-                use linux_link_core::streaming::Connection as _;
-                linux_link_core::streaming::QuinnConnection::new(conn.clone()).peer_key()
-            },
+            peer_key: peer_key.clone(),
             iroh_id: None,
         };
         if crate::plugins::pair::device_keys_refused(&claim) {
@@ -72,6 +73,7 @@ pub async fn handle_v2_session(
         let sender: Arc<dyn DeviceSender> = Arc::new(QuicDeviceSender::new(
             send0,
             peer_identity.device_id.clone(),
+            peer_key,
             session_id.clone(),
         ));
 
@@ -266,14 +268,21 @@ async fn handle_persistent_stream(mut recv: RecvStream, name: &'static str) -> a
 struct QuicDeviceSender {
     send: Arc<Mutex<SendStream>>,
     device_id: String,
+    peer_key: Option<linux_link_core::streaming::PeerKey>,
     connection_id: String,
 }
 
 impl QuicDeviceSender {
-    fn new(send: SendStream, device_id: String, connection_id: String) -> Self {
+    fn new(
+        send: SendStream,
+        device_id: String,
+        peer_key: Option<linux_link_core::streaming::PeerKey>,
+        connection_id: String,
+    ) -> Self {
         Self {
             send: Arc::new(Mutex::new(send)),
             device_id,
+            peer_key,
             connection_id,
         }
     }
@@ -287,6 +296,10 @@ impl DeviceSender for QuicDeviceSender {
 
     fn connection_id(&self) -> &str {
         &self.connection_id
+    }
+
+    fn peer_key(&self) -> Option<linux_link_core::streaming::PeerKey> {
+        self.peer_key.clone()
     }
 
     async fn send_packet(&self, packet: &NetworkPacket) -> std::result::Result<(), LinuxLinkError> {
