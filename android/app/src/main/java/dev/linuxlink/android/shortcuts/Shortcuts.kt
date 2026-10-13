@@ -58,29 +58,49 @@ object Shortcuts {
             HostStore.hosts(app),
             hasWake = { HostStore.wolMac(app, it).isNotBlank() },
         )
+        val wake = ShortcutPlan.Kind.WAKE
         val shortcuts = plan.map { entry ->
-            val label = app.getString(
-                if (entry.kind == ShortcutPlan.Kind.WAKE) R.string.shortcut_wake else R.string.shortcut_connect,
-                entry.address,
-            )
             ShortcutInfo.Builder(app, entry.id)
-                .setShortLabel(label)
-                .setLongLabel(label)
+                // The address tells computers apart where little fits; the
+                // icon tells connect from wake.
+                .setShortLabel(entry.address)
+                .setLongLabel(
+                    app.getString(
+                        if (entry.kind == wake) R.string.shortcut_wake else R.string.shortcut_connect,
+                        entry.address,
+                    ),
+                )
                 .setIcon(
                     Icon.createWithResource(
                         app,
-                        if (entry.kind == ShortcutPlan.Kind.WAKE) R.drawable.ic_ll_power else R.drawable.ic_stat_linux_link,
+                        if (entry.kind == wake) R.drawable.ic_shortcut_wake else R.drawable.ic_shortcut_connect,
                     ),
                 )
                 .setIntent(intent(app, entry.kind, entry.address))
                 .build()
         }
+        val manager = app.getSystemService(ShortcutManager::class.java)
         // A launcher may refuse (rate limits for an app in the background);
         // the next refresh catches up.
-        runCatching { app.getSystemService(ShortcutManager::class.java)?.dynamicShortcuts = shortcuts }
-        val widgets = AppWidgetManager.getInstance(app)
-        val ids = widgets.getAppWidgetIds(ComponentName(app, ConnectWidget::class.java))
-        if (ids.isNotEmpty()) ConnectWidget.update(app, widgets, ids)
+        runCatching { manager?.dynamicShortcuts = shortcuts }
+        // A shortcut pinned to the home screen outlives the list: one for a
+        // computer that was removed is disabled (a computer saved later at
+        // the same address must not inherit it), and enabled again if the
+        // computer is saved again.
+        runCatching {
+            val saved = HostStore.hosts(app).map { it.address }.toSet()
+            val (keep, gone) = manager?.pinnedShortcuts.orEmpty().map { it.id }
+                .partition { id -> id.substringAfter(':') in saved }
+            if (gone.isNotEmpty()) manager?.disableShortcuts(gone, app.getString(R.string.shortcut_not_saved))
+            if (keep.isNotEmpty()) manager?.enableShortcuts(keep)
+        }
+        // Not every device has app widgets.
+        AppWidgetManager.getInstance(app)?.let { widgets ->
+            val ids = widgets.getAppWidgetIds(ComponentName(app, ConnectWidget::class.java))
+            if (ids.isNotEmpty()) ConnectWidget.update(app, widgets, ids)
+        }
+        // The tile reads the last computer each time the panel opens; this
+        // only asks for a refresh where the system honours it.
         runCatching {
             TileService.requestListeningState(app, ComponentName(app, ConnectTileService::class.java))
         }

@@ -73,6 +73,12 @@ class MainActivity : ComponentActivity() {
     private val shortcutSession = mutableStateOf<String?>(null)
 
     /**
+     * Whether this launch acted on a shortcut: auto-connecting to the last
+     * computer must not also start (a Wake shortcut names a sleeping one).
+     */
+    private var tookShortcut = false
+
+    /**
      * Act on a shortcut, the tile or the widget (F11): connect to, or wake,
      * a computer already saved. Recents replays the original intent, so a
      * launch from history acts on nothing.
@@ -86,6 +92,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         setIntent(Intent(intent).setAction(Intent.ACTION_MAIN))
+        tookShortcut = true
         val host = dev.linuxlink.android.shortcuts.ShortcutPlan.savedHost(
             intent.getStringExtra(dev.linuxlink.android.shortcuts.Shortcuts.EXTRA_ADDRESS),
             HostStore.hosts(this),
@@ -109,15 +116,18 @@ class MainActivity : ComponentActivity() {
             ).show()
             return
         }
+        // The application context, posted to the main thread: the relay may
+        // take a while, and must not hold this screen.
         val app = applicationContext
         Thread {
             val result = RustCore.wakeViaRelay(host.address, host.controlPort, mac)
-            runOnUiThread {
-                val message = if (result.isSuccess) {
-                    app.getString(R.string.wake_sent, host.address)
-                } else {
-                    app.getString(R.string.wake_failed, result.exceptionOrNull()?.message)
-                }
+            val message = if (result.isSuccess) {
+                app.getString(R.string.wake_sent, host.address)
+            } else {
+                val error = result.exceptionOrNull()
+                app.getString(R.string.wake_failed, error?.message ?: error.toString())
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
                 android.widget.Toast.makeText(app, message, android.widget.Toast.LENGTH_LONG).show()
             }
         }.start()
@@ -210,6 +220,7 @@ class MainActivity : ComponentActivity() {
 
                     LaunchedEffect(Unit) {
                         if (sessionKey == null &&
+                            !tookShortcut &&
                             HostStore.autoConnect(this@MainActivity)
                         ) {
                             HostStore.lastHost(this@MainActivity)?.let {

@@ -9,7 +9,7 @@ import dev.linuxlink.android.R
 
 /**
  * Quick Settings tile (F11): one tap connects to the last computer, or
- * opens the app when none is saved.
+ * opens the app when none is saved (the subtitle says so).
  */
 class ConnectTileService : TileService() {
     override fun onStartListening() {
@@ -20,7 +20,9 @@ class ConnectTileService : TileService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.subtitle = host?.address ?: getString(R.string.tile_no_computer)
         }
-        tile.state = if (host != null) Tile.STATE_INACTIVE else Tile.STATE_UNAVAILABLE
+        // Inactive, not unavailable, with no computer saved: an unavailable
+        // tile gets no clicks, and this one then opens the app.
+        tile.state = Tile.STATE_INACTIVE
         tile.updateTile()
     }
 
