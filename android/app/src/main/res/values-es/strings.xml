@@ -163,6 +163,7 @@
     <string name="share_nothing">No hay nada compartible en esta intent.</string>
     <string name="share_sent_clipboard">Enviado al portapapeles.</string>
     <string name="share_failed">Error: %1$s</string>
+    <string name="share_unreadable">La app que lo compartió no permitió que Pocketdesk lo leyera.</string>
     <string name="channel_transfers">Transferencias de archivos</string>
     <string name="channel_transfers_desc">Progreso de los archivos enviados a tu ordenador y desde él</string>
     <string name="transfer_sending">Enviando %1$d de %2$d</string>

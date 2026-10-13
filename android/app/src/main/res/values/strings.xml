@@ -168,6 +168,7 @@
     <string name="share_nothing">Nothing shareable in this intent.</string>
     <string name="share_sent_clipboard">Sent to clipboard.</string>
     <string name="share_failed">Failed: %1$s</string>
+    <string name="share_unreadable">The app that shared this did not let Pocketdesk read it.</string>
     <string name="channel_transfers">File transfers</string>
     <string name="channel_transfers_desc">Progress of files sent to and from your computer</string>
     <string name="transfer_sending">Sending %1$d of %2$d</string>
