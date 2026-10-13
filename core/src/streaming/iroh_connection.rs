@@ -205,6 +205,7 @@ impl IrohDial {
         direct_addrs: &[String],
         use_relays: bool,
         timeout: Duration,
+        device_key: Option<iroh::SecretKey>,
     ) -> Result<Self> {
         let id: iroh::EndpointId = endpoint_id.parse().context("invalid iroh EndpointId")?;
         let mut addr = EndpointAddr::new(id);
@@ -222,7 +223,13 @@ impl IrohDial {
         }
 
         let alpn = StreamTransportConfig::default().alpn;
-        let endpoint = Endpoint::builder(Minimal)
+        let mut builder = Endpoint::builder(Minimal);
+        // Device keys: dial as this device's own key, so the desktop can bind
+        // the session to it; without one, iroh makes a throwaway key.
+        if let Some(key) = device_key {
+            builder = builder.secret_key(key);
+        }
+        let endpoint = builder
             .alpns(vec![alpn.clone()])
             .relay_mode(if use_relays {
                 RelayMode::Default
@@ -306,11 +313,50 @@ impl InStream for IrohRecvStream {
     }
 }
 
+/// This device's WAN key, loaded from `path` or created there (device keys).
+/// A damaged file is an error rather than a silent new key: the desktop has
+/// bound the old one, and a new key would be refused there.
+pub fn load_or_create_device_key(path: &std::path::Path) -> Result<iroh::SecretKey> {
+    if path.exists() {
+        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        let raw: [u8; 32] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("{} is not a 32-byte key", path.display()))?;
+        return Ok(iroh::SecretKey::from_bytes(&raw));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let key = iroh::SecretKey::generate();
+    crate::secure_fs::write_private(path, &key.to_bytes())
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::streaming::transport::StreamTransportConfig;
     use iroh::endpoint::VarInt;
+
+    /// Device keys: the phone dials the WAN with one key, kept across runs,
+    /// so the desktop can bind its WAN sessions to it.
+    #[test]
+    fn a_device_keeps_its_wan_key_across_runs() {
+        let dir = std::env::temp_dir().join(format!("ll-irohkey-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("iroh_device.key");
+        let first = load_or_create_device_key(&path).unwrap();
+        let again = load_or_create_device_key(&path).unwrap();
+        assert_eq!(first.public().to_string(), again.public().to_string());
+        std::fs::write(&path, b"short").unwrap();
+        assert!(
+            load_or_create_device_key(&path).is_err(),
+            "a damaged key is not replaced silently"
+        );
+    }
 
     /// Loopback iroh endpoint with relays/DNS disabled — the spike's
     /// zero-infrastructure setup, dialing the direct `EndpointAddr` only.
@@ -443,6 +489,7 @@ mod tests {
                 &[server_addr.to_string()],
                 false,
                 Duration::from_secs(10),
+                None,
             )
             .await
             .expect("loopback dial over direct addr");

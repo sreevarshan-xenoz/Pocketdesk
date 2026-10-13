@@ -341,6 +341,9 @@ impl PocketdeskApp {
         let result = TrustStore::update(self.state_dir.join(TRUST_FILE), |store| {
             store.untrust_device(id)
         });
+        // Its keys go too, so the phone can pair again (perhaps reinstalled,
+        // with new keys) and bind them.
+        let _ = linux_link_core::local::device_keys::clear(&self.state_dir, id);
         self.notice = Some(match result {
             Ok(()) => format!("Removed {} — it must pair again to connect.", short(id)),
             Err(e) => format!("Could not remove {}: {e}", short(id)),

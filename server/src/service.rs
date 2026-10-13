@@ -431,14 +431,13 @@ pub async fn run(config: Config) -> Result<()> {
                                 streaming_server.set_session_telemetry(true);
                                 streaming_server.set_hevc_allowed(allow_hevc);
                                 streaming_server.set_capture_backend(capture_backend);
-                                // The stream transport's TLS is anonymous — the gate judges the
-                                // deviceId the client announces in-band (see core client.rs
-                                // DEVICE_ID_MARKER). It runs with pairing off too, so a paired
-                                // device's own permissions still apply.
-                                streaming_server.set_session_gate(move |device_id, peer| {
+                                // The gate judges the deviceId the client announces in-band
+                                // against the key its TLS certificate proved (device keys). It
+                                // runs with pairing off too, so a paired device's own
+                                // permissions still apply.
+                                streaming_server.set_session_gate(move |claim| {
                                     Box::pin(crate::plugins::pair::session_gate(
-                                        device_id,
-                                        peer,
+                                        claim,
                                         pairing_required,
                                     ))
                                 });
@@ -999,6 +998,10 @@ pub async fn unpair(device_id: Option<String>) -> Result<()> {
         }
         for id in &targets {
             store.untrust_device(id)?;
+            // Its keys go too, so a phone that pairs again can bind new ones.
+            if let Ok(dir) = state::state_dir() {
+                let _ = linux_link_core::local::device_keys::clear(&dir, id);
+            }
             println!("Untrusted {id}");
         }
         Ok(())

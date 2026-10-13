@@ -232,12 +232,8 @@ pub async fn spawn_wan_endpoint(
                 // deviceId the client announces in-band (see core client.rs
                 // DEVICE_ID_MARKER). It runs with pairing off too, so a paired
                 // device's own permissions still apply.
-                streaming_server.set_session_gate(move |device_id, peer| {
-                    Box::pin(crate::plugins::pair::session_gate(
-                        device_id,
-                        peer,
-                        pairing_required,
-                    ))
+                streaming_server.set_session_gate(move |claim| {
+                    Box::pin(crate::plugins::pair::session_gate(claim, pairing_required))
                 });
                 if let Err(e) = streaming_server
                     .run_on_connection(IrohConnection::shared(conn))

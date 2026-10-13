@@ -1323,11 +1323,15 @@ pub async fn connect_streaming(
         tracing::info!(peer = %peer_label, "Establishing new trust bond with peer (TOFU)");
     }
 
+    // Device keys: on a LAN session, whose TLS certificate proves this
+    // phone, name the WAN key it dials with so the desktop can bind it.
+    let iroh_id = device_wan_key().map(|key| key.public().to_string());
     let (client, packet_rx, audio_rx) = StreamingClient::connect(
         &addr,
         cert_manager,
         monitor_index,
         Some(&client_identity().device_id),
+        iroh_id.as_deref(),
         Some(codec_caps),
     )
     .await
@@ -1416,6 +1420,8 @@ pub async fn connect_streaming_wan(
         &direct_addrs,
         true,
         Duration::from_secs(20),
+        // Device keys: dial as this phone's own key, the one it named on LAN.
+        device_wan_key(),
     )
     .await
     .map_err(|e| {
@@ -1432,6 +1438,7 @@ pub async fn connect_streaming_wan(
         dial.connection(),
         monitor_index,
         Some(&client_identity().device_id),
+        None,
         Some(codec_caps),
     )
     .await;
@@ -1447,6 +1454,21 @@ pub async fn connect_streaming_wan(
         Some(dial),
     )
     .await
+}
+
+/// This phone's WAN (iroh) key, kept in its data directory across runs so
+/// the desktop can bind its WAN sessions to it (device keys). `None` without
+/// a data directory, or if the key cannot be read; the dial then uses a
+/// throwaway key, which a desktop that has bound one refuses.
+fn device_wan_key() -> Option<linux_link_core::streaming::IrohSecretKey> {
+    let dir = crate::CERT_DIR.lock().ok()?.clone()?;
+    match linux_link_core::streaming::load_or_create_device_key(&dir.join("iroh_device.key")) {
+        Ok(key) => Some(key),
+        Err(e) => {
+            tracing::warn!("WAN key unavailable: {e}");
+            None
+        }
+    }
 }
 
 /// Cleanly stop a streaming session: cancel its tasks and close the WAN dial

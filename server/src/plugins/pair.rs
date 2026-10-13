@@ -153,13 +153,18 @@ pub fn session_permissions(
     session_permissions_in(store.as_ref(), device_id, pairing_required)
 }
 
-/// The stream gate (F5): [`session_permissions`], then, for a device whose
-/// owner asked to approve each session, the owner's answer at the desk.
+/// The stream gate (F5): the device keys check, [`session_permissions`],
+/// then, for a device whose owner asked to approve each session, the
+/// owner's answer at the desk.
 pub async fn session_gate(
-    device_id: Option<String>,
-    peer: std::net::SocketAddr,
+    claim: linux_link_core::streaming::SessionClaim,
     pairing_required: bool,
 ) -> Option<DevicePermissions> {
+    if !device_keys_allow(&claim) {
+        return None;
+    }
+    let device_id = claim.device_id;
+    let peer = claim.peer;
     let permissions = session_permissions(device_id.as_deref(), pairing_required)?;
     if !permissions.ask_first {
         return Some(permissions);
@@ -180,6 +185,92 @@ pub async fn session_gate(
             })
         }
     }
+}
+
+/// Device keys (phase A): whether the session's connection proved the key
+/// bound to the paired device it claims to be. Refusals are logged, and the
+/// desk is told (at most once a minute per device).
+pub(crate) fn device_keys_allow(claim: &linux_link_core::streaming::SessionClaim) -> bool {
+    let Ok(dir) = state::state_dir() else {
+        return false;
+    };
+    let paired = claim.device_id.as_deref().is_some_and(is_paired_device);
+    let allowed = device_keys_allow_in(&dir, claim, paired);
+    if !allowed && let Some(id) = &claim.device_id {
+        warn_impostor(id, claim);
+    }
+    allowed
+}
+
+fn device_keys_allow_in(
+    dir: &std::path::Path,
+    claim: &linux_link_core::streaming::SessionClaim,
+    paired: bool,
+) -> bool {
+    use linux_link_core::local::device_keys::{self, Slot, Verdict};
+    use linux_link_core::streaming::PeerKey;
+    // An unpaired device is the pairing gate's to judge; it has no keys.
+    let Some(id) = claim.device_id.as_deref().filter(|_| paired) else {
+        return true;
+    };
+    let (slot, presented) = match &claim.peer_key {
+        Some(PeerKey::Tls(hash)) => (Slot::Tls, Some(hex(hash))),
+        Some(PeerKey::Iroh(endpoint)) => (Slot::Iroh, Some(endpoint.clone())),
+        None => (Slot::Tls, None),
+    };
+    let verdict = device_keys::check(dir, id, slot, presented.as_deref());
+    if let Verdict::Refused(why) = &verdict {
+        tracing::warn!(
+            device_id = id,
+            presented = presented.as_deref().unwrap_or("<none>"),
+            "Session refused: {why}"
+        );
+        return false;
+    }
+    // The certificate proved the device: the WAN key it names is its own.
+    if slot == Slot::Tls
+        && matches!(verdict, Verdict::Matches | Verdict::Bound)
+        && let Some(iroh) = &claim.iroh_id
+        && let Err(e) = device_keys::register(dir, id, Slot::Iroh, iroh)
+    {
+        tracing::warn!(device_id = id, "Could not record the device's WAN key: {e}");
+    }
+    true
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Tell the desk that something claimed a paired device without its key,
+/// at most once a minute per device so a retrying impostor cannot flood it.
+fn warn_impostor(device_id: &str, claim: &linux_link_core::streaming::SessionClaim) {
+    static LAST: std::sync::OnceLock<Mutex<HashMap<String, Instant>>> = std::sync::OnceLock::new();
+    let now = Instant::now();
+    {
+        let mut last = LAST
+            .get_or_init(Default::default)
+            .lock()
+            .expect("impostor log");
+        if last
+            .get(device_id)
+            .is_some_and(|at| now.duration_since(*at) < Duration::from_secs(60))
+        {
+            return;
+        }
+        last.insert(device_id.to_string(), now);
+    }
+    let short: String = device_id.chars().take(8).collect();
+    let body = format!(
+        "A connection from {} claimed to be your paired phone {short}… without its key, and was refused.",
+        claim.peer.ip()
+    );
+    std::thread::spawn(move || {
+        let summary = "Pocketdesk: a session was refused";
+        if !crate::platform::notify(summary, &body, Duration::from_secs(10)) {
+            tracing::warn!("{summary} — {body}");
+        }
+    });
 }
 
 /// "Always allow": turn the device's "Ask before each session" off.
@@ -396,6 +487,13 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             let _ = local_pin::remove_if(&dir, pin);
         }
         let grant_secs = cli_grant.flatten();
+        // Pairing again (perhaps from a reinstalled phone, with new keys)
+        // lets the device bind the keys it proves next.
+        if let Ok(dir) = state::state_dir()
+            && let Err(e) = linux_link_core::local::device_keys::clear(&dir, &phone_id)
+        {
+            tracing::warn!("Could not clear the keys of {phone_id}: {e}");
+        }
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
             match grant_secs {
                 Some(secs) => {
@@ -468,6 +566,95 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use linux_link_core::streaming::{PeerKey, SessionClaim};
+
+    fn key_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ll-gatekeys-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn claim(peer_key: Option<PeerKey>, iroh_id: Option<&str>) -> SessionClaim {
+        SessionClaim {
+            device_id: Some("phone".to_string()),
+            peer: "192.0.2.7:51000".parse().unwrap(),
+            peer_key,
+            iroh_id: iroh_id.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_paired_phone_is_held_to_the_key_it_first_proved() {
+        let dir = key_dir("tls");
+        let phone = Some(PeerKey::Tls([1; 32]));
+        assert!(device_keys_allow_in(
+            &dir,
+            &claim(phone.clone(), None),
+            true
+        ));
+        assert!(device_keys_allow_in(&dir, &claim(phone, None), true));
+        assert!(
+            !device_keys_allow_in(&dir, &claim(Some(PeerKey::Tls([2; 32])), None), true),
+            "someone else claiming the phone's id"
+        );
+        assert!(
+            !device_keys_allow_in(&dir, &claim(None, None), true),
+            "no key, now that the phone has one"
+        );
+    }
+
+    #[test]
+    fn the_wan_key_is_taken_only_from_an_authenticated_session() {
+        let dir = key_dir("iroh");
+        let phone = Some(PeerKey::Tls([1; 32]));
+        // A stranger's iroh key cannot bind first.
+        device_keys_allow_in(&dir, &claim(phone.clone(), None), true);
+        assert!(!device_keys_allow_in(
+            &dir,
+            &claim(Some(PeerKey::Iroh("stranger".into())), None),
+            true
+        ));
+        // The phone names its WAN key on a session its certificate proves.
+        assert!(device_keys_allow_in(
+            &dir,
+            &claim(phone, Some("phone-endpoint")),
+            true
+        ));
+        assert!(device_keys_allow_in(
+            &dir,
+            &claim(Some(PeerKey::Iroh("phone-endpoint".into())), None),
+            true
+        ));
+        // A claim of a WAN key on a session that proved the wrong certificate
+        // registers nothing.
+        assert!(!device_keys_allow_in(
+            &dir,
+            &claim(Some(PeerKey::Tls([9; 32])), Some("stranger")),
+            true
+        ));
+        assert!(!device_keys_allow_in(
+            &dir,
+            &claim(Some(PeerKey::Iroh("stranger".into())), None),
+            true
+        ));
+    }
+
+    #[test]
+    fn an_unpaired_device_binds_nothing() {
+        let dir = key_dir("unpaired");
+        assert!(device_keys_allow_in(
+            &dir,
+            &claim(Some(PeerKey::Tls([1; 32])), None),
+            false
+        ));
+        assert!(
+            linux_link_core::local::device_keys::read(&dir)
+                .unwrap()
+                .is_empty(),
+            "the pairing gate decides an unpaired device; no key is recorded for it"
+        );
+    }
 
     fn temp_store(name: &str) -> TrustStore {
         let path = std::env::temp_dir().join(format!("ll-perm-{name}-{}.json", std::process::id()));

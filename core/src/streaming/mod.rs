@@ -81,14 +81,16 @@ pub use input_packet::{
     InputPacket, MAX_SAMPLES_PER_FRAME, SAMPLE_DECODE, SAMPLE_E2E, SAMPLE_RENDER, SampleBatch,
 };
 #[cfg(feature = "wan")]
-pub use iroh_connection::{IrohConnection, IrohDial};
+pub use iroh::SecretKey as IrohSecretKey;
+#[cfg(feature = "wan")]
+pub use iroh_connection::{IrohConnection, IrohDial, load_or_create_device_key};
 pub use session::{SessionType, detect_session_type};
 pub use session_telemetry::{
     LinkReport, SessionGuard, SessionOutcome, SessionRecorder, SessionReport,
     set_session_telemetry_callback,
 };
 #[cfg(feature = "server")]
-pub use streamer::StreamingServer;
+pub use streamer::{SessionClaim, StreamingServer};
 
 use serde::{Deserialize, Serialize};
 

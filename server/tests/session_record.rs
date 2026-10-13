@@ -82,6 +82,7 @@ async fn a_live_session_records_every_measured_stage() {
         None,
         Some("loopback-test"),
         None,
+        None,
     )
     .await
     .expect("client connect");
