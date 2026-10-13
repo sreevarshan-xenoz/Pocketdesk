@@ -966,19 +966,20 @@ fn humantime(secs: u64) -> String {
 
 /// Remove devices from the persistent trust store (`linux-link unpair`).
 pub async fn unpair(device_id: Option<String>) -> Result<()> {
-    let mut store = TrustStore::load_or_create(state::trust_store_path()?)?;
-    let targets: Vec<String> = match device_id {
-        Some(id) => vec![id],
-        None => store.trusted_devices(),
-    };
-    if targets.is_empty() {
-        println!("No trusted devices.");
-        return Ok(());
-    }
-    for id in &targets {
-        store.untrust_device(id)?;
-        println!("Untrusted {id}");
-    }
+    TrustStore::update(state::trust_store_path()?, |store| {
+        let targets: Vec<String> = match device_id {
+            Some(id) => vec![id],
+            None => store.trusted_devices(),
+        };
+        if targets.is_empty() {
+            println!("No trusted devices.");
+        }
+        for id in &targets {
+            store.untrust_device(id)?;
+            println!("Untrusted {id}");
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 

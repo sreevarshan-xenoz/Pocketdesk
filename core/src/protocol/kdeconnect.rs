@@ -366,7 +366,81 @@ fn unix_now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// A held lock on a trust store file: `<file>.lock`, created exclusively and
+/// removed on drop. The server and the desktop app both change the store, and
+/// each change is load, modify, save; without the lock one of two changes
+/// made at the same moment would be lost.
+struct StoreLock {
+    path: PathBuf,
+}
+
+impl StoreLock {
+    /// Give up after this long; a lock this old was left by a crash.
+    const STALE: std::time::Duration = std::time::Duration::from_secs(10);
+
+    fn acquire(store_path: &Path) -> Result<Self> {
+        let mut path = store_path.as_os_str().to_owned();
+        path.push(".lock");
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let started = std::time::Instant::now();
+        loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(_) => return Ok(Self { path }),
+                // Windows reports a lock file still being deleted as access
+                // denied rather than as existing: busy either way, for a while.
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::AlreadyExists
+                        || (e.kind() == std::io::ErrorKind::PermissionDenied
+                            && started.elapsed() < Self::STALE) =>
+                {
+                    let stale = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|age| age > Self::STALE);
+                    if stale || started.elapsed() > Self::STALE {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => {
+                    return Err(anyhow::Error::new(e)
+                        .context(format!("failed to lock {}", path.display()))
+                        .into());
+                }
+            }
+        }
+    }
+}
+
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 impl TrustStore {
+    /// Change the store at `path` under its lock: load it fresh, apply
+    /// `change` (whose mutations save as usual), release. Every writer goes
+    /// through here so the server and the desktop app never lose each
+    /// other's changes.
+    pub fn update<R>(
+        path: impl AsRef<Path>,
+        change: impl FnOnce(&mut TrustStore) -> Result<R>,
+    ) -> Result<R> {
+        let _lock = StoreLock::acquire(path.as_ref())?;
+        let mut store = Self::load_or_create(path)?;
+        change(&mut store)
+    }
+
     pub fn load_or_create(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
@@ -375,15 +449,14 @@ impl TrustStore {
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            let empty = TrustStoreFile::default();
-            std::fs::write(&path, serde_json::to_vec_pretty(&empty)?)
-                .with_context(|| format!("failed to initialize {}", path.display()))?;
-            return Ok(Self {
+            let empty = Self {
                 path,
                 trusted_device_ids: HashSet::new(),
                 grants: HashMap::new(),
                 permissions: HashMap::new(),
-            });
+            };
+            empty.persist()?;
+            return Ok(empty);
         }
 
         let bytes =
@@ -487,8 +560,11 @@ impl TrustStore {
         let bytes = serde_json::to_vec_pretty(&payload)?;
         // Whole-file replace: the server and the desktop app both write this
         // file, and a reader must never see one of them halfway through.
+        // A temp name of its own per save, so two writers never share one.
+        static SAVES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SAVES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut tmp = self.path.clone().into_os_string();
-        tmp.push(".tmp");
+        tmp.push(format!(".{}.{n}.tmp", std::process::id()));
         let tmp = std::path::PathBuf::from(tmp);
         std::fs::write(&tmp, bytes)
             .with_context(|| format!("failed to write {}", tmp.display()))?;
@@ -545,6 +621,44 @@ impl KdeConnectService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two writers changing different devices at the same moment both land.
+    #[test]
+    fn concurrent_updates_through_the_lock_lose_nothing() {
+        use crate::protocol::permissions::Capability;
+        let dir = std::env::temp_dir().join(format!("ll-trust-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("trusted_devices.json");
+        let writers: Vec<_> = (0..4)
+            .map(|w| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..25 {
+                        TrustStore::update(&path, |store| {
+                            store.trust_device(format!("d{w}-{i}"))?;
+                            let mut p = store.permissions("x");
+                            p.set(Capability::Exec, true);
+                            store.set_permissions(&format!("d{w}-{i}"), p)
+                        })
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        let store = TrustStore::load_or_create(&path).unwrap();
+        assert_eq!(store.trusted_devices().len(), 100);
+        assert!(
+            (0..4).all(|w| (0..25).all(|i| store
+                .permissions(&format!("d{w}-{i}"))
+                .allows(Capability::Exec))),
+            "every permission survived"
+        );
+        assert!(!dir.join("trusted_devices.json.lock").exists(), "released");
+    }
 
     /// The server and the desktop app both write the trust store; a save must
     /// replace the file whole (temp + rename) rather than rewrite it in place,

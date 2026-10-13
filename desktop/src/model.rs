@@ -103,17 +103,19 @@ pub fn answer_approval(
     approval::answer(state_dir, id, verdict, now_unix)
 }
 
-// Load, change, save in one go: the server writes the same file (pairing,
-// grants), so the copy read at the last refresh may be stale.
+// Load, change, save under the store's lock: the server writes the same file
+// (pairing, grants, "Always allow"), so the copy read at the last refresh may
+// be stale, and two writers must not lose each other's change.
 fn update_permissions(
     state_dir: &Path,
     id: &str,
     change: impl FnOnce(&mut DevicePermissions),
 ) -> linux_link_core::error::Result<()> {
-    let mut store = TrustStore::load_or_create(state_dir.join(TRUST_FILE))?;
-    let mut permissions = store.permissions(id);
-    change(&mut permissions);
-    store.set_permissions(id, permissions)
+    TrustStore::update(state_dir.join(TRUST_FILE), |store| {
+        let mut permissions = store.permissions(id);
+        change(&mut permissions);
+        store.set_permissions(id, permissions)
+    })
 }
 
 /// The last `lines` lines of the newest daily server log

@@ -159,13 +159,13 @@ pub async fn session_gate(
 fn stop_asking(device_id: &str) {
     let result = state::trust_store_path()
         .map_err(|e| e.to_string())
-        .and_then(|path| TrustStore::load_or_create(path).map_err(|e| e.to_string()))
-        .and_then(|mut store| {
-            let mut permissions = store.permissions(device_id);
-            permissions.ask_first = false;
-            store
-                .set_permissions(device_id, permissions)
-                .map_err(|e| e.to_string())
+        .and_then(|path| {
+            TrustStore::update(path, |store| {
+                let mut permissions = store.permissions(device_id);
+                permissions.ask_first = false;
+                store.set_permissions(device_id, permissions)
+            })
+            .map_err(|e| e.to_string())
         });
     if let Err(e) = result {
         tracing::warn!("Could not stop asking for {device_id}: {e}");
@@ -364,13 +364,14 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             let _ = local_pin::remove_if(&dir, pin);
         }
         let grant_secs = cli_grant.flatten();
-        let outcome = TrustStore::load_or_create(state::trust_store_path().expect("state dir"))
-            .and_then(|mut store| match grant_secs {
+        let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
+            match grant_secs {
                 Some(secs) => {
                     store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
                 }
                 None => store.trust_device(phone_id.clone()),
-            });
+            }
+        });
         match outcome {
             Ok(()) => {
                 match grant_secs {

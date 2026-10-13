@@ -315,8 +315,9 @@ impl PocketdeskApp {
     }
 
     fn revoke(&mut self, id: &str) {
-        let result = TrustStore::load_or_create(self.state_dir.join(TRUST_FILE))
-            .and_then(|mut store| store.untrust_device(id));
+        let result = TrustStore::update(self.state_dir.join(TRUST_FILE), |store| {
+            store.untrust_device(id)
+        });
         self.notice = Some(match result {
             Ok(()) => format!("Removed {} — it must pair again to connect.", short(id)),
             Err(e) => format!("Could not remove {}: {e}", short(id)),
