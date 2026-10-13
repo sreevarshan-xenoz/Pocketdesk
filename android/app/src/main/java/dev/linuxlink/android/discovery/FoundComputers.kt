@@ -15,25 +15,33 @@ data class FoundComputer(
     val name: String,
     /** Its device id, or blank when the record has none. */
     val id: String,
+    /** The address it is listed at: the first of [candidates] that answered. */
     val address: String,
     val controlPort: Int,
     val streamPort: Int,
+    /** Every announced address worth trying, best first (see [FoundComputers.rankAddresses]). */
+    val candidates: List<String> = listOf(address),
 ) {
     fun toHost(): HostStore.Host = HostStore.Host(address, streamPort, controlPort)
 }
 
 object FoundComputers {
     /**
-     * The address to dial: the phone found it on this network, so a private
-     * IPv4 address (the LAN) comes first, then any other IPv4 (Tailscale's
-     * 100.64/10 among them), then IPv6. Null when there is none.
+     * The announced addresses worth trying, best first: the phone found the
+     * computer on this network, so private IPv4 (the LAN) comes first, then
+     * any other IPv4 (Tailscale's 100.64/10 among them), then IPv6. A server
+     * announces every address it has, Docker and VM bridges included, so the
+     * caller tries them in turn; at most [MAX_CANDIDATES].
      */
-    fun pickAddress(addresses: List<String>): String? {
-        val v4 = addresses.filter { isIpv4(it) }
-        return v4.firstOrNull { isPrivateIpv4(it) }
-            ?: v4.firstOrNull()
-            ?: addresses.firstOrNull { it.contains(':') }
+    fun rankAddresses(addresses: List<String>): List<String> {
+        val v4 = addresses.filter { isIpv4(it) }.distinct()
+        val ranked = v4.filter { isPrivateIpv4(it) } +
+            v4.filterNot { isPrivateIpv4(it) } +
+            addresses.filter { it.contains(':') }.distinct()
+        return ranked.take(MAX_CANDIDATES)
     }
+
+    private const val MAX_CANDIDATES = 4
 
     /**
      * A found computer from its resolved record, or null without a usable
@@ -45,7 +53,8 @@ object FoundComputers {
         txt: Map<String, String>,
         addresses: List<String>,
     ): FoundComputer? {
-        val address = pickAddress(addresses) ?: return null
+        val candidates = rankAddresses(addresses)
+        val address = candidates.firstOrNull() ?: return null
         val control = port.takeIf { it in 1..65535 } ?: HostStore.DEFAULT_CONTROL_PORT
         val stream = txt["stream"]?.toIntOrNull()?.takeIf { it in 1..65535 }
             ?: HostStore.DEFAULT_STREAMING_PORT
@@ -57,6 +66,7 @@ object FoundComputers {
             address = address,
             controlPort = control,
             streamPort = stream,
+            candidates = candidates,
         )
     }
 
@@ -68,23 +78,15 @@ object FoundComputers {
     )
 
     /**
-     * A found computer is a saved one when its address is saved, or when its
-     * device id is the one a saved address paired with (its address changed).
+     * A found computer is a saved one only when it answered at a saved
+     * address. The record's device id is not used: mDNS is unauthenticated,
+     * so anyone can announce any id, and a computer that moved must be
+     * offered at its new address, not hidden behind its old card.
      */
-    fun merge(
-        found: List<FoundComputer>,
-        saved: List<HostStore.Host>,
-        pairedId: (address: String) -> String?,
-    ): View {
-        val savedOnline = mutableSetOf<String>()
-        val unsaved = found.filter { computer ->
-            val match = saved.firstOrNull { host ->
-                host.address == computer.address ||
-                    (computer.id.isNotEmpty() && pairedId(host.address) == computer.id)
-            }
-            if (match != null) savedOnline += match.address
-            match == null
-        }.distinctBy { it.address }
+    fun merge(found: List<FoundComputer>, saved: List<HostStore.Host>): View {
+        val savedAddresses = saved.map { it.address }.toSet()
+        val savedOnline = found.map { it.address }.filter { it in savedAddresses }.toSet()
+        val unsaved = found.filter { it.address !in savedAddresses }.distinctBy { it.address }
         return View(unsaved, savedOnline)
     }
 

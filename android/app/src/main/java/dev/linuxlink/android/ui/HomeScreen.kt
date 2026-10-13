@@ -69,7 +69,7 @@ fun HomeScreen(
     // F6: computers announcing themselves on this network, browsed while
     // this screen is in front.
     val found by rememberFoundComputers()
-    val network = FoundComputers.merge(found, hosts) { HostStore.pairedDesktopId(context, it) }
+    val network = FoundComputers.merge(found, hosts)
 
     Column(
         modifier = Modifier
