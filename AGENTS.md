@@ -42,6 +42,28 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **Trackpad gestures (roadmap F3, branch `feat/trackpad-gestures`) and the keyboard's review fix pass.**
+  - **F3.** Both trackpads (trackpad mode and the foldable dock) feed one pure, tested `TrackpadGesture` engine and share one sender:
+    - one-, two- and three-finger taps are left, right and middle clicks;
+    - tap-then-drag holds the left button, and a second tap is a double click;
+    - two fingers scroll;
+    - cursor speed is a Settings slider (0.5×–3×) with sub-pixel carry.
+
+    On the A71 → Windows, tap-and-drag selected a Notepad line, and the slider persists. Multi-finger taps are unit-tested only (adb cannot make them; checklist §27).
+  - **Keyboard fix pass (fresh review: 1 Critical, 7 Important).**
+    - Re-composing after any reset duplicated text. The shadow's offset now starts over with the IME, and a region it cannot take resyncs.
+    - The shadow resyncs whenever the caret may have moved: arrows and other bar keys, shortcuts, a selection away from the end, a touch on the desktop.
+    - IME key events keep it in step.
+    - A latch is one key.
+    - Modifiers latch on the first tap.
+    - The IME does not learn passwords.
+    - The sink takes focus only while open.
+    - `hotkey` releases what it held on a failed hold.
+    - Landscape gets a one-row bar.
+
+    PR #9 merged with CI green on every job.
+  - **Desktop-safety rule for device tests:** adb taps during a session reach the real desktop. Sessions end with force-stop, and typing tests go only into a scratch Notepad, only while the user is away. Three stray clicks happened on 2026-10-12 before this rule.
+  - Gates: 74 Kotlin tests (31 keyboard, 9 trackpad), lint at 21.
 - 2026-10-12: **Feature roadmap and the in-session keyboard (branch `feat/in-session-keyboard`; research `docs/research/2026-10-12-competitor-features.md`, roadmap `docs/superpowers/specs/2026-10-12-feature-roadmap.md`, spec `docs/superpowers/specs/2026-10-12-in-session-keyboard-design.md`).**
   - **Roadmap.** A competitor survey (RustDesk, Moonlight/Apollo, Parsec, Jump, Chrome and Microsoft RD, KDE Connect, scrcpy, Phone Link) ranks eleven features for the phone and desktop apps:
     - F1 keyboard;
