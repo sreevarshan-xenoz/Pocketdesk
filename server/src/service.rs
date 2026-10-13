@@ -788,6 +788,11 @@ async fn handle_connection_with_kde(
             .await
             .context("TLS handshake timeout")?
             .context("TLS handshake failed")?;
+        let peer_key = stream
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(linux_link_core::streaming::PeerKey::from_tls_certs);
 
         let (reader_half, writer_half) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader_half);
@@ -837,17 +842,54 @@ async fn handle_connection_with_kde(
             tracing::debug!("Sent local identity packet");
         }
 
-        // Step 3: Enter KDE Connect packet loop
-        let device_id = peer_addr
-            .map(|a| a.ip().to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        // Step 3: the phone's identity, held to the key the TLS handshake
+        // proved (phase B). The connection goes by that id from here on, so
+        // nothing about it rests on its IP address.
+        let mut line = String::new();
+        let bytes = timeout(Duration::from_secs(5), reader.read_line(&mut line))
+            .await
+            .context("identity timeout")?
+            .context("failed to read the peer's identity")?;
+        if bytes == 0 {
+            tracing::info!("Connection closed by peer before its identity");
+            return Ok(());
+        }
+        let Some(identity) = NetworkPacket::from_wire(line.trim())
+            .ok()
+            .filter(|p| p.packet_type == "kdeconnect.identity")
+        else {
+            tracing::warn!("Control connection without an identity; dropped");
+            return Ok(());
+        };
+        let Some(device_id) = identity
+            .body
+            .get("deviceId")
+            .and_then(|v| v.as_str())
+            .filter(|id| crate::plugins::pair::valid_device_id(id))
+            .map(str::to_string)
+        else {
+            tracing::warn!("Control connection with an unusable deviceId; dropped");
+            return Ok(());
+        };
+        let Some(peer_addr) = peer_addr else {
+            return Ok(());
+        };
+        if !crate::plugins::pair::admit_control(&device_id, peer_addr, peer_key.as_ref()) {
+            return Ok(());
+        }
 
-        let sender: Arc<dyn DeviceSender> =
-            Arc::new(TcpDeviceSender::from_arc(writer, device_id.clone()).with_peer(peer_addr));
+        let sender: Arc<dyn DeviceSender> = Arc::new(
+            TcpDeviceSender::from_arc(writer, device_id.clone()).with_peer(Some(peer_addr)),
+        );
         let sender_ref = &*sender;
 
-        // Update span with device_id
         tracing::Span::current().record("peer", &device_id);
+
+        // The plugins learn the identity as they always have, before anything
+        // asks whether this device is paired.
+        if let Err(e) = registry.dispatch_packet(&identity, sender_ref).await {
+            tracing::warn!("Identity dispatch failed: {}", e);
+        }
 
         // Register this client for pushes (one target per device: its newest connection)
         state::register_client(sender.clone()).await;
@@ -882,6 +924,13 @@ async fn handle_connection_with_kde(
                     match NetworkPacket::from_wire(trimmed) {
                         Ok(packet) => {
                             let packet_type = packet.packet_type.clone();
+                            // The connection's identity was settled in the
+                            // handshake; another would re-point it at a
+                            // different device.
+                            if packet_type == "kdeconnect.identity" {
+                                tracing::warn!("Ignored a second identity on {device_id}'s connection");
+                                continue;
+                            }
                             // PIN pairing enforcement (Tier-2 #11b): before a
                             // connection is paired, only the pairing handshake
                             // itself and the identity announcement run.

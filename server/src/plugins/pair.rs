@@ -77,8 +77,9 @@ pub fn is_trusted(conn_key: &str) -> bool {
         .contains_key(conn_key)
 }
 
-/// The deviceId the phone at `conn_key` (a TCP peer address) announced in
-/// its identity, if it did (F7b: the desktop app names phones by that id).
+/// The deviceId the phone on connection `conn_key` announced in its
+/// identity, if it did (F7b: the desktop app names phones by that id). On
+/// TCP the connection key is that id already (phase B).
 pub fn phone_id_of(conn_key: &str) -> Option<String> {
     phone_ids()
         .lock()
@@ -104,8 +105,9 @@ pub fn is_paired_device(device_id: &str) -> bool {
 }
 
 /// F5: may this device send `packet_type`? Packets that use no capability
-/// always pass. [conn_key] is a TCP connection's peer IP (resolved to the
-/// phone's deviceId learned from its identity) or, on QUIC, the deviceId.
+/// always pass. [conn_key] is the deviceId a connection goes by: on TCP the
+/// one its identity named in the handshake and its TLS key backed (phase B),
+/// on QUIC the one it presented in-band.
 /// The store is re-read per check, so a change in the desktop app applies
 /// to the next packet.
 pub fn permits(conn_key: &str, packet_type: &str) -> bool {
@@ -176,7 +178,13 @@ pub async fn session_gate(
         "Device keys decided"
     );
     if let Some(refusal) = keys.refused {
-        report_refusal(&dir, &claim, refusal, keys.presented.as_deref());
+        report_refusal(
+            &dir,
+            claim.device_id.as_deref().unwrap_or("<none>"),
+            claim.peer,
+            refusal,
+            keys.presented.as_deref(),
+        );
         return None;
     }
     let permissions =
@@ -232,7 +240,13 @@ pub(crate) fn device_keys_refused(claim: &linux_link_core::streaming::SessionCla
     let keys = decide_keys_in(&dir, claim, paired);
     match keys.refused {
         Some(refusal) => {
-            report_refusal(&dir, claim, refusal, keys.presented.as_deref());
+            report_refusal(
+                &dir,
+                claim.device_id.as_deref().unwrap_or("<none>"),
+                claim.peer,
+                refusal,
+                keys.presented.as_deref(),
+            );
             true
         }
         None => false,
@@ -287,6 +301,62 @@ fn decide_keys_in(
     decision
 }
 
+/// A deviceId a connection may go by: short printable text. It keys the
+/// connection's state and appears in logs and notifications.
+pub(crate) fn valid_device_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
+}
+
+/// Phase B: may a control connection that proved `key` go by `device_id`?
+/// Refusals are logged and notified as the stream's are.
+pub(crate) fn admit_control(
+    device_id: &str,
+    peer: std::net::SocketAddr,
+    key: Option<&linux_link_core::streaming::PeerKey>,
+) -> bool {
+    let Ok(dir) = state::state_dir() else {
+        tracing::warn!("No state directory: refusing the control connection of {device_id}");
+        return false;
+    };
+    let paired = is_paired_device(device_id);
+    match decide_control_identity_in(&dir, device_id, key, paired) {
+        Ok(()) => true,
+        Err(refusal) => {
+            let presented = match key {
+                Some(linux_link_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
+                _ => None,
+            };
+            report_refusal(&dir, device_id, peer, refusal, presented.as_deref());
+            false
+        }
+    }
+}
+
+/// The control channel's half of device keys: a paired device must prove
+/// the TLS key bound to it. Nothing is bound here, since no approval step
+/// runs on the control channel; a paired device with no key yet passes by
+/// its id until an allowed LAN stream binds one. An unpaired device passes,
+/// so that it can pair.
+fn decide_control_identity_in(
+    dir: &std::path::Path,
+    device_id: &str,
+    key: Option<&linux_link_core::streaming::PeerKey>,
+    paired: bool,
+) -> std::result::Result<(), linux_link_core::local::device_keys::Refusal> {
+    use linux_link_core::local::device_keys::{self, Slot, Verdict};
+    if !paired {
+        return Ok(());
+    }
+    let presented = match key {
+        Some(linux_link_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
+        _ => None,
+    };
+    match device_keys::check(dir, device_id, Slot::Tls, presented.as_deref()) {
+        Verdict::Matches | Verdict::FirstUse | Verdict::Unbound => Ok(()),
+        Verdict::Refused(refusal) => Err(refusal),
+    }
+}
+
 /// Apply what an allowed session may record. `false` when another session
 /// bound a different key to the device first.
 fn commit_keys_in(dir: &std::path::Path, device_id: &str, keys: &KeyDecision) -> bool {
@@ -317,12 +387,12 @@ fn hex(bytes: &[u8]) -> String {
 /// per device, so a retrying impostor cannot flood it).
 fn report_refusal(
     dir: &std::path::Path,
-    claim: &linux_link_core::streaming::SessionClaim,
+    id: &str,
+    peer: std::net::SocketAddr,
     refusal: linux_link_core::local::device_keys::Refusal,
     presented: Option<&str>,
 ) {
     use linux_link_core::local::device_keys::Refusal;
-    let id = claim.device_id.as_deref().unwrap_or("<none>");
     let bound = linux_link_core::local::device_keys::read(dir)
         .ok()
         .and_then(|keys| keys.get(id).cloned());
@@ -356,7 +426,7 @@ fn report_refusal(
         ),
         _ => format!(
             "A connection from {} claimed to be your paired phone {short}… without its key, and was refused.",
-            claim.peer.ip()
+            peer.ip()
         ),
     };
     std::thread::spawn(move || {
@@ -686,6 +756,68 @@ mod tests {
     fn allowed(dir: &std::path::Path, claim: &SessionClaim) -> bool {
         let keys = decide_keys_in(dir, claim, true);
         keys.refused.is_none() && commit_keys_in(dir, "phone", &keys)
+    }
+
+    #[test]
+    fn the_control_channel_admits_a_paired_phone_only_with_its_key() {
+        let dir = key_dir("control");
+        let phone = PeerKey::Tls([1; 32]);
+        assert!(
+            allowed(&dir, &claim(Some(phone.clone()), None)),
+            "bound on the stream"
+        );
+        assert_eq!(
+            decide_control_identity_in(&dir, "phone", Some(&phone), true),
+            Ok(())
+        );
+        assert!(
+            decide_control_identity_in(&dir, "phone", Some(&PeerKey::Tls([2; 32])), true).is_err(),
+            "someone else claiming the phone's id"
+        );
+        assert!(
+            decide_control_identity_in(&dir, "phone", None, true).is_err(),
+            "no key, now that the phone has one"
+        );
+    }
+
+    #[test]
+    fn the_control_channel_never_binds_a_key() {
+        // No approval step runs on the control channel, so a paired phone
+        // without keys yet passes by its id and nothing is recorded.
+        let dir = key_dir("control-unbound");
+        let stranger = PeerKey::Tls([9; 32]);
+        assert_eq!(
+            decide_control_identity_in(&dir, "phone", Some(&stranger), true),
+            Ok(())
+        );
+        assert!(
+            linux_link_core::local::device_keys::read(&dir)
+                .unwrap()
+                .get("phone")
+                .is_none_or(|k| k.tls.is_none() && k.iroh.is_none())
+        );
+    }
+
+    #[test]
+    fn an_unpaired_device_may_use_the_control_channel_to_pair() {
+        let dir = key_dir("control-unpaired");
+        assert!(allowed(&dir, &claim(Some(PeerKey::Tls([1; 32])), None)));
+        assert_eq!(
+            decide_control_identity_in(&dir, "phone", Some(&PeerKey::Tls([2; 32])), false),
+            Ok(()),
+            "pairing decides; an unpaired id holds nothing yet"
+        );
+    }
+
+    #[test]
+    fn a_device_id_is_short_printable_text() {
+        assert!(valid_device_id("4f18245c-b2fa-44e6-a938-eb60e57c4bd6"));
+        assert!(!valid_device_id(""));
+        assert!(!valid_device_id(
+            "phone
+forged log line"
+        ));
+        assert!(!valid_device_id(&"x".repeat(300)));
     }
 
     #[test]
