@@ -318,9 +318,7 @@ private fun InputOverlay(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val ordered = remember { Dispatchers.IO.limitedParallelism(1) }
-
-    fun send(block: () -> Unit) = scope.launch(ordered) { block() }
+    fun send(block: () -> Unit) = scope.launch(padOrdered) { block() }
 
     Box(
         modifier.pointerInput(address to port to mode to layout to mapping to sensitivity) {
@@ -360,6 +358,7 @@ private fun InputOverlay(
 
             fun sendPad(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { send(it) }
 
+            try {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 when (mode) {
@@ -422,7 +421,7 @@ private fun InputOverlay(
                     InputMode.Trackpad -> {
                         // F3: the gestures live in TrackpadGesture; this loop
                         // only feeds it the fingers and sends what it returns.
-                        pad.down(down.uptimeMillis)
+                        sendPad(pad.down(down.uptimeMillis))
                         var tracked = down.id
                         var last = down.position
                         // Cursor motion maps view px to video px (the
@@ -436,6 +435,7 @@ private fun InputOverlay(
                             val change = event.changes.firstOrNull { it.pressed }
                             if (change == null) {
                                 sendPad(pad.up(event.changes.first().uptimeMillis))
+                                scope.scheduleHeldClick(pad, ::sendPad)
                                 break
                             }
                             // A different finger leading is not motion.
@@ -451,6 +451,11 @@ private fun InputOverlay(
                         }
                     }
                 }
+            }
+            } finally {
+                // The gesture can be torn down mid-drag (layout change, mode switch,
+                // view disposed): never leave the left button pressed on the desktop.
+                cancelPad(address, port, pad)
             }
         },
     )

@@ -31,6 +31,10 @@ import dev.linuxlink.android.R
 import dev.linuxlink.android.Prefs
 import dev.linuxlink.android.stream.ShortcutBar
 import dev.linuxlink.android.stream.TrackpadGesture
+import dev.linuxlink.android.stream.PadOutput
+import dev.linuxlink.android.stream.cancelPad
+import dev.linuxlink.android.stream.padOrdered
+import dev.linuxlink.android.stream.scheduleHeldClick
 import dev.linuxlink.android.stream.sendPadOutputs
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
@@ -95,8 +99,7 @@ fun TrackpadDock(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val ordered = remember { Dispatchers.IO.limitedParallelism(1) }
-    fun send(block: () -> Unit) = scope.launch(ordered) { block() }
+    fun send(block: () -> Unit) = scope.launch(padOrdered) { block() }
     Prefs.observedVersion()
     val sensitivity = Prefs.trackpadSensitivity(LocalContext.current)
 
@@ -122,9 +125,11 @@ fun TrackpadDock(
                             // taps by finger count, tap-and-drag and speed
                             // behave the same here.
                             val pad = TrackpadGesture(slop = viewConfiguration.touchSlop, sensitivity = sensitivity)
+                            fun sendPad(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { send(it) }
+                            try {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
-                                pad.down(down.uptimeMillis)
+                                sendPad(pad.down(down.uptimeMillis))
                                 var tracked = down.id
                                 var last = down.position
                                 while (true) {
@@ -133,9 +138,8 @@ fun TrackpadDock(
                                     val fingers = event.changes.count { it.pressed }
                                     val change = event.changes.firstOrNull { it.pressed }
                                     if (change == null) {
-                                        sendPadOutputs(address, port, pad.up(event.changes.first().uptimeMillis)) {
-                                            send(it)
-                                        }
+                                        sendPad(pad.up(event.changes.first().uptimeMillis))
+                                        scope.scheduleHeldClick(pad, ::sendPad)
                                         break
                                     }
                                     // A different finger leading is not motion.
@@ -145,10 +149,11 @@ fun TrackpadDock(
                                     }
                                     val delta = change.position - last
                                     last = change.position
-                                    sendPadOutputs(address, port, pad.move(delta.x, delta.y, fingers)) {
-                                        send(it)
-                                    }
+                                    sendPad(pad.move(delta.x, delta.y, fingers))
                                 }
+                            }
+                            } finally {
+                                cancelPad(address, port, pad)
                             }
                         },
             )

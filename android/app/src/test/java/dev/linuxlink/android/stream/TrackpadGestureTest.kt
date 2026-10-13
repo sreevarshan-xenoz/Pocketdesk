@@ -14,7 +14,11 @@ class TrackpadGestureTest {
         val pad = pad()
         pad.down(0)
         pad.move(1f, 1f, fingers = 1)
-        assertEquals(listOf(left), pad.up(100))
+        assertEquals("a tap waits to learn whether it starts a drag", emptyList<PadOutput>(), pad.up(100))
+        assertEquals(100 + 300L, pad.pendingDeadline())
+        assertEquals("too early", emptyList<PadOutput>(), pad.expire(300))
+        assertEquals(listOf(left), pad.expire(400))
+        assertEquals("only once", emptyList<PadOutput>(), pad.expire(500))
     }
 
     @Test
@@ -58,7 +62,8 @@ class TrackpadGestureTest {
     fun twoFingersScrollContentWithTheFingers() {
         val pad = pad()
         pad.down(0)
-        assertEquals(listOf(PadOutput.Scroll(0, -3)), pad.move(0f, 3f, fingers = 2))
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 3f, fingers = 2))
+        assertEquals(listOf(PadOutput.Scroll(0, -12)), pad.move(0f, 9f, fingers = 2))
         assertEquals(listOf(PadOutput.Scroll(4, 0)), pad.move(4f, 0f, fingers = 2))
         assertEquals(emptyList<PadOutput>(), pad.up(500))
     }
@@ -67,10 +72,12 @@ class TrackpadGestureTest {
     fun tapThenTouchAndMoveDragsWithTheButtonHeld() {
         val pad = pad()
         pad.down(0)
-        assertEquals(listOf(left), pad.up(80))
+        assertEquals(emptyList<PadOutput>(), pad.up(80))
         pad.down(250)
         val start = pad.move(12f, 0f, fingers = 1)
+        // One press and no click before it: the desktop must not see a double click.
         assertEquals(listOf(PadOutput.Button(TrackpadGesture.LEFT, true), PadOutput.Move(12, 0)), start)
+        assertEquals("the tap is spent by the drag", null, pad.pendingDeadline())
         assertEquals(listOf(PadOutput.Button(TrackpadGesture.LEFT, false)), pad.up(900))
     }
 
@@ -80,7 +87,8 @@ class TrackpadGestureTest {
         pad.down(0)
         pad.up(80)
         pad.down(200)
-        assertEquals("double click", listOf(left), pad.up(260))
+        assertEquals("double click", listOf(left, left), pad.up(260))
+        assertEquals(null, pad.pendingDeadline())
         pad.down(2_000)
         val moved = pad.move(12f, 0f, fingers = 1)
         assertTrue("no button outside the window", moved.none { it is PadOutput.Button })
@@ -95,5 +103,51 @@ class TrackpadGestureTest {
         pad.move(12f, 0f, fingers = 1)
         pad.move(5f, 5f, fingers = 2)
         assertEquals(listOf(PadOutput.Button(TrackpadGesture.LEFT, false)), pad.up(800))
+    }
+
+    @Test
+    fun aLateTouchFlushesTheTapThatWasWaiting() {
+        val pad = pad()
+        pad.down(0)
+        pad.up(80)
+        assertEquals("past the window: the click goes out first", listOf(left), pad.down(1_000))
+        assertEquals(null, pad.pendingDeadline())
+    }
+
+    @Test
+    fun aTwoFingerGestureAfterATapFlushesTheTapFirst() {
+        val pad = pad()
+        pad.down(0)
+        pad.up(80)
+        pad.down(200)
+        val out = pad.move(0f, 20f, fingers = 2)
+        assertEquals(left, out.first())
+        assertTrue(out.drop(1).all { it is PadOutput.Scroll })
+    }
+
+    @Test
+    fun cancelReleasesADragAndDropsAWaitingTap() {
+        val drag = pad()
+        drag.down(0)
+        drag.up(80)
+        drag.down(200)
+        drag.move(12f, 0f, fingers = 1)
+        assertEquals(listOf(PadOutput.Button(TrackpadGesture.LEFT, false)), drag.cancel())
+        assertEquals(emptyList<PadOutput>(), drag.cancel())
+
+        val waiting = pad()
+        waiting.down(0)
+        waiting.up(80)
+        assertEquals("a lost click is better than a stuck button", emptyList<PadOutput>(), waiting.cancel())
+        assertEquals(null, waiting.pendingDeadline())
+    }
+
+    @Test
+    fun aTwoFingerTapWithTouchJitterStillOnlyRightClicks() {
+        val pad = pad()
+        pad.down(0)
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 1f, fingers = 2))
+        assertEquals(emptyList<PadOutput>(), pad.move(1f, 0f, fingers = 2))
+        assertEquals(listOf(PadOutput.Click(TrackpadGesture.RIGHT)), pad.up(120))
     }
 }
