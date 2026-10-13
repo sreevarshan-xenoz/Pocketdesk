@@ -83,7 +83,7 @@ fn app_dir() -> PathBuf {
 }
 
 /// A command that shows no console window on Windows.
-fn quiet(program: impl AsRef<std::ffi::OsStr>) -> Command {
+pub(crate) fn quiet(program: impl AsRef<std::ffi::OsStr>) -> Command {
     #[allow(unused_mut)]
     let mut command = Command::new(program);
     #[cfg(windows)]
@@ -96,7 +96,7 @@ fn quiet(program: impl AsRef<std::ffi::OsStr>) -> Command {
 }
 
 #[cfg(windows)]
-fn system32(tool: &str) -> PathBuf {
+pub(crate) fn system32(tool: &str) -> PathBuf {
     use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
     let mut buf = [0u16; 260];
     let len = unsafe { GetSystemDirectoryW(Some(&mut buf)) } as usize;

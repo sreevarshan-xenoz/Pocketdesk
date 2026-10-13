@@ -179,16 +179,17 @@ pub fn check_internet_path(state_dir: &Path) -> Finding {
     }
 }
 
-/// The firewall rules `linux-link install` adds (Windows): `None` where not
-/// checked, else how many are enabled, or why they could not be read.
+/// The firewall (Windows): `None` where not checked, else how many enabled
+/// rules let phones in (`linux-link install`'s, or a program rule Windows
+/// added), or why they could not be read.
 pub fn check_firewall(rules: Option<Result<usize, String>>) -> Option<Finding> {
     let check = "Firewall";
     Some(match rules? {
         Ok(0) => with_hint(
-            finding(check, Status::Bad, "no Pocketdesk rule lets phones in"),
+            finding(check, Status::Bad, "no rule lets phones in"),
             "Run `linux-link install` (it adds the rules), or allow the control and stream ports.",
         ),
-        Ok(n) => finding(check, Status::Good, format!("{n} Pocketdesk rules enabled")),
+        Ok(n) => finding(check, Status::Good, format!("{n} rules let phones in")),
         Err(e) => finding(
             check,
             Status::Warn,

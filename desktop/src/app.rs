@@ -69,6 +69,7 @@ pub enum Tab {
     Sessions,
     Files,
     Settings,
+    Diagnostics,
     Logs,
 }
 
@@ -101,6 +102,8 @@ pub struct PocketdeskApp {
     send_path: String,
     /// A "Choose file…" dialog that is open.
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
+    /// The Diagnostics tab (F10).
+    diagnostics: crate::diagnostics_view::DiagnosticsView,
 }
 
 impl PocketdeskApp {
@@ -124,6 +127,7 @@ impl PocketdeskApp {
             send_to: None,
             send_path: String::new(),
             picking: None,
+            diagnostics: Default::default(),
         }
     }
 
@@ -864,6 +868,7 @@ impl eframe::App for PocketdeskApp {
                     (Tab::Sessions, "Sessions"),
                     (Tab::Files, "Files"),
                     (Tab::Settings, "Settings"),
+                    (Tab::Diagnostics, "Diagnostics"),
                     (Tab::Logs, "Logs"),
                 ] {
                     if ui.selectable_label(self.tab == tab, label).clicked() {
@@ -889,6 +894,12 @@ impl eframe::App for PocketdeskApp {
             Tab::Sessions => self.sessions_tab(ui),
             Tab::Files => self.files_tab(ui),
             Tab::Settings => self.settings_tab(ui),
+            Tab::Diagnostics => self.diagnostics.show(
+                ui,
+                &self.state_dir,
+                self.config.as_ref(),
+                self.snapshot.running,
+            ),
             Tab::Logs => self.logs_tab(ui),
         });
         self.approval_prompt(ui);

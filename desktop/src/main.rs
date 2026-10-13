@@ -5,6 +5,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod diagnostics_view;
 mod icon;
 mod model;
 mod pair_view;
