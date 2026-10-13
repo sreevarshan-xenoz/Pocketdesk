@@ -225,6 +225,9 @@ pub(crate) fn take_file_offers_json() -> String {
 pub(crate) struct StreamingHandle {
     pub(crate) address: String,
     pub(crate) port: u16,
+    /// The monitor this session captures (`None`: the desktop's choice). A
+    /// connect for another monitor is a new session, not this one.
+    pub(crate) monitor_index: Option<u32>,
     /// Token that can be used to cancel the receive loop.
     pub(crate) cancel: tokio_util::sync::CancellationToken,
     /// JoinHandle of the background `client.start()` task.
@@ -254,4 +257,55 @@ pub(crate) fn update_streaming_rtt(rtt_us: u64) {
     let mut history = RTT_HISTORY.lock().unwrap();
     history.push(rtt_us);
     crate::rates::trim(&mut history, crate::rates::RTT_SAMPLES);
+}
+
+/// Which streaming connect is the live one. A connect can take seconds (a
+/// LAN attempt, then the WAN fallback); a stop or a newer connect that comes
+/// meanwhile retires it, and a retired connect must not install its session
+/// when it finally lands — it would replace the session the phone moved on
+/// to, and its decoder would come back to feed a view that is gone.
+#[derive(Default)]
+pub(crate) struct ConnectGeneration(std::sync::atomic::AtomicU64);
+
+impl ConnectGeneration {
+    /// Start a connect; it is current until retired.
+    pub(crate) fn begin(&self) -> u64 {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+
+    /// Retire every connect in flight (a stop).
+    pub(crate) fn retire(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn is_current(&self, generation: u64) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst) == generation
+    }
+}
+
+/// The bridge's one [`ConnectGeneration`].
+pub(crate) static CONNECT_GENERATION: ConnectGeneration =
+    ConnectGeneration(std::sync::atomic::AtomicU64::new(0));
+
+#[cfg(test)]
+mod connect_generation_tests {
+    use super::ConnectGeneration;
+
+    #[test]
+    fn a_stop_retires_a_connect_still_in_flight() {
+        let gens = ConnectGeneration::default();
+        let mine = gens.begin();
+        assert!(gens.is_current(mine));
+        gens.retire();
+        assert!(!gens.is_current(mine), "stopped while it was connecting");
+    }
+
+    #[test]
+    fn a_newer_connect_retires_an_older_one() {
+        let gens = ConnectGeneration::default();
+        let old = gens.begin();
+        let new = gens.begin();
+        assert!(!gens.is_current(old));
+        assert!(gens.is_current(new));
+    }
 }

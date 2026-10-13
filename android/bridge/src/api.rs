@@ -1263,11 +1263,15 @@ pub async fn connect_streaming(
 
     let addr = format!("{address}:{streaming_port}");
 
-    // F2: Idempotent session check
-    {
+    // F2: Idempotent session check — the same desktop *and* monitor; a
+    // switch to another monitor is a new session.
+    let generation = {
         let mut handle_guard = (*STREAMING_HANDLE).lock().await;
         if let Some(handle) = &*handle_guard {
-            if handle.address == address && handle.port == streaming_port {
+            if handle.address == address
+                && handle.port == streaming_port
+                && handle.monitor_index == monitor_index
+            {
                 tracing::info!("Session already active for {addr}, skipping connect");
                 return Ok(());
             }
@@ -1279,7 +1283,8 @@ pub async fn connect_streaming(
         if let Some(handle) = handle_guard.take() {
             teardown_streaming_handle(handle).await;
         }
-    }
+        crate::CONNECT_GENERATION.begin()
+    };
 
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
     tracing::info!("Connecting to streaming server at {addr}");
@@ -1336,7 +1341,17 @@ pub async fn connect_streaming(
         err_dto.message
     })?;
 
-    install_streaming(client, packet_rx, audio_rx, address, streaming_port, None).await
+    install_streaming(
+        generation,
+        client,
+        packet_rx,
+        audio_rx,
+        address,
+        streaming_port,
+        monitor_index,
+        None,
+    )
+    .await
 }
 
 /// Request remote screen streaming over the iroh WAN path.
@@ -1371,10 +1386,13 @@ pub async fn connect_streaming_wan(
 
     // WAN sessions are keyed by the desktop address with a 0 port sentinel
     // (there is no TCP port on the iroh path).
-    {
+    let generation = {
         let mut handle_guard = (*STREAMING_HANDLE).lock().await;
         if let Some(handle) = &*handle_guard {
-            if handle.address == address && handle.port == 0 {
+            if handle.address == address
+                && handle.port == 0
+                && handle.monitor_index == monitor_index
+            {
                 tracing::info!("WAN session already active for {address}, skipping connect");
                 return Ok(());
             }
@@ -1386,7 +1404,8 @@ pub async fn connect_streaming_wan(
         if let Some(handle) = handle_guard.take() {
             teardown_streaming_handle(handle).await;
         }
-    }
+        crate::CONNECT_GENERATION.begin()
+    };
 
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
     tracing::info!("Dialing {address} over iroh WAN (endpoint {endpoint_id})");
@@ -1417,11 +1436,24 @@ pub async fn connect_streaming_wan(
     )
     .await;
 
-    install_streaming(client, packet_rx, audio_rx, address, 0, Some(dial)).await
+    install_streaming(
+        generation,
+        client,
+        packet_rx,
+        audio_rx,
+        address,
+        0,
+        monitor_index,
+        Some(dial),
+    )
+    .await
 }
 
 /// Cleanly stop a streaming session: cancel its tasks and close the WAN dial
 /// endpoint if it owns one (iroh endpoints must be closed, never dropped).
+/// Why a connect that a stop or a newer connect overtook did not install.
+const SUPERSEDED: &str = "the stream was stopped or replaced while it connected";
+
 async fn teardown_streaming_handle(handle: StreamingHandle) {
     VIDEO_RX.lock().await.take();
     AUDIO_RX.lock().await.take();
@@ -1436,14 +1468,27 @@ async fn teardown_streaming_handle(handle: StreamingHandle) {
 /// Spawn the client start + RTT tasks and install the global streaming handle.
 /// Shared by the LAN (`connect_streaming`) and WAN (`connect_streaming_wan`)
 /// connect paths.
+#[allow(clippy::too_many_arguments)]
 async fn install_streaming(
+    generation: u64,
     mut client: StreamingClient,
     packet_rx: tokio::sync::mpsc::Receiver<linux_link_core::streaming::EncodedPacket>,
     audio_rx: tokio::sync::mpsc::Receiver<linux_link_core::streaming::AudioPacket>,
     address: String,
     port: u16,
+    monitor_index: Option<u32>,
     wan_dial: Option<linux_link_core::streaming::IrohDial>,
 ) -> Result<(), String> {
+    // A stop or a newer connect came while this one was connecting: it must
+    // not take over. Checked again under the handle lock below, where it
+    // counts; this early check only saves starting tasks for nothing.
+    if !crate::CONNECT_GENERATION.is_current(generation) {
+        client.cancel_token().cancel();
+        if let Some(dial) = wan_dial {
+            dial.close().await;
+        }
+        return Err(SUPERSEDED.to_string());
+    }
     let connection = client
         .connection()
         .ok_or_else(|| "Connection not available after connect".to_string())?
@@ -1535,12 +1580,26 @@ async fn install_streaming(
     );
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Active;
 
+    let mut handle = (*STREAMING_HANDLE).lock().await;
+    // Under the lock a stop takes after retiring connects: either the stop
+    // retired this one first and it is refused here, or it is installed and
+    // the stop tears it down.
+    if !crate::CONNECT_GENERATION.is_current(generation) {
+        drop(handle);
+        client_cancel.cancel();
+        let _ = task.await;
+        let _ = rtt_task.await;
+        if let Some(dial) = wan_dial {
+            dial.close().await;
+        }
+        return Err(SUPERSEDED.to_string());
+    }
     *VIDEO_RX.lock().await = Some(packet_rx);
     *AUDIO_RX.lock().await = Some(audio_rx);
-    let mut handle = (*STREAMING_HANDLE).lock().await;
     *handle = Some(StreamingHandle {
         address: address.clone(),
         port,
+        monitor_index,
         cancel: client_cancel,
         task,
         rtt_task,
@@ -1761,6 +1820,9 @@ pub async fn stop_streaming() -> Result<(), String> {
     crate::SESSION_RELAYED.store(false, std::sync::atomic::Ordering::Relaxed);
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Disconnected;
 
+    // Retire connects in flight first, so one that lands after this stop
+    // does not install itself (see `install_streaming`).
+    crate::CONNECT_GENERATION.retire();
     let handle = {
         let mut guard = (*STREAMING_HANDLE).lock().await;
         guard.take()
