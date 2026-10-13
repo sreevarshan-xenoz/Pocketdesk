@@ -146,16 +146,26 @@ impl CertManager {
         let cert_path = identity_dir.join("identity.der");
         let key_path = identity_dir.join("identity.key");
 
-        let (cert_der, key_der) = if cert_path.exists() && key_path.exists() {
-            let cert = std::fs::read(&cert_path)?;
-            let key = std::fs::read(&key_path)?;
-            (cert, key)
-        } else {
-            let (cert, key) = generate_identity()?;
-            std::fs::write(&cert_path, &cert)?;
-            // The private half of the TOFU-pinned identity: owner-only.
-            crate::secure_fs::write_private(&key_path, &key)?;
-            (cert, key)
+        // One identity, however many first loads run at once (the phone
+        // loads it for every control connection): checked and made under
+        // one lock, each file written whole and renamed into place, the key
+        // before the certificate that marks the pair complete.
+        let (cert_der, key_der) = {
+            static IDENTITY: Mutex<()> = Mutex::new(());
+            let _one = IDENTITY.lock().unwrap_or_else(|e| e.into_inner());
+            if cert_path.exists() && key_path.exists() {
+                (std::fs::read(&cert_path)?, std::fs::read(&key_path)?)
+            } else {
+                let (cert, key) = generate_identity()?;
+                let key_tmp = key_path.with_extension(format!("key.{}.tmp", std::process::id()));
+                // The private half of the TOFU-pinned identity: owner-only.
+                crate::secure_fs::write_private(&key_tmp, &key)?;
+                std::fs::rename(&key_tmp, &key_path)?;
+                let cert_tmp = cert_path.with_extension(format!("der.{}.tmp", std::process::id()));
+                std::fs::write(&cert_tmp, &cert)?;
+                std::fs::rename(&cert_tmp, &cert_path)?;
+                (cert, key)
+            }
         };
 
         let peers_path = identity_dir.join("known_peers.json");
@@ -1014,6 +1024,23 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ll-pins-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn first_loads_at_once_make_one_identity() {
+        let dir = pin_dir("identity-race");
+        let loads: Vec<_> = (0..8)
+            .map(|_| {
+                let dir = dir.clone();
+                std::thread::spawn(move || CertManager::load_or_create(&dir).unwrap())
+            })
+            .collect();
+        let managers: Vec<CertManager> = loads.into_iter().map(|t| t.join().unwrap()).collect();
+        let on_disk = CertManager::load_or_create(&dir).unwrap();
+        for manager in &managers {
+            assert_eq!(manager.cert_der, on_disk.cert_der, "one certificate");
+            assert_eq!(manager.key_der, on_disk.key_der, "and its own key");
+        }
     }
 
     #[test]
