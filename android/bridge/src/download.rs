@@ -497,6 +497,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn silent_connections_do_not_hold_up_the_desktop() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        let (listener, addr) = listener().await;
+        // Connections that never start a handshake, ahead of the desktop.
+        let mut silent = Vec::new();
+        for _ in 0..4 {
+            silent.push(TcpStream::connect(addr).await.unwrap());
+        }
+        let receiving = tokio::spawn(async move {
+            let mut out = Vec::new();
+            let got = await_and_receive(
+                listener,
+                KEY,
+                &phone_tls(),
+                std::future::pending(),
+                &mut out,
+            )
+            .await;
+            (got, out)
+        });
+        let sent = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            desktop_sending(addr, KEY, 3, b"abc".to_vec()),
+        )
+        .await;
+        assert_eq!(sent, Ok(Some(1)), "served while the others sit silent");
+        assert_eq!(receiving.await.unwrap(), (Ok(3), b"abc".to_vec()));
+        drop(silent);
+    }
+
+    #[tokio::test]
     async fn a_short_download_fails_and_says_so() {
         let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;

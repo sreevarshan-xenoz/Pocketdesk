@@ -1262,33 +1262,61 @@ pub(crate) fn transfer_acceptor_in(
 }
 
 /// The desktop's connection for a transfer: TLS, in which it must prove it
-/// is the pinned desktop, then the transfer's `key`. Anything else that
-/// connects is dropped, and the wait goes on.
+/// is the pinned desktop and speak the transfer protocol, then the
+/// transfer's `key`. Connections are checked side by side (up to
+/// [`MAX_PENDING_TRANSFER_CONNECTIONS`]), so ones that stall cannot hold up
+/// the desktop's; anything that fails is dropped, and the wait goes on.
 pub(crate) async fn accept_transfer(
     listener: &tokio::net::TcpListener,
     key: &str,
     tls: &tokio_rustls::TlsAcceptor,
 ) -> Result<TransferStream, String> {
+    let mut pending = tokio::task::JoinSet::new();
     loop {
-        let (stream, peer) = listener
-            .accept()
-            .await
-            .map_err(|e| format!("Failed to accept connection: {e}"))?;
-        let mut stream =
-            match tokio::time::timeout(Duration::from_secs(5), tls.accept(stream)).await {
-                Ok(Ok(stream)) => stream,
-                _ => {
-                    tracing::warn!(
-                        "File transfer: dropped a connection from {peer} that is not the computer"
-                    );
-                    continue;
+        tokio::select! {
+            accepted = listener.accept(), if pending.len() < MAX_PENDING_TRANSFER_CONNECTIONS => {
+                let (stream, peer) =
+                    accepted.map_err(|e| format!("Failed to accept connection: {e}"))?;
+                let tls = tls.clone();
+                let key = key.to_string();
+                pending.spawn(async move {
+                    let checked = check_transfer_connection(stream, &tls, &key).await;
+                    if let Err(why) = &checked {
+                        tracing::warn!("File transfer: dropped a connection from {peer}: {why}");
+                    }
+                    checked.ok()
+                });
+            }
+            Some(done) = pending.join_next(), if !pending.is_empty() => {
+                if let Ok(Some(stream)) = done {
+                    // Dropping the set ends the checks still running.
+                    return Ok(stream);
                 }
-            };
-        if presents_key(&mut stream, key).await {
-            return Ok(stream);
+            }
         }
-        tracing::warn!("File transfer: dropped a connection from {peer} without the key");
     }
+}
+
+/// How many incoming connections are checked at once while a transfer waits.
+const MAX_PENDING_TRANSFER_CONNECTIONS: usize = 16;
+
+/// TLS with the pinned desktop on the transfer protocol, then the key.
+async fn check_transfer_connection(
+    stream: tokio::net::TcpStream,
+    tls: &tokio_rustls::TlsAcceptor,
+    key: &str,
+) -> Result<TransferStream, &'static str> {
+    let mut stream = tokio::time::timeout(Duration::from_secs(5), tls.accept(stream))
+        .await
+        .map_err(|_| "no TLS handshake")?
+        .map_err(|_| "not the computer")?;
+    if stream.get_ref().1.alpn_protocol() != Some(linux_link_core::protocol::ALPN_TRANSFER) {
+        return Err("not a file transfer");
+    }
+    if !presents_key(&mut stream, key).await {
+        return Err("without the key");
+    }
+    Ok(stream)
 }
 
 /// Whether a connection opens with `key` and a newline, read within 5 s.
