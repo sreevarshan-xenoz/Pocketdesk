@@ -22,6 +22,14 @@ class RemoteFilesTest {
     }
 
     @Test
+    fun aFolderThatFailedToLoadStillHasAWayBack() {
+        val docs = RemoteFolder("/home/me/docs", "/home/me", emptyList(), null)
+        assertEquals("back to where it came from", "/home/me/docs", RemoteFiles.wayBack("/home/me/docs/x", docs))
+        assertEquals("a reload that failed goes up", "/home/me", RemoteFiles.wayBack("/home/me/docs", docs))
+        assertEquals("nothing loaded yet", null, RemoteFiles.wayBack("", null))
+    }
+
+    @Test
     fun sizesReadNaturally() {
         assertEquals("512 B", RemoteFiles.humanSize(512))
         assertEquals("2.0 MB", RemoteFiles.humanSize(2_100_000))

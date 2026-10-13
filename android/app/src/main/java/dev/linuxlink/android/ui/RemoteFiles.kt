@@ -29,6 +29,17 @@ object RemoteFiles {
     fun sorted(entries: List<RemoteEntry>): List<RemoteEntry> =
         entries.sortedWith(compareBy<RemoteEntry>({ !it.isDirectory }, { it.name.lowercase(Locale.ROOT) }))
 
+    /**
+     * Where Up goes when [failedPath] could not be listed at all: back to the
+     * last folder that loaded, or that folder's parent when it is the one
+     * that failed again. `null` when nothing has loaded.
+     */
+    fun wayBack(failedPath: String, lastGood: RemoteFolder?): String? = when {
+        lastGood == null -> null
+        lastGood.path != failedPath -> lastGood.path
+        else -> lastGood.parent
+    }
+
     /** The folder's own name, whichever separator the computer uses. */
     fun title(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
 

@@ -77,6 +77,8 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
     // "" is the home folder.
     var path by remember { mutableStateOf("") }
     var folder by remember { mutableStateOf<RemoteFolder?>(null) }
+    // The last folder that loaded, so a failed load still has a way back.
+    var lastGood by remember { mutableStateOf<RemoteFolder?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<RemoteEntry?>(null) }
 
@@ -86,7 +88,10 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
         val result = withContext(Dispatchers.IO) {
             RustCore.listRemoteFiles(address, controlPort, path).mapCatching(::parseRemoteFolder)
         }
-        result.onSuccess { folder = it }.onFailure { failure = it.message ?: it.toString() }
+        result.onSuccess {
+            folder = it
+            if (it.error == null) lastGood = it
+        }.onFailure { failure = it.message ?: it.toString() }
     }
 
     ModalBottomSheet(
@@ -110,7 +115,7 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                     modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
                 )
             }
-            val parent = folder?.parent
+            val parent = folder?.parent ?: if (failure != null) RemoteFiles.wayBack(path, lastGood) else null
             if (parent != null) {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.files_up)) },
