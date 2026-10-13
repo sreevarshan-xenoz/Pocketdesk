@@ -894,12 +894,9 @@ impl eframe::App for PocketdeskApp {
             Tab::Sessions => self.sessions_tab(ui),
             Tab::Files => self.files_tab(ui),
             Tab::Settings => self.settings_tab(ui),
-            Tab::Diagnostics => self.diagnostics.show(
-                ui,
-                &self.state_dir,
-                self.config.as_ref(),
-                self.snapshot.running,
-            ),
+            Tab::Diagnostics => self
+                .diagnostics
+                .show(ui, &self.state_dir, self.config.as_ref()),
             Tab::Logs => self.logs_tab(ui),
         });
         self.approval_prompt(ui);

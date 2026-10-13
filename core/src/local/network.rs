@@ -53,7 +53,7 @@ const COMMAND_LIMIT: Duration = Duration::from_secs(2);
 /// it opens no console: the desktop app is a GUI program, and each run would
 /// flash one. Only for commands with a few lines of output, which the pipe
 /// holds until the child exits.
-fn output_within(program: &str, args: &[&str], limit: Duration) -> Option<Vec<u8>> {
+pub fn output_within(program: &str, args: &[&str], limit: Duration) -> Option<Vec<u8>> {
     use std::io::Read;
     use std::process::{Command, Stdio};
 

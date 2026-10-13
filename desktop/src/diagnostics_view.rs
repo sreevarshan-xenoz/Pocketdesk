@@ -19,21 +19,24 @@ pub struct DiagnosticsView {
     report: Option<Report>,
     /// When the shown report was made, for the debug report's "ago".
     ran_at: u64,
+    /// The last run failed (the checks' thread ended without a report).
+    failed: bool,
 }
 
 impl DiagnosticsView {
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        state_dir: &Path,
-        config: Option<&Config>,
-        server_running: bool,
-    ) {
+    pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path, config: Option<&Config>) {
         if self.running.as_ref().is_some_and(|job| job.is_finished())
             && let Some(job) = self.running.take()
         {
-            self.report = job.join().ok();
-            self.ran_at = now_unix();
+            // A failed run keeps the last results and says so.
+            match job.join() {
+                Ok(report) => {
+                    self.report = Some(report);
+                    self.ran_at = now_unix();
+                    self.failed = false;
+                }
+                Err(_) => self.failed = true,
+            }
         }
         ui.label(
             "Checks why a phone might not connect: the server, its ports, the firewall, \
@@ -55,9 +58,10 @@ impl DiagnosticsView {
             {
                 let dir = state_dir.to_path_buf();
                 let config = config.cloned();
-                self.running = Some(std::thread::spawn(move || {
-                    run(&dir, config, server_running)
-                }));
+                self.running = Some(std::thread::spawn(move || run(&dir, config)));
+            }
+            if self.failed {
+                ui.label(egui::RichText::new("The checks failed to run.").color(BAD));
             }
             if busy {
                 ui.spinner();
@@ -119,7 +123,7 @@ impl DiagnosticsView {
             }
             ui.label(
                 egui::RichText::new(
-                    "For an issue. It includes this computer's local addresses, but no PINs, keys or file names.",
+                    "For an issue. It includes this computer's addresses (local, and any public or Tailscale ones), but no PINs, keys or file names.",
                 )
                 .color(MUTED),
             );
@@ -146,20 +150,21 @@ fn finding_row(ui: &mut egui::Ui, finding: &Finding) {
 }
 
 /// Every check, as the worker thread runs them.
-fn run(state_dir: &Path, config: Option<Config>, server_running: bool) -> Report {
+fn run(state_dir: &Path, config: Option<Config>) -> Report {
     let config = config.unwrap_or_default();
+    let state = diagnostics::server_state(state_dir);
     let mut findings = vec![
-        diagnostics::check_server(server_running),
-        diagnostics::check_control_port(config.control_port, server_running),
-        diagnostics::check_stream_port(config.streaming_port, server_running),
+        diagnostics::check_server(state),
+        diagnostics::check_control_port(config.control_port, state),
+        diagnostics::check_stream_port(config.streaming_port, state),
     ];
-    if let Some(firewall) = diagnostics::check_firewall(firewall_rules()) {
+    if let Some(firewall) = diagnostics::check_firewall(firewall_state(state_dir)) {
         findings.push(firewall);
     }
     findings.push(diagnostics::check_addresses(
         &linux_link_core::local::network::local_ips(),
     ));
-    findings.push(diagnostics::check_internet_path(state_dir));
+    findings.push(diagnostics::check_internet_path(state_dir, state));
     Report {
         findings,
         last_session: diagnostics::last_session(state_dir),
@@ -169,34 +174,38 @@ fn run(state_dir: &Path, config: Option<Config>, server_running: bool) -> Report
     }
 }
 
-/// How many enabled inbound rules let phones reach the server (Windows): the
-/// ones `linux-link install` adds, and program rules for linux-link.exe that
-/// Windows adds when someone answers its "Allow access" prompt. `None` where
-/// there is no such check.
+/// The firewall as it applies to phones (Windows): the enabled inbound
+/// rules for the server that apply to the active network profile, Allow and
+/// Block. The rules are `linux-link install`'s Pocketdesk group, and program
+/// rules for the running server's own exe (Windows adds those when someone
+/// answers its prompt). `None` where there is no such check.
 #[cfg(windows)]
-fn firewall_rules() -> Option<Result<usize, String>> {
-    const QUERY: &str = r"$g = @(Get-NetFirewallRule -Group 'Pocketdesk' -Enabled True -Direction Inbound -Action Allow -ErrorAction SilentlyContinue); $a = @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | Where-Object { $_.Program -like '*\linux-link.exe' } | Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' }); (@($g) + @($a) | Select-Object -Unique -Property Name).Count";
-    let output = crate::restart::quiet(crate::restart::system32(
-        "WindowsPowerShell\\v1.0\\powershell.exe",
-    ))
-    .args(["-NoProfile", "-NonInteractive", "-Command", QUERY])
-    .output();
-    Some(match output {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| "an answer that is not a count".to_string()),
-        Ok(out) => Err(String::from_utf8_lossy(&out.stderr)
-            .trim()
-            .chars()
-            .take(120)
-            .collect()),
-        Err(e) => Err(e.to_string()),
+fn firewall_state(state_dir: &Path) -> Option<Result<diagnostics::FirewallState, String>> {
+    // The pid is a number, so it goes into the script as one.
+    let exe = linux_link_core::local::server::server_pid(state_dir)
+        .filter(|_| linux_link_core::local::server::is_running(state_dir))
+        .map(|pid| format!("(Get-Process -Id {pid}).Path"))
+        .unwrap_or_else(|| "''".to_string());
+    let script = format!("$Exe = {exe}; {FIREWALL_QUERY}");
+    let powershell = crate::restart::system32("WindowsPowerShell\\v1.0\\powershell.exe");
+    let answer = linux_link_core::local::network::output_within(
+        &powershell.to_string_lossy(),
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+        std::time::Duration::from_secs(10),
+    );
+    Some(match answer {
+        Some(out) => diagnostics::parse_firewall(&String::from_utf8_lossy(&out)),
+        None => Err("no answer from PowerShell within 10 s".to_string()),
     })
 }
 
+/// Counts, for `$Exe`, the rules that apply to the active profiles:
+/// "allow,block,profiles".
+#[cfg(windows)]
+const FIREWALL_QUERY: &str = r"$ErrorActionPreference = 'SilentlyContinue'; $profiles = @(Get-NetConnectionProfile | ForEach-Object { $c = $_.NetworkCategory.ToString(); if ($c -eq 'DomainAuthenticated') { 'Domain' } else { $c } } | Select-Object -Unique); $rules = @(Get-NetFirewallRule -Group 'Pocketdesk' -Enabled True -Direction Inbound); if ($Exe) { $rules += @(Get-NetFirewallApplicationFilter | Where-Object { $_.Program -eq $Exe } | Get-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' }) }; $rules = @($rules | Sort-Object -Property Name -Unique); $applies = @($rules | Where-Object { $p = $_.Profile.ToString(); $p -eq 'Any' -or @($profiles | Where-Object { $p -match $_ }).Count -gt 0 }); '{0},{1},{2}' -f @($applies | Where-Object { $_.Action -eq 'Allow' }).Count, @($applies | Where-Object { $_.Action -eq 'Block' }).Count, ($profiles -join '/')";
+
 #[cfg(not(windows))]
-fn firewall_rules() -> Option<Result<usize, String>> {
+fn firewall_state(_state_dir: &Path) -> Option<Result<diagnostics::FirewallState, String>> {
     None
 }
 
@@ -216,8 +225,7 @@ mod tests {
     fn the_checks_run_on_this_computer() {
         let dir = linux_link_core::local::paths::state_dir().unwrap();
         let config = linux_link_core::local::config::Config::load().ok();
-        let running = linux_link_core::local::server::is_running(&dir);
-        let report = super::run(&dir, config, running);
+        let report = super::run(&dir, config);
         println!(
             "{}",
             linux_link_core::local::diagnostics::report_text(

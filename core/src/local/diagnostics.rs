@@ -1,13 +1,13 @@
 //! Desktop diagnostics (roadmap F10): checks that turn "it doesn't connect"
-//! into a reason and a next step, and a debug report safe to paste in an
-//! issue. The desktop app runs them; everything here is synchronous and
-//! takes its ports and paths as arguments, so it is tested on loopback.
+//! into a reason and a next step, and a debug report to paste in an issue.
+//! The desktop app runs them; everything here is synchronous and takes its
+//! ports, paths and state as arguments, so it is tested on loopback.
 
 use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use super::paths::{ENDPOINT_FILE, SESSIONS_FILE};
+use super::paths::{ENDPOINT_FILE, PID_FILE, SESSIONS_FILE};
 
 /// How one check came out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +30,33 @@ pub struct Finding {
     pub detail: String,
     /// What to do about it, when something is wrong.
     pub hint: Option<String>,
+}
+
+/// Whether the server runs, and whether it has had time to open its ports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerState {
+    Stopped,
+    /// Running for less than [`STARTUP_GRACE`]: it writes its pid file
+    /// first and opens its ports after, so a port check now would report a
+    /// problem that is not there (and a stream-port probe could get in the
+    /// way of the server's own bind).
+    Starting,
+    Running,
+}
+
+/// How long after its pid file a server may still be opening its ports.
+pub const STARTUP_GRACE: Duration = Duration::from_secs(30);
+
+/// The firewall as it applies to phones (Windows), from the desktop's query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirewallState {
+    /// Enabled inbound Allow rules for the server that apply to the active
+    /// network profile.
+    pub allow: usize,
+    /// Enabled inbound Block rules for it that apply (a block wins).
+    pub block: usize,
+    /// The active network profiles, as Windows names them ("Private").
+    pub profiles: String,
 }
 
 /// A latency distribution's median and 99th percentile, in milliseconds.
@@ -78,27 +105,58 @@ fn with_hint(mut finding: Finding, hint: impl Into<String>) -> Finding {
     finding
 }
 
+/// The server's state: [`super::server::is_running`], and how old its pid
+/// file is.
+pub fn server_state(state_dir: &Path) -> ServerState {
+    let running = super::server::is_running(state_dir);
+    let age = std::fs::metadata(state_dir.join(PID_FILE))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|at| SystemTime::now().duration_since(at).ok());
+    server_state_from(running, age)
+}
+
+fn server_state_from(running: bool, pid_file_age: Option<Duration>) -> ServerState {
+    match (running, pid_file_age) {
+        (false, _) => ServerState::Stopped,
+        (true, Some(age)) if age < STARTUP_GRACE => ServerState::Starting,
+        (true, _) => ServerState::Running,
+    }
+}
+
+const STARTING: &str = "not checked yet: the server is starting";
+const AGAIN: &str = "Run the checks again in a moment.";
+
 /// Is the server process running?
-pub fn check_server(running: bool) -> Finding {
-    if running {
-        finding("Server", Status::Good, "running")
-    } else {
-        with_hint(
+pub fn check_server(state: ServerState) -> Finding {
+    match state {
+        ServerState::Running => finding("Server", Status::Good, "running"),
+        ServerState::Starting => with_hint(finding("Server", Status::Info, "starting"), AGAIN),
+        ServerState::Stopped => with_hint(
             finding("Server", Status::Bad, "not running"),
             "Start it from the Status tab; phones cannot connect until it runs.",
-        )
+        ),
     }
 }
 
 /// Does the control port answer on this computer?
-pub fn check_control_port(port: u16, running: bool) -> Finding {
+pub fn check_control_port(port: u16, state: ServerState) -> Finding {
     let check = "Control port";
-    if !running {
-        return finding(
-            check,
-            Status::Info,
-            format!("TCP {port}: not checked, the server is stopped"),
-        );
+    match state {
+        ServerState::Stopped => {
+            return finding(
+                check,
+                Status::Info,
+                format!("TCP {port}: not checked, the server is stopped"),
+            );
+        }
+        ServerState::Starting => {
+            return with_hint(
+                finding(check, Status::Info, format!("TCP {port}: {STARTING}")),
+                AGAIN,
+            );
+        }
+        ServerState::Running => {}
     }
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     match TcpStream::connect_timeout(&addr, Duration::from_millis(500)) {
@@ -114,9 +172,17 @@ pub fn check_control_port(port: u16, running: bool) -> Finding {
     }
 }
 
-/// Is the stream port taken (by the server)?
-pub fn check_stream_port(port: u16, running: bool) -> Finding {
+/// Is the stream port taken (by the server)? Probed by binding it, which
+/// only happens once the server has had time to bind it first.
+pub fn check_stream_port(port: u16, state: ServerState) -> Finding {
     let check = "Stream port";
+    if state == ServerState::Starting {
+        return with_hint(
+            finding(check, Status::Info, format!("UDP {port}: {STARTING}")),
+            AGAIN,
+        );
+    }
+    let running = state == ServerState::Running;
     match UdpSocket::bind(("0.0.0.0", port)) {
         Err(_) if running => finding(
             check,
@@ -163,45 +229,103 @@ pub fn check_addresses(ips: &[String]) -> Finding {
     }
 }
 
-/// Can phones find this computer over the internet?
-pub fn check_internet_path(state_dir: &Path) -> Finding {
-    if state_dir.join(ENDPOINT_FILE).is_file() {
+/// Can phones away from home reach this computer? Only once the running
+/// server has reached a relay (the file is written before that, and kept
+/// after the server stops).
+pub fn check_internet_path(state_dir: &Path, state: ServerState) -> Finding {
+    let check = "Internet path";
+    if state != ServerState::Running {
+        return finding(
+            check,
+            Status::Info,
+            "not checked: the server is not running yet",
+        );
+    }
+    let relays = std::fs::read_to_string(state_dir.join(ENDPOINT_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get("relayUrls").and_then(|r| r.as_array()).map(Vec::len))
+        .unwrap_or(0);
+    if relays > 0 {
         finding(
-            "Internet path",
+            check,
             Status::Good,
-            "published (phones away from home can reach it)",
+            "ready (a relay is reached; phones away from home can connect)",
         )
     } else {
         with_hint(
-            finding("Internet path", Status::Warn, "not published yet"),
-            "It appears once the server has run with internet access; until then only this network works.",
+            finding(check, Status::Warn, "not ready: no relay reached yet"),
+            "It needs internet access; until then only this network works.",
         )
     }
 }
 
-/// The firewall (Windows): `None` where not checked, else how many enabled
-/// rules let phones in (`linux-link install`'s, or a program rule Windows
-/// added), or why they could not be read.
-pub fn check_firewall(rules: Option<Result<usize, String>>) -> Option<Finding> {
+/// Read the desktop's firewall query: `allow,block,profiles`.
+pub fn parse_firewall(answer: &str) -> Result<FirewallState, String> {
+    let mut parts = answer.trim().splitn(3, ',');
+    let mut count = || -> Result<usize, String> {
+        parts
+            .next()
+            .and_then(|n| n.trim().parse().ok())
+            .ok_or_else(|| format!("an answer that is not a count: {}", answer.trim()))
+    };
+    let allow = count()?;
+    let block = count()?;
+    let profiles = parts.next().unwrap_or("").trim().to_string();
+    Ok(FirewallState {
+        allow,
+        block,
+        profiles,
+    })
+}
+
+/// The firewall (Windows): `None` where not checked.
+pub fn check_firewall(state: Option<Result<FirewallState, String>>) -> Option<Finding> {
     let check = "Firewall";
-    Some(match rules? {
-        Ok(0) => with_hint(
-            finding(check, Status::Bad, "no rule lets phones in"),
-            "Run `linux-link install` (it adds the rules), or allow the control and stream ports.",
-        ),
-        Ok(n) => finding(check, Status::Good, format!("{n} rules let phones in")),
+    Some(match state? {
         Err(e) => finding(
             check,
             Status::Warn,
             format!("could not read the rules ({e})"),
         ),
+        Ok(fw) if fw.block > 0 => with_hint(
+            finding(
+                check,
+                Status::Bad,
+                format!("a rule blocks the server on this {} network", fw.profiles),
+            ),
+            "In Windows Defender Firewall, allow linux-link (or remove its block rule) for this network.",
+        ),
+        Ok(fw) if fw.allow == 0 => with_hint(
+            finding(
+                check,
+                Status::Bad,
+                format!("no rule lets phones in on this {} network", fw.profiles),
+            ),
+            "Run `linux-link install` (it allows phones on private networks), or allow the control and stream ports for this network.",
+        ),
+        Ok(fw) => finding(
+            check,
+            Status::Good,
+            format!(
+                "{} rules let phones in on this {} network",
+                fw.allow, fw.profiles
+            ),
+        ),
     })
 }
 
-/// The newest session the server recorded, if any.
+/// The newest session record that reads, if any (a torn last line does not
+/// hide the ones before it).
 pub fn last_session(state_dir: &Path) -> Option<LastSession> {
     let raw = std::fs::read_to_string(state_dir.join(SESSIONS_FILE)).ok()?;
-    let line = raw.lines().rev().find(|l| !l.trim().is_empty())?;
+    raw.lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .find_map(parse_session)
+}
+
+fn parse_session(line: &str) -> Option<LastSession> {
     let record: serde_json::Value = serde_json::from_str(line).ok()?;
     let tail = |key: &str| {
         let t = record.get(key)?;
@@ -246,7 +370,8 @@ fn status_mark(status: Status) -> &'static str {
 
 /// Plain text to paste in an issue: what was checked and found, the ports,
 /// and the last session. No PINs, keys, fingerprints or file names; a
-/// phone's id is cut to 8 characters. Local addresses are included.
+/// phone's id is cut to 8 characters. This computer's addresses are
+/// included (local ones, and any public or Tailscale ones it has).
 pub fn report_text(report: &Report, version: &str, os: &str, now_unix: u64) -> String {
     use std::fmt::Write as _;
     let mut text = String::new();
@@ -316,6 +441,8 @@ pub fn human_ago(secs: u64) -> String {
 mod tests {
     use super::*;
 
+    const UP: ServerState = ServerState::Running;
+
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-diag-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -333,9 +460,39 @@ mod tests {
     }
 
     #[test]
+    fn a_server_that_just_started_is_given_time_to_open_its_ports() {
+        assert_eq!(
+            server_state_from(false, Some(Duration::from_secs(1))),
+            ServerState::Stopped
+        );
+        assert_eq!(
+            server_state_from(true, Some(Duration::from_secs(5))),
+            ServerState::Starting
+        );
+        assert_eq!(
+            server_state_from(true, Some(Duration::from_secs(60))),
+            ServerState::Running
+        );
+        assert_eq!(server_state_from(true, None), ServerState::Running);
+        // While it starts, neither port is judged (nor the stream port bound).
+        let silent = free_tcp_port();
+        assert_eq!(
+            check_control_port(silent, ServerState::Starting).status,
+            Status::Info
+        );
+        let held = UdpSocket::bind("0.0.0.0:0").unwrap();
+        let port = held.local_addr().unwrap().port();
+        drop(held);
+        assert_eq!(
+            check_stream_port(port, ServerState::Starting).status,
+            Status::Info
+        );
+    }
+
+    #[test]
     fn the_server_check_says_to_start_it() {
-        assert_eq!(check_server(true).status, Status::Good);
-        let stopped = check_server(false);
+        assert_eq!(check_server(UP).status, Status::Good);
+        let stopped = check_server(ServerState::Stopped);
         assert_eq!(stopped.status, Status::Bad);
         assert!(stopped.hint.is_some());
     }
@@ -344,12 +501,12 @@ mod tests {
     fn the_control_port_must_answer_while_the_server_runs() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        assert_eq!(check_control_port(port, true).status, Status::Good);
-        let silent = check_control_port(free_tcp_port(), true);
+        assert_eq!(check_control_port(port, UP).status, Status::Good);
+        let silent = check_control_port(free_tcp_port(), UP);
         assert_eq!(silent.status, Status::Bad);
         assert!(silent.hint.is_some());
         assert_eq!(
-            check_control_port(free_tcp_port(), false).status,
+            check_control_port(free_tcp_port(), ServerState::Stopped).status,
             Status::Info,
             "nothing to judge with the server stopped"
         );
@@ -359,10 +516,10 @@ mod tests {
     fn the_stream_port_is_taken_while_the_server_runs() {
         let held = UdpSocket::bind("0.0.0.0:0").unwrap();
         let port = held.local_addr().unwrap().port();
-        assert_eq!(check_stream_port(port, true).status, Status::Good);
+        assert_eq!(check_stream_port(port, UP).status, Status::Good);
         drop(held);
         assert_eq!(
-            check_stream_port(port, true).status,
+            check_stream_port(port, UP).status,
             Status::Bad,
             "the listener is down"
         );
@@ -377,20 +534,56 @@ mod tests {
     }
 
     #[test]
-    fn the_internet_path_needs_the_endpoint_file() {
+    fn the_internet_path_is_ready_once_a_relay_is_reached() {
         let dir = temp_dir("endpoint");
-        assert_eq!(check_internet_path(&dir).status, Status::Warn);
-        std::fs::write(dir.join(ENDPOINT_FILE), "{}").unwrap();
-        assert_eq!(check_internet_path(&dir).status, Status::Good);
+        assert_eq!(
+            check_internet_path(&dir, UP).status,
+            Status::Warn,
+            "no file"
+        );
+        std::fs::write(
+            dir.join(ENDPOINT_FILE),
+            r#"{"endpointId":"x","relayUrls":[],"directAddrs":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            check_internet_path(&dir, UP).status,
+            Status::Warn,
+            "no relay yet"
+        );
+        std::fs::write(
+            dir.join(ENDPOINT_FILE),
+            r#"{"endpointId":"x","relayUrls":["https://relay.example/"],"directAddrs":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(check_internet_path(&dir, UP).status, Status::Good);
+        assert_eq!(
+            check_internet_path(&dir, ServerState::Stopped).status,
+            Status::Info,
+            "a file left by a stopped server proves nothing"
+        );
     }
 
     #[test]
-    fn the_firewall_needs_the_rules_install_adds() {
+    fn the_firewall_must_let_phones_in_on_the_network_in_use() {
         assert_eq!(check_firewall(None), None, "not checked off Windows");
-        assert_eq!(check_firewall(Some(Ok(4))).unwrap().status, Status::Good);
-        let none = check_firewall(Some(Ok(0))).unwrap();
+        let state = |allow, block| {
+            Some(Ok(FirewallState {
+                allow,
+                block,
+                profiles: "Public".into(),
+            }))
+        };
+        assert_eq!(check_firewall(state(2, 0)).unwrap().status, Status::Good);
+        let none = check_firewall(state(0, 0)).unwrap();
         assert_eq!(none.status, Status::Bad);
+        assert!(none.detail.contains("Public"));
         assert!(none.hint.unwrap().contains("linux-link install"));
+        assert_eq!(
+            check_firewall(state(2, 1)).unwrap().status,
+            Status::Bad,
+            "a block wins"
+        );
         assert_eq!(
             check_firewall(Some(Err("access denied".into())))
                 .unwrap()
@@ -399,10 +592,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_firewall_answer_is_read() {
+        assert_eq!(
+            parse_firewall("2,0,Private/Public\r\n"),
+            Ok(FirewallState {
+                allow: 2,
+                block: 0,
+                profiles: "Private/Public".into()
+            })
+        );
+        assert!(parse_firewall("").is_err());
+        assert!(parse_firewall("access denied").is_err());
+    }
+
     const SESSION: &str = r#"{"unix_secs":1700000000,"outcome":"lan_direct","ever_relayed":false,"duration_secs":95,"rtt_avg_ms":4,"goodput_kbps":9000,"device_id":"0d7c3a52-91e4-4b6f-8a2e-5f1c9b3d6e70","rtt_tail":{"count":9,"mean_ms":4,"p50_ms":4,"p90_ms":5,"p95_ms":6,"p99_ms":7,"max_ms":8},"encode_tail":{"count":900,"mean_ms":5,"p50_ms":4,"p90_ms":6,"p95_ms":7,"p99_ms":9,"max_ms":12},"decode_tail":null,"render_tail":null,"e2e_tail":{"count":900,"mean_ms":18,"p50_ms":16,"p90_ms":21,"p95_ms":24,"p99_ms":31,"max_ms":40},"link":null,"encoder":"ffmpeg-sidecar-nvenc"}"#;
 
     #[test]
-    fn the_last_session_is_the_newest_record() {
+    fn the_last_session_is_the_newest_record_that_reads() {
         let dir = temp_dir("sessions");
         assert_eq!(last_session(&dir), None);
         let older = SESSION.replace("lan_direct", "wan_relayed");
@@ -437,6 +644,13 @@ mod tests {
                 p99_ms: 7
             })
         );
+        // A torn last line does not hide the one before it.
+        std::fs::write(
+            dir.join(SESSIONS_FILE),
+            format!("{older}\n{{\"unix_secs\":17"),
+        )
+        .unwrap();
+        assert_eq!(last_session(&dir).unwrap().outcome, "wan_relayed");
     }
 
     #[test]
@@ -444,7 +658,15 @@ mod tests {
         let dir = temp_dir("report");
         std::fs::write(dir.join(SESSIONS_FILE), SESSION).unwrap();
         let report = Report {
-            findings: vec![check_server(true), check_firewall(Some(Ok(0))).unwrap()],
+            findings: vec![
+                check_server(UP),
+                check_firewall(Some(Ok(FirewallState {
+                    allow: 0,
+                    block: 0,
+                    profiles: "Public".into(),
+                })))
+                .unwrap(),
+            ],
             last_session: last_session(&dir),
             control_port: 1716,
             streaming_port: 4716,
