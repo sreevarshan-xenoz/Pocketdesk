@@ -467,6 +467,8 @@ impl StreamingServer {
             info!("Encoding task started");
             let mut packets_encoded = 0u64;
             let mut frames_dropped = 0u64;
+            // The encoder the record names (F10), noted when it changes.
+            let mut noted_encoder: Option<&'static str> = None;
             let mut crop: Option<(u32, u32, u32, u32)> = None;
             let mut crop_rx = encode_crop_rx;
             let mut window_rx = encode_window_rx;
@@ -685,6 +687,11 @@ impl StreamingServer {
                             Ok(packets) if !packets.is_empty() => {
                                 if let Some(recorder) = &encode_recorder {
                                     recorder.record_encode(encode_started.elapsed());
+                                    let name = encoder.backend_name();
+                                    if noted_encoder != Some(name) {
+                                        recorder.note_encoder(name);
+                                        noted_encoder = Some(name);
+                                    }
                                 }
                                 packets_encoded += packets.len() as u64;
                                 encode_errs = 0;

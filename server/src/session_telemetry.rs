@@ -240,6 +240,7 @@ mod tests {
             render_tail: None,
             e2e_tail: None,
             link: None,
+            encoder: None,
         }
     }
 
