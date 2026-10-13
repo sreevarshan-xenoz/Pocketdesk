@@ -20,26 +20,27 @@ impl FileBrowsePlugin {
 
     /// Sanitize and validate path to prevent directory traversal.
     fn sanitize_path(requested: &str) -> Option<PathBuf> {
-        let home = dirs::home_dir()?;
-        let path = if requested.is_empty() || requested == "/" {
-            home.clone()
-        } else {
-            Path::new(requested).to_path_buf()
-        };
+        Self::sanitize_path_in(&dirs::home_dir()?, requested)
+    }
 
-        // Ensure the path is within home directory
-        if !path.starts_with(&home) {
+    /// The real directory `requested` names, if it lies inside `home`.
+    /// Both are resolved first, so a symlink (or a Windows junction) inside
+    /// home that points elsewhere cannot lead out of it.
+    fn sanitize_path_in(home: &Path, requested: &str) -> Option<PathBuf> {
+        let home = home.canonicalize().ok()?;
+        if requested.is_empty() || requested == "/" {
+            return Some(home);
+        }
+        let path = Path::new(requested);
+        // Reject paths containing ".." components outright.
+        if path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return None;
         }
-
-        // Reject paths containing ".." components
-        for component in path.components() {
-            if let std::path::Component::ParentDir = component {
-                return None;
-            }
-        }
-
-        Some(path.to_path_buf())
+        let real = path.canonicalize().ok()?;
+        real.starts_with(&home).then_some(real)
     }
 
     /// List directory contents as a JSON array of file entries.
@@ -133,5 +134,59 @@ impl Plugin for FileBrowsePlugin {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_home(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ll-browse-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("docs")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn only_real_folders_inside_home_can_be_listed() {
+        let home = temp_home("inside");
+        let docs = home.join("docs");
+        let real_docs = docs.canonicalize().unwrap();
+        assert_eq!(
+            FileBrowsePlugin::sanitize_path_in(&home, docs.to_str().unwrap()),
+            Some(real_docs)
+        );
+        assert_eq!(
+            FileBrowsePlugin::sanitize_path_in(&home, ""),
+            Some(home.canonicalize().unwrap())
+        );
+        let up = docs.join("..").join("..");
+        assert_eq!(
+            FileBrowsePlugin::sanitize_path_in(&home, up.to_str().unwrap()),
+            None
+        );
+        let outside = std::env::temp_dir();
+        assert_eq!(
+            FileBrowsePlugin::sanitize_path_in(&home, outside.to_str().unwrap()),
+            None
+        );
+        assert_eq!(
+            FileBrowsePlugin::sanitize_path_in(&home, home.join("missing").to_str().unwrap()),
+            None,
+            "a path that does not exist"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_inside_home_cannot_lead_out_of_it() {
+        let home = temp_home("link");
+        let link = home.join("escape");
+        std::os::unix::fs::symlink("/", &link).unwrap();
+        assert_eq!(
+            FileBrowsePlugin::sanitize_path_in(&home, link.to_str().unwrap()),
+            None
+        );
     }
 }
