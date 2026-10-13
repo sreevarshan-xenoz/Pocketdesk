@@ -42,6 +42,19 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **Phase C of mutual auth: file transfers inside TLS (branch `feat/transfer-tls`; spec `docs/superpowers/specs/2026-10-13-transfer-tls-design.md`, with an as-built section).**
+  - **Roles.** The phone still listens and the desktop still dials, but each transfer opens with TLS 1.3 (ALPN `linux-link-transfer/1`), and each end accepts exactly one certificate:
+    - the phone, the desktop it pinned for the address it asked (an IP or a saved name);
+    - the desktop, the key bound to the phone that asked. A paired phone with no key bound yet moves no files.
+
+    The one-time key, the size and the status byte run inside, flushed.
+  - **Fresh review (0 Critical, 2 Important), fixed one commit each:**
+    - a computer saved by name had lost transfers (pins are now looked up by the control channel's label, and Remove forgets named pins too);
+    - the docs.
+
+    Minors fixed: the bound-key requirement, the desktop's certificate read once, ALPN checked both ends, the phone checking incoming connections side by side (silent ones had starved the desktop's), and the pin looked up after the request.
+  - **Device-verified (A71 ↔ Windows, LAN):** desktop to phone (an offer) 3 MB and phone to desktop (a share) 2 MB, MD5s matching.
+  - **Found on the way, not phase C:** a share whose content URI the app cannot read crashes `ShareActivity` (a `SecurityException` from `startForegroundService`); fixed separately.
 - 2026-10-13: **Phase B of mutual auth: the control channel inside TLS (branch `feat/control-tls`; spec `docs/superpowers/specs/2026-10-13-control-tls-design.md`, with an as-built section).**
   - **Wire.** TCP 1716 opens with TLS 1.3 (ALPN `linux-link-control/1`), with the stream's certificates.
     - The desktop requires the phone's certificate.
@@ -60,7 +73,7 @@ The detailed build journal lives in `git log` — one conventional commit per lo
 
     Minors: PIN pacing, bounded handshake lines, a quiet disconnect log, and pushes only to the right desktop.
   - **Device-verified on the A71 (LAN):** plain refused; TLS control and video; a tampered key held to pairing only; Pair again with the owner's PIN recovering it; the WAN key re-registered.
-  - **Still open:** file transfers are plain TCP (the next security item). Without the QR code, first contact is trust on first use.
+  - **Still open:** without the QR code, first contact is trust on first use. File transfers moved inside TLS in phase C (next bullet up).
 - 2026-10-13: **Device keys, a phone proves who it is (branch `feat/device-keys`, on top of the verifier fix in PR #21; spec `docs/superpowers/specs/2026-10-13-device-keys-design.md`).**
   - **Verifier fix (#21).** The phone's TLS verifier had accepted every handshake signature, so a pinned desktop certificate proved nothing: anyone could present a copy. It now verifies signatures with the ring provider.
   - **Phase A of mutual auth.**

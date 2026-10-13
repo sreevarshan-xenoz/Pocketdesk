@@ -50,3 +50,17 @@ The roles stay as they are: the phone listens and the desktop dials.
 ## Device test (A71 ↔ Windows, LAN)
 
 A share from the phone, a desktop send (an offer), and a browse download, each with MD5s matching. The server log shows the transfer's TLS handshake. A transfer with the pin removed on the phone is refused.
+
+## As built (2026-10-13)
+
+- **As designed, with these changes from the fresh review (0 Critical, 2 Important):**
+  - **A computer saved by name** (`mypc.local`, a Tailscale name) had lost every transfer: the pin was looked up only for an IP. `peer_label_for_address` gives the control channel's label for any address, and both the transfer and the app's Remove use it (Remove had left named pins behind).
+  - **The pin is looked up once the request is out,** since a connection made for that request may pin the desktop a moment before.
+  - **A paired phone must have its key bound** (`pair::may_transfer`). One paired before device keys and not yet bound moves no files until it pairs again, because someone may be claiming its id. With pairing off, an unpaired device's own key is used.
+  - **The desktop's certificate is read once** (it had been re-read from disk per transfer).
+  - **Both ends require ALPN `linux-link-transfer/1`.**
+  - **The phone checks incoming connections side by side**, up to 16. Checked one at a time, two silent connections had been enough to time the desktop out.
+- **Ruled, not changed:**
+  - An offer is spent when the key check refuses it (it is finished with the reason).
+  - When the desktop's handshake fails, the phone waits out its 30 s window rather than hearing a reason.
+- **Device-verified (A71 ↔ Windows, LAN):** desktop to phone (an offer) 3 MB and phone to desktop (a share) 2 MB, MD5s matching. A desktop or phone with the wrong certificate is covered by unit tests on both ends (removing the phone's pin on the device would only re-pin it on the next control connection).

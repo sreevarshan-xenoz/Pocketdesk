@@ -13,7 +13,7 @@ Please report security problems privately. Use GitHub's **Security → Report a 
 | Control channel (pairing, clipboard, file browse, notifications, commands) | TCP 1716 | Yes (TLS 1.3) | Both ways by key, as on the stream: the phone pins the desktop's certificate, and must present its own, which the desktop holds the device to (device keys). A client that does not speak TLS is refused |
 | Video, audio and input stream (LAN) | UDP 4716 (QUIC) | Yes (TLS 1.3) | Both ways by key: the phone pins the desktop's certificate (first use, or the QR code's fingerprint) and checks the handshake signature; the phone presents its own certificate, and the desktop holds the device to it (device keys) |
 | Stream over the internet (WAN) | iroh (QUIC) | Yes | Both ends' iroh keys; the desktop holds the phone to the iroh key it registered on the LAN |
-| File transfers | a fresh TCP port per file | **No** | A one-time 32-hex key per transfer; the desktop dials only the address the request came from |
+| File transfers | a fresh TCP port per file | Yes (TLS 1.3) | Each end accepts exactly one certificate: the phone, the desktop it pinned for the address it asked; the desktop, the key bound to the phone that asked. A one-time key per transfer is checked inside, and the desktop dials only the address the request came from |
 
 Tailscale, when you use it, wraps all of these in WireGuard, which encrypts and authenticates the whole path between your devices.
 
@@ -38,6 +38,8 @@ Tailscale, when you use it, wraps all of these in WireGuard, which encrypts and 
   - Running commands is off until granted.
   - "Ask before each session" holds every session for that phone until someone at the desk allows it.
 - **Files:**
+  - Transfers run inside TLS, pinned both ways: no other device can read the bytes, send them, or take them.
+  - A paired phone moves files only once its key is bound (pairing binds it).
   - Received files are confined to Downloads, never overwrite anything, are size-limited, and are marked as downloaded on Windows.
   - Browsing and downloading are confined to the home folder. Hidden files, the server's own keys and settings, network paths and device names are refused, and links that lead out of home are refused too.
 
@@ -45,10 +47,9 @@ Tailscale, when you use it, wraps all of these in WireGuard, which encrypts and 
 
 These are real gaps in the current design. Plan around them.
 
-1. **File transfers are not encrypted.** The one-time key decides who may take the bytes, but not who can read them on the way. Moving them inside TLS is the next security item.
-2. **Without the QR code, the first contact with an address is trust on first use.** Someone who can intercept that very first connection could relay the pairing. Scanning the QR code closes this.
-3. **A phone paired before device keys, that has not streamed on the LAN since, holds no key yet.** Until it does, the control channel accepts it by its id alone (the first LAN stream the desktop allows binds its key). Pairing it again binds the key at once.
-4. **Someone who knows an unpaired phone's id can get in the way of its pairing**, by asking for PINs or spending the wrong guesses under that id. They cannot pair as it without the PIN.
+1. **Without the QR code, the first contact with an address is trust on first use.** Someone who can intercept that very first connection could relay the pairing. Scanning the QR code closes this.
+2. **A phone paired before device keys, that has not streamed on the LAN since, holds no key yet.** Until it does, the control channel accepts it by its id alone, and it moves no files. The first LAN stream the desktop allows binds its key, and pairing it again binds it at once.
+3. **Someone who knows an unpaired phone's id can get in the way of its pairing**, by asking for PINs or spending the wrong guesses under that id. They cannot pair as it without the PIN.
 
 ## Using it safely today
 
