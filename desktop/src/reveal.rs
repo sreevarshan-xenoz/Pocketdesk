@@ -18,10 +18,12 @@ pub fn show_in_folder(path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     {
         let folder = path.parent().unwrap_or(path);
-        std::process::Command::new("xdg-open")
-            .arg(folder)
-            .spawn()
-            .map(drop)
+        let mut child = std::process::Command::new("xdg-open").arg(folder).spawn()?;
+        // Reaped off the UI thread, so it does not linger as a zombie.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {

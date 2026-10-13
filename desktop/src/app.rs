@@ -609,14 +609,15 @@ impl PocketdeskApp {
                 .striped(true)
                 .spacing([16.0, 8.0])
                 .show(ui, |ui| {
-                    for file in &self.snapshot.received {
+                    for row in &self.snapshot.received {
+                        let file = &row.file;
                         ui.label(&file.name).on_hover_text(&file.path);
                         ui.label(human_size(file.size));
                         ui.label(format!(
                             "{} ago",
                             human_duration(now.saturating_sub(file.received_unix))
                         ));
-                        if std::path::Path::new(&file.path).exists() {
+                        if row.exists {
                             if ui.button("Show in folder").clicked() {
                                 show = Some(file.path.clone());
                             }

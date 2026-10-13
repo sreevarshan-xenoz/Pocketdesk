@@ -31,7 +31,15 @@ pub struct Snapshot {
     /// Sessions the server is holding for the owner's answer (F5).
     pub approvals: Vec<ApprovalRequest>,
     /// Files received from phones, newest first (F7).
-    pub received: Vec<ReceivedFile>,
+    pub received: Vec<ReceivedRow>,
+}
+
+/// A received file, and whether it is still where it was saved (checked
+/// once per refresh, not on every repaint).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceivedRow {
+    pub file: ReceivedFile,
+    pub exists: bool,
 }
 
 /// The state under `state_dir` at `now_unix`.
@@ -69,8 +77,14 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
     } else {
         Vec::new()
     };
-    let mut received = received::read(state_dir);
-    received.reverse();
+    let received = received::read(state_dir)
+        .into_iter()
+        .rev()
+        .map(|file| ReceivedRow {
+            exists: Path::new(&file.path).exists(),
+            file,
+        })
+        .collect();
     Snapshot {
         running,
         devices,
@@ -293,7 +307,7 @@ mod tests {
         let names: Vec<_> = snapshot_with(&dir, 10, false)
             .received
             .into_iter()
-            .map(|f| f.name)
+            .map(|row| row.file.name)
             .collect();
         assert_eq!(names, ["f3", "f2", "f1"]);
     }
