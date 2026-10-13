@@ -111,7 +111,8 @@ pub fn permits(conn_key: &str, packet_type: &str) -> bool {
     permits_in(store.as_ref(), &device_id, packet_type)
 }
 
-/// [`permits`] against a given store; without one, the defaults apply.
+/// [`permits`] against a given store; without one, nothing that needs a
+/// permission is allowed.
 fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) -> bool {
     let Some(capability) = linux_link_core::protocol::permissions::capability_for(packet_type)
     else {
@@ -119,7 +120,9 @@ fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) ->
     };
     match store {
         Some(store) => store.permissions(device_id).allows(capability),
-        None => capability.default_allowed(),
+        // An unreadable store could be hiding a denial: refuse rather than
+        // fall back to the defaults (the stream gate refuses too).
+        None => false,
     }
 }
 
@@ -480,8 +483,12 @@ mod tests {
             "another device keeps its defaults"
         );
         assert!(
-            !permits_in(None, "phone-1", "kdeconnect.linuxlink.exec"),
-            "no readable store means the defaults, not everything"
+            !permits_in(None, "phone-1", "kdeconnect.clipboard"),
+            "no readable store denies what needs a permission"
+        );
+        assert!(
+            permits_in(None, "phone-1", "kdeconnect.battery.request"),
+            "and still answers what needs none"
         );
     }
 
