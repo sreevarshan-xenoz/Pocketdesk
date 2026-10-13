@@ -157,11 +157,20 @@
     <!-- ShareActivity -->
     <string name="share_no_host">Pocketdesk: no saved host. Connect once from the app first.</string>
     <string name="share_nothing">Nothing shareable in this intent.</string>
-    <string name="share_sending_text">Sending text to %1$s…</string>
     <string name="share_sent_clipboard">Sent to clipboard.</string>
     <string name="share_failed">Failed: %1$s</string>
-    <string name="share_preparing">Preparing %1$s…</string>
-    <string name="share_sent_file">Sent %1$s.</string>
+    <string name="channel_transfers">File transfers</string>
+    <string name="channel_transfers_desc">Progress of files sent to your computer</string>
+    <string name="transfer_sending">Sending %1$d of %2$d</string>
+    <string name="transfer_failed">Not sent: %1$d of %2$d</string>
+    <plurals name="share_sending_files">
+        <item quantity="one">Sending %1$d file to %2$s…</item>
+        <item quantity="other">Sending %1$d files to %2$s…</item>
+    </plurals>
+    <plurals name="transfer_sent">
+        <item quantity="one">Sent %1$d file to %2$s</item>
+        <item quantity="other">Sent %1$d files to %2$s</item>
+    </plurals>
 
     <!-- Pairing sheet -->
     <string name="pair_title">Pair with %1$s</string>

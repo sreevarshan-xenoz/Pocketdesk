@@ -88,6 +88,8 @@ object RustCore {
 
     private external fun nativeSendGamepadEvent(axes: IntArray, buttons: Int): String
     private external fun nativeSendFile(address: String, port: Int, filePath: String): String
+    private external fun nativeSendFileFd(address: String, port: Int, fd: Int, name: String, size: Long): String
+    private external fun nativeTransferProgress(): LongArray?
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
     private external fun nativeGetMonitors(address: String, port: Int): String
     private external fun nativeGetBattery(address: String, port: Int): String
@@ -474,6 +476,16 @@ object RustCore {
 
     fun sendFile(address: String, port: Int, filePath: String): Result<Unit> =
         envelope(nativeSendFile(address, port, filePath)).map { }
+
+    /** Send [size] bytes from [fd], which the bridge takes over and closes (F7). */
+    fun sendFileFd(address: String, port: Int, fd: Int, name: String, size: Long): Result<Unit> =
+        envelope(nativeSendFileFd(address, port, fd, name, size)).map { }
+
+    /** The running file transfer as (bytes sent, total). */
+    fun transferProgress(): Pair<Long, Long> {
+        val values = nativeTransferProgress() ?: return 0L to 0L
+        return if (values.size == 2) values[0] to values[1] else 0L to 0L
+    }
 
     fun listRemoteFiles(address: String, port: Int, remotePath: String): Result<String> =
         envelope(nativeListRemoteFiles(address, port, remotePath))

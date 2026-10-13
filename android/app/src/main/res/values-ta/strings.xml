@@ -150,11 +150,20 @@
     <!-- ShareActivity -->
     <string name="share_no_host">Pocketdesk: சேமித்த ஹோஸ்ட் இல்லை. முதலில் செயலியிலிருந்து ஒருமுறை இணையுங்கள்.</string>
     <string name="share_nothing">இந்த intent-ல் பகிர ஏதும் இல்லை.</string>
-    <string name="share_sending_text">%1$s க்கு உரை அனுப்புகிறது…</string>
     <string name="share_sent_clipboard">க்ளிப் போர்டுக்கு அனுப்பப்பட்டது.</string>
     <string name="share_failed">தோல்வி: %1$s</string>
-    <string name="share_preparing">%1$s தயாராகிறது…</string>
-    <string name="share_sent_file">%1$s அனுப்பப்பட்டது.</string>
+    <string name="channel_transfers">கோப்புப் பரிமாற்றங்கள்</string>
+    <string name="channel_transfers_desc">உங்கள் கணினிக்கு அனுப்பிய கோப்புகளின் முன்னேற்றம்</string>
+    <string name="transfer_sending">%2$d இல் %1$d அனுப்பப்படுகிறது</string>
+    <string name="transfer_failed">அனுப்பப்படாதவை: %2$d இல் %1$d</string>
+    <plurals name="share_sending_files">
+        <item quantity="one">%2$s க்கு %1$d கோப்பு அனுப்பப்படுகிறது…</item>
+        <item quantity="other">%2$s க்கு %1$d கோப்புகள் அனுப்பப்படுகின்றன…</item>
+    </plurals>
+    <plurals name="transfer_sent">
+        <item quantity="one">%2$s க்கு %1$d கோப்பு அனுப்பப்பட்டது</item>
+        <item quantity="other">%2$s க்கு %1$d கோப்புகள் அனுப்பப்பட்டன</item>
+    </plurals>
 
     <!-- Pairing sheet -->
     <string name="pair_title">%1$s உடன் இணை</string>
