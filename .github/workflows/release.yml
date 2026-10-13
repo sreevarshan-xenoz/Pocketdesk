@@ -1,15 +1,56 @@
 name: Release
 
+# A tag `vX.Y.Z` publishes a release; `vX.Y.Z-beta.1` (any suffix) publishes a
+# pre-release. The tag must match the workspace and Android versions, so a
+# release can never carry a different number than the binaries inside it.
+# Run it by hand (Actions → Release → Run workflow) for a dry run: everything
+# is built and uploaded as workflow artifacts, and nothing is published.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.check.outputs.name }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag against the versions in the tree
+        id: check
+        run: |
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          android_version=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts | head -1)
+          test -n "$cargo_version" && test -n "$android_version"
+          if [ "$cargo_version" != "$android_version" ]; then
+            echo "Cargo.toml says $cargo_version but the Android app says $android_version" >&2
+            exit 1
+          fi
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF_NAME}"
+            case "$tag" in
+              "v$cargo_version") prerelease=false ;;
+              "v$cargo_version"-*) prerelease=true ;;
+              *) echo "tag $tag does not match version $cargo_version" >&2; exit 1 ;;
+            esac
+            name="$tag"
+          else
+            name="v$cargo_version-dryrun"
+            prerelease=true
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "Releasing $name (prerelease: $prerelease)"
+
   build-linux:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,55 +61,42 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      # A tag should not be able to ship a known-vulnerable dependency: this runs
-      # before the build so an audit finding stops the release rather than being
-      # echoed into a log line nobody reads (the old `|| echo` in ci.yml).
+      # A tag should not be able to ship a known-vulnerable dependency: the
+      # audit runs before the build, so a finding stops the release.
       - name: Security audit
         run: |
           cargo install cargo-audit
           cargo audit
 
-      # The server binary links PipeWire/Wayland and, under the `encode` feature,
-      # libav* — without the dev packages this job fails at the link step, so no
-      # tag has ever produced a release artifact from CI.
+      # The server links PipeWire/Wayland and, under the `encode` feature, libav*.
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
-      - name: Build release binary
-        run: cargo build --release --bin linux-link
+      - name: Build release binaries
+        run: cargo build --release --bin linux-link --bin pocketdesk
 
       - name: Run tests
         run: cargo test --workspace
 
       - name: Create release archive
         run: |
-          mkdir -p release/linux-link
-          cp target/release/linux-link release/linux-link/
-          cp config.toml.example release/linux-link/
-          cp linux-link.service release/linux-link/
-          cp README.md release/linux-link/
-          cp LICENSE-MIT LICENSE-APACHE release/linux-link/
-          cd release
-          tar czf "linux-link-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz" linux-link/
-          sha256sum "linux-link-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz" > "linux-link-${{ github.ref_name }}-checksums.txt"
+          name="pocketdesk-${{ needs.version.outputs.name }}-linux-x86_64"
+          mkdir -p "release/$name"
+          cp target/release/linux-link target/release/pocketdesk "release/$name/"
+          cp config.toml.example linux-link.service README.md SECURITY.md LICENSE-MIT LICENSE-APACHE "release/$name/"
+          cp -r man "release/$name/"
+          tar -C release -czf "release/$name.tar.gz" "$name"
 
-      - name: Upload Linux binary
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: linux-binary
-          path: release/linux-link-*.tar.gz
+          name: linux
+          path: release/pocketdesk-*.tar.gz
 
-      - name: Upload checksums
-        uses: actions/upload-artifact@v4
-        with:
-          name: checksums
-          path: release/linux-link-*-checksums.txt
-
-  # The Windows server (and the Pocketdesk desktop app beside it) are
-  # self-contained exes importing only system DLLs and the Windows 10+ UCRT,
-  # so the zip carries no runtime. FFmpeg is not
-  # bundled (the encoder sidecar finds it on PATH; README says how to get it).
+  # The Windows server and the desktop app are self-contained exes importing
+  # only system DLLs and the Windows 10+ UCRT. FFmpeg is not bundled (the
+  # encoder sidecar finds it on PATH; the README says how to get it).
   build-windows:
+    needs: version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,8 +108,8 @@ jobs:
           rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --component clippy,rustfmt
           rustup default stable-x86_64-pc-windows-gnu
 
-      # MSYS2's UCRT64 gcc, CMake and NASM stand in for the WinLibs build used
-      # locally: the C parts (aws-lc, Opus) need a MinGW compiler and CMake.
+      # MSYS2's UCRT64 gcc, CMake and NASM: the C parts (aws-lc, Opus) need a
+      # MinGW compiler and CMake.
       - name: Install MinGW (gcc, CMake, NASM)
         id: msys2
         uses: msys2/setup-msys2@v2
@@ -109,23 +137,86 @@ jobs:
       - name: Create release archive
         shell: pwsh
         run: |
-          $name = "linux-link-${{ github.ref_name }}-x86_64-pc-windows-gnu"
-          New-Item -ItemType Directory -Force "release/linux-link" | Out-Null
-          Copy-Item target/release/linux-link.exe, target/release/pocketdesk.exe, config.toml.example, README.md, LICENSE-MIT, LICENSE-APACHE release/linux-link/
-          Compress-Archive -Path release/linux-link -DestinationPath "release/$name.zip"
-          $hash = (Get-FileHash "release/$name.zip" -Algorithm SHA256).Hash.ToLower()
-          Set-Content -Path "release/$name-checksums.txt" -Value "$hash  $name.zip" -Encoding ascii
+          $name = "pocketdesk-${{ needs.version.outputs.name }}-windows-x86_64"
+          New-Item -ItemType Directory -Force "release/$name" | Out-Null
+          Copy-Item target/release/linux-link.exe, target/release/pocketdesk.exe, config.toml.example, README.md, SECURITY.md, LICENSE-MIT, LICENSE-APACHE "release/$name/"
+          Compress-Archive -Path "release/$name" -DestinationPath "release/$name.zip"
 
-      - name: Upload Windows binary
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: windows-binary
-          path: |
-            release/linux-link-*.zip
-            release/linux-link-*-checksums.txt
+          name: windows
+          path: release/pocketdesk-*.zip
 
-  create-release:
-    needs: [build-linux, build-windows]
+  # The phone app. With signing secrets set (ANDROID_KEYSTORE_BASE64,
+  # ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) it is a
+  # release build signed with that key; without them it is the debug build,
+  # named as such, so nobody mistakes it for a store-signed app.
+  build-android:
+    needs: version
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (with the Android target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install platform, build-tools and NDK
+        run: |
+          (yes || true) | sdkmanager --install "platforms;android-37.0" "build-tools;36.1.0" >/dev/null
+          NDK=$(sdkmanager --list 2>/dev/null | awk '/ndk;29\./ { print $1; exit }')
+          test -n "$NDK" || { echo "no NDK r29 in sdkmanager --list" >&2; exit 1; }
+          (yes || true) | sdkmanager --install "$NDK" >/dev/null
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Build the arm64 bridge
+        working-directory: android/bridge
+        run: cargo ndk -t arm64-v8a -o ../app/src/main/jniLibs build --release
+
+      - name: Build the APK
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p ../release
+          base="pocketdesk-${{ needs.version.outputs.name }}-android-arm64"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            ./gradlew assembleRelease --no-daemon
+            BT=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)
+            "$BT/zipalign" -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-pass env:KEYSTORE_PASSWORD \
+              --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD \
+              --out "../release/$base.apk" "$RUNNER_TEMP/aligned.apk"
+          else
+            ./gradlew assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk "../release/$base-debug-signed.apk"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: release/pocketdesk-*.apk
+
+  publish:
+    needs: [version, build-linux, build-windows, build-android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -134,22 +225,28 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: linux-binary
+          path: dist
+          merge-multiple: true
 
-      - uses: actions/download-artifact@v4
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum pocketdesk-* > SHA256SUMS && cat SHA256SUMS
+
+      # A dry run stops here: the files are in the workflow's artifacts.
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'push'
         with:
-          name: checksums
+          name: release-dry-run
+          path: dist/*
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-binary
-
-      - name: Create GitHub Release
+      - name: Publish the release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          body_path: CHANGELOG.md
+          name: Pocketdesk ${{ needs.version.outputs.name }}
+          body_path: .github/release-notes.md
+          generate_release_notes: true
+          prerelease: ${{ needs.version.outputs.prerelease }}
           files: |
-            linux-link-*.tar.gz
-            linux-link-*.zip
-            linux-link-*-checksums.txt
-          draft: true
+            dist/pocketdesk-*
+            dist/SHA256SUMS

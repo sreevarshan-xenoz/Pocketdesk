@@ -81,7 +81,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **CLI** with start/stop/status/list/watch/connect/pair/capabilities commands
 - **systemd service** for auto-start on boot
 - **TOML configuration** with video quality presets (low/balanced/high)
-- **52 passing tests** across core and server crates
+- **Tests** across core, server, the desktop app and the Android bridge, plus JVM tests for the app; CI runs them on Linux and Windows for every pull request
 
 ## Installation
 
@@ -469,18 +469,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 All 6 development phases and the RustDesk research round (R4) have landed in code: the native
 Kotlin client, the Rust↔JNI bridge, MediaCodec decode, and the streaming/transport/security stack
-are in `main`, and `v0.1.0` is tagged and pushed.
+are in `main`. Releases are built by [the release workflow](.github/workflows/release.yml): a `vX.Y.Z` tag (or `vX.Y.Z-beta.N` for a pre-release) that matches the workspace and Android versions publishes Linux, Windows and Android files with a `SHA256SUMS`.
 
 What is *not* done is verification and hardening, so treat this as beta rather than a release:
 
 - [x] `cargo fmt --all -- --check`, `clippy -D warnings` across every `core` feature profile and
       `cargo test --workspace` all pass from a clean checkout of `main` (verified 2026-09-24).
-      [CI](.github/workflows/ci.yml) now runs that matrix plus the Android build, and `cargo audit`
-      can fail a run — but no workflow has executed yet, because the branch has to be pushed first.
+      [CI](.github/workflows/ci.yml) runs that matrix, a Windows job and the Android build on every
+      pull request, and `cargo audit` can fail a run.
 - [ ] On-device verification for the large majority of shipped Android features (see
       [docs/device-verification-checklist.md](docs/device-verification-checklist.md))
 - [ ] Cross-network (cellular ↔ LAN) WAN test over iroh; the Tailscale path is device-verified
-- [ ] A GitHub Release with artifacts (`v0.1.0` is a tag only)
+- [ ] The first published release (`v0.1.0` was a tag only; the workflow is ready, and a `v0.2.0-beta.1` tag cuts the first one)
 
 The full backlog, with every item's verified status against this tree, is
 [docs/roadmap-3000.md](docs/roadmap-3000.md); how that backlog gets executed is

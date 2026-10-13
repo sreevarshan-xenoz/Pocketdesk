@@ -464,7 +464,7 @@ cmd_uninstall() {
   # Remove binary
   if [ -f "${INSTALL_PREFIX}/bin/${BINARY_NAME}" ]; then
     info "Removing binary ${INSTALL_PREFIX}/bin/${BINARY_NAME}..."
-    [ "$DRY_RUN" = true ] || sudo rm -f "${INSTALL_PREFIX}/bin/${BINARY_NAME}"
+    [ "$DRY_RUN" = true ] || sudo rm -f "${INSTALL_PREFIX}/bin/${BINARY_NAME}" "${INSTALL_PREFIX}/bin/pocketdesk"
   fi
 
   # Remove service file
@@ -1050,7 +1050,10 @@ cmd_install() {
   section "Downloading"
 
   # Build download URL
-  local archive_name="${BINARY_NAME}-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+  # The release workflow's names: pocketdesk-<tag>-linux-x86_64.tar.gz, with
+  # every file's checksum in one SHA256SUMS.
+  local release_dir="pocketdesk-${VERSION}-linux-x86_64"
+  local archive_name="${release_dir}.tar.gz"
   local url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/${archive_name}"
 
   TMPDIR=$(mktemp -d)
@@ -1093,7 +1096,7 @@ cmd_install() {
   debug "Archive size: ${archive_size} bytes"
 
   # Checksum verification
-  local checksum_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/${BINARY_NAME}-${VERSION}-checksums.txt"
+  local checksum_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/SHA256SUMS"
   local checksum_file="${TMPDIR}/checksums.txt"
   if curl -fsSL --max-time 15 -o "$checksum_file" "$checksum_url" 2>/dev/null; then
     local expected
@@ -1125,7 +1128,7 @@ cmd_install() {
   fi
 
   # Find extracted directory
-  local extracted_dir="${TMPDIR}/${BINARY_NAME}"
+  local extracted_dir="${TMPDIR}/${release_dir}"
   if [ ! -d "$extracted_dir" ]; then
     extracted_dir=$(find "$TMPDIR" -maxdepth 1 -type d -not -name "$(basename "$TMPDIR")" | head -1)
     if [ -z "$extracted_dir" ]; then
@@ -1174,6 +1177,11 @@ cmd_install() {
   # Install binary
   info "Installing binary to ${INSTALL_PREFIX}/bin/${BINARY_NAME}..."
   [ "$DRY_RUN" = true ] || sudo install -Dm755 "${extracted_dir}/${BINARY_NAME}" "${INSTALL_PREFIX}/bin/${BINARY_NAME}"
+  # The Pocketdesk desktop app, when the release carries it.
+  if [ -f "${extracted_dir}/pocketdesk" ]; then
+    info "Installing the desktop app to ${INSTALL_PREFIX}/bin/pocketdesk..."
+    [ "$DRY_RUN" = true ] || sudo install -Dm755 "${extracted_dir}/pocketdesk" "${INSTALL_PREFIX}/bin/pocketdesk"
+  fi
 
   # Install service (systemd *user* unit — the server needs the graphical
   # session's Wayland/PipeWire, which a system unit cannot reach)
@@ -1198,7 +1206,7 @@ cmd_install() {
     info "Skipping documentation installation (--no-docs)."
   else
     local doc_dir="${INSTALL_PREFIX}/share/doc/${BINARY_NAME}"
-    for doc in README.md CHANGELOG.md config.toml.example; do
+    for doc in README.md SECURITY.md LICENSE-MIT LICENSE-APACHE config.toml.example; do
       if [ -f "${extracted_dir}/${doc}" ]; then
         [ "$DRY_RUN" = true ] || sudo install -Dm644 "${extracted_dir}/${doc}" "${doc_dir}/${doc}"
       fi
