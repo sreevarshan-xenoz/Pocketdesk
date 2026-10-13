@@ -52,3 +52,6 @@ fun kotlinx.coroutines.CoroutineScope.scheduleHeldClick(pad: TrackpadGesture, se
         send(pad.expire(android.os.SystemClock.uptimeMillis()))
     }
 }
+
+/** Two-finger travel per wheel notch: a notch is about three lines on Windows. */
+const val SCROLL_DP_PER_NOTCH = 24f

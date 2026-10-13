@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.linuxlink.android.HostStore
 import dev.linuxlink.android.Prefs
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import dev.linuxlink.android.bridge.RustCore
 import kotlinx.coroutines.CoroutineScope
@@ -354,7 +355,11 @@ private fun InputOverlay(
 
             // F3: one engine for the whole input session, so a tap and the touch
             // after it can make a drag.
-            val pad = TrackpadGesture(slop = viewConfiguration.touchSlop, sensitivity = sensitivity)
+            val pad = TrackpadGesture(
+                slop = viewConfiguration.touchSlop,
+                sensitivity = sensitivity,
+                pxPerNotch = SCROLL_DP_PER_NOTCH.dp.toPx(),
+            )
 
             fun sendPad(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { send(it) }
 

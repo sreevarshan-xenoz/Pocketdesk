@@ -608,7 +608,9 @@ Checked on 2026-10-12 with the Galaxy A71 against Windows:
 - the Trackpad speed slider renders and its value survives an app restart.
 
 - [ ] Two-finger tap opens a context menu; three-finger tap middle-clicks (e.g. opens a link in a new tab). adb cannot make multi-finger touches.
-- [ ] Two fingers resting without moving do not right-click.
+- [ ] Two fingers resting without moving do not right-click, and a two-finger tap does not scroll the page first.
+- [ ] Two-finger scroll is natural (content follows the fingers, like the phone itself) at about one wheel notch per 24 dp, in both axes. Unverified: adb cannot make two-finger touches.
+- [ ] Tap, then drag a window by its title bar: it moves without maximising (no double click), and a tap left alone clicks about 0.3 s later.
 - [ ] A drag survives a second finger landing mid-drag and releases on lift.
 - [ ] Speed 0.5× and 3× feel right; slow movements still move the cursor.
 - [ ] The foldable dock's trackpad behaves the same.

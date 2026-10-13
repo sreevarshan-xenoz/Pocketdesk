@@ -59,12 +59,15 @@ class TrackpadGestureTest {
     }
 
     @Test
-    fun twoFingersScrollContentWithTheFingers() {
-        val pad = pad()
+    fun twoFingersScrollNaturallyAboutOneNotchPerPxPerNotch() {
+        // Natural: finger down = content down = a positive (up) wheel; finger
+        // right = content right = a negative horizontal wheel.
+        val pad = TrackpadGesture(slop = 8f, pxPerNotch = 10f)
         pad.down(0)
         assertEquals(emptyList<PadOutput>(), pad.move(0f, 3f, fingers = 2))
-        assertEquals(listOf(PadOutput.Scroll(0, -12)), pad.move(0f, 9f, fingers = 2))
-        assertEquals(listOf(PadOutput.Scroll(4, 0)), pad.move(4f, 0f, fingers = 2))
+        assertEquals("30 px = 3 notches, nothing lost to the slop", listOf(PadOutput.Scroll(0, 3)), pad.move(0f, 27f, fingers = 2))
+        assertEquals("half a notch carried, not enough yet", emptyList<PadOutput>(), pad.move(0f, 5f, fingers = 2))
+        assertEquals("the carried half completes a notch", listOf(PadOutput.Scroll(-1, 1)), pad.move(10f, 5f, fingers = 2))
         assertEquals(emptyList<PadOutput>(), pad.up(500))
     }
 

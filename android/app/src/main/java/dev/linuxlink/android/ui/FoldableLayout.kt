@@ -32,6 +32,7 @@ import dev.linuxlink.android.Prefs
 import dev.linuxlink.android.stream.ShortcutBar
 import dev.linuxlink.android.stream.TrackpadGesture
 import dev.linuxlink.android.stream.PadOutput
+import dev.linuxlink.android.stream.SCROLL_DP_PER_NOTCH
 import dev.linuxlink.android.stream.cancelPad
 import dev.linuxlink.android.stream.padOrdered
 import dev.linuxlink.android.stream.scheduleHeldClick
@@ -124,7 +125,11 @@ fun TrackpadDock(
                             // F3: the in-stream trackpad's gesture engine, so
                             // taps by finger count, tap-and-drag and speed
                             // behave the same here.
-                            val pad = TrackpadGesture(slop = viewConfiguration.touchSlop, sensitivity = sensitivity)
+                            val pad = TrackpadGesture(
+                slop = viewConfiguration.touchSlop,
+                sensitivity = sensitivity,
+                pxPerNotch = SCROLL_DP_PER_NOTCH.dp.toPx(),
+            )
                             fun sendPad(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { send(it) }
                             try {
                             awaitEachGesture {

@@ -44,6 +44,8 @@ class TrackpadGesture(
     private val sensitivity: Float = 1f,
     private val dragWindowMs: Long = 300,
     private val tapMaxMs: Long = 400,
+    /** Finger travel (view px) per wheel notch; the caller derives it from dp. */
+    private val pxPerNotch: Float = 1f,
 ) {
     private var startMs = 0L
     private var maxFingers = 0
@@ -101,15 +103,17 @@ class TrackpadGesture(
             armed = false
             // Like the cursor, scrolling waits for the slop, so the jitter of a
             // second finger landing does not scroll before a right-click.
-            scrollCarryX += dx
-            scrollCarryY += dy
+            // Natural scrolling: the content follows the fingers (finger down =
+            // content down = the view scrolls up = a positive wheel; finger right =
+            // content right = a negative horizontal wheel).
+            scrollCarryX -= dx / pxPerNotch
+            scrollCarryY += dy / pxPerNotch
             if (travelled <= slop) return out
-            val sx = scrollCarryX.roundToInt()
-            // Finger down == content down == negative wheel.
-            val sy = (-scrollCarryY).roundToInt()
+            val sx = scrollCarryX.toInt()
+            val sy = scrollCarryY.toInt()
             if (sx == 0 && sy == 0) return out
             scrollCarryX -= sx
-            scrollCarryY += sy
+            scrollCarryY -= sy
             out += PadOutput.Scroll(sx, sy)
             return out
         }
