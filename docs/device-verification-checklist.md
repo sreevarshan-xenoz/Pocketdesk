@@ -629,6 +629,7 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host, over WAN. Th
 - [ ] Clipboard off: the phone's clipboard actions are dropped (`Denied … clipboard` in the log); turn it on again and they work at once.
 - [ ] Running commands: denied by default; allowed after the switch is turned on.
 - [ ] Control off: the session is view-only and the phone cannot lift it. Sound off: no desktop sound. Microphone off: the mic does not reach the desktop.
+- [ ] Turning control, sound or the microphone off during a session ends that session; Retry starts one with the change. Removing a connected phone ends its session.
 - [ ] LAN session: the prompt shows the phone's address.
 
 ## Recording results
