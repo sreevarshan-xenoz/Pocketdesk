@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use linux_link_core::local::approval::{self, ApprovalRequest, Verdict};
 use linux_link_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
 use linux_link_core::local::{server, sessions};
 use linux_link_core::protocol::kdeconnect::TrustStore;
@@ -26,6 +27,8 @@ pub struct Snapshot {
     pub running: bool,
     pub devices: Vec<Device>,
     pub sessions: Vec<sessions::MirrorSession>,
+    /// Sessions the server is holding for the owner's answer (F5).
+    pub approvals: Vec<ApprovalRequest>,
 }
 
 /// The state under `state_dir` at `now_unix`.
@@ -57,10 +60,17 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
             .collect(),
         Err(_) => Vec::new(),
     };
+    // Like the mirror: only a running server is still waiting for an answer.
+    let approvals = if running {
+        approval::read_pending(state_dir, now_unix)
+    } else {
+        Vec::new()
+    };
     Snapshot {
         running,
         devices,
         sessions,
+        approvals,
     }
 }
 
@@ -72,6 +82,25 @@ pub fn set_permission(
     allowed: bool,
 ) -> linux_link_core::error::Result<()> {
     update_permissions(state_dir, id, |p| p.set(capability, allowed))
+}
+
+/// Hold each of `id`'s sessions for approval at this desktop, or not.
+pub fn set_ask_first(
+    state_dir: &Path,
+    id: &str,
+    ask_first: bool,
+) -> linux_link_core::error::Result<()> {
+    update_permissions(state_dir, id, |p| p.ask_first = ask_first)
+}
+
+/// The owner's answer to a held session.
+pub fn answer_approval(
+    state_dir: &Path,
+    id: &str,
+    verdict: Verdict,
+    now_unix: u64,
+) -> std::io::Result<()> {
+    approval::answer(state_dir, id, verdict, now_unix)
 }
 
 // Load, change, save in one go: the server writes the same file (pairing,
@@ -186,6 +215,54 @@ mod tests {
                 .permissions("a")
                 .allows(Capability::Exec),
             "the server reads the same file"
+        );
+    }
+
+    #[test]
+    fn held_sessions_show_while_the_server_runs_and_an_answer_reaches_it() {
+        let dir = temp_dir("approvals");
+        let request = ApprovalRequest {
+            id: "r1".to_string(),
+            device_id: "a".to_string(),
+            peer: "192.0.2.7:51000".to_string(),
+            asked_unix: 100,
+        };
+        approval::write_pending(&dir, std::slice::from_ref(&request)).unwrap();
+        assert_eq!(snapshot_with(&dir, 101, true).approvals, [request]);
+        assert!(
+            snapshot_with(&dir, 101, false).approvals.is_empty(),
+            "server gone"
+        );
+        assert!(
+            snapshot_with(&dir, 131, true).approvals.is_empty(),
+            "timed out"
+        );
+
+        answer_approval(&dir, "r1", Verdict::AllowOnce, 102).unwrap();
+        assert_eq!(
+            approval::take_answer(&dir, "r1", 102),
+            Some(Verdict::AllowOnce)
+        );
+    }
+
+    #[test]
+    fn ask_first_is_set_per_device() {
+        let dir = temp_dir("askfirst");
+        TrustStore::load_or_create(dir.join(TRUST_FILE))
+            .unwrap()
+            .trust_device("a")
+            .unwrap();
+        set_ask_first(&dir, "a", true).unwrap();
+        assert!(
+            snapshot_with(&dir, 101, false).devices[0]
+                .permissions
+                .ask_first
+        );
+        set_ask_first(&dir, "a", false).unwrap();
+        assert!(
+            !snapshot_with(&dir, 101, false).devices[0]
+                .permissions
+                .ask_first
         );
     }
 
