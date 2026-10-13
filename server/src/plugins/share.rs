@@ -11,8 +11,19 @@ const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// A transfer that sends nothing for this long is abandoned.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-/// Longest file name kept, in characters.
-const MAX_NAME_CHARS: usize = 120;
+/// Longest file name kept, in bytes (Linux allows 255).
+const MAX_NAME_BYTES: usize = 200;
+/// Transfers running at once; more are refused, not queued.
+const MAX_TRANSFERS: usize = 2;
+/// The slowest transfer allowed, so a trickle cannot hold a slot forever.
+const MIN_BYTES_PER_SEC: u64 = 32 * 1024;
+
+/// The transfer slots, shared by every connection.
+fn transfer_slots() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
+    static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    SLOTS.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_TRANSFERS)))
+}
 
 #[derive(Debug)]
 pub struct SharePlugin {
@@ -91,8 +102,13 @@ impl Plugin for SharePlugin {
                 let name =
                     safe_file_name(body.get("filename").and_then(|v| v.as_str()).unwrap_or(""));
                 let size = packet.payload_size.unwrap_or(0);
+                let Ok(slot) = transfer_slots().clone().try_acquire_owned() else {
+                    tracing::warn!("File share of {name} refused: {MAX_TRANSFERS} already running");
+                    return Ok(());
+                };
 
                 tokio::spawn(async move {
+                    let _slot = slot;
                     match receive_file(SocketAddr::new(phone_ip, port), &dir, &name, size).await {
                         Ok(path) => {
                             tracing::info!("File received: {} ({size} bytes)", path.display())
@@ -150,26 +166,82 @@ pub fn safe_file_name(raw: &str) -> String {
     let last = raw.rsplit(['/', '\\']).next().unwrap_or("");
     let cleaned: String = last
         .chars()
-        .filter(|c| !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+        .filter(|c| {
+            !c.is_control()
+                && !is_invisible_format(*c)
+                && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+        })
         .collect();
-    // Leading dots would hide the file (or make "." and ".."); trailing dots
-    // and spaces are dropped by Windows, which could make two names one.
-    let trimmed = cleaned
-        .trim_start_matches(['.', ' '])
-        .trim_end_matches(['.', ' ']);
-    let mut name: String = trimmed.chars().take(MAX_NAME_CHARS).collect();
+    let mut name = fit_name(trim_name(&cleaned));
     if name.is_empty() {
         name = "shared_file".to_string();
     }
-    let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
-    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
-            && stem.len() == 4
-            && stem.as_bytes()[3].is_ascii_digit());
-    if reserved {
+    if is_reserved_name(&name) {
         name.insert(0, '_');
     }
     name
+}
+
+/// Leading dots would hide the file (or make "." and ".."); trailing dots
+/// and spaces are dropped by Windows, which could make two names one.
+fn trim_name(name: &str) -> &str {
+    name.trim_start_matches(['.', ' '])
+        .trim_end_matches(['.', ' '])
+}
+
+/// Characters that change how a name reads without being seen: a
+/// right-to-left override makes "invoice<RLO>fdp.exe" read as
+/// "invoiceexe.pdf".
+fn is_invisible_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
+    )
+}
+
+/// At most [`MAX_NAME_BYTES`], keeping a short extension: a long name loses
+/// the end of its stem, not what opens it.
+fn fit_name(name: &str) -> String {
+    if name.len() <= MAX_NAME_BYTES {
+        return name.to_string();
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 && name.len() - i <= 16 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    let budget = MAX_NAME_BYTES - ext.len();
+    let mut cut = String::new();
+    for c in stem.chars() {
+        if cut.len() + c.len_utf8() > budget {
+            break;
+        }
+        cut.push(c);
+    }
+    format!("{}{ext}", trim_name(&cut))
+}
+
+/// Windows device names, which name a device in any folder and with any
+/// extension: CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM0-9 and LPT0-9
+/// (superscript digits too), ignoring case and spaces before the dot.
+fn is_reserved_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(' ')
+        .to_uppercase();
+    if matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
+        return true;
+    }
+    let mut chars = stem.chars();
+    let prefix: String = chars.by_ref().take(3).collect();
+    let digit = chars.next();
+    (prefix == "COM" || prefix == "LPT")
+        && chars.next().is_none()
+        && digit.is_some_and(|d| d.is_ascii_digit() || matches!(d, '¹' | '²' | '³'))
 }
 
 /// Create a new file for `name` in `dir` that did not exist before:
@@ -203,9 +275,47 @@ async fn create_unique(dir: &Path, name: &str) -> Result<(PathBuf, tokio::fs::Fi
     })
 }
 
+/// A transfer in progress: its reserved final name and the `.part` file the
+/// bytes go to. Unless committed, both go when this is dropped, also when
+/// the task is cancelled, so no half file is ever left under a real name.
+struct Incoming {
+    final_path: PathBuf,
+    part_path: PathBuf,
+    committed: bool,
+}
+
+impl Drop for Incoming {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = std::fs::remove_file(&self.part_path);
+            let _ = std::fs::remove_file(&self.final_path);
+        }
+    }
+}
+
+/// The whole transfer must finish within this, so a peer cannot hold a
+/// slot open by sending a byte now and then.
+fn transfer_deadline(size: u64) -> Duration {
+    Duration::from_secs(30 + size / MIN_BYTES_PER_SEC)
+}
+
+/// Mark a received file as coming from another computer, so Windows warns
+/// before running it, as it does for a browser download.
+#[cfg(windows)]
+fn mark_of_the_web(path: &Path) {
+    let mut stream = path.as_os_str().to_owned();
+    stream.push(":Zone.Identifier");
+    if let Err(e) = std::fs::write(stream, "[ZoneTransfer]\r\nZoneId=3\r\n") {
+        tracing::warn!("Could not mark {} as downloaded: {e}", path.display());
+    }
+}
+
+#[cfg(not(windows))]
+fn mark_of_the_web(_path: &Path) {}
+
 /// Connect to the phone at `from`, read exactly `size` bytes into a new file
-/// in `dir`, and return its path. A transfer that ends short, stalls, or
-/// declares no size or too large a size leaves no file behind.
+/// in `dir`, and return its path. A transfer that ends short, stalls, runs
+/// too slow, or declares no size or too large a size leaves no file behind.
 async fn receive_file(from: SocketAddr, dir: &Path, name: &str, size: u64) -> Result<PathBuf> {
     if size == 0 || size > MAX_FILE_BYTES {
         return Err(LinuxLinkError::Io {
@@ -220,10 +330,27 @@ async fn receive_file(from: SocketAddr, dir: &Path, name: &str, size: u64) -> Re
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| io_error("create_dir", e))?;
-    let (path, mut file) = create_unique(dir, name).await?;
-    tracing::info!("Receiving {} from {from} ({size} bytes)", path.display());
+    let (final_path, placeholder) = create_unique(dir, name).await?;
+    drop(placeholder);
+    let mut part_path = final_path.as_os_str().to_owned();
+    part_path.push(".part");
+    let mut incoming = Incoming {
+        final_path,
+        part_path: PathBuf::from(part_path),
+        committed: false,
+    };
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&incoming.part_path)
+        .await
+        .map_err(|e| io_error("create_file", e))?;
+    tracing::info!(
+        "Receiving {} from {from} ({size} bytes)",
+        incoming.final_path.display()
+    );
 
-    let result = async {
+    let copy = async {
         let mut buffer = vec![0u8; 64 * 1024];
         let mut received: u64 = 0;
         while received < size {
@@ -246,15 +373,17 @@ async fn receive_file(from: SocketAddr, dir: &Path, name: &str, size: u64) -> Re
             received += n as u64;
         }
         file.flush().await.map_err(|e| io_error("write", e))
-    }
-    .await;
-
-    if let Err(e) = result {
-        drop(file);
-        let _ = tokio::fs::remove_file(&path).await;
-        return Err(e);
-    }
-    Ok(path)
+    };
+    tokio::time::timeout(transfer_deadline(size), copy)
+        .await
+        .map_err(|_| io_error("read", "too slow"))??;
+    drop(file);
+    tokio::fs::rename(&incoming.part_path, &incoming.final_path)
+        .await
+        .map_err(|e| io_error("rename", e))?;
+    incoming.committed = true;
+    mark_of_the_web(&incoming.final_path);
+    Ok(incoming.final_path.clone())
 }
 
 fn io_error(operation: &'static str, detail: impl std::fmt::Display) -> LinuxLinkError {
@@ -307,6 +436,11 @@ mod tests {
             ("CON", "_CON"),
             ("com1.txt", "_com1.txt"),
             ("COM10.txt", "COM10.txt"),
+            ("con .txt", "_con .txt"),
+            ("COM¹.log", "_COM¹.log"),
+            ("CONIN$", "_CONIN$"),
+            ("invoice\u{202E}fdp.exe", "invoicefdp.exe"),
+            ("a\u{200B}b.txt", "ab.txt"),
             ("trailing. . .", "trailing"),
             ("", "shared_file"),
             ("..", "shared_file"),
@@ -315,9 +449,12 @@ mod tests {
         ] {
             assert_eq!(safe_file_name(raw), want, "{raw:?}");
         }
-        assert_eq!(
-            safe_file_name(&"a".repeat(500)).chars().count(),
-            MAX_NAME_CHARS
+        assert_eq!(safe_file_name(&"a".repeat(500)).len(), MAX_NAME_BYTES);
+        let long = format!("{}.pdf", "文".repeat(200));
+        let fitted = safe_file_name(&long);
+        assert!(
+            fitted.len() <= MAX_NAME_BYTES && fitted.ends_with(".pdf"),
+            "{fitted}"
         );
     }
 
@@ -354,6 +491,11 @@ mod tests {
             .unwrap();
         assert_eq!(path, dir.join("big.bin"));
         assert_eq!(std::fs::read(path).unwrap(), data);
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["big.bin"], "no .part left behind");
     }
 
     #[tokio::test]
@@ -362,6 +504,15 @@ mod tests {
         let from = phone_sending(vec![1; 10]).await;
         assert!(receive_file(from, &dir, "x.bin", 20).await.is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_slow_trickle_has_a_deadline() {
+        assert_eq!(transfer_deadline(1), Duration::from_secs(30));
+        assert_eq!(
+            transfer_deadline(MIN_BYTES_PER_SEC * 100),
+            Duration::from_secs(130)
+        );
     }
 
     #[tokio::test]
