@@ -50,6 +50,8 @@ fun QuickSettingsSheet(
     onSetClipboardSync: (Boolean) -> Unit,
     onOpenHistory: () -> Unit,
     onOpenAudio: () -> Unit,
+    onSendText: () -> Unit,
+    onTypeClipboard: () -> Unit,
     micOn: Boolean,
     onSetMic: (Boolean) -> Unit,
     privacyGrab: Boolean,
@@ -90,6 +92,8 @@ fun QuickSettingsSheet(
             ToggleRow(LlIcons.Clipboard, stringResource(R.string.row_clipboard), clipboardSync, onSetClipboardSync)
             ActionRow(LlIcons.History, stringResource(R.string.row_history), onOpenHistory)
             ActionRow(LlIcons.Volume, stringResource(R.string.row_audio), onOpenAudio)
+            ActionRow(LlIcons.Keyboard, stringResource(R.string.row_send_text), onSendText)
+            ActionRow(LlIcons.Clipboard, stringResource(R.string.row_type_clipboard), onTypeClipboard)
             ToggleRow(LlIcons.Mic, stringResource(R.string.row_mic), micOn, onSetMic)
             ToggleRow(LlIcons.Lock, stringResource(R.string.row_privacy), privacyGrab, onSetPrivacy)
             ValueRow(

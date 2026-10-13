@@ -63,6 +63,7 @@ fun KeyboardBar(
     haptics: LlHaptics,
     compact: Boolean,
     onHide: () -> Unit,
+    onCompose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val key: (Int) -> Unit = { code ->
@@ -82,6 +83,7 @@ fun KeyboardBar(
         Cap("↑") { key(KeyEvent.KEYCODE_DPAD_UP) }
         Cap("↓") { key(KeyEvent.KEYCODE_DPAD_DOWN) }
         Cap("→") { key(KeyEvent.KEYCODE_DPAD_RIGHT) }
+        Cap("✎", stringResource(R.string.send_text_title)) { haptics.tap(); onCompose() }
         Cap("⌄", stringResource(R.string.keyboard_hide)) { haptics.tap(); onHide() }
     }
     val second: @Composable RowScope.() -> Unit = {

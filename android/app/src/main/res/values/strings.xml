@@ -105,6 +105,22 @@
     <string name="keyboard_mod_off">off</string>
     <string name="keyboard_mod_once">for the next key</string>
     <string name="keyboard_mod_locked">locked</string>
+    <string name="send_text_title">Send text</string>
+    <string name="send_text_hint">Type or dictate, then send</string>
+    <string name="send_text_send">Send</string>
+    <string name="send_text_paste">Paste</string>
+    <string name="send_text_enter">Press Enter after</string>
+    <plurals name="send_text_limit">
+        <item quantity="one">Up to %1$d character</item>
+        <item quantity="other">Up to %1$d characters</item>
+    </plurals>
+    <plurals name="send_text_too_long">
+        <item quantity="one">That is more than %1$d character</item>
+        <item quantity="other">That is more than %1$d characters</item>
+    </plurals>
+    <string name="phone_clipboard_no_text">The phone\'s clipboard has no text</string>
+    <string name="row_send_text">Send text…</string>
+    <string name="row_type_clipboard">Type phone clipboard</string>
     <string name="row_privacy">Privacy grab</string>
     <string name="row_pairing">Pairing</string>
     <string name="value_direct_touch">Direct touch</string>

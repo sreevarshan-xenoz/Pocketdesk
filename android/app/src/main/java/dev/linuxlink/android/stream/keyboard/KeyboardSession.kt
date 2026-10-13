@@ -71,6 +71,21 @@ class KeyboardSession(
     /** A key from the bar, with the latched modifiers. */
     fun key(keyCode: Int) = controller.key(keyCode)
 
+    /**
+     * Type [text] as a whole (roadmap F2), and Enter after it if asked. What
+     * the desktop field holds changes underneath the IME, so the keyboard
+     * resyncs. Failure is [TextSend]'s refusal (empty or too long).
+     */
+    fun typeText(text: String, pressEnter: Boolean): Result<Unit> =
+        TextSend.actions(text, pressEnter).map { actions ->
+            queue.trySend(actions)
+            sentHistory.add(text)
+            controller.contextLost()
+        }
+
+    /** The texts sent this process, newest first (spec S4: memory only). */
+    fun sentTexts(): List<String> = sentHistory.items()
+
     /** Send one combo as it is, ignoring the latch (Ctrl+Alt+Del). */
     fun combo(keyCode: Int, vararg modifiers: KeyModifier) {
         queue.trySend(listOf(KeyAction.Combo(modifiers.map { it.keyCode }, keyCode)))
@@ -78,5 +93,8 @@ class KeyboardSession(
 
     private companion object {
         const val TAG = "Keyboard"
+
+        /** Process-wide, so it outlives one session but never the app. */
+        val sentHistory = SendHistory()
     }
 }

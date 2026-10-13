@@ -98,6 +98,24 @@
     <string name="keyboard_mod_off">desactivado</string>
     <string name="keyboard_mod_once">para la siguiente tecla</string>
     <string name="keyboard_mod_locked">bloqueado</string>
+    <string name="send_text_title">Enviar texto</string>
+    <string name="send_text_hint">Escribe o dicta y luego envía</string>
+    <string name="send_text_send">Enviar</string>
+    <string name="send_text_paste">Pegar</string>
+    <string name="send_text_enter">Pulsar Intro después</string>
+    <plurals name="send_text_limit">
+        <item quantity="one">Hasta %1$d carácter</item>
+        <item quantity="many">Hasta %1$d caracteres</item>
+        <item quantity="other">Hasta %1$d caracteres</item>
+    </plurals>
+    <plurals name="send_text_too_long">
+        <item quantity="one">Es más de %1$d carácter</item>
+        <item quantity="many">Son más de %1$d caracteres</item>
+        <item quantity="other">Son más de %1$d caracteres</item>
+    </plurals>
+    <string name="phone_clipboard_no_text">El portapapeles del teléfono no tiene texto</string>
+    <string name="row_send_text">Enviar texto…</string>
+    <string name="row_type_clipboard">Escribir el portapapeles del teléfono</string>
     <string name="row_privacy">Bloqueo de privacidad</string>
     <string name="row_pairing">Emparejamiento</string>
     <string name="value_direct_touch">Toque directo</string>
