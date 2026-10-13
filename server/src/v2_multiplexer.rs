@@ -63,7 +63,7 @@ pub async fn handle_v2_session(
             },
             iroh_id: None,
         };
-        if !crate::plugins::pair::device_keys_allow(&claim) {
+        if crate::plugins::pair::device_keys_refused(&claim) {
             conn.close(0u32.into(), b"session refused");
             anyhow::bail!("v2 session refused: not the key this device proved");
         }
