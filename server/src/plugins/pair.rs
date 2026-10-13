@@ -165,6 +165,16 @@ pub async fn session_gate(
     let dir = state::state_dir().ok()?;
     let paired = claim.device_id.as_deref().is_some_and(is_paired_device);
     let keys = decide_keys_in(&dir, &claim, paired);
+    tracing::debug!(
+        device_id = claim.device_id.as_deref().unwrap_or("<none announced>"),
+        paired,
+        presented = claim.peer_key.as_ref().map(|k| k.to_string()),
+        iroh_id = claim.iroh_id.as_deref(),
+        bind = keys.bind_tls.is_some(),
+        register_wan = keys.register_iroh.is_some(),
+        refused = keys.refused.as_ref().map(|r| r.reason()),
+        "Device keys decided"
+    );
     if let Some(refusal) = keys.refused {
         report_refusal(&dir, &claim, refusal, keys.presented.as_deref());
         return None;
