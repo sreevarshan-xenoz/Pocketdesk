@@ -360,13 +360,20 @@ async fn dial_transfer(
         .map_err(|_| io_error("connect", "timed out"))?
         .map_err(|e| io_error("connect", e))?;
     let name = tokio_rustls::rustls::pki_types::ServerName::IpAddress(to.ip().into());
-    tokio::time::timeout(
+    let stream = tokio::time::timeout(
         CONNECT_TIMEOUT,
         tokio_rustls::TlsConnector::from(tls).connect(name, tcp),
     )
     .await
     .map_err(|_| io_error("tls", "timed out"))?
-    .map_err(|e| io_error("tls", e))
+    .map_err(|e| io_error("tls", e))?;
+    if stream.get_ref().1.alpn_protocol() != Some(linux_link_core::protocol::ALPN_TRANSFER) {
+        return Err(io_error(
+            "tls",
+            "the phone does not speak the transfer protocol",
+        ));
+    }
+    Ok(stream)
 }
 
 /// The phone behind `sender`: a connection goes by its device's id (phase B).
