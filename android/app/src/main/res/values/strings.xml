@@ -200,6 +200,8 @@
     <string name="err_link_dropped">The video link dropped. The desktop may have slept or left the network.</string>
     <string name="err_generic">Something went wrong reaching the desktop.</string>
     <string name="connecting_still">Still trying… check that the desktop is awake and running Pocketdesk.</string>
+    <string name="waiting_for_picture">Connected — waiting for the picture…</string>
+    <string name="waiting_for_approval">If this computer asks before each session, allow it there.</string>
     <string name="repair_pairing">Pair again</string>
     <string name="session_menu">Session menu</string>
     <string name="pair_link_title">Pairing with %1$s…</string>

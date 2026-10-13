@@ -193,6 +193,8 @@
     <string name="err_link_dropped">வீடியோ இணைப்பு அறுந்தது. டெஸ்க்டாப் உறங்கியிருக்கலாம் அல்லது வலையத்தை விட்டு வெளியேறியிருக்கலாம்.</string>
     <string name="err_generic">டெஸ்க்டாப்பை அணுகும்போது ஏதோ தவறு நடந்தது.</string>
     <string name="connecting_still">முயற்சி தொடர்கிறது… டெஸ்க்டாப் விழிப்புடன் Pocketdesk-உடன் உள்ளதா பார்க்கவும்.</string>
+    <string name="waiting_for_picture">இணைந்தது — திரைக்காகக் காத்திருக்கிறது…</string>
+    <string name="waiting_for_approval">இந்தக் கணினி ஒவ்வொரு அமர்வுக்கும் முன் அனுமதி கேட்டால், அங்கே அனுமதிக்கவும்.</string>
     <string name="repair_pairing">மீண்டும் இணையுங்கள்</string>
     <string name="session_menu">அமர்வு பட்டியல்</string>
     <string name="pair_link_title">%1$s உடன் இணைக்கிறது…</string>

@@ -231,12 +231,17 @@ fun RemoteScreen(
     // seconds, and the raw Rust failure behind a Down goes to Logcat only —
     // the user sees the humanized mapping on the status card.
     var stillTrying by remember { mutableStateOf(false) }
+    // F5: a desktop that asks before each session holds the stream until its
+    // owner answers, so a connected link can show no picture for a while.
+    var awaitingPicture by remember { mutableStateOf(true) }
+    var showAwaitHint by remember { mutableStateOf(false) }
     LaunchedEffect(streamStatus) {
         stillTrying = false
         (streamStatus as? StreamStatus.Down)?.let {
             android.util.Log.w("RemoteScreen", "stream down: ${it.reason}")
         }
         if (streamStatus is StreamStatus.Connecting) {
+            awaitingPicture = true
             delay(6_000)
             stillTrying = true
         }
@@ -245,6 +250,13 @@ fun RemoteScreen(
     // "wan_relayed" | "wan" | "none"), polled from the bridge while up.
     var linkState by remember { mutableStateOf("none") }
     val status = streamStatus
+    LaunchedEffect(status, awaitingPicture) {
+        showAwaitHint = false
+        if (status is StreamStatus.Up && awaitingPicture) {
+            delay(4_000)
+            showAwaitHint = true
+        }
+    }
     LaunchedEffect(status) {
         if (status !is StreamStatus.Up || status.kind != StreamTransportKind.Wan) {
             linkState = "none"
@@ -753,7 +765,10 @@ fun RemoteScreen(
                 monitorIndex = monitorIndex,
                 onStatus = { streamStatus = it },
                 onCodecChanged = { label -> codecNotice = label },
-                onVideoSizeChanged = { w, h -> videoSize = androidx.compose.ui.unit.IntSize(w, h) },
+                onVideoSizeChanged = { w, h ->
+                    videoSize = androidx.compose.ui.unit.IntSize(w, h)
+                    awaitingPicture = false
+                },
                 secure = blackout,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -844,6 +859,38 @@ fun RemoteScreen(
 
                                 else -> Unit
                             }
+                        }
+                    }
+                }
+            } else if (showAwaitHint) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Surface(
+                        shape = Space.sheet,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        tonalElevation = 6.dp,
+                        modifier = Modifier.padding(horizontal = 40.dp),
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.padding(24.dp),
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                stringResource(R.string.waiting_for_picture),
+                                style = MaterialTheme.typography.titleMedium,
+                                textAlign = TextAlign.Center,
+                            )
+                            Text(
+                                stringResource(R.string.waiting_for_approval),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
                         }
                     }
                 }
