@@ -1083,6 +1083,13 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
     file_size: u64,
     mut file: R,
 ) -> Result<(), String> {
+    // This transfer's counters from the start: the phone reads them while
+    // waiting for the desktop too, and must not see the last file's.
+    {
+        use std::sync::atomic::Ordering;
+        TRANSFER_TOTAL.store(file_size, Ordering::Relaxed);
+        TRANSFER_SENT.store(0, Ordering::Relaxed);
+    }
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
         .await
         .map_err(|e| format!("Failed to bind port: {}", e))?;
