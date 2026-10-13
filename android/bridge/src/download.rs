@@ -328,6 +328,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_download_lands_in_the_writer_and_the_desktop_hears_it_saved() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let data: Vec<u8> = (0..200_000u32).map(|i| (i * 3) as u8).collect();
         let desktop = tokio::spawn(desktop_sending(addr, KEY, data.len() as u64, data.clone()));
@@ -342,6 +343,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_connection_without_the_key_is_dropped_and_the_right_one_served() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let wrong = tokio::spawn(async move {
             let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -369,6 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_short_download_fails_and_says_so() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let desktop = tokio::spawn(desktop_sending(addr, KEY, 10, b"abcd".to_vec()));
         let mut out = Vec::new();
@@ -382,6 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_oversized_download_is_refused_before_any_byte() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let desktop = tokio::spawn(desktop_sending(addr, KEY, 9 << 30, Vec::new()));
         let mut out = Vec::new();
@@ -415,6 +419,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_write_answers_zero() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let desktop = tokio::spawn(desktop_sending(addr, KEY, 3, b"abc".to_vec()));
         let got = await_and_receive(listener, KEY, std::future::pending(), &mut Full).await;

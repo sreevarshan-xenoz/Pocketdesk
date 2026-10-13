@@ -1024,6 +1024,10 @@ pub(crate) static TRANSFER_SENT: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 pub(crate) static TRANSFER_TOTAL: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
+/// Tests that move the transfer counters run one at a time: the counters
+/// are process-wide.
+#[cfg(test)]
+pub(crate) static TRANSFER_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// `(sent, total)` of the running (or last) file transfer.
 pub fn transfer_progress() -> (u64, u64) {
@@ -3155,6 +3159,7 @@ mod send_file_tests {
 
     #[tokio::test]
     async fn progress_runs_from_zero_to_the_total() {
+        let _counters = super::TRANSFER_TEST_LOCK.lock().await;
         let data: Vec<u8> = (0..300_000u32).map(|i| i as u8).collect();
         let (mut ours, mut theirs) = tokio::io::duplex(1 << 20);
         let reader = tokio::spawn(async move {
