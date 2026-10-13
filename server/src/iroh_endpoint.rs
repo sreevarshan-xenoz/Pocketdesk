@@ -130,16 +130,56 @@ pub fn record_endpoint_in(
     }
 }
 
+/// What the Diagnostics tab shows about reaching this computer from outside
+/// (N1), from iroh's own network report: yes/no facts, no address.
+pub fn wan_status_from(
+    report: &iroh::unstable_net_report::NetReport,
+    unix_secs: u64,
+) -> linux_link_core::local::diagnostics::WanStatus {
+    linux_link_core::local::diagnostics::WanStatus {
+        unix_secs,
+        udp: report.has_udp(),
+        nat_varies: report.mapping_varies_by_dest(),
+        public_v4: report.global_v4.is_some(),
+        public_v6: report.global_v6.is_some(),
+        captive_portal: report.captive_portal,
+    }
+}
+
 /// Keep `endpoint.json` current: the relay URL only appears once iroh has
 /// reached its home relay, and direct addresses change with the network.
+/// `wan_status.json` follows iroh's network report the same way.
 fn spawn_endpoint_recorder(endpoint: Endpoint) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
     tokio::spawn(async move {
+        use iroh::Watcher as _;
         let mut last = None;
+        let mut last_status = None;
         loop {
             record_endpoint_in(&dir, &endpoint.addr(), endpoint.id(), &mut last);
+            if let Some(report) = endpoint.net_report().get() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let status = wan_status_from(&report, now);
+                // Rewritten when a fact changes, not every tick.
+                let facts = (
+                    status.udp,
+                    status.nat_varies,
+                    status.public_v4,
+                    status.public_v6,
+                    status.captive_portal,
+                );
+                if last_status != Some(facts) {
+                    match linux_link_core::local::diagnostics::write_wan_status(&dir, &status) {
+                        Ok(()) => last_status = Some(facts),
+                        Err(e) => tracing::debug!("could not record the WAN status: {e}"),
+                    }
+                }
+            }
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         }
     });
