@@ -703,6 +703,23 @@ Built on `fix/monitor-switch`. Checked on 2026-10-13 with the Galaxy A71 against
 - [ ] Three or more monitors: a chip each, in the desktop's order.
 - [ ] The Linux host (portal or screencopy capture per monitor).
 
+## 33. Shortcuts outside the app (F11)
+
+Built on `feat/shortcuts`. Checked on 2026-10-13 with the Galaxy A71 against the Windows host:
+- The launcher lists "Connect to …" for each saved computer, most recent first.
+- Firing the "Connect to 192.168.1.101" shortcut opened a LAN session.
+- A connect request for an address that is not saved opened nothing.
+- The Quick Settings tile, added and clicked with `cmd statusbar`, connected to the last computer.
+- The widget's provider is registered.
+
+- [x] Long-press the app icon: a "Connect to …" shortcut per saved computer (up to four), opening its session.
+- [x] A request for a computer that is not saved opens nothing.
+- [x] The Quick Settings tile connects to the last computer; with none saved, it is unavailable.
+- [ ] Place the widget on the home screen: it names the last computer and connects on a tap; with none saved it opens the app.
+- [ ] A Wake shortcut appears for a computer with a Wake-on-LAN address, and sends the packet.
+- [ ] Pin a shortcut to the home screen; it survives the computer being reconnected, and stops working once the computer is removed.
+- [ ] Android 13 or older: the tile opens the session (the older collapse path).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

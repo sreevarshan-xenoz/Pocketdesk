@@ -29,7 +29,7 @@ Each item is its own branch (`feat/<topic>`), spec, plan and device check on the
 | F8 | **Image clipboard** both ways. | Both | Expected next to text clipboard. | M |
 | F9 | **Session polish:** in-session monitor quick-switch (shipped 2026-10-13: a chip per screen in the session chrome), optional three-finger swipes for Alt+Tab and workspaces, hardware keyboard and mouse passthrough with pointer capture. | Phone | Power users, on top of F1/F3. | M |
 | F10 | **Desktop app diagnostics:** port and firewall check, advertised interfaces, encoder in use, last session's latency tails, "copy debug report". | Desktop | Turns "it doesn't connect" into a fixable message. | M |
-| F11 | **Shortcuts outside the app:** home-screen widget, Quick Settings tile, launcher shortcuts for connect and wake. | Phone | Small, makes the app feel native. | S |
+| F11 | **Shortcuts outside the app:** home-screen widget, Quick Settings tile, launcher shortcuts for connect and wake (shipped 2026-10-13). | Phone | Small, makes the app feel native. | S |
 
 **Deferred, with reason:**
 - A virtual display sized to the phone: Hyprland's write IPC is broken upstream, and Windows needs an indirect display driver.

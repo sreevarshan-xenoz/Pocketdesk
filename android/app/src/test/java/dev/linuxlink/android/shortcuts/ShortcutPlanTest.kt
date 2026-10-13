@@ -1,0 +1,52 @@
+package dev.linuxlink.android.shortcuts
+
+import dev.linuxlink.android.HostStore
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class ShortcutPlanTest {
+    private fun host(address: String) = HostStore.Host(address, 4716)
+
+    @Test
+    fun connectingComesFirstInRecentOrderThenWaking() {
+        val hosts = listOf(host("10.0.0.1"), host("10.0.0.2"), host("10.0.0.3"))
+        val plan = ShortcutPlan.plan(hosts, hasWake = { it != "10.0.0.2" })
+        assertEquals(
+            listOf(
+                ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, "10.0.0.1"),
+                ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, "10.0.0.2"),
+                ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, "10.0.0.3"),
+                ShortcutPlan.Entry(ShortcutPlan.Kind.WAKE, "10.0.0.1"),
+            ),
+            plan,
+        )
+    }
+
+    @Test
+    fun aLauncherShowsAtMostFour() {
+        val hosts = (1..6).map { host("10.0.0.$it") }
+        val plan = ShortcutPlan.plan(hosts, hasWake = { true })
+        assertEquals(4, plan.size)
+        assertEquals(ShortcutPlan.Kind.CONNECT, plan.last().kind)
+    }
+
+    @Test
+    fun noComputersNoShortcuts() {
+        assertEquals(emptyList<ShortcutPlan.Entry>(), ShortcutPlan.plan(emptyList(), hasWake = { true }))
+    }
+
+    @Test
+    fun eachShortcutHasAStableIdForItsComputerAndAction() {
+        assertEquals("connect:10.0.0.1", ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, "10.0.0.1").id)
+        assertEquals("wake:10.0.0.1", ShortcutPlan.Entry(ShortcutPlan.Kind.WAKE, "10.0.0.1").id)
+    }
+
+    @Test
+    fun aRequestOpensOnlyAComputerAlreadySaved() {
+        val hosts = listOf(host("10.0.0.1"), host("mypc.local"))
+        assertEquals(hosts[1], ShortcutPlan.savedHost("mypc.local", hosts))
+        assertNull("another app cannot add a computer this way", ShortcutPlan.savedHost("10.9.9.9", hosts))
+        assertNull(ShortcutPlan.savedHost(null, hosts))
+    }
+}
