@@ -161,6 +161,7 @@
     <string name="share_nothing">இந்த intent-ல் பகிர ஏதும் இல்லை.</string>
     <string name="share_sent_clipboard">க்ளிப் போர்டுக்கு அனுப்பப்பட்டது.</string>
     <string name="share_failed">தோல்வி: %1$s</string>
+    <string name="share_unreadable">இதைப் பகிர்ந்த செயலி Pocketdesk-ஐ இதைப் படிக்க அனுமதிக்கவில்லை.</string>
     <string name="channel_transfers">கோப்புப் பரிமாற்றங்கள்</string>
     <string name="channel_transfers_desc">உங்கள் கணினிக்கும் அதிலிருந்தும் அனுப்பிய கோப்புகளின் முன்னேற்றம்</string>
     <string name="transfer_sending">%2$d இல் %1$d அனுப்பப்படுகிறது</string>

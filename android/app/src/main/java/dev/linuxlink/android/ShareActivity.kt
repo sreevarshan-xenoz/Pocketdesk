@@ -42,7 +42,17 @@ class ShareActivity : ComponentActivity() {
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
         when {
             uris.isNotEmpty() -> {
-                TransferService.start(this, host.address, host.controlPort, uris)
+                // The service reads the files under this screen's grant. A
+                // share that gave no permission to read them (the sender
+                // did not grant it) is refused by the system here, and must
+                // end with a message, not a crash.
+                try {
+                    TransferService.start(this, host.address, host.controlPort, uris)
+                } catch (e: SecurityException) {
+                    android.util.Log.w("ShareActivity", "Shared files are not readable", e)
+                    done(getString(R.string.share_unreadable))
+                    return
+                }
                 done(resources.getQuantityString(R.plurals.share_sending_files, uris.size, uris.size, host.address))
             }
             !text.isNullOrBlank() -> sendText(host, text)
