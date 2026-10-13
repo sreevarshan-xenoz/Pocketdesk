@@ -42,6 +42,17 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **N1, reaching the desktop from outside without Tailscale, step 1 (branch `feat/wan-insight`).**
+  - **Already there, now confirmed:**
+    - the built-in iroh WAN path (hole punching, n0's free relays as the fallback, both ends held to their keys);
+    - UPnP / NAT-PMP / PCP port mapping, which is iroh's default and stays on under the `Minimal` preset;
+    - the phone's "WAN · direct / relayed" badge.
+  - **New:**
+    - The server records iroh's network report in `wan_status.json`: yes/no facts only (UDP, the IPv4 NAT's mapping variance, public IPv6, captive portal), never an address. It removes the file, and `endpoint.json`, at start.
+    - Diagnostics turns those facts into "From outside" (this computer's NAT allows direct connections, or may need the relay) and "IPv6".
+  - **Verified on this box:** friendly NAT, no public IPv6.
+  - **Owed (checklist §35):** the cellular test. The phone has no mobile service, so it needs a SIM or a hotspot.
+  - **Review:** 3 Important, fixed (a stale status from an earlier run, over-claiming wording, an IPv6-polluted NAT verdict).
 - 2026-10-13: **F10, desktop diagnostics (branch `feat/diagnostics`; spec `docs/superpowers/specs/2026-10-13-diagnostics-design.md`).**
   - **The tab.** The desktop app's new Diagnostics tab checks:
     - the server;
