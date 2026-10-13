@@ -679,6 +679,48 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFile
     to_jstring(&mut env, json)
 }
 
+/// Send a file from a file descriptor the caller gives up (F7): `{"ok": null}`
+/// or `{"err": "..."}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFileFd(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    fd: jint,
+    name: JString<'_>,
+    size: jlong,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let name = jstring_to_string(&mut env, &name);
+    let size = u64::try_from(size).unwrap_or(0);
+    let json =
+        envelope_unit(RUNTIME.block_on(api::send_file_fd(address, port as u16, fd, name, size)));
+    to_jstring(&mut env, json)
+}
+
+/// The running file transfer as `[sent, total]` bytes.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTransferProgress(
+    env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jni::sys::jlongArray {
+    let (sent, total) = api::transfer_progress();
+    let values = [
+        i64::try_from(sent).unwrap_or(i64::MAX),
+        i64::try_from(total).unwrap_or(i64::MAX),
+    ];
+    match env.new_long_array(2) {
+        Ok(array) => {
+            if env.set_long_array_region(&array, 0, &values).is_err() {
+                return std::ptr::null_mut();
+            }
+            array.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 /// List a remote directory: `{"ok": [RemoteFileDto, ...]}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeListRemoteFiles(

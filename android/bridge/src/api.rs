@@ -1010,17 +1010,79 @@ pub async fn get_clipboard(address: String, port: u16) -> Result<String, String>
         .to_string())
 }
 
+/// The running file transfer's bytes sent and total, for the phone's
+/// progress notification (F7). Reset as each transfer starts.
+static TRANSFER_SENT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static TRANSFER_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `(sent, total)` of the running (or last) file transfer.
+pub fn transfer_progress() -> (u64, u64) {
+    use std::sync::atomic::Ordering;
+    (
+        TRANSFER_SENT.load(Ordering::Relaxed),
+        TRANSFER_TOTAL.load(Ordering::Relaxed),
+    )
+}
+
 /// Send file to peer using KDE Share protocol.
 pub async fn send_file(address: String, port: u16, file_path: String) -> Result<(), String> {
-    let metadata = tokio::fs::metadata(&file_path)
+    let file = tokio::fs::File::open(&file_path)
         .await
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
-    let file_size = metadata.len();
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+    let file_size = file
+        .metadata()
+        .await
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?
+        .len();
     let filename = std::path::Path::new(&file_path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown_file")
         .to_string();
+    send_stream(address, port, filename, file_size, file).await
+}
+
+/// Send `size` bytes read from `fd` as `name`, taking ownership of the file
+/// descriptor (the phone hands over a content provider's file this way, so
+/// it is not copied first).
+#[cfg(unix)]
+pub async fn send_file_fd(
+    address: String,
+    port: u16,
+    fd: i32,
+    name: String,
+    size: u64,
+) -> Result<(), String> {
+    use std::os::fd::FromRawFd;
+    if fd < 0 {
+        return Err("no file descriptor".to_string());
+    }
+    // SAFETY: the caller gives up `fd` (ParcelFileDescriptor.detachFd), so
+    // this File is its only owner and closes it.
+    let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    send_stream(address, port, name, size, tokio::fs::File::from_std(file)).await
+}
+
+#[cfg(not(unix))]
+pub async fn send_file_fd(
+    _address: String,
+    _port: u16,
+    _fd: i32,
+    _name: String,
+    _size: u64,
+) -> Result<(), String> {
+    Err("file descriptors are only passed on Android".to_string())
+}
+
+/// Offer `file_size` bytes from `file` to the desktop as `filename`, and send
+/// them when it connects back with the key.
+async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
+    address: String,
+    port: u16,
+    filename: String,
+    file_size: u64,
+    mut file: R,
+) -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
         .await
         .map_err(|e| format!("Failed to bind port: {}", e))?;
@@ -1039,7 +1101,7 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
             "filename": filename,
             "payloadTransferInfo": { "port": transfer_port, "key": key },
         }))
-        .with_payload_size(file_size as u64);
+        .with_payload_size(file_size);
     sender
         .send_packet(&request)
         .await
@@ -1063,29 +1125,7 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
     })
     .await
     .map_err(|_| "Timeout waiting for file receiver".to_string())??;
-    let mut file = tokio::fs::File::open(&file_path)
-        .await
-        .map_err(|e| format!("Failed to open file: {}", e))?;
-    let mut buffer = vec![0u8; 64 * 1024];
-    let mut sent: u64 = 0;
-    loop {
-        let n = file
-            .read(&mut buffer)
-            .await
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-        if n == 0 {
-            break;
-        }
-        client_stream
-            .write_all(&buffer[..n])
-            .await
-            .map_err(|e| format!("Failed to write to stream: {}", e))?;
-        sent += n as u64;
-    }
-    client_stream
-        .flush()
-        .await
-        .map_err(|e: std::io::Error| e.to_string())?;
+    let sent = pump(&mut file, &mut client_stream, file_size).await?;
     if sent != file_size {
         return Err(format!(
             "The file changed while it was sent ({sent} of {file_size} bytes)"
@@ -1093,6 +1133,40 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
     }
     tracing::info!("File sent: {} ({} bytes)", filename, sent);
     Ok(())
+}
+
+/// Copy `reader` to `writer` until the reader ends, counting into the
+/// transfer progress (`total` is what the reader is expected to hold).
+async fn pump<R, W>(reader: &mut R, writer: &mut W, total: u64) -> Result<u64, String>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use std::sync::atomic::Ordering;
+    TRANSFER_TOTAL.store(total, Ordering::Relaxed);
+    TRANSFER_SENT.store(0, Ordering::Relaxed);
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut sent: u64 = 0;
+    loop {
+        let n = reader
+            .read(&mut buffer)
+            .await
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        writer
+            .write_all(&buffer[..n])
+            .await
+            .map_err(|e| format!("Failed to write to stream: {}", e))?;
+        sent += n as u64;
+        TRANSFER_SENT.store(sent, Ordering::Relaxed);
+    }
+    writer
+        .flush()
+        .await
+        .map_err(|e: std::io::Error| e.to_string())?;
+    Ok(sent)
 }
 
 /// Whether a connection opens with `key` and a newline, read within 5 s.
@@ -3032,8 +3106,31 @@ mod receive_tests {
 
 #[cfg(test)]
 mod send_file_tests {
-    use super::presents_key;
-    use tokio::io::AsyncWriteExt;
+    use super::{presents_key, pump, transfer_progress};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn progress_runs_from_zero_to_the_total() {
+        let data: Vec<u8> = (0..300_000u32).map(|i| i as u8).collect();
+        let (mut ours, mut theirs) = tokio::io::duplex(1 << 20);
+        let reader = tokio::spawn(async move {
+            let mut got = Vec::new();
+            theirs.read_to_end(&mut got).await.unwrap();
+            got
+        });
+        let sent = pump(&mut &data[..], &mut ours, data.len() as u64)
+            .await
+            .unwrap();
+        drop(ours);
+        assert_eq!(sent, data.len() as u64);
+        assert_eq!(transfer_progress(), (sent, sent));
+        assert_eq!(reader.await.unwrap(), data);
+        // The next transfer starts from zero.
+        pump(&mut &b""[..], &mut tokio::io::sink(), 10)
+            .await
+            .unwrap();
+        assert_eq!(transfer_progress(), (0, 10));
+    }
 
     #[tokio::test]
     async fn only_a_connection_with_the_key_gets_the_file() {
