@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -329,13 +330,19 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        else -> RemoteScreen(
-                            address = session.first,
-                            port = session.second,
-                            controlPort = session.third,
-                            inPictureInPicture = inPictureInPicture.value,
-                            onExit = { sessionKey = null },
-                        )
+                        // Keyed by the session: a shortcut can name another
+                        // computer while one is on screen, and the old session
+                        // (decoder, service, input) must end, not be reused
+                        // with half its parts pointed at the new computer.
+                        else -> key(sessionKey) {
+                            RemoteScreen(
+                                address = session.first,
+                                port = session.second,
+                                controlPort = session.third,
+                                inPictureInPicture = inPictureInPicture.value,
+                                onExit = { sessionKey = null },
+                            )
+                        }
                     }
                 }
             }
