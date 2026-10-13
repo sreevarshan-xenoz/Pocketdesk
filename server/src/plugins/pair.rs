@@ -571,13 +571,6 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             let _ = local_pin::remove_if(&dir, pin);
         }
         let grant_secs = cli_grant.flatten();
-        // Pairing again (perhaps from a reinstalled phone, with new keys)
-        // lets the device bind the keys it proves next.
-        if let Ok(dir) = state::state_dir()
-            && let Err(e) = linux_link_core::local::device_keys::clear(&dir, &phone_id)
-        {
-            tracing::warn!("Could not clear the keys of {phone_id}: {e}");
-        }
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
             match grant_secs {
                 Some(secs) => {
@@ -588,6 +581,17 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         });
         match outcome {
             Ok(()) => {
+                // Pairing again with the owner's own PIN (perhaps from a
+                // reinstalled phone, with new keys) lets the device bind the
+                // keys it proves next. A time-boxed guest PIN never does: the
+                // id it pairs under is only claimed, and clearing it would
+                // hand a guest someone else's phone.
+                if grant_secs.is_none()
+                    && let Ok(dir) = state::state_dir()
+                    && let Err(e) = linux_link_core::local::device_keys::clear(&dir, &phone_id)
+                {
+                    tracing::warn!("Could not clear the keys of {phone_id}: {e}");
+                }
                 match grant_secs {
                     Some(secs) => tracing::info!(
                         "Paired phone {phone_id} on connection {conn} (scoped grant: {secs}s)"
