@@ -47,7 +47,7 @@ jobs:
           cp config.toml.example release/linux-link/
           cp linux-link.service release/linux-link/
           cp README.md release/linux-link/
-          cp LICENSE release/linux-link/
+          cp LICENSE-MIT LICENSE-APACHE release/linux-link/
           cd release
           tar czf "linux-link-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz" linux-link/
           sha256sum "linux-link-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz" > "linux-link-${{ github.ref_name }}-checksums.txt"
@@ -111,7 +111,7 @@ jobs:
         run: |
           $name = "linux-link-${{ github.ref_name }}-x86_64-pc-windows-gnu"
           New-Item -ItemType Directory -Force "release/linux-link" | Out-Null
-          Copy-Item target/release/linux-link.exe, target/release/pocketdesk.exe, config.toml.example, README.md, LICENSE release/linux-link/
+          Copy-Item target/release/linux-link.exe, target/release/pocketdesk.exe, config.toml.example, README.md, LICENSE-MIT, LICENSE-APACHE release/linux-link/
           Compress-Archive -Path release/linux-link -DestinationPath "release/$name.zip"
           $hash = (Get-FileHash "release/$name.zip" -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path "release/$name-checksums.txt" -Value "$hash  $name.zip" -Encoding ascii

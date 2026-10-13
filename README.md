@@ -5,7 +5,7 @@
 > Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). The name changed when Windows support landed. The `linux-link` command, its config/state paths and the wire protocol keep the old name, so existing installs and pairings carry over.
 
 [![Rust](https://img.shields.io/badge/Rust-Pure%20Rust-orange?logo=rust)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue)](LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
 [![CI](https://github.com/sreevarshan-xenoz/Pocketdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/sreevarshan-xenoz/Pocketdesk/actions)
 [![Issues](https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk)](https://github.com/sreevarshan-xenoz/Pocketdesk/issues)
 [![Status](https://img.shields.io/badge/status-beta%20-%20feature%20complete%2C%20gates%20green-orange)](#roadmap)
@@ -482,6 +482,17 @@ The full backlog, with every item's verified status against this tree, is
 [docs/roadmap-3000.md](docs/roadmap-3000.md); how that backlog gets executed is
 [docs/roadmap-execution-plan.md](docs/roadmap-execution-plan.md). See [plan.md](plan.md) for the
 development journal.
+
+## License
+
+Pocketdesk is licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as
+above, without any additional terms or conditions.
 
 ---
 
