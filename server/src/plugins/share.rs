@@ -73,7 +73,7 @@ impl Plugin for SharePlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.share.request", FETCH]
+        &["kdeconnect.share.request", FETCH, crate::offers::DECLINE]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -87,6 +87,17 @@ impl Plugin for SharePlugin {
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         if packet.packet_type == FETCH {
             handle_fetch(packet, sender).await;
+            return Ok(());
+        }
+        if packet.packet_type == crate::offers::DECLINE {
+            if let Some(id) = packet.body.get("id").and_then(|v| v.as_str()) {
+                let reason = packet
+                    .body
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                crate::offers::decline(id, &phone_of(sender), reason);
+            }
             return Ok(());
         }
         if packet.packet_type.as_str() == "kdeconnect.share.request" {
@@ -244,11 +255,7 @@ fn plan_fetch(
         let (path, size) = crate::plugins::file_browse::resolve_file(path)?;
         (path, size, None)
     } else if let Some(id) = body.get("offer").and_then(|v| v.as_str()) {
-        // A TCP connection is known by its address; the offer names the
-        // phone by the id it announced there.
-        let phone = crate::plugins::pair::phone_id_of(sender.device_id())
-            .unwrap_or_else(|| sender.device_id().to_string());
-        let path = crate::offers::redeem(id, &phone)?;
+        let path = crate::offers::redeem(id, &phone_of(sender))?;
         let Some(size) = std::fs::metadata(&path)
             .ok()
             .filter(|m| m.is_file())
@@ -263,7 +270,11 @@ fn plan_fetch(
         return Err("no file named".to_string());
     };
     if size > MAX_FILE_BYTES {
-        return Err("the file is larger than 8 GB".to_string());
+        let reason = "the file is larger than 8 GB";
+        if let Some(id) = &offer {
+            crate::offers::finish(id, Err(reason.to_string()));
+        }
+        return Err(reason.to_string());
     }
     Ok(Fetch {
         to: SocketAddr::new(ip, port),
@@ -271,6 +282,13 @@ fn plan_fetch(
         offer,
         slot,
     })
+}
+
+/// The phone behind `sender`: a TCP connection is known by its address,
+/// and the phone by the id it announced there.
+fn phone_of(sender: &dyn DeviceSender) -> String {
+    crate::plugins::pair::phone_id_of(sender.device_id())
+        .unwrap_or_else(|| sender.device_id().to_string())
 }
 
 async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {
@@ -1018,6 +1036,26 @@ mod tests {
         plugin.handle_packet(&packet, &phone).await.unwrap();
         let (_, reason) = refusal(&phone).expect("a refusal");
         assert_eq!(reason, "the file was offered to another phone");
+    }
+
+    #[tokio::test]
+    async fn the_phone_can_decline_an_offer_it_will_not_fetch() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("192.0.2.7:51000");
+        crate::offers::offer_at(
+            "offer-declined",
+            temp_dir("decline").join("a.txt"),
+            "phone",
+            std::time::Instant::now(),
+        );
+        let packet = NetworkPacket::new(crate::offers::DECLINE)
+            .with_body(serde_json::json!({ "id": "offer-declined", "reason": "no space" }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        assert_eq!(
+            crate::offers::redeem("offer-declined", "phone"),
+            Err("the offer was used or is unknown"),
+            "declining used it up"
+        );
     }
 
     #[tokio::test]

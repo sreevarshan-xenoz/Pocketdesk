@@ -5,8 +5,11 @@
 //! phone a `file_offer` `{id, name, size}`. The phone then fetches the file
 //! by that id (`share::FETCH`), so the desktop still dials the phone and
 //! the phone can name nothing but what the owner chose. An offer is single
-//! use, expires after [`OFFER_TTL`], and is valid only from its phone.
-//! Each send and its outcome go to `sent.json` for the app's Files tab.
+//! use, expires after [`OFFER_TTL`], and is valid only from its phone (as
+//! far as the phone's in-band device id can be trusted: see the F5 limit).
+//! Each send and its outcome go to `sent.json` for the app's Files tab, and
+//! every send reaches an end there: sent, refused, declined by the phone,
+//! or swept when its time runs out.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,8 +24,14 @@ use linux_link_core::protocol::permissions::Capability;
 
 /// Pushed to the phone: a file is waiting for it, `{id, name, size}`.
 pub const OFFER: &str = "kdeconnect.linuxlink.file_offer";
-/// How long the phone has to fetch an offered file.
-pub const OFFER_TTL: Duration = Duration::from_secs(120);
+/// The phone declines an offer it will not fetch: `{id, reason}` (no room,
+/// too large, nowhere to save it).
+pub const DECLINE: &str = "kdeconnect.linuxlink.file_offer_declined";
+/// How long the phone has to fetch an offered file. Long enough for a phone
+/// that fetches a dropped batch one file after another.
+pub const OFFER_TTL: Duration = Duration::from_secs(10 * 60);
+/// What the sent list says of an offer whose time ran out.
+const EXPIRED: &str = "the phone did not take it in time";
 /// The largest file offered, as for every transfer.
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// How often the outbox is read.
@@ -44,7 +53,6 @@ fn offers() -> &'static Mutex<HashMap<String, Offer>> {
 /// Offer `path` to `device_id` under `id` (the outbox request's id).
 pub(crate) fn offer_at(id: &str, path: PathBuf, device_id: &str, now: Instant) {
     let mut offers = offers().lock().unwrap_or_else(|e| e.into_inner());
-    offers.retain(|_, o| o.expires > now);
     offers.insert(
         id.to_string(),
         Offer {
@@ -58,8 +66,14 @@ pub(crate) fn offer_at(id: &str, path: PathBuf, device_id: &str, now: Instant) {
 /// The file offered as `id`, taken by `device_id`: the offer is used up.
 /// An offer for another phone is refused and left for its own phone.
 pub fn redeem(id: &str, device_id: &str) -> Result<PathBuf, &'static str> {
-    redeem_at(id, device_id, Instant::now())
+    let redeemed = redeem_at(id, device_id, Instant::now());
+    if redeemed == Err(OFFER_EXPIRED) {
+        finish(id, Err(EXPIRED.to_string()));
+    }
+    redeemed
 }
+
+const OFFER_EXPIRED: &str = "the offer expired";
 
 fn redeem_at(id: &str, device_id: &str, now: Instant) -> Result<PathBuf, &'static str> {
     let mut offers = offers().lock().unwrap_or_else(|e| e.into_inner());
@@ -71,9 +85,51 @@ fn redeem_at(id: &str, device_id: &str, now: Instant) -> Result<PathBuf, &'stati
         .remove(id)
         .ok_or("the offer was used or is unknown")?;
     if offer.expires <= now {
-        return Err("the offer expired");
+        return Err(OFFER_EXPIRED);
     }
     Ok(offer.path)
+}
+
+/// Take every offer whose time is up at `now`; their ids.
+fn sweep_at(now: Instant) -> Vec<String> {
+    let mut offers = offers().lock().unwrap_or_else(|e| e.into_inner());
+    let expired: Vec<String> = offers
+        .iter()
+        .filter(|(_, o)| o.expires <= now)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &expired {
+        offers.remove(id);
+    }
+    expired
+}
+
+/// The phone `device_id` will not fetch offer `id`, and says why. Only the
+/// phone it was offered to can decline it.
+pub fn decline(id: &str, device_id: &str, reason: &str) {
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    decline_in(&dir, id, device_id, reason, Instant::now());
+}
+
+fn decline_in(dir: &Path, id: &str, device_id: &str, reason: &str, now: Instant) {
+    if redeem_at(id, device_id, now).is_err() {
+        return;
+    }
+    // The phone's words go into the desktop app: short, and one line.
+    let reason: String = reason
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect();
+    let reason = if reason.trim().is_empty() {
+        "the phone declined it".to_string()
+    } else {
+        format!("the phone declined it: {}", reason.trim())
+    };
+    tracing::info!("Offer {id} declined by {device_id}: {reason}");
+    update_sent(dir, id, SentState::Failed(reason));
 }
 
 /// Record how the fetch of offer `id` ended.
@@ -81,11 +137,15 @@ pub fn finish(id: &str, outcome: Result<(), String>) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
+    finish_in(&dir, id, outcome);
+}
+
+fn finish_in(dir: &Path, id: &str, outcome: Result<(), String>) {
     let state = match outcome {
         Ok(()) => SentState::Sent,
         Err(reason) => SentState::Failed(reason),
     };
-    update_sent(&dir, id, state);
+    update_sent(dir, id, state);
 }
 
 /// The live connection that reaches `device_id`: on TCP a connection is
@@ -114,6 +174,10 @@ pub async fn run_watcher() {
     };
     loop {
         tokio::time::sleep(POLL).await;
+        for id in sweep_at(Instant::now()) {
+            tracing::info!("Offer {id} expired before the phone took it");
+            finish_in(&dir, &id, Err(EXPIRED.to_string()));
+        }
         for request in outbox::take_all(&dir, now_unix()) {
             let clients = crate::state::clone_clients().await;
             let store = crate::state::trust_store_path()
@@ -131,7 +195,9 @@ pub async fn run_watcher() {
     }
 }
 
-/// Check one request, offer the file to its phone, and record it.
+/// Check one request, offer the file to its phone, and record it. The
+/// record is written before the offer goes out, so a phone that fetches at
+/// once cannot finish a send the list does not hold yet.
 async fn deliver(
     dir: &Path,
     request: SendRequest,
@@ -148,42 +214,71 @@ async fn deliver(
         .ok()
         .filter(|m| m.is_file())
         .map(|m| m.len());
-    let outcome = offer_to_phone(&request, &path, &name, size, clients, store, phone_id_of).await;
-    match &outcome {
-        Ok(()) => tracing::info!("Offered {} to {}", path.display(), request.device_id),
-        Err(reason) => tracing::warn!(
-            "Not sending {} to {}: {reason}",
-            path.display(),
-            request.device_id
-        ),
-    }
+    let checked = check(&request, size, clients, store, phone_id_of);
     let file = SentFile {
-        id: request.id,
-        name,
-        path: request.path,
+        id: request.id.clone(),
+        name: name.clone(),
+        path: request.path.clone(),
         size: size.unwrap_or(0),
-        device_id: request.device_id,
+        device_id: request.device_id.clone(),
         sent_unix: now_unix(),
-        state: match outcome {
-            Ok(()) => SentState::Offered,
+        state: match &checked {
+            Ok(_) => SentState::Offered,
             Err(reason) => SentState::Failed(reason.to_string()),
         },
     };
-    let _guard = sent_lock().lock().unwrap_or_else(|e| e.into_inner());
-    if let Err(e) = sent::record(dir, file) {
-        tracing::warn!("Could not record the sent file: {e}");
+    {
+        let _guard = sent_lock().lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = sent::record(dir, file) {
+            tracing::warn!("Could not record the sent file: {e}");
+        }
     }
+    let (target, size) = match checked {
+        Ok(found) => found,
+        Err(reason) => {
+            tracing::warn!(
+                "Not sending {} to {}: {reason}",
+                path.display(),
+                request.device_id
+            );
+            return;
+        }
+    };
+    offer_at(
+        &request.id,
+        path.clone(),
+        &request.device_id,
+        Instant::now(),
+    );
+    let packet = NetworkPacket::new(OFFER).with_body(serde_json::json!({
+        "id": request.id,
+        "name": name,
+        "size": size,
+    }));
+    if target.send_packet(&packet).await.is_err() {
+        offers()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&request.id);
+        update_sent(
+            dir,
+            &request.id,
+            SentState::Failed("phone not connected".to_string()),
+        );
+        return;
+    }
+    tracing::info!("Offered {} to {}", path.display(), request.device_id);
 }
 
-async fn offer_to_phone(
+/// Whether `request` may be offered: the file, the phone's permission, and
+/// a live connection to it. The connection and the file's size.
+fn check(
     request: &SendRequest,
-    path: &Path,
-    name: &str,
     size: Option<u64>,
     clients: &[Arc<dyn DeviceSender>],
     store: Option<&TrustStore>,
     phone_id_of: impl Fn(&str) -> Option<String>,
-) -> Result<(), &'static str> {
+) -> Result<(Arc<dyn DeviceSender>, u64), &'static str> {
     let size = size.ok_or("not a file")?;
     if size > MAX_FILE_BYTES {
         return Err("the file is larger than 8 GB");
@@ -198,25 +293,7 @@ async fn offer_to_phone(
     }
     let target =
         target_for(&request.device_id, clients, phone_id_of).ok_or("phone not connected")?;
-    offer_at(
-        &request.id,
-        path.to_path_buf(),
-        &request.device_id,
-        Instant::now(),
-    );
-    let packet = NetworkPacket::new(OFFER).with_body(serde_json::json!({
-        "id": request.id,
-        "name": name,
-        "size": size,
-    }));
-    if target.send_packet(&packet).await.is_err() {
-        offers()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&request.id);
-        return Err("phone not connected");
-    }
-    Ok(())
+    Ok((target, size))
 }
 
 /// `sent.json` is read, changed and replaced; one writer at a time.
@@ -273,10 +350,61 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_offer_whose_time_is_up_is_swept() {
+        let now = Instant::now();
+        offer_at("o-sweep", PathBuf::from("/a.pdf"), "phone-a", now);
+        assert!(!sweep_at(now).contains(&"o-sweep".to_string()));
+        let later = now + OFFER_TTL + Duration::from_secs(1);
+        assert!(sweep_at(later).contains(&"o-sweep".to_string()));
+        assert_eq!(
+            redeem_at("o-sweep", "phone-a", later),
+            Err("the offer was used or is unknown")
+        );
+    }
+
+    #[test]
+    fn only_its_phone_can_decline_an_offer_and_the_reason_is_recorded() {
+        let dir = temp_dir("decline");
+        let now = Instant::now();
+        let file = |id: &str| SentFile {
+            id: id.to_string(),
+            name: "a.pdf".to_string(),
+            path: "/a.pdf".to_string(),
+            size: 1,
+            device_id: "phone-a".to_string(),
+            sent_unix: 1,
+            state: SentState::Offered,
+        };
+        sent::record(&dir, file("o-decline")).unwrap();
+        offer_at("o-decline", PathBuf::from("/a.pdf"), "phone-a", now);
+        decline_in(&dir, "o-decline", "phone-b", "no", now);
+        assert_eq!(
+            sent::read(&dir)[0].state,
+            SentState::Offered,
+            "not its phone"
+        );
+        decline_in(
+            &dir,
+            "o-decline",
+            "phone-a",
+            "Not enough space\nfor a.pdf",
+            now,
+        );
+        assert_eq!(
+            sent::read(&dir)[0].state,
+            SentState::Failed("the phone declined it: Not enough spacefor a.pdf".to_string())
+        );
+        assert!(redeem_at("o-decline", "phone-a", now).is_err(), "used up");
+    }
+
     struct Conn {
         id: &'static str,
         tcp: bool,
         sent: Mutex<Vec<NetworkPacket>>,
+        /// The sent list's states when each packet went out.
+        listed: Mutex<Vec<Vec<SentState>>>,
+        dir: Mutex<Option<PathBuf>>,
     }
 
     impl Conn {
@@ -285,6 +413,8 @@ mod tests {
                 id,
                 tcp,
                 sent: Default::default(),
+                listed: Default::default(),
+                dir: Default::default(),
             })
         }
     }
@@ -302,6 +432,10 @@ mod tests {
         }
         async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
             self.sent.lock().unwrap().push(packet.clone());
+            if let Some(dir) = self.dir.lock().unwrap().as_ref() {
+                let states = sent::read(dir).into_iter().map(|f| f.state).collect();
+                self.listed.lock().unwrap().push(states);
+            }
             Ok(())
         }
     }
@@ -341,6 +475,7 @@ mod tests {
         std::fs::write(&file, b"12345").unwrap();
         let store = trusting(&dir, "phone-a", true);
         let tcp = Conn::new("192.0.2.7", true);
+        *tcp.dir.lock().unwrap() = Some(dir.clone());
         let clients: [Arc<dyn DeviceSender>; 1] = [tcp.clone()];
         let sent_request = request(&dir, &file);
         deliver(&dir, sent_request.clone(), &clients, Some(&store), ids).await;
@@ -351,6 +486,11 @@ mod tests {
         assert_eq!(pushed[0].body["id"], sent_request.id);
         assert_eq!(pushed[0].body["name"], "report.pdf");
         assert_eq!(pushed[0].body["size"], 5);
+        assert_eq!(
+            tcp.listed.lock().unwrap()[0],
+            [SentState::Offered],
+            "listed before the phone could fetch it"
+        );
         let listed = sent::read(&dir);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].state, SentState::Offered);
