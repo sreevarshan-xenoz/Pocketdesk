@@ -549,14 +549,37 @@ async fn request_pin(conn: &str, sender: &dyn DeviceSender) {
         return;
     }
 
+    // Any device that has not paired may ask, under an id it chooses, so
+    // minting is paced: a burst of requests is not a stream of desktop
+    // notifications, and a pending PIN is announced again, not replaced.
+    let now = Instant::now();
+    let pending = pins()
+        .lock()
+        .expect("pair state")
+        .get(conn)
+        .is_some_and(|e| !pin_expired(e));
+    if !mint_pace().lock().expect("pair state").allow(now) {
+        tracing::info!("PIN request from {conn} within 10 s of the last; no new PIN");
+        if pending {
+            let response = NetworkPacket::new("kdeconnect.linuxlink.pair").with_body(json!({
+                "pairStatus": "pinSent",
+            }));
+            let _ = sender.send_packet(&response).await;
+        }
+        return;
+    }
     let pin = local_pin::mint_value();
-    pins().lock().expect("pair state").insert(
-        conn.to_string(),
-        PinEntry {
-            pin: pin.clone(),
-            created: Instant::now(),
-        },
-    );
+    {
+        let mut pins = pins().lock().expect("pair state");
+        pins.retain(|_, e| !pin_expired(e));
+        pins.insert(
+            conn.to_string(),
+            PinEntry {
+                pin: pin.clone(),
+                created: now,
+            },
+        );
+    }
     tracing::info!(
         "Pairing PIN for {conn}: {pin} (valid {}s)",
         PIN_TTL.as_secs()
@@ -567,6 +590,34 @@ async fn request_pin(conn: &str, sender: &dyn DeviceSender) {
         "pairStatus": "pinSent",
     }));
     let _ = sender.send_packet(&response).await;
+}
+
+/// When the desktop last minted a PIN for a phone that asked.
+#[derive(Default)]
+struct MintPace {
+    last: Option<Instant>,
+}
+
+impl MintPace {
+    /// The shortest wait between two minted PINs.
+    const GAP: Duration = Duration::from_secs(10);
+
+    /// Whether a PIN may be minted at `now`; if so, it counts as minted.
+    fn allow(&mut self, now: Instant) -> bool {
+        if self
+            .last
+            .is_some_and(|last| now.saturating_duration_since(last) < Self::GAP)
+        {
+            return false;
+        }
+        self.last = Some(now);
+        true
+    }
+}
+
+fn mint_pace() -> &'static Mutex<MintPace> {
+    static PACE: OnceLock<Mutex<MintPace>> = OnceLock::new();
+    PACE.get_or_init(Default::default)
 }
 
 /// Wrong guesses allowed against one PIN before it is discarded.
@@ -857,6 +908,18 @@ mod tests {
             standing_in(&dir, "phone", Some(&reinstalled), true),
             Standing::Paired
         );
+    }
+
+    #[test]
+    fn the_desktop_mints_a_pin_at_most_every_ten_seconds() {
+        let start = Instant::now();
+        let mut mints = MintPace::default();
+        assert!(mints.allow(start));
+        assert!(
+            !mints.allow(start + Duration::from_secs(3)),
+            "a burst of requests"
+        );
+        assert!(mints.allow(start + Duration::from_secs(10)));
     }
 
     #[test]
