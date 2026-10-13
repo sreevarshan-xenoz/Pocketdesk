@@ -349,6 +349,41 @@ fn decide_control_identity_in(
     }
 }
 
+/// May files move between this desktop and the device a connection goes by,
+/// over a transfer pinned to `key` (phase C)? A paired device must have
+/// proved that very key and had it bound: one with no key bound yet may be
+/// someone else claiming its id (pairing it again binds its key). With
+/// pairing off, an unpaired device's own key is the one used.
+pub(crate) fn may_transfer(
+    device_id: &str,
+    key: &linux_link_core::streaming::PeerKey,
+) -> std::result::Result<(), String> {
+    let dir = state::state_dir().map_err(|e| e.to_string())?;
+    may_transfer_in(&dir, device_id, key, is_paired_device(device_id))
+}
+
+fn may_transfer_in(
+    dir: &std::path::Path,
+    device_id: &str,
+    key: &linux_link_core::streaming::PeerKey,
+    paired: bool,
+) -> std::result::Result<(), String> {
+    use linux_link_core::local::device_keys::{self, Slot, Verdict};
+    let linux_link_core::streaming::PeerKey::Tls(hash) = key else {
+        return Err("files move only over the local network connection".to_string());
+    };
+    if !paired {
+        return Ok(());
+    }
+    match device_keys::check(dir, device_id, Slot::Tls, Some(&hex(hash))) {
+        Verdict::Matches => Ok(()),
+        Verdict::FirstUse | Verdict::Unbound => {
+            Err("this phone has no key bound here yet; pair it again to move files".to_string())
+        }
+        Verdict::Refused(refusal) => Err(refusal.reason().to_string()),
+    }
+}
+
 /// Apply what an allowed session may record. `false` when another session
 /// bound a different key to the device first.
 fn commit_keys_in(dir: &std::path::Path, device_id: &str, keys: &KeyDecision) -> bool {
@@ -920,6 +955,23 @@ mod tests {
             "a burst of requests"
         );
         assert!(mints.allow(start + Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn files_move_only_with_the_key_bound_to_a_paired_phone() {
+        let dir = key_dir("transfer");
+        let phone = PeerKey::Tls([1; 32]);
+        assert!(
+            may_transfer_in(&dir, "phone", &phone, true).is_err(),
+            "a paired phone with no key bound yet: someone may be claiming its id"
+        );
+        assert!(allowed(&dir, &claim(Some(phone.clone()), None)));
+        assert!(may_transfer_in(&dir, "phone", &phone, true).is_ok());
+        assert!(may_transfer_in(&dir, "phone", &PeerKey::Tls([2; 32]), true).is_err());
+        assert!(
+            may_transfer_in(&dir, "stranger", &PeerKey::Tls([3; 32]), false).is_ok(),
+            "unpaired: only possible with pairing off"
+        );
     }
 
     #[test]

@@ -321,9 +321,10 @@ fn plan_fetch(
 fn transfer_tls(
     sender: &dyn DeviceSender,
 ) -> std::result::Result<std::sync::Arc<tokio_rustls::rustls::ClientConfig>, String> {
-    let Some(linux_link_core::streaming::PeerKey::Tls(phone)) = sender.peer_key() else {
+    let Some(key @ linux_link_core::streaming::PeerKey::Tls(phone)) = sender.peer_key() else {
         return Err("the phone's connection proved no key".to_string());
     };
+    crate::plugins::pair::may_transfer(sender.device_id(), &key)?;
     let dir = crate::state::state_dir()
         .map_err(|e| e.to_string())?
         .join("certs");
