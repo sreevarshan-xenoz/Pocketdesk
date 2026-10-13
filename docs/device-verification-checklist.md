@@ -642,7 +642,11 @@ Checked on 2026-10-13 with the Galaxy A71 and the Windows host on the same Wi-Fi
 - with `lan_discovery = false` the server logs that it is not announced;
 - a server killed without a goodbye left a cached record, which the phone did not list ("announced but does not answer").
 
-- [ ] Tap a found, unpaired computer: the PIN sheet opens, and pairing saves it.
+- the confirmation dialog shows on tapping a found computer; Connect opened a session at the found address with the PIN sheet (an address not paired before), and nothing was saved;
+- an announcement that lists an unreachable address first is listed at its reachable one.
+
+- [ ] Pair from a found computer: after the PIN it appears under Saved.
+- [ ] Android 17: the local-network permission prompt at first launch; LAN sessions and discovery work after Allow, and time out after Deny.
 - [ ] Two computers on the network, both listed.
 - [ ] Android 13 or older (the resolveService path).
 - [ ] The Linux host is found (Avahi may also be announcing on the same host).

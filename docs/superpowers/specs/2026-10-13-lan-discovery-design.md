@@ -22,6 +22,12 @@ To reach a computer the first time, a phone user scans the desktop app's QR code
 - **A ghost on the network.** mdns-sd sends no goodbye when its daemon just stops, and keeps PTR/TXT records for 75 minutes. With no server running, the phone still "found" the computer from its mDNS cache. Two fixes:
   - the server now withdraws its announcement (an mDNS goodbye) on a graceful stop;
   - the phone lists a found computer only once a TCP connect to its control port succeeds within 1.5 s. Each found record costs the server one connection that opens and closes, which appears as one "Incoming v1 TCP" log line.
+- **After review (fresh reviewer: 0 Critical, 5 Important):**
+  - **L3 and L5 changed.** A tap on a found computer now opens a confirmation. It names the computer as what it "calls itself", warns to type only a PIN the user's own Pocketdesk is showing, and offers the QR scan instead. The card says the computer is unverified until paired. A found computer is saved only once pairing succeeds, at the end of the list. A spoofed announcement could otherwise collect the one-time PIN and become the auto-connect host.
+  - **L2 changed.** A saved computer is recognised by its address only. The TXT `id` is unauthenticated, and matching on it hid a moved computer behind its old card, which was then marked online. The id is still announced for later use.
+  - **L4 extended.** Up to four announced addresses are probed, LAN first, and the computer is listed at the first that answers. A failed probe retries at 0.5, 1.5 and 4 s.
+  - The server announces only after its control listener is bound.
+  - **Android 17.** The app targets SDK 37, so every LAN connection needs `ACCESS_LOCAL_NETWORK`. It is now requested at launch on API 37+. This was app-wide, not F6's, and the Android 17 path is untested here.
 - **Server test.** The server-side test is a live, opt-in test of the goodbye, not of the config check, which is a plain `if` at startup. It needs multicast.
 - **Not yet handled:** a computer that crashes while Home is open stays listed until Home is reopened, or until the phone's cache expires.
 
