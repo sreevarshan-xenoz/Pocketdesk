@@ -340,9 +340,9 @@ impl StreamingServer {
                     if let Some(guard) = &_telemetry_guard {
                         guard.record(SessionOutcome::Rejected);
                     }
-                    connection.close(0u32, b"pairing required");
+                    connection.close(0u32, b"session refused");
                     return Err(anyhow::anyhow!(
-                        "pairing required: this device must pair over the control channel first"
+                        "session refused: the device is not paired, or the owner did not approve it"
                     ));
                 }
             },
