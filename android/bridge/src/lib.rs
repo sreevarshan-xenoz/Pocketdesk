@@ -218,6 +218,15 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeIsStream
     api::is_streaming_active() as jboolean
 }
 
+/// Why the streaming connection closed; empty while it is open.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStreamClosedReason(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    to_jstring(&mut env, api::stream_closed_reason().unwrap_or_default())
+}
+
 /// Last measured streaming RTT in microseconds.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetStreamingRtt(

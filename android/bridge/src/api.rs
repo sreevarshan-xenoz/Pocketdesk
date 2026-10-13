@@ -21,8 +21,8 @@ use linux_link_core::streaming::{SAMPLE_DECODE, SAMPLE_RENDER, report_samples};
 use crate::{
     AUDIO_RX, CONNECTION_STATE, CONTROL_PEER, CONTROL_WRITER, DECODE_SAMPLES,
     MAX_AUDIO_PACKETS_PER_RECEIVE, MAX_FRAMES_PER_RECEIVE, RATE_SNAPSHOTS, RENDER_SAMPLES,
-    RTT_HISTORY, STREAMING_ACTIVE, STREAMING_BYTE_COUNT, STREAMING_FRAME_COUNT, STREAMING_HANDLE,
-    StreamingHandle, VIDEO_RX, update_streaming_rtt,
+    RTT_HISTORY, STREAM_CLOSED_REASON, STREAMING_ACTIVE, STREAMING_BYTE_COUNT,
+    STREAMING_FRAME_COUNT, STREAMING_HANDLE, StreamingHandle, VIDEO_RX, update_streaming_rtt,
 };
 
 /// Initialize the Linux Link backend
@@ -1326,6 +1326,7 @@ async fn install_streaming(
     // this session replaced would be quoted as if it were measured here.
     RTT_HISTORY.lock().unwrap().clear();
     RATE_SNAPSHOTS.lock().unwrap().clear();
+    *STREAM_CLOSED_REASON.lock().unwrap() = None;
 
     let cancel = client.cancel_token();
     let client_cancel = cancel.clone();
@@ -1346,6 +1347,11 @@ async fn install_streaming(
                     break;
                 }
                 _ = interval.tick() => {
+                    if let Some(reason) = rtt_connection.close_reason() {
+                        tracing::info!("Streaming connection closed: {reason}");
+                        *STREAM_CLOSED_REASON.lock().unwrap() = Some(reason);
+                        break;
+                    }
                     let stats = rtt_connection.stats();
                     let rtt_us = stats.rtt.as_micros() as u64;
                     update_streaming_rtt(rtt_us);
@@ -1637,7 +1643,14 @@ pub async fn stop_streaming() -> Result<(), String> {
     let _ = stop_v2().await;
 
     STREAMING_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    *STREAM_CLOSED_REASON.lock().unwrap() = None;
     Ok(())
+}
+
+/// Why the live session's connection closed, or `None` while it is open (or
+/// no session ever ran).
+pub fn stream_closed_reason() -> Option<String> {
+    STREAM_CLOSED_REASON.lock().unwrap().clone()
 }
 
 /// Check if streaming is active using an atomic flag (no lock contention).

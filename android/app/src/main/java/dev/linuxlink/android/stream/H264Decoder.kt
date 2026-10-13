@@ -60,6 +60,9 @@ class H264Decoder(
      */
     var onStalled: (() -> Unit)? = null
 
+    /** Fired from the decode thread when the desktop closes the stream, with its reason. */
+    var onClosed: ((String) -> Unit)? = null
+
     private var codec: MediaCodec? = null
     private var configW = width
     private var configH = height
@@ -166,6 +169,13 @@ class H264Decoder(
             while (running.get()) {
                 val frames = RustCore.receiveFrames(timeoutMs = POLL_TIMEOUT_MS)
                 if (frames.isEmpty()) {
+                    // The desktop closed the stream (refused the session,
+                    // ended it): say so now rather than after the watchdog.
+                    RustCore.streamClosedReason?.let { reason ->
+                        Log.w(TAG, "stream closed by the desktop: $reason")
+                        onClosed?.invoke(reason)
+                        break
+                    }
                     val silentFor = SystemClock.elapsedRealtime() - lastFrameAt
                     if (silentFor > if (sawFrame) STALL_MS else FIRST_FRAME_MS) {
                         Log.w(TAG, "video feed silent for $silentFor ms — link dropped")

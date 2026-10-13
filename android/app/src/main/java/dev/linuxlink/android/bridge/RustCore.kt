@@ -34,6 +34,7 @@ object RustCore {
     private external fun nativePollIncomingPackets(): String
     private external fun nativeSessionStatus(): String
     private external fun nativeIsStreamingActive(): Boolean
+    private external fun nativeStreamClosedReason(): String
     private external fun nativeGetStreamingRtt(): Int
     private external fun nativeGetStreamingStats(): String
     private external fun nativeRecordSample(kind: Int, micros: Long)
@@ -205,6 +206,10 @@ object RustCore {
 
     val isStreamingActive: Boolean
         get() = nativeIsStreamingActive()
+
+    /** Why the desktop closed the stream (e.g. "session refused"); null while open. */
+    val streamClosedReason: String?
+        get() = nativeStreamClosedReason().ifEmpty { null }
 
     /** This session's streaming RTT in microseconds: a median of recent polls, see [StreamingStats.rttUs]. */
     val streamingRttUs: Int

@@ -104,6 +104,13 @@ pub(crate) static SESSION_IS_WAN: AtomicBool = AtomicBool::new(false);
 pub(crate) static STREAMING_FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static STREAMING_BYTE_COUNT: AtomicU64 = AtomicU64::new(0);
 
+/// Why the live session's connection ended, once it has (the desktop's own
+/// reason when it refused or ended the session). The decode loop polls it so
+/// a closed stream reaches the UI at once instead of after a frame-gap
+/// watchdog. Cleared when a session starts or stops.
+pub(crate) static STREAM_CLOSED_REASON: std::sync::Mutex<Option<String>> =
+    std::sync::Mutex::new(None);
+
 /// Global handle for the active streaming client session.
 pub(crate) static STREAMING_HANDLE: LazyLock<TokioMutex<Option<StreamingHandle>>> =
     LazyLock::new(|| TokioMutex::new(None));
