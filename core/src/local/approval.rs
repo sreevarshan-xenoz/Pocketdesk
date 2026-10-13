@@ -113,7 +113,9 @@ pub fn take_answer(state_dir: &Path, id: &str, now_unix: u64) -> Option<Verdict>
     let raw = std::fs::read_to_string(&path).ok()?;
     let _ = std::fs::remove_file(&path);
     let answer: Answer = serde_json::from_str(&raw).ok()?;
-    let fresh = now_unix.saturating_sub(answer.answered_unix) <= APPROVAL_TIMEOUT_SECS;
+    // Same machine, same clock: an answer from the future is not one.
+    let fresh = answer.answered_unix <= now_unix
+        && now_unix - answer.answered_unix <= APPROVAL_TIMEOUT_SECS;
     (answer.id == id && fresh).then_some(answer.verdict)
 }
 
@@ -191,6 +193,8 @@ mod tests {
         let dir = temp_dir("stale");
         answer(&dir, "a", Verdict::AllowOnce, 100).unwrap();
         assert_eq!(take_answer(&dir, "a", 131), None, "older than the limit");
+        answer(&dir, "a", Verdict::AllowOnce, 500).unwrap();
+        assert_eq!(take_answer(&dir, "a", 100), None, "stamped in the future");
         // A file under one id that says it answers another.
         answer(&dir, "b", Verdict::AllowOnce, 100).unwrap();
         std::fs::rename(
