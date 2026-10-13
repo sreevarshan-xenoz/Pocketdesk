@@ -59,7 +59,7 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - Pairing with the owner's PIN (never a guest grant), unpair and the app's Remove clear keys.
     - The store takes the trust store's lock file. An unreadable store refuses everyone with its own notification, and Remove or re-pairing sets it aside.
   - **Fresh review (1 Critical, 3 Important), all fixed, one commit each:** WAN first-use binding (lockout, or an internet squatter binding first), binding before the gate (a denied impostor kept its key), a guest PIN clearing the owner phone's keys, no recovery or lock on the store.
-  - **Device-verified on the A71 (before the review fixes):** bind, WAN match, refusal on a tampered fingerprint, recovery.
+  - **Device-verified on the A71, again after the review fixes:** a keyless WAN session binds nothing; the first LAN session binds the certificate and registers the iroh key; WAN then matches; a tampered stored key is refused (logged, the phone's refusal card); restoring recovers. An iroh session over a direct LAN path shows the phone's LAN address: read the gate's `Device keys decided` debug line, not the address.
   - **Still open (phase B):** the TCP control channel (clipboard, files, notifications, pairing) still trusts the announced id and is unencrypted.
 - 2026-10-13: **Repo review fixes (branch `chore/repo-review`) and the screen-switch crash (branch `fix/monitor-switch`, PR #19).**
   - **License.** The root `LICENSE` was garbled text, not a license. It is now `LICENSE-MIT` plus `LICENSE-APACHE` (canonical), matching `MIT OR Apache-2.0`. Every crate declares the license, and the README has a License section.

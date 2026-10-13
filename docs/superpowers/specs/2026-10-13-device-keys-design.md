@@ -53,6 +53,13 @@ The pieces for a real proof already exist:
   - a WAN session passed on the bound iroh key;
   - a changed stored fingerprint was refused, with the reason logged, the phone's "session turned down" card, and the desk notified;
   - restoring the binding brought the stream back.
+- **Device-verified again after the review fixes (A71 ↔ Windows):**
+  - with no keys stored, a WAN session streamed and bound nothing;
+  - the first LAN session bound the certificate and registered the iroh key, only after the gate allowed it;
+  - a WAN session then matched;
+  - a changed stored iroh key was refused, the log naming the presented and the bound key, and the phone showing its "turned the session down" card;
+  - restoring the store brought the stream back.
+- **Reading the logs.** An iroh session that rides a direct LAN path reports the phone's LAN address, so it can look like a LAN session. The gate's `Device keys decided` debug line (`RUST_LOG=linux_link_server::plugins::pair=debug`) names the kind of key it proved.
 
 ## Out of scope
 
