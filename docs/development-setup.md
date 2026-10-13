@@ -1,4 +1,4 @@
-# Linux Link Development Setup
+# Pocketdesk Development Setup
 
 This guide covers the Rust workspace and the native Android (Kotlin) client.
 

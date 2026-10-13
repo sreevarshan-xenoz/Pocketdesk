@@ -3508,7 +3508,7 @@ checksum = "d4a5ff6bcca6c4867b1c4fd4ef63e4db7436ef363e0ad7531d1558856bae64f4"
 
 [[package]]
 name = "linux-link-android-bridge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "jni 0.21.1",
@@ -3525,7 +3525,7 @@ dependencies = [
 
 [[package]]
 name = "linux-link-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "ashpd",
@@ -3568,7 +3568,7 @@ dependencies = [
 
 [[package]]
 name = "linux-link-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5103,7 +5103,7 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "linux-link-core",

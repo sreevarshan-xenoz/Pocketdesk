@@ -457,7 +457,7 @@ impl Capabilities {
             self.protocol.kde_identity_version
         ));
         out.push_str(&format!(
-            "| Linux Link extension `llVersion` | `{}` | every `kdeconnect.linuxlink.*` packet (R4 D4) |\n",
+            "| Pocketdesk extension `llVersion` | `{}` | every `kdeconnect.linuxlink.*` packet (R4 D4) |\n",
             self.protocol.kde_extension_version
         ));
         out.push_str(&format!(

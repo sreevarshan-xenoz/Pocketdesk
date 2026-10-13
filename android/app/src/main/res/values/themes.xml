@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Window theme only; Compose paints the app (LinuxLinkTheme). Kept in
+    <!-- Window theme only; Compose paints the app (PocketdeskTheme). Kept in
          step with values-night so the pre-draw window never flashes the
          wrong lightness. -->
-    <style name="Theme.LinuxLink" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Pocketdesk" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

@@ -62,7 +62,7 @@ private val DarkScheme = darkColorScheme(
  * when enabled. Reading [Prefs.observedVersion] re-composes on pref changes.
  */
 @Composable
-fun LinuxLinkTheme(content: @Composable () -> Unit) {
+fun PocketdeskTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
     Prefs.observedVersion()
 

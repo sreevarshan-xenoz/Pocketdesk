@@ -2,10 +2,10 @@
 
 **Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale or a hole-punched iroh path. No port forwarding required.**
 
-> Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). The name changed when Windows support landed. The `linux-link` command, its config/state paths and the wire protocol keep the old name, so existing installs and pairings carry over.
+> Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). The name changed when Windows support landed. The `linux-link` command, its config/state paths, the wire protocol and the Android package id (`dev.linuxlink.android`) keep the old name on purpose, so existing installs, pairings and app updates carry over.
 
 [![Rust](https://img.shields.io/badge/Rust-Pure%20Rust-orange?logo=rust)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue)](LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
 [![CI](https://github.com/sreevarshan-xenoz/Pocketdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/sreevarshan-xenoz/Pocketdesk/actions)
 [![Issues](https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk)](https://github.com/sreevarshan-xenoz/Pocketdesk/issues)
 [![Status](https://img.shields.io/badge/status-beta%20-%20feature%20complete%2C%20gates%20green-orange)](#roadmap)
@@ -81,7 +81,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **CLI** with start/stop/status/list/watch/connect/pair/capabilities commands
 - **systemd service** for auto-start on boot
 - **TOML configuration** with video quality presets (low/balanced/high)
-- **52 passing tests** across core and server crates
+- **Tests** across core, server, the desktop app and the Android bridge, plus JVM tests for the app; CI runs them on Linux and Windows for every pull request
 
 ## Installation
 
@@ -92,7 +92,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash
 
 # Install specific version
-curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- v0.1.0
+curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- v0.2.0
 
 # Non-interactive install (no prompts)
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --yes
@@ -358,6 +358,10 @@ cd android
 
 Requires JDK 17+ and Android SDK/NDK.
 
+## Security
+
+Read [SECURITY.md](SECURITY.md) before using Pocketdesk on a network you do not control. In short: the video stream is encrypted (TLS 1.3 over QUIC), but the control channel and file transfers are not, and a paired phone is identified by an id it announces rather than a key it proves. On anything but a trusted home network, run it over Tailscale (or another VPN) and keep "Ask before each session" on. Report vulnerabilities privately through GitHub's **Security → Report a vulnerability**.
+
 ## Architecture
 
 ```
@@ -465,23 +469,34 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 All 6 development phases and the RustDesk research round (R4) have landed in code: the native
 Kotlin client, the Rust↔JNI bridge, MediaCodec decode, and the streaming/transport/security stack
-are in `main`, and `v0.1.0` is tagged and pushed.
+are in `main`. Releases are built by [the release workflow](.github/workflows/release.yml): a `vX.Y.Z` tag (or `vX.Y.Z-beta.N` for a pre-release) that matches the workspace and Android versions publishes Linux, Windows and Android files with a `SHA256SUMS`.
 
 What is *not* done is verification and hardening, so treat this as beta rather than a release:
 
 - [x] `cargo fmt --all -- --check`, `clippy -D warnings` across every `core` feature profile and
       `cargo test --workspace` all pass from a clean checkout of `main` (verified 2026-09-24).
-      [CI](.github/workflows/ci.yml) now runs that matrix plus the Android build, and `cargo audit`
-      can fail a run — but no workflow has executed yet, because the branch has to be pushed first.
+      [CI](.github/workflows/ci.yml) runs that matrix, a Windows job and the Android build on every
+      pull request, and `cargo audit` can fail a run.
 - [ ] On-device verification for the large majority of shipped Android features (see
       [docs/device-verification-checklist.md](docs/device-verification-checklist.md))
 - [ ] Cross-network (cellular ↔ LAN) WAN test over iroh; the Tailscale path is device-verified
-- [ ] A GitHub Release with artifacts (`v0.1.0` is a tag only)
+- [ ] The first published release (`v0.1.0` was a tag only; the workflow is ready, and a `v0.2.0-beta.1` tag cuts the first one)
 
 The full backlog, with every item's verified status against this tree, is
 [docs/roadmap-3000.md](docs/roadmap-3000.md); how that backlog gets executed is
 [docs/roadmap-execution-plan.md](docs/roadmap-execution-plan.md). See [plan.md](plan.md) for the
 development journal.
+
+## License
+
+Pocketdesk is licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as
+above, without any additional terms or conditions.
 
 ---
 

@@ -1,4 +1,4 @@
-# Linux Link Configuration
+# Pocketdesk server configuration (read by the `linux-link` command)
 # Copy this file to ~/.config/linux-link/config.toml and customize.
 
 # Control port (KDE Connect compatible)

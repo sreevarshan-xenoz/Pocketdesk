@@ -1,4 +1,6 @@
-# Linux Link - Comprehensive Development Plan
+# Pocketdesk (formerly Linux Link) - Development Plan and Journal
+
+> **Historical document.** This is the project's original plan and journal, kept for its record; it predates the rename to Pocketdesk and the Windows host. The current state of every feature is in `AGENTS.md` (Current Status) and the README.
 
 > **A Rust-based remote desktop solution combining low-latency Wayland screen streaming (Sunshine-level) + full KDE Connect feature set + Tailscale-native connectivity**
 
