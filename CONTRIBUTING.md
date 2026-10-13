@@ -69,7 +69,7 @@ XDG_CONFIG_HOME=$PWD/devconfig cargo run --bin linux-link -- start
 
 - **Bug reports:** Use the bug report template
 - **Feature requests:** Use the feature request template
-- **Security issues:** Email directly (do not open a public issue)
+- **Security issues:** report them privately, as [SECURITY.md](SECURITY.md) describes — never in a public issue
 
 ## Architecture Overview
 
