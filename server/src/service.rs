@@ -76,17 +76,18 @@ pub async fn run(config: Config) -> Result<()> {
         .map(|i| (i.device_name.clone(), i.device_id.clone()))
         .unwrap_or_else(|| ("linux-link-host".to_string(), String::new()));
 
-    if config.lan_discovery {
-        lan_discovery.register_service(
+    let announcement = if config.lan_discovery {
+        Some(lan_discovery.register_service(
             &host_name,
             &host_id,
             config.control_port,
             config.streaming_port,
             local_ips,
-        )?;
+        )?)
     } else {
         tracing::info!("Not announced on the local network (lan_discovery = false)");
-    }
+        None
+    };
 
     let discovery = DiscoveryService::new(tailscale.clone());
     let mut discovery_rx = discovery.subscribe();
@@ -453,6 +454,10 @@ pub async fn run(config: Config) -> Result<()> {
             }
             Some(reason) = shutdown.recv() => {
                 tracing::info!("Shutdown requested ({reason})");
+                // Tell phones on the network this computer is going away.
+                if let Some(announcement) = announcement {
+                    let _ = tokio::task::spawn_blocking(move || announcement.withdraw()).await;
+                }
                 break;
             }
             event = discovery_rx.recv() => {

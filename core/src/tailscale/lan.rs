@@ -39,6 +39,31 @@ pub enum LanEvent {
     },
 }
 
+/// This server's live mDNS announcement. Withdraw it on the way out: the
+/// daemon sends no goodbye when it just stops, and phones then keep listing
+/// a computer that is gone until their cached record expires (over an hour
+/// for the PTR record).
+pub struct Announcement {
+    daemon: ServiceDaemon,
+    fullname: String,
+}
+
+impl Announcement {
+    /// Send the goodbye and wait (briefly) for it to go out.
+    pub fn withdraw(self) {
+        match self.daemon.unregister(&self.fullname) {
+            Ok(done) => {
+                if done.recv_timeout(Duration::from_secs(1)).is_err() {
+                    warn!("mDNS goodbye for {} not confirmed", self.fullname);
+                } else {
+                    info!("Withdrew mDNS announcement {}", self.fullname);
+                }
+            }
+            Err(e) => warn!("mDNS goodbye for {} failed: {e}", self.fullname),
+        }
+    }
+}
+
 /// LAN peer discovery service using mDNS.
 pub struct LanDiscoveryService {
     tx: broadcast::Sender<LanEvent>,
@@ -64,7 +89,7 @@ impl LanDiscoveryService {
         port: u16,
         stream_port: u16,
         ips: Vec<String>,
-    ) -> Result<()> {
+    ) -> Result<Announcement> {
         let span = tracing::info_span!("mdns_register", service = %name, %port);
         let _enter = span.enter();
 
@@ -83,6 +108,7 @@ impl LanDiscoveryService {
             Some(properties),
         )
         .context("Failed to create service info")?;
+        let fullname = service_info.get_fullname().to_string();
 
         self.daemon.register(service_info).map_err(|e| {
             let err = format!("{e}");
@@ -98,7 +124,10 @@ impl LanDiscoveryService {
             "Registered mDNS service: {} on port {}",
             instance_name, port
         );
-        Ok(())
+        Ok(Announcement {
+            daemon: self.daemon.clone(),
+            fullname,
+        })
     }
 
     /// Subscribe to LAN discovery events.
@@ -349,6 +378,45 @@ mod tests {
     fn test_check_mdns_available_runs() {
         // Should not panic. May return false in CI without mDNS.
         let _ = check_mdns_available();
+    }
+
+    /// Needs multicast on a real interface, so opt-in.
+    #[tokio::test]
+    #[ignore = "needs multicast on a real network interface"]
+    async fn a_withdrawn_announcement_says_goodbye() {
+        let name = format!("ll-test-{}", std::process::id());
+        let ips = get_local_ips().await;
+        assert!(!ips.is_empty(), "no local address to announce");
+        let host = LanDiscoveryService::new().unwrap();
+        let browser = ServiceDaemon::new().unwrap();
+        let events = browser.browse(SERVICE_TYPE).unwrap();
+        let announcement = host
+            .register_service(&name, "id", 47160, 47161, ips)
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match events.recv_timeout(Duration::from_millis(500)) {
+                Ok(ServiceEvent::ServiceResolved(info))
+                    if info.get_fullname().starts_with(&name) =>
+                {
+                    announcement.withdraw();
+                    break;
+                }
+                _ if std::time::Instant::now() > deadline => panic!("never seen"),
+                _ => {}
+            }
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match events.recv_timeout(Duration::from_millis(500)) {
+                Ok(ServiceEvent::ServiceRemoved(_, fullname)) if fullname.starts_with(&name) => {
+                    break;
+                }
+                _ if std::time::Instant::now() > deadline => panic!("no goodbye seen"),
+                _ => {}
+            }
+        }
+        let _ = browser.shutdown();
     }
 
     #[test]
