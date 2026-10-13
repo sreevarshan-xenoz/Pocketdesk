@@ -55,6 +55,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_LOCK_DESKTOP = "dev.linuxlink.android.LOCK_DESKTOP"
 
         private const val STATE_PAIR_LINK = "pair_link"
+        /** API level of Android 17, where local network protection starts. */
+        private const val ANDROID_17 = 37
         private const val STATE_PAIR_SCANNED = "pair_link_scanned"
     }
 
@@ -90,6 +92,13 @@ class MainActivity : ComponentActivity() {
             // Denied is non-fatal: the service still runs, just without a visible notification.
         }
 
+    private val requestLocalNetworkPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) {
+                android.util.Log.w("MainActivity", "local network access denied: LAN connections will time out")
+            }
+        }
+
     /** Float the live session over other apps; aspect follows the video. */
     fun enterSessionPictureInPicture(videoWidth: Int, videoHeight: Int) {
         if (videoWidth <= 0 || videoHeight <= 0) {
@@ -121,6 +130,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         RustCore.start(filesDir)
         if (savedInstanceState == null) {
+            maybeRequestLocalNetworkPermission()
             pairLink.value = takePairUri(intent)
             pairLinkScanned.value = false
         } else {
@@ -281,6 +291,20 @@ class MainActivity : ComponentActivity() {
                     runCatching { RustCore.desktopPrivacy(address, controlPort, "status", lock = true) }
                 }.start()
             }
+        }
+    }
+
+    /**
+     * Android 17 blocks the local network (every LAN connection, and finding
+     * computers on it) for apps that target it, until the user allows it.
+     * Asked at launch, since nothing works on a LAN without it.
+     */
+    private fun maybeRequestLocalNetworkPermission() {
+        if (Build.VERSION.SDK_INT >= ANDROID_17 &&
+            checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestLocalNetworkPermission.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
         }
     }
 
