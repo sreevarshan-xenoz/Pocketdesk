@@ -163,6 +163,15 @@ impl Connection for IrohConnection {
         self.inner
             .close(iroh::endpoint::VarInt::from_u32(error_code), reason);
     }
+
+    fn close_reason(&self) -> Option<String> {
+        Some(match self.inner.close_reason()? {
+            iroh::endpoint::ConnectionError::ApplicationClosed(close) => {
+                String::from_utf8_lossy(&close.reason).into_owned()
+            }
+            other => other.to_string(),
+        })
+    }
 }
 
 /// Client-side WAN dial (R1 stage 3).

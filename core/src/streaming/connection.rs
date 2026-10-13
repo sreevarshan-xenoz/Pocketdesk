@@ -122,6 +122,12 @@ pub trait Connection: Send + Sync {
     /// and reason (e.g. rejecting an unpaired session), instead of letting
     /// the peer sit on a live-but-dead connection until the idle timeout.
     fn close(&self, error_code: u32, reason: &[u8]);
+    /// Why the connection ended, once it has: the peer's own reason when it
+    /// closed deliberately (as the server does when it refuses a session),
+    /// otherwise the transport's error. `None` while it is open.
+    fn close_reason(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Shared handle passed around pipeline tasks (quinn::Connection itself is
@@ -219,6 +225,15 @@ impl Connection for QuinnConnection {
 
     fn close(&self, error_code: u32, reason: &[u8]) {
         self.inner.close(error_code.into(), reason);
+    }
+
+    fn close_reason(&self) -> Option<String> {
+        Some(match self.inner.close_reason()? {
+            quinn::ConnectionError::ApplicationClosed(close) => {
+                String::from_utf8_lossy(&close.reason).into_owned()
+            }
+            other => other.to_string(),
+        })
     }
 }
 
@@ -365,6 +380,8 @@ mod tests {
         .0;
         assert_eq!(payload, b"hello stream");
 
+        assert_eq!(client.close_reason(), None, "open");
+
         // After the connection is closed, accept_uni reports Closed rather
         // than hanging — this is what the receive loops break on.
         client_q.inner().close(quinn::VarInt::from_u32(0), b"bye");
@@ -374,5 +391,7 @@ mod tests {
             Ok(Err(other)) => panic!("expected Closed from accept_uni, got {other}"),
             Err(_) => panic!("accept_uni hung after close"),
         }
+        // The side that was closed learns the closer's own words.
+        assert_eq!(server.close_reason().as_deref(), Some("bye"));
     }
 }
