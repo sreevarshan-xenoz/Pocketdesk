@@ -164,6 +164,13 @@ pub trait DeviceSender: Send + Sync {
     /// Get a unique ID for this specific connection session.
     fn connection_id(&self) -> &str;
 
+    /// The address the transport saw this peer connect from, when it has
+    /// one. Never derived from [`DeviceSender::device_id`]: on some channels
+    /// the peer chooses that string itself.
+    fn peer_addr(&self) -> Option<std::net::SocketAddr> {
+        None
+    }
+
     async fn send_packet(&self, packet: &NetworkPacket) -> Result<()>;
 }
 
@@ -172,6 +179,7 @@ pub struct TcpDeviceSender<W> {
     writer: Arc<Mutex<W>>,
     device_id: String,
     connection_id: String,
+    peer: Option<std::net::SocketAddr>,
 }
 
 impl<W> Clone for TcpDeviceSender<W> {
@@ -180,6 +188,7 @@ impl<W> Clone for TcpDeviceSender<W> {
             writer: self.writer.clone(),
             device_id: self.device_id.clone(),
             connection_id: self.connection_id.clone(),
+            peer: self.peer,
         }
     }
 }
@@ -193,6 +202,7 @@ where
             writer: Arc::new(Mutex::new(writer)),
             device_id,
             connection_id: uuid::Uuid::new_v4().to_string(),
+            peer: None,
         }
     }
 
@@ -201,7 +211,14 @@ where
             writer,
             device_id,
             connection_id: uuid::Uuid::new_v4().to_string(),
+            peer: None,
         }
+    }
+
+    /// The socket's peer address, as the transport reports it.
+    pub fn with_peer(mut self, peer: Option<std::net::SocketAddr>) -> Self {
+        self.peer = peer;
+        self
     }
 
     pub fn with_connection_id(mut self, id: String) -> Self {
@@ -221,6 +238,10 @@ where
 
     fn connection_id(&self) -> &str {
         &self.connection_id
+    }
+
+    fn peer_addr(&self) -> Option<std::net::SocketAddr> {
+        self.peer
     }
 
     async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {

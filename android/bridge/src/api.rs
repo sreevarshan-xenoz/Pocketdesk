@@ -313,7 +313,7 @@ pub async fn wake_via_relay(
         .await
         .map_err(|e| format!("Connection failed: {e}"))?;
     let (_reader, writer) = tokio::io::split(stream);
-    let sender = TcpDeviceSender::new(writer, address);
+    let sender = TcpDeviceSender::new(writer, address.clone());
     let request = NetworkPacket::new("kdeconnect.linuxlink.wol").with_body(serde_json::json!({
         "mac": mac,
         "broadcast": broadcast,
@@ -1025,6 +1025,7 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .await
         .map_err(|e| format!("Failed to bind port: {}", e))?;
     let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let key = uuid::Uuid::new_v4().simple().to_string();
     let conn_mgr = ConnectionManager::new(Duration::from_secs(10));
     let identity = client_identity();
     let stream = conn_mgr
@@ -1032,21 +1033,36 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .await
         .map_err(|e| e.to_string())?;
     let (_reader, writer) = tokio::io::split(stream);
-    let sender = TcpDeviceSender::new(writer, address);
+    let sender = TcpDeviceSender::new(writer, address.clone());
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(serde_json::json!({
             "filename": filename,
-            "payloadTransferInfo": { "port": transfer_port },
+            "payloadTransferInfo": { "port": transfer_port, "key": key },
         }))
         .with_payload_size(file_size as u64);
     sender
         .send_packet(&request)
         .await
         .map_err(|e| format!("Failed to send share request: {}", e))?;
-    let (mut client_stream, _) = tokio::time::timeout(Duration::from_secs(30), listener.accept())
-        .await
-        .map_err(|_| "Timeout waiting for file receiver".to_string())?
-        .map_err(|e| format!("Failed to accept connection: {}", e))?;
+    // The desktop connects back for the bytes. The listener is on every
+    // interface, so the bytes go only to a connection that first presents
+    // the key from the request, which only the desktop has seen; anything
+    // else that connects is dropped. (Its source address is no test: a
+    // desktop with several addresses may connect back from another one.)
+    let mut client_stream = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let (mut stream, peer) = listener
+                .accept()
+                .await
+                .map_err(|e| format!("Failed to accept connection: {}", e))?;
+            if presents_key(&mut stream, &key).await {
+                return Ok::<_, String>(stream);
+            }
+            tracing::warn!("File transfer: dropped a connection from {peer} without the key");
+        }
+    })
+    .await
+    .map_err(|_| "Timeout waiting for file receiver".to_string())??;
     let mut file = tokio::fs::File::open(&file_path)
         .await
         .map_err(|e| format!("Failed to open file: {}", e))?;
@@ -1070,8 +1086,23 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .flush()
         .await
         .map_err(|e: std::io::Error| e.to_string())?;
+    if sent != file_size {
+        return Err(format!(
+            "The file changed while it was sent ({sent} of {file_size} bytes)"
+        ));
+    }
     tracing::info!("File sent: {} ({} bytes)", filename, sent);
     Ok(())
+}
+
+/// Whether a connection opens with `key` and a newline, read within 5 s.
+async fn presents_key<R: tokio::io::AsyncRead + Unpin>(stream: &mut R, key: &str) -> bool {
+    let mut presented = vec![0u8; key.len() + 1];
+    matches!(
+        tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut presented)).await,
+        Ok(Ok(_))
+    ) && presented[..key.len()] == *key.as_bytes()
+        && presented[key.len()] == b'\n'
 }
 
 /// List files in a remote directory using the file browse protocol.
@@ -2996,5 +3027,27 @@ mod receive_tests {
         assert_eq!(waiting.await.unwrap(), vec![(41, vec![9])]);
         *crate::AUDIO_RX.lock().await = None;
         *crate::VIDEO_RX.lock().await = None;
+    }
+}
+
+#[cfg(test)]
+mod send_file_tests {
+    use super::presents_key;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn only_a_connection_with_the_key_gets_the_file() {
+        let key = "0123456789abcdef0123456789abcdef";
+        for (sent, ok) in [
+            (format!("{key}\n"), true),
+            (format!("{key}x"), false),
+            ("ffffffffffffffffffffffffffffffff\n".to_string(), false),
+            ("short".to_string(), false),
+        ] {
+            let (mut desktop, mut phone) = tokio::io::duplex(64);
+            desktop.write_all(sent.as_bytes()).await.unwrap();
+            drop(desktop);
+            assert_eq!(presents_key(&mut phone, key).await, ok, "{sent:?}");
+        }
     }
 }
