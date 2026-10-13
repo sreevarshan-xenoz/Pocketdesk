@@ -291,10 +291,13 @@ pub async fn run(config: Config) -> Result<()> {
         streaming_config.clone(),
         input_tx.clone(),
         Arc::clone(&cert_manager),
-        config.pairing_required,
-        config.allow_hevc,
-        config.capture_backend,
-        config.mic_relay_device.clone(),
+        iroh_endpoint::WanSettings {
+            pairing_required: config.pairing_required,
+            allow_hevc: config.allow_hevc,
+            capture_backend: config.capture_backend,
+            mic_relay_device: config.mic_relay_device.clone(),
+            relay_urls: config.relay_urls.clone(),
+        },
     )
     .await
     {

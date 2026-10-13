@@ -29,6 +29,7 @@ pub mod offers;
 pub mod platform;
 pub mod plugins;
 pub mod privacy;
+pub mod relay;
 pub mod service;
 pub mod session_telemetry;
 pub mod state;
