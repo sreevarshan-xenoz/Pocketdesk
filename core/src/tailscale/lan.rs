@@ -1,7 +1,7 @@
 //! LAN peer discovery via mDNS (multicast DNS)
 //!
-//! Discovers Linux Link servers on the local network without Tailscale.
-//! Uses `mdns-sd` to discover `_linux-link._tcp.local` services and resolves
+//! Discovers Pocketdesk servers on the local network without Tailscale.
+//! Uses `mdns-sd` to discover `_pocketdesk._tcp.local` services and resolves
 //! their IP addresses and ports.
 //!
 //! This is a fallback for environments where Tailscale isn't running or
@@ -17,8 +17,8 @@ use tracing::{debug, error, info, warn};
 
 use super::PeerInfo;
 
-/// mDNS service type used by Linux Link servers.
-const SERVICE_TYPE: &str = "_linux-link._tcp.local.";
+/// mDNS service type used by Pocketdesk servers.
+const SERVICE_TYPE: &str = "_pocketdesk._tcp.local.";
 
 /// Scan timeout: how long to wait for mDNS responses during a single scan.
 const SCAN_TIMEOUT: Duration = Duration::from_secs(3);
@@ -196,7 +196,7 @@ impl LanDiscoveryService {
         .await
     }
 
-    /// Perform a single scan of the LAN for Linux Link servers.
+    /// Perform a single scan of the LAN for Pocketdesk servers.
     pub async fn scan_lan_peers(&self) -> Result<Vec<PeerInfo>> {
         let receiver = self
             .daemon
@@ -298,7 +298,7 @@ pub fn check_mdns_available() -> bool {
     }
 }
 
-/// Scan the LAN once for Linux Link servers.
+/// Scan the LAN once for Pocketdesk servers.
 ///
 /// Returns all discovered peers within the default timeout (3 seconds).
 /// Useful for quick "list available peers" commands.

@@ -21,7 +21,7 @@ pub fn fingerprint_hex(fingerprint: [u8; 32]) -> String {
 }
 
 /// Record the iroh endpoint the server is reachable at — the body of the
-/// `kdeconnect.linuxlink.endpoint` packet it pushes to paired phones — so a
+/// `kdeconnect.pocketdesk.endpoint` packet it pushes to paired phones — so a
 /// pairing code can carry it without the app linking iroh.
 pub fn write_endpoint(state_dir: &Path, body: &serde_json::Value) -> io::Result<()> {
     std::fs::create_dir_all(state_dir)?;

@@ -3,15 +3,15 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info, warn};
 
-use crate::error::{LinuxLinkError, Result};
+use crate::error::{PocketdeskError, Result};
 
-pub const ALPN_V2: &[u8] = b"linux-link-v2";
+pub const ALPN_V2: &[u8] = b"pocketdesk-v2";
 
 /// The v2 handshake version range this build speaks.
 ///
 /// Both ends construct their [`IdentityPacketV2`] from these two numbers, so a
 /// bump is one edit here rather than one per side that can silently disagree
-/// (roadmap Phase 0 item 4). `linux-link capabilities` reports them.
+/// (roadmap Phase 0 item 4). `pocketdesk capabilities` reports them.
 pub const V2_MIN_VERSION: u32 = 2;
 pub const V2_MAX_VERSION: u32 = 2;
 
@@ -74,7 +74,7 @@ where
             read_framed_json_internal::<R, IdentityPacketV2>(recv),
         )
         .await
-        .map_err(|_| LinuxLinkError::Timeout {
+        .map_err(|_| PocketdeskError::Timeout {
             operation: "handshake",
             duration_ms: 5000,
         })?
@@ -88,7 +88,7 @@ where
     if peer_identity.max_version < local_identity.min_version
         || peer_identity.min_version > local_identity.max_version
     {
-        let err = LinuxLinkError::ProtocolError {
+        let err = PocketdeskError::ProtocolError {
             detail: format!(
                 "Incompatible versions: local [{}-{}], peer [{}-{}]",
                 local_identity.min_version,
@@ -131,7 +131,7 @@ where
     let len = u32::from_be_bytes(len_buf) as usize;
 
     if len > MAX_CONTROL_PAYLOAD_SIZE {
-        return Err(LinuxLinkError::ProtocolError {
+        return Err(PocketdeskError::ProtocolError {
             detail: format!(
                 "Payload size {} exceeds limit {}",
                 len, MAX_CONTROL_PAYLOAD_SIZE
@@ -215,7 +215,7 @@ mod tests {
         let res = tokio::try_join!(client_handshake, server_handshake);
 
         match res {
-            Err(LinuxLinkError::ProtocolError { detail }) => {
+            Err(PocketdeskError::ProtocolError { detail }) => {
                 assert!(detail.contains("Incompatible versions"));
             }
             _ => panic!("Expected version mismatch error, got {:?}", res),
@@ -271,7 +271,7 @@ mod tests {
         let result = read_framed_json_internal::<_, IdentityPacketV2>(&mut server).await;
 
         match result {
-            Err(LinuxLinkError::ProtocolError { detail }) => {
+            Err(PocketdeskError::ProtocolError { detail }) => {
                 assert!(detail.contains("exceeds limit"));
             }
             _ => panic!(
@@ -295,7 +295,7 @@ mod tests {
         let result = read_framed_json_internal::<_, IdentityPacketV2>(&mut server).await;
 
         match result {
-            Err(LinuxLinkError::Serialization { format, .. }) => {
+            Err(PocketdeskError::Serialization { format, .. }) => {
                 assert_eq!(format, "JSON");
             }
             _ => panic!(
@@ -326,7 +326,7 @@ mod tests {
             perform_v2_handshake_internal(&mut client_send, &mut client_recv, &client_id).await;
 
         match result {
-            Err(LinuxLinkError::Timeout { operation, .. }) => {
+            Err(PocketdeskError::Timeout { operation, .. }) => {
                 assert_eq!(operation, "handshake");
             }
             _ => panic!("Expected timeout error, got {:?}", result),

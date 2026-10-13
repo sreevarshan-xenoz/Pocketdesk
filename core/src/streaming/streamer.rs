@@ -388,8 +388,8 @@ impl StreamingServer {
         }
 
         // R4 D2: publish the accepted session in the live registry so the
-        // desktop can list it (`linux-link status`) or end it
-        // (`linux-link kick`); the handle deregisters when this function
+        // desktop can list it (`pocketdesk status`) or end it
+        // (`pocketdesk kick`); the handle deregisters when this function
         // exits by any path.
         let _live_session = super::sessions::register(device_id.clone(), &connection);
 

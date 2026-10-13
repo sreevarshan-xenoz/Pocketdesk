@@ -39,7 +39,7 @@ pub fn acquire(window_title: &str) -> Option<Instance> {
 #[cfg(unix)]
 pub fn acquire(_window_title: &str) -> Option<Instance> {
     use std::os::unix::net::{UnixListener, UnixStream};
-    let dir = linux_link_core::local::paths::state_dir().ok()?;
+    let dir = pocketdesk_core::local::paths::state_dir().ok()?;
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join("pocketdesk.sock");
     match UnixListener::bind(&path) {

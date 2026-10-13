@@ -20,8 +20,8 @@ use evdev::{
 // Off Linux the wire's evdev codes still need names; the core shim has the
 // same `KeyCode::KEY_*.0` shape as the evdev crate.
 #[cfg(not(target_os = "linux"))]
-use linux_link_core::input::evdev_codes::KeyCode;
-use linux_link_core::streaming::input_packet::InputPacket;
+use pocketdesk_core::input::evdev_codes::KeyCode;
+use pocketdesk_core::streaming::input_packet::InputPacket;
 #[cfg(target_os = "linux")]
 use std::path::Path;
 use std::sync::Mutex;
@@ -847,8 +847,8 @@ enum UinputDevice {
 impl UinputDevice {
     fn label(self) -> &'static str {
         match self {
-            UinputDevice::Main => "Linux Link Virtual Input",
-            UinputDevice::Abs => "Linux Link Virtual Abs Pointer",
+            UinputDevice::Main => "Pocketdesk Virtual Input",
+            UinputDevice::Abs => "Pocketdesk Virtual Abs Pointer",
         }
     }
 }
@@ -889,7 +889,7 @@ fn build_main_device() -> Result<VirtualDevice> {
         .context("Failed to set up virtual keys")?
         .with_relative_axes(&rel)
         .context("Failed to set up relative axes")?
-        .name(b"Linux Link Virtual Input")
+        .name(b"Pocketdesk Virtual Input")
         .build()
         .context(
             "Failed to build virtual device. \
@@ -931,7 +931,7 @@ fn build_abs_device() -> Result<VirtualDevice> {
         .context("Failed to set up ABS_X")?
         .with_absolute_axis(&abs_y)
         .context("Failed to set up ABS_Y")?
-        .name(b"Linux Link Virtual Abs Pointer")
+        .name(b"Pocketdesk Virtual Abs Pointer")
         .build()
         .context("Failed to build uinput absolute pointer device")?;
 
@@ -1221,7 +1221,7 @@ mod tests {
     /// a phone without /dev/uinput access degrades the same way as one with it.
     #[test]
     fn every_key_the_phone_can_send_has_a_mapping() {
-        for code in linux_link_core::input::keys::phone_emittable_codes() {
+        for code in pocketdesk_core::input::keys::phone_emittable_codes() {
             assert!(
                 keycode_to_enigo(code).is_some(),
                 "evdev code {code} is emittable but unmapped"
@@ -1294,7 +1294,7 @@ mod tests {
     #[test]
     fn the_portable_key_code_names_agree_with_the_evdev_crate() {
         use std::str::FromStr;
-        for &(name, code) in linux_link_core::input::evdev_codes::ALL_NAMED {
+        for &(name, code) in pocketdesk_core::input::evdev_codes::ALL_NAMED {
             let real =
                 KeyCode::from_str(name).unwrap_or_else(|_| panic!("evdev has no key named {name}"));
             assert_eq!(real.0, code.0, "{name}");

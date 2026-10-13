@@ -59,7 +59,7 @@ Tailscale demotes to a candidate address source.
   out of the box; a `connect` attempt times out at 10 s. For latency work,
   review `QuicTransportConfig` explicitly — including congestion controller,
   which is set per-connection via `ConnectOptions::with_transport_config`
-  (R2#5's `LINUX_LINK_CC` env would move there under iroh).
+  (R2#5's `POCKETDESK_CC` env would move there under iroh).
 - Always `Endpoint::close().await` — dropping a live endpoint aborts its
   socket task with an ERROR log.
 - `iroh::endpoint::Connection` is `Clone` and handle-like; cheap to share

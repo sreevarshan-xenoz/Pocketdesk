@@ -1,12 +1,12 @@
 //! Client session API ported from the Flutter-era bridge (git 4bf3c73).
 //! Plain polling functions; JNI wrappers live in lib.rs.
 
-use linux_link_core::protocol::connection::ConnectionManager;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDeviceSender};
-use linux_link_core::protocol::v2::{ALPN_V2, IdentityPacketV2, perform_v2_handshake};
-use linux_link_core::streaming::QuinnConnection;
-use linux_link_core::streaming::StreamingClient;
-use linux_link_core::tailscale::TailscaleClient;
+use pocketdesk_core::protocol::connection::ConnectionManager;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDeviceSender};
+use pocketdesk_core::protocol::v2::{ALPN_V2, IdentityPacketV2, perform_v2_handshake};
+use pocketdesk_core::streaming::QuinnConnection;
+use pocketdesk_core::streaming::StreamingClient;
+use pocketdesk_core::tailscale::TailscaleClient;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -15,8 +15,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 
-use linux_link_core::streaming::InputPacket;
-use linux_link_core::streaming::{SAMPLE_DECODE, SAMPLE_RENDER, report_samples};
+use pocketdesk_core::streaming::InputPacket;
+use pocketdesk_core::streaming::{SAMPLE_DECODE, SAMPLE_RENDER, report_samples};
 
 use crate::{
     AUDIO_RX, CONNECTION_STATE, CONTROL_PEER, CONTROL_WRITER, DECODE_SAMPLES,
@@ -25,7 +25,7 @@ use crate::{
     STREAMING_FRAME_COUNT, STREAMING_HANDLE, StreamingHandle, VIDEO_RX, update_streaming_rtt,
 };
 
-/// Initialize the Linux Link backend
+/// Initialize the Pocketdesk backend
 pub fn init_app() {
     crate::init_app_impl();
 }
@@ -33,7 +33,7 @@ pub fn init_app() {
 /// Set the persistent data directory for certs and state.
 /// Must be called before `connect_streaming` for cert persistence.
 pub fn set_data_dir(path: String) {
-    let cert_path = PathBuf::from(&path).join("linux-link").join("certs");
+    let cert_path = PathBuf::from(&path).join("pocketdesk").join("certs");
     let mut guard = crate::CERT_DIR.lock().unwrap();
     *guard = Some(cert_path);
     tracing::info!("Data directory set to: {path}");
@@ -77,9 +77,9 @@ pub(crate) fn pin_peer_certificate_in(
         *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
             .map_err(|_| "the fingerprint is not hex".to_string())?;
     }
-    let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
+    let manager = pocketdesk_core::streaming::transport::CertManager::load_or_create(cert_dir)
         .map_err(|e| e.to_string())?;
-    let label = linux_link_core::streaming::transport::peer_label_for_ip(ip);
+    let label = pocketdesk_core::streaming::transport::peer_label_for_ip(ip);
     // Anything can open a pairing link, so one must never replace the
     // certificate this phone already trusts for an address: a different
     // fingerprint there is a different computer. Removing the computer in
@@ -119,10 +119,10 @@ pub(crate) fn forget_peer_certificate_in(
 ) -> Result<bool, String> {
     // The label the control channel pinned it under: its IP, or the name a
     // computer saved by name was dialed with.
-    let Some(label) = linux_link_core::streaming::transport::peer_label_for_address(address) else {
+    let Some(label) = pocketdesk_core::streaming::transport::peer_label_for_address(address) else {
         return Ok(false);
     };
-    let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
+    let manager = pocketdesk_core::streaming::transport::CertManager::load_or_create(cert_dir)
         .map_err(|e| e.to_string())?;
     manager.remove_peer(&label).map_err(|e| e.to_string())
 }
@@ -137,18 +137,18 @@ pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-use linux_link_core::error::LinuxLinkError;
+use pocketdesk_core::error::PocketdeskError;
 
 /// Structured error information for the client.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LinuxLinkErrorDto {
+pub struct PocketdeskErrorDto {
     pub code: u32,
     pub message: String,
     pub is_retryable: bool,
 }
 
-impl From<LinuxLinkError> for LinuxLinkErrorDto {
-    fn from(e: LinuxLinkError) -> Self {
+impl From<PocketdeskError> for PocketdeskErrorDto {
+    fn from(e: PocketdeskError) -> Self {
         Self {
             code: e.code() as u32,
             message: e.to_string(),
@@ -173,7 +173,7 @@ pub enum SessionStatus {
         next_retry_ms: u64,
     },
     /// A fatal error occurred that cannot be automatically recovered.
-    Error(LinuxLinkErrorDto),
+    Error(PocketdeskErrorDto),
 }
 
 /// Connection state enumeration for the client (legacy control channel state).
@@ -183,7 +183,7 @@ pub enum ConnectionState {
     Connected,
     Disconnected,
     Connecting,
-    Error(LinuxLinkErrorDto),
+    Error(PocketdeskErrorDto),
 }
 
 /// Peer information for display in the client.
@@ -235,7 +235,7 @@ pub struct MonitorInfoDto {
 }
 
 /// Get or create the persistent device identity for this Android client.
-pub(crate) fn client_identity() -> linux_link_core::protocol::kdeconnect::DeviceIdentity {
+pub(crate) fn client_identity() -> pocketdesk_core::protocol::kdeconnect::DeviceIdentity {
     let mut guard = crate::DEVICE_IDENTITY.lock().unwrap();
     if let Some(id) = &*guard {
         return id.clone();
@@ -252,9 +252,9 @@ pub(crate) fn client_identity() -> linux_link_core::protocol::kdeconnect::Device
     {
         let trimmed = data.trim().to_string();
         if !trimmed.is_empty() {
-            let identity = linux_link_core::protocol::kdeconnect::DeviceIdentity::new(
+            let identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
                 &trimmed,
-                "Linux Link Android Client",
+                "Pocketdesk Android Client",
             );
             *guard = Some(identity.clone());
             return identity;
@@ -267,9 +267,9 @@ pub(crate) fn client_identity() -> linux_link_core::protocol::kdeconnect::Device
         let _ = std::fs::write(&path, &new_id);
     }
 
-    let identity = linux_link_core::protocol::kdeconnect::DeviceIdentity::new(
+    let identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
         &new_id,
-        "Linux Link Android Client",
+        "Pocketdesk Android Client",
     );
     *guard = Some(identity.clone());
     identity
@@ -277,7 +277,7 @@ pub(crate) fn client_identity() -> linux_link_core::protocol::kdeconnect::Device
 
 /// Send Wake-on-LAN magic packet to wake a sleeping peer.
 pub fn send_wol(mac_address: String, broadcast_addr: String) -> Result<(), String> {
-    linux_link_core::tailscale::wol::send_wol(&mac_address, &broadcast_addr)
+    pocketdesk_core::tailscale::wol::send_wol(&mac_address, &broadcast_addr)
         .map_err(|e| e.to_string())
 }
 
@@ -301,7 +301,7 @@ pub async fn wake_via_relay(
         .map_err(|e| format!("Connection failed: {e}"))?;
     let (_reader, writer) = tokio::io::split(stream);
     let sender = TcpDeviceSender::new(writer, address.clone());
-    let request = NetworkPacket::new("kdeconnect.linuxlink.wol").with_body(serde_json::json!({
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.wol").with_body(serde_json::json!({
         "mac": mac,
         "broadcast": broadcast,
     }));
@@ -338,7 +338,7 @@ pub async fn get_peers() -> Result<Vec<PeerInfoDto>, String> {
 
     // 2. Get LAN peers via mDNS
     crate::MDNS_ACTIVE.store(true, Ordering::Release);
-    let lan_peers = linux_link_core::tailscale::lan::scan_lan_once().await;
+    let lan_peers = pocketdesk_core::tailscale::lan::scan_lan_once().await;
     crate::MDNS_ACTIVE.store(false, Ordering::Release);
     for lp in lan_peers {
         // Avoid duplicates if a peer is found on both Tailscale and LAN
@@ -368,7 +368,7 @@ pub(crate) fn control_manager(timeout: Duration) -> Result<ConnectionManager, St
         .unwrap()
         .clone()
         .ok_or_else(|| "no data directory configured".to_string())?;
-    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(&dir)
+    let certs = pocketdesk_core::streaming::transport::CertManager::load_or_create(&dir)
         .map_err(|e| format!("This phone's certificate: {e}"))?;
     Ok(ConnectionManager::new(
         timeout,
@@ -411,7 +411,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
         session = %session_id,
         peer = %address,
         transport = "tcp",
-        proto = %linux_link_core::protocol::PROTOCOL_VERSION
+        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
     );
 
     use tracing::Instrument;
@@ -446,9 +446,9 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                             if !trimmed.is_empty() {
                                 // Cache the server's iroh WAN identity as it is
                                 // announced, independent of Kotlin's poll loop.
-                                if trimmed.contains("linuxlink.endpoint")
+                                if trimmed.contains("pocketdesk.endpoint")
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
-                                    && pkt.packet_type == "kdeconnect.linuxlink.endpoint"
+                                    && pkt.packet_type == "kdeconnect.pocketdesk.endpoint"
                                 {
                                     let mut id = crate::WAN_IDENTITY.lock().await;
                                     *id = Some(pkt.body.to_string());
@@ -472,7 +472,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                 if trimmed.contains("kdeconnect.pair")
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
                                     && (pkt.packet_type == "kdeconnect.pair"
-                                        || pkt.packet_type == "kdeconnect.linuxlink.pair")
+                                        || pkt.packet_type == "kdeconnect.pocketdesk.pair")
                                 {
                                     let mut slot = crate::PAIR_RESULT.lock().await;
                                     *slot = Some(pkt.body.clone());
@@ -552,7 +552,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
             }
             Err(e) => {
                 tracing::error!(error = %e, "Connection failed");
-                Ok(ConnectionState::Error(LinuxLinkErrorDto::from(e)))
+                Ok(ConnectionState::Error(PocketdeskErrorDto::from(e)))
             }
         }
     }
@@ -596,7 +596,7 @@ pub async fn poll_incoming_packets() -> Vec<String> {
     packets
 }
 
-/// The server's cached iroh WAN identity (raw `kdeconnect.linuxlink.endpoint`
+/// The server's cached iroh WAN identity (raw `kdeconnect.pocketdesk.endpoint`
 /// body JSON), or `None` if the connected desktop has not announced one.
 pub async fn get_wan_identity() -> Option<String> {
     crate::WAN_IDENTITY.lock().await.clone()
@@ -662,15 +662,15 @@ fn remember_paired_server(server_id: &str) {
 /// then receives no pushes - HUD, notifications, WAN identity - until the
 /// app reconnects. Returns
 /// `"pinSent"` when the desktop displayed a PIN to read off it, `"pinReady"`
-/// when `linux-link pair` already put a PIN up for manual entry, or `"error"`.
+/// when `pocketdesk pair` already put a PIN up for manual entry, or `"error"`.
 pub async fn request_pair_pin(address: String, port: u16) -> Result<String, String> {
-    let request = NetworkPacket::new("kdeconnect.linuxlink.pair")
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.pair")
         .with_body(serde_json::json!({ "requestPin": true }));
     let body = query_peer(
         &address,
         port,
         &request,
-        "kdeconnect.linuxlink.pair",
+        "kdeconnect.pocketdesk.pair",
         Duration::from_secs(5),
     )
     .await
@@ -682,7 +682,7 @@ pub async fn request_pair_pin(address: String, port: u16) -> Result<String, Stri
         .to_string())
 }
 
-/// Submit an externally-entered pairing PIN (`linux-link pair` flow, or the
+/// Submit an externally-entered pairing PIN (`pocketdesk pair` flow, or the
 /// code the desktop just displayed). Blocks briefly for the desktop's
 /// decision; `Some(desktopDeviceId)` = paired (persisted phone-side).
 pub async fn pair_with_pin(
@@ -718,7 +718,7 @@ pub async fn pair_with_pin(
 }
 
 /// Wait up to `wait_secs` for the desktop's pairing outcome (latched by the
-/// control reader from pushed `kdeconnect.pair` / `kdeconnect.linuxlink.pair`
+/// control reader from pushed `kdeconnect.pair` / `kdeconnect.pocketdesk.pair`
 /// packets) and consume it. `Some(serverId)` = paired (the desktop id is
 /// persisted to the phone-side trust list); `None` = still unpaired.
 pub async fn check_pair_result(wait_secs: u64) -> Option<String> {
@@ -774,7 +774,7 @@ pub async fn send_notification_reply(
     id: String,
     text: String,
 ) -> Result<(), String> {
-    let request = NetworkPacket::new("kdeconnect.linuxlink.notification_reply")
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.notification_reply")
         .with_body(serde_json::json!({ "id": id, "reply": text, "passive": false }));
     push_packet(&address, port, &request).await
 }
@@ -1243,11 +1243,11 @@ pub(crate) fn transfer_acceptor_in(
     dir: &std::path::Path,
     address: &str,
 ) -> Result<tokio_rustls::TlsAcceptor, String> {
-    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(dir)
+    let certs = pocketdesk_core::streaming::transport::CertManager::load_or_create(dir)
         .map_err(|e| format!("This phone's certificate: {e}"))?;
     // The pin's label is the one the control channel used for `address`:
     // its IP, or the name of a computer saved by name.
-    let label = linux_link_core::streaming::transport::peer_label_for_address(address)
+    let label = pocketdesk_core::streaming::transport::peer_label_for_address(address)
         .ok_or_else(|| format!("{address} is not an address"))?;
     let pinned = certs
         .known_peers()
@@ -1310,7 +1310,7 @@ async fn check_transfer_connection(
         .await
         .map_err(|_| "no TLS handshake")?
         .map_err(|_| "not the computer")?;
-    if stream.get_ref().1.alpn_protocol() != Some(linux_link_core::protocol::ALPN_TRANSFER) {
+    if stream.get_ref().1.alpn_protocol() != Some(pocketdesk_core::protocol::ALPN_TRANSFER) {
         return Err("not a file transfer");
     }
     if !presents_key(&mut stream, key).await {
@@ -1366,8 +1366,8 @@ pub async fn connect_streaming(
 ) -> Result<(), String> {
     // If the control port (1716) is passed, automatically switch to the default streaming port (4716).
     // In a real KDE Connect implementation, this would be negotiated or discovery-based.
-    let streaming_port = if port == linux_link_core::DEFAULT_CONTROL_PORT {
-        linux_link_core::DEFAULT_STREAMING_PORT
+    let streaming_port = if port == pocketdesk_core::DEFAULT_CONTROL_PORT {
+        pocketdesk_core::DEFAULT_STREAMING_PORT
     } else {
         port
     };
@@ -1407,13 +1407,13 @@ pub async fn connect_streaming(
         let guard = crate::CERT_DIR.lock().unwrap();
         match guard.as_ref() {
             Some(dir) => std::sync::Arc::new(
-                linux_link_core::streaming::transport::CertManager::load_or_create(dir)
+                pocketdesk_core::streaming::transport::CertManager::load_or_create(dir)
                     .map_err(|e| e.to_string())?,
             ),
             None => {
                 tracing::warn!("No data dir configured — cert trust is ephemeral");
                 std::sync::Arc::new(
-                    linux_link_core::streaming::transport::CertManager::new()
+                    pocketdesk_core::streaming::transport::CertManager::new()
                         .map_err(|e| e.to_string())?,
                 )
             }
@@ -1447,8 +1447,8 @@ pub async fn connect_streaming(
     )
     .await
     .map_err(|e| {
-        let err_dto = LinuxLinkErrorDto::from(linux_link_core::error::LinuxLinkError::from(e));
-        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(LinuxLinkErrorDto {
+        let err_dto = PocketdeskErrorDto::from(pocketdesk_core::error::PocketdeskError::from(e));
+        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(PocketdeskErrorDto {
             code: err_dto.code,
             message: err_dto.message.clone(),
             is_retryable: err_dto.is_retryable,
@@ -1471,7 +1471,7 @@ pub async fn connect_streaming(
 
 /// Request remote screen streaming over the iroh WAN path.
 ///
-/// `identity_json` is the cached `kdeconnect.linuxlink.endpoint` body learned
+/// `identity_json` is the cached `kdeconnect.pocketdesk.endpoint` body learned
 /// from the desktop over the trusted control channel (fields: endpointId,
 /// relayUrls, directAddrs). Relays are used for hole punching only — there is
 /// no pkarr discovery, so the identity must come from a prior LAN session.
@@ -1525,7 +1525,7 @@ pub async fn connect_streaming_wan(
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
     tracing::info!("Dialing {address} over iroh WAN (endpoint {endpoint_id})");
 
-    let dial = linux_link_core::streaming::IrohDial::dial(
+    let dial = pocketdesk_core::streaming::IrohDial::dial(
         endpoint_id,
         &relay_urls,
         &direct_addrs,
@@ -1536,8 +1536,8 @@ pub async fn connect_streaming_wan(
     )
     .await
     .map_err(|e| {
-        let err_dto = LinuxLinkErrorDto::from(linux_link_core::error::LinuxLinkError::from(e));
-        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(LinuxLinkErrorDto {
+        let err_dto = PocketdeskErrorDto::from(pocketdesk_core::error::PocketdeskError::from(e));
+        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(PocketdeskErrorDto {
             code: err_dto.code,
             message: err_dto.message.clone(),
             is_retryable: err_dto.is_retryable,
@@ -1571,13 +1571,13 @@ pub async fn connect_streaming_wan(
 /// the desktop can bind its WAN sessions to it (device keys). `None` without
 /// a data directory, or if the key cannot be read; the dial then uses a
 /// throwaway key, which a desktop that has bound one refuses.
-fn device_wan_key() -> Option<linux_link_core::streaming::IrohSecretKey> {
+fn device_wan_key() -> Option<pocketdesk_core::streaming::IrohSecretKey> {
     // One caller at a time: two first calls at once (a LAN connect and a WAN
     // dial) must not each make a key.
     static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = crate::CERT_DIR.lock().ok()?.clone()?;
-    match linux_link_core::streaming::load_or_create_device_key(&dir.join("iroh_device.key")) {
+    match pocketdesk_core::streaming::load_or_create_device_key(&dir.join("iroh_device.key")) {
         Ok(key) => Some(key),
         Err(e) => {
             tracing::warn!("WAN key unavailable: {e}");
@@ -1609,12 +1609,12 @@ async fn teardown_streaming_handle(handle: StreamingHandle) {
 async fn install_streaming(
     generation: u64,
     mut client: StreamingClient,
-    packet_rx: tokio::sync::mpsc::Receiver<linux_link_core::streaming::EncodedPacket>,
-    audio_rx: tokio::sync::mpsc::Receiver<linux_link_core::streaming::AudioPacket>,
+    packet_rx: tokio::sync::mpsc::Receiver<pocketdesk_core::streaming::EncodedPacket>,
+    audio_rx: tokio::sync::mpsc::Receiver<pocketdesk_core::streaming::AudioPacket>,
     address: String,
     port: u16,
     monitor_index: Option<u32>,
-    wan_dial: Option<linux_link_core::streaming::IrohDial>,
+    wan_dial: Option<pocketdesk_core::streaming::IrohDial>,
 ) -> Result<(), String> {
     // A stop or a newer connect came while this one was connecting: it must
     // not take over. Checked again under the handle lock below, where it
@@ -1778,13 +1778,13 @@ pub async fn connect_v2(address: String, port: u16) -> Result<(), String> {
         let guard = crate::CERT_DIR.lock().unwrap();
         match guard.as_ref() {
             Some(dir) => std::sync::Arc::new(
-                linux_link_core::streaming::transport::CertManager::load_or_create(dir)
+                pocketdesk_core::streaming::transport::CertManager::load_or_create(dir)
                     .map_err(|e| e.to_string())?,
             ),
             None => {
                 tracing::warn!("No data dir configured — cert trust is ephemeral");
                 std::sync::Arc::new(
-                    linux_link_core::streaming::transport::CertManager::new()
+                    pocketdesk_core::streaming::transport::CertManager::new()
                         .map_err(|e| e.to_string())?,
                 )
             }
@@ -1828,8 +1828,8 @@ pub async fn connect_v2(address: String, port: u16) -> Result<(), String> {
         let local_identity = IdentityPacketV2 {
             device_id: identity.device_id,
             device_name: identity.device_name,
-            min_version: linux_link_core::protocol::v2::V2_MIN_VERSION,
-            max_version: linux_link_core::protocol::v2::V2_MAX_VERSION,
+            min_version: pocketdesk_core::protocol::v2::V2_MIN_VERSION,
+            max_version: pocketdesk_core::protocol::v2::V2_MAX_VERSION,
             capabilities: vec!["streaming".to_string(), "input".to_string()],
         };
 
@@ -1854,7 +1854,7 @@ pub async fn connect_v2(address: String, port: u16) -> Result<(), String> {
                     break;
                 }
                 let len = u32::from_be_bytes(len_buf) as usize;
-                if len > linux_link_core::protocol::v2::MAX_CONTROL_PAYLOAD_SIZE {
+                if len > pocketdesk_core::protocol::v2::MAX_CONTROL_PAYLOAD_SIZE {
                     tracing::error!("v2 payload exceeds limit: {}", len);
                     break;
                 }
@@ -1890,7 +1890,7 @@ pub async fn connect_v2(address: String, port: u16) -> Result<(), String> {
         Err(e) => {
             let err_msg: String = e;
             let err_dto =
-                LinuxLinkErrorDto::from(linux_link_core::error::LinuxLinkError::ProtocolError {
+                PocketdeskErrorDto::from(pocketdesk_core::error::PocketdeskError::ProtocolError {
                     detail: err_msg.clone(),
                 });
             *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(err_dto);
@@ -2035,12 +2035,12 @@ pub fn get_streaming_stats() -> StreamingStatsDto {
         // R4 E3: real compositor-true estimate (capture→send age measured
         // on the desktop clock + one network leg), EWMA'd in the core
         // client. 0 until the session's first video packet.
-        e2e_latency_ms: linux_link_core::streaming::client::e2e_estimate_ms(),
+        e2e_latency_ms: pocketdesk_core::streaming::client::e2e_estimate_ms(),
         // Frames whose sequence number never arrived, counted by the client's
         // receive loop — see `missed_video_frames` in core. This replaced a
         // literal 0 that asserted a healthy link the phone had never
         // measured (roadmap 2051/2052).
-        frame_drops: linux_link_core::streaming::client::missed_video_frames(),
+        frame_drops: pocketdesk_core::streaming::client::missed_video_frames(),
         link_state: match crate::LINK_STATE.load(Ordering::Relaxed) {
             1 => "lan",
             2 => "wan_direct",
@@ -2084,12 +2084,12 @@ pub fn forget_trusted_peer(label: String) -> bool {
 /// F2: Multi-monitor support — returns an error if the desktop does not answer.
 pub async fn get_monitors(address: String, port: u16) -> Result<Vec<MonitorInfoDto>, String> {
     let request =
-        NetworkPacket::new("kdeconnect.linuxlink.monitors").with_body(serde_json::json!({}));
+        NetworkPacket::new("kdeconnect.pocketdesk.monitors").with_body(serde_json::json!({}));
     let body = query_peer(
         &address,
         port,
         &request,
-        "kdeconnect.linuxlink.monitors",
+        "kdeconnect.pocketdesk.monitors",
         Duration::from_secs(5),
     )
     .await?;
@@ -2141,19 +2141,19 @@ pub async fn desktop_privacy(
     action: String,
     lock: bool,
 ) -> Result<serde_json::Value, String> {
-    let request = NetworkPacket::new("kdeconnect.linuxlink.privacy")
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.privacy")
         .with_body(serde_json::json!({ "action": action, "lock": lock }));
     query_peer(
         &address,
         port,
         &request,
-        "kdeconnect.linuxlink.privacy",
+        "kdeconnect.pocketdesk.privacy",
         Duration::from_secs(5),
     )
     .await
 }
 
-/// Desktop audio control (Tier-3 #16): send a `kdeconnect.linuxlink.audio`
+/// Desktop audio control (Tier-3 #16): send a `kdeconnect.pocketdesk.audio`
 /// request built from `body_json` (e.g. `{"action":"setVolume","volume":45}`)
 /// and wait for the plugin's reply, matched by packet type within the
 /// timeout. Same shared-control-connection shape as [desktop_privacy].
@@ -2164,12 +2164,12 @@ pub async fn audio_control(
 ) -> Result<serde_json::Value, String> {
     let body: serde_json::Value =
         serde_json::from_str(&body_json).map_err(|e| format!("Bad request JSON: {e}"))?;
-    let request = NetworkPacket::new("kdeconnect.linuxlink.audio").with_body(body);
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.audio").with_body(body);
     query_peer(
         &address,
         port,
         &request,
-        "kdeconnect.linuxlink.audio",
+        "kdeconnect.pocketdesk.audio",
         Duration::from_secs(8),
     )
     .await
@@ -2225,12 +2225,12 @@ pub async fn get_windows(
     port: u16,
 ) -> Result<(Vec<WindowInfoDto>, String, Option<[i32; 4]>), String> {
     let request =
-        NetworkPacket::new("kdeconnect.linuxlink.windows").with_body(serde_json::json!({}));
+        NetworkPacket::new("kdeconnect.pocketdesk.windows").with_body(serde_json::json!({}));
     let body = query_peer(
         &address,
         port,
         &request,
-        "kdeconnect.linuxlink.windows",
+        "kdeconnect.pocketdesk.windows",
         Duration::from_secs(5),
     )
     .await?;
@@ -2265,7 +2265,7 @@ pub async fn get_windows(
 /// Execute a power management command on the remote server.
 /// Supported actions: "sleep", "shutdown", "restart", "hibernate".
 pub async fn send_power_command(address: String, port: u16, action: String) -> Result<(), String> {
-    let packet = NetworkPacket::new("kdeconnect.linuxlink.power")
+    let packet = NetworkPacket::new("kdeconnect.pocketdesk.power")
         .with_body(serde_json::json!({ "action": action }));
     push_packet(&address, port, &packet).await?;
     tracing::info!("Power command sent: {action}");
@@ -2278,13 +2278,13 @@ pub async fn execute_remote_command(
     port: u16,
     command: String,
 ) -> Result<String, String> {
-    let request = NetworkPacket::new("kdeconnect.linuxlink.exec")
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.exec")
         .with_body(serde_json::json!({ "command": command }));
     let body = query_peer(
         &address,
         port,
         &request,
-        "kdeconnect.linuxlink.exec",
+        "kdeconnect.pocketdesk.exec",
         Duration::from_secs(10),
     )
     .await?;
@@ -2740,7 +2740,7 @@ pub async fn send_quality_preset(preset: u8) -> Result<(), String> {
 // cross-compile here (audiopus_sys builds libopus via CMake, which fights
 // cargo-ndk) — so the bridge only frames and forwards finished packets.
 // Format both ends agree on: 48 kHz mono, 20 ms frames.
-async fn stream_connection() -> Result<linux_link_core::streaming::SharedConnection, String> {
+async fn stream_connection() -> Result<pocketdesk_core::streaming::SharedConnection, String> {
     (*STREAMING_HANDLE)
         .lock()
         .await
@@ -2750,7 +2750,7 @@ async fn stream_connection() -> Result<linux_link_core::streaming::SharedConnect
 }
 
 async fn send_mic_frame(
-    conn: &linux_link_core::streaming::SharedConnection,
+    conn: &pocketdesk_core::streaming::SharedConnection,
     enabled: bool,
     opus: Vec<u8>,
 ) -> Result<(), String> {
@@ -3108,7 +3108,7 @@ fn android_to_evdev_keycode(android_keycode: i32) -> u16 {
 
 #[cfg(test)]
 mod transfer_pin_tests {
-    use linux_link_core::streaming::transport::{CertManager, peer_label_for_address};
+    use pocketdesk_core::streaming::transport::{CertManager, peer_label_for_address};
 
     fn dir(name: &str) -> std::path::PathBuf {
         let dir =
@@ -3209,7 +3209,7 @@ mod keymap_tests {
         emitted.dedup();
         assert_eq!(
             emitted,
-            linux_link_core::input::keys::phone_emittable_codes()
+            pocketdesk_core::input::keys::phone_emittable_codes()
         );
     }
 
@@ -3229,7 +3229,7 @@ mod keymap_tests {
 #[cfg(test)]
 mod pin_certificate_tests {
     use super::{forget_peer_certificate_in, pin_peer_certificate_in};
-    use linux_link_core::streaming::transport::{CertManager, peer_label_for_ip};
+    use pocketdesk_core::streaming::transport::{CertManager, peer_label_for_ip};
 
     #[test]
     fn a_pairing_code_fingerprint_is_pinned_under_the_verifiers_label() {
@@ -3303,8 +3303,8 @@ mod receive_tests {
     static SESSION_STATICS: std::sync::LazyLock<tokio::sync::Mutex<()>> =
         std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
 
-    fn frame(sequence: u64) -> linux_link_core::streaming::EncodedPacket {
-        linux_link_core::streaming::EncodedPacket {
+    fn frame(sequence: u64) -> pocketdesk_core::streaming::EncodedPacket {
+        pocketdesk_core::streaming::EncodedPacket {
             data: vec![0, 0, 0, 1],
             is_keyframe: true,
             timestamp: std::time::Instant::now(),
@@ -3367,7 +3367,7 @@ mod receive_tests {
         );
 
         audio_tx
-            .send(linux_link_core::streaming::AudioPacket {
+            .send(pocketdesk_core::streaming::AudioPacket {
                 data: vec![9],
                 sequence: 41,
                 timestamp: std::time::Instant::now(),

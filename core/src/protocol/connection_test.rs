@@ -1,7 +1,7 @@
 //! Tests for the TCP handshake protocol in `connection.rs`.
 //!
-//! These tests run a mock server that simulates the Linux Link server's
-//! handshake protocol (TLS, then `LINUX_LINK_HELLO → LINUX_LINK_OK →
+//! These tests run a mock server that simulates the Pocketdesk server's
+//! handshake protocol (TLS, then `POCKETDESK_HELLO → POCKETDESK_OK →
 //! identity packet`).
 
 #[cfg(test)]
@@ -110,7 +110,7 @@ mod tests {
             // Send wrong response
             let writer = reader.into_inner();
             writer
-                .write_all(b"LINUX_LINK_BAD 1\n")
+                .write_all(b"POCKETDESK_BAD 1\n")
                 .await
                 .expect("mock server write bad response");
             writer.flush().await.ok();

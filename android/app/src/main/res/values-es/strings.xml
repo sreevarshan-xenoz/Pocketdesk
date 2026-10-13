@@ -201,7 +201,7 @@
     <!-- Pairing sheet -->
     <string name="pair_title">Emparejar con %1$s</string>
     <string name="pair_read_pin">Lee el PIN en la pantalla del escritorio…</string>
-    <string name="pair_pin_ready">Hay un PIN mostrando en el escritorio (`linux-link pair`) — escríbelo abajo.</string>
+    <string name="pair_pin_ready">Hay un PIN mostrando en el escritorio (`pocketdesk pair`) — escríbelo abajo.</string>
     <string name="pair_error">Error: %1$s</string>
     <string name="pair_no_pin">El escritorio no confirmó un PIN.</string>
     <string name="pair_wrong_pin">PIN incorrecto o caducado.</string>

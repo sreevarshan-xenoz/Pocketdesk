@@ -3,7 +3,7 @@
 //! The bridge and core log through `tracing`, but without a subscriber every
 //! message was dropped, so a failing connect on a phone left no trace at all.
 //! This installs one that writes each event as a logcat line under the tag
-//! `LinuxLinkRust`, through Android's own `liblog` (no extra crate).
+//! `PocketdeskRust`, through Android's own `liblog` (no extra crate).
 
 use std::io::Write;
 
@@ -13,7 +13,7 @@ pub(crate) fn init() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         let filter = tracing_subscriber::EnvFilter::new(
-            "info,linux_link_core=info,linux_link_android_bridge=debug",
+            "info,pocketdesk_core=info,pocketdesk_android_bridge=debug",
         );
         let installed = tracing_subscriber::fmt()
             .with_env_filter(filter)
@@ -85,7 +85,7 @@ fn write_logcat(priority: i32, line: &str) {
     };
     // SAFETY: both pointers are valid NUL-terminated strings for the call.
     unsafe {
-        __android_log_write(priority, c"LinuxLinkRust".as_ptr(), text.as_ptr());
+        __android_log_write(priority, c"PocketdeskRust".as_ptr(), text.as_ptr());
     }
 }
 

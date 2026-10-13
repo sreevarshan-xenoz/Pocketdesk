@@ -1,5 +1,5 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 
 /// Wake-on-LAN relay (Tier-2 #12).
 ///
@@ -10,7 +10,7 @@ use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin}
 /// connects to the *relay* over WAN (iroh/Tailscale) and asks it to emit
 /// the magic packet for the sleeping target's MAC.
 ///
-/// Answers `kdeconnect.linuxlink.wol` `{mac, broadcast?, name?}` by sending
+/// Answers `kdeconnect.pocketdesk.wol` `{mac, broadcast?, name?}` by sending
 /// the magic packet from this host's LAN and replying with the outcome.
 #[derive(Debug, Default)]
 pub struct WakeRelayPlugin;
@@ -26,7 +26,7 @@ impl Plugin for WakeRelayPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.linuxlink.wol"]
+        &["kdeconnect.pocketdesk.wol"]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -34,7 +34,7 @@ impl Plugin for WakeRelayPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
-        if packet.packet_type != "kdeconnect.linuxlink.wol" {
+        if packet.packet_type != "kdeconnect.pocketdesk.wol" {
             return Ok(());
         }
         let mac = packet
@@ -54,7 +54,7 @@ impl Plugin for WakeRelayPlugin {
         let mac_owned = mac.to_string();
         let broadcast_owned = broadcast.to_string();
         let outcome = tokio::task::spawn_blocking(move || {
-            linux_link_core::tailscale::wol::send_wol(&mac_owned, &broadcast_owned)
+            pocketdesk_core::tailscale::wol::send_wol(&mac_owned, &broadcast_owned)
                 .map_err(|e| e.to_string())
         })
         .await;
@@ -71,7 +71,7 @@ impl Plugin for WakeRelayPlugin {
             Err(e) => serde_json::json!({ "ok": false, "mac": mac, "error": e.to_string() }),
         };
         let response =
-            NetworkPacket::new("kdeconnect.linuxlink.wol").with_body(insert_name(response, name));
+            NetworkPacket::new("kdeconnect.pocketdesk.wol").with_body(insert_name(response, name));
         sender.send_packet(&response).await
     }
 }
@@ -95,7 +95,7 @@ mod tests {
         assert!(
             WakeRelayPlugin
                 .incoming_capabilities()
-                .contains(&"kdeconnect.linuxlink.wol")
+                .contains(&"kdeconnect.pocketdesk.wol")
         );
     }
 

@@ -3,8 +3,8 @@
 //! Every accepted video pipeline registers itself here for the life of the
 //! session ([`register`], called from `run_pipeline`; the returned handle
 //! deregisters on drop). This is the desktop's answer to RustDesk's session
-//! tray: `linux-link status` lists what is watching right now, and
-//! `linux-link kick <device>` tears a session down by closing its QUIC
+//! tray: `pocketdesk status` lists what is watching right now, and
+//! `pocketdesk kick <device>` tears a session down by closing its QUIC
 //! connection — the pipeline's own teardown path does the rest, so capture,
 //! encoder children and mic relays all die through the normal routes rather
 //! than a special kill switch.

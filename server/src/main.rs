@@ -1,10 +1,10 @@
-//! Linux Link Server
-//!
-//! Background daemon for remote desktop access over Tailscale.
+// Pocketdesk Server
+//
+// Background daemon for remote desktop access over Tailscale.
 
 use anyhow::Result;
 use clap::Parser;
-use linux_link_server::*;
+use pocketdesk_server::*;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         std::fs::create_dir_all(&dir)?;
         let appender = tracing_appender::rolling::Builder::new()
             .rotation(tracing_appender::rolling::Rotation::DAILY)
-            .filename_prefix("linux-link")
+            .filename_prefix("pocketdesk")
             .filename_suffix("log")
             .max_log_files(7)
             .build(&dir)?;

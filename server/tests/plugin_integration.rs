@@ -3,11 +3,11 @@
 //! Tests that each registered plugin correctly handles its expected
 //! packet types and produces appropriate responses.
 
-use linux_link_core::error::Result;
+use pocketdesk_core::error::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
 
 /// A mock sender that captures packets sent by plugins for verification.
 #[derive(Clone)]
@@ -40,8 +40,8 @@ impl DeviceSender for MockSender {
     }
 }
 
-fn build_test_registry() -> linux_link_server::plugins::PluginSet {
-    linux_link_server::plugins::register_all()
+fn build_test_registry() -> pocketdesk_server::plugins::PluginSet {
+    pocketdesk_server::plugins::register_all()
 }
 
 #[tokio::test]
@@ -123,7 +123,7 @@ async fn test_power_plugin() {
     let registry = build_test_registry();
     let sender = MockSender::new();
     // Power plugin should handle the request
-    let request = NetworkPacket::new("kdeconnect.linuxlink.power")
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.power")
         .with_body(serde_json::json!({ "action": "shutdown" }));
     let result = registry.dispatch_packet(&request, &sender).await;
     // The action may fail in test env (no systemctl), but dispatch should not error
@@ -152,14 +152,14 @@ async fn test_clipboard_connect_request() {
 async fn test_exec_plugin() {
     let registry = build_test_registry();
     let sender = MockSender::new();
-    let request = NetworkPacket::new("kdeconnect.linuxlink.exec")
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.exec")
         .with_body(serde_json::json!({ "command": "echo hello" }));
     let result = registry.dispatch_packet(&request, &sender).await;
     assert!(result.is_ok(), "Exec plugin should handle simple commands");
     let sent = sender.sent.lock().await;
     let response = sent
         .iter()
-        .find(|p| p.packet_type == "kdeconnect.linuxlink.exec");
+        .find(|p| p.packet_type == "kdeconnect.pocketdesk.exec");
     assert!(
         response.is_some(),
         "Exec plugin should respond with exec response"
@@ -198,16 +198,16 @@ fn test_plugin_capabilities() {
         "File browse plugin should register filebrowse.request"
     );
     assert!(
-        incoming.contains(&"kdeconnect.linuxlink.power".to_string()),
-        "Power plugin should register linuxlink.power"
+        incoming.contains(&"kdeconnect.pocketdesk.power".to_string()),
+        "Power plugin should register pocketdesk.power"
     );
     assert!(
-        incoming.contains(&"kdeconnect.linuxlink.exec".to_string()),
-        "Exec plugin should register linuxlink.exec"
+        incoming.contains(&"kdeconnect.pocketdesk.exec".to_string()),
+        "Exec plugin should register pocketdesk.exec"
     );
     assert!(
-        incoming.contains(&"kdeconnect.linuxlink.windows".to_string()),
-        "Windows plugin should register linuxlink.windows"
+        incoming.contains(&"kdeconnect.pocketdesk.windows".to_string()),
+        "Windows plugin should register pocketdesk.windows"
     );
 }
 
@@ -218,12 +218,12 @@ fn test_plugin_capabilities() {
 async fn test_windows_plugin_payload() {
     let registry = build_test_registry();
     let sender = MockSender::new();
-    let request = NetworkPacket::new("kdeconnect.linuxlink.windows");
+    let request = NetworkPacket::new("kdeconnect.pocketdesk.windows");
     registry.dispatch_packet(&request, &sender).await.unwrap();
     let sent = sender.sent.lock().await;
     let resp = sent
         .iter()
-        .find(|p| p.packet_type == "kdeconnect.linuxlink.windows")
+        .find(|p| p.packet_type == "kdeconnect.pocketdesk.windows")
         .expect("Windows plugin should respond");
 
     assert!(

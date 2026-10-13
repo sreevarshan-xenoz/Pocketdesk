@@ -1,6 +1,6 @@
 use super::kdeconnect::DeviceIdentity;
 use super::{HANDSHAKE_HELLO, HANDSHAKE_OK, PROTOCOL_VERSION};
-use crate::error::{LinuxLinkError, Result};
+use crate::error::{PocketdeskError, Result};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -48,11 +48,11 @@ impl ConnectionManager {
 
             let stream = tokio::time::timeout(self.timeout, TcpStream::connect(&socket_addr))
                 .await
-                .map_err(|_| LinuxLinkError::Timeout {
+                .map_err(|_| PocketdeskError::Timeout {
                     operation: "connect",
                     duration_ms: self.timeout.as_millis() as u64,
                 })?
-                .map_err(|e| LinuxLinkError::ConnectionFailed {
+                .map_err(|e| PocketdeskError::ConnectionFailed {
                     address: address.to_string(),
                     port,
                     reason: e.to_string(),
@@ -65,7 +65,7 @@ impl ConnectionManager {
             // name), the same pin the stream uses, and this device presents
             // its own.
             let server_name = rustls::pki_types::ServerName::try_from(address.to_string())
-                .map_err(|e| LinuxLinkError::ConnectionFailed {
+                .map_err(|e| PocketdeskError::ConnectionFailed {
                     address: address.to_string(),
                     port,
                     reason: format!("not an address: {e}"),
@@ -75,11 +75,11 @@ impl ConnectionManager {
                 tokio_rustls::TlsConnector::from(self.tls.clone()).connect(server_name, stream),
             )
             .await
-            .map_err(|_| LinuxLinkError::Timeout {
+            .map_err(|_| PocketdeskError::Timeout {
                 operation: "TLS handshake",
                 duration_ms: self.timeout.as_millis() as u64,
             })?
-            .map_err(|e| LinuxLinkError::ConnectionFailed {
+            .map_err(|e| PocketdeskError::ConnectionFailed {
                 address: address.to_string(),
                 port,
                 reason: format!("TLS: {e}"),
@@ -89,7 +89,7 @@ impl ConnectionManager {
             stream
                 .write_all(format!("{}\n", HANDSHAKE_HELLO).as_bytes())
                 .await
-                .map_err(|e| LinuxLinkError::Io {
+                .map_err(|e| PocketdeskError::Io {
                     operation: "write handshake hello",
                     detail: e.to_string(),
                 })?;
@@ -99,17 +99,17 @@ impl ConnectionManager {
             let mut response = String::new();
             tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut response))
                 .await
-                .map_err(|_| LinuxLinkError::Timeout {
+                .map_err(|_| PocketdeskError::Timeout {
                     operation: "handshake response",
                     duration_ms: 5000,
                 })?
-                .map_err(|e| LinuxLinkError::HandshakeFailed {
+                .map_err(|e| PocketdeskError::HandshakeFailed {
                     peer: address.to_string(),
                     response: e.to_string(),
                 })?;
 
             if response.trim() != HANDSHAKE_OK {
-                return Err(LinuxLinkError::HandshakeFailed {
+                return Err(PocketdeskError::HandshakeFailed {
                     peer: address.to_string(),
                     response: response.trim().to_string(),
                 });
@@ -136,7 +136,7 @@ impl ConnectionManager {
             let identity_bytes =
                 identity_packet
                     .to_wire()
-                    .map_err(|e| LinuxLinkError::Serialization {
+                    .map_err(|e| PocketdeskError::Serialization {
                         format: "JSON",
                         detail: e.to_string(),
                     })?;
@@ -145,11 +145,11 @@ impl ConnectionManager {
             stream
                 .write_all(&identity_bytes)
                 .await
-                .map_err(|e| LinuxLinkError::Io {
+                .map_err(|e| PocketdeskError::Io {
                     operation: "send identity packet",
                     detail: e.to_string(),
                 })?;
-            stream.flush().await.map_err(|e| LinuxLinkError::Io {
+            stream.flush().await.map_err(|e| PocketdeskError::Io {
                 operation: "flush identity packet",
                 detail: e.to_string(),
             })?;

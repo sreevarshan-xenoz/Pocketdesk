@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Pocketdesk Installer
-# Downloads and installs Pocketdesk (the linux-link server) from GitHub Releases.
+# Downloads and installs Pocketdesk (the pocketdesk server) from GitHub Releases.
 #
 # Usage: ./install.sh [VERSION] [OPTIONS]
 #
@@ -43,7 +43,7 @@ set -euo pipefail
 
 REPO_OWNER="sreevarshan-xenoz"
 REPO_NAME="Pocketdesk"
-BINARY_NAME="linux-link"
+BINARY_NAME="pocketdesk"
 INSTALL_PREFIX="/usr"
 SERVICE_FILE=""
 CONFIG_DIR="$HOME/.config/${BINARY_NAME}"

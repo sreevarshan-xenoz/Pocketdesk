@@ -286,7 +286,7 @@ mod tests {
     }
 
     /// Real libx264 encode through the in-process path (needs FFmpeg with
-    /// x264 at runtime). Run with: cargo test -p linux-link-core -- --ignored
+    /// x264 at runtime). Run with: cargo test -p pocketdesk-core -- --ignored
     #[test]
     #[ignore]
     fn test_inprocess_encode_annexb_roundtrip() {

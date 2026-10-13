@@ -2,22 +2,22 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin, TrustStore};
-use linux_link_core::protocol::permissions::DevicePermissions;
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin, TrustStore};
+use pocketdesk_core::protocol::permissions::DevicePermissions;
 use serde_json::json;
 
 use crate::state;
-use linux_link_core::local::approval::Verdict;
-use linux_link_core::local::pin as local_pin;
+use pocketdesk_core::local::approval::Verdict;
+use pocketdesk_core::local::pin as local_pin;
 
 // PIN pairing (KDE Connect parity, R3 Tier-2 #11b).
 //
 // Two flows, converging on the same `kdeconnect.pair` `{pin}` packet:
-// - **push**: the phone requests a PIN (`kdeconnect.linuxlink.pair`
+// - **push**: the phone requests a PIN (`kdeconnect.pocketdesk.pair`
 //   `{requestPin:true}`); the desktop generates one, shows it via a desktop
 //   notification (and the log), and the phone echoes it back.
-// - **pull**: `linux-link pair` on the desktop writes a PIN file; the phone
+// - **pull**: `pocketdesk pair` on the desktop writes a PIN file; the phone
 //   enters that PIN and the request validates against the file.
 //
 // On success the phone's deviceId (learned from its `kdeconnect.identity`)
@@ -83,7 +83,7 @@ pub fn permits(conn_key: &str, packet_type: &str) -> bool {
 /// [`permits`] against a given store; without one, nothing that needs a
 /// permission is allowed.
 fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) -> bool {
-    let Some(capability) = linux_link_core::protocol::permissions::capability_for(packet_type)
+    let Some(capability) = pocketdesk_core::protocol::permissions::capability_for(packet_type)
     else {
         return true;
     };
@@ -118,7 +118,7 @@ pub fn session_permissions(
 /// phone names is registered, only once all of that has allowed the
 /// session: an impostor the owner denies must not leave its key bound.
 pub async fn session_gate(
-    claim: linux_link_core::streaming::SessionClaim,
+    claim: pocketdesk_core::streaming::SessionClaim,
     pairing_required: bool,
 ) -> Option<DevicePermissions> {
     let dir = state::state_dir().ok()?;
@@ -189,7 +189,7 @@ async fn permissions_gate(
 
 /// Device keys for a v2 session: refused when its connection did not prove
 /// the key bound to the device it claims. Reads only: v2 never binds.
-pub(crate) fn device_keys_refused(claim: &linux_link_core::streaming::SessionClaim) -> bool {
+pub(crate) fn device_keys_refused(claim: &pocketdesk_core::streaming::SessionClaim) -> bool {
     let Ok(dir) = state::state_dir() else {
         return true;
     };
@@ -214,7 +214,7 @@ pub(crate) fn device_keys_refused(claim: &linux_link_core::streaming::SessionCla
 #[derive(Debug, Default)]
 struct KeyDecision {
     /// Refused, and why.
-    refused: Option<linux_link_core::local::device_keys::Refusal>,
+    refused: Option<pocketdesk_core::local::device_keys::Refusal>,
     /// The key the connection proved, as stored (for the log).
     presented: Option<String>,
     /// A LAN key to bind if the session is allowed (first use).
@@ -226,11 +226,11 @@ struct KeyDecision {
 /// Read-only: decide the session's claim against the device key store.
 fn decide_keys_in(
     dir: &std::path::Path,
-    claim: &linux_link_core::streaming::SessionClaim,
+    claim: &pocketdesk_core::streaming::SessionClaim,
     paired: bool,
 ) -> KeyDecision {
-    use linux_link_core::local::device_keys::{self, Slot, Verdict};
-    use linux_link_core::streaming::PeerKey;
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    use pocketdesk_core::streaming::PeerKey;
     // An unpaired device is the pairing gate's to judge; it has no keys.
     let Some(id) = claim.device_id.as_deref().filter(|_| paired) else {
         return KeyDecision::default();
@@ -274,24 +274,24 @@ pub(crate) enum Standing {
     Unpaired,
     /// The device is paired, but the connection did not prove its key: it
     /// may only pair again, with the owner's PIN.
-    WrongKey(linux_link_core::local::device_keys::Refusal),
+    WrongKey(pocketdesk_core::local::device_keys::Refusal),
 }
 
 /// The standing of a connection that goes by `device_id` and proved `key`.
 pub(crate) fn standing(
     device_id: &str,
-    key: Option<&linux_link_core::streaming::PeerKey>,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
 ) -> Standing {
     match state::state_dir() {
         Ok(dir) => standing_in(&dir, device_id, key, is_paired_device(device_id)),
-        Err(_) => Standing::WrongKey(linux_link_core::local::device_keys::Refusal::StoreUnreadable),
+        Err(_) => Standing::WrongKey(pocketdesk_core::local::device_keys::Refusal::StoreUnreadable),
     }
 }
 
 fn standing_in(
     dir: &std::path::Path,
     device_id: &str,
-    key: Option<&linux_link_core::streaming::PeerKey>,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
     paired: bool,
 ) -> Standing {
     match decide_control_identity_in(dir, device_id, key, paired) {
@@ -309,14 +309,14 @@ fn standing_in(
 pub(crate) fn admit_control(
     device_id: &str,
     peer: std::net::SocketAddr,
-    key: Option<&linux_link_core::streaming::PeerKey>,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
 ) -> Standing {
     let standing = standing(device_id, key);
     if let Standing::WrongKey(refusal) = standing
         && let Ok(dir) = state::state_dir()
     {
         let presented = match key {
-            Some(linux_link_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
+            Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
             _ => None,
         };
         report_refusal(&dir, device_id, peer, refusal, presented.as_deref());
@@ -332,15 +332,15 @@ pub(crate) fn admit_control(
 fn decide_control_identity_in(
     dir: &std::path::Path,
     device_id: &str,
-    key: Option<&linux_link_core::streaming::PeerKey>,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
     paired: bool,
-) -> std::result::Result<(), linux_link_core::local::device_keys::Refusal> {
-    use linux_link_core::local::device_keys::{self, Slot, Verdict};
+) -> std::result::Result<(), pocketdesk_core::local::device_keys::Refusal> {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
     if !paired {
         return Ok(());
     }
     let presented = match key {
-        Some(linux_link_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
+        Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
         _ => None,
     };
     match device_keys::check(dir, device_id, Slot::Tls, presented.as_deref()) {
@@ -356,7 +356,7 @@ fn decide_control_identity_in(
 /// pairing off, an unpaired device's own key is the one used.
 pub(crate) fn may_transfer(
     device_id: &str,
-    key: &linux_link_core::streaming::PeerKey,
+    key: &pocketdesk_core::streaming::PeerKey,
 ) -> std::result::Result<(), String> {
     let dir = state::state_dir().map_err(|e| e.to_string())?;
     may_transfer_in(&dir, device_id, key, is_paired_device(device_id))
@@ -365,11 +365,11 @@ pub(crate) fn may_transfer(
 fn may_transfer_in(
     dir: &std::path::Path,
     device_id: &str,
-    key: &linux_link_core::streaming::PeerKey,
+    key: &pocketdesk_core::streaming::PeerKey,
     paired: bool,
 ) -> std::result::Result<(), String> {
-    use linux_link_core::local::device_keys::{self, Slot, Verdict};
-    let linux_link_core::streaming::PeerKey::Tls(hash) = key else {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    let pocketdesk_core::streaming::PeerKey::Tls(hash) = key else {
         return Err("files move only over the local network connection".to_string());
     };
     if !paired {
@@ -387,7 +387,7 @@ fn may_transfer_in(
 /// Apply what an allowed session may record. `false` when another session
 /// bound a different key to the device first.
 fn commit_keys_in(dir: &std::path::Path, device_id: &str, keys: &KeyDecision) -> bool {
-    use linux_link_core::local::device_keys::{self, Slot};
+    use pocketdesk_core::local::device_keys::{self, Slot};
     if let Some(key) = &keys.bind_tls {
         match device_keys::bind_first(dir, device_id, key) {
             Ok(true) => tracing::info!(device_id, "Bound the device's key on its first session"),
@@ -416,11 +416,11 @@ fn report_refusal(
     dir: &std::path::Path,
     id: &str,
     peer: std::net::SocketAddr,
-    refusal: linux_link_core::local::device_keys::Refusal,
+    refusal: pocketdesk_core::local::device_keys::Refusal,
     presented: Option<&str>,
 ) {
-    use linux_link_core::local::device_keys::Refusal;
-    let bound = linux_link_core::local::device_keys::read(dir)
+    use pocketdesk_core::local::device_keys::Refusal;
+    let bound = pocketdesk_core::local::device_keys::read(dir)
         .ok()
         .and_then(|keys| keys.get(id).cloned());
     tracing::warn!(
@@ -503,7 +503,7 @@ fn pin_expired(entry: &PinEntry) -> bool {
     entry.created.elapsed() > PIN_TTL
 }
 
-/// The live PIN file written by `linux-link pair` or the desktop app, as
+/// The live PIN file written by `pocketdesk pair` or the desktop app, as
 /// `(pin, grant_secs)` (format and expiry: `core::local::pin`).
 fn cli_pin() -> Option<(String, Option<u64>)> {
     let dir = state::state_dir().ok()?;
@@ -530,7 +530,7 @@ impl Plugin for PairPlugin {
         // pairing cannot learn the phone's deviceId to persist.
         &[
             "kdeconnect.pair",
-            "kdeconnect.linuxlink.pair",
+            "kdeconnect.pocketdesk.pair",
             "kdeconnect.identity",
         ]
     }
@@ -553,7 +553,7 @@ impl Plugin for PairPlugin {
                     );
                 }
             }
-            "kdeconnect.linuxlink.pair" => {
+            "kdeconnect.pocketdesk.pair" => {
                 if packet
                     .body
                     .get("requestPin")
@@ -577,7 +577,7 @@ impl Plugin for PairPlugin {
 /// entry instead.
 async fn request_pin(conn: &str, sender: &dyn DeviceSender) {
     if cli_pin().is_some() {
-        let response = NetworkPacket::new("kdeconnect.linuxlink.pair").with_body(json!({
+        let response = NetworkPacket::new("kdeconnect.pocketdesk.pair").with_body(json!({
             "pairStatus": "pinReady",
         }));
         let _ = sender.send_packet(&response).await;
@@ -596,7 +596,7 @@ async fn request_pin(conn: &str, sender: &dyn DeviceSender) {
     if !mint_pace().lock().expect("pair state").allow(now) {
         tracing::info!("PIN request from {conn} within 10 s of the last; no new PIN");
         if pending {
-            let response = NetworkPacket::new("kdeconnect.linuxlink.pair").with_body(json!({
+            let response = NetworkPacket::new("kdeconnect.pocketdesk.pair").with_body(json!({
                 "pairStatus": "pinSent",
             }));
             let _ = sender.send_packet(&response).await;
@@ -621,7 +621,7 @@ async fn request_pin(conn: &str, sender: &dyn DeviceSender) {
     );
     show_pin_notification(&pin);
 
-    let response = NetworkPacket::new("kdeconnect.linuxlink.pair").with_body(json!({
+    let response = NetworkPacket::new("kdeconnect.pocketdesk.pair").with_body(json!({
         "pairStatus": "pinSent",
     }));
     let _ = sender.send_packet(&response).await;
@@ -807,11 +807,11 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
 fn owner_paired_in(
     dir: &std::path::Path,
     phone_id: &str,
-    key: Option<&linux_link_core::streaming::PeerKey>,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
 ) -> std::io::Result<()> {
-    use linux_link_core::local::device_keys;
+    use pocketdesk_core::local::device_keys;
     match key {
-        Some(linux_link_core::streaming::PeerKey::Tls(hash)) => {
+        Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => {
             device_keys::replace(dir, phone_id, &hex(hash))
         }
         _ => device_keys::clear(dir, phone_id),
@@ -825,20 +825,20 @@ fn owner_paired_in(
 fn guest_may_pair_in(
     dir: &std::path::Path,
     phone_id: &str,
-    key: Option<&linux_link_core::streaming::PeerKey>,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
     already_paired: bool,
 ) -> bool {
-    use linux_link_core::local::device_keys::{self, Slot, Verdict};
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
     if already_paired {
         let presented = match key {
-            Some(linux_link_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
+            Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
             _ => None,
         };
         return device_keys::check(dir, phone_id, Slot::Tls, presented.as_deref())
             == Verdict::Matches;
     }
     match key {
-        Some(linux_link_core::streaming::PeerKey::Tls(hash)) => {
+        Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => {
             device_keys::bind_first(dir, phone_id, &hex(hash)).unwrap_or(false)
         }
         // Nothing proved: allowed only while the id holds no key.
@@ -874,7 +874,7 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::streaming::{PeerKey, SessionClaim};
+    use pocketdesk_core::streaming::{PeerKey, SessionClaim};
 
     fn key_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-gatekeys-{name}-{}", std::process::id()));
@@ -985,7 +985,7 @@ mod tests {
             Ok(())
         );
         assert!(
-            linux_link_core::local::device_keys::read(&dir)
+            pocketdesk_core::local::device_keys::read(&dir)
                 .unwrap()
                 .get("phone")
                 .is_none_or(|k| k.tls.is_none() && k.iroh.is_none())
@@ -1066,7 +1066,7 @@ mod tests {
             true
         ));
         assert!(
-            !linux_link_core::local::device_keys::read(&dir)
+            !pocketdesk_core::local::device_keys::read(&dir)
                 .unwrap()
                 .contains_key("phone"),
             "nothing bound"
@@ -1127,7 +1127,7 @@ forged log line"
         );
         assert!(keys.refused.is_none() && keys.bind_tls.is_some());
         assert!(
-            linux_link_core::local::device_keys::read(&dir)
+            pocketdesk_core::local::device_keys::read(&dir)
                 .unwrap()
                 .is_empty()
         );
@@ -1192,7 +1192,7 @@ forged log line"
 
     #[test]
     fn a_denied_capability_blocks_its_packets_and_only_those() {
-        use linux_link_core::protocol::permissions::Capability;
+        use pocketdesk_core::protocol::permissions::Capability;
         let mut store = temp_store("deny");
         store.trust_device("phone-1").unwrap();
         let mut permissions = store.permissions("phone-1");
@@ -1204,7 +1204,7 @@ forged log line"
             !permits_in(
                 Some(&store),
                 "phone-1",
-                "kdeconnect.linuxlink.notification_reply"
+                "kdeconnect.pocketdesk.notification_reply"
             ),
             "a reply lands on the desktop clipboard"
         );
@@ -1219,7 +1219,7 @@ forged log line"
             "kdeconnect.battery.request"
         ));
         assert!(
-            !permits_in(Some(&store), "phone-1", "kdeconnect.linuxlink.exec"),
+            !permits_in(Some(&store), "phone-1", "kdeconnect.pocketdesk.exec"),
             "exec is off until granted"
         );
         assert!(
@@ -1238,7 +1238,7 @@ forged log line"
 
     #[test]
     fn a_stream_gets_its_devices_permissions_and_an_unpaired_one_none() {
-        use linux_link_core::protocol::permissions::Capability;
+        use pocketdesk_core::protocol::permissions::Capability;
         let mut store = temp_store("session");
         store.trust_device("phone-s").unwrap();
         let mut permissions = store.permissions("phone-s");
@@ -1279,18 +1279,18 @@ forged log line"
     /// or be listed here as always allowed, so nothing slips past the gate.
     #[test]
     fn every_incoming_packet_type_is_mapped_or_deliberately_always_allowed() {
-        use linux_link_core::protocol::permissions::capability_for;
+        use pocketdesk_core::protocol::permissions::capability_for;
         const ALWAYS_ALLOWED: &[&str] = &[
             "kdeconnect.identity",
             "kdeconnect.pair",
-            "kdeconnect.linuxlink.pair",
+            "kdeconnect.pocketdesk.pair",
             "kdeconnect.battery",
             "kdeconnect.battery.request",
             "kdeconnect.notification",
             "kdeconnect.notification.request",
-            "kdeconnect.linuxlink.monitors",
-            "kdeconnect.linuxlink.windows",
-            "kdeconnect.linuxlink.wol",
+            "kdeconnect.pocketdesk.monitors",
+            "kdeconnect.pocketdesk.windows",
+            "kdeconnect.pocketdesk.wol",
             "kdeconnect.findmydevice",
             "kdeconnect.mousepad.echo",
             "kdeconnect.filebrowse.response",
@@ -1350,7 +1350,7 @@ forged log line"
     fn plugin_declares_pair_capabilities() {
         let caps = PairPlugin.incoming_capabilities();
         assert!(caps.contains(&"kdeconnect.pair"));
-        assert!(caps.contains(&"kdeconnect.linuxlink.pair"));
+        assert!(caps.contains(&"kdeconnect.pocketdesk.pair"));
     }
 
     #[test]

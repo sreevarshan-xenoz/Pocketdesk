@@ -23,7 +23,7 @@ From repository root:
 cargo check --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p linux-link-core --no-default-features --features client -- -D warnings
+cargo clippy -p pocketdesk-core --no-default-features --features client -- -D warnings
 ```
 
 The second clippy command matters: the Android bridge builds `core` with
@@ -33,19 +33,19 @@ code paths the server build never compiles.
 ## 3. Server Run
 
 ```bash
-cargo run --bin linux-link -- start
+cargo run --bin pocketdesk -- start
 ```
 
 Optional config file location:
 
-- `~/.config/linux-link/config.toml` (see `config.toml.example`)
+- `~/.config/pocketdesk/config.toml` (see `config.toml.example`)
 
-Streaming QUIC congestion control can be A/B tested via the `LINUX_LINK_CC`
+Streaming QUIC congestion control can be A/B tested via the `POCKETDESK_CC`
 environment variable (`bbr`, `cubic`, or `new_reno`; default `new_reno`).
 It applies to both the server and client endpoints.
 
 ```bash
-LINUX_LINK_CC=bbr cargo run --bin linux-link -- start
+POCKETDESK_CC=bbr cargo run --bin pocketdesk -- start
 ```
 
 ## 4. Windows server (the Windows host)
@@ -66,22 +66,22 @@ no SDK, so GNU is the one that is exercised.
 
 ```powershell
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --exclude linux-link-android-bridge --exclude iroh-spike -- -D warnings
-cargo test --workspace --exclude linux-link-android-bridge --exclude iroh-spike
+cargo clippy --workspace --all-targets --exclude pocketdesk-android-bridge --exclude iroh-spike -- -D warnings
+cargo test --workspace --exclude pocketdesk-android-bridge --exclude iroh-spike
 # live tests that need this desktop / GPU (capture, encoders, input, clipboard, toast):
-cargo test -p linux-link-core --lib -- --ignored wgc_ dxgi_ windows_rung_roundtrip
-cargo test -p linux-link-server --lib -- --ignored sendinput_drives clipboard_round_trips a_toast_is_shown
+cargo test -p pocketdesk-core --lib -- --ignored wgc_ dxgi_ windows_rung_roundtrip
+cargo test -p pocketdesk-server --lib -- --ignored sendinput_drives clipboard_round_trips a_toast_is_shown
 ```
 
-Run it with `cargo run --bin linux-link -- start`, or register it at logon
-with `linux-link install`. Config lives in `%APPDATA%\linux-link\config.toml`,
-state (pairing, trust store, certs, logs) in `%LOCALAPPDATA%\linux-link\`.
+Run it with `cargo run --bin pocketdesk -- start`, or register it at logon
+with `pocketdesk install`. Config lives in `%APPDATA%\pocketdesk\config.toml`,
+state (pairing, trust store, certs, logs) in `%LOCALAPPDATA%\pocketdesk\`.
 
 ## 5. Android Client (Kotlin + Rust JNI bridge)
 
 - `android/app` — Kotlin/Compose app.
-- `android/bridge` — Rust cdylib (`liblinux_link_android_bridge.so`) loaded via JNI by
-  `dev.linuxlink.android.bridge.RustCore`.
+- `android/bridge` — Rust cdylib (`libpocketdesk_android_bridge.so`) loaded via JNI by
+  `dev.pocketdesk.android.bridge.RustCore`.
 
 Full local build (verified working: SDK Platform 36/37, Build-Tools 36/37, NDK 29):
 
@@ -106,7 +106,7 @@ Notes:
 
 The bridge now exposes the full client session/streaming/input API (ported from
 the Flutter-era `android/rust/src/api.rs`) via 34 `native*` JNI functions under
-`dev.linuxlink.android.bridge.RustCore`, with a typed Kotlin facade in
+`dev.pocketdesk.android.bridge.RustCore`, with a typed Kotlin facade in
 `android/app/.../bridge/RustCore.kt`. Fallible calls return a `{"ok":...}` /
 `{"error":...}` JSON envelope; H.264 frames and Opus audio cross the boundary as
 big-endian binary blobs. MediaCodec decode (feeding frames to a `Surface`) and

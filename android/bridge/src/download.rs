@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDeviceSender};
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDeviceSender};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, broadcast};
 
@@ -20,13 +20,13 @@ use crate::api::{TRANSFER_SENT, TRANSFER_TOTAL, accept_transfer, client_identity
 use crate::{CONTROL_PEER, CONTROL_WRITER};
 
 /// Ask the desktop for a file (F7b): `{path | offer, port, key}`.
-const FETCH: &str = "kdeconnect.linuxlink.file_fetch";
+const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 /// The desktop will not send it: `{key, reason}`.
-const FETCH_REFUSED: &str = "kdeconnect.linuxlink.file_fetch_refused";
+const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
 /// The desktop's owner sent this phone a file: `{id, name, size}`.
-pub(crate) const FILE_OFFER: &str = "kdeconnect.linuxlink.file_offer";
+pub(crate) const FILE_OFFER: &str = "kdeconnect.pocketdesk.file_offer";
 /// The phone will not fetch an offer: `{id, reason}`.
-const DECLINE: &str = "kdeconnect.linuxlink.file_offer_declined";
+const DECLINE: &str = "kdeconnect.pocketdesk.file_offer_declined";
 /// The largest file the phone takes, as the desktop.
 const MAX_DOWNLOAD_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// A download that receives nothing for this long is abandoned.
@@ -329,7 +329,7 @@ where
 mod tests {
     use super::{FETCH_REFUSED, await_and_receive, refusal_for};
     use crate::api::transfer_progress;
-    use linux_link_core::protocol::kdeconnect::NetworkPacket;
+    use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -337,7 +337,7 @@ mod tests {
 
     const KEY: &str = "0123456789abcdef0123456789abcdef";
 
-    use linux_link_core::streaming::transport::CertManager;
+    use pocketdesk_core::streaming::transport::CertManager;
 
     /// This phone, the desktop it pinned, and another computer.
     fn certs() -> &'static (CertManager, CertManager, CertManager) {
@@ -671,7 +671,7 @@ mod tests {
         let packet = super::decline_packet("o-1", "Not enough space for a.pdf");
         assert_eq!(
             packet.packet_type,
-            "kdeconnect.linuxlink.file_offer_declined"
+            "kdeconnect.pocketdesk.file_offer_declined"
         );
         assert_eq!(packet.body["id"], "o-1");
         assert_eq!(packet.body["reason"], "Not enough space for a.pdf");

@@ -6,9 +6,9 @@ use std::path::Path;
 use std::sync::mpsc;
 
 use eframe::egui::{self, Color32, ColorImage, RichText, TextureHandle, TextureOptions};
-use linux_link_core::local::config::Config;
-use linux_link_core::local::pair_link::{PairLink, order_addresses};
-use linux_link_core::local::{identity, network, pin};
+use pocketdesk_core::local::config::Config;
+use pocketdesk_core::local::pair_link::{PairLink, order_addresses};
+use pocketdesk_core::local::{identity, network, pin};
 
 use crate::model::Device;
 
@@ -112,7 +112,7 @@ enum Next {
     /// The code on screen is still the live PIN.
     Keep,
     /// Show a code for the PIN on file, minting one if there is none: the
-    /// tab is fresh, the shown PIN ran out of time, or `linux-link pair`
+    /// tab is fresh, the shown PIN ran out of time, or `pocketdesk pair`
     /// replaced it.
     Refresh,
     /// The shown PIN left the file before its time: it paired a phone, or
@@ -366,9 +366,9 @@ impl PairView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::local::config::Config;
-    use linux_link_core::local::paths::CERT_FILE;
-    use linux_link_core::local::{identity, pin};
+    use pocketdesk_core::local::config::Config;
+    use pocketdesk_core::local::paths::CERT_FILE;
+    use pocketdesk_core::local::{identity, pin};
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("pd-pair-{name}-{}", std::process::id()));
@@ -452,7 +452,7 @@ mod tests {
         assert_eq!(
             next_step(Some(&shown), Some(&file_pin("654321")), 1_100),
             Next::Refresh,
-            "`linux-link pair` replaced it"
+            "`pocketdesk pair` replaced it"
         );
         assert_eq!(
             next_step(Some(&shown), None, 1_100),
@@ -491,7 +491,7 @@ mod tests {
         view.reset(&dir);
         assert!(
             pin::read(&dir, 1_001).is_some_and(|p| p.pin == "654321"),
-            "a PIN `linux-link pair` wrote since is left alone"
+            "a PIN `pocketdesk pair` wrote since is left alone"
         );
         assert!(view.shown.is_none() && !view.stopped);
     }

@@ -2,8 +2,8 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
 
-use linux_link_core::streaming::chaos::proxy::{ChaosConfig, ChaosProxy};
-use linux_link_core::streaming::transport::{
+use pocketdesk_core::streaming::chaos::proxy::{ChaosConfig, ChaosProxy};
+use pocketdesk_core::streaming::transport::{
     CertManager, StreamClient, StreamServer, StreamTransportConfig,
 };
 
@@ -171,7 +171,7 @@ async fn input_packets_survive_a_video_flood_under_loss() {
 /// measures 12-89 ms. quinn's stream priority does not bound the queue once
 /// retransmission pressure starts. See roadmap-3000 §"146-149" and id 2449
 /// (fairness scheduler with a documented algorithm); run with
-/// `cargo test -p linux-link-core -- --ignored`.
+/// `cargo test -p pocketdesk-core -- --ignored`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "measured 2.2-3.8 s avg input latency at 10% loss against a 300 ms contract"]
 async fn input_latency_stays_under_the_fairness_contract() {

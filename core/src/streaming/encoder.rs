@@ -891,7 +891,7 @@ pub(crate) fn vbv_kbit_bounds(bitrate_bps: u32, fps: u32) -> (u64, u64) {
 /// Build the FFmpeg command-line arguments for encoding.
 ///
 /// The DRM render node the VAAPI sidecar should bind to. Honours the
-/// `LINUX_LINK_VAAPI_DEVICE` override, else the lowest existing
+/// `POCKETDESK_VAAPI_DEVICE` override, else the lowest existing
 /// `/dev/dri/renderD*`. On hybrid-GPU laptops the first node (`renderD128`)
 /// is often the discrete NVIDIA card with no VA driver, so hardcoding it
 /// fails; picking a present node + the C2 startup verify lets a broken pick
@@ -901,7 +901,7 @@ fn vaapi_device_node() -> String {
     #[cfg(target_os = "linux")]
     use super::encoder_vaapi::VAAPI_DEVICE_ENV;
     #[cfg(not(target_os = "linux"))]
-    const VAAPI_DEVICE_ENV: &str = "LINUX_LINK_VAAPI_DEVICE";
+    const VAAPI_DEVICE_ENV: &str = "POCKETDESK_VAAPI_DEVICE";
     if let Ok(node) = std::env::var(VAAPI_DEVICE_ENV)
         && !node.is_empty()
     {
@@ -1806,7 +1806,7 @@ mod tests {
 
     /// Push 60 moving frames through one Windows rung's real sidecar and
     /// require bits out, the first of them a keyframe. Run on a box with the
-    /// GPU: `cargo test -p linux-link-core --lib windows_rung_roundtrip -- --ignored`.
+    /// GPU: `cargo test -p pocketdesk-core --lib windows_rung_roundtrip -- --ignored`.
     #[cfg(windows)]
     fn windows_rung_roundtrip(encoder: HardwareEncoder) {
         let config = windows_rung_config(encoder);

@@ -15,7 +15,7 @@ use iroh::endpoint::presets::Minimal;
 use iroh::endpoint::{Connection, Endpoint};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-pub const ALPN: &[u8] = b"linux-link-spike/0";
+pub const ALPN: &[u8] = b"pocketdesk-spike/0";
 
 pub const PAYLOAD: &[u8] = b"iroh spike: hello over QUIC";
 

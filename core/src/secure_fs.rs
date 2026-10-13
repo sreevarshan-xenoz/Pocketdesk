@@ -113,7 +113,7 @@ mod tests {
 
     fn temp(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "linux-link-secure-fs-{}-{label}",
+            "pocketdesk-secure-fs-{}-{label}",
             std::process::id()
         ))
     }

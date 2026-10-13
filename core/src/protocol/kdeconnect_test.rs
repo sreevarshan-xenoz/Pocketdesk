@@ -486,7 +486,7 @@ mod tests {
                             NetworkPacket::new("kdeconnect.notification").with_body(json!({
                                 "title": "URL Received",
                                 "text": url,
-                                "app": "Linux Link",
+                                "app": "Pocketdesk",
                             }));
                         sender.send_packet(&notification).await?;
                     }

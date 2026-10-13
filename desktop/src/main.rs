@@ -29,7 +29,7 @@ fn main() -> eframe::Result {
         // Another copy is running; it has been brought to the front.
         return Ok(());
     };
-    let state_dir = match linux_link_core::local::paths::state_dir() {
+    let state_dir = match pocketdesk_core::local::paths::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("Pocketdesk: {e}");

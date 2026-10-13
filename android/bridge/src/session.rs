@@ -9,7 +9,7 @@ use std::sync::{Arc, LazyLock};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::broadcast;
 
-/// Initialize the Linux Link backend (internal, called from api::init_app).
+/// Initialize the Pocketdesk backend (internal, called from api::init_app).
 ///
 /// Logging goes to logcat. This used to install a stdout subscriber, which on
 /// Android writes nowhere; being first, it also kept the logcat one out.
@@ -25,7 +25,7 @@ pub(crate) const MAX_AUDIO_PACKETS_PER_RECEIVE: usize = 32;
 
 /// The write half of a control connection (TLS over TCP, phase B).
 pub(crate) type ControlWriter =
-    tokio::io::WriteHalf<linux_link_core::protocol::connection::ControlStream>;
+    tokio::io::WriteHalf<pocketdesk_core::protocol::connection::ControlStream>;
 
 /// Global handle for the active control connection writer.
 pub(crate) static CONTROL_WRITER: LazyLock<TokioMutex<Option<Arc<TokioMutex<ControlWriter>>>>> =
@@ -42,7 +42,7 @@ pub(crate) static CONNECTION_STATE: LazyLock<TokioMutex<api::ConnectionState>> =
 
 /// Persistent device identity for the Android client.
 pub(crate) static DEVICE_IDENTITY: LazyLock<
-    std::sync::Mutex<Option<linux_link_core::protocol::kdeconnect::DeviceIdentity>>,
+    std::sync::Mutex<Option<pocketdesk_core::protocol::kdeconnect::DeviceIdentity>>,
 > = LazyLock::new(|| std::sync::Mutex::new(None));
 
 /// mDNS discovery service status flag.
@@ -50,9 +50,9 @@ pub(crate) static MDNS_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Exponential backoff state for reconnection.
 pub(crate) static RECONNECT_BACKOFF: LazyLock<
-    std::sync::Mutex<linux_link_core::protocol::backoff::ExponentialBackoff>,
+    std::sync::Mutex<pocketdesk_core::protocol::backoff::ExponentialBackoff>,
 > = LazyLock::new(|| {
-    std::sync::Mutex::new(linux_link_core::protocol::backoff::ExponentialBackoff::default())
+    std::sync::Mutex::new(pocketdesk_core::protocol::backoff::ExponentialBackoff::default())
 });
 
 /// High-level session status for reconnection state machine.
@@ -81,10 +81,10 @@ pub(crate) static STREAMING_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// feed→drained-frame time, `RENDER_SAMPLES` the gap between frames reaching the
 /// panel. Both are bounded, so a session that reports on its 1 s poller cannot
 /// grow them; a new session clears them (see `install_streaming`).
-pub(crate) static DECODE_SAMPLES: linux_link_core::streaming::SampleBatch =
-    linux_link_core::streaming::SampleBatch::new();
-pub(crate) static RENDER_SAMPLES: linux_link_core::streaming::SampleBatch =
-    linux_link_core::streaming::SampleBatch::new();
+pub(crate) static DECODE_SAMPLES: pocketdesk_core::streaming::SampleBatch =
+    pocketdesk_core::streaming::SampleBatch::new();
+pub(crate) static RENDER_SAMPLES: pocketdesk_core::streaming::SampleBatch =
+    pocketdesk_core::streaming::SampleBatch::new();
 
 /// True when the live streaming session rode a relay path (iroh WAN without a
 /// punched direct path). Updated by the RTT poller; LAN sessions are always
@@ -122,13 +122,13 @@ pub(crate) static STREAMING_HANDLE: LazyLock<TokioMutex<Option<StreamingHandle>>
 /// `receive_frames` waits on it for up to its timeout, and holding the
 /// session handle that long held up every input send behind it.
 pub(crate) static VIDEO_RX: LazyLock<
-    TokioMutex<Option<tokio::sync::mpsc::Receiver<linux_link_core::streaming::EncodedPacket>>>,
+    TokioMutex<Option<tokio::sync::mpsc::Receiver<pocketdesk_core::streaming::EncodedPacket>>>,
 > = LazyLock::new(|| TokioMutex::new(None));
 
 /// The live session's audio receiver, apart from [`STREAMING_HANDLE`] and
 /// [`VIDEO_RX`] for the same reason: `receive_audio` waits on it.
 pub(crate) static AUDIO_RX: LazyLock<
-    TokioMutex<Option<tokio::sync::mpsc::Receiver<linux_link_core::streaming::AudioPacket>>>,
+    TokioMutex<Option<tokio::sync::mpsc::Receiver<pocketdesk_core::streaming::AudioPacket>>>,
 > = LazyLock::new(|| TokioMutex::new(None));
 
 /// Global handle for the active v2 unified connection.
@@ -141,7 +141,7 @@ pub(crate) static CERT_DIR: LazyLock<std::sync::Mutex<Option<PathBuf>>> =
 
 /// Currently active CertManager for trust management UI.
 pub(crate) static CERT_MANAGER: LazyLock<
-    std::sync::Mutex<Option<Arc<linux_link_core::streaming::transport::CertManager>>>,
+    std::sync::Mutex<Option<Arc<pocketdesk_core::streaming::transport::CertManager>>>,
 > = LazyLock::new(|| std::sync::Mutex::new(None));
 
 /// Broadcast channel for incoming KDE Connect packets from the control connection.
@@ -149,7 +149,7 @@ pub(crate) static CERT_MANAGER: LazyLock<
 pub(crate) static INCOMING_PACKETS: LazyLock<TokioMutex<Option<broadcast::Sender<String>>>> =
     LazyLock::new(|| TokioMutex::new(None));
 
-/// The server's iroh WAN identity (`kdeconnect.linuxlink.endpoint` body JSON),
+/// The server's iroh WAN identity (`kdeconnect.pocketdesk.endpoint` body JSON),
 /// cached by the control reader so WAN dialing survives the poll loop's absence.
 pub(crate) static WAN_IDENTITY: LazyLock<TokioMutex<Option<String>>> =
     LazyLock::new(|| TokioMutex::new(None));
@@ -244,10 +244,10 @@ pub(crate) struct StreamingHandle {
     pub(crate) rtt_task: tokio::task::JoinHandle<()>,
     /// The streaming connection (transport-agnostic handle), kept alive for
     /// sending input events.
-    pub(crate) connection: linux_link_core::streaming::SharedConnection,
+    pub(crate) connection: pocketdesk_core::streaming::SharedConnection,
     /// Live iroh dial for WAN sessions — owns the endpoint and must be
     /// closed (not dropped) when the session ends.
-    pub(crate) wan_dial: Option<linux_link_core::streaming::IrohDial>,
+    pub(crate) wan_dial: Option<pocketdesk_core::streaming::IrohDial>,
 }
 
 /// Holds the unified v2 connection and its persistent control streams.

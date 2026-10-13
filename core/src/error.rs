@@ -1,6 +1,6 @@
-//! Structured error types for Linux Link.
+//! Structured error types for Pocketdesk.
 //!
-//! Provides `LinuxLinkError` as the primary error type with well-defined
+//! Provides `PocketdeskError` as the primary error type with well-defined
 //! variants covering protocol, streaming, discovery, and I/O failures.
 //! Each variant carries contextual information for logging and debugging.
 
@@ -40,9 +40,9 @@ pub enum ErrorCode {
     TaskCancelled = 6002,
 }
 
-/// The primary error type for Linux Link operations.
+/// The primary error type for Pocketdesk operations.
 #[derive(Debug, Clone)]
-pub enum LinuxLinkError {
+pub enum PocketdeskError {
     /// A network connection could not be established.
     ConnectionFailed {
         address: String,
@@ -91,7 +91,7 @@ pub enum LinuxLinkError {
     Other { detail: String },
 }
 
-impl LinuxLinkError {
+impl PocketdeskError {
     /// Get a stable machine-readable error code.
     pub fn code(&self) -> ErrorCode {
         match self {
@@ -131,7 +131,7 @@ impl LinuxLinkError {
     }
 }
 
-impl fmt::Display for LinuxLinkError {
+impl fmt::Display for PocketdeskError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ConnectionFailed {
@@ -190,13 +190,13 @@ impl fmt::Display for LinuxLinkError {
     }
 }
 
-impl std::error::Error for LinuxLinkError {}
+impl std::error::Error for PocketdeskError {}
 
 // ---------------------------------------------------------------------------
-// From implementations — convert common error types into LinuxLinkError
+// From implementations — convert common error types into PocketdeskError
 // ---------------------------------------------------------------------------
 
-impl From<std::io::Error> for LinuxLinkError {
+impl From<std::io::Error> for PocketdeskError {
     fn from(e: std::io::Error) -> Self {
         Self::Io {
             operation: "I/O operation",
@@ -205,7 +205,7 @@ impl From<std::io::Error> for LinuxLinkError {
     }
 }
 
-impl From<serde_json::Error> for LinuxLinkError {
+impl From<serde_json::Error> for PocketdeskError {
     fn from(e: serde_json::Error) -> Self {
         Self::Serialization {
             format: "JSON",
@@ -214,7 +214,7 @@ impl From<serde_json::Error> for LinuxLinkError {
     }
 }
 
-impl From<quinn::ConnectionError> for LinuxLinkError {
+impl From<quinn::ConnectionError> for PocketdeskError {
     fn from(e: quinn::ConnectionError) -> Self {
         Self::QuicError {
             detail: e.to_string(),
@@ -222,7 +222,7 @@ impl From<quinn::ConnectionError> for LinuxLinkError {
     }
 }
 
-impl From<quinn::WriteError> for LinuxLinkError {
+impl From<quinn::WriteError> for PocketdeskError {
     fn from(e: quinn::WriteError) -> Self {
         Self::QuicError {
             detail: e.to_string(),
@@ -230,7 +230,7 @@ impl From<quinn::WriteError> for LinuxLinkError {
     }
 }
 
-impl From<quinn::ReadExactError> for LinuxLinkError {
+impl From<quinn::ReadExactError> for PocketdeskError {
     fn from(e: quinn::ReadExactError) -> Self {
         Self::QuicError {
             detail: e.to_string(),
@@ -238,7 +238,7 @@ impl From<quinn::ReadExactError> for LinuxLinkError {
     }
 }
 
-impl From<rustls::Error> for LinuxLinkError {
+impl From<rustls::Error> for PocketdeskError {
     fn from(e: rustls::Error) -> Self {
         Self::TlsError {
             detail: e.to_string(),
@@ -246,7 +246,7 @@ impl From<rustls::Error> for LinuxLinkError {
     }
 }
 
-impl From<rcgen::Error> for LinuxLinkError {
+impl From<rcgen::Error> for PocketdeskError {
     fn from(e: rcgen::Error) -> Self {
         Self::TlsError {
             detail: e.to_string(),
@@ -254,7 +254,7 @@ impl From<rcgen::Error> for LinuxLinkError {
     }
 }
 
-impl From<anyhow::Error> for LinuxLinkError {
+impl From<anyhow::Error> for PocketdeskError {
     fn from(e: anyhow::Error) -> Self {
         Self::Other {
             detail: format!("{e:#}"),
@@ -266,5 +266,5 @@ impl From<anyhow::Error> for LinuxLinkError {
 // Result alias
 // ---------------------------------------------------------------------------
 
-/// A `Result` type using `LinuxLinkError`.
-pub type Result<T> = std::result::Result<T, LinuxLinkError>;
+/// A `Result` type using `PocketdeskError`.
+pub type Result<T> = std::result::Result<T, PocketdeskError>;

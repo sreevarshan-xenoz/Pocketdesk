@@ -1,6 +1,6 @@
 //! The pairing PIN file, `<state>/pairing.pin`.
 //!
-//! `linux-link pair` and the desktop app write it; the server's pair plugin
+//! `pocketdesk pair` and the desktop app write it; the server's pair plugin
 //! accepts a phone that sends the PIN while the file is fresh. Format, one
 //! value per line: the six digits, the unix second it was minted, and an
 //! optional grant length in seconds (R4 D3: pairing with this PIN trusts the

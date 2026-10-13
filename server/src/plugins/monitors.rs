@@ -1,10 +1,10 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
-use linux_link_core::streaming::MonitorInfo;
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::streaming::MonitorInfo;
 
 /// F2: Monitor enumeration plugin.
 ///
-/// Responds to `kdeconnect.linuxlink.monitors` queries by reporting
+/// Responds to `kdeconnect.pocketdesk.monitors` queries by reporting
 /// the details of available monitors (names, resolutions, indices).
 pub struct MonitorsPlugin;
 
@@ -15,7 +15,7 @@ impl Plugin for MonitorsPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.linuxlink.monitors"]
+        &["kdeconnect.pocketdesk.monitors"]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -23,10 +23,10 @@ impl Plugin for MonitorsPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
-        if packet.packet_type == "kdeconnect.linuxlink.monitors" {
+        if packet.packet_type == "kdeconnect.pocketdesk.monitors" {
             let monitors = enumerate_monitors();
             let response =
-                NetworkPacket::new("kdeconnect.linuxlink.monitors").with_body(serde_json::json!({
+                NetworkPacket::new("kdeconnect.pocketdesk.monitors").with_body(serde_json::json!({
                     "count": monitors.len(),
                     "monitors": monitors
                 }));

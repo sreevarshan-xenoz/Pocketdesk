@@ -4,9 +4,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{Instrument, debug, info, info_span, trace, warn};
 
-use linux_link_core::error::LinuxLinkError;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, PluginRegistry};
-use linux_link_core::protocol::v2::{
+use pocketdesk_core::error::PocketdeskError;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, PluginRegistry};
+use pocketdesk_core::protocol::v2::{
     ChannelKind, IdentityPacketV2, perform_v2_handshake, read_framed_json, write_framed_json,
 };
 
@@ -55,10 +55,10 @@ pub async fn handle_v2_session(
         // client certificate is the proof, held to the one bound to that
         // device.
         let peer_key = {
-            use linux_link_core::streaming::Connection as _;
-            linux_link_core::streaming::QuinnConnection::new(conn.clone()).peer_key()
+            use pocketdesk_core::streaming::Connection as _;
+            pocketdesk_core::streaming::QuinnConnection::new(conn.clone()).peer_key()
         };
-        let claim = linux_link_core::streaming::SessionClaim {
+        let claim = pocketdesk_core::streaming::SessionClaim {
             device_id: Some(peer_identity.device_id.clone()),
             peer: peer_addr,
             peer_key: peer_key.clone(),
@@ -101,7 +101,7 @@ pub async fn handle_v2_session(
                              packet_type.as_str(),
                              "kdeconnect.identity"
                                  | "kdeconnect.pair"
-                                 | "kdeconnect.linuxlink.pair"
+                                 | "kdeconnect.pocketdesk.pair"
                          );
                          if control_pairing_required
                              && !pairing_packet
@@ -220,7 +220,7 @@ async fn handle_unidirectional_stream(mut recv: RecvStream) -> anyhow::Result<()
         debug!("Incoming File stream (Reliable Uni)");
         handle_persistent_stream(recv, "file").await
     } else {
-        Err(LinuxLinkError::ProtocolError {
+        Err(PocketdeskError::ProtocolError {
             detail: format!("Unknown unidirectional stream kind: {}", kind_raw),
         }
         .into())
@@ -235,7 +235,7 @@ async fn handle_bidirectional_stream(
     recv.read_exact(&mut header).await?;
     let kind_raw = header[0];
 
-    Err(LinuxLinkError::ProtocolError {
+    Err(PocketdeskError::ProtocolError {
         detail: format!("Unexpected bidirectional stream kind: {}", kind_raw),
     }
     .into())
@@ -268,7 +268,7 @@ async fn handle_persistent_stream(mut recv: RecvStream, name: &'static str) -> a
 struct QuicDeviceSender {
     send: Arc<Mutex<SendStream>>,
     device_id: String,
-    peer_key: Option<linux_link_core::streaming::PeerKey>,
+    peer_key: Option<pocketdesk_core::streaming::PeerKey>,
     connection_id: String,
 }
 
@@ -276,7 +276,7 @@ impl QuicDeviceSender {
     fn new(
         send: SendStream,
         device_id: String,
-        peer_key: Option<linux_link_core::streaming::PeerKey>,
+        peer_key: Option<pocketdesk_core::streaming::PeerKey>,
         connection_id: String,
     ) -> Self {
         Self {
@@ -298,11 +298,14 @@ impl DeviceSender for QuicDeviceSender {
         &self.connection_id
     }
 
-    fn peer_key(&self) -> Option<linux_link_core::streaming::PeerKey> {
+    fn peer_key(&self) -> Option<pocketdesk_core::streaming::PeerKey> {
         self.peer_key.clone()
     }
 
-    async fn send_packet(&self, packet: &NetworkPacket) -> std::result::Result<(), LinuxLinkError> {
+    async fn send_packet(
+        &self,
+        packet: &NetworkPacket,
+    ) -> std::result::Result<(), PocketdeskError> {
         let mut guard = self.send.lock().await;
         write_framed_json(&mut guard, packet).await?;
         Ok(())

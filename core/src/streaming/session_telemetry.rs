@@ -69,7 +69,7 @@ impl SessionOutcome {
 ///
 /// Also the retained record: the server writes each report as one JSON line in
 /// `streaming_sessions.jsonl` so a later run can be compared against an earlier
-/// one (`linux-link sessions --json`).
+/// one (`pocketdesk sessions --json`).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionReport {
     pub unix_secs: u64,

@@ -28,11 +28,11 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc::Receiver;
 use tracing::{info, warn};
 
-use linux_link_core::streaming::{AudioDecoder, InputPacket};
+use pocketdesk_core::streaming::{AudioDecoder, InputPacket};
 
 /// Defined in `core::streaming::audio` because the phone's encoder has to match
 /// them; re-exported here so the relay reads as one file.
-pub use linux_link_core::streaming::audio::{MIC_CHANNELS, MIC_SAMPLE_RATE};
+pub use pocketdesk_core::streaming::audio::{MIC_CHANNELS, MIC_SAMPLE_RATE};
 
 /// Minimum spacing between node spawn attempts after a failure (the phone
 /// sends a frame every 20 ms — without this a missing pw-loopback would
@@ -40,7 +40,7 @@ pub use linux_link_core::streaming::audio::{MIC_CHANNELS, MIC_SAMPLE_RATE};
 const SPAWN_RETRY: Duration = Duration::from_secs(5);
 
 pub fn mic_node_props() -> String {
-    "node.name=linux_link_mic node.description=\"Pocketdesk Mic\" \
+    "node.name=pocketdesk_mic node.description=\"Pocketdesk Mic\" \
      node.nick=\"Pocketdesk Mic\" media.class=Audio/Source/Virtual"
         .to_string()
 }
@@ -172,7 +172,7 @@ async fn run_mic_relay_with(program: &str, args: &[String], mut rx: Receiver<Inp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::streaming::{AudioConfig, AudioEncoder};
+    use pocketdesk_core::streaming::{AudioConfig, AudioEncoder};
     use tokio::sync::mpsc;
 
     fn mic_frame(enabled: bool, opus: Vec<u8>) -> InputPacket {
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn node_props_declare_a_virtual_mic() {
         let props = mic_node_props();
-        assert!(props.contains("node.name=linux_link_mic"));
+        assert!(props.contains("node.name=pocketdesk_mic"));
         assert!(props.contains("media.class=Audio/Source/Virtual"));
         assert!(props.contains("node.description=\"Pocketdesk Mic\""));
     }

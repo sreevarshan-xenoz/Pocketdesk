@@ -143,7 +143,7 @@ pub fn show() -> Option<PrivacyShield> {
         &surface,
         None, // output: None spans the whole compositor space
         Layer::Overlay,
-        "linux-link-shield".to_string(),
+        "pocketdesk-shield".to_string(),
         &qh,
         configure.clone(),
     );
@@ -251,7 +251,7 @@ fn make_buffer(
 }
 
 fn new_memfd() -> anyhow::Result<OwnedFd> {
-    let name = std::ffi::CString::new("linux-link-shield").unwrap();
+    let name = std::ffi::CString::new("pocketdesk-shield").unwrap();
     // SAFETY: memfd_create with a valid C string; fd checked below.
     let raw = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
     if raw < 0 {

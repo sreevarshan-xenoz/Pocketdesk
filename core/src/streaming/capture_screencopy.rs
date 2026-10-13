@@ -13,7 +13,7 @@
 //! no Wayland display, no/old global (non-wlroots compositors), unsupported
 //! buffer — returns `Err` before any frame flows, and
 //! [`crate::streaming::capture::start_capture_auto`] then uses the portal
-//! path unchanged. Set `LINUX_LINK_SCREENCOPY=0` to force the portal even
+//! path unchanged. Set `POCKETDESK_SCREENCOPY=0` to force the portal even
 //! on wlroots.
 //!
 //! R4 B2 extends the same loop with **per-window capture** through
@@ -309,11 +309,11 @@ pub fn start_screencopy_capture(
     window_rx: watch::Receiver<u64>,
     window_mode: Arc<AtomicBool>,
 ) -> Result<CaptureSession> {
-    if std::env::var("LINUX_LINK_SCREENCOPY")
+    if std::env::var("POCKETDESK_SCREENCOPY")
         .map(|v| v == "0")
         .unwrap_or(false)
     {
-        bail!("screencopy backend disabled via LINUX_LINK_SCREENCOPY=0");
+        bail!("screencopy backend disabled via POCKETDESK_SCREENCOPY=0");
     }
 
     let (ready_tx, ready_rx) = mpsc::channel::<Result<()>>();
@@ -883,7 +883,7 @@ impl Drop for ShmBuffer {
 }
 
 fn make_memfd(len: u64) -> Result<OwnedFd> {
-    let name = std::ffi::CString::new("linux-link-screencopy").unwrap();
+    let name = std::ffi::CString::new("pocketdesk-screencopy").unwrap();
     // SAFETY: plain memfd_create; fd checked below.
     let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
     if fd < 0 {

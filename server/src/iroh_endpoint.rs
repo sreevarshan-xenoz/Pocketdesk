@@ -5,7 +5,7 @@
 //! connections into the same [`StreamingServer`] pipeline. The endpoint's
 //! identity (`EndpointId` plus current relay URLs and direct addresses) is
 //! pushed to registered control-channel clients as a
-//! `kdeconnect.linuxlink.endpoint` packet — the phone caches it and dials the
+//! `kdeconnect.pocketdesk.endpoint` packet — the phone caches it and dials the
 //! full `EndpointAddr` later, so neither side needs pkarr or any address
 //! discovery infrastructure (relays are used only for hole punching).
 
@@ -21,22 +21,21 @@ use anyhow::{Context, Result};
 use iroh::endpoint::QuicTransportConfig;
 use iroh::endpoint::presets::Minimal;
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey};
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
-use linux_link_core::streaming::input_packet::InputPacket;
-use linux_link_core::streaming::transport::{CertManager, StreamTransportConfig};
-use linux_link_core::streaming::{IrohConnection, StreamingConfig, StreamingServer};
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
+use pocketdesk_core::streaming::input_packet::InputPacket;
+use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
+use pocketdesk_core::streaming::{IrohConnection, StreamingConfig, StreamingServer};
 use tokio::sync::broadcast;
 
 /// Packet type carrying the server's WAN identity to registered clients.
-pub const ENDPOINT_PACKET: &str = "kdeconnect.linuxlink.endpoint";
+pub const ENDPOINT_PACKET: &str = "kdeconnect.pocketdesk.endpoint";
 
 /// Persisted iroh identity key, next to `config.toml`.
 const KEY_FILE: &str = "iroh_secret.key";
 
 fn key_path() -> Result<PathBuf> {
-    Ok(dirs::config_dir()
+    Ok(pocketdesk_core::local::paths::config_dir()
         .context("unable to determine config directory")?
-        .join("linux-link")
         .join(KEY_FILE))
 }
 
@@ -79,7 +78,7 @@ pub fn load_or_create_secret_key(path: &Path) -> Result<SecretKey> {
             #[cfg(windows)]
             {
                 drop(file);
-                linux_link_core::secure_fs::restrict_to_owner(path)
+                pocketdesk_core::secure_fs::restrict_to_owner(path)
                     .with_context(|| format!("failed restricting {}", path.display()))?;
             }
             Ok(key)
@@ -118,7 +117,7 @@ pub fn record_endpoint_in(
     if last.as_ref() == Some(&body) {
         return false;
     }
-    match linux_link_core::local::identity::write_endpoint(state_dir, &body) {
+    match pocketdesk_core::local::identity::write_endpoint(state_dir, &body) {
         Ok(()) => {
             *last = Some(body);
             true
@@ -135,8 +134,8 @@ pub fn record_endpoint_in(
 pub fn wan_status_from(
     report: &iroh::unstable_net_report::NetReport,
     unix_secs: u64,
-) -> linux_link_core::local::diagnostics::WanStatus {
-    linux_link_core::local::diagnostics::WanStatus {
+) -> pocketdesk_core::local::diagnostics::WanStatus {
+    pocketdesk_core::local::diagnostics::WanStatus {
         unix_secs,
         udp: report.has_udp(),
         // The NAT verdict is IPv4's: an IPv6 address that rotates is not a
@@ -174,7 +173,7 @@ fn spawn_endpoint_recorder(endpoint: Endpoint) {
                     status.captive_portal,
                 );
                 if last_status != Some(facts) {
-                    match linux_link_core::local::diagnostics::write_wan_status(&dir, &status) {
+                    match pocketdesk_core::local::diagnostics::write_wan_status(&dir, &status) {
                         Ok(()) => last_status = Some(facts),
                         Err(e) => tracing::debug!("could not record the WAN status: {e}"),
                     }
@@ -206,7 +205,7 @@ pub async fn spawn_wan_endpoint(
     cert_manager: Arc<CertManager>,
     pairing_required: bool,
     allow_hevc: bool,
-    capture_backend: linux_link_core::streaming::CaptureBackend,
+    capture_backend: pocketdesk_core::streaming::CaptureBackend,
     mic_relay_device: Option<String>,
 ) -> Result<Endpoint> {
     // What an earlier run recorded about its internet path is not this
@@ -214,8 +213,8 @@ pub async fn spawn_wan_endpoint(
     // binds shows nothing measured rather than the last network's facts.
     if let Ok(dir) = crate::state::state_dir() {
         for stale in [
-            linux_link_core::local::paths::WAN_STATUS_FILE,
-            linux_link_core::local::paths::ENDPOINT_FILE,
+            pocketdesk_core::local::paths::WAN_STATUS_FILE,
+            pocketdesk_core::local::paths::ENDPOINT_FILE,
         ] {
             let _ = std::fs::remove_file(dir.join(stale));
         }
@@ -328,7 +327,7 @@ mod tests {
 
     fn temp_key_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "linux-link-iroh-test-{}-{label}.key",
+            "pocketdesk-iroh-test-{}-{label}.key",
             std::process::id()
         ))
     }
@@ -399,7 +398,7 @@ mod tests {
         let mut last = None;
         assert!(record_endpoint_in(&dir, &addr, id, &mut last));
         assert_eq!(
-            linux_link_core::local::identity::read_endpoint(&dir),
+            pocketdesk_core::local::identity::read_endpoint(&dir),
             Some(endpoint_packet(&addr, id).body)
         );
         assert!(

@@ -20,7 +20,7 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 /// The identity toasts are shown under. An unpackaged app needs one registered
 /// under `HKCU\Software\Classes\AppUserModelId` for Windows to display them.
-const AUMID: &str = "LinuxLink.Server";
+const AUMID: &str = "Pocketdesk.Server";
 
 /// A tool in the real System32, located by asking Windows (not `%SystemRoot%`,
 /// which the user can point anywhere).
@@ -115,11 +115,11 @@ pub(super) fn notify(summary: &str, body: &str) -> bool {
     }
 }
 
-/// The event a server waits on and `linux-link stop` signals. Session-local,
+/// The event a server waits on and `pocketdesk stop` signals. Session-local,
 /// so other logon sessions cannot reach it; [`listen_for_stop_event`] refuses
 /// one that already exists, so a squatter cannot hand us its own.
 fn stop_event_name(pid: u32) -> HSTRING {
-    HSTRING::from(format!(r"Local\LinuxLink-{pid}-stop"))
+    HSTRING::from(format!(r"Local\Pocketdesk-{pid}-stop"))
 }
 
 /// Create this process's stop event and forward its signal to `tx`.
@@ -128,7 +128,7 @@ pub(super) fn listen_for_stop_event(tx: tokio::sync::mpsc::Sender<super::Shutdow
     let event = match unsafe { CreateEventW(None, true, false, &name) } {
         Ok(event) => event,
         Err(e) => {
-            tracing::warn!("cannot create the stop event; `linux-link stop` will force-kill: {e}");
+            tracing::warn!("cannot create the stop event; `pocketdesk stop` will force-kill: {e}");
             return;
         }
     };
@@ -138,7 +138,7 @@ pub(super) fn listen_for_stop_event(tx: tokio::sync::mpsc::Sender<super::Shutdow
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         let _ = unsafe { CloseHandle(event) };
         tracing::warn!(
-            "a stop event for this pid already existed (planted?); ignoring it, so              `linux-link stop` will fall back to terminating the process"
+            "a stop event for this pid already existed (planted?); ignoring it, so              `pocketdesk stop` will fall back to terminating the process"
         );
         return;
     }
@@ -149,7 +149,7 @@ pub(super) fn listen_for_stop_event(tx: tokio::sync::mpsc::Sender<super::Shutdow
         .spawn(move || {
             let event = windows::Win32::Foundation::HANDLE(raw as *mut _);
             unsafe { WaitForSingleObject(event, INFINITE) };
-            let _ = tx.blocking_send("linux-link stop");
+            let _ = tx.blocking_send("pocketdesk stop");
             let _ = unsafe { CloseHandle(event) };
         });
     if let Err(e) = spawned {
@@ -170,12 +170,14 @@ pub(super) fn signal_stop_event(pid: u32) -> bool {
 }
 
 /// Whether two executable paths name the same program file (Windows paths
-/// compare case-insensitively).
+/// compare case-insensitively). `pocketdesk` and `pd` are one program.
 fn same_program(a: &std::path::Path, b: &std::path::Path) -> bool {
+    use pocketdesk_core::local::server::is_server_image;
     match (a.file_name(), b.file_name()) {
-        (Some(a), Some(b)) => a
-            .to_string_lossy()
-            .eq_ignore_ascii_case(&b.to_string_lossy()),
+        (Some(a), Some(b)) => {
+            let (a, b) = (a.to_string_lossy(), b.to_string_lossy());
+            a.eq_ignore_ascii_case(&b) || (is_server_image(&a) && is_server_image(&b))
+        }
         _ => false,
     }
 }
@@ -248,7 +250,7 @@ mod tests {
         let reason = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
             .expect("stop request delivered");
-        assert_eq!(reason, Some("linux-link stop"));
+        assert_eq!(reason, Some("pocketdesk stop"));
         assert!(
             !signal_stop_event(u32::MAX),
             "no event for a pid that is not running"
@@ -259,16 +261,30 @@ mod tests {
     fn only_the_same_program_counts_as_a_server() {
         use std::path::Path;
         assert!(same_program(
-            Path::new(r"C:\Program Files\Linux Link\linux-link.exe"),
-            Path::new(r"E:\build\LINUX-LINK.EXE")
+            Path::new(r"C:\Program Files\Pocketdesk\pocketdesk.exe"),
+            Path::new(r"E:\build\POCKETDESK.EXE")
         ));
+        assert!(
+            same_program(
+                Path::new(r"C:\Program Files\Pocketdesk\pocketdesk.exe"),
+                Path::new(r"E:\build\pd.exe")
+            ),
+            "the short name is the same program"
+        );
+        assert!(
+            !same_program(
+                Path::new(r"C:\Program Files\Pocketdesk\pocketdesk.exe"),
+                Path::new(r"E:\build\pocketdesk-app.exe")
+            ),
+            "the desktop app is not the server"
+        );
         assert!(!same_program(
             Path::new(r"C:\Windows\explorer.exe"),
-            Path::new(r"E:\build\linux-link.exe")
+            Path::new(r"E:\build\pocketdesk.exe")
         ));
         assert!(!same_program(
             Path::new(""),
-            Path::new(r"E:\linux-link.exe")
+            Path::new(r"E:\pocketdesk.exe")
         ));
     }
 
@@ -282,12 +298,12 @@ mod tests {
     }
 
     /// Live: a toast actually reaches the Action Center. Run on a desktop:
-    /// `cargo test -p linux-link-server --lib a_toast_is_shown -- --ignored`.
+    /// `cargo test -p pocketdesk-server --lib a_toast_is_shown -- --ignored`.
     #[test]
     #[ignore = "shows a real toast on an interactive Windows desktop"]
     fn a_toast_is_shown() {
         assert!(notify(
-            "Linux Link test",
+            "Pocketdesk test",
             "If you can read this, toasts work."
         ));
     }

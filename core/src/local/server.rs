@@ -15,14 +15,22 @@ pub fn server_pid(state_dir: &Path) -> Option<u32> {
 }
 
 /// Whether the server is running: the pid file names a live process whose
-/// executable is `linux-link`. On an OS where the image cannot be read, the
+/// executable is `pocketdesk`. On an OS where the image cannot be read, the
 /// pid file alone answers.
 pub fn is_running(state_dir: &Path) -> bool {
     server_pid(state_dir).is_some_and(process_is_server)
 }
 
-fn is_server_image(file_name: &str) -> bool {
-    file_name.starts_with("linux-link")
+/// The names the server runs under: the `pocketdesk` command and its short
+/// form `pd`. The desktop app (`pocketdesk-app`) is not one of them.
+pub const SERVER_PROGRAMS: [&str; 2] = ["pocketdesk", "pd"];
+
+/// Whether an executable's file name is the server's, with or without
+/// `.exe`, in any case.
+pub fn is_server_image(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    let stem = lower.strip_suffix(".exe").unwrap_or(&lower);
+    SERVER_PROGRAMS.contains(&stem)
 }
 
 #[cfg(windows)]
@@ -75,6 +83,29 @@ mod tests {
     use super::*;
     use crate::local::paths::PID_FILE;
 
+    #[test]
+    fn the_server_runs_as_pocketdesk_or_pd_and_nothing_else() {
+        for name in [
+            "pocketdesk",
+            "pocketdesk.exe",
+            "POCKETDESK.EXE",
+            "pd",
+            "pd.exe",
+            "PD.EXE",
+        ] {
+            assert!(is_server_image(name), "{name}");
+        }
+        for name in [
+            "pocketdesk-app",
+            "pocketdesk-app.exe",
+            "pdf.exe",
+            "explorer.exe",
+            "",
+        ] {
+            assert!(!is_server_image(name), "{name}");
+        }
+    }
+
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-srv-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -92,7 +123,7 @@ mod tests {
 
     #[test]
     fn a_live_process_that_is_not_the_server_is_not_running() {
-        // This test binary is alive, but it is not `linux-link`: a reused pid.
+        // This test binary is alive, but it is not `pocketdesk`: a reused pid.
         let dir = temp_dir("reused");
         std::fs::write(dir.join(PID_FILE), std::process::id().to_string()).unwrap();
         assert!(!is_running(&dir));

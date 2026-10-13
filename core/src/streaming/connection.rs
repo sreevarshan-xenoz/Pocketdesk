@@ -362,7 +362,7 @@ mod tests {
             .set_default_client_config(phone.client_config(alpn).expect("client config"));
         let client = QuinnConnection::shared(
             client_endpoint
-                .connect(addr, "linux-link.local")
+                .connect(addr, "pocketdesk.local")
                 .expect("dial")
                 .await
                 .expect("connect"),
@@ -415,7 +415,7 @@ mod tests {
         client_endpoint
             .set_default_client_config(certs.client_config(alpn).expect("client config"));
         let raw_client = client_endpoint
-            .connect(addr, "linux-link.local")
+            .connect(addr, "pocketdesk.local")
             .expect("dial")
             .await
             .expect("connect");

@@ -1,25 +1,25 @@
 //! Start and restart the server from the app.
 //!
-//! Stopping goes through `linux-link stop` (the CLI's graceful-stop path,
+//! Stopping goes through `pocketdesk stop` (the CLI's graceful-stop path,
 //! with its own safety checks); starting prefers how the server is
 //! installed — the logon task on Windows, the systemd user unit on Linux —
-//! and otherwise launches `linux-link start --background`. Never run without
+//! and otherwise launches `pocketdesk start --background`. Never run without
 //! the user's click: this app does not stop the server on its own.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use linux_link_core::local::server;
+use pocketdesk_core::local::server;
 
 pub const START_ARGS: [&str; 2] = ["start", "--background"];
 pub const STOP_ARGS: [&str; 1] = ["stop"];
 
-/// The logon task `linux-link install` registers on Windows.
+/// The logon task `pocketdesk install` registers on Windows.
 #[cfg(windows)]
 const TASK_NAME: &str = "Pocketdesk";
 /// The systemd user unit on Linux.
-const UNIT_NAME: &str = "linux-link";
+const UNIT_NAME: &str = "pocketdesk";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
@@ -58,14 +58,14 @@ pub fn start_plan(os: Os, installed: bool, exe: PathBuf) -> StartPlan {
 
 pub fn server_file_name() -> &'static str {
     if cfg!(windows) {
-        "linux-link.exe"
+        "pocketdesk.exe"
     } else {
-        "linux-link"
+        "pocketdesk"
     }
 }
 
 /// The server executable: the one installed beside this app, else whatever
-/// `linux-link` is on PATH.
+/// `pocketdesk` is on PATH.
 pub fn server_exe(app_dir: &Path) -> PathBuf {
     let beside = app_dir.join(server_file_name());
     if beside.is_file() {
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn an_installed_server_is_started_the_way_it_was_installed() {
-        let exe = PathBuf::from("linux-link");
+        let exe = PathBuf::from("pocketdesk");
         assert_eq!(
             start_plan(Os::Windows, true, exe.clone()),
             StartPlan::LogonTask

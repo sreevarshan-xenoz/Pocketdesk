@@ -13,15 +13,15 @@
 //! default:
 //!
 //! ```text
-//! cargo test -p linux-link-server --test session_record -- --ignored --nocapture
+//! cargo test -p pocketdesk-server --test session_record -- --ignored --nocapture
 //! ```
 
 use std::net::SocketAddr;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use linux_link_core::streaming::transport::{CertManager, StreamServer, StreamTransportConfig};
-use linux_link_core::streaming::{
+use pocketdesk_core::streaming::transport::{CertManager, StreamServer, StreamTransportConfig};
+use pocketdesk_core::streaming::{
     QuinnConnection, SAMPLE_DECODE, SAMPLE_RENDER, SampleBatch, SessionReport, StreamingClient,
     StreamingConfig, StreamingServer, report_samples, set_session_telemetry_callback,
 };

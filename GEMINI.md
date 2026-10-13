@@ -1,6 +1,6 @@
-# Pocketdesk (formerly Linux Link) — Agent Context
+# Pocketdesk (formerly Pocketdesk) — Agent Context
 
-This file provides architectural context for AI agents working on the Pocketdesk project (formerly Linux Link).
+This file provides architectural context for AI agents working on the Pocketdesk project (formerly Pocketdesk).
 
 ## Project Context
 

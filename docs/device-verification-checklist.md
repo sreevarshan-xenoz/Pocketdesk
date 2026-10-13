@@ -11,7 +11,7 @@ of exactly that, including the one fix that merged without its confirming observ
 
 ## 0. Prerequisites
 
-- [ ] Desktop: `cargo run -p linux-link-server` (or installed server) on the
+- [ ] Desktop: `cargo run -p pocketdesk-server` (or installed server) on the
       Hyprland machine; FFmpeg + PipeWire + xdg-desktop-portal present.
 - [ ] Phone: `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`
       (build it first: `cargo ndk` for the bridge `.so`, then `assembleDebug`).
@@ -29,7 +29,7 @@ of exactly that, including the one fix that merged without its confirming observ
 - [ ] First connection: Pairing sheet auto-opens (pairing_required default true).
 - [ ] "Show PIN on desktop" → desktop pops a notify-send PIN → phone confirms "Paired ✓", button flips to "Paired ✓".
 - [ ] Second connect to same host: no pairing prompt (persisted both sides).
-- [ ] Manual flow: `linux-link pair` on desktop → type 6-digit PIN on phone → paired.
+- [ ] Manual flow: `pocketdesk pair` on desktop → type 6-digit PIN on phone → paired.
 - [ ] Wrong/expired PIN → clear error, retry works.
 - [ ] With an *unpaired* second phone: control features (clipboard, monitors) must stay locked out.
 - [ ] QUIC gate (v2 + video): before pairing completes, video must not flow — desktop log shows
@@ -56,7 +56,7 @@ of exactly that, including the one fix that merged without its confirming observ
       "Capture started via backend Screencopy". If instead it shows "Capture backend
       Screencopy unavailable (…); trying next" followed by "Capture started via backend
       Portal", the reason is in the line — that's the fallback working, but note it as a
-      finding. `LINUX_LINK_SCREENCOPY=0` forces the portal path.
+      finding. `POCKETDESK_SCREENCOPY=0` forces the portal path.
 - [ ] R4 B3 capture_backend config override: set `capture_backend = "portal"` in
       config.toml, restart, start a stream → log shows "Capture started via backend Portal"
       and NO screencopy attempt line (pipeline pinned). With `capture_backend = "screencopy"`
@@ -105,15 +105,15 @@ Note: there is **no `hardware_encoder` key in config.toml yet** — the streamin
 `StreamingConfig` with `HardwareEncoder::Auto` (`streamer.rs`), which `VideoEncoder::new` resolves via
 `resolve_encoder(Auto, probe_encoders())`. So on a live session the exact rung is whatever Auto picks;
 the deterministic C4 proof on the host is the unit test below, and the desktop-observable checks are the
-backend log line + the `LINUX_LINK_VAAPI_DEVICE` override (honoured by both the in-process and sidecar
+backend log line + the `POCKETDESK_VAAPI_DEVICE` override (honoured by both the in-process and sidecar
 paths regardless of the config knob). Forcing a *specific* encoder end-to-end is a known future knob,
 not part of C4.
 
-- [ ] R4 C4 host proof (no phone): `cargo test -p linux-link-core --lib encoder_vaapi` → 
+- [ ] R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` → 
       `test_vaapi_encode_roundtrip` encodes 40 real frames through `h264_vaapi` on this box's Intel
       iHD node and asserts Annex-B packets + ≥1 keyframe (self-skips green where no VA node exists).
 - [ ] R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the
-      VA-capable node, NOT the hardcoded NVIDIA `renderD128` — `LINUX_LINK_VAAPI_DEVICE=/dev/dri/renderD129`
+      VA-capable node, NOT the hardcoded NVIDIA `renderD128` — `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD129`
       starts a session → server log "Video encoder: in-process VAAPI (h264_vaapi) on /dev/dri/renderD129"
       and **no `ffmpeg` sidecar child** is spawned for the vaapi path (`pstree` of the server). Point the
       override at a VA-less node (e.g. `/dev/dri/renderD128`) → it degrades to sidecar-then-software (C2),
@@ -123,17 +123,17 @@ not part of C4.
 
 ## 2a. Desktop-side session visibility + kick (R4 D2)
 
-- [ ] Consent notice: first phone connect → desktop shows a "Linux Link: a device is
+- [ ] Consent notice: first phone connect → desktop shows a "Pocketdesk: a device is
       streaming this desktop" notification with device id + LAN/WAN + peer (headless: the same
       line appears in the server log instead).
-- [ ] `linux-link status` during the session → tailscale output plus a "Streaming sessions
+- [ ] `pocketdesk status` during the session → tailscale output plus a "Streaming sessions
       (live):" line (short device id, transport, peer, up-seconds). With no session: "none live".
-- [ ] `linux-link kick <id-prefix>` (≥6 chars, or full id, or peer IP) → phone shows the Down
+- [ ] `pocketdesk kick <id-prefix>` (≥6 chars, or full id, or peer IP) → phone shows the Down
       status chip within ~2 s and the status line disappears; other sessions are untouched.
-- [ ] `linux-link kick all` ends every live session at once.
-- [ ] kick with no running server → "no running Linux Link server to kick through", nothing
+- [ ] `pocketdesk kick all` ends every live session at once.
+- [ ] kick with no running server → "no running Pocketdesk server to kick through", nothing
       written; a bogus target logs "kick: no live session matched" and the live session survives.
-- [ ] Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/linux-link/kick`
+- [ ] Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/pocketdesk/kick`
       (`all\n<unix-secs older than 60s>`), start the daemon, connect a phone → the session must
       NOT be killed (the expired request is dropped with a warn on first tick).
 - [ ] Phone disconnect (normal Exit) → status line goes away within ~2 s; no leftover session in
@@ -172,14 +172,14 @@ is still filling in is dimmed. What to confirm on a real phone:
 - [ ] Portrait legibility: the caption is one line of 10 sp monospace; in portrait on a narrow phone it
       must not wrap into a single-character column the way the six metric chips did before they became a
       `FlowRow`, and must not be clipped by the HUD panel's padding.
-- [ ] Optional cross-check: while the caption reads `rates over 3.0s`, `linux-link sessions` for the same
+- [ ] Optional cross-check: while the caption reads `rates over 3.0s`, `pocketdesk sessions` for the same
       session should report a mean kbps within the same order of magnitude — the session record averages
       over the whole session, the HUD does not, and a large disagreement is a measurement bug in one of
       them.
 
 ## 3. Input paths (R2#4, Tier 1 #2)
 
-- [x] Direct-touch: tap lands at the touched point. **Verified 2026-09-22 on OPPO CPH2359 → Hyprland:** taps map pixel-exact through the letterbox (phone (540,1230) → cursor (768,432) = desktop center). Under Wayland the injector uses uinput (enigo/XTEST is inert on Hyprland): motion rides the "Linux Link Virtual Abs Pointer" device (ABS_X/ABS_Y + BTN_LEFT, created eagerly at startup so the first tap is not lost); keyboard/relative ride "Linux Link Virtual Input".
+- [x] Direct-touch: tap lands at the touched point. **Verified 2026-09-22 on OPPO CPH2359 → Hyprland:** taps map pixel-exact through the letterbox (phone (540,1230) → cursor (768,432) = desktop center). Under Wayland the injector uses uinput (enigo/XTEST is inert on Hyprland): motion rides the "Pocketdesk Virtual Abs Pointer" device (ABS_X/ABS_Y + BTN_LEFT, created eagerly at startup so the first tap is not lost); keyboard/relative ride "Pocketdesk Virtual Input".
 - [ ] ...and a tap is actually a **click** (roadmap 2061, re-verify 2026-09-24). The 2026-09-22 note above
       claimed "click (BTN_LEFT) lands", but the code that ran sent absolute motion plus a left *release* and
       never a press — so that half was either an inference or a window reacting to something else. A tap
@@ -251,14 +251,14 @@ is still filling in is dimmed. What to confirm on a real phone:
 ## 8a. Control-channel versioning (R4 D4)
 
 - [ ] Reply still works end-to-end after the `kdeconnect.notification-reply` →
-      `kdeconnect.linuxlink.notification_reply` rename (desktop-side check): reply from the phone
+      `kdeconnect.pocketdesk.notification_reply` rename (desktop-side check): reply from the phone
       shade → `replies.log` records it + confirmation popup (the server only matches the new type
       now, so an old client build's reply would silently no-op — both ends must be from this build).
 - [ ] `llVersion` tag is present on our extension packets only: capture the control-channel line
       (e.g. `journalctl`/strace the JSON, or a debug log of `to_wire` output) — a
-      `kdeconnect.linuxlink.privacy`/`.audio`/`.state` packet carries `"llVersion":1`; a native
+      `kdeconnect.pocketdesk.privacy`/`.audio`/`.state` packet carries `"llVersion":1`; a native
       `kdeconnect.identity`/`kdeconnect.pair`/`kdeconnect.clipboard` packet does NOT.
-- [ ] Forward-compat: hand-inject a `kdeconnect.linuxlink.privacy` line with an extra unknown
+- [ ] Forward-compat: hand-inject a `kdeconnect.pocketdesk.privacy` line with an extra unknown
       top-level field and an unknown body key → server still parses and acts (unknown fields ignored).
 
 ## 9. Privacy mode + lock (Tier-3 #15, R4 E4)
@@ -267,7 +267,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 - [ ] Compositor shield (R4 E4, Hyprland/wlroots): the same "Privacy: on" also paints a full-perimeter red frame on every monitor within ~1 s; the desktop centre stays visible and interactive from the phone (the ring is `KeyboardInteractivity::None`, click-through). Desktop log shows "privacy: layer-shell privacy shield engaged".
 - [ ] Leave session with privacy on → release happens (phone app exit); also verify 10-min TTL auto-release by force-killing the phone app mid-grab.
 - [ ] Shield tears down with the grab: "Privacy: off" → the red frame disappears immediately; force-killing the phone app mid-grab → frame gone after the TTL auto-release.
-- [ ] Non-wlroots desktop (GNOME/KDE/X11, or `LINUX_LINK_SCREENCOPY=0` headless): no shield is attempted — grab still works, no crash, no "shield engaged" log line.
+- [ ] Non-wlroots desktop (GNOME/KDE/X11, or `POCKETDESK_SCREENCOPY=0` headless): no shield is attempted — grab still works, no crash, no "shield engaged" log line.
 - [ ] "Lock PC" / session-notification "Lock desktop" → screen locks (loginctl path).
 - [ ] Without `input` group: clean error, no crash.
 
@@ -279,9 +279,9 @@ is still filling in is dimmed. What to confirm on a real phone:
 ## 10a. Phone mic share (R4 E2)
 
 - [ ] "Mic: off" tap → RECORD_AUDIO permission dialog; denying it toasts "Microphone permission denied" and the toggle stays off.
-- [ ] Granting it → button reads "Mic: on" (amber) and the desktop gains a source: `pactl list short sources | grep linux_link_mic` (or pavucontrol → Recording).
-- [ ] Speaking moves the pavucontrol input meter for "Pocketdesk Mic"; `pw-record --target linux_link_mic /tmp/mic.wav` captures audible speech (play it back).
-- [ ] "Mic: on" tap → source disappears immediately; `pgrep -f linux_link_mic` empty (no leaked pw-loopback children after repeated toggling).
+- [ ] Granting it → button reads "Mic: on" (amber) and the desktop gains a source: `pactl list short sources | grep pocketdesk_mic` (or pavucontrol → Recording).
+- [ ] Speaking moves the pavucontrol input meter for "Pocketdesk Mic"; `pw-record --target pocketdesk_mic /tmp/mic.wav` captures audible speech (play it back).
+- [ ] "Mic: on" tap → source disappears immediately; `pgrep -f pocketdesk_mic` empty (no leaked pw-loopback children after repeated toggling).
 - [ ] View-only latched → mic keeps flowing (it is session media, not injected input); input is still dropped.
 - [ ] Exit the session while mic is on → source disappears (release-on-dispose); force-killing the phone app → source gone within the QUIC idle timeout (~45 s).
 - [ ] Screen off / PiP while mic is on (Android 14+): audio keeps flowing — the FGS carries the microphone type (logcat: no SecurityException, no silent AudioRecord).
@@ -293,13 +293,13 @@ is still filling in is dimmed. What to confirm on a real phone:
 - [ ] Phone on LTE (Wi-Fi off): dial from cached identity succeeds → badge shows "WAN · punching…" then settles to "WAN · direct" or "WAN · relayed — trying direct…", video + input + keyframe-on-gap all work through relays (R4 A1).
 - [ ] Desktop reconnects (restart server) → identity re-announced within 30 s, phone re-dials.
 - [ ] Hole punching through a real NAT (relay-free if possible): check `directAddrs` paths get used.
-- [ ] After both a LAN and a WAN session: `linux-link sessions` shows one line per session with distinct `outcome=` (`lan_direct` vs `wan_punched`/`wan_relayed`), plausible `rtt_ms`/`kbps`, and `dev=` = the paired deviceId.
+- [ ] After both a LAN and a WAN session: `pocketdesk sessions` shows one line per session with distinct `outcome=` (`lan_direct` vs `wan_punched`/`wan_relayed`), plausible `rtt_ms`/`kbps`, and `dev=` = the paired deviceId.
 - [ ] Tail latency (roadmap 2141-2146): the same lines carry `enc_n`/`enc_p50`/`enc_p90`/`enc_p95`/`enc_p99`/`enc_max` and the matching `rtt_*` set. `enc_n` counts frames the encoder actually produced a packet for, so it must be non-zero and of the same order as fps × session duration — a large shortfall is its own finding (frames dropped upstream, or a path that never samples). `enc_p50` must sit near the typical frame time for the encoder rung in use (the log line names the backend at session start), and a deliberate stall — crop to a window, or unplug/replug Wi-Fi mid-session — has to move `enc_max` or `rtt_max` above `enc_p50`/`rtt_p50`. **A line with no `enc_*` at all means the sampling was never wired to the live pipeline: that is a bug, not a healthy session.**
-- [ ] Device-reported tails (roadmap 2143-2146, the phone's half of the chain): the same lines must carry `dec_*`, `rnd_*` and `e2e_*` plus `phone_rtt`/`phone_lost`. `dec_n` counts frames the decoder actually rendered, so it has to track `enc_n` within the loss the link imposed (a `dec_n` far below `enc_n` is dropped-or-stalled frames, not a telemetry bug), `dec_p50` must be single-digit ms on a hardware rung and grow when the desktop is cropped to a bigger window, and `e2e_p50` must sit near the HUD's e2e figure for the same session. `rnd_p50` is the rendered-frame interval, so it should be near 1000/fps ms and must jump when the bitrate clamp or a preset slows the link. On a session that never delivered video (rejected, or killed before the first frame) `dec_*`/`rnd_*` are legitimately absent — that is the "nobody measured" case, and `key=0` in their place would be a bug. **The server side of this path is already proven without a phone: `cargo test -p linux-link-server --test session_record -- --ignored --nocapture` drives a real capture→encode→send→receive session over loopback and asserts the record carries all of these tails; what remains device-only is that `H264Decoder.kt` feeds `dec_*`/`rnd_*` with real MediaCodec timings rather than the numbers the test injects.**
+- [ ] Device-reported tails (roadmap 2143-2146, the phone's half of the chain): the same lines must carry `dec_*`, `rnd_*` and `e2e_*` plus `phone_rtt`/`phone_lost`. `dec_n` counts frames the decoder actually rendered, so it has to track `enc_n` within the loss the link imposed (a `dec_n` far below `enc_n` is dropped-or-stalled frames, not a telemetry bug), `dec_p50` must be single-digit ms on a hardware rung and grow when the desktop is cropped to a bigger window, and `e2e_p50` must sit near the HUD's e2e figure for the same session. `rnd_p50` is the rendered-frame interval, so it should be near 1000/fps ms and must jump when the bitrate clamp or a preset slows the link. On a session that never delivered video (rejected, or killed before the first frame) `dec_*`/`rnd_*` are legitimately absent — that is the "nobody measured" case, and `key=0` in their place would be a bug. **The server side of this path is already proven without a phone: `cargo test -p pocketdesk-server --test session_record -- --ignored --nocapture` drives a real capture→encode→send→receive session over loopback and asserts the record carries all of these tails; what remains device-only is that `H264Decoder.kt` feeds `dec_*`/`rnd_*` with real MediaCodec timings rather than the numbers the test injects.**
 - [ ] Transport exposure (roadmap 2151-2158): every line from a session that lasted longer than the 5 s sampler must carry `lost_pk`/`lost_b`/`dgrams`/`tx_b`/`path_chg`/`relayed_s`, and `cong_ev`/`cwnd_pk`/`mtu`/`black` **on either transport**: quinn exposes them on the connection, and the iroh arm reads them off the *selected* path (`Connection::paths()`), so a WAN session riding a punched direct path reports the same set. A WAN line missing them is no longer the expected shape — the earlier "iroh drops the per-path values" claim was read off its connection-level aggregate, which really does discard them — and the only legitimate reason for a gap now is a snapshot taken with no selected path, which is why the field is `Option` and never a `0` pretending to be a measurement. `mtu` must be ≥ 1200 (quinn's `INITIAL_MTU`) and may climb as PLPMTUD probes pay off; `cwnd_pk` must be non-zero on any session that sent video. Walk between Wi-Fi bands, or kick the phone onto cellular mid-session, and `path_chg` has to count it; start a relayed WAN session and `relayed_s` must be non-zero with `outcome=wan_punched` if punching eventually won.
 - [ ] Relayed → direct upgrade while streaming: badge flips to "WAN · direct" on its own (iroh keeps punching) and the bridge logs "upgraded from relay to direct path" (logcat). Relayed session must stay usable the whole time, not stall on the transition.
 - [ ] Relayed session (R4 A3): within ~2 s of the badge reading "relayed", the desktop log shows "Encoder bitrate target changed" (relay_cap engaged) at effective ≤ 2 Mbit/s followed by "Encoder rebuilt for new bitrate", and picture is visibly softer than LAN/direct.
-- [ ] Full-quality override (R4 A3): while relaying, the badge area offers "Full quality: off" — tap → log shows "Relay quality override changed" then a fresh "Encoder bitrate target changed" back to configured (`linux-link sessions` kbps over the next session line). Tap again to re-clamp; toggle survives a stream retry (re-arms).
+- [ ] Full-quality override (R4 A3): while relaying, the badge area offers "Full quality: off" — tap → log shows "Relay quality override changed" then a fresh "Encoder bitrate target changed" back to configured (`pocketdesk sessions` kbps over the next session line). Tap again to re-clamp; toggle survives a stream retry (re-arms).
 - [ ] Clamp release on punch-through: start relayed (override off), wait for the direct upgrade → within ~2 s the log shows "Encoder bitrate target changed" back to configured without touching anything.
 - [ ] LAN session (R4 A3): the relay clamp never engages (`stats().relayed` is always false on quinn → relay_cap is unbounded); the arbiter task still runs but emits no bitrate-change line until a preset is chosen below or the link starts losing packets.
 - [ ] Loss response (roadmap 2053): degrade the link — `tc qdisc add dev <iface> root netem loss 5%` on the desktop, or walk the phone toward the far edge of the Wi-Fi mid-session — and within a few 2 s ticks the desktop log shows "Encoder bitrate target changed" carrying a `loss_cap=` field with effective below configured, then "Encoder rebuilt for new bitrate" and a visibly softer picture. The cut is 20 % per congested tick down to a 1 Mbit/s floor (a configured rate below the floor is never raised to it). Restore the link → the same line reappears **without** `loss_cap=` as the rate climbs back ~10 % per tick to configured, then stops being a term at all.
@@ -308,7 +308,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 ## 11b. HUD link-profile presets (R4 E5)
 
 - [ ] Session bar shows "Quality: auto" by default. Tap it once → "Quality: max" (blue), then "balanced", "economy", back to "auto" — the button cycles all four.
-- [ ] On LAN, pick "economy": desktop log shows "Link-profile preset changed" then "Encoder bitrate target changed" with effective ≤ 1.5 Mbit/s and "Encoder rebuilt for new bitrate"; the HUD bitrate/`linux-link sessions` kbps drop and the picture softens. Native resolution is NOT reduced (only bitrate) — verify the HUD reports the same width×height.
+- [ ] On LAN, pick "economy": desktop log shows "Link-profile preset changed" then "Encoder bitrate target changed" with effective ≤ 1.5 Mbit/s and "Encoder rebuilt for new bitrate"; the HUD bitrate/`pocketdesk sessions` kbps drop and the picture softens. Native resolution is NOT reduced (only bitrate) — verify the HUD reports the same width×height.
 - [ ] Pick "balanced": effective ≤ 5 Mbit/s. A configured rate below a band (low-res monitor) is never raised above it (the band is a ceiling, not a floor).
 - [ ] Preset survives a stream retry / monitor switch: choose "economy", trigger Retry — the new pipeline re-arms the preset (stays ≤ 1.5 Mbit/s without re-tapping). Server latches are per-session, so a full reconnect to a fresh `StreamingServer` resets to Auto (phone must re-pick) — expected.
 - [ ] View-only interaction: while a preset is active, toggling View-only still drops injected input but the bitrate preset keeps applying (both are control-plane).
@@ -362,8 +362,8 @@ is still filling in is dimmed. What to confirm on a real phone:
 
 ## 18. Login autostart + tailnet access (server-side)
 
-- [ ] Reboot the desktop → after reaching the Hyprland session, `systemctl --user status linux-link` is active without any manual start (WantedBy=graphical-session.target).
-- [ ] Phone reconnects to the auto-started server WITHOUT re-pairing (QUIC identity persisted in `~/.local/state/linux-link/certs/`; a regenerated cert would trip the TOFU pin).
+- [ ] Reboot the desktop → after reaching the Hyprland session, `systemctl --user status pocketdesk` is active without any manual start (WantedBy=graphical-session.target).
+- [ ] Phone reconnects to the auto-started server WITHOUT re-pairing (QUIC identity persisted in `~/.local/state/pocketdesk/certs/`; a regenerated cert would trip the TOFU pin).
 - [ ] Log out / session end → service stops with the session (PartOf), never orphaned.
 - [ ] `install.sh` run → unit lands in `~/.config/systemd/user/`, ExecStart points at the real prefix path, prompt enables it; `--status` reports the user unit; `--uninstall` removes it and any legacy `/etc/systemd/system` unit.
 - [x] Phone on the tailnet (not on the LAN): connect to the laptop's 100.x Tailscale IP → pairing + video + taps work end to end. **(verified 2026-09-22: oppo-reno8-5g 100.82.170.9 → 100.117.27.83)**
@@ -411,7 +411,7 @@ Items below are re-scored against that build.
 - [ ] Edge-to-edge on all screens: content draws behind the status/nav bars and no control is unreachable under them.
 - [x] Session goes immersive: system bars hidden on entry, transient reveal on swipe, restored on Exit/PiP/blackout. After a reveal, video keeps rendering and taps stay pixel-exact (decoder-stability spot check — if OPPO shows black bars, see plan C2 fallback). *Bars stay hidden through a full session and the decoder is stable across reveal + exit; the black-bars fallback never had to be used.*
 - [x] Chrome auto-hide: HUD, mode chip, action disc, WAN badge and shortcut bar fade out together ~6 s after link-up; **any tap on the stream** reveals them (the old invisible 30 dp edge strips are gone — they made the menu unreachable); the timer is suspended while any sheet is open; dual-pane keeps chrome forced-visible.
-- [x] Error UX: a disconnect shows a centered card with a humanized reason (never a raw Rust string), Retry reconnects, "Re-pair" opens the pairing sheet when the error suggests it; session messages arrive as snackbars, not toasts. *Verified by `linux-link kick all` mid-session: warning-glyph card, "The video link dropped…" copy, and Retry rebuilt the QUIC session end to end (server log + live HUD). The re-pair branch and the snackbar paths were not exercised by this run.*
+- [x] Error UX: a disconnect shows a centered card with a humanized reason (never a raw Rust string), Retry reconnects, "Re-pair" opens the pairing sheet when the error suggests it; session messages arrive as snackbars, not toasts. *Verified by `pocketdesk kick all` mid-session: warning-glyph card, "The video link dropped…" copy, and Retry rebuilt the QUIC session end to end (server log + live HUD). The re-pair branch and the snackbar paths were not exercised by this run.*
 - [x] Silent-link detection: a desktop-side teardown (kick, sleep, Wi-Fi loss) reaches the error card within ~10 s instead of leaving the last frame frozen under normal-looking chrome — the bridge never reports the drop, so the decoder's frame gap is the liveness signal. *Verified on-device: card appeared 10 s after the kick and a healthy session ran 25 s+ past the threshold without a false positive.*
 - [x] Monitor/window/audio pickers: selected row shows the radio + primary-colored headline (the old "· current" suffix is gone); quick-settings rows have leading icons and chevron/switch affordances. *Session-settings sheet confirmed on-device with real vector glyphs, chevrons and switches; the window picker opens and renders its empty state (list contents need a desktop with windows on the streamed workspace).*
 - [ ] Pairing sheet: progress bar while waiting, PIN field auto-focused, eye toggle honors the reveal-PIN pref, animated check on success then auto-dismiss.
@@ -420,7 +420,7 @@ Items below are re-scored against that build.
 - [ ] Siren: a desktop-pushed `kdeconnect.findmydevice {ring:true}` rings the alarm AND shows the full-screen dialog; Silence stops both; the 30 s auto-stop still works if the dialog is ignored.
 - [ ] Clipboard sheet: Clear asks for confirmation first (Cancel keeps history); empty state has the clipboard icon.
 - [ ] Haptics: tick on the action disc, mode toggle, picker picks and shortcut chips; heavier buzz on Exit; the Settings haptics switch mutes all of them live.
-- [x] Session notification: real Linux Link status-bar icon (not the stock eye), Disconnect + Lock-desktop actions carry icons, channel shows its description in system settings. *`dumpsys notification` shows the custom `ic_stat_linux_link` resource and both actions; the shade renders the monitor glyph plus power/lock action icons, and the session channel carries its description.*
+- [x] Session notification: real Pocketdesk status-bar icon (not the stock eye), Disconnect + Lock-desktop actions carry icons, channel shows its description in system settings. *`dumpsys notification` shows the custom `ic_stat_pocketdesk` resource and both actions; the shade renders the monitor glyph plus power/lock action icons, and the session channel carries its description.*
 - [x] Shortcut bar: System | Workspaces groups with divider and localized captions; chips are ≥32 dp touch targets; key caps stay literal in es/ta. *Now a dark floating pill, legible over video; scrolls horizontally past PrtSc.*
 - [x] es/ta: every Phase-C string shipped (locales in sync at 161 each).
 - [x] Launcher icon: the adaptive icon renders on ColorOS (phone-into-monitor mark on the brand pine plate) instead of the default Android blob. Needed filled paths in a scaled group — stroke-only adaptive foregrounds are not rasterized there.
@@ -437,7 +437,7 @@ The reconnect storm fix is merged but its own success criterion needs the phone 
 
 ```bash
 adb devices -l                                   # confirm the phone is really there
-journalctl --user -u linux-link.service -f > /tmp/ll-journal.log &
+journalctl --user -u pocketdesk.service -f > /tmp/ll-journal.log &
 # then, on the phone: connect, open the quick-settings sheet, the monitor picker,
 # the window picker, the clipboard sheet, watch the battery row for 60 s, exit.
 kill %1
@@ -506,14 +506,14 @@ on this run; the rest are still open.
 Setup, once, from the build output or the release zip:
 
 ```powershell
-linux-link.exe install          # logon task + firewall rules (one UAC prompt)
-linux-link.exe pair             # prints the PIN (also shown as a toast)
-Get-Content "$env:LOCALAPPDATA\linux-link\logs\linux-link.*.log" -Wait
+pocketdesk.exe install          # logon task + firewall rules (one UAC prompt)
+pocketdesk.exe pair             # prints the PIN (also shown as a toast)
+Get-Content "$env:LOCALAPPDATA\pocketdesk\logs\pocketdesk.*.log" -Wait
 ```
 
 - [ ] `install` registers the "Pocketdesk" task (Task Scheduler → Task Scheduler Library), removes a
-      "Linux Link" task an older version left, starts the server with no console window, and the log
-      file appears under `%LOCALAPPDATA%\linux-link\logs`.
+      "Pocketdesk" task an older version left, starts the server with no console window, and the log
+      file appears under `%LOCALAPPDATA%\pocketdesk\logs`.
 - [ ] A toast "Pocketdesk pairing PIN: …" appears for `pair` (the `a_toast_is_shown` test only proves
       Windows accepted it).
 - [ ] The phone discovers the PC on the LAN (mDNS) and over the tailnet, pairs with the PIN, and the
@@ -537,9 +537,9 @@ Get-Content "$env:LOCALAPPDATA\linux-link\logs\linux-link.*.log" -Wait
 - [ ] Window crop: picking a window streams just that window; closing it returns to the monitor.
 - [ ] A UAC prompt or Win+L mid-session: the stream recovers after it is dismissed (WGC keeps running; on
       the DXGI fallback, access-lost rebuilds the duplication).
-- [ ] `linux-link stop` from a second terminal stops the server cleanly (the log ends with
-      `Shutdown requested (linux-link stop)`) — run this yourself; it is deliberately not automated.
-- [ ] `uninstall` removes the task and the firewall rules (`wf.msc`), including the "Linux Link" ones an
+- [ ] `pocketdesk stop` from a second terminal stops the server cleanly (the log ends with
+      `Shutdown requested (pocketdesk stop)`) — run this yourself; it is deliberately not automated.
+- [ ] `uninstall` removes the task and the firewall rules (`wf.msc`), including the "Pocketdesk" ones an
       older version created.
 
 ## 24. Desktop app and QR pairing
@@ -727,7 +727,7 @@ Built on `feat/diagnostics`. On the Windows box, an ignored test (`cargo test -p
 - [x] Windows: the six checks against a running server; the "starting" window.
 - [ ] Open the Diagnostics tab in the app and click Run checks; Copy debug report pastes the same text.
 - [ ] A network Windows files as Public, with only `install`'s rules: the firewall check says no rule lets phones in.
-- [ ] A Block rule for linux-link: the firewall check reports it.
+- [ ] A Block rule for pocketdesk: the firewall check reports it.
 - [ ] Linux: the checks with the systemd user service (no firewall line).
 
 ## 35. Reaching the desktop from outside (N1)

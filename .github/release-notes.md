@@ -6,7 +6,7 @@ Pocketdesk is a remote desktop for your own computers: an Android app that strea
 
 | Platform | File | How |
 |---|---|---|
-| Windows | `pocketdesk-…-windows-x86_64.zip` | Unzip, then run `linux-link.exe install` to start the server at logon and open its firewall ports. `pocketdesk.exe` is the desktop app. FFmpeg must be on `PATH` for the encoder. |
+| Windows | `pocketdesk-…-windows-x86_64.zip` | Unzip, then run `pocketdesk.exe install` to start the server at logon and open its firewall ports. `pocketdesk-app.exe` is the desktop app. FFmpeg must be on `PATH` for the encoder. |
 | Linux | `pocketdesk-…-linux-x86_64.tar.gz` | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` installs the server, the desktop app and the systemd user service. It needs PipeWire and FFmpeg (libav*). |
 | Android | `pocketdesk-…-android-arm64*.apk` | Install it on the phone, then pair with the QR code from the desktop app (Pair tab). |
 

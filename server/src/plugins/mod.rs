@@ -15,7 +15,7 @@ pub mod siren;
 pub mod wake_relay;
 pub mod windows;
 
-use linux_link_core::protocol::kdeconnect::PluginRegistry;
+use pocketdesk_core::protocol::kdeconnect::PluginRegistry;
 
 /// Shorthand for the full plugin registry type with all 16 plugins registered.
 pub type PluginSet = PluginRegistry;

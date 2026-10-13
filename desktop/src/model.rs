@@ -3,13 +3,13 @@
 
 use std::path::Path;
 
-use linux_link_core::local::approval::{self, ApprovalRequest, Verdict};
-use linux_link_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
-use linux_link_core::local::received::{self, ReceivedFile};
-use linux_link_core::local::sent::{self, SentFile};
-use linux_link_core::local::{server, sessions};
-use linux_link_core::protocol::kdeconnect::TrustStore;
-use linux_link_core::protocol::permissions::{Capability, DevicePermissions};
+use pocketdesk_core::local::approval::{self, ApprovalRequest, Verdict};
+use pocketdesk_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
+use pocketdesk_core::local::received::{self, ReceivedFile};
+use pocketdesk_core::local::sent::{self, SentFile};
+use pocketdesk_core::local::{server, sessions};
+use pocketdesk_core::protocol::kdeconnect::TrustStore;
+use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
 
 /// A paired phone.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +142,7 @@ pub fn queue_send(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
-    linux_link_core::local::outbox::request(
+    pocketdesk_core::local::outbox::request(
         state_dir,
         device_id,
         &path.display().to_string(),
@@ -158,7 +158,7 @@ pub fn set_permission(
     id: &str,
     capability: Capability,
     allowed: bool,
-) -> linux_link_core::error::Result<()> {
+) -> pocketdesk_core::error::Result<()> {
     update_permissions(state_dir, id, |p| p.set(capability, allowed))
 }
 
@@ -176,7 +176,7 @@ pub fn set_ask_first(
     state_dir: &Path,
     id: &str,
     ask_first: bool,
-) -> linux_link_core::error::Result<()> {
+) -> pocketdesk_core::error::Result<()> {
     update_permissions(state_dir, id, |p| p.ask_first = ask_first)
 }
 
@@ -197,7 +197,7 @@ fn update_permissions(
     state_dir: &Path,
     id: &str,
     change: impl FnOnce(&mut DevicePermissions),
-) -> linux_link_core::error::Result<()> {
+) -> pocketdesk_core::error::Result<()> {
     TrustStore::update(state_dir.join(TRUST_FILE), |store| {
         let mut permissions = store.permissions(id);
         change(&mut permissions);
@@ -206,7 +206,7 @@ fn update_permissions(
 }
 
 /// The last `lines` lines of the newest daily server log
-/// (`<state>/logs/linux-link.<date>.log`, written by `start --background`).
+/// (`<state>/logs/pocketdesk.<date>.log`, written by `start --background`).
 pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(state_dir.join(LOG_DIR)) else {
         return Vec::new();
@@ -217,7 +217,7 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("linux-link.") && n.ends_with(".log"))
+                .is_some_and(|n| n.starts_with("pocketdesk.") && n.ends_with(".log"))
         })
         .max();
     let Some(raw) = newest.and_then(|p| std::fs::read(p).ok()) else {
@@ -234,8 +234,8 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
-    use linux_link_core::protocol::kdeconnect::TrustStore;
+    use pocketdesk_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
+    use pocketdesk_core::protocol::kdeconnect::TrustStore;
     use std::time::Duration;
 
     pub(crate) fn temp_dir(name: &str) -> std::path::PathBuf {
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn a_permission_set_here_shows_in_the_next_snapshot_and_reaches_the_store() {
-        use linux_link_core::protocol::permissions::Capability;
+        use pocketdesk_core::protocol::permissions::Capability;
         let dir = temp_dir("perms");
         TrustStore::load_or_create(dir.join(TRUST_FILE))
             .unwrap()
@@ -396,9 +396,9 @@ mod tests {
         let dir = temp_dir("logs");
         let logs = dir.join(LOG_DIR);
         std::fs::create_dir_all(&logs).unwrap();
-        std::fs::write(logs.join("linux-link.2026-10-11.log"), "old\n").unwrap();
+        std::fs::write(logs.join("pocketdesk.2026-10-11.log"), "old\n").unwrap();
         let lines: String = (0..250).map(|i| format!("line {i}\n")).collect();
-        std::fs::write(logs.join("linux-link.2026-10-12.log"), lines).unwrap();
+        std::fs::write(logs.join("pocketdesk.2026-10-12.log"), lines).unwrap();
         let tail = log_tail(&dir, 200);
         assert_eq!(tail.len(), 200);
         assert_eq!(tail.first().map(String::as_str), Some("line 50"));
@@ -427,13 +427,13 @@ mod tests {
             queue_send(&dir, "a", &file, 100),
             Ok("report.pdf".to_string())
         );
-        let queued = linux_link_core::local::outbox::take_all(&dir, 101);
+        let queued = pocketdesk_core::local::outbox::take_all(&dir, 101);
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].device_id, "a");
         assert_eq!(queued[0].path, file.display().to_string());
         assert!(queue_send(&dir, "a", &dir, 100).is_err(), "a folder");
         assert!(queue_send(&dir, "a", &dir.join("gone"), 100).is_err());
-        assert!(linux_link_core::local::outbox::take_all(&dir, 101).is_empty());
+        assert!(pocketdesk_core::local::outbox::take_all(&dir, 101).is_empty());
     }
 
     #[test]
@@ -441,7 +441,7 @@ mod tests {
         let dir = temp_dir("relative");
         // Tests run in the package folder, which holds Cargo.toml.
         assert!(queue_send(&dir, "a", std::path::Path::new("Cargo.toml"), 100).is_ok());
-        let queued = linux_link_core::local::outbox::take_all(&dir, 101);
+        let queued = pocketdesk_core::local::outbox::take_all(&dir, 101);
         let path = std::path::Path::new(&queued[0].path);
         assert!(path.is_absolute(), "{}", path.display());
         assert!(path.ends_with("Cargo.toml"));
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn sent_files_are_listed_newest_first() {
-        use linux_link_core::local::sent::{self, SentFile, SentState};
+        use pocketdesk_core::local::sent::{self, SentFile, SentState};
         let dir = temp_dir("sent");
         for n in 0..2u64 {
             sent::record(

@@ -1,0 +1,18 @@
+[Unit]
+Description=Pocketdesk — remote desktop server (KDE Connect + QUIC streaming)
+Documentation=https://github.com/sreevarshan/pocketdesk
+# A USER service, installed to ~/.config/systemd/user/. The server captures the
+# Wayland/X11 session and talks to PipeWire, so it must live and die with the
+# graphical session — a system service on multi-user.target can never see them.
+PartOf=graphical-session.target
+After=graphical-session.target pipewire.service wireplumber.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/pocketdesk start
+Restart=on-failure
+RestartSec=3
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=graphical-session.target

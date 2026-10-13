@@ -1,20 +1,20 @@
 [package]
-name = "linux-link-server"
+name = "pocketdesk-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "linux_link_server"
+name = "pocketdesk_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "linux-link"
+name = "pocketdesk"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-linux-link-core = { path = "../core", features = ["wan", "local"] }
+pocketdesk-core = { path = "../core", features = ["wan", "local"] }
 serde.workspace = true
 # Same version core already uses: the OS CSPRNG for pairing PINs.
 rand = "0.8"

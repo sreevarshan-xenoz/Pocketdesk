@@ -33,18 +33,84 @@ fn missing(what: &str) -> io::Error {
     )
 }
 
-/// `<config dir>/linux-link` (`%APPDATA%\linux-link`, `~/.config/linux-link`).
+/// `<config dir>/pocketdesk` (`%APPDATA%\pocketdesk`, `~/.config/pocketdesk`).
 pub fn config_dir() -> io::Result<PathBuf> {
-    Ok(dirs::config_dir()
-        .ok_or_else(|| missing("config"))?
-        .join("linux-link"))
+    Ok(app_dir(
+        &dirs::config_dir().ok_or_else(|| missing("config"))?,
+    ))
 }
 
-/// `<state dir>/linux-link`, falling back to local data (`%LOCALAPPDATA%` on
+/// `<state dir>/pocketdesk`, falling back to local data (`%LOCALAPPDATA%` on
 /// Windows, which has no state dir).
 pub fn state_dir() -> io::Result<PathBuf> {
-    Ok(dirs::state_dir()
-        .or_else(dirs::data_local_dir)
-        .ok_or_else(|| missing("state"))?
-        .join("linux-link"))
+    Ok(app_dir(
+        &dirs::state_dir()
+            .or_else(dirs::data_local_dir)
+            .ok_or_else(|| missing("state"))?,
+    ))
+}
+
+/// The folder name under the config and state directories.
+pub const DIR_NAME: &str = "pocketdesk";
+
+/// The name before the rename, moved to [`DIR_NAME`] on first use.
+pub const OLD_DIR_NAME: &str = "linux-link";
+
+/// `<base>/pocketdesk`. A folder from before the rename (`<base>/linux-link`)
+/// is moved there the first time, so pairings, keys and settings carry
+/// over; an existing new folder is never touched. If the move fails (a file
+/// held open), the old folder keeps being used rather than starting empty.
+fn app_dir(base: &std::path::Path) -> PathBuf {
+    let new = base.join(DIR_NAME);
+    let old = base.join(OLD_DIR_NAME);
+    if new.exists() || !old.is_dir() {
+        return new;
+    }
+    match std::fs::rename(&old, &new) {
+        Ok(()) => new,
+        Err(_) => old,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ll-paths-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_folder_from_before_the_rename_moves_to_the_new_name_once() {
+        let base = base("migrate");
+        std::fs::create_dir_all(base.join(OLD_DIR_NAME)).unwrap();
+        std::fs::write(base.join(OLD_DIR_NAME).join(TRUST_FILE), "{}").unwrap();
+        let dir = app_dir(&base);
+        assert_eq!(dir, base.join(DIR_NAME));
+        assert!(dir.join(TRUST_FILE).is_file(), "pairings carried over");
+        assert!(!base.join(OLD_DIR_NAME).exists());
+        assert_eq!(app_dir(&base), base.join(DIR_NAME), "and stays put");
+    }
+
+    #[test]
+    fn an_existing_new_folder_is_never_overwritten() {
+        let base = base("both");
+        std::fs::create_dir_all(base.join(OLD_DIR_NAME)).unwrap();
+        std::fs::create_dir_all(base.join(DIR_NAME)).unwrap();
+        std::fs::write(base.join(DIR_NAME).join(TRUST_FILE), "new").unwrap();
+        assert_eq!(app_dir(&base), base.join(DIR_NAME));
+        assert_eq!(
+            std::fs::read_to_string(base.join(DIR_NAME).join(TRUST_FILE)).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn a_fresh_install_uses_the_new_name() {
+        let base = base("fresh");
+        assert_eq!(app_dir(&base), base.join(DIR_NAME));
+    }
 }

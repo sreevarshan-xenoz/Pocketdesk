@@ -384,7 +384,7 @@ pub fn check_firewall(state: Option<Result<FirewallState, String>>) -> Option<Fi
                 Status::Bad,
                 format!("a rule blocks the server on this {} network", fw.profiles),
             ),
-            "In Windows Defender Firewall, allow linux-link (or remove its block rule) for this network.",
+            "In Windows Defender Firewall, allow pocketdesk (or remove its block rule) for this network.",
         ),
         Ok(fw) if fw.allow == 0 => with_hint(
             finding(
@@ -392,7 +392,7 @@ pub fn check_firewall(state: Option<Result<FirewallState, String>>) -> Option<Fi
                 Status::Bad,
                 format!("no rule lets phones in on this {} network", fw.profiles),
             ),
-            "Run `linux-link install` (it allows phones on private networks), or allow the control and stream ports for this network.",
+            "Run `pocketdesk install` (it allows phones on private networks), or allow the control and stream ports for this network.",
         ),
         Ok(fw) => finding(
             check,
@@ -668,7 +668,7 @@ mod tests {
         let none = check_firewall(state(0, 0)).unwrap();
         assert_eq!(none.status, Status::Bad);
         assert!(none.detail.contains("Public"));
-        assert!(none.hint.unwrap().contains("linux-link install"));
+        assert!(none.hint.unwrap().contains("pocketdesk install"));
         assert_eq!(
             check_firewall(state(2, 1)).unwrap().status,
             Status::Bad,
@@ -824,7 +824,7 @@ mod tests {
             "pairing required: yes",
             "Server",
             "Firewall",
-            "linux-link install",
+            "pocketdesk install",
             "ffmpeg-sidecar-nvenc",
             "e2e p50 16 ms, p99 31 ms",
             "0d7c3a52",

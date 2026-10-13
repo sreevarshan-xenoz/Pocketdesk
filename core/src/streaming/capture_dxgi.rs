@@ -230,7 +230,7 @@ mod tests {
 
     /// Live: duplicate the primary monitor and check the first frame. Run on
     /// a desktop session:
-    /// `cargo test -p linux-link-core --lib dxgi_captures -- --ignored`.
+    /// `cargo test -p pocketdesk-core --lib dxgi_captures -- --ignored`.
     #[test]
     #[ignore = "needs an interactive Windows desktop"]
     fn dxgi_captures_a_real_frame_of_the_primary_monitor() {

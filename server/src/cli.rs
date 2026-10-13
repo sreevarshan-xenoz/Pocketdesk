@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "linux-link", version)]
+#[command(name = "pocketdesk", version)]
 #[command(about = "Pocketdesk - your desktop from your phone, over LAN, Tailscale or iroh")]
 pub struct Cli {
     #[arg(short, long)]
@@ -21,7 +21,7 @@ pub enum Commands {
         #[arg(long)]
         background: bool,
     },
-    /// Register Linux Link to start at logon, start it now, and open its
+    /// Register Pocketdesk to start at logon, start it now, and open its
     /// firewall ports (asks for administrator rights once, for the firewall)
     #[cfg(windows)]
     Install {
@@ -40,7 +40,7 @@ pub enum Commands {
     #[cfg(windows)]
     #[command(hide = true)]
     FirewallRemove,
-    /// Stop a running server process started with `linux-link start`
+    /// Stop a running server process started with `pocketdesk start`
     Stop,
     /// Print local tailscale status
     Status,
@@ -66,7 +66,7 @@ pub enum Commands {
         /// Frames to encode; the first 30 are discarded as warm-up
         #[arg(
             long,
-            default_value_t = linux_link_core::streaming::bench::DEFAULT_FRAMES
+            default_value_t = pocketdesk_core::streaming::bench::DEFAULT_FRAMES
         )]
         frames: u32,
         /// Repeat the clip and keep the fastest run: other work on the machine
@@ -116,7 +116,7 @@ pub enum Commands {
         /// Peer hostname, MagicDNS name, or Tailscale IP
         peer: String,
         /// Control port to connect to
-        #[arg(short, long, default_value_t = linux_link_core::DEFAULT_CONTROL_PORT)]
+        #[arg(short, long, default_value_t = pocketdesk_core::DEFAULT_CONTROL_PORT)]
         port: u16,
     },
     /// Set or generate a temporary pairing PIN
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn the_version_flag_prints_the_crate_version() {
         use clap::Parser;
-        let err = super::Cli::try_parse_from(["linux-link", "--version"]).unwrap_err();
+        let err = super::Cli::try_parse_from(["pocketdesk", "--version"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
         assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")), "{err}");
     }

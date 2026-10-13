@@ -203,7 +203,7 @@
     <!-- Pairing sheet -->
     <string name="pair_title">Pair with %1$s</string>
     <string name="pair_read_pin">Read the PIN off the desktop screen…</string>
-    <string name="pair_pin_ready">A PIN is showing on the desktop (`linux-link pair`) — type it below.</string>
+    <string name="pair_pin_ready">A PIN is showing on the desktop (`pocketdesk pair`) — type it below.</string>
     <string name="pair_error">Error: %1$s</string>
     <string name="pair_no_pin">Desktop did not confirm a PIN.</string>
     <string name="pair_wrong_pin">Wrong or expired PIN.</string>

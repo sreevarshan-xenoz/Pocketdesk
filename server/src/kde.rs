@@ -1,5 +1,5 @@
 use anyhow::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceIdentity, KdeConnectService, TrustStore};
+use pocketdesk_core::protocol::kdeconnect::{DeviceIdentity, KdeConnectService, TrustStore};
 use std::path::PathBuf;
 
 use crate::plugins;
@@ -30,7 +30,7 @@ pub fn build_default_service() -> Result<KdeConnectService> {
 }
 
 fn host_device_id() -> String {
-    if let Ok(id) = std::env::var("LINUX_LINK_DEVICE_ID") {
+    if let Ok(id) = std::env::var("POCKETDESK_DEVICE_ID") {
         return id;
     }
 
@@ -62,5 +62,5 @@ fn host_device_name() -> String {
         }
     }
 
-    "linux-link-host".to_string()
+    "pocketdesk-host".to_string()
 }
