@@ -42,6 +42,23 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **Repo review fixes (branch `chore/repo-review`) and the screen-switch crash (branch `fix/monitor-switch`, PR #19).**
+  - **License.** The root `LICENSE` was garbled text, not a license. It is now `LICENSE-MIT` plus `LICENSE-APACHE` (canonical), matching `MIT OR Apache-2.0`. Every crate declares the license, and the README has a License section.
+  - **Rename.** Finished where people read it: CONTRIBUTING, the issue templates, the config example, the dev setup, and the Android theme. `plan.md` is marked historical. Kept on purpose, and documented: the `linux-link` command, its paths, the wire protocol, and the package id `dev.linuxlink.android` (changing it would break updates and pairings).
+  - **Security.** `SECURITY.md` describes each connection, what protects it, and the known limits, and GitHub private vulnerability reporting is now enabled.
+    - **Top open security item:** a paired phone is identified by the `deviceId` it announces in plain text, not by a key it proves, so anyone on the same LAN who has seen that id can claim it. The fix is mutual authentication, binding the id to a key.
+    - The control channel and file transfers are not encrypted.
+  - **Releases.** `release.yml` publishes on a `vX.Y.Z` tag, or a pre-release on `vX.Y.Z-beta.N`, after checking the tag against the Cargo and Android versions.
+    - **Contents:** the Linux tar.gz (server, desktop app, man page), the Windows zip, and the Android APK (release-signed when signing secrets exist, else the debug build), with `SHA256SUMS` and release notes.
+    - **Dry run:** running it by hand publishes nothing.
+    - `install.sh` follows the new names. `linux-link --version` exists now (install.sh relied on it).
+    - Version 0.2.0 everywhere. No release has been published yet.
+  - **Screen switch crash (device-found, `IllegalStateException: Invalid to call at Released state`).** A connect in flight when a switch stopped the stream installed its session afterwards, and its stopped decoder restarted on a dead surface. Fixed in two places:
+    - bridge connect generations, with the monitor part of the session's identity;
+    - a `DecodeGate` that cannot reopen, and codec errors that end the stream, not the app.
+
+    Also added: a screen-switcher chip per monitor in the session chrome (F9). Verified on the A71 over LAN and WAN, including switches during a slow connect.
+  - **CI fix (PR #18).** A race between two bridge tests over the shared offer queue failed #17's Linux job; they now share a test lock.
 - 2026-10-13: **F7b, files both ways and the remote browser (branch `feat/file-transfer-b`, stacked on `feat/file-transfer`; spec `docs/superpowers/specs/2026-10-13-file-transfer-b-design.md`, plan `docs/superpowers/plans/2026-10-13-file-transfer-b.md`).**
   - **One mechanism.** The phone asks with `kdeconnect.linuxlink.file_fetch` `{path | offer, port, key}`, and the desktop dials only the transport's peer, as in F7a. On the socket go `key\n`, then the size as a big-endian u64, then the bytes. A refusal comes back as `file_fetch_refused` `{key, reason}`.
   - **Status byte, both ways.** The receiver ends every transfer with one status byte (1 saved, 0 failed), F7a's share included, so "sent" means saved.
