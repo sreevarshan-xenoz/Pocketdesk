@@ -42,6 +42,25 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **Phase B of mutual auth: the control channel inside TLS (branch `feat/control-tls`; spec `docs/superpowers/specs/2026-10-13-control-tls-design.md`, with an as-built section).**
+  - **Wire.** TCP 1716 opens with TLS 1.3 (ALPN `linux-link-control/1`), with the stream's certificates.
+    - The desktop requires the phone's certificate.
+    - The phone checks the desktop against the same per-address pin, so a QR pin covers pairing from the first byte.
+    - A plain client gets `LINUX_LINK_ERR 1 tls-required`.
+  - **Identity.**
+    - The phone's identity is read in the handshake, and the connection goes by that device id, not its IP.
+    - Every packet re-reads its standing: paired with its key, unpaired, or a paired id with another key, which may only pair again.
+    - Pairing binds the key that paired. The owner's PIN replaces it, which recovers a phone whose certificate changed. A guest never takes a paired id.
+  - **Fresh review (1 Critical, 4 Important), all fixed, one commit each:**
+    - a v2 identity could re-point a TCP connection at a paired phone (the id maps are gone);
+    - trust was decided once, at admission;
+    - re-pairing could not recover a changed key;
+    - the phone's pin file could lose or guess pins;
+    - the phone's first identity could race.
+
+    Minors: PIN pacing, bounded handshake lines, a quiet disconnect log, and pushes only to the right desktop.
+  - **Device-verified on the A71 (LAN):** plain refused; TLS control and video; a tampered key held to pairing only; Pair again with the owner's PIN recovering it; the WAN key re-registered.
+  - **Still open:** file transfers are plain TCP (the next security item). Without the QR code, first contact is trust on first use.
 - 2026-10-13: **Device keys, a phone proves who it is (branch `feat/device-keys`, on top of the verifier fix in PR #21; spec `docs/superpowers/specs/2026-10-13-device-keys-design.md`).**
   - **Verifier fix (#21).** The phone's TLS verifier had accepted every handshake signature, so a pinned desktop certificate proved nothing: anyone could present a copy. It now verifies signatures with the ring provider.
   - **Phase A of mutual auth.**

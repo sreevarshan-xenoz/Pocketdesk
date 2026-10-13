@@ -284,11 +284,9 @@ fn plan_fetch(
     })
 }
 
-/// The phone behind `sender`: a TCP connection is known by its address,
-/// and the phone by the id it announced there.
+/// The phone behind `sender`: a connection goes by its device's id (phase B).
 fn phone_of(sender: &dyn DeviceSender) -> String {
-    crate::plugins::pair::phone_id_of(sender.device_id())
-        .unwrap_or_else(|| sender.device_id().to_string())
+    sender.device_id().to_string()
 }
 
 async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {

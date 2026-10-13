@@ -169,21 +169,14 @@ fn finish_in(dir: &Path, id: &str, outcome: Result<(), String>) {
     update_sent(dir, id, state);
 }
 
-/// The live connection that reaches `device_id`: on TCP a connection is
-/// keyed by its address, so it is matched through the phone id it
-/// announced (`phone_id_of`). Only a connection with an address can carry
-/// the download that follows.
-fn target_for(
-    device_id: &str,
-    clients: &[Arc<dyn DeviceSender>],
-    phone_id_of: impl Fn(&str) -> Option<String>,
-) -> Option<Arc<dyn DeviceSender>> {
+/// The live connection that reaches `device_id` (a connection goes by its
+/// device's id, phase B). Only a connection with an address can carry the
+/// download that follows.
+fn target_for(device_id: &str, clients: &[Arc<dyn DeviceSender>]) -> Option<Arc<dyn DeviceSender>> {
     clients
         .iter()
         .filter(|c| c.peer_addr().is_some())
-        .find(|c| {
-            c.device_id() == device_id || phone_id_of(c.device_id()).as_deref() == Some(device_id)
-        })
+        .find(|c| c.device_id() == device_id)
         .cloned()
 }
 
@@ -204,14 +197,7 @@ pub async fn run_watcher() {
             let store = crate::state::trust_store_path()
                 .ok()
                 .and_then(|path| TrustStore::load_or_create(path).ok());
-            deliver(
-                &dir,
-                request,
-                &clients,
-                store.as_ref(),
-                crate::plugins::pair::phone_id_of,
-            )
-            .await;
+            deliver(&dir, request, &clients, store.as_ref()).await;
         }
     }
 }
@@ -224,7 +210,6 @@ async fn deliver(
     request: SendRequest,
     clients: &[Arc<dyn DeviceSender>],
     store: Option<&TrustStore>,
-    phone_id_of: impl Fn(&str) -> Option<String>,
 ) {
     let path = PathBuf::from(&request.path);
     let name = path
@@ -235,7 +220,7 @@ async fn deliver(
         .ok()
         .filter(|m| m.is_file())
         .map(|m| m.len());
-    let checked = check(&request, size, clients, store, phone_id_of);
+    let checked = check(&request, size, clients, store);
     let file = SentFile {
         id: request.id.clone(),
         name: name.clone(),
@@ -298,7 +283,6 @@ fn check(
     size: Option<u64>,
     clients: &[Arc<dyn DeviceSender>],
     store: Option<&TrustStore>,
-    phone_id_of: impl Fn(&str) -> Option<String>,
 ) -> Result<(Arc<dyn DeviceSender>, u64), &'static str> {
     let size = size.ok_or("not a file")?;
     if size > MAX_FILE_BYTES {
@@ -312,8 +296,7 @@ fn check(
     if !allowed {
         return Err("files are off for this phone");
     }
-    let target =
-        target_for(&request.device_id, clients, phone_id_of).ok_or("phone not connected")?;
+    let target = target_for(&request.device_id, clients).ok_or("phone not connected")?;
     Ok((target, size))
 }
 
@@ -464,19 +447,15 @@ mod tests {
         }
     }
 
-    fn ids(address: &str) -> Option<String> {
-        (address == "192.0.2.7").then(|| "phone-a".to_string())
-    }
-
     #[test]
     fn a_phone_is_reached_through_the_address_it_connected_from() {
         let quic: Arc<dyn DeviceSender> = Conn::new("phone-a", false);
-        let tcp: Arc<dyn DeviceSender> = Conn::new("192.0.2.7", true);
-        let other: Arc<dyn DeviceSender> = Conn::new("192.0.2.9", true);
+        let tcp: Arc<dyn DeviceSender> = Conn::new("phone-a", true);
+        let other: Arc<dyn DeviceSender> = Conn::new("phone-c", true);
         let clients = [quic, other, tcp];
-        let found = target_for("phone-a", &clients, ids).expect("found");
-        assert_eq!(found.device_id(), "192.0.2.7");
-        assert!(target_for("phone-b", &clients, ids).is_none());
+        let found = target_for("phone-a", &clients).expect("found");
+        assert_eq!(found.device_id(), "phone-a");
+        assert!(target_for("phone-b", &clients).is_none());
     }
 
     fn trusting(dir: &Path, device: &str, files: bool) -> TrustStore {
@@ -498,11 +477,11 @@ mod tests {
         let file = dir.join("report.pdf");
         std::fs::write(&file, b"12345").unwrap();
         let store = trusting(&dir, "phone-a", true);
-        let tcp = Conn::new("192.0.2.7", true);
+        let tcp = Conn::new("phone-a", true);
         *tcp.dir.lock().unwrap() = Some(dir.clone());
         let clients: [Arc<dyn DeviceSender>; 1] = [tcp.clone()];
         let sent_request = request(&dir, &file);
-        deliver(&dir, sent_request.clone(), &clients, Some(&store), ids).await;
+        deliver(&dir, sent_request.clone(), &clients, Some(&store)).await;
 
         let pushed = tcp.sent.lock().unwrap().clone();
         assert_eq!(pushed.len(), 1);
@@ -531,7 +510,7 @@ mod tests {
         let dir = temp_dir("refuse");
         let file = dir.join("a.txt");
         std::fs::write(&file, b"x").unwrap();
-        let tcp = Conn::new("192.0.2.7", true);
+        let tcp = Conn::new("phone-a", true);
         let connected: [Arc<dyn DeviceSender>; 1] = [tcp.clone()];
         let allowed = trusting(&dir, "phone-a", true);
         for (path, clients, store, why) in [
@@ -551,7 +530,7 @@ mod tests {
             ),
         ] {
             let _ = std::fs::remove_file(dir.join("sent.json"));
-            deliver(&dir, request(&dir, &path), clients, store, ids).await;
+            deliver(&dir, request(&dir, &path), clients, store).await;
             assert_eq!(
                 sent::read(&dir)[0].state,
                 SentState::Failed(why.to_string()),
@@ -561,7 +540,7 @@ mod tests {
         }
         let denied = trusting(&temp_dir("refuse-denied"), "phone-a", false);
         let _ = std::fs::remove_file(dir.join("sent.json"));
-        deliver(&dir, request(&dir, &file), &connected, Some(&denied), ids).await;
+        deliver(&dir, request(&dir, &file), &connected, Some(&denied)).await;
         assert_eq!(
             sent::read(&dir)[0].state,
             SentState::Failed("files are off for this phone".to_string())

@@ -53,6 +53,8 @@ uuid.workspace = true
 async-trait.workspace = true
 rand = "0.8"
 tokio-util.workspace = true
+# The control channel inside TLS (phase B); ring, as the rest of the tree.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 
 # Audio coding (Opus). Server: desktop-audio encode + phone-mic decode (R4 E2).
 # The Android bridge deliberately does NOT enable it (CMake cross-compile);

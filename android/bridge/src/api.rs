@@ -39,12 +39,12 @@ pub fn set_data_dir(path: String) {
     tracing::info!("Data directory set to: {path}");
 }
 
-/// Pin a desktop's certificate before the first streaming connection to
-/// `address`, from a scanned pairing code (`fp`: hex SHA-256 of its
-/// certificate), so that connection is verified rather than trusted on first
-/// use. Only the QUIC streaming channel is covered: the control channel the
-/// PIN rides is not encrypted. Refused when a different certificate is
-/// already trusted for the address (see below).
+/// Pin a desktop's certificate before the first connection to `address`,
+/// from a scanned pairing code (`fp`: hex SHA-256 of its certificate), so
+/// that connection is verified rather than trusted on first use. The pin
+/// covers the stream and the control channel (phase B), so the PIN that
+/// pairs travels to the right computer. Refused when a different
+/// certificate is already trusted for the address (see below).
 pub fn pin_peer_certificate(address: String, fingerprint_hex: String) -> Result<bool, String> {
     let dir = crate::CERT_DIR
         .lock()
@@ -123,13 +123,11 @@ pub(crate) fn forget_peer_certificate_in(
     };
     let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
         .map_err(|e| e.to_string())?;
-    let removed = manager.remove_peer(&linux_link_core::streaming::transport::peer_label_for_ip(
-        ip,
-    ));
-    if removed {
-        manager.save_known_peers().map_err(|e| e.to_string())?;
-    }
-    Ok(removed)
+    manager
+        .remove_peer(&linux_link_core::streaming::transport::peer_label_for_ip(
+            ip,
+        ))
+        .map_err(|e| e.to_string())
 }
 
 /// Check if the LAN discovery service is active.
@@ -298,7 +296,7 @@ pub async fn wake_via_relay(
     mac: String,
     broadcast: String,
 ) -> Result<(), String> {
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(5));
+    let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
     let stream = conn_mgr
         .connect(&address, port, &identity)
@@ -363,6 +361,24 @@ pub async fn get_peers() -> Result<Vec<PeerInfoDto>, String> {
         .collect())
 }
 
+/// A control channel manager: this phone's certificate and its pins of
+/// desktops, read fresh so a pin set since (a pairing code, the stream)
+/// applies. The control channel runs inside TLS (phase B), so without a data
+/// directory there is none.
+pub(crate) fn control_manager(timeout: Duration) -> Result<ConnectionManager, String> {
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(&dir)
+        .map_err(|e| format!("This phone's certificate: {e}"))?;
+    Ok(ConnectionManager::new(
+        timeout,
+        certs.control_client_config(),
+    ))
+}
+
 /// Connect to a peer
 pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionState, String> {
     // Kotlin calls this from several poll loops (clipboard sync, quick
@@ -384,10 +400,10 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
         }
     }
 
+    let conn_mgr = control_manager(Duration::from_secs(10))?;
     let mut state_guard = (*CONNECTION_STATE).lock().await;
     *state_guard = ConnectionState::Connecting;
 
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(10));
     let identity = client_identity();
 
     let conn_id = uuid::Uuid::new_v4().to_string();
@@ -406,7 +422,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
     let result = async move {
         match conn_mgr.connect(&address, port, &identity).await {
             Ok(stream) => {
-                let (reader, writer) = stream.into_split();
+                let (reader, writer) = tokio::io::split(stream);
                 let writer_arc = Arc::new(Mutex::new(writer));
                 {
                     let mut writer_guard = (*CONTROL_WRITER).lock().await;
@@ -810,19 +826,8 @@ async fn control_request(
     // Only the live connection *to this desktop* may carry the request: with
     // another computer connected, reusing it would send this desktop's query -
     // or its pairing PIN - to the wrong machine, and record that machine's
-    // answer as this one's. Locked writer-then-peer, like the control reader.
-    let writer = {
-        let guard = (*CONTROL_WRITER).lock().await;
-        let peer = (*CONTROL_PEER).lock().await;
-        let same_desktop = peer
-            .as_ref()
-            .is_some_and(|(host, live_port)| host == address && *live_port == port);
-        if same_desktop {
-            guard.as_ref().cloned()
-        } else {
-            None
-        }
-    };
+    // answer as this one's.
+    let writer = live_writer_for(address, port).await;
     // Subscribe before sending: the answer can otherwise land in the broadcast
     // before there is anyone listening for it.
     let rx = {
@@ -874,7 +879,7 @@ async fn oneshot_request(
     reply_type: &str,
     timeout: Duration,
 ) -> Result<serde_json::Value, String> {
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(5));
+    let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
     let stream = conn_mgr
         .connect(address, port, &identity)
@@ -936,6 +941,26 @@ async fn query_peer(
     }
 }
 
+/// Is the live control connection, made to `live`, the one to `address`:`port`?
+fn same_desktop(live: Option<&(String, u16)>, address: &str, port: u16) -> bool {
+    live.is_some_and(|(host, live_port)| host == address && *live_port == port)
+}
+
+/// The live control connection's writer, if that connection is to
+/// `address`:`port`. Locked writer-then-peer, like the control reader.
+async fn live_writer_for(
+    address: &str,
+    port: u16,
+) -> Option<Arc<Mutex<crate::session::ControlWriter>>> {
+    let guard = (*CONTROL_WRITER).lock().await;
+    let peer = (*CONTROL_PEER).lock().await;
+    if same_desktop(peer.as_ref(), address, port) {
+        guard.as_ref().cloned()
+    } else {
+        None
+    }
+}
+
 /// Fire-and-forget push: write `request` on the live control connection, or on
 /// a dedicated one when the phone is not connected yet.
 ///
@@ -947,11 +972,9 @@ pub(crate) async fn push_packet(
     port: u16,
     request: &NetworkPacket,
 ) -> Result<(), String> {
-    let writer = {
-        let guard = (*CONTROL_WRITER).lock().await;
-        guard.as_ref().cloned()
-    };
-    if let Some(writer) = writer {
+    // The live connection only if it is to this desktop: a push for another
+    // computer (a clipboard, a command) must not reach the connected one.
+    if let Some(writer) = live_writer_for(address, port).await {
         let sender = TcpDeviceSender::from_arc(writer, address.to_string());
         return sender
             .send_packet(request)
@@ -959,7 +982,7 @@ pub(crate) async fn push_packet(
             .map_err(|e| format!("Failed to send {}: {e}", request.packet_type));
     }
 
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(5));
+    let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
     let stream = conn_mgr
         .connect(address, port, &identity)
@@ -1960,13 +1983,10 @@ pub fn list_trusted_peers() -> Vec<String> {
 pub fn forget_trusted_peer(label: String) -> bool {
     let guard = crate::CERT_MANAGER.lock().unwrap();
     match guard.as_ref() {
-        Some(cm) => {
-            let removed = cm.remove_peer(&label);
-            if removed {
-                let _ = cm.save_known_peers();
-            }
-            removed
-        }
+        Some(cm) => cm.remove_peer(&label).unwrap_or_else(|e| {
+            tracing::warn!("Could not forget the certificate of {label}: {e}");
+            false
+        }),
         None => false,
     }
 }
@@ -2995,6 +3015,27 @@ fn android_to_evdev_keycode(android_keycode: i32) -> u16 {
         141 => 87, // F11 -> KEY_F11
         142 => 88, // F12 -> KEY_F12
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod live_connection_tests {
+    #[test]
+    fn only_the_connection_to_that_desktop_is_reused() {
+        let live = ("192.0.2.1".to_string(), 1716);
+        assert!(super::same_desktop(Some(&live), "192.0.2.1", 1716));
+        assert!(
+            !super::same_desktop(Some(&live), "192.0.2.2", 1716),
+            "another computer"
+        );
+        assert!(
+            !super::same_desktop(Some(&live), "192.0.2.1", 1717),
+            "another port"
+        );
+        assert!(
+            !super::same_desktop(None, "192.0.2.1", 1716),
+            "nothing connected"
+        );
     }
 }
 

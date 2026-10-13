@@ -126,11 +126,26 @@ pub fn set_pairing_required(required: bool) {
     PAIRING_REQUIRED.store(required, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Whether `device_id` may be sent desktop state: always with pairing off,
-/// otherwise only once it has paired.
-pub fn may_receive_pushes(device_id: &str) -> bool {
-    !PAIRING_REQUIRED.load(std::sync::atomic::Ordering::Relaxed)
-        || crate::plugins::pair::is_trusted(device_id)
+/// Whether a connection may be sent desktop state: never one that claims a
+/// paired device without its key (phase B); otherwise always with pairing
+/// off, and only a paired device's with it on.
+pub fn may_receive_pushes(sender: &dyn DeviceSender) -> bool {
+    use crate::plugins::pair::Standing;
+    match crate::plugins::pair::standing(sender.device_id(), sender.peer_key().as_ref()) {
+        Standing::Paired => true,
+        Standing::Unpaired => !PAIRING_REQUIRED.load(std::sync::atomic::Ordering::Relaxed),
+        Standing::WrongKey(_) => false,
+    }
+}
+
+/// Each device's newest connection among those `eligible` for pushes. The
+/// filter comes first: a newer connection that may not receive pushes must
+/// not hide the device's real one.
+fn push_targets(
+    clients: Vec<Arc<dyn DeviceSender>>,
+    eligible: impl Fn(&dyn DeviceSender) -> bool,
+) -> Vec<Arc<dyn DeviceSender>> {
+    newest_per_device(clients.into_iter().filter(|c| eligible(&**c)).collect())
 }
 
 /// The clients that may receive pushed desktop state (notifications, window
@@ -142,10 +157,7 @@ pub fn may_receive_pushes(device_id: &str) -> bool {
 /// *sends* by the packet loop, and on what it *receives* here.
 pub async fn clone_clients() -> Vec<Arc<dyn DeviceSender>> {
     let clients = ACTIVE_CLIENTS.lock().await.clone();
-    newest_per_device(clients)
-        .into_iter()
-        .filter(|c| may_receive_pushes(c.device_id()))
-        .collect()
+    push_targets(clients, may_receive_pushes)
 }
 
 /// Remove clients whose `connection_id` appears in `dead_ids`.
@@ -192,5 +204,16 @@ mod tests {
             ids(&newest_per_device(vec![control, laptop])),
             ["control", "l1"]
         );
+    }
+
+    #[test]
+    fn a_connection_that_may_not_receive_pushes_neither_gets_them_nor_hides_the_phone() {
+        // A newer connection that claims the phone's id without its key must
+        // not become the phone's push target: it would see the pushes, or,
+        // filtered out after the choice, leave the real phone with none.
+        let phone: Arc<dyn DeviceSender> = Arc::new(Conn("phone", "real"));
+        let impostor: Arc<dyn DeviceSender> = Arc::new(Conn("phone", "impostor"));
+        let targets = push_targets(vec![phone, impostor], |c| c.connection_id() != "impostor");
+        assert_eq!(ids(&targets), ["real"]);
     }
 }

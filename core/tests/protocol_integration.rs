@@ -1,7 +1,7 @@
 //! Integration tests for the KDE Connect protocol over TCP.
 //!
-//! Spins up a mock TCP server that speaks the LINUX_LINK_HELLO handshake
-//! and responds to KDE Connect packets. Tests the full client-side flow
+//! Spins up a mock server that speaks TLS, then the LINUX_LINK_HELLO
+//! handshake, and responds to KDE Connect packets. Tests the full client-side flow
 //! from ConnectionManager through to NetworkPacket dispatch.
 
 use std::sync::Arc;
@@ -15,6 +15,30 @@ use linux_link_core::protocol::kdeconnect::{
     DeviceIdentity, DeviceSender, NetworkPacket, TcpDeviceSender,
 };
 use linux_link_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
+use linux_link_core::streaming::transport::CertManager;
+
+/// Accept one connection on `listener` and run the desktop's side of TLS.
+async fn accept_tls(
+    listener: &TcpListener,
+) -> std::io::Result<tokio_rustls::server::TlsStream<tokio::net::TcpStream>> {
+    let (stream, _) = listener.accept().await?;
+    tokio_rustls::TlsAcceptor::from(desktop().control_server_config().unwrap())
+        .accept(stream)
+        .await
+}
+
+/// One desktop identity for every mock server, as a real desktop keeps one:
+/// a phone's pin for 127.0.0.1 then holds across connections.
+fn desktop() -> &'static CertManager {
+    static DESKTOP: std::sync::OnceLock<CertManager> = std::sync::OnceLock::new();
+    DESKTOP.get_or_init(|| CertManager::new().expect("desktop certificate"))
+}
+
+/// A phone's control channel manager, with a fresh certificate and pins.
+fn manager(timeout: Duration) -> ConnectionManager {
+    let phone = CertManager::new().expect("phone certificate");
+    ConnectionManager::new(timeout, phone.control_client_config())
+}
 
 /// Start a mock TCP server that performs the KDE Connect handshake
 /// and echoes back received packets with a "response." suffix.
@@ -25,8 +49,8 @@ async fn start_mock_server() -> (u16, Arc<Mutex<Vec<NetworkPacket>>>) {
 
     let recv_clone = received.clone();
     tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let (reader, mut writer) = stream.split();
+        let stream = accept_tls(&listener).await.unwrap();
+        let (reader, mut writer) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader);
 
         // Step 1: Expect LINUX_LINK_HELLO
@@ -87,7 +111,7 @@ async fn start_mock_server() -> (u16, Arc<Mutex<Vec<NetworkPacket>>>) {
 #[tokio::test]
 async fn test_handshake_success() {
     let (port, _received) = start_mock_server().await;
-    let manager = ConnectionManager::new(Duration::from_secs(10));
+    let manager = manager(Duration::from_secs(10));
     let identity = DeviceIdentity::new("test-client", "Test Client");
     let result = manager.connect("127.0.0.1", port, &identity).await;
     assert!(
@@ -104,7 +128,7 @@ async fn test_handshake_wrong_protocol() {
     let port = listener.local_addr().unwrap().port();
 
     tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut stream = accept_tls(&listener).await.unwrap();
         let mut line = String::new();
         let mut reader = BufReader::new(&mut stream);
         reader.read_line(&mut line).await.unwrap();
@@ -112,7 +136,7 @@ async fn test_handshake_wrong_protocol() {
         stream.write_all(b"LINUX_LINK_OK 999\n").await.unwrap();
     });
 
-    let manager = ConnectionManager::new(Duration::from_secs(5));
+    let manager = manager(Duration::from_secs(5));
     let identity = DeviceIdentity::new("test-client", "Test Client");
     let result = manager.connect("127.0.0.1", port, &identity).await;
     assert!(result.is_err(), "Handshake with wrong protocol should fail");
@@ -125,7 +149,7 @@ async fn test_handshake_timeout() {
     let port = listener.local_addr().unwrap().port();
 
     tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut stream = accept_tls(&listener).await.unwrap();
         let mut line = String::new();
         let mut reader = BufReader::new(&mut stream);
         // Read HELLO but never respond — just hold the connection
@@ -135,7 +159,7 @@ async fn test_handshake_timeout() {
         drop(stream);
     });
 
-    let manager = ConnectionManager::new(Duration::from_secs(2));
+    let manager = manager(Duration::from_secs(2));
     let identity = DeviceIdentity::new("test-client", "Test Client");
     let result = manager.connect("127.0.0.1", port, &identity).await;
     assert!(result.is_err(), "Timeout should cause handshake failure");
@@ -144,11 +168,11 @@ async fn test_handshake_timeout() {
 #[tokio::test]
 async fn test_send_and_receive_packet() {
     let (port, received) = start_mock_server().await;
-    let manager = ConnectionManager::new(Duration::from_secs(10));
+    let manager = manager(Duration::from_secs(10));
     let identity = DeviceIdentity::new("test-client", "Test Client");
     let stream = manager.connect("127.0.0.1", port, &identity).await.unwrap();
 
-    let (_reader, writer) = stream.into_split();
+    let (_reader, writer) = tokio::io::split(stream);
     let sender = TcpDeviceSender::new(writer, "127.0.0.1".to_string());
 
     // Send a clipboard request
@@ -173,11 +197,11 @@ async fn test_send_and_receive_packet() {
 #[tokio::test]
 async fn test_packet_with_body() {
     let (port, received) = start_mock_server().await;
-    let manager = ConnectionManager::new(Duration::from_secs(10));
+    let manager = manager(Duration::from_secs(10));
     let identity = DeviceIdentity::new("test-client", "Test Client");
     let stream = manager.connect("127.0.0.1", port, &identity).await.unwrap();
 
-    let (_reader, writer) = stream.into_split();
+    let (_reader, writer) = tokio::io::split(stream);
     let sender = TcpDeviceSender::new(writer, "127.0.0.1".to_string());
 
     // Send a file browse request with body
@@ -205,7 +229,7 @@ async fn test_concurrent_connections() {
 
     let count_clone = connection_count.clone();
     tokio::spawn(async move {
-        while let Ok((mut stream, _)) = listener.accept().await {
+        while let Ok(mut stream) = accept_tls(&listener).await {
             {
                 let mut c = count_clone.lock().await;
                 *c += 1;
@@ -219,7 +243,7 @@ async fn test_concurrent_connections() {
         }
     });
 
-    let manager = ConnectionManager::new(Duration::from_secs(5));
+    let manager = manager(Duration::from_secs(5));
     let identity = DeviceIdentity::new("test-client", "Test Client");
 
     // Connect 3 clients concurrently

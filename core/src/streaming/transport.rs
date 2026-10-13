@@ -146,26 +146,33 @@ impl CertManager {
         let cert_path = identity_dir.join("identity.der");
         let key_path = identity_dir.join("identity.key");
 
-        let (cert_der, key_der) = if cert_path.exists() && key_path.exists() {
-            let cert = std::fs::read(&cert_path)?;
-            let key = std::fs::read(&key_path)?;
-            (cert, key)
-        } else {
-            let (cert, key) = generate_identity()?;
-            std::fs::write(&cert_path, &cert)?;
-            // The private half of the TOFU-pinned identity: owner-only.
-            crate::secure_fs::write_private(&key_path, &key)?;
-            (cert, key)
+        // One identity, however many first loads run at once (the phone
+        // loads it for every control connection): checked and made under
+        // one lock, each file written whole and renamed into place, the key
+        // before the certificate that marks the pair complete.
+        let (cert_der, key_der) = {
+            static IDENTITY: Mutex<()> = Mutex::new(());
+            let _one = IDENTITY.lock().unwrap_or_else(|e| e.into_inner());
+            if cert_path.exists() && key_path.exists() {
+                (std::fs::read(&cert_path)?, std::fs::read(&key_path)?)
+            } else {
+                let (cert, key) = generate_identity()?;
+                let key_tmp = key_path.with_extension(format!("key.{}.tmp", std::process::id()));
+                // The private half of the TOFU-pinned identity: owner-only.
+                crate::secure_fs::write_private(&key_tmp, &key)?;
+                std::fs::rename(&key_tmp, &key_path)?;
+                let cert_tmp = cert_path.with_extension(format!("der.{}.tmp", std::process::id()));
+                std::fs::write(&cert_tmp, &cert)?;
+                std::fs::rename(&cert_tmp, &cert_path)?;
+                (cert, key)
+            }
         };
 
         let peers_path = identity_dir.join("known_peers.json");
-        let known_peers = if peers_path.exists() {
-            let data =
-                std::fs::read_to_string(&peers_path).context("Failed to read known peers")?;
-            serde_json::from_str(&data).unwrap_or_default()
-        } else {
-            HashMap::new()
-        };
+        // A file that will not parse is an error: read as empty, it would
+        // trust any certificate for every address, and the next write would
+        // drop every pin.
+        let known_peers = read_pins(&peers_path)?;
 
         Ok(Self {
             cert_der,
@@ -195,6 +202,31 @@ impl CertManager {
 
     /// The TLS half of [`CertManager::server_config`].
     fn tls_server_config(&self) -> Result<rustls::ServerConfig> {
+        // A phone proves its own key here (device keys, phase A): the
+        // certificate is offered for, not required, so a session without one
+        // is refused by the session gate with a reason instead of failing
+        // the handshake.
+        self.tls_server_config_with(AnyClientCert { mandatory: false })
+    }
+
+    /// The control channel's TLS server configuration (phase B): this
+    /// device's certificate, and a client certificate required of every
+    /// connection, since the control channel holds each device to its key.
+    pub fn control_server_config(&self) -> Result<Arc<rustls::ServerConfig>> {
+        let mut config = self.tls_server_config_with(AnyClientCert { mandatory: true })?;
+        config.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        Ok(Arc::new(config))
+    }
+
+    /// The control channel's TLS client configuration (phase B): the same
+    /// certificate pins as the stream, and this device's certificate.
+    pub fn control_client_config(&self) -> Arc<rustls::ClientConfig> {
+        let mut config = self.tls_client_config();
+        config.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        Arc::new(config)
+    }
+
+    fn tls_server_config_with(&self, verifier: AnyClientCert) -> Result<rustls::ServerConfig> {
         let cert = CertificateDer::from(self.cert_der.clone());
         let key = PrivateKeyDer::try_from(self.key_der.clone())
             .map_err(|_| anyhow::anyhow!("Failed to parse private key"))?;
@@ -203,12 +235,8 @@ impl CertManager {
         // server binaries, so rustls cannot auto-pick a process-level provider.
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        // A phone proves its own key here (device keys, phase A): the
-        // certificate is offered for, not required, so a session without one
-        // is refused by the session gate with a reason instead of failing
-        // the handshake.
         rustls::ServerConfig::builder()
-            .with_client_cert_verifier(Arc::new(AnyClientCert))
+            .with_client_cert_verifier(Arc::new(verifier))
             .with_single_cert(vec![cert], key)
             .context("Failed to configure TLS server")
     }
@@ -234,15 +262,6 @@ impl CertManager {
     }
 
     /// Save the known peers map to the configured path.
-    pub fn save_known_peers(&self) -> Result<()> {
-        if let Some(path) = &self.peers_path {
-            let peers = self.known_peers.lock().unwrap();
-            let json = serde_json::to_string_pretty(&*peers)?;
-            std::fs::write(path, json)?;
-        }
-        Ok(())
-    }
-
     /// Return a copy of all known peer labels and their certificate hashes.
     pub fn known_peers(&self) -> Vec<(String, [u8; 32])> {
         let peers = self.known_peers.lock().unwrap();
@@ -262,13 +281,22 @@ impl CertManager {
             .lock()
             .unwrap()
             .insert(label.to_string(), hash);
-        self.save_known_peers()
+        if let Some(path) = &self.peers_path {
+            update_pins(path, |pins| {
+                pins.insert(label.to_string(), hash);
+            })?;
+        }
+        Ok(())
     }
 
-    /// Remove a known peer by label. Returns true if the peer was found and removed.
-    pub fn remove_peer(&self, label: &str) -> bool {
-        let mut peers = self.known_peers.lock().unwrap();
-        peers.remove(label).is_some()
+    /// Forget the peer `label`, here and on disk. Returns whether it was
+    /// pinned.
+    pub fn remove_peer(&self, label: &str) -> Result<bool> {
+        let mut removed = self.known_peers.lock().unwrap().remove(label).is_some();
+        if let Some(path) = &self.peers_path {
+            update_pins(path, |pins| removed |= pins.remove(label).is_some())?;
+        }
+        Ok(removed)
     }
 
     /// The TLS half of [`CertManager::client_config`]: TOFU certificate pins.
@@ -328,6 +356,44 @@ fn generate_identity() -> Result<(Vec<u8>, Vec<u8>)> {
     Ok((cert.der().to_vec(), key_pair.serialize_der()))
 }
 
+/// One writer of a pin file at a time, in this process. Each write re-reads
+/// the file and applies only its own change, so managers loaded at
+/// different times (one per connection) never drop each other's pins.
+static PINS_FILE: Mutex<()> = Mutex::new(());
+
+/// The pins in `path`; none if there is no file yet. A file that will not
+/// parse is an error.
+fn read_pins(path: &Path) -> Result<HashMap<String, [u8; 32]>> {
+    match std::fs::read_to_string(path) {
+        Ok(data) => serde_json::from_str(&data)
+            .with_context(|| format!("The certificate pins in {} are damaged", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+        Err(e) => Err(e).context("Failed to read known peers"),
+    }
+}
+
+/// Apply `change` to the pins on disk and replace the file whole (a temp
+/// file, then a rename). Returns the pins as written.
+fn update_pins(
+    path: &Path,
+    change: impl FnOnce(&mut HashMap<String, [u8; 32]>),
+) -> Result<HashMap<String, [u8; 32]>> {
+    let _one = PINS_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut pins = read_pins(path)?;
+    change(&mut pins);
+    let tmp = path.with_extension(format!(
+        "json.{}.{}.tmp",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&tmp, serde_json::to_string_pretty(&pins)?)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e).context("Failed to save known peers");
+    }
+    Ok(pins)
+}
+
 /// The label a peer's certificate pin is stored under: the server name the
 /// connection was made to. ServerName has no Display; its DNS name is a
 /// string and its IP's Debug output is stable.
@@ -371,6 +437,17 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
         let label = peer_label(server_name);
 
         let mut peers = self.known_peers.lock().unwrap();
+        // Not pinned here: it may have been pinned on disk since this
+        // manager loaded (another connection, a pairing code). The file
+        // decides before anything is accepted on first use.
+        if !peers.contains_key(&label)
+            && let Some(path) = &self.peers_path
+        {
+            let on_disk = read_pins(path).map_err(|e| rustls::Error::General(e.to_string()))?;
+            if let Some(pinned) = on_disk.get(&label) {
+                peers.insert(label.clone(), *pinned);
+            }
+        }
 
         match peers.get(&label) {
             Some(stored) if *stored == hash => {
@@ -390,15 +467,22 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
             }
             None => {
                 // New peer — TOFU: auto-accept and store.
+                // Persist first, merged with the file: if another connection
+                // pinned this address a moment ago, that pin wins.
+                if let Some(path) = &self.peers_path {
+                    let pins = update_pins(path, |pins| {
+                        pins.entry(label.clone()).or_insert(hash);
+                    })
+                    .map_err(|e| rustls::Error::General(e.to_string()))?;
+                    if pins.get(&label) != Some(&hash) {
+                        warn!("TOFU: {label} was pinned to another certificate meanwhile");
+                        return Err(rustls::Error::General(format!(
+                            "Certificate for {label} does not match its pin."
+                        )));
+                    }
+                }
                 info!("TOFU: first connection to {label}, accepting cert");
                 peers.insert(label, hash);
-                // Persist to disk so the trust survives restarts.
-                if let Some(path) = &self.peers_path
-                    && let Ok(json) = serde_json::to_string_pretty(&*peers)
-                    && let Err(e) = std::fs::write(path, json)
-                {
-                    warn!("TOFU: failed to persist known peers: {e}");
-                }
                 Ok(rustls::client::danger::ServerCertVerified::assertion())
             }
         }
@@ -435,9 +519,12 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
 /// The server's view of a client certificate (device keys, phase A): any
 /// certificate is welcome, since the session gate decides whether it is the
 /// one bound to the device that claims it, but the handshake signature must
-/// prove the client holds its key.
+/// prove the client holds its key. `mandatory` refuses a client that sends
+/// no certificate at all (the control channel).
 #[derive(Debug)]
-struct AnyClientCert;
+struct AnyClientCert {
+    mandatory: bool,
+}
 
 impl rustls::server::danger::ClientCertVerifier for AnyClientCert {
     fn offer_client_auth(&self) -> bool {
@@ -445,7 +532,7 @@ impl rustls::server::danger::ClientCertVerifier for AnyClientCert {
     }
 
     fn client_auth_mandatory(&self) -> bool {
-        false
+        self.mandatory
     }
 
     fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
@@ -933,6 +1020,98 @@ mod tests {
         assert!(next.known_peers().contains(&(label, [7u8; 32])));
     }
 
+    fn pin_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ll-pins-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn first_loads_at_once_make_one_identity() {
+        let dir = pin_dir("identity-race");
+        let loads: Vec<_> = (0..8)
+            .map(|_| {
+                let dir = dir.clone();
+                std::thread::spawn(move || CertManager::load_or_create(&dir).unwrap())
+            })
+            .collect();
+        let managers: Vec<CertManager> = loads.into_iter().map(|t| t.join().unwrap()).collect();
+        let on_disk = CertManager::load_or_create(&dir).unwrap();
+        for manager in &managers {
+            assert_eq!(manager.cert_der, on_disk.cert_der, "one certificate");
+            assert_eq!(manager.key_der, on_disk.key_der, "and its own key");
+        }
+    }
+
+    #[test]
+    fn a_pin_one_manager_writes_is_not_lost_by_another() {
+        let dir = pin_dir("merge");
+        let control = CertManager::load_or_create(&dir).unwrap();
+        let stream = CertManager::load_or_create(&dir).unwrap();
+        control.pin_peer("a", [1u8; 32]).unwrap();
+        stream.pin_peer("b", [2u8; 32]).unwrap();
+        let next = CertManager::load_or_create(&dir).unwrap();
+        let peers = next.known_peers();
+        assert!(peers.contains(&("a".to_string(), [1u8; 32])), "{peers:?}");
+        assert!(peers.contains(&("b".to_string(), [2u8; 32])), "{peers:?}");
+    }
+
+    #[test]
+    fn a_removed_pin_is_not_written_back_by_a_manager_that_still_holds_it() {
+        let dir = pin_dir("remove");
+        let old = CertManager::load_or_create(&dir).unwrap();
+        old.pin_peer("a", [1u8; 32]).unwrap();
+        let ui = CertManager::load_or_create(&dir).unwrap();
+        assert!(ui.remove_peer("a").unwrap());
+        old.pin_peer("b", [2u8; 32]).unwrap();
+        let peers = CertManager::load_or_create(&dir).unwrap().known_peers();
+        assert!(!peers.iter().any(|(label, _)| label == "a"), "{peers:?}");
+    }
+
+    #[test]
+    fn a_damaged_pin_file_is_an_error_not_an_empty_list() {
+        let dir = pin_dir("damaged");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("known_peers.json"), "{not json").unwrap();
+        assert!(
+            CertManager::load_or_create(&dir).is_err(),
+            "an empty list would trust any certificate for every address"
+        );
+    }
+
+    #[test]
+    fn a_manager_loaded_before_a_pin_does_not_accept_another_certificate_for_it() {
+        let dir = pin_dir("stale");
+        let stale = CertManager::load_or_create(&dir).unwrap();
+        let ip: std::net::IpAddr = "192.0.2.30".parse().unwrap();
+        let (desktop, _) = generate_identity().unwrap();
+        CertManager::load_or_create(&dir)
+            .unwrap()
+            .pin_peer(
+                &peer_label_for_ip(ip),
+                CertManager::cert_hash(&CertificateDer::from(desktop)),
+            )
+            .unwrap();
+        let (impostor, _) = generate_identity().unwrap();
+        let verifier = TofuVerifier {
+            known_peers: stale.known_peers.clone(),
+            peers_path: stale.peers_path.clone(),
+        };
+        use rustls::client::danger::ServerCertVerifier;
+        assert!(
+            verifier
+                .verify_server_cert(
+                    &CertificateDer::from(impostor),
+                    &[],
+                    &ServerName::IpAddress(ip.into()),
+                    &[],
+                    rustls::pki_types::UnixTime::now(),
+                )
+                .is_err(),
+            "the address was pinned since this manager loaded"
+        );
+    }
+
     #[test]
     fn test_packet_header_roundtrip() {
         let header = PacketHeader {
@@ -983,5 +1162,87 @@ mod tests {
             rendered.contains("max_idle_timeout: Some(45000)"),
             "idle timeout missing: {rendered}"
         );
+    }
+
+    /// A TLS handshake over a loopback TCP socket with the control channel's
+    /// configurations; what each end learned of the other.
+    async fn control_handshake(
+        server: Arc<rustls::ServerConfig>,
+        client: Arc<rustls::ClientConfig>,
+    ) -> (
+        std::result::Result<Option<super::super::PeerKey>, std::io::Error>,
+        std::result::Result<Option<Vec<u8>>, std::io::Error>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_side = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await?;
+            let tls = tokio_rustls::TlsAcceptor::from(server).accept(tcp).await?;
+            let (_, session) = tls.get_ref();
+            assert_eq!(session.alpn_protocol(), Some(crate::protocol::ALPN_CONTROL));
+            Ok(session
+                .peer_certificates()
+                .and_then(super::super::PeerKey::from_tls_certs))
+        });
+        let client_side = async {
+            let tcp = tokio::net::TcpStream::connect(addr).await?;
+            let name = ServerName::IpAddress(addr.ip().into());
+            let mut tls = tokio_rustls::TlsConnector::from(client)
+                .connect(name, tcp)
+                .await?;
+            // TLS 1.3 settles the client's certificate after the client's
+            // handshake ends; a read is where a refusal surfaces.
+            use tokio::io::AsyncReadExt;
+            let mut byte = [0u8; 1];
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_millis(300), tls.read(&mut byte))
+                    .await;
+            let (_, session) = tls.get_ref();
+            Ok(session
+                .peer_certificates()
+                .and_then(|c| c.first())
+                .map(|c| c.as_ref().to_vec()))
+        };
+        let client_seen = client_side.await;
+        let server_seen = server_side.await.unwrap();
+        (server_seen, client_seen)
+    }
+
+    #[tokio::test]
+    async fn each_end_of_the_control_channel_proves_its_key() {
+        let desktop = CertManager::new().unwrap();
+        let phone = CertManager::new().unwrap();
+        let (server_seen, client_seen) = control_handshake(
+            desktop.control_server_config().unwrap(),
+            phone.control_client_config(),
+        )
+        .await;
+        assert_eq!(
+            server_seen.unwrap(),
+            Some(super::super::PeerKey::Tls(phone.cert_fingerprint())),
+            "the desktop knows the phone's key"
+        );
+        assert_eq!(client_seen.unwrap().as_deref(), Some(&desktop.cert_der[..]));
+    }
+
+    #[tokio::test]
+    async fn the_control_channel_refuses_a_client_without_a_certificate() {
+        let desktop = CertManager::new().unwrap();
+        let phone = CertManager::new().unwrap();
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut anonymous = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(TofuVerifier {
+                known_peers: phone.known_peers.clone(),
+                peers_path: None,
+            }))
+            .with_no_client_auth();
+        anonymous.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        let (server_seen, _) = control_handshake(
+            desktop.control_server_config().unwrap(),
+            Arc::new(anonymous),
+        )
+        .await;
+        assert!(server_seen.is_err(), "no certificate, no control channel");
     }
 }

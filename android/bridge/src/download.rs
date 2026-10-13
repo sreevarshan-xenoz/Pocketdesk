@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use linux_link_core::protocol::connection::ConnectionManager;
 use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDeviceSender};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, broadcast};
@@ -103,15 +102,18 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
     await_and_receive(listener, &key, refused, out).await
 }
 
+/// The read half of a connection opened for one request.
+pub(crate) type OwnReader = Box<dyn tokio::io::AsyncRead + Send + Unpin>;
+
 /// Where the desktop's replies to a request arrive: the live control
 /// connection's broadcast, or a connection opened for this request alone,
 /// kept open while its lines are read.
 pub(crate) enum Replies {
     Shared(broadcast::Receiver<String>),
     Own {
-        lines: tokio::io::Lines<tokio::io::BufReader<tokio::net::tcp::OwnedReadHalf>>,
+        lines: tokio::io::Lines<tokio::io::BufReader<OwnReader>>,
         // Held so the connection stays open while its replies are read.
-        _writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+        _writer: Box<dyn std::any::Any + Send>,
     },
 }
 
@@ -179,19 +181,19 @@ pub(crate) async fn send_watching_replies(
             .map_err(|e| format!("Failed to ask for the file: {e}"))?;
         return Ok(Replies::Shared(rx));
     }
-    let stream = ConnectionManager::new(Duration::from_secs(10))
+    let stream = crate::api::control_manager(Duration::from_secs(10))?
         .connect(address, port, &client_identity())
         .await
         .map_err(|e| e.to_string())?;
-    let (reader, writer) = stream.into_split();
+    let (reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));
     TcpDeviceSender::from_arc(writer.clone(), address.to_string())
         .send_packet(request)
         .await
         .map_err(|e| format!("Failed to ask for the file: {e}"))?;
     Ok(Replies::Own {
-        lines: tokio::io::BufReader::new(reader).lines(),
-        _writer: writer,
+        lines: tokio::io::BufReader::new(Box::new(reader) as OwnReader).lines(),
+        _writer: Box::new(writer),
     })
 }
 
@@ -504,8 +506,10 @@ mod tests {
         });
         let (reader, writer) = TcpStream::connect(addr).await.unwrap().into_split();
         let replies = super::Replies::Own {
-            lines: tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(reader)),
-            _writer: std::sync::Arc::new(tokio::sync::Mutex::new(writer)),
+            lines: tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(
+                Box::new(reader) as super::OwnReader
+            )),
+            _writer: Box::new(writer),
         };
         let reading = replies.keep_reading();
         let _socket = desktop.await.unwrap();

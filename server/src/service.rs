@@ -96,6 +96,12 @@ pub async fn run(config: Config) -> Result<()> {
     let cert_manager = Arc::new(
         CertManager::load_or_create(&identity_dir).context("Failed to create CertManager")?,
     );
+    // The control channel runs inside TLS with the same identity (phase B).
+    let control_tls = tokio_rustls::TlsAcceptor::from(
+        cert_manager
+            .control_server_config()
+            .context("Failed to configure the control channel's TLS")?,
+    );
     let registry = Arc::new(kde_service.registry.clone_for_dispatch());
     let local_v2_identity = IdentityPacketV2 {
         device_id: kde_service
@@ -361,9 +367,11 @@ pub async fn run(config: Config) -> Result<()> {
                         let hypr = hypr_ipc.clone();
                         let wan = wan_endpoint.clone();
                         let pairing_required = config.pairing_required;
+                        let tls = control_tls.clone();
                         tokio::spawn(async move {
                             if let Err(error) = handle_connection_with_kde(
                                 stream,
+                                tls,
                                 identity_packet,
                                 &registry_clone,
                                 hypr.as_deref(),
@@ -668,7 +676,11 @@ pub async fn connect_peer(peer: String, port: u16, identity: &DeviceIdentity) ->
     let tailscale = TailscaleClient::new().context("failed to initialize Tailscale client")?;
     let address = resolve_peer_address(&tailscale, &peer).await?;
 
-    let manager = ConnectionManager::new(Duration::from_secs(10));
+    // This desktop's own certificate is the client's (phase B: the control
+    // channel runs inside TLS, and a client must present one).
+    let certs = CertManager::load_or_create(&crate::state::state_dir()?.join("certs"))
+        .context("Failed to load this desktop's certificate")?;
+    let manager = ConnectionManager::new(Duration::from_secs(10), certs.control_client_config());
     let _stream = manager
         .connect(&address, port, identity)
         .await
@@ -699,12 +711,61 @@ async fn seed_desktop_state(
     }
 }
 
+/// The longest handshake line (HELLO, the identity) a peer may send before
+/// it has proved anything; an identity packet is a few hundred bytes.
+const MAX_HANDSHAKE_LINE: u64 = 64 * 1024;
+
+/// Read one handshake line of at most [`MAX_HANDSHAKE_LINE`] bytes.
+async fn read_handshake_line<R>(reader: &mut R, line: &mut String) -> std::io::Result<usize>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let read = (&mut *reader)
+        .take(MAX_HANDSHAKE_LINE)
+        .read_line(line)
+        .await?;
+    if read as u64 == MAX_HANDSHAKE_LINE && !line.ends_with('\n') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "handshake line too long",
+        ));
+    }
+    Ok(read)
+}
+
+/// Tell a client that did not start TLS why it is dropped. What it already
+/// sent is read first and the socket half-closed, then drained: closing with
+/// unread data sends a reset, which can discard the answer before the client
+/// reads it.
+async fn refuse_plain(mut stream: TcpStream) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut sink = [0u8; 1024];
+    let _ = timeout(Duration::from_secs(1), stream.read(&mut sink)).await;
+    let refusal = format!("{}\n", linux_link_core::protocol::HANDSHAKE_TLS_REQUIRED);
+    if stream.write_all(refusal.as_bytes()).await.is_err() {
+        return;
+    }
+    let _ = stream.shutdown().await;
+    let _ = timeout(Duration::from_millis(500), async {
+        while let Ok(n) = stream.read(&mut sink).await {
+            if n == 0 {
+                break;
+            }
+        }
+    })
+    .await;
+}
+
 /// Handle a TCP connection with KDE Connect protocol support.
 ///
-/// After the initial handshake, this sends our identity packet and then
-/// enters a loop reading JSON packets and dispatching them to plugins.
+/// The connection runs inside TLS (phase B): a client that does not start a
+/// TLS handshake is told so and dropped. After the initial handshake, this
+/// sends our identity packet and then enters a loop reading JSON packets and
+/// dispatching them to plugins.
 async fn handle_connection_with_kde(
     stream: TcpStream,
+    tls: tokio_rustls::TlsAcceptor,
     identity_packet: Option<NetworkPacket>,
     registry: &Arc<PluginRegistry>,
     hypr_ipc: Option<&HyprlandIpc>,
@@ -730,7 +791,33 @@ async fn handle_connection_with_kde(
     async move {
         tracing::info!("Handling new connection");
 
-        let (reader_half, writer_half) = stream.into_split();
+        // A TLS client opens with a handshake record. Anything else is a
+        // client from before phase B (or not ours): say why, and drop it.
+        let mut first = [0u8; 1];
+        let peeked = timeout(Duration::from_secs(8), stream.peek(&mut first))
+            .await
+            .context("connection handshake timeout")?
+            .context("failed to read incoming handshake")?;
+        if peeked == 0 {
+            tracing::info!("Connection closed by peer before handshake");
+            return Ok(());
+        }
+        if first[0] != linux_link_core::protocol::TLS_HANDSHAKE_RECORD {
+            tracing::warn!("Refused a control connection without TLS (an outdated app?)");
+            refuse_plain(stream).await;
+            return Ok(());
+        }
+        let stream = timeout(Duration::from_secs(8), tls.accept(stream))
+            .await
+            .context("TLS handshake timeout")?
+            .context("TLS handshake failed")?;
+        let peer_key = stream
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(linux_link_core::streaming::PeerKey::from_tls_certs);
+
+        let (reader_half, writer_half) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader_half);
 
         // Wrap writer in Arc<Mutex> so both handshake and TcpDeviceSender can use it
@@ -738,7 +825,7 @@ async fn handle_connection_with_kde(
 
         // Step 1: LINUX_LINK_HELLO handshake
         let mut line = String::new();
-        let bytes = timeout(Duration::from_secs(8), reader.read_line(&mut line))
+        let bytes = timeout(Duration::from_secs(8), read_handshake_line(&mut reader, &mut line))
             .await
             .context("connection handshake timeout")?
             .context("failed to read incoming handshake")?;
@@ -778,17 +865,64 @@ async fn handle_connection_with_kde(
             tracing::debug!("Sent local identity packet");
         }
 
-        // Step 3: Enter KDE Connect packet loop
-        let device_id = peer_addr
-            .map(|a| a.ip().to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        // Step 3: the phone's identity, held to the key the TLS handshake
+        // proved (phase B). The connection goes by that id from here on, so
+        // nothing about it rests on its IP address.
+        let mut line = String::new();
+        let bytes = timeout(Duration::from_secs(5), read_handshake_line(&mut reader, &mut line))
+            .await
+            .context("identity timeout")?
+            .context("failed to read the peer's identity")?;
+        if bytes == 0 {
+            tracing::info!("Connection closed by peer before its identity");
+            return Ok(());
+        }
+        let Some(identity) = NetworkPacket::from_wire(line.trim())
+            .ok()
+            .filter(|p| p.packet_type == "kdeconnect.identity")
+        else {
+            tracing::warn!("Control connection without an identity; dropped");
+            return Ok(());
+        };
+        let Some(device_id) = identity
+            .body
+            .get("deviceId")
+            .and_then(|v| v.as_str())
+            .filter(|id| crate::plugins::pair::valid_device_id(id))
+            .map(str::to_string)
+        else {
+            tracing::warn!("Control connection with an unusable deviceId; dropped");
+            return Ok(());
+        };
+        let Some(peer_addr) = peer_addr else {
+            return Ok(());
+        };
+        // A connection that claims a paired device without its key is kept
+        // for pairing only (the owner's PIN recovers a phone whose key
+        // changed); the per-packet gate below holds it there.
+        if let crate::plugins::pair::Standing::WrongKey(refusal) =
+            crate::plugins::pair::admit_control(&device_id, peer_addr, peer_key.as_ref())
+        {
+            tracing::warn!(
+                "Control connection for {device_id} held to pairing only: {}",
+                refusal.reason()
+            );
+        }
 
-        let sender: Arc<dyn DeviceSender> =
-            Arc::new(TcpDeviceSender::from_arc(writer, device_id.clone()).with_peer(peer_addr));
+        let sender: Arc<dyn DeviceSender> = Arc::new(
+            TcpDeviceSender::from_arc(writer, device_id.clone())
+                .with_peer(Some(peer_addr))
+                .with_peer_key(peer_key.clone()),
+        );
         let sender_ref = &*sender;
 
-        // Update span with device_id
         tracing::Span::current().record("peer", &device_id);
+
+        // The plugins learn the identity as they always have, before anything
+        // asks whether this device is paired.
+        if let Err(e) = registry.dispatch_packet(&identity, sender_ref).await {
+            tracing::warn!("Identity dispatch failed: {}", e);
+        }
 
         // Register this client for pushes (one target per device: its newest connection)
         state::register_client(sender.clone()).await;
@@ -799,7 +933,7 @@ async fn handle_connection_with_kde(
         // on this connection is seeded the moment it does (below), rather
         // than waiting for the periodic pushes.
         let mut seeded = false;
-        if state::may_receive_pushes(&device_id) {
+        if state::may_receive_pushes(&*sender) {
             seed_desktop_state(&sender, hypr_ipc, wan_endpoint).await;
             seeded = true;
         }
@@ -823,22 +957,35 @@ async fn handle_connection_with_kde(
                     match NetworkPacket::from_wire(trimmed) {
                         Ok(packet) => {
                             let packet_type = packet.packet_type.clone();
+                            // The connection's identity was settled in the
+                            // handshake; another would re-point it at a
+                            // different device.
+                            if packet_type == "kdeconnect.identity" {
+                                tracing::warn!("Ignored a second identity on {device_id}'s connection");
+                                continue;
+                            }
                             // PIN pairing enforcement (Tier-2 #11b): before a
                             // connection is paired, only the pairing handshake
                             // itself and the identity announcement run.
                             let pairing_packet = matches!(
                                 packet_type.as_str(),
-                                "kdeconnect.identity"
-                                    | "kdeconnect.pair"
-                                    | "kdeconnect.linuxlink.pair"
+                                "kdeconnect.pair" | "kdeconnect.linuxlink.pair"
                             );
-                            if pairing_required
-                                && !pairing_packet
-                                && !crate::plugins::pair::is_trusted(&device_id)
-                            {
+                            // Re-read per packet: pairing, unpairing or a key
+                            // change applies to a connection already open.
+                            use crate::plugins::pair::Standing;
+                            let may_act = match crate::plugins::pair::standing(
+                                &device_id,
+                                peer_key.as_ref(),
+                            ) {
+                                Standing::Paired => true,
+                                Standing::Unpaired => !pairing_required,
+                                Standing::WrongKey(_) => false,
+                            };
+                            if !pairing_packet && !may_act {
                                 tracing::debug!(
-                                    "Blocking {packet_type} from unpaired {device_id} \
-                                     (set pairing_required = false to disable)"
+                                    "Blocking {packet_type} from {device_id}: not paired, \
+                                     or not with this key"
                                 );
                                 continue;
                             }
@@ -861,7 +1008,7 @@ async fn handle_connection_with_kde(
                             }
                             .instrument(packet_span)
                             .await;
-                            if pairing_packet && !seeded && state::may_receive_pushes(&device_id) {
+                            if pairing_packet && !seeded && state::may_receive_pushes(&*sender) {
                                 tracing::info!(
                                     "Peer paired on this connection; seeding desktop state"
                                 );
@@ -873,6 +1020,12 @@ async fn handle_connection_with_kde(
                             tracing::warn!("Malformed packet received: {}", e);
                         }
                     }
+                }
+                // A phone that drops the socket without TLS's close_notify
+                // (the app stopped, the network went) has simply left.
+                Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    tracing::info!("Peer disconnected");
+                    break;
                 }
                 Ok(Err(e)) => {
                     tracing::error!("Read error in control channel: {}", e);
@@ -1068,5 +1221,102 @@ struct PidFileGuard {
 impl Drop for PidFileGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod control_tls_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    /// A control port on loopback, served by the real connection handler.
+    async fn control_port() -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let desktop = CertManager::new().unwrap();
+        let tls = tokio_rustls::TlsAcceptor::from(desktop.control_server_config().unwrap());
+        tokio::spawn(async move {
+            let registry =
+                Arc::new(linux_link_core::protocol::kdeconnect::PluginRegistry::default());
+            while let Ok((stream, _)) = listener.accept().await {
+                let tls = tls.clone();
+                let registry = registry.clone();
+                tokio::spawn(async move {
+                    let _ =
+                        handle_connection_with_kde(stream, tls, None, &registry, None, None, true)
+                            .await;
+                });
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn a_client_without_tls_is_told_and_dropped() {
+        let addr = control_port().await;
+        let mut plain = TcpStream::connect(addr).await.unwrap();
+        plain
+            .write_all(
+                format!(
+                    "{HANDSHAKE_HELLO}
+"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut reply = String::new();
+        let mut reader = BufReader::new(plain);
+        timeout(Duration::from_secs(5), reader.read_line(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reply.trim(),
+            linux_link_core::protocol::HANDSHAKE_TLS_REQUIRED
+        );
+        let mut rest = String::new();
+        let closed = timeout(Duration::from_secs(5), reader.read_line(&mut rest))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(closed, 0, "the connection is closed after the refusal");
+    }
+
+    #[tokio::test]
+    async fn a_client_inside_tls_completes_the_handshake() {
+        let addr = control_port().await;
+        let phone = CertManager::new().unwrap();
+        let identity = linux_link_core::protocol::kdeconnect::DeviceIdentity::new(
+            "control-tls-test-phone",
+            "Test Phone",
+        );
+        ConnectionManager::new(Duration::from_secs(5), phone.control_client_config())
+            .connect(&addr.ip().to_string(), addr.port(), &identity)
+            .await
+            .expect("the control channel over TLS");
+    }
+}
+
+#[cfg(test)]
+mod handshake_line_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_handshake_line_has_a_limit() {
+        let endless = vec![b'x'; 200 * 1024];
+        let mut reader = BufReader::new(&endless[..]);
+        let mut line = String::new();
+        assert!(
+            read_handshake_line(&mut reader, &mut line).await.is_err(),
+            "a peer that has proved nothing cannot make the desktop buffer this"
+        );
+        let mut reader = BufReader::new(&b"LINUX_LINK_HELLO 1\n"[..]);
+        let mut line = String::new();
+        assert_eq!(
+            read_handshake_line(&mut reader, &mut line).await.unwrap(),
+            19
+        );
+        assert_eq!(line.trim(), HANDSHAKE_HELLO);
     }
 }

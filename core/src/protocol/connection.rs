@@ -1,20 +1,32 @@
 use super::kdeconnect::DeviceIdentity;
 use super::{HANDSHAKE_HELLO, HANDSHAKE_OK, PROTOCOL_VERSION};
 use crate::error::{LinuxLinkError, Result};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tracing::{Instrument, debug, info_span};
 use uuid;
 
+/// A control connection: TLS over TCP (phase B), already past the handshake.
+pub type ControlStream = tokio_rustls::client::TlsStream<TcpStream>;
+
+/// The address a control connection reached.
+pub fn control_peer_addr(stream: &ControlStream) -> std::io::Result<std::net::SocketAddr> {
+    stream.get_ref().0.peer_addr()
+}
+
 #[derive(Debug, Clone)]
 pub struct ConnectionManager {
     timeout: Duration,
+    /// This device's certificate and its pins of desktops
+    /// (`CertManager::control_client_config`).
+    tls: Arc<rustls::ClientConfig>,
 }
 
 impl ConnectionManager {
-    pub fn new(timeout: Duration) -> Self {
-        Self { timeout }
+    pub fn new(timeout: Duration, tls: Arc<rustls::ClientConfig>) -> Self {
+        Self { timeout, tls }
     }
 
     pub async fn connect(
@@ -22,7 +34,7 @@ impl ConnectionManager {
         address: &str,
         port: u16,
         identity: &DeviceIdentity,
-    ) -> Result<TcpStream> {
+    ) -> Result<ControlStream> {
         let conn_id = uuid::Uuid::new_v4().to_string();
         let span = info_span!(
             "handshake",
@@ -34,7 +46,7 @@ impl ConnectionManager {
         async move {
             let socket_addr = format!("{address}:{port}");
 
-            let mut stream = tokio::time::timeout(self.timeout, TcpStream::connect(&socket_addr))
+            let stream = tokio::time::timeout(self.timeout, TcpStream::connect(&socket_addr))
                 .await
                 .map_err(|_| LinuxLinkError::Timeout {
                     operation: "connect",
@@ -47,6 +59,31 @@ impl ConnectionManager {
                 })?;
 
             stream.set_nodelay(true)?;
+
+            // The channel runs inside TLS. The desktop's certificate is
+            // checked against the pin for the address dialed (the server
+            // name), the same pin the stream uses, and this device presents
+            // its own.
+            let server_name = rustls::pki_types::ServerName::try_from(address.to_string())
+                .map_err(|e| LinuxLinkError::ConnectionFailed {
+                    address: address.to_string(),
+                    port,
+                    reason: format!("not an address: {e}"),
+                })?;
+            let mut stream = tokio::time::timeout(
+                self.timeout,
+                tokio_rustls::TlsConnector::from(self.tls.clone()).connect(server_name, stream),
+            )
+            .await
+            .map_err(|_| LinuxLinkError::Timeout {
+                operation: "TLS handshake",
+                duration_ms: self.timeout.as_millis() as u64,
+            })?
+            .map_err(|e| LinuxLinkError::ConnectionFailed {
+                address: address.to_string(),
+                port,
+                reason: format!("TLS: {e}"),
+            })?;
 
             // Step 1: Perform Handshake Hello
             stream
