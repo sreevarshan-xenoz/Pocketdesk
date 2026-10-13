@@ -33,7 +33,7 @@ pub fn session_log_path() -> Result<PathBuf> {
 /// every field typed, for tooling and for the benchmark regression check
 /// (roadmap 2167/2168). `linux-link sessions --json` prints it.
 pub fn session_record_path() -> Result<PathBuf> {
-    Ok(state::state_dir()?.join("streaming_sessions.jsonl"))
+    Ok(state::state_dir()?.join(linux_link_core::local::paths::SESSIONS_FILE))
 }
 
 /// Install the core telemetry sink → [`record`]. Called once at server
@@ -240,6 +240,7 @@ mod tests {
             render_tail: None,
             e2e_tail: None,
             link: None,
+            encoder: None,
         }
     }
 

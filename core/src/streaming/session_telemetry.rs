@@ -107,6 +107,10 @@ pub struct SessionReport {
     /// What the transport itself said about the link, or `None` for a session
     /// that never got far enough to sample one.
     pub link: Option<LinkReport>,
+    /// The encoder that produced the session's frames
+    /// (`VideoEncoder::backend_name`), the last one if it changed (a
+    /// fallback). `None` when no frame was encoded.
+    pub encoder: Option<String>,
 }
 
 /// The transport's own account of a session's link, read from quinn or iroh
@@ -259,6 +263,9 @@ impl SessionReport {
         if let Some(link) = &self.link {
             write!(line, "{}", link.format()).expect("infallible");
         }
+        if let Some(encoder) = &self.encoder {
+            write!(line, "\tencoder={encoder}").expect("infallible");
+        }
         if let Some(id) = &self.device_id {
             // Defensive: ids are UTF-8 device names from the pairing layer.
             let id = id.replace(['\t', '\n'], " ");
@@ -362,6 +369,8 @@ pub struct SessionRecorder {
     observed: Mutex<PathObserver>,
     family: TransportFamily,
     device_id: Option<String>,
+    /// The encoder last noted, see [`SessionRecorder::note_encoder`].
+    encoder: Mutex<Option<&'static str>>,
 }
 
 impl SessionRecorder {
@@ -380,7 +389,15 @@ impl SessionRecorder {
             observed: Mutex::new(PathObserver::default()),
             family,
             device_id,
+            encoder: Mutex::new(None),
         }
+    }
+
+    /// The encoder now producing frames (`VideoEncoder::backend_name`); the
+    /// last one noted is the one the record names. The encode task calls it
+    /// only when the encoder changes.
+    pub fn note_encoder(&self, name: &'static str) {
+        *self.encoder.lock().unwrap_or_else(|p| p.into_inner()) = Some(name);
     }
 
     /// Observe the connection once. Call every few seconds from a pipeline
@@ -495,6 +512,11 @@ impl SessionRecorder {
             render_tail: self.render_tail.summary_ms(),
             e2e_tail: self.e2e_tail.summary_ms(),
             link: self.link_report(),
+            encoder: self
+                .encoder
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .map(str::to_string),
         }
     }
 
@@ -657,6 +679,7 @@ mod tests {
             render_tail: None,
             e2e_tail: None,
             link: None,
+            encoder: None,
         }
     }
 
@@ -679,6 +702,31 @@ mod tests {
         // 99th-percentile encode hitch from a 99th-percentile link stall.
         assert!(line.contains("rtt_p99=99\trtt_max=100"), "{line}");
         assert!(line.contains("enc_p99=99\tenc_max=100"), "{line}");
+    }
+
+    #[test]
+    fn the_record_names_the_encoder_the_session_ended_on() {
+        let rec = SessionRecorder::new(TransportFamily::Quinn, None);
+        assert_eq!(
+            rec.finish(SessionOutcome::Completed, 0).encoder,
+            None,
+            "none opened"
+        );
+        rec.note_encoder("ffmpeg-sidecar-nvenc");
+        rec.note_encoder("ffmpeg-sidecar");
+        let report = rec.finish(SessionOutcome::Completed, 0);
+        assert_eq!(
+            report.encoder.as_deref(),
+            Some("ffmpeg-sidecar"),
+            "the last one, after a fallback"
+        );
+        assert!(
+            report.format().contains("encoder=ffmpeg-sidecar"),
+            "{}",
+            report.format()
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["encoder"], "ffmpeg-sidecar");
     }
 
     #[test]

@@ -229,6 +229,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/linux-link/confi
 - **Sessions**: live sessions, with End.
 - **Files**: send a file to a phone that is in a session (pick the phone, then a path, "Choose file…" on Windows, or drop files on the window), the files sent and whether each was saved, and files received from phones, newest first, with Show in folder.
 - **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
+- **Diagnostics**: why a phone might not connect. It checks the server, its ports, the firewall, the addresses phones can use and the internet path, shows the last session (encoder and latency), and copies a debug report for an issue.
 - **Logs**: the server's log.
 
 Closing the window keeps it in the tray on Windows; Linux has no tray yet, so there closing it quits.
