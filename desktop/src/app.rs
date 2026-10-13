@@ -8,6 +8,7 @@ use linux_link_core::local::approval::{ApprovalRequest, Verdict};
 use linux_link_core::local::config::Config;
 use linux_link_core::local::paths::TRUST_FILE;
 use linux_link_core::local::pin::now_unix;
+use linux_link_core::local::sent::SentState;
 use linux_link_core::local::sessions;
 use linux_link_core::protocol::kdeconnect::TrustStore;
 use linux_link_core::protocol::permissions::Capability;
@@ -94,6 +95,12 @@ pub struct PocketdeskApp {
     confirm_restart: bool,
     /// Held sessions already brought to the owner's attention.
     raised_approvals: Vec<String>,
+    /// The phone the Files tab sends to (F7b).
+    send_to: Option<String>,
+    /// The Files tab's path field.
+    send_path: String,
+    /// A "Choose file…" dialog that is open.
+    picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
 }
 
 impl PocketdeskApp {
@@ -114,6 +121,9 @@ impl PocketdeskApp {
             job: None,
             confirm_restart: false,
             raised_approvals: Vec::new(),
+            send_to: None,
+            send_path: String::new(),
+            picking: None,
         }
     }
 
@@ -590,6 +600,136 @@ impl PocketdeskApp {
     }
 
     fn files_tab(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            self.send_box(ui);
+            ui.add_space(12.0);
+            self.sent_list(ui);
+            self.received_list(ui);
+        });
+    }
+
+    /// The phone files go to (F7b): the one chosen, if it is still in a
+    /// session, else the first phone that is.
+    fn send_target(&mut self) -> Option<String> {
+        let targets = model::send_targets(&self.snapshot);
+        let chosen = self
+            .send_to
+            .as_ref()
+            .filter(|id| targets.iter().any(|d| &d.id == *id))
+            .cloned()
+            .or_else(|| targets.first().map(|d| d.id.clone()));
+        self.send_to = chosen.clone();
+        chosen
+    }
+
+    /// Queue `path` for the chosen phone and say what happened.
+    fn send_file(&mut self, path: &std::path::Path) {
+        let Some(device) = self.send_target() else {
+            self.notice = Some("No phone is in a session to send to.".to_string());
+            return;
+        };
+        self.notice = Some(
+            match model::queue_send(&self.state_dir, &device, path, now_unix()) {
+                Ok(name) => format!("Sending {name} to {}…", short(&device)),
+                Err(e) => e,
+            },
+        );
+        self.refreshed = None;
+    }
+
+    fn send_box(&mut self, ui: &mut egui::Ui) {
+        ui.strong("Send to a phone");
+        let Some(device) = self.send_target() else {
+            ui.label(
+                RichText::new(
+                    "No phone is in a session. Open a session on the phone, then send files \
+                     from here; they land in the phone's Downloads/Pocketdesk.",
+                )
+                .color(MUTED),
+            );
+            return;
+        };
+        let targets: Vec<String> = model::send_targets(&self.snapshot)
+            .iter()
+            .map(|d| d.id.clone())
+            .collect();
+        let mut chosen = device.clone();
+        ui.horizontal(|ui| {
+            ui.label("Phone");
+            egui::ComboBox::from_id_salt("send-to")
+                .selected_text(short(&chosen))
+                .show_ui(ui, |ui| {
+                    for id in &targets {
+                        ui.selectable_value(&mut chosen, id.clone(), short(id));
+                    }
+                });
+        });
+        self.send_to = Some(chosen);
+        let mut send = None;
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.send_path)
+                    .hint_text("Path to a file")
+                    .desired_width(360.0),
+            );
+            if ui.button("Send").clicked() && !self.send_path.trim().is_empty() {
+                send = Some(PathBuf::from(self.send_path.trim()));
+            }
+            if crate::pick_file::AVAILABLE
+                && ui
+                    .add_enabled(self.picking.is_none(), egui::Button::new("Choose file…"))
+                    .clicked()
+            {
+                self.picking = Some(crate::pick_file::spawn());
+            }
+        });
+        if let Some(path) = send {
+            self.send_file(&path);
+            self.send_path.clear();
+        }
+        let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
+        let hint = if hovering {
+            RichText::new("Drop to send.").strong()
+        } else {
+            RichText::new("Or drop files on this window.").color(MUTED)
+        };
+        ui.label(hint);
+    }
+
+    fn sent_list(&mut self, ui: &mut egui::Ui) {
+        if self.snapshot.sent.is_empty() {
+            return;
+        }
+        ui.strong("Sent");
+        let now = now_unix();
+        egui::Grid::new("sent")
+            .num_columns(4)
+            .striped(true)
+            .spacing([16.0, 8.0])
+            .show(ui, |ui| {
+                for file in &self.snapshot.sent {
+                    ui.label(&file.name).on_hover_text(&file.path);
+                    ui.label(short(&file.device_id));
+                    ui.label(format!(
+                        "{} ago",
+                        human_duration(now.saturating_sub(file.sent_unix))
+                    ));
+                    match &file.state {
+                        SentState::Offered => ui.label("waiting for the phone"),
+                        SentState::Sent => ui.label("saved on the phone"),
+                        SentState::Failed(reason) => ui.label(
+                            RichText::new(format!("not sent: {reason}"))
+                                .color(Color32::from_rgb(0xd9, 0x5c, 0x4a)),
+                        ),
+                    };
+                    ui.end_row();
+                }
+            });
+        ui.add_space(12.0);
+    }
+
+    fn received_list(&mut self, ui: &mut egui::Ui) {
+        ui.strong("Received");
         if self.snapshot.received.is_empty() {
             ui.label("Nothing received yet.");
             ui.label(
@@ -603,35 +743,59 @@ impl PocketdeskApp {
         }
         let now = now_unix();
         let mut show = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Grid::new("received")
-                .num_columns(4)
-                .striped(true)
-                .spacing([16.0, 8.0])
-                .show(ui, |ui| {
-                    for row in &self.snapshot.received {
-                        let file = &row.file;
-                        ui.label(&file.name).on_hover_text(&file.path);
-                        ui.label(human_size(file.size));
-                        ui.label(format!(
-                            "{} ago",
-                            human_duration(now.saturating_sub(file.received_unix))
-                        ));
-                        if row.exists {
-                            if ui.button("Show in folder").clicked() {
-                                show = Some(file.path.clone());
-                            }
-                        } else {
-                            ui.label(RichText::new("moved or deleted").color(MUTED));
+        egui::Grid::new("received")
+            .num_columns(4)
+            .striped(true)
+            .spacing([16.0, 8.0])
+            .show(ui, |ui| {
+                for row in &self.snapshot.received {
+                    let file = &row.file;
+                    ui.label(&file.name).on_hover_text(&file.path);
+                    ui.label(human_size(file.size));
+                    ui.label(format!(
+                        "{} ago",
+                        human_duration(now.saturating_sub(file.received_unix))
+                    ));
+                    if row.exists {
+                        if ui.button("Show in folder").clicked() {
+                            show = Some(file.path.clone());
                         }
-                        ui.end_row();
+                    } else {
+                        ui.label(RichText::new("moved or deleted").color(MUTED));
                     }
-                });
-        });
+                    ui.end_row();
+                }
+            });
         if let Some(path) = show
             && let Err(e) = crate::reveal::show_in_folder(std::path::Path::new(&path))
         {
             self.notice = Some(format!("Could not open the folder: {e}"));
+        }
+    }
+
+    /// Files dropped on the window, and a finished "Choose file…", go to
+    /// the chosen phone (F7b).
+    fn take_files_to_send(&mut self, ctx: &egui::Context) {
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect()
+        });
+        if !dropped.is_empty() {
+            self.switch_to(Tab::Files);
+            for path in dropped {
+                self.send_file(&path);
+            }
+        }
+        if self.picking.as_ref().is_some_and(|h| h.is_finished()) {
+            if let Some(Ok(Some(path))) = self.picking.take().map(|h| h.join()) {
+                self.send_file(&path);
+            }
+        } else if self.picking.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(200));
         }
     }
 
@@ -682,6 +846,7 @@ impl eframe::App for PocketdeskApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.take_files_to_send(ui.ctx());
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {

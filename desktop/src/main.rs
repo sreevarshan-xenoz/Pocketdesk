@@ -8,6 +8,7 @@ mod app;
 mod icon;
 mod model;
 mod pair_view;
+mod pick_file;
 mod restart;
 mod reveal;
 mod settings_view;
