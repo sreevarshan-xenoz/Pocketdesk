@@ -1025,6 +1025,7 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .await
         .map_err(|e| format!("Failed to bind port: {}", e))?;
     let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let key = uuid::Uuid::new_v4().simple().to_string();
     let conn_mgr = ConnectionManager::new(Duration::from_secs(10));
     let identity = client_identity();
     let stream = conn_mgr
@@ -1036,7 +1037,7 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(serde_json::json!({
             "filename": filename,
-            "payloadTransferInfo": { "port": transfer_port },
+            "payloadTransferInfo": { "port": transfer_port, "key": key },
         }))
         .with_payload_size(file_size as u64);
     sender
@@ -1044,23 +1045,20 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .await
         .map_err(|e| format!("Failed to send share request: {}", e))?;
     // The desktop connects back for the bytes. The listener is on every
-    // interface, so take the file only to the desktop's own address;
-    // anything else on the network that connects first gets nothing.
-    let desktop_ips: Vec<std::net::IpAddr> = tokio::net::lookup_host((address.as_str(), port))
-        .await
-        .map_err(|e| format!("Failed to resolve {address}: {e}"))?
-        .map(|a| a.ip())
-        .collect();
+    // interface, so the bytes go only to a connection that first presents
+    // the key from the request, which only the desktop has seen; anything
+    // else that connects is dropped. (Its source address is no test: a
+    // desktop with several addresses may connect back from another one.)
     let mut client_stream = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let (stream, peer) = listener
+            let (mut stream, peer) = listener
                 .accept()
                 .await
                 .map_err(|e| format!("Failed to accept connection: {}", e))?;
-            if is_desktop(peer.ip(), &desktop_ips) {
+            if presents_key(&mut stream, &key).await {
                 return Ok::<_, String>(stream);
             }
-            tracing::warn!("File transfer: ignored a connection from {peer}");
+            tracing::warn!("File transfer: dropped a connection from {peer} without the key");
         }
     })
     .await
@@ -1088,21 +1086,23 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .flush()
         .await
         .map_err(|e: std::io::Error| e.to_string())?;
+    if sent != file_size {
+        return Err(format!(
+            "The file changed while it was sent ({sent} of {file_size} bytes)"
+        ));
+    }
     tracing::info!("File sent: {} ({} bytes)", filename, sent);
     Ok(())
 }
 
-/// Whether `peer` is one of the desktop's addresses (an IPv4 peer may show
-/// up IPv4-mapped on a dual-stack listener).
-fn is_desktop(peer: std::net::IpAddr, desktop: &[std::net::IpAddr]) -> bool {
-    let peer = match peer {
-        std::net::IpAddr::V6(v6) => v6
-            .to_ipv4_mapped()
-            .map(std::net::IpAddr::V4)
-            .unwrap_or(peer),
-        v4 => v4,
-    };
-    desktop.contains(&peer)
+/// Whether a connection opens with `key` and a newline, read within 5 s.
+async fn presents_key<R: tokio::io::AsyncRead + Unpin>(stream: &mut R, key: &str) -> bool {
+    let mut presented = vec![0u8; key.len() + 1];
+    matches!(
+        tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut presented)).await,
+        Ok(Ok(_))
+    ) && presented[..key.len()] == *key.as_bytes()
+        && presented[key.len()] == b'\n'
 }
 
 /// List files in a remote directory using the file browse protocol.
@@ -3032,17 +3032,22 @@ mod receive_tests {
 
 #[cfg(test)]
 mod send_file_tests {
-    use super::is_desktop;
+    use super::presents_key;
+    use tokio::io::AsyncWriteExt;
 
-    #[test]
-    fn only_the_desktop_may_take_a_file() {
-        let desktop = ["192.0.2.10".parse().unwrap()];
-        assert!(is_desktop("192.0.2.10".parse().unwrap(), &desktop));
-        assert!(
-            is_desktop("::ffff:192.0.2.10".parse().unwrap(), &desktop),
-            "IPv4-mapped on a dual-stack listener"
-        );
-        assert!(!is_desktop("192.0.2.11".parse().unwrap(), &desktop));
-        assert!(!is_desktop("::1".parse().unwrap(), &desktop));
+    #[tokio::test]
+    async fn only_a_connection_with_the_key_gets_the_file() {
+        let key = "0123456789abcdef0123456789abcdef";
+        for (sent, ok) in [
+            (format!("{key}\n"), true),
+            (format!("{key}x"), false),
+            ("ffffffffffffffffffffffffffffffff\n".to_string(), false),
+            ("short".to_string(), false),
+        ] {
+            let (mut desktop, mut phone) = tokio::io::duplex(64);
+            desktop.write_all(sent.as_bytes()).await.unwrap();
+            drop(desktop);
+            assert_eq!(presents_key(&mut phone, key).await, ok, "{sent:?}");
+        }
     }
 }

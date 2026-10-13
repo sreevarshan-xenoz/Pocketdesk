@@ -102,6 +102,18 @@ impl Plugin for SharePlugin {
                 let name =
                     safe_file_name(body.get("filename").and_then(|v| v.as_str()).unwrap_or(""));
                 let size = packet.payload_size.unwrap_or(0);
+                // The phone hands the bytes only to whoever presents the key
+                // it put in this request, so they reach this desktop and no
+                // one else on the network.
+                let Some(key) = transfer_info
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .filter(|k| is_transfer_key(k))
+                    .map(str::to_string)
+                else {
+                    tracing::warn!("File share of {name} refused: no transfer key");
+                    return Ok(());
+                };
                 let Ok(slot) = transfer_slots().clone().try_acquire_owned() else {
                     tracing::warn!("File share of {name} refused: {MAX_TRANSFERS} already running");
                     return Ok(());
@@ -109,7 +121,9 @@ impl Plugin for SharePlugin {
 
                 tokio::spawn(async move {
                     let _slot = slot;
-                    match receive_file(SocketAddr::new(phone_ip, port), &dir, &name, size).await {
+                    match receive_file(SocketAddr::new(phone_ip, port), &key, &dir, &name, size)
+                        .await
+                    {
                         Ok(path) => {
                             tracing::info!("File received: {} ({size} bytes)", path.display())
                         }
@@ -131,6 +145,11 @@ impl Plugin for SharePlugin {
         }
         Ok(())
     }
+}
+
+/// A transfer key as the phone makes it: 32 hex digits (a random UUID).
+fn is_transfer_key(key: &str) -> bool {
+    key.len() == 32 && key.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Whether the desktop may connect back to a phone at `ip`: not itself
@@ -316,7 +335,13 @@ fn mark_of_the_web(_path: &Path) {}
 /// Connect to the phone at `from`, read exactly `size` bytes into a new file
 /// in `dir`, and return its path. A transfer that ends short, stalls, runs
 /// too slow, or declares no size or too large a size leaves no file behind.
-async fn receive_file(from: SocketAddr, dir: &Path, name: &str, size: u64) -> Result<PathBuf> {
+async fn receive_file(
+    from: SocketAddr,
+    key: &str,
+    dir: &Path,
+    name: &str,
+    size: u64,
+) -> Result<PathBuf> {
     if size == 0 || size > MAX_FILE_BYTES {
         return Err(LinuxLinkError::Io {
             operation: "receive",
@@ -327,6 +352,10 @@ async fn receive_file(from: SocketAddr, dir: &Path, name: &str, size: u64) -> Re
         .await
         .map_err(|_| io_error("connect", "timed out"))?
         .map_err(|e| io_error("connect", e))?;
+    stream
+        .write_all(format!("{key}\n").as_bytes())
+        .await
+        .map_err(|e| io_error("write", e))?;
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| io_error("create_dir", e))?;
@@ -470,15 +499,28 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "keep");
     }
 
-    /// A phone-side listener that sends `data` to whoever connects.
+    const KEY: &str = "0123456789abcdef0123456789abcdef";
+
+    /// A phone-side listener that sends `data` to whoever presents [`KEY`].
     async fn phone_sending(data: Vec<u8>) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
+            let mut presented = [0u8; 33];
+            socket.read_exact(&mut presented).await.unwrap();
+            assert_eq!(&presented, format!("{KEY}\n").as_bytes());
             socket.write_all(&data).await.unwrap();
         });
         addr
+    }
+
+    #[test]
+    fn a_transfer_key_is_32_hex_digits() {
+        assert!(is_transfer_key(KEY));
+        assert!(!is_transfer_key(""));
+        assert!(!is_transfer_key(&KEY[1..]));
+        assert!(!is_transfer_key("0123456789abcdef0123456789abcdeg"));
     }
 
     #[tokio::test]
@@ -486,7 +528,7 @@ mod tests {
         let dir = temp_dir("receive");
         let data: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
         let from = phone_sending(data.clone()).await;
-        let path = receive_file(from, &dir, "big.bin", data.len() as u64)
+        let path = receive_file(from, KEY, &dir, "big.bin", data.len() as u64)
             .await
             .unwrap();
         assert_eq!(path, dir.join("big.bin"));
@@ -502,7 +544,7 @@ mod tests {
     async fn a_short_transfer_leaves_no_file() {
         let dir = temp_dir("short");
         let from = phone_sending(vec![1; 10]).await;
-        assert!(receive_file(from, &dir, "x.bin", 20).await.is_err());
+        assert!(receive_file(from, KEY, &dir, "x.bin", 20).await.is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
     }
 
@@ -519,9 +561,9 @@ mod tests {
     async fn an_undeclared_or_huge_size_is_refused_before_connecting() {
         let dir = temp_dir("size");
         let unused: SocketAddr = "127.0.0.1:9".parse().unwrap();
-        assert!(receive_file(unused, &dir, "x", 0).await.is_err());
+        assert!(receive_file(unused, KEY, &dir, "x", 0).await.is_err());
         assert!(
-            receive_file(unused, &dir, "x", MAX_FILE_BYTES + 1)
+            receive_file(unused, KEY, &dir, "x", MAX_FILE_BYTES + 1)
                 .await
                 .is_err()
         );
