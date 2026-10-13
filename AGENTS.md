@@ -42,6 +42,10 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **F6, computers on this network (branch `feat/lan-discovery`; spec `docs/superpowers/specs/2026-10-13-lan-discovery-design.md`).**
+  - **Server.** The mDNS announcement (`_linux-link._tcp`) carries the device id and stream port in TXT. A new `lan_discovery` config key (on by default, "Visible on this network" in the desktop app) can turn it off. The announcement is withdrawn with an mDNS goodbye on a graceful stop.
+  - **Phone.** Home browses with NsdManager while in front. Unsaved computers are listed under "On this network"; saved ones get a label, matched by address or paired id. The LAN IPv4 address is preferred, and a computer is listed only if its control port answers (mdns-sd's 75-minute cache otherwise shows ghosts).
+  - **Device-verified (A71 ↔ Windows, same Wi-Fi):** found in about 0.2 s; label on the saved card; a test announcer listed and then removed live on its goodbye; a killed server's cached record not listed. Owed (checklist §29): tap-to-pair, Android ≤13, the Linux host, and the desktop switch end to end.
 - 2026-10-13: **F5, per-device permissions and session approval (branch `feat/approvals-permissions`; spec `docs/superpowers/specs/2026-10-13-approvals-permissions-design.md`, with an as-built section).**
   - **Permissions.** Each paired device has switches for input, clipboard, files, audio, mic, power and exec, stored in `trusted_devices.json`. Exec is off unless granted. One `capability_for(packet_type)` table gates control packets on TCP and v2. The stream gate forces view-only, skips audio and drops mic per device. The desktop app's Devices tab sets them.
   - **Approval.** "Ask before each session" holds a stream at the gate for up to 30 s. The request goes in `pending_approvals.json` with a toast, and the app comes to the front with Allow once / Always allow / Deny, answering through `approvals/<id>.json`. No answer is a deny.

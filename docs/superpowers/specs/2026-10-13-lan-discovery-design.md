@@ -17,6 +17,14 @@ To reach a computer the first time, a phone user scans the desktop app's QR code
 | L5 | Discovery never pins a certificate or trusts anything. Pairing still needs the PIN, and the QR code is still the only way to pin a fingerprint before the first stream. | mDNS is unauthenticated: anyone on the network can announce anything. The name is shown as the computer "calls itself", the same as the pairing link. |
 | L6 | A new `lan_discovery` key in `config.toml` (on by default). The desktop app's Settings has a **Visible on this network** switch for it, and the change applies when the server restarts. | Some owners do not want to announce the machine on a café network. On by default, because that is what makes discovery useful. |
 
+## As built (2026-10-13)
+
+- **A ghost on the network.** mdns-sd sends no goodbye when its daemon just stops, and keeps PTR/TXT records for 75 minutes. With no server running, the phone still "found" the computer from its mDNS cache. Two fixes:
+  - the server now withdraws its announcement (an mDNS goodbye) on a graceful stop;
+  - the phone lists a found computer only once a TCP connect to its control port succeeds within 1.5 s. Each found record costs the server one connection that opens and closes, which appears as one "Incoming v1 TCP" log line.
+- **Server test.** The server-side test is a live, opt-in test of the goodbye, not of the config check, which is a plain `if` at startup. It needs multicast.
+- **Not yet handled:** a computer that crashes while Home is open stays listed until Home is reopened, or until the phone's cache expires.
+
 ## Out of scope
 
 - Discovery over Tailscale or the internet (WAN connections go through iroh, by pairing).
