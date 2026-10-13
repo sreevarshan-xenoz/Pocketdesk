@@ -67,6 +67,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
@@ -96,6 +97,7 @@ import dev.linuxlink.android.stream.keyboard.KeyboardBar
 import dev.linuxlink.android.stream.keyboard.keyboardBarHeight
 import dev.linuxlink.android.stream.keyboard.KeyboardSession
 import dev.linuxlink.android.stream.keyboard.KeyboardSinkView
+import dev.linuxlink.android.stream.keyboard.TextSend
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.linuxlink.android.ui.theme.Space
 import kotlinx.coroutines.Dispatchers
@@ -184,6 +186,26 @@ fun RemoteScreen(
     var clipboardSync by remember { mutableStateOf(true) }
     var desktopSound by remember { mutableStateOf(Prefs.desktopSound(context)) }
     var showHistory by remember { mutableStateOf(false) }
+    // F2: the Send text sheet, and a message to show from a send that failed.
+    var showSendText by remember { mutableStateOf(false) }
+    var sendTextNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(sendTextNotice) {
+        sendTextNotice?.let {
+            snackbar.showSnackbar(it)
+            sendTextNotice = null
+        }
+    }
+    val tooLongText = pluralStringResource(R.plurals.send_text_too_long, TextSend.MAX_CHARS, TextSend.MAX_CHARS)
+    val noClipboardText = stringResource(R.string.phone_clipboard_no_text)
+    fun tooLong() = tooLongText
+    fun typePhoneClipboard() {
+        val clip = phoneClipboardText(context)
+        sendTextNotice = when {
+            clip == null -> noClipboardText
+            keyboard.typeText(clip, pressEnter = false).isFailure -> tooLong()
+            else -> null
+        }
+    }
     // UI refresh: the old 16-button bottom bar became a floating action disc
     // opening this grouped sheet; only the input-mode toggle stayed outside.
     var showQuick by remember { mutableStateOf(false) }
@@ -764,7 +786,7 @@ fun RemoteScreen(
         // permanent control surface, and fading the stream chrome next to it
         // would look broken, not immersive.
         val chromeSticky = showQuick || showPicker || showMonitorPicker ||
-            showPairing || showAudio || showHistory || dualPane || keyboardOpen
+            showPairing || showAudio || showHistory || dualPane || keyboardOpen || showSendText
         LaunchedEffect(chromeVisible, status, chromeSticky) {
             if (chromeVisible && !chromeSticky && status is StreamStatus.Up) {
                 delay(6_000)
@@ -1088,6 +1110,7 @@ fun RemoteScreen(
                     keyboard.close()
                     keyboardOpen = false
                 },
+                onCompose = { showSendText = true },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -1114,6 +1137,16 @@ fun RemoteScreen(
             }
         }
     }
+    }
+
+    if (showSendText) {
+        SendTextSheet(
+            history = keyboard.sentTexts(),
+            onSend = { text, pressEnter ->
+                if (keyboard.typeText(text, pressEnter).isFailure) tooLong() else null
+            },
+            onDismiss = { showSendText = false },
+        )
     }
 
     if (showHistory) {
@@ -1239,6 +1272,14 @@ fun RemoteScreen(
             onOpenAudio = {
                 showQuick = false
                 showAudio = true
+            },
+            onSendText = {
+                showQuick = false
+                showSendText = true
+            },
+            onTypeClipboard = {
+                showQuick = false
+                typePhoneClipboard()
             },
             micOn = mic != null,
             onSetMic = { if (it) startMicShare() else stopMicShare() },

@@ -98,6 +98,22 @@
     <string name="keyboard_mod_off">அணைந்தது</string>
     <string name="keyboard_mod_once">அடுத்த விசைக்கு</string>
     <string name="keyboard_mod_locked">பூட்டப்பட்டது</string>
+    <string name="send_text_title">உரை அனுப்பு</string>
+    <string name="send_text_hint">தட்டச்சு செய்யவும் அல்லது பேசவும், பின் அனுப்பவும்</string>
+    <string name="send_text_send">அனுப்பு</string>
+    <string name="send_text_paste">ஒட்டு</string>
+    <string name="send_text_enter">பின்னர் Enter அழுத்து</string>
+    <plurals name="send_text_limit">
+        <item quantity="one">%1$d எழுத்து வரை</item>
+        <item quantity="other">%1$d எழுத்துகள் வரை</item>
+    </plurals>
+    <plurals name="send_text_too_long">
+        <item quantity="one">இது %1$d எழுத்தை விட அதிகம்</item>
+        <item quantity="other">இது %1$d எழுத்துகளை விட அதிகம்</item>
+    </plurals>
+    <string name="phone_clipboard_no_text">கைபேசி கிளிப்போர்டில் உரை இல்லை</string>
+    <string name="row_send_text">உரை அனுப்பு…</string>
+    <string name="row_type_clipboard">கைபேசி கிளிப்போர்டை தட்டச்சு செய்</string>
     <string name="row_privacy">தனியுரிமைப் பூட்டு</string>
     <string name="row_pairing">இணைப்பு</string>
     <string name="value_direct_touch">நேரடித் தொடுதல்</string>
