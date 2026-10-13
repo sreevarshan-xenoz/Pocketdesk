@@ -5,6 +5,7 @@ use std::path::Path;
 
 use linux_link_core::local::approval::{self, ApprovalRequest, Verdict};
 use linux_link_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
+use linux_link_core::local::received::{self, ReceivedFile};
 use linux_link_core::local::{server, sessions};
 use linux_link_core::protocol::kdeconnect::TrustStore;
 use linux_link_core::protocol::permissions::{Capability, DevicePermissions};
@@ -29,6 +30,8 @@ pub struct Snapshot {
     pub sessions: Vec<sessions::MirrorSession>,
     /// Sessions the server is holding for the owner's answer (F5).
     pub approvals: Vec<ApprovalRequest>,
+    /// Files received from phones, newest first (F7).
+    pub received: Vec<ReceivedFile>,
 }
 
 /// The state under `state_dir` at `now_unix`.
@@ -66,11 +69,14 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
     } else {
         Vec::new()
     };
+    let mut received = received::read(state_dir);
+    received.reverse();
     Snapshot {
         running,
         devices,
         sessions,
         approvals,
+        received,
     }
 }
 
@@ -266,6 +272,30 @@ mod tests {
             fixed,
             [Capability::Input, Capability::Audio, Capability::Mic]
         );
+    }
+
+    #[test]
+    fn received_files_are_listed_newest_first() {
+        let dir = temp_dir("received");
+        for n in 1..=3u64 {
+            received::record(
+                &dir,
+                ReceivedFile {
+                    name: format!("f{n}"),
+                    path: format!("/d/f{n}"),
+                    size: n,
+                    received_unix: n,
+                    from: "phone".into(),
+                },
+            )
+            .unwrap();
+        }
+        let names: Vec<_> = snapshot_with(&dir, 10, false)
+            .received
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+        assert_eq!(names, ["f3", "f2", "f1"]);
     }
 
     #[test]

@@ -66,6 +66,7 @@ pub enum Tab {
     Pair,
     Devices,
     Sessions,
+    Files,
     Settings,
     Logs,
 }
@@ -588,6 +589,51 @@ impl PocketdeskApp {
         }
     }
 
+    fn files_tab(&mut self, ui: &mut egui::Ui) {
+        if self.snapshot.received.is_empty() {
+            ui.label("Nothing received yet.");
+            ui.label(
+                RichText::new(
+                    "Share a file to Pocketdesk on your phone; it lands in Downloads and is \
+                     listed here.",
+                )
+                .color(MUTED),
+            );
+            return;
+        }
+        let now = now_unix();
+        let mut show = None;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::Grid::new("received")
+                .num_columns(4)
+                .striped(true)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
+                    for file in &self.snapshot.received {
+                        ui.label(&file.name).on_hover_text(&file.path);
+                        ui.label(human_size(file.size));
+                        ui.label(format!(
+                            "{} ago",
+                            human_duration(now.saturating_sub(file.received_unix))
+                        ));
+                        if std::path::Path::new(&file.path).exists() {
+                            if ui.button("Show in folder").clicked() {
+                                show = Some(file.path.clone());
+                            }
+                        } else {
+                            ui.label(RichText::new("moved or deleted").color(MUTED));
+                        }
+                        ui.end_row();
+                    }
+                });
+        });
+        if let Some(path) = show
+            && let Err(e) = crate::reveal::show_in_folder(std::path::Path::new(&path))
+        {
+            self.notice = Some(format!("Could not open the folder: {e}"));
+        }
+    }
+
     fn logs_tab(&self, ui: &mut egui::Ui) {
         if self.log.is_empty() {
             ui.label(
@@ -645,6 +691,7 @@ impl eframe::App for PocketdeskApp {
                     (Tab::Pair, "Pair"),
                     (Tab::Devices, "Devices"),
                     (Tab::Sessions, "Sessions"),
+                    (Tab::Files, "Files"),
                     (Tab::Settings, "Settings"),
                     (Tab::Logs, "Logs"),
                 ] {
@@ -669,6 +716,7 @@ impl eframe::App for PocketdeskApp {
             ),
             Tab::Devices => self.devices_tab(ui),
             Tab::Sessions => self.sessions_tab(ui),
+            Tab::Files => self.files_tab(ui),
             Tab::Settings => self.settings_tab(ui),
             Tab::Logs => self.logs_tab(ui),
         });
@@ -693,6 +741,21 @@ pub fn short(id: &str) -> String {
     } else {
         id.to_string()
     }
+}
+
+/// `2_100_000` → "2.0 MB".
+pub fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 /// `75` → "1m 15s", `7200` → "2h 0m".

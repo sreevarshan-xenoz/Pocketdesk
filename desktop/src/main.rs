@@ -9,6 +9,7 @@ mod icon;
 mod model;
 mod pair_view;
 mod restart;
+mod reveal;
 mod settings_view;
 mod single_instance;
 #[cfg(not(target_os = "linux"))]
