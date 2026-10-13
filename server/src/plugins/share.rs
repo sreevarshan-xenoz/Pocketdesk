@@ -17,6 +17,19 @@ const MAX_NAME_BYTES: usize = 200;
 const MAX_TRANSFERS: usize = 2;
 /// The slowest transfer allowed, so a trickle cannot hold a slot forever.
 const MIN_BYTES_PER_SEC: u64 = 32 * 1024;
+/// The receiver's last word on a transfer, one byte after the data: the
+/// file is saved under its real name, or it is not (F7b). Without it, the
+/// sender could only say every byte was taken.
+const STATUS_SAVED: u8 = 1;
+const STATUS_FAILED: u8 = 0;
+
+/// The phone asks for a file (F7b): `{path | offer, port, key}`. It listens
+/// on `port`, and the desktop dials it, as for a share, so the bytes go to
+/// the transport's peer and nowhere the phone names.
+pub const FETCH: &str = "kdeconnect.linuxlink.file_fetch";
+/// A download the desktop will not make, and why: `{key, reason}`, so the
+/// phone stops waiting at once instead of at its listener's timeout.
+pub const FETCH_REFUSED: &str = "kdeconnect.linuxlink.file_fetch_refused";
 
 /// The transfer slots, shared by every connection.
 fn transfer_slots() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
@@ -60,14 +73,33 @@ impl Plugin for SharePlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.share.request"]
+        &["kdeconnect.share.request", FETCH, crate::offers::DECLINE]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.share.request"]
+        &[
+            "kdeconnect.share.request",
+            FETCH_REFUSED,
+            crate::offers::OFFER,
+        ]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
+        if packet.packet_type == FETCH {
+            handle_fetch(packet, sender).await;
+            return Ok(());
+        }
+        if packet.packet_type == crate::offers::DECLINE {
+            if let Some(id) = packet.body.get("id").and_then(|v| v.as_str()) {
+                let reason = packet
+                    .body
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                crate::offers::decline(id, &phone_of(sender), reason);
+            }
+            return Ok(());
+        }
         if packet.packet_type.as_str() == "kdeconnect.share.request" {
             let body = &packet.body;
 
@@ -119,13 +151,15 @@ impl Plugin for SharePlugin {
                     return Ok(());
                 };
 
+                let from = sender.device_id().to_string();
                 tokio::spawn(async move {
                     let _slot = slot;
                     match receive_file(SocketAddr::new(phone_ip, port), &key, &dir, &name, size)
                         .await
                     {
                         Ok(path) => {
-                            tracing::info!("File received: {} ({size} bytes)", path.display())
+                            tracing::info!("File received: {} ({size} bytes)", path.display());
+                            on_received(&path, size, &from);
                         }
                         Err(e) => tracing::warn!("File transfer of {name} failed: {e}"),
                     }
@@ -145,6 +179,256 @@ impl Plugin for SharePlugin {
         }
         Ok(())
     }
+}
+
+/// A download the phone asked for: check it, then send the file from a task
+/// of its own, or tell the phone why not.
+async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    // Without a key there is nothing to address a refusal to.
+    let Some(key) = packet
+        .body
+        .get("key")
+        .and_then(|v| v.as_str())
+        .filter(|k| is_transfer_key(k))
+        .map(str::to_string)
+    else {
+        tracing::warn!("Download refused: no transfer key");
+        return;
+    };
+    match plan_fetch(&packet.body, sender) {
+        Ok(fetch) => {
+            tracing::info!("Sending {} to {}", fetch.path.display(), fetch.to);
+            tokio::spawn(async move {
+                let _slot = fetch.slot;
+                let sent = send_file_to(fetch.to, &key, &fetch.path).await;
+                match &sent {
+                    Ok(size) => {
+                        tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
+                    }
+                    Err(e) => tracing::warn!("Sending {} failed: {e}", fetch.path.display()),
+                }
+                if let Some(id) = fetch.offer {
+                    crate::offers::finish(&id, sent.map(|_| ()).map_err(|e| e.to_string()));
+                }
+            });
+        }
+        Err(reason) => {
+            tracing::warn!("Download refused: {reason}");
+            refuse(sender, &key, &reason).await;
+        }
+    }
+}
+
+/// A download that passed every check, holding its transfer slot.
+struct Fetch {
+    to: SocketAddr,
+    path: PathBuf,
+    /// The desktop app's send this download answers, if any.
+    offer: Option<String>,
+    slot: tokio::sync::OwnedSemaphorePermit,
+}
+
+fn plan_fetch(
+    body: &serde_json::Value,
+    sender: &dyn DeviceSender,
+) -> std::result::Result<Fetch, String> {
+    let port = body
+        .get("port")
+        .and_then(|v| v.as_u64())
+        .and_then(|p| u16::try_from(p).ok())
+        .filter(|p| *p != 0)
+        .ok_or("no port to send to")?;
+    let ip = sender
+        .peer_addr()
+        .map(|a| a.ip())
+        .ok_or("downloads need the local network connection")?;
+    if !dialable(ip) {
+        return Err(format!("will not connect back to {ip}"));
+    }
+    // Taken before an offer is redeemed, so a busy desktop does not use up
+    // the phone's one try.
+    let slot = transfer_slots()
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| format!("{MAX_TRANSFERS} transfers are already running"))?;
+    let (path, size, offer) = if let Some(path) = body.get("path").and_then(|v| v.as_str()) {
+        let (path, size) = crate::plugins::file_browse::resolve_file(path)?;
+        (path, size, None)
+    } else if let Some(id) = body.get("offer").and_then(|v| v.as_str()) {
+        let path = crate::offers::redeem(id, &phone_of(sender))?;
+        let Some(size) = std::fs::metadata(&path)
+            .ok()
+            .filter(|m| m.is_file())
+            .map(|m| m.len())
+        else {
+            let reason = "the file is no longer there";
+            crate::offers::finish(id, Err(reason.to_string()));
+            return Err(reason.to_string());
+        };
+        (path, size, Some(id.to_string()))
+    } else {
+        return Err("no file named".to_string());
+    };
+    if size > MAX_FILE_BYTES {
+        let reason = "the file is larger than 8 GB";
+        if let Some(id) = &offer {
+            crate::offers::finish(id, Err(reason.to_string()));
+        }
+        return Err(reason.to_string());
+    }
+    Ok(Fetch {
+        to: SocketAddr::new(ip, port),
+        path,
+        offer,
+        slot,
+    })
+}
+
+/// The phone behind `sender`: a TCP connection is known by its address,
+/// and the phone by the id it announced there.
+fn phone_of(sender: &dyn DeviceSender) -> String {
+    crate::plugins::pair::phone_id_of(sender.device_id())
+        .unwrap_or_else(|| sender.device_id().to_string())
+}
+
+async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {
+    let packet = NetworkPacket::new(FETCH_REFUSED)
+        .with_body(serde_json::json!({ "key": key, "reason": reason }));
+    if let Err(e) = sender.send_packet(&packet).await {
+        tracing::debug!("Could not tell the phone the download was refused: {e}");
+    }
+}
+
+/// Send the file at `path` to the phone listening at `to`, and return its
+/// size once the phone says it saved it.
+pub(crate) async fn send_file_to(to: SocketAddr, key: &str, path: &Path) -> Result<u64> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| io_error("open", e))?;
+    let size = file
+        .metadata()
+        .await
+        .map_err(|e| io_error("open", e))?
+        .len();
+    if size > MAX_FILE_BYTES {
+        return Err(io_error("send", "larger than 8 GB"));
+    }
+    send_reader(to, key, &mut file, size).await
+}
+
+/// Dial `to`, present `key`, write `size` (u64, big-endian) and exactly
+/// that many bytes from `reader`, then wait for the phone's status byte.
+/// A reader that ends early (the file shrank) fails the send.
+async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
+    to: SocketAddr,
+    key: &str,
+    reader: &mut R,
+    size: u64,
+) -> Result<u64> {
+    let send = async {
+        let mut stream = tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(to))
+            .await
+            .map_err(|_| io_error("connect", "timed out"))?
+            .map_err(|e| io_error("connect", e))?;
+        stream
+            .write_all(format!("{key}\n").as_bytes())
+            .await
+            .map_err(|e| io_error("write", e))?;
+        stream
+            .write_u64(size)
+            .await
+            .map_err(|e| io_error("write", e))?;
+        let mut buffer = vec![0u8; 64 * 1024];
+        let mut sent: u64 = 0;
+        while sent < size {
+            let want = buffer
+                .len()
+                .min(usize::try_from(size - sent).unwrap_or(usize::MAX));
+            let n = reader
+                .read(&mut buffer[..want])
+                .await
+                .map_err(|e| io_error("read", e))?;
+            if n == 0 {
+                return Err(io_error(
+                    "read",
+                    format!("the file changed while it was sent ({sent} of {size} bytes)"),
+                ));
+            }
+            tokio::time::timeout(IDLE_TIMEOUT, stream.write_all(&buffer[..n]))
+                .await
+                .map_err(|_| io_error("write", "stalled"))?
+                .map_err(|e| io_error("write", e))?;
+            sent += n as u64;
+        }
+        stream.flush().await.map_err(|e| io_error("write", e))?;
+        let mut status = [0u8; 1];
+        tokio::time::timeout(IDLE_TIMEOUT, stream.read_exact(&mut status))
+            .await
+            .map_err(|_| io_error("read", "the phone did not confirm the file"))?
+            .map_err(|_| io_error("read", "the phone did not confirm the file"))?;
+        if status[0] != STATUS_SAVED {
+            return Err(io_error("send", "the phone could not save the file"));
+        }
+        Ok(size)
+    };
+    tokio::time::timeout(transfer_deadline(size), send)
+        .await
+        .map_err(|_| io_error("write", "too slow"))?
+}
+
+/// Tell the owner a file arrived: a desktop notification, and a row in the
+/// received-files list the desktop app shows (roadmap F7).
+fn on_received(path: &Path, size: u64, from: &str) {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if let Ok(dir) = crate::state::state_dir() {
+        record_received_in(&dir, path, &name, size, from);
+    }
+    let folder = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let body = format!("{name} ({}) is in {folder}.", human_size(size));
+    std::thread::spawn(move || {
+        let summary = "Pocketdesk: file received";
+        if !crate::platform::notify(summary, &body, Duration::from_secs(8)) {
+            tracing::info!("{summary} — {body}");
+        }
+    });
+}
+
+fn record_received_in(state_dir: &Path, path: &Path, name: &str, size: u64, from: &str) {
+    // Transfers run concurrently; the list is read, changed and replaced.
+    static LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LIST.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = linux_link_core::local::received::ReceivedFile {
+        name: name.to_string(),
+        path: path.display().to_string(),
+        size,
+        received_unix: linux_link_core::local::pin::now_unix(),
+        from: from.to_string(),
+    };
+    if let Err(e) = linux_link_core::local::received::record(state_dir, entry) {
+        tracing::warn!("Could not record the received file: {e}");
+    }
+}
+
+/// `2_100_000` -> "2.0 MB".
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 /// A transfer key as the phone makes it: 32 hex digits (a random UUID).
@@ -242,7 +526,7 @@ fn fit_name(name: &str) -> String {
 /// Windows device names, which name a device in any folder and with any
 /// extension: CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM0-9 and LPT0-9
 /// (superscript digits too), ignoring case and spaces before the dot.
-fn is_reserved_name(name: &str) -> bool {
+pub(crate) fn is_reserved_name(name: &str) -> bool {
     let stem = name
         .split('.')
         .next()
@@ -356,6 +640,26 @@ async fn receive_file(
         .write_all(format!("{key}\n").as_bytes())
         .await
         .map_err(|e| io_error("write", e))?;
+    let saved = save_stream(&mut stream, from, dir, name, size).await;
+    // Best effort: a phone that is already gone has nothing to hear.
+    let status = if saved.is_ok() {
+        STATUS_SAVED
+    } else {
+        STATUS_FAILED
+    };
+    let _ = tokio::time::timeout(CONNECT_TIMEOUT, stream.write_all(&[status])).await;
+    saved
+}
+
+/// Read exactly `size` bytes from `stream` into a new file in `dir` named
+/// like `name`, and return its path; on any failure no file is left.
+async fn save_stream(
+    stream: &mut tokio::net::TcpStream,
+    from: SocketAddr,
+    dir: &Path,
+    name: &str,
+    size: u64,
+) -> Result<PathBuf> {
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| io_error("create_dir", e))?;
@@ -501,18 +805,36 @@ mod tests {
 
     const KEY: &str = "0123456789abcdef0123456789abcdef";
 
-    /// A phone-side listener that sends `data` to whoever presents [`KEY`].
-    async fn phone_sending(data: Vec<u8>) -> SocketAddr {
+    /// A phone-side listener that sends `data` to whoever presents [`KEY`],
+    /// then reads the desktop's status byte (`None`: it sent none).
+    async fn phone_sending(data: Vec<u8>) -> (SocketAddr, tokio::task::JoinHandle<Option<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        let status = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut presented = [0u8; 33];
             socket.read_exact(&mut presented).await.unwrap();
             assert_eq!(&presented, format!("{KEY}\n").as_bytes());
             socket.write_all(&data).await.unwrap();
+            socket.shutdown().await.unwrap();
+            let mut status = [0u8; 1];
+            socket.read_exact(&mut status).await.ok().map(|_| status[0])
         });
-        addr
+        (addr, status)
+    }
+
+    #[test]
+    fn a_received_file_is_listed_for_the_desktop_app() {
+        let state = temp_dir("list");
+        let path = state.join("photo.jpg");
+        record_received_in(&state, &path, "photo.jpg", 2_100_000, "192.0.2.7");
+        let files = linux_link_core::local::received::read(&state);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, "photo.jpg");
+        assert_eq!(files[0].size, 2_100_000);
+        assert_eq!(files[0].path, path.display().to_string());
+        assert_eq!(human_size(2_100_000), "2.0 MB");
+        assert_eq!(human_size(512), "512 B");
     }
 
     #[test]
@@ -527,11 +849,16 @@ mod tests {
     async fn the_desktop_dials_the_phone_and_saves_exactly_the_declared_bytes() {
         let dir = temp_dir("receive");
         let data: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
-        let from = phone_sending(data.clone()).await;
+        let (from, status) = phone_sending(data.clone()).await;
         let path = receive_file(from, KEY, &dir, "big.bin", data.len() as u64)
             .await
             .unwrap();
         assert_eq!(path, dir.join("big.bin"));
+        assert_eq!(
+            status.await.unwrap(),
+            Some(STATUS_SAVED),
+            "told it was saved"
+        );
         assert_eq!(std::fs::read(path).unwrap(), data);
         let names: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -543,9 +870,10 @@ mod tests {
     #[tokio::test]
     async fn a_short_transfer_leaves_no_file() {
         let dir = temp_dir("short");
-        let from = phone_sending(vec![1; 10]).await;
+        let (from, status) = phone_sending(vec![1; 10]).await;
         assert!(receive_file(from, KEY, &dir, "x.bin", 20).await.is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        assert_eq!(status.await.unwrap(), Some(STATUS_FAILED), "told it failed");
     }
 
     #[test]
@@ -568,5 +896,187 @@ mod tests {
                 .is_err()
         );
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    }
+
+    /// A phone-side listener for a download: checks the key, reads the
+    /// size and the bytes, and answers `status`. Yields what it received.
+    async fn phone_fetching(status: u8) -> (SocketAddr, tokio::task::JoinHandle<Vec<u8>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let got = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut presented = [0u8; 33];
+            socket.read_exact(&mut presented).await.unwrap();
+            assert_eq!(&presented, format!("{KEY}\n").as_bytes());
+            let size = socket.read_u64().await.unwrap();
+            let mut data = vec![0u8; size as usize];
+            socket.read_exact(&mut data).await.unwrap();
+            socket.write_all(&[status]).await.unwrap();
+            data
+        });
+        (addr, got)
+    }
+
+    #[tokio::test]
+    async fn a_download_sends_the_size_then_the_bytes_and_waits_for_the_save() {
+        let dir = temp_dir("fetch");
+        let data: Vec<u8> = (0..150_000u32).map(|i| (i * 7) as u8).collect();
+        let path = dir.join("a.bin");
+        std::fs::write(&path, &data).unwrap();
+        let (to, got) = phone_fetching(STATUS_SAVED).await;
+        assert_eq!(
+            send_file_to(to, KEY, &path).await.unwrap(),
+            data.len() as u64
+        );
+        assert_eq!(got.await.unwrap(), data);
+    }
+
+    #[tokio::test]
+    async fn a_download_the_phone_could_not_save_fails() {
+        let dir = temp_dir("fetch-fail");
+        let path = dir.join("a.bin");
+        std::fs::write(&path, b"abc").unwrap();
+        let (to, _) = phone_fetching(STATUS_FAILED).await;
+        assert!(send_file_to(to, KEY, &path).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_file_that_shrinks_fails_the_send() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let to = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut sink = Vec::new();
+            let _ = socket.read_to_end(&mut sink).await;
+        });
+        // Listed at 10 bytes, holding 4 by the time it is read.
+        let sent = send_reader(to, KEY, &mut &b"abcd"[..], 10).await;
+        assert!(sent.is_err(), "{sent:?}");
+    }
+
+    /// The phone's control connection, as the plugin sees it.
+    struct Phone {
+        peer: SocketAddr,
+        sent: std::sync::Mutex<Vec<NetworkPacket>>,
+    }
+
+    impl Phone {
+        fn at(peer: &str) -> Self {
+            Self {
+                peer: peer.parse().unwrap(),
+                sent: Default::default(),
+            }
+        }
+
+        fn replies(&self) -> Vec<NetworkPacket> {
+            self.sent.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Phone {
+        fn device_id(&self) -> &str {
+            "phone"
+        }
+        fn connection_id(&self) -> &str {
+            "conn"
+        }
+        fn peer_addr(&self) -> Option<SocketAddr> {
+            Some(self.peer)
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.sent.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    fn fetch(body: serde_json::Value) -> NetworkPacket {
+        NetworkPacket::new(FETCH).with_body(body)
+    }
+
+    fn refusal(phone: &Phone) -> Option<(String, String)> {
+        let replies = phone.replies();
+        let packet = replies.iter().find(|p| p.packet_type == FETCH_REFUSED)?;
+        Some((
+            packet.body["key"].as_str()?.to_string(),
+            packet.body["reason"].as_str()?.to_string(),
+        ))
+    }
+
+    /// A file that exists on this computer outside the home folder.
+    fn outside_home() -> &'static str {
+        if cfg!(windows) {
+            r"C:\Windows\System32\drivers\etc\hosts"
+        } else {
+            "/etc/hosts"
+        }
+    }
+
+    #[tokio::test]
+    async fn a_download_outside_home_is_refused_with_its_key() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("192.0.2.7:51000");
+        let packet =
+            fetch(serde_json::json!({ "path": outside_home(), "port": 40000, "key": KEY }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        let (key, reason) = refusal(&phone).expect("a refusal");
+        assert_eq!(key, KEY);
+        assert!(!reason.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_offer_made_to_another_phone_is_refused() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("192.0.2.7:51000");
+        let file = temp_dir("offer").join("a.txt");
+        std::fs::write(&file, "a").unwrap();
+        crate::offers::offer_at("offer-for-x", file, "phone-x", std::time::Instant::now());
+        let packet =
+            fetch(serde_json::json!({ "offer": "offer-for-x", "port": 40000, "key": KEY }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        let (_, reason) = refusal(&phone).expect("a refusal");
+        assert_eq!(reason, "the file was offered to another phone");
+    }
+
+    #[tokio::test]
+    async fn the_phone_can_decline_an_offer_it_will_not_fetch() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("192.0.2.7:51000");
+        crate::offers::offer_at(
+            "offer-declined",
+            temp_dir("decline").join("a.txt"),
+            "phone",
+            std::time::Instant::now(),
+        );
+        let packet = NetworkPacket::new(crate::offers::DECLINE)
+            .with_body(serde_json::json!({ "id": "offer-declined", "reason": "no space" }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        assert_eq!(
+            crate::offers::redeem("offer-declined", "phone"),
+            Err("the offer was used or is unknown"),
+            "declining used it up"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_download_without_a_usable_key_gets_no_answer() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("192.0.2.7:51000");
+        let packet =
+            fetch(serde_json::json!({ "path": outside_home(), "port": 40000, "key": "nope" }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        assert!(phone.replies().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_download_is_never_dialled_back_to_this_machine() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("127.0.0.1:51000");
+        let home = dirs::home_dir().unwrap();
+        let packet = fetch(serde_json::json!({
+            "path": home.display().to_string(), "port": 40000, "key": KEY,
+        }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        assert_eq!(refusal(&phone).map(|(k, _)| k), Some(KEY.to_string()));
     }
 }

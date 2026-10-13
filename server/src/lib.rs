@@ -25,6 +25,7 @@ pub mod mic_relay;
 #[cfg(windows)]
 mod notification_listener_windows;
 pub mod notification_monitor;
+pub mod offers;
 pub mod platform;
 pub mod plugins;
 pub mod privacy;

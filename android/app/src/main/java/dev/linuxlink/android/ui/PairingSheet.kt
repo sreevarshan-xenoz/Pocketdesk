@@ -111,7 +111,9 @@ fun PairingSheet(
     }
 
     fun submitPin() {
-        if (pinEntry.length != 6 || waiting || success) return
+        if (!PinRules.canSubmit(pinEntry, success)) return
+        // The PIN answers the desktop directly; stop waiting for a push.
+        waiting = false
         keyboard?.hide()
         val pin = pinEntry
         scope.launch {
@@ -219,7 +221,7 @@ fun PairingSheet(
                     .focusRequester(pinFocus),
             )
             OutlinedButton(
-                enabled = pinEntry.length == 6 && !waiting && !success,
+                enabled = PinRules.canSubmit(pinEntry, success),
                 onClick = { submitPin() },
             ) {
                 Text(stringResource(R.string.pair_enter_pin))

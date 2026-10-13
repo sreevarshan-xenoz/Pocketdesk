@@ -42,6 +42,48 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **F7b, files both ways and the remote browser (branch `feat/file-transfer-b`, stacked on `feat/file-transfer`; spec `docs/superpowers/specs/2026-10-13-file-transfer-b-design.md`, plan `docs/superpowers/plans/2026-10-13-file-transfer-b.md`).**
+  - **One mechanism.** The phone asks with `kdeconnect.linuxlink.file_fetch` `{path | offer, port, key}`, and the desktop dials only the transport's peer, as in F7a. On the socket go `key\n`, then the size as a big-endian u64, then the bytes. A refusal comes back as `file_fetch_refused` `{key, reason}`.
+  - **Status byte, both ways.** The receiver ends every transfer with one status byte (1 saved, 0 failed), F7a's share included, so "sent" means saved.
+  - **Browse.** Replies carry the folder's path, its parent and each entry's own path, so the phone can open folders; that was impossible before. Hidden entries, the server's state and config folders, and Windows device names are refused, by listing and by path.
+  - **Desktop to phone.**
+    - The app's Files tab writes `outbox/<id>.json`. You name the file with a phone picker, a path field, "Choose file…" (Windows) or a drop on the window.
+    - The server pushes `file_offer` `{id, name, size}` to a phone in a session. An offer is single use, lasts 10 minutes and is for its own phone.
+    - The phone fetches it into MediaStore `Downloads/Pocketdesk`, pending until complete.
+    - `sent.json` always reaches an end: an expired offer is swept, and the phone can decline with `file_offer_declined`.
+  - **Phone.** "Files on this computer" in Quick Settings, and incoming offers downloaded during the session. The bridge's `download.rs` adds `nativeFetchFile`, `nativeTakeFileOffers` and `nativeDeclineOffer`.
+  - **Device-verified (A71 ↔ Windows, LAN):**
+    - browse home → sub-folder → Up, with hidden entries gone;
+    - a 3 MB download and a 5 MB desktop send, MD5s matching;
+    - a phone share waiting for the save;
+    - the Files tab and "Choose file…", the second copy saved as `name (1).bin`;
+    - "failed: phone not connected" for a send to a phone that has left.
+  - **Owed (checklist §31):** drag and drop, opening a saved file from the notification, full disk, more than 1 GB, Android 8–9, and the Linux host.
+  - **Review (fresh reviewer, 0 Critical, 4 Important), all fixed:**
+    - a download by path reached hidden files and the server's identity key;
+    - sends stuck at "offered";
+    - an offer pushed to a share's unread connection;
+    - plus five minors.
+  - **The fifth Important is a ruling.** An offer is bound only as far as the in-band device id, which is the F5 limit.
+  - **Also fixed, found on the device run:** the pairing sheet could not take a PIN after "Show PIN on desktop".
+  - **Desktop-safety lesson.** uiautomator still lists faded session chrome, so "chrome visible" checks are unreliable: two stray taps opened the keyboard-layout flyout. For device tests, turn the phone's Input permission off at the server; the session is then forced view-only. Restore it afterwards.
+  - Gates: fmt, workspace clippy `-D warnings`, `cargo test` (core lib, server lib 160, desktop 32), bridge 36, Kotlin tests, and lint at or under the 21 baseline. Linux gates are owed (CI).
+- 2026-10-13: **File transfer made safe, then F7a, phone to desktop (branches `fix/share-safety`, merged as PR #15, and `feat/file-transfer`; spec `docs/superpowers/specs/2026-10-13-file-transfer-design.md`).**
+  - **Never worked, and was unsafe.** Phone-to-desktop file sharing had never completed, because both ends listened and neither dialed.
+    - The server joined the phone's file name onto Downloads, so any paired device could write anywhere.
+    - It listened on 0.0.0.0 at a port the phone chose.
+    - The file browser could be coerced into NTLM authentication via UNC paths.
+  - **Fixes (PR #15, two security reviews):**
+    - safe names, no overwrite, a declared size of at most 8 GiB, and `.part` files with a drop guard;
+    - the desktop dials the transport's peer (`DeviceSender::peer_addr`), never loopback or link-local;
+    - a one-time transfer key authenticates the connection;
+    - at most two transfers at once, each with a deadline;
+    - Mark of the Web on Windows, and lexical-then-canonical browse paths.
+  - **F7a:**
+    - **Phone:** `SEND_MULTIPLE`; a `dataSync` foreground service that queues shares, streams from the provider's file descriptor (no cache copy) and shows a progress notification.
+    - **Desktop:** a notification per received file, `received.json` (the last 50), and the app's Files tab with Show in folder.
+  - **Device-verified (A71 → Windows, LAN):** 0.3, 1.5, 2, 4 and 6 MB files with matching MD5s; no overwrite; `ZoneId=3`; three queued shares; the final notification.
+  - **Limits:** LAN only (not `adb reverse`, the v2 channel or WAN). Desktop-to-phone and the remote browser are F7b.
 - 2026-10-13: **F6, computers on this network (branch `feat/lan-discovery`; spec `docs/superpowers/specs/2026-10-13-lan-discovery-design.md`).**
   - **Server.** The mDNS announcement (`_linux-link._tcp`) carries the device id and stream port in TXT. A new `lan_discovery` config key (on by default, "Visible on this network" in the desktop app) can turn it off. The announcement is withdrawn with an mDNS goodbye on a graceful stop.
   - **Phone.** Home browses with NsdManager while in front. Unsaved computers are listed under "On this network"; saved ones get a label, matched by address or paired id. The LAN IPv4 address is preferred, and a computer is listed only if its control port answers (mdns-sd's 75-minute cache otherwise shows ghosts).

@@ -85,6 +85,8 @@ pub async fn run(config: Config) -> Result<()> {
     // R4 D2: mirror live streaming sessions to the state dir, notify the
     // desktop when one starts, and consume `linux-link kick` requests.
     tokio::spawn(crate::live_sessions::run_watcher());
+    // F7b: files the desktop app sends to a phone in a session.
+    tokio::spawn(crate::offers::run_watcher());
 
     // Prepare shared state for v2 multiplexer and v1 streaming.
     // The QUIC identity must be STABLE across restarts: clients pin it with

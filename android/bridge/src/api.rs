@@ -208,14 +208,6 @@ pub struct FrameDto {
     pub sequence: u64,
 }
 
-/// Remote file metadata for the file browser.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct RemoteFileDto {
-    pub name: String,
-    pub is_directory: bool,
-    pub size: u64,
-    pub modified: u64,
-}
 /// Streaming statistics for display in the client.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StreamingStatsDto {
@@ -248,7 +240,7 @@ pub struct MonitorInfoDto {
 }
 
 /// Get or create the persistent device identity for this Android client.
-fn client_identity() -> linux_link_core::protocol::kdeconnect::DeviceIdentity {
+pub(crate) fn client_identity() -> linux_link_core::protocol::kdeconnect::DeviceIdentity {
     let mut guard = crate::DEVICE_IDENTITY.lock().unwrap();
     if let Some(id) = &*guard {
         return id.clone();
@@ -496,6 +488,14 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                         pkt.source.as_deref().unwrap_or("desktop"),
                                     );
                                 }
+                                // A file the desktop's owner sent us (F7b):
+                                // latched for the session to download.
+                                if trimmed.contains("file_offer")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == crate::download::FILE_OFFER
+                                {
+                                    crate::queue_file_offer(&pkt.body);
+                                }
                                 let _ = packet_tx.send(trimmed);
                             }
                             line.clear();
@@ -524,6 +524,12 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                         *crate::WAN_IDENTITY.lock().await = None;
                         crate::SIREN_RINGING.store(false, std::sync::atomic::Ordering::SeqCst);
                         *crate::PAIR_RESULT.lock().await = None;
+                        // Offers came from this desktop; another one cannot
+                        // fill them (F7b).
+                        crate::PENDING_OFFERS
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clear();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );
@@ -936,7 +942,11 @@ async fn query_peer(
 /// The dedicated connection is half-closed and drained rather than dropped, for
 /// the same reason [`oneshot_request`] is: an abrupt close with data still in
 /// flight shows up server-side as a `Broken pipe` plugin error.
-async fn push_packet(address: &str, port: u16, request: &NetworkPacket) -> Result<(), String> {
+pub(crate) async fn push_packet(
+    address: &str,
+    port: u16,
+    request: &NetworkPacket,
+) -> Result<(), String> {
     let writer = {
         let guard = (*CONTROL_WRITER).lock().await;
         guard.as_ref().cloned()
@@ -1010,40 +1020,110 @@ pub async fn get_clipboard(address: String, port: u16) -> Result<String, String>
         .to_string())
 }
 
+/// The running file transfer's bytes sent and total, for the phone's
+/// progress notification (F7). Reset as each transfer starts.
+pub(crate) static TRANSFER_SENT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static TRANSFER_TOTAL: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+/// Tests that move the transfer counters run one at a time: the counters
+/// are process-wide.
+#[cfg(test)]
+pub(crate) static TRANSFER_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// `(sent, total)` of the running (or last) file transfer.
+pub fn transfer_progress() -> (u64, u64) {
+    use std::sync::atomic::Ordering;
+    (
+        TRANSFER_SENT.load(Ordering::Relaxed),
+        TRANSFER_TOTAL.load(Ordering::Relaxed),
+    )
+}
+
 /// Send file to peer using KDE Share protocol.
 pub async fn send_file(address: String, port: u16, file_path: String) -> Result<(), String> {
-    let metadata = tokio::fs::metadata(&file_path)
+    let file = tokio::fs::File::open(&file_path)
         .await
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
-    let file_size = metadata.len();
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+    let file_size = file
+        .metadata()
+        .await
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?
+        .len();
     let filename = std::path::Path::new(&file_path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown_file")
         .to_string();
+    send_stream(address, port, filename, file_size, file).await
+}
+
+/// Send `size` bytes read from `fd` as `name`, taking ownership of the file
+/// descriptor (the phone hands over a content provider's file this way, so
+/// it is not copied first).
+#[cfg(unix)]
+pub async fn send_file_fd(
+    address: String,
+    port: u16,
+    fd: i32,
+    name: String,
+    size: u64,
+) -> Result<(), String> {
+    use std::os::fd::FromRawFd;
+    if fd < 0 {
+        return Err("no file descriptor".to_string());
+    }
+    // SAFETY: the caller gives up `fd` (ParcelFileDescriptor.detachFd), so
+    // this File is its only owner and closes it.
+    let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    send_stream(address, port, name, size, tokio::fs::File::from_std(file)).await
+}
+
+#[cfg(not(unix))]
+pub async fn send_file_fd(
+    _address: String,
+    _port: u16,
+    _fd: i32,
+    _name: String,
+    _size: u64,
+) -> Result<(), String> {
+    Err("file descriptors are only passed on Android".to_string())
+}
+
+/// Offer `file_size` bytes from `file` to the desktop as `filename`, and send
+/// them when it connects back with the key.
+async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
+    address: String,
+    port: u16,
+    filename: String,
+    file_size: u64,
+    mut file: R,
+) -> Result<(), String> {
+    // This transfer's counters from the start: the phone reads them while
+    // waiting for the desktop too, and must not see the last file's.
+    {
+        use std::sync::atomic::Ordering;
+        TRANSFER_TOTAL.store(file_size, Ordering::Relaxed);
+        TRANSFER_SENT.store(0, Ordering::Relaxed);
+    }
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
         .await
         .map_err(|e| format!("Failed to bind port: {}", e))?;
     let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let key = uuid::Uuid::new_v4().simple().to_string();
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(10));
-    let identity = client_identity();
-    let stream = conn_mgr
-        .connect(&address, port, &identity)
-        .await
-        .map_err(|e| e.to_string())?;
-    let (_reader, writer) = tokio::io::split(stream);
-    let sender = TcpDeviceSender::new(writer, address.clone());
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(serde_json::json!({
             "filename": filename,
             "payloadTransferInfo": { "port": transfer_port, "key": key },
         }))
-        .with_payload_size(file_size as u64);
-    sender
-        .send_packet(&request)
+        .with_payload_size(file_size);
+    // The live control connection carries the request when it is to this
+    // desktop; otherwise a connection of its own does, read for the whole
+    // transfer so an offer the desktop pushes to it is not lost (F7b).
+    let replies = crate::download::send_watching_replies(&address, port, &request)
         .await
-        .map_err(|e| format!("Failed to send share request: {}", e))?;
+        .map_err(|e| format!("Failed to send share request: {e}"))?;
+    let _reading = AbortOnDrop(replies.keep_reading());
     // The desktop connects back for the bytes. The listener is on every
     // interface, so the bytes go only to a connection that first presents
     // the key from the request, which only the desktop has seen; anything
@@ -1063,40 +1143,76 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
     })
     .await
     .map_err(|_| "Timeout waiting for file receiver".to_string())??;
-    let mut file = tokio::fs::File::open(&file_path)
-        .await
-        .map_err(|e| format!("Failed to open file: {}", e))?;
+    let sent = pump(&mut file, &mut client_stream, file_size).await?;
+    if sent != file_size {
+        return Err(format!(
+            "The file changed while it was sent ({sent} of {file_size} bytes)"
+        ));
+    }
+    read_status(&mut client_stream).await?;
+    tracing::info!("File sent: {} ({} bytes)", filename, sent);
+    Ok(())
+}
+
+/// The receiver's status byte after the data: `1` is saved under its real
+/// name; `0`, or nothing within 10 s, is a failure (F7b).
+async fn read_status<R: tokio::io::AsyncRead + Unpin>(stream: &mut R) -> Result<(), String> {
+    let mut status = [0u8; 1];
+    match tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut status)).await {
+        Ok(Ok(_)) if status[0] == 1 => Ok(()),
+        Ok(Ok(_)) => Err("The computer could not save the file".to_string()),
+        Ok(Err(_)) | Err(_) => Err("The computer did not confirm the file".to_string()),
+    }
+}
+
+/// Aborts a task when dropped, however the function holding it returns.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Copy `reader` to `writer` until the reader ends, counting into the
+/// transfer progress (`total` is what the reader is expected to hold).
+async fn pump<R, W>(reader: &mut R, writer: &mut W, total: u64) -> Result<u64, String>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use std::sync::atomic::Ordering;
+    TRANSFER_TOTAL.store(total, Ordering::Relaxed);
+    TRANSFER_SENT.store(0, Ordering::Relaxed);
     let mut buffer = vec![0u8; 64 * 1024];
     let mut sent: u64 = 0;
     loop {
-        let n = file
+        let n = reader
             .read(&mut buffer)
             .await
             .map_err(|e| format!("Failed to read file: {}", e))?;
         if n == 0 {
             break;
         }
-        client_stream
+        writer
             .write_all(&buffer[..n])
             .await
             .map_err(|e| format!("Failed to write to stream: {}", e))?;
         sent += n as u64;
+        TRANSFER_SENT.store(sent, Ordering::Relaxed);
     }
-    client_stream
+    writer
         .flush()
         .await
         .map_err(|e: std::io::Error| e.to_string())?;
-    if sent != file_size {
-        return Err(format!(
-            "The file changed while it was sent ({sent} of {file_size} bytes)"
-        ));
-    }
-    tracing::info!("File sent: {} ({} bytes)", filename, sent);
-    Ok(())
+    Ok(sent)
 }
 
 /// Whether a connection opens with `key` and a newline, read within 5 s.
-async fn presents_key<R: tokio::io::AsyncRead + Unpin>(stream: &mut R, key: &str) -> bool {
+pub(crate) async fn presents_key<R: tokio::io::AsyncRead + Unpin>(
+    stream: &mut R,
+    key: &str,
+) -> bool {
     let mut presented = vec![0u8; key.len() + 1];
     matches!(
         tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut presented)).await,
@@ -1105,40 +1221,24 @@ async fn presents_key<R: tokio::io::AsyncRead + Unpin>(stream: &mut R, key: &str
         && presented[key.len()] == b'\n'
 }
 
-/// List files in a remote directory using the file browse protocol.
+/// A folder on the desktop (F7b): the browse reply as the desktop sent it,
+/// `{path, parent, files: [{name, isDirectory, size, modified, path}]}`, or
+/// with `error` when the folder cannot be listed.
 pub async fn list_remote_files(
     address: String,
     port: u16,
     remote_path: String,
-) -> Result<Vec<RemoteFileDto>, String> {
+) -> Result<serde_json::Value, String> {
     let request = NetworkPacket::new("kdeconnect.filebrowse.request")
         .with_body(serde_json::json!({ "path": remote_path }));
-    let body = query_peer(
+    query_peer(
         &address,
         port,
         &request,
         "kdeconnect.filebrowse.response",
         Duration::from_secs(10),
     )
-    .await?;
-    if let Some(error) = body.get("error").and_then(|v| v.as_str()) {
-        return Err(error.to_string());
-    }
-    let files = body
-        .get("files")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| "Missing 'files' in response".to_string())?;
-    Ok(files
-        .iter()
-        .filter_map(|f| {
-            Some(RemoteFileDto {
-                name: f.get("name")?.as_str()?.to_string(),
-                is_directory: f.get("isDirectory")?.as_bool()?,
-                size: f.get("size")?.as_u64()?,
-                modified: f.get("modified")?.as_u64()?,
-            })
-        })
-        .collect())
+    .await
 }
 
 /// Request remote screen streaming.
@@ -3032,8 +3132,44 @@ mod receive_tests {
 
 #[cfg(test)]
 mod send_file_tests {
-    use super::presents_key;
-    use tokio::io::AsyncWriteExt;
+    use super::{presents_key, pump, read_status, transfer_progress};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn a_file_is_sent_only_once_the_receiver_says_it_saved_it() {
+        for (answer, ok) in [(Some(1u8), true), (Some(0u8), false), (None, false)] {
+            let (mut desktop, mut phone) = tokio::io::duplex(64);
+            if let Some(byte) = answer {
+                desktop.write_all(&[byte]).await.unwrap();
+            }
+            drop(desktop);
+            assert_eq!(read_status(&mut phone).await.is_ok(), ok, "{answer:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_runs_from_zero_to_the_total() {
+        let _counters = super::TRANSFER_TEST_LOCK.lock().await;
+        let data: Vec<u8> = (0..300_000u32).map(|i| i as u8).collect();
+        let (mut ours, mut theirs) = tokio::io::duplex(1 << 20);
+        let reader = tokio::spawn(async move {
+            let mut got = Vec::new();
+            theirs.read_to_end(&mut got).await.unwrap();
+            got
+        });
+        let sent = pump(&mut &data[..], &mut ours, data.len() as u64)
+            .await
+            .unwrap();
+        drop(ours);
+        assert_eq!(sent, data.len() as u64);
+        assert_eq!(transfer_progress(), (sent, sent));
+        assert_eq!(reader.await.unwrap(), data);
+        // The next transfer starts from zero.
+        pump(&mut &b""[..], &mut tokio::io::sink(), 10)
+            .await
+            .unwrap();
+        assert_eq!(transfer_progress(), (0, 10));
+    }
 
     #[tokio::test]
     async fn only_a_connection_with_the_key_gets_the_file() {

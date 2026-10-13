@@ -17,7 +17,7 @@
 Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wayland/Hyprland) and now also for Windows 10/11. It combines:
 
 - **Low-latency screen streaming** — wlroots/PipeWire capture → FFmpeg H.264 encoding → QUIC transport → Android MediaCodec decode
-- **KDE Connect-style features** — clipboard sync, sending files from the phone (LAN), notifications, input control, battery info
+- **KDE Connect-style features** — clipboard sync, files both ways and a remote file browser (LAN), notifications, input control, battery info
 - **Tailscale-native connectivity** — No manual port forwarding or NAT traversal; just pair and connect
 
 ### Key Differentiators
@@ -44,8 +44,8 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 
 ### KDE Connect Integration
 - **Clipboard sync** — bidirectional clipboard sharing via `wl-clipboard`
-- **File transfer** — send files from Android to Linux via KDE Share protocol
-- **Remote file browsing** — browse and navigate Linux directories from Android
+- **File transfer** — files both ways over the LAN; each transfer ends with the receiver confirming the save
+- **Remote file browsing** — browse the computer's home folder from a session and download a file to the phone's Downloads/Pocketdesk
 - **Notifications** — receive Android notifications on your Linux desktop
 - **Notification reply** — answer desktop notifications from the phone; the desktop records the reply, copies it to the clipboard and shows a confirmation
 - **Find my device** — ring the desktop from the phone, or ring the phone from the desktop
@@ -73,7 +73,8 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **Picture-in-picture** — shrink the live session into a video-only PiP window (desktop aspect ratio, chrome hidden) and keep working in other apps; also enables DeX/docked windows
 - **Blackout / pocket mode** — black, touch-locked screen while the session keeps streaming: the phone and its video surface go secure (no screenshots or Recents leakage), brightness drops; double-tap or back to unlock
 - **Localized UI** — English, Spanish and Tamil; pick per-app language from the "Language" button on the connect screen (Android 13+)
-- **Share to the desktop** — share text (to the desktop clipboard) or a file (to its Downloads folder, over the LAN) from any app; a remote file browser is not built yet (roadmap F7)
+- **Share to the desktop** — share text (to the desktop clipboard) or one or more files (to its Downloads folder, over the LAN) from any app, with progress in a notification; the desktop shows a notification per file. "Sent" means the desktop saved it
+- **Files on this computer** — in a session, browse the computer's home folder (hidden files left out) and download a file to Downloads/Pocketdesk, with progress in a notification. Files the desktop app sends arrive the same way while the session is up
 - **Settings** with DataStore persistence
 
 ### Server
@@ -225,6 +226,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/linux-link/confi
 - **Devices**: paired phones, which one is connected, and Remove. Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
 - **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
 - **Sessions**: live sessions, with End.
+- **Files**: send a file to a phone that is in a session (pick the phone, then a path, "Choose file…" on Windows, or drop files on the window), the files sent and whether each was saved, and files received from phones, newest first, with Show in folder.
 - **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
 - **Logs**: the server's log.
 

@@ -58,6 +58,8 @@ object LlIcons {
     val Pip = LlGlyph(R.drawable.ic_ll_pip)
     val Info = LlGlyph(R.drawable.ic_ll_info)
     val Warning = LlGlyph(R.drawable.ic_ll_warning)
+    val Folder = LlGlyph(R.drawable.ic_ll_folder)
+    val File = LlGlyph(R.drawable.ic_ll_file)
 }
 
 /**

@@ -5,6 +5,8 @@ use std::path::Path;
 
 use linux_link_core::local::approval::{self, ApprovalRequest, Verdict};
 use linux_link_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
+use linux_link_core::local::received::{self, ReceivedFile};
+use linux_link_core::local::sent::{self, SentFile};
 use linux_link_core::local::{server, sessions};
 use linux_link_core::protocol::kdeconnect::TrustStore;
 use linux_link_core::protocol::permissions::{Capability, DevicePermissions};
@@ -29,6 +31,18 @@ pub struct Snapshot {
     pub sessions: Vec<sessions::MirrorSession>,
     /// Sessions the server is holding for the owner's answer (F5).
     pub approvals: Vec<ApprovalRequest>,
+    /// Files received from phones, newest first (F7).
+    pub received: Vec<ReceivedRow>,
+    /// Files sent to phones and how each went, newest first (F7b).
+    pub sent: Vec<SentFile>,
+}
+
+/// A received file, and whether it is still where it was saved (checked
+/// once per refresh, not on every repaint).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceivedRow {
+    pub file: ReceivedFile,
+    pub exists: bool,
 }
 
 /// The state under `state_dir` at `now_unix`.
@@ -66,12 +80,76 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
     } else {
         Vec::new()
     };
+    let received = received::read(state_dir)
+        .into_iter()
+        .rev()
+        .map(|file| ReceivedRow {
+            exists: Path::new(&file.path).exists(),
+            file,
+        })
+        .collect();
+    let mut sent = sent::read(state_dir);
+    sent.reverse();
     Snapshot {
         running,
         devices,
         sessions,
         approvals,
+        received,
+        sent,
     }
+}
+
+/// The phones a file can be sent to: those in a session now, since only
+/// then does a phone hold the connection an offer reaches (F7b).
+pub fn send_targets(snapshot: &Snapshot) -> Vec<&Device> {
+    snapshot.devices.iter().filter(|d| d.connected).collect()
+}
+
+/// The phone a send goes to: the one the owner chose, while it is still in
+/// a session; with none chosen, the first phone that is. A chosen phone
+/// that left is an error, never a quiet switch to another phone.
+pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<String, String> {
+    let targets = send_targets(snapshot);
+    match chosen {
+        Some(id) if targets.iter().any(|d| d.id == id) => Ok(id.to_string()),
+        Some(_) => Err(
+            "The phone you chose has left its session. Choose a phone, then send again."
+                .to_string(),
+        ),
+        None => targets
+            .first()
+            .map(|d| d.id.clone())
+            .ok_or_else(|| "No phone is in a session to send to.".to_string()),
+    }
+}
+
+/// Ask the server to send the file at `path` to `device_id`; the file's
+/// name, or why not.
+pub fn queue_send(
+    state_dir: &Path,
+    device_id: &str,
+    path: &Path,
+    now_unix: u64,
+) -> Result<String, String> {
+    if !path.is_file() {
+        return Err(format!("{} is not a file.", path.display()));
+    }
+    // The server resolves the path, from its own working folder: name the
+    // file as this app sees it.
+    let path = &std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    linux_link_core::local::outbox::request(
+        state_dir,
+        device_id,
+        &path.display().to_string(),
+        now_unix,
+    )
+    .map_err(|e| format!("Could not queue {name}: {e}"))?;
+    Ok(name)
 }
 
 /// Allow or deny one capability for `id`, in the store the server reads.
@@ -269,6 +347,30 @@ mod tests {
     }
 
     #[test]
+    fn received_files_are_listed_newest_first() {
+        let dir = temp_dir("received");
+        for n in 1..=3u64 {
+            received::record(
+                &dir,
+                ReceivedFile {
+                    name: format!("f{n}"),
+                    path: format!("/d/f{n}"),
+                    size: n,
+                    received_unix: n,
+                    from: "phone".into(),
+                },
+            )
+            .unwrap();
+        }
+        let names: Vec<_> = snapshot_with(&dir, 10, false)
+            .received
+            .into_iter()
+            .map(|row| row.file.name)
+            .collect();
+        assert_eq!(names, ["f3", "f2", "f1"]);
+    }
+
+    #[test]
     fn ask_first_is_set_per_device() {
         let dir = temp_dir("askfirst");
         TrustStore::load_or_create(dir.join(TRUST_FILE))
@@ -302,5 +404,95 @@ mod tests {
         assert_eq!(tail.first().map(String::as_str), Some("line 50"));
         assert_eq!(tail.last().map(String::as_str), Some("line 249"));
         assert!(log_tail(&temp_dir("nologs"), 10).is_empty());
+    }
+
+    #[test]
+    fn only_a_phone_in_a_session_can_be_sent_a_file() {
+        let dir = temp_dir("targets");
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("a").unwrap();
+        store.trust_device("b").unwrap();
+        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
+        let snap = snapshot_with(&dir, 101, true);
+        let ids: Vec<_> = send_targets(&snap).iter().map(|d| d.id.clone()).collect();
+        assert_eq!(ids, ["a"]);
+    }
+
+    #[test]
+    fn a_send_queues_a_request_for_the_server_and_refuses_what_is_no_file() {
+        let dir = temp_dir("send");
+        let file = dir.join("report.pdf");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(
+            queue_send(&dir, "a", &file, 100),
+            Ok("report.pdf".to_string())
+        );
+        let queued = linux_link_core::local::outbox::take_all(&dir, 101);
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].device_id, "a");
+        assert_eq!(queued[0].path, file.display().to_string());
+        assert!(queue_send(&dir, "a", &dir, 100).is_err(), "a folder");
+        assert!(queue_send(&dir, "a", &dir.join("gone"), 100).is_err());
+        assert!(linux_link_core::local::outbox::take_all(&dir, 101).is_empty());
+    }
+
+    #[test]
+    fn a_relative_path_is_queued_as_the_app_sees_it() {
+        let dir = temp_dir("relative");
+        // Tests run in the package folder, which holds Cargo.toml.
+        assert!(queue_send(&dir, "a", std::path::Path::new("Cargo.toml"), 100).is_ok());
+        let queued = linux_link_core::local::outbox::take_all(&dir, 101);
+        let path = std::path::Path::new(&queued[0].path);
+        assert!(path.is_absolute(), "{}", path.display());
+        assert!(path.ends_with("Cargo.toml"));
+    }
+
+    #[test]
+    fn a_send_goes_only_to_the_phone_chosen_while_it_is_in_a_session() {
+        let dir = temp_dir("chosen");
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("a").unwrap();
+        store.trust_device("b").unwrap();
+        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
+        let snap = snapshot_with(&dir, 101, true);
+        assert_eq!(target_for_send(&snap, Some("a")), Ok("a".to_string()));
+        assert_eq!(
+            target_for_send(&snap, None),
+            Ok("a".to_string()),
+            "the one in a session"
+        );
+        assert!(
+            target_for_send(&snap, Some("b")).is_err(),
+            "b left its session: no silent switch to a"
+        );
+        let empty = snapshot_with(&temp_dir("chosen-none"), 101, true);
+        assert!(target_for_send(&empty, None).is_err());
+    }
+
+    #[test]
+    fn sent_files_are_listed_newest_first() {
+        use linux_link_core::local::sent::{self, SentFile, SentState};
+        let dir = temp_dir("sent");
+        for n in 0..2u64 {
+            sent::record(
+                &dir,
+                SentFile {
+                    id: format!("s{n}"),
+                    name: format!("f{n}"),
+                    path: format!("/f{n}"),
+                    size: n,
+                    device_id: "a".to_string(),
+                    sent_unix: n,
+                    state: SentState::Sent,
+                },
+            )
+            .unwrap();
+        }
+        let names: Vec<_> = snapshot_with(&dir, 101, false)
+            .sent
+            .iter()
+            .map(|f| f.name.clone())
+            .collect();
+        assert_eq!(names, ["f1", "f0"]);
     }
 }

@@ -652,6 +652,44 @@ Checked on 2026-10-13 with the Galaxy A71 and the Windows host on the same Wi-Fi
 - [ ] The Linux host is found (Avahi may also be announcing on the same host).
 - [ ] "Visible on this network" in the desktop app, then a server restart: the computer no longer appears.
 
+## 30. Sending files to the desktop
+
+Built on `feat/file-transfer`; spec `docs/superpowers/specs/2026-10-13-file-transfer-design.md`.
+
+Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN. Three shares 1.5 s apart (2, 4 and 6 MB) queued on the phone and were sent one after another with matching MD5s. All three appear in `received.json`, and the final notification read "Sent 3 files to …".
+
+- [ ] Share several photos at once from the gallery (`SEND_MULTIPLE`): "Sending 2 of 3" with a moving progress bar.
+- [ ] The desktop shows a notification per file; the app's Files tab lists them, and Show in folder selects each in Explorer.
+- [ ] A file from a provider without a size (e.g. some cloud apps) still arrives (copied first).
+- [ ] A share with the desktop off or unreachable ends in "Not sent: 1 of 1" with the reason.
+- [ ] A non-English file name arrives with its name.
+
+## 31. Files both ways and the remote browser
+
+Built on `feat/file-transfer-b`; spec `docs/superpowers/specs/2026-10-13-file-transfer-b-design.md`.
+
+Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN:
+- Files on this computer opened at the home folder, a sub-folder, and Up.
+- A 3 MB download landed in Downloads/Pocketdesk with a matching MD5, and the notification read "Saved 1 file to Downloads".
+- A 5 MB file sent from the desktop was fetched within a second, with a matching MD5, and `sent.json` read `sent`.
+- A phone-to-desktop share waited for the desktop's save and read "Sent 1 file to …", with a matching MD5.
+- The desktop app's Files tab and "Choose file…" worked: the file arrived as `name (1).bin` beside the earlier copy, with a matching MD5.
+- A send to a phone that had left its session read "failed: phone not connected".
+
+- [x] Browse the home folder from a session; folders open, Up returns, hidden files are left out.
+- [x] Download a file; MD5 matches; it is in Downloads/Pocketdesk.
+- [x] Send from the desktop app with "Choose file…"; the phone saves it; the Sent list says so.
+- [x] A phone-to-desktop share reports sent only after the desktop saved it.
+- [ ] A download refused by the desktop (an offer used twice) fails at once with its reason, not after 30 s.
+- [ ] Send a file while a large share from the phone is running; the offer still arrives.
+- [ ] A phone that has no room declines an offer; the desktop's Sent list says "the phone declined it: …".
+- [ ] Drag a file onto the desktop app's window; it is sent to the chosen phone (Windows, and X11 Linux).
+- [ ] Tap "Saved … to Downloads"; the file opens.
+- [ ] Download into a phone without enough space: "Not enough space for …", nothing left in Downloads.
+- [ ] A file over 1 GB both ways, and a download stopped halfway (Wi-Fi off): no partial file is published.
+- [ ] Android 8 or 9: the file lands in the app's own Downloads/Pocketdesk.
+- [ ] The Linux host: browse `/home/<user>`, a download, and a send from the app's path field.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

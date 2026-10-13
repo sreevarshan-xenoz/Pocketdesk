@@ -6,6 +6,7 @@
 //! polls; there is no callback channel yet.
 
 mod api;
+mod download;
 mod logcat;
 mod rates;
 mod session;
@@ -679,7 +680,102 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFile
     to_jstring(&mut env, json)
 }
 
-/// List a remote directory: `{"ok": [RemoteFileDto, ...]}`.
+/// Send a file from a file descriptor the caller gives up (F7): `{"ok": null}`
+/// or `{"err": "..."}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFileFd(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    fd: jint,
+    name: JString<'_>,
+    size: jlong,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let name = jstring_to_string(&mut env, &name);
+    let size = u64::try_from(size).unwrap_or(0);
+    let json =
+        envelope_unit(RUNTIME.block_on(api::send_file_fd(address, port as u16, fd, name, size)));
+    to_jstring(&mut env, json)
+}
+
+/// The running file transfer as `[sent, total]` bytes.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTransferProgress(
+    env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jni::sys::jlongArray {
+    let (sent, total) = api::transfer_progress();
+    let values = [
+        i64::try_from(sent).unwrap_or(i64::MAX),
+        i64::try_from(total).unwrap_or(i64::MAX),
+    ];
+    match env.new_long_array(2) {
+        Ok(array) => {
+            if env.set_long_array_region(&array, 0, &values).is_err() {
+                return std::ptr::null_mut();
+            }
+            array.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Download a file from the desktop into `fd`, which the bridge takes over
+/// (F7b): a browsed `value` path, or an offer id when `is_offer`.
+/// `{"ok": bytes}` or `{"error": "..."}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeFetchFile(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    is_offer: jni::sys::jboolean,
+    value: JString<'_>,
+    fd: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let value = jstring_to_string(&mut env, &value);
+    let target = if is_offer != 0 {
+        download::FetchTarget::Offer(value)
+    } else {
+        download::FetchTarget::Path(value)
+    };
+    let json =
+        envelope(RUNTIME.block_on(download::fetch_file_fd(address, port as u16, target, fd)));
+    to_jstring(&mut env, json)
+}
+
+/// Tell the desktop the phone will not fetch offer `id` (F7b).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeDeclineOffer(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    id: JString<'_>,
+    reason: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let id = jstring_to_string(&mut env, &id);
+    let reason = jstring_to_string(&mut env, &reason);
+    let json =
+        envelope_unit(RUNTIME.block_on(download::decline_offer(address, port as u16, id, reason)));
+    to_jstring(&mut env, json)
+}
+
+/// Files the desktop offered since the last call: `{"ok": "[{id,name,size}]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTakeFileOffers(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(download::take_file_offers()));
+    to_jstring(&mut env, json)
+}
+
+/// A folder on the desktop (F7b): `{"ok": {path, parent, files, error?}}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeListRemoteFiles(
     mut env: JNIEnv<'_>,

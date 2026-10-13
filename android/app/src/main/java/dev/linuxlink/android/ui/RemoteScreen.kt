@@ -188,6 +188,8 @@ fun RemoteScreen(
     var showHistory by remember { mutableStateOf(false) }
     // F2: the Send text sheet, and a message to show from a send that failed.
     var showSendText by remember { mutableStateOf(false) }
+    // F7b: the computer's files.
+    var showFiles by remember { mutableStateOf(false) }
     var sendTextNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(sendTextNotice) {
         sendTextNotice?.let {
@@ -675,6 +677,7 @@ fun RemoteScreen(
     ClipboardSyncEffect(address, controlPort, enabled = clipboardSync)
     SirenWatcher(context)
     DesktopNotificationRelay(address = address, controlPort = controlPort)
+    FileOffersEffect(address = address, controlPort = controlPort)
 
     // R1 stage 3: cache the desktop's iroh WAN identity while the control
     // channel is up (the server pushes it on register and re-announces every
@@ -802,7 +805,7 @@ fun RemoteScreen(
         // permanent control surface, and fading the stream chrome next to it
         // would look broken, not immersive.
         val chromeSticky = showQuick || showPicker || showMonitorPicker ||
-            showPairing || showAudio || showHistory || dualPane || keyboardOpen || showSendText
+            showPairing || showAudio || showHistory || dualPane || keyboardOpen || showSendText || showFiles
         LaunchedEffect(chromeVisible, status, chromeSticky) {
             if (chromeVisible && !chromeSticky && status is StreamStatus.Up) {
                 delay(6_000)
@@ -1187,6 +1190,10 @@ fun RemoteScreen(
     }
     }
 
+    if (showFiles) {
+        RemoteFilesSheet(address = address, controlPort = controlPort, onDismiss = { showFiles = false })
+    }
+
     if (showSendText) {
         SendTextSheet(
             history = keyboard.sentTexts(),
@@ -1330,6 +1337,10 @@ fun RemoteScreen(
             onTypeClipboard = {
                 showQuick = false
                 typePhoneClipboard()
+            },
+            onOpenFiles = {
+                showQuick = false
+                showFiles = true
             },
             micOn = mic != null,
             onSetMic = { if (it) startMicShare() else stopMicShare() },

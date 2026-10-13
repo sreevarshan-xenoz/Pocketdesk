@@ -127,6 +127,14 @@
     <string name="phone_clipboard_no_text">The phone\'s clipboard has no text</string>
     <string name="row_send_text">Send text…</string>
     <string name="row_type_clipboard">Type phone clipboard</string>
+    <string name="row_files">Files on this computer…</string>
+    <string name="files_up">Up</string>
+    <string name="files_empty">This folder is empty.</string>
+    <string name="files_download_title">Download %1$s?</string>
+    <string name="files_download_text">%1$s, saved to Downloads/Pocketdesk.</string>
+    <string name="files_download">Download</string>
+    <string name="files_download_started">Downloading %1$s…</string>
+    <string name="files_failed">This folder could not be opened: %1$s</string>
     <string name="row_privacy">Privacy grab</string>
     <string name="row_pairing">Pairing</string>
     <string name="value_direct_touch">Direct touch</string>
@@ -157,11 +165,28 @@
     <!-- ShareActivity -->
     <string name="share_no_host">Pocketdesk: no saved host. Connect once from the app first.</string>
     <string name="share_nothing">Nothing shareable in this intent.</string>
-    <string name="share_sending_text">Sending text to %1$s…</string>
     <string name="share_sent_clipboard">Sent to clipboard.</string>
     <string name="share_failed">Failed: %1$s</string>
-    <string name="share_preparing">Preparing %1$s…</string>
-    <string name="share_sent_file">Sent %1$s.</string>
+    <string name="channel_transfers">File transfers</string>
+    <string name="channel_transfers_desc">Progress of files sent to and from your computer</string>
+    <string name="transfer_sending">Sending %1$d of %2$d</string>
+    <string name="transfer_failed">Not sent: %1$d of %2$d</string>
+    <string name="transfer_receiving">Receiving from your computer</string>
+    <string name="transfer_done_mixed">Done. Sent: %1$d, saved: %2$d</string>
+    <string name="transfer_some_failed">Failed: %1$d of %2$d</string>
+    <string name="transfer_no_space">Not enough space for %1$s</string>
+    <plurals name="transfer_saved">
+        <item quantity="one">Saved %1$d file to Downloads</item>
+        <item quantity="other">Saved %1$d files to Downloads</item>
+    </plurals>
+    <plurals name="share_sending_files">
+        <item quantity="one">Sending %1$d file to %2$s…</item>
+        <item quantity="other">Sending %1$d files to %2$s…</item>
+    </plurals>
+    <plurals name="transfer_sent">
+        <item quantity="one">Sent %1$d file to %2$s</item>
+        <item quantity="other">Sent %1$d files to %2$s</item>
+    </plurals>
 
     <!-- Pairing sheet -->
     <string name="pair_title">Pair with %1$s</string>

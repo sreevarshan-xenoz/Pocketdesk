@@ -62,7 +62,10 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         "kdeconnect.clipboard"
         | "kdeconnect.clipboard.connect"
         | "kdeconnect.linuxlink.notification_reply" => Capability::Clipboard,
-        "kdeconnect.share.request" | "kdeconnect.filebrowse.request" => Capability::Files,
+        "kdeconnect.share.request"
+        | "kdeconnect.filebrowse.request"
+        | "kdeconnect.linuxlink.file_fetch"
+        | "kdeconnect.linuxlink.file_offer_declined" => Capability::Files,
         "kdeconnect.linuxlink.audio" => Capability::Audio,
         "kdeconnect.linuxlink.power" | "kdeconnect.linuxlink.privacy" => Capability::Power,
         "kdeconnect.linuxlink.exec" => Capability::Exec,
@@ -133,6 +136,18 @@ impl DevicePermissions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn downloading_from_the_desktop_needs_the_files_permission() {
+        assert_eq!(
+            capability_for("kdeconnect.linuxlink.file_fetch"),
+            Some(Capability::Files)
+        );
+        assert_eq!(
+            capability_for("kdeconnect.linuxlink.file_offer_declined"),
+            Some(Capability::Files)
+        );
+    }
 
     #[test]
     fn a_device_with_no_choices_may_do_everything_but_run_commands() {
