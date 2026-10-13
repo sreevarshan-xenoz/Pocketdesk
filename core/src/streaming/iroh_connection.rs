@@ -193,10 +193,26 @@ pub struct IrohDial {
     connection: SharedConnection,
 }
 
+/// The relays the dialing end uses for itself. A desktop that announces only
+/// relays of its own (N2) is dialed with only those, so n0's relays see
+/// neither end; a desktop on n0's relays keeps n0's defaults.
+fn dial_relay_mode(announced: &[iroh::RelayUrl], use_relays: bool) -> RelayMode {
+    if !use_relays {
+        return RelayMode::Disabled;
+    }
+    let n0 = RelayMode::Default.relay_map();
+    if announced.is_empty() || announced.iter().any(|url| n0.contains(url)) {
+        RelayMode::Default
+    } else {
+        RelayMode::Custom(announced.iter().cloned().collect())
+    }
+}
+
 impl IrohDial {
     /// Dial a server from its announced identity parts.
     ///
-    /// `use_relays` selects n0 relay assistance (hole punching); `false`
+    /// `use_relays` selects relay assistance (hole punching): the desktop's
+    /// own relays when it announces only those, n0's otherwise. `false`
     /// restricts the dial to the direct addresses — loopback tests and
     /// air-gapped direct paths.
     pub async fn dial(
@@ -208,12 +224,16 @@ impl IrohDial {
         device_key: Option<iroh::SecretKey>,
     ) -> Result<Self> {
         let id: iroh::EndpointId = endpoint_id.parse().context("invalid iroh EndpointId")?;
+        let relay_urls = relay_urls
+            .iter()
+            .map(|url| {
+                url.parse::<iroh::RelayUrl>()
+                    .with_context(|| format!("invalid relay url: {url}"))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut addr = EndpointAddr::new(id);
-        for url in relay_urls {
-            let url = url
-                .parse()
-                .with_context(|| format!("invalid relay url: {url}"))?;
-            addr = addr.with_relay_url(url);
+        for url in &relay_urls {
+            addr = addr.with_relay_url(url.clone());
         }
         for a in direct_addrs {
             let a: SocketAddr = a
@@ -231,11 +251,7 @@ impl IrohDial {
         }
         let endpoint = builder
             .alpns(vec![alpn.clone()])
-            .relay_mode(if use_relays {
-                RelayMode::Default
-            } else {
-                RelayMode::Disabled
-            })
+            .relay_mode(dial_relay_mode(&relay_urls, use_relays))
             .bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)))
             .context("iroh bind_addr rejected wildcard socket addr")?
             .bind()
@@ -362,6 +378,26 @@ mod tests {
         let fresh = load_or_create_device_key(&path).unwrap();
         assert_ne!(fresh.public().to_string(), first.public().to_string());
         assert_eq!(std::fs::read(&path).unwrap().len(), 32);
+    }
+
+    #[test]
+    fn a_phone_uses_the_desktops_own_relay_and_not_n0s() {
+        let n0: Vec<iroh::RelayUrl> = RelayMode::Default.relay_map().urls();
+        assert!(matches!(dial_relay_mode(&[], true), RelayMode::Default));
+        assert!(
+            matches!(dial_relay_mode(&n0[..1], true), RelayMode::Default),
+            "a desktop on n0's relays"
+        );
+        let mine: iroh::RelayUrl = "http://192.0.2.10:3340".parse().unwrap();
+        let RelayMode::Custom(map) = dial_relay_mode(std::slice::from_ref(&mine), true) else {
+            panic!("a desktop on its own relay: only that relay");
+        };
+        assert!(map.contains(&mine));
+        assert!(!n0.iter().any(|url| map.contains(url)), "nothing of n0's");
+        assert!(matches!(
+            dial_relay_mode(std::slice::from_ref(&mine), false),
+            RelayMode::Disabled
+        ));
     }
 
     /// Loopback iroh endpoint with relays/DNS disabled — the spike's
