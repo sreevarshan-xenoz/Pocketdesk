@@ -110,6 +110,29 @@ pub enum TransportFamily {
     Iroh,
 }
 
+/// The key a connection's peer proved it holds during the handshake
+/// (device keys, phase A): what binds a device to the connection, where the
+/// id it announces is only a claim.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PeerKey {
+    /// SHA-256 of the peer's TLS certificate (QUIC on the LAN).
+    Tls([u8; 32]),
+    /// The peer's iroh endpoint id (WAN).
+    Iroh(String),
+}
+
+impl std::fmt::Display for PeerKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PeerKey::Tls(hash) => {
+                f.write_str("tls:")?;
+                hash.iter().try_for_each(|b| write!(f, "{b:02x}"))
+            }
+            PeerKey::Iroh(id) => write!(f, "iroh:{id}"),
+        }
+    }
+}
+
 /// A live remote connection usable by the streaming pipeline.
 #[async_trait]
 pub trait Connection: Send + Sync {
@@ -126,6 +149,10 @@ pub trait Connection: Send + Sync {
     /// closed deliberately (as the server does when it refuses a session),
     /// otherwise the transport's error. `None` while it is open.
     fn close_reason(&self) -> Option<String> {
+        None
+    }
+    /// The key the peer proved in the handshake, if it presented one.
+    fn peer_key(&self) -> Option<PeerKey> {
         None
     }
 }
@@ -199,6 +226,17 @@ impl Connection for QuinnConnection {
 
     fn remote_address(&self) -> SocketAddr {
         self.inner.remote_address()
+    }
+
+    fn peer_key(&self) -> Option<PeerKey> {
+        use sha2::{Digest, Sha256};
+        let certs = self
+            .inner
+            .peer_identity()?
+            .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
+            .ok()?;
+        let leaf = certs.first()?;
+        Some(PeerKey::Tls(Sha256::digest(leaf.as_ref()).into()))
     }
 
     fn stats(&self) -> ConnectionStats {
@@ -287,6 +325,56 @@ impl InStream for QuinnRecvStream {
 mod tests {
     use super::*;
     use crate::streaming::transport::{CertManager, StreamTransportConfig};
+
+    /// Device keys (phase A): each end learns the key the other proved in
+    /// the handshake; the desktop, the phone's.
+    #[tokio::test]
+    async fn each_end_knows_the_key_the_other_proved() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let desktop = CertManager::new().expect("desktop certs");
+        let phone = CertManager::new().expect("phone certs");
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            desktop.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let conn = server_endpoint
+                .accept()
+                .await
+                .expect("incoming")
+                .await
+                .expect("accept");
+            QuinnConnection::shared(conn)
+        });
+        let mut client_endpoint =
+            quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).expect("client endpoint");
+        client_endpoint
+            .set_default_client_config(phone.client_config(alpn).expect("client config"));
+        let client = QuinnConnection::shared(
+            client_endpoint
+                .connect(addr, "linux-link.local")
+                .expect("dial")
+                .await
+                .expect("connect"),
+        );
+        let server = accept.await.expect("accept task");
+
+        assert_eq!(
+            server.peer_key(),
+            Some(PeerKey::Tls(phone.cert_fingerprint()))
+        );
+        assert_eq!(
+            client.peer_key(),
+            Some(PeerKey::Tls(desktop.cert_fingerprint()))
+        );
+        assert_eq!(
+            PeerKey::Tls([0xab; 32]).to_string(),
+            format!("tls:{}", "ab".repeat(32))
+        );
+    }
 
     /// Full trait exercise over a real quinn loopback connection: open/accept
     /// uni, split writes across read_exact + read_to_end, finish ends the

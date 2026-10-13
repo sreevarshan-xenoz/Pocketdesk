@@ -26,7 +26,7 @@ use iroh::endpoint::{
 use iroh::{Endpoint, EndpointAddr, RelayMode};
 
 use super::connection::{
-    Connection, ConnectionError, ConnectionStats, InStream, OutStream, SharedConnection,
+    Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, SharedConnection,
     TransportFamily,
 };
 use super::transport::StreamTransportConfig;
@@ -88,6 +88,10 @@ impl Connection for IrohConnection {
             .await
             .map(|s| Box::new(IrohRecvStream { inner: s }) as Box<dyn InStream>)
             .map_err(classify_conn_error)
+    }
+
+    fn peer_key(&self) -> Option<PeerKey> {
+        Some(PeerKey::Iroh(self.inner.remote_id().to_string()))
     }
 
     fn remote_address(&self) -> SocketAddr {

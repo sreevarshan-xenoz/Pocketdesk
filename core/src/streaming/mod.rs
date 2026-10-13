@@ -73,7 +73,7 @@ pub use client::StreamingClient;
 /// [`client::report_samples`].
 pub use client::report_samples;
 pub use connection::{
-    Connection, ConnectionError, ConnectionStats, InStream, OutStream, QuinnConnection,
+    Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, QuinnConnection,
     SharedConnection, TransportFamily,
 };
 pub use encoder_detect::{AvailableEncoders, HardwareEncoder, probe_encoders, resolve_encoder};
