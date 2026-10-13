@@ -6,7 +6,6 @@ use crate::api;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, LazyLock};
-use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::broadcast;
 
@@ -24,8 +23,12 @@ pub(crate) const MAX_FRAMES_PER_RECEIVE: usize = 16;
 /// Maximum number of audio packets to drain per `receive_audio` call.
 pub(crate) const MAX_AUDIO_PACKETS_PER_RECEIVE: usize = 32;
 
+/// The write half of a control connection (TLS over TCP, phase B).
+pub(crate) type ControlWriter =
+    tokio::io::WriteHalf<linux_link_core::protocol::connection::ControlStream>;
+
 /// Global handle for the active control connection writer.
-pub(crate) static CONTROL_WRITER: LazyLock<TokioMutex<Option<Arc<TokioMutex<OwnedWriteHalf>>>>> =
+pub(crate) static CONTROL_WRITER: LazyLock<TokioMutex<Option<Arc<TokioMutex<ControlWriter>>>>> =
     LazyLock::new(|| TokioMutex::new(None));
 
 /// `{address, port}` the writer above belongs to, so `connect_to_peer` can

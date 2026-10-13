@@ -38,6 +38,8 @@ iroh = "1.2"
 
 # Cancellation tokens and utilities
 tokio-util.workspace = true
+# The control channel runs inside TLS (phase B).
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 
 # UUID for persistent device ID
 uuid.workspace = true

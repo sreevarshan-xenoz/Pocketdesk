@@ -298,7 +298,7 @@ pub async fn wake_via_relay(
     mac: String,
     broadcast: String,
 ) -> Result<(), String> {
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(5));
+    let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
     let stream = conn_mgr
         .connect(&address, port, &identity)
@@ -363,6 +363,24 @@ pub async fn get_peers() -> Result<Vec<PeerInfoDto>, String> {
         .collect())
 }
 
+/// A control channel manager: this phone's certificate and its pins of
+/// desktops, read fresh so a pin set since (a pairing code, the stream)
+/// applies. The control channel runs inside TLS (phase B), so without a data
+/// directory there is none.
+pub(crate) fn control_manager(timeout: Duration) -> Result<ConnectionManager, String> {
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(&dir)
+        .map_err(|e| format!("This phone's certificate: {e}"))?;
+    Ok(ConnectionManager::new(
+        timeout,
+        certs.control_client_config(),
+    ))
+}
+
 /// Connect to a peer
 pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionState, String> {
     // Kotlin calls this from several poll loops (clipboard sync, quick
@@ -384,10 +402,10 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
         }
     }
 
+    let conn_mgr = control_manager(Duration::from_secs(10))?;
     let mut state_guard = (*CONNECTION_STATE).lock().await;
     *state_guard = ConnectionState::Connecting;
 
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(10));
     let identity = client_identity();
 
     let conn_id = uuid::Uuid::new_v4().to_string();
@@ -406,7 +424,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
     let result = async move {
         match conn_mgr.connect(&address, port, &identity).await {
             Ok(stream) => {
-                let (reader, writer) = stream.into_split();
+                let (reader, writer) = tokio::io::split(stream);
                 let writer_arc = Arc::new(Mutex::new(writer));
                 {
                     let mut writer_guard = (*CONTROL_WRITER).lock().await;
@@ -874,7 +892,7 @@ async fn oneshot_request(
     reply_type: &str,
     timeout: Duration,
 ) -> Result<serde_json::Value, String> {
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(5));
+    let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
     let stream = conn_mgr
         .connect(address, port, &identity)
@@ -959,7 +977,7 @@ pub(crate) async fn push_packet(
             .map_err(|e| format!("Failed to send {}: {e}", request.packet_type));
     }
 
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(5));
+    let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
     let stream = conn_mgr
         .connect(address, port, &identity)

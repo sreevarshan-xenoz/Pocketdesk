@@ -1,16 +1,43 @@
 //! Tests for the TCP handshake protocol in `connection.rs`.
 //!
-//! These tests run a mock TCP server that simulates the Linux Link server's
-//! handshake protocol (`LINUX_LINK_HELLO → LINUX_LINK_OK → identity packet`).
+//! These tests run a mock server that simulates the Linux Link server's
+//! handshake protocol (TLS, then `LINUX_LINK_HELLO → LINUX_LINK_OK →
+//! identity packet`).
 
 #[cfg(test)]
 mod tests {
     use crate::protocol::connection::ConnectionManager;
     use crate::protocol::kdeconnect::DeviceIdentity;
     use crate::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
+    use crate::streaming::transport::CertManager;
     use std::time::Duration;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::TcpListener;
+
+    /// Accept one connection and run the desktop's side of TLS on it.
+    async fn accept_tls(
+        listener: &TcpListener,
+    ) -> tokio_rustls::server::TlsStream<tokio::net::TcpStream> {
+        let (stream, _) = listener.accept().await.expect("mock server accept");
+        stream.set_nodelay(true).ok();
+        tokio_rustls::TlsAcceptor::from(desktop().control_server_config().unwrap())
+            .accept(stream)
+            .await
+            .expect("mock server TLS")
+    }
+
+    /// One desktop identity for every mock server, as a real desktop keeps
+    /// one: a phone's pin for 127.0.0.1 then holds across connections.
+    fn desktop() -> &'static CertManager {
+        static DESKTOP: std::sync::OnceLock<CertManager> = std::sync::OnceLock::new();
+        DESKTOP.get_or_init(|| CertManager::new().expect("desktop certificate"))
+    }
+
+    /// A phone's control channel manager, with a fresh certificate and pins.
+    fn manager(timeout: Duration) -> ConnectionManager {
+        let phone = CertManager::new().expect("phone certificate");
+        ConnectionManager::new(timeout, phone.control_client_config())
+    }
 
     // -----------------------------------------------------------------------
     // Helpers
@@ -25,9 +52,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
 
         tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("mock server accept");
-
-            stream.set_nodelay(true).ok();
+            let mut stream = accept_tls(&listener).await;
 
             // Read HELLO
             let mut reader = BufReader::new(&mut stream);
@@ -73,9 +98,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
 
         tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("mock server accept");
-
-            stream.set_nodelay(true).ok();
+            let mut stream = accept_tls(&listener).await;
 
             let mut reader = BufReader::new(&mut stream);
             let mut line = String::new();
@@ -104,9 +127,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
 
         tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("mock server accept");
-
-            stream.set_nodelay(true).ok();
+            let mut stream = accept_tls(&listener).await;
 
             // Read HELLO but never respond — connection just hangs
             let mut reader = BufReader::new(&mut stream);
@@ -130,13 +151,34 @@ mod tests {
     #[test]
     fn new_creates_manager_with_timeout() {
         // Just verify construction works — no panic
-        let _manager = ConnectionManager::new(Duration::from_secs(10));
+        let _manager = manager(Duration::from_secs(10));
     }
 
     #[test]
     fn new_creates_manager_with_zero_timeout() {
         // Zero timeout is valid (connection will likely fail but manager is valid)
-        let _manager = ConnectionManager::new(Duration::from_secs(0));
+        let _manager = manager(Duration::from_secs(0));
+    }
+
+    #[tokio::test]
+    async fn connect_refuses_a_server_that_does_not_speak_tls() {
+        // A plain server answers the first bytes it reads with the old
+        // handshake; the client must not fall back to plain text.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 512];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+            let _ = stream
+                .write_all(format!("{}\n", HANDSHAKE_OK).as_bytes())
+                .await;
+        });
+        let identity = DeviceIdentity::new("test-client", "Test Client");
+        let result = manager(Duration::from_secs(2))
+            .connect("127.0.0.1", port, &identity)
+            .await;
+        assert!(result.is_err(), "a plain server is not a control channel");
     }
 
     // -----------------------------------------------------------------------
@@ -146,7 +188,7 @@ mod tests {
     #[tokio::test]
     async fn connect_succeeds_with_valid_handshake() {
         let port = spawn_mock_server().await;
-        let manager = ConnectionManager::new(Duration::from_secs(5));
+        let manager = manager(Duration::from_secs(5));
         let identity = DeviceIdentity::new("test-client", "Test Client");
 
         let stream = manager
@@ -155,7 +197,8 @@ mod tests {
             .expect("connect should succeed with valid handshake");
 
         // Verify we got a live TCP stream back
-        let peer_addr = stream.peer_addr().expect("get peer addr");
+        let peer_addr =
+            crate::protocol::connection::control_peer_addr(&stream).expect("get peer addr");
         assert_eq!(peer_addr.port(), port);
     }
 
@@ -166,7 +209,7 @@ mod tests {
     #[tokio::test]
     async fn connect_fails_with_bad_handshake_response() {
         let port = spawn_mock_server_bad_handshake().await;
-        let manager = ConnectionManager::new(Duration::from_secs(5));
+        let manager = manager(Duration::from_secs(5));
         let identity = DeviceIdentity::new("test-client", "Test Client");
 
         let result = manager.connect("127.0.0.1", port, &identity).await;
@@ -190,7 +233,7 @@ mod tests {
     async fn connect_times_out_when_server_is_silent() {
         let port = spawn_mock_server_silent().await;
         // Use a short timeout so the test doesn't hang
-        let manager = ConnectionManager::new(Duration::from_millis(500));
+        let manager = manager(Duration::from_millis(500));
         let identity = DeviceIdentity::new("test-client", "Test Client");
 
         let result = manager.connect("127.0.0.1", port, &identity).await;
@@ -203,7 +246,7 @@ mod tests {
     #[tokio::test]
     async fn connect_times_out_when_no_server() {
         // Connect to a port that nothing is listening on (extremely unlikely to be in use)
-        let manager = ConnectionManager::new(Duration::from_millis(500));
+        let manager = manager(Duration::from_millis(500));
         let identity = DeviceIdentity::new("test-client", "Test Client");
 
         let result = manager.connect("127.0.0.1", 51999, &identity).await;
@@ -225,7 +268,7 @@ mod tests {
         let timeout = Duration::from_millis(200);
         let identity = DeviceIdentity::new("test-client", "Test Client");
 
-        let manager = ConnectionManager::new(timeout);
+        let manager = manager(timeout);
         let _result = manager.connect("127.0.0.1", port, &identity).await;
 
         let elapsed = start.elapsed();
@@ -243,7 +286,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_connections_succeed() {
-        let manager = ConnectionManager::new(Duration::from_secs(5));
+        let manager = manager(Duration::from_secs(5));
         let identity = DeviceIdentity::new("test-client", "Test Client");
 
         for _ in 0..3 {
@@ -252,7 +295,8 @@ mod tests {
                 .connect("127.0.0.1", port, &identity)
                 .await
                 .expect("connect should succeed");
-            let peer_addr = stream.peer_addr().expect("get peer addr");
+            let peer_addr =
+                crate::protocol::connection::control_peer_addr(&stream).expect("get peer addr");
             assert_eq!(peer_addr.port(), port);
         }
     }
@@ -266,7 +310,7 @@ mod tests {
         // This test verifies the full handshake by inspecting what the mock
         // server receives (the mock asserts the identity packet starts with '{')
         let port = spawn_mock_server().await;
-        let manager = ConnectionManager::new(Duration::from_secs(5));
+        let manager = manager(Duration::from_secs(5));
         let identity = DeviceIdentity::new("test-client", "Test Client");
 
         let stream = manager
@@ -275,6 +319,6 @@ mod tests {
             .expect("connect should succeed");
 
         // If we got here, the mock server's assertions all passed
-        assert!(stream.peer_addr().is_ok());
+        assert!(crate::protocol::connection::control_peer_addr(&stream).is_ok());
     }
 }
