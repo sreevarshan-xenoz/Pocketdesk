@@ -29,8 +29,9 @@ use crate::protocol::permissions::{Capability, DevicePermissions};
 /// `None` to reject it (see [`StreamingServer::set_session_gate`]).
 pub type SessionGateFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Option<DevicePermissions>> + Send>>;
-type SessionGate =
-    std::sync::Arc<dyn Fn(Option<String>) -> SessionGateFuture + Send + Sync + 'static>;
+type SessionGate = std::sync::Arc<
+    dyn Fn(Option<String>, std::net::SocketAddr) -> SessionGateFuture + Send + Sync + 'static,
+>;
 
 /// Where a whole-monitor session's absolute pointer input has to land.
 ///
@@ -197,10 +198,11 @@ impl StreamingServer {
     /// The QUIC transport authenticates the *endpoint*, not the device (both
     /// TLS configs use `with_no_client_auth`), so the gate judges the device
     /// id the client announces in-band. A client that announces nothing (an
-    /// older build) fails the gate while one is set.
+    /// older build) fails the gate while one is set. The peer address is
+    /// for the owner's approval prompt, not for judging the device.
     pub fn set_session_gate<F>(&mut self, gate: F)
     where
-        F: Fn(Option<String>) -> SessionGateFuture + Send + Sync + 'static,
+        F: Fn(Option<String>, std::net::SocketAddr) -> SessionGateFuture + Send + Sync + 'static,
     {
         self.session_gate = Some(std::sync::Arc::new(gate));
     }
@@ -328,7 +330,7 @@ impl StreamingServer {
         // the defaults.
         let permissions = match &self.session_gate {
             None => DevicePermissions::default(),
-            Some(gate) => match gate(device_id.clone()).await {
+            Some(gate) => match gate(device_id.clone(), connection.remote_address()).await {
                 Some(permissions) => permissions,
                 None => {
                     warn!(

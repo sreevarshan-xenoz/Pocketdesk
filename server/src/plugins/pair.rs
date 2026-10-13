@@ -8,6 +8,7 @@ use linux_link_core::protocol::permissions::DevicePermissions;
 use serde_json::json;
 
 use crate::state;
+use linux_link_core::local::approval::Verdict;
 use linux_link_core::local::pin as local_pin;
 
 // PIN pairing (KDE Connect parity, R3 Tier-2 #11b).
@@ -130,6 +131,45 @@ pub fn session_permissions(device_id: Option<&str>) -> Option<DevicePermissions>
         .ok()
         .and_then(|path| TrustStore::load_or_create(path).ok());
     session_permissions_in(store.as_ref(), device_id)
+}
+
+/// The stream gate (F5): [`session_permissions`], then, for a device whose
+/// owner asked to approve each session, the owner's answer at the desk.
+pub async fn session_gate(
+    device_id: Option<String>,
+    peer: std::net::SocketAddr,
+) -> Option<DevicePermissions> {
+    let mut permissions = session_permissions(device_id.as_deref())?;
+    if !permissions.ask_first {
+        return Some(permissions);
+    }
+    let id = device_id?;
+    match crate::approvals::ask(&id, peer).await {
+        Verdict::Deny => None,
+        Verdict::AllowOnce => Some(permissions),
+        Verdict::AlwaysAllow => {
+            stop_asking(&id);
+            permissions.ask_first = false;
+            Some(permissions)
+        }
+    }
+}
+
+/// "Always allow": turn the device's "Ask before each session" off.
+fn stop_asking(device_id: &str) {
+    let result = state::trust_store_path()
+        .map_err(|e| e.to_string())
+        .and_then(|path| TrustStore::load_or_create(path).map_err(|e| e.to_string()))
+        .and_then(|mut store| {
+            let mut permissions = store.permissions(device_id);
+            permissions.ask_first = false;
+            store
+                .set_permissions(device_id, permissions)
+                .map_err(|e| e.to_string())
+        });
+    if let Err(e) = result {
+        tracing::warn!("Could not stop asking for {device_id}: {e}");
+    }
 }
 
 fn session_permissions_in(

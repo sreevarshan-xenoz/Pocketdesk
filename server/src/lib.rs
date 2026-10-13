@@ -2,6 +2,7 @@
 //!
 //! Re-exports for integration testing. The `main.rs` binary uses these same modules.
 
+pub mod approvals;
 pub mod audio_control;
 pub mod bench;
 pub mod cli;

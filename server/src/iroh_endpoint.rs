@@ -229,10 +229,8 @@ pub async fn spawn_wan_endpoint(
                 streaming_server.set_hevc_allowed(allow_hevc);
                 streaming_server.set_capture_backend(capture_backend);
                 if pairing_required {
-                    streaming_server.set_session_gate(|device_id| {
-                        Box::pin(async move {
-                            crate::plugins::pair::session_permissions(device_id.as_deref())
-                        })
+                    streaming_server.set_session_gate(|device_id, peer| {
+                        Box::pin(crate::plugins::pair::session_gate(device_id, peer))
                     });
                 }
                 if let Err(e) = streaming_server

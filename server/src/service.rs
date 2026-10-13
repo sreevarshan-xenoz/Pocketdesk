@@ -336,137 +336,135 @@ pub async fn run(config: Config) -> Result<()> {
 
     loop {
         tokio::select! {
-            accepted = listener.accept() => {
-                match accepted {
-                    Ok((stream, peer_addr)) => {
-                        tracing::info!("Incoming v1 TCP connection from {}", peer_addr);
-                        let identity_packet = kde_service.identity_packet().clone();
-                        let registry_clone = Arc::clone(&registry);
-                        let hypr = hypr_ipc.clone();
-                        let wan = wan_endpoint.clone();
-                        let pairing_required = config.pairing_required;
-                        tokio::spawn(async move {
-                            if let Err(error) = handle_connection_with_kde(
-                                stream,
-                                identity_packet,
-                                &registry_clone,
-                                hypr.as_deref(),
-                                wan.as_ref(),
-                                pairing_required,
-                            )
-                            .await
-                            {
-                                tracing::warn!("connection handler failed: {}", error);
-                            }
-                        });
-                    }
-                    Err(error) => tracing::warn!("Accept error: {}", error),
-                }
-            }
-            quic_incoming = quic_endpoint.accept() => {
-                if let Some(incoming) = quic_incoming {
-                    let registry_clone = Arc::clone(&registry);
-                    let cert_manager_clone = Arc::clone(&cert_manager);
-                    let local_v2_identity = local_v2_identity.clone();
-                    let streaming_config = streaming_config.clone();
-                    let input_tx = input_tx.clone();
-                    let pairing_required = config.pairing_required;
-                    let allow_hevc = config.allow_hevc;
-                    let capture_backend = config.capture_backend;
-                    let mic_relay_device = config.mic_relay_device.clone();
-
-                    tokio::spawn(async move {
-                        let conn = match incoming.await {
-                            Ok(c) => c,
-                            Err(e) => {
-                                tracing::warn!("QUIC connection failed: {}", e);
-                                return;
-                            }
-                        };
-
-                        let alpn = {
-                            let handshake_data = conn.handshake_data();
-                            handshake_data.as_ref()
-                                .and_then(|any| any.downcast_ref::<quinn::crypto::rustls::HandshakeData>())
-                                .and_then(|h| h.protocol.clone())
-                        };
-
-                        match alpn.as_deref() {
-                            Some(ALPN_V2) => {
-                                if let Err(e) = handle_v2_session(conn, local_v2_identity, registry_clone, pairing_required).await {
-                                    tracing::error!("v2 session error: {}", e);
-                                }
-                            }
-                            Some(ALPN_V1_STREAM) => {
-                                let mut streaming_server = StreamingServer::new(
-                                    streaming_config,
-                                    StreamTransportConfig::default(),
-                                    cert_manager_clone
-                                );
-                                streaming_server.set_input_channel(input_tx);
-                                // R4 E2: phone-mic frames feed a pw-loopback
-                                // virtual source for the life of this session.
-                                let (mic_tx, mic_rx) = tokio::sync::mpsc::channel(64);
-                                tokio::spawn(crate::mic_relay::run_mic_relay(
-                                    mic_rx,
-                                    mic_relay_device,
-                                ));
-                                streaming_server.set_mic_channel(mic_tx);
-                                streaming_server.set_session_telemetry(true);
-                                streaming_server.set_hevc_allowed(allow_hevc);
-                                streaming_server.set_capture_backend(capture_backend);
-                                if pairing_required {
-                                    // The stream transport's TLS is anonymous — the
-                                    // gate judges the deviceId the client announces
-                                    // in-band (see core client.rs DEVICE_ID_MARKER).
-                                    streaming_server.set_session_gate(|device_id| {
-                                        Box::pin(async move {
-                                            crate::plugins::pair::session_permissions(device_id.as_deref())
-                                        })
-                                    });
-                                }
-                                if let Err(e) = streaming_server
-                                    .run_on_connection(QuinnConnection::shared(conn))
+                    accepted = listener.accept() => {
+                        match accepted {
+                            Ok((stream, peer_addr)) => {
+                                tracing::info!("Incoming v1 TCP connection from {}", peer_addr);
+                                let identity_packet = kde_service.identity_packet().clone();
+                                let registry_clone = Arc::clone(&registry);
+                                let hypr = hypr_ipc.clone();
+                                let wan = wan_endpoint.clone();
+                                let pairing_required = config.pairing_required;
+                                tokio::spawn(async move {
+                                    if let Err(error) = handle_connection_with_kde(
+                                        stream,
+                                        identity_packet,
+                                        &registry_clone,
+                                        hypr.as_deref(),
+                                        wan.as_ref(),
+                                        pairing_required,
+                                    )
                                     .await
-                                {
-                                    tracing::error!("v1 streaming session error: {}", e);
-                                }
+                                    {
+                                        tracing::warn!("connection handler failed: {}", error);
+                                    }
+                                });
                             }
-                            _ => {
-                                tracing::warn!("Unknown ALPN on QUIC port: {:?}", alpn.map(|a| String::from_utf8_lossy(&a).into_owned()));
-                            }
+                            Err(error) => tracing::warn!("Accept error: {}", error),
                         }
-                    });
+                    }
+                    quic_incoming = quic_endpoint.accept() => {
+                        if let Some(incoming) = quic_incoming {
+                            let registry_clone = Arc::clone(&registry);
+                            let cert_manager_clone = Arc::clone(&cert_manager);
+                            let local_v2_identity = local_v2_identity.clone();
+                            let streaming_config = streaming_config.clone();
+                            let input_tx = input_tx.clone();
+                            let pairing_required = config.pairing_required;
+                            let allow_hevc = config.allow_hevc;
+                            let capture_backend = config.capture_backend;
+                            let mic_relay_device = config.mic_relay_device.clone();
+
+                            tokio::spawn(async move {
+                                let conn = match incoming.await {
+                                    Ok(c) => c,
+                                    Err(e) => {
+                                        tracing::warn!("QUIC connection failed: {}", e);
+                                        return;
+                                    }
+                                };
+
+                                let alpn = {
+                                    let handshake_data = conn.handshake_data();
+                                    handshake_data.as_ref()
+                                        .and_then(|any| any.downcast_ref::<quinn::crypto::rustls::HandshakeData>())
+                                        .and_then(|h| h.protocol.clone())
+                                };
+
+                                match alpn.as_deref() {
+                                    Some(ALPN_V2) => {
+                                        if let Err(e) = handle_v2_session(conn, local_v2_identity, registry_clone, pairing_required).await {
+                                            tracing::error!("v2 session error: {}", e);
+                                        }
+                                    }
+                                    Some(ALPN_V1_STREAM) => {
+                                        let mut streaming_server = StreamingServer::new(
+                                            streaming_config,
+                                            StreamTransportConfig::default(),
+                                            cert_manager_clone
+                                        );
+                                        streaming_server.set_input_channel(input_tx);
+                                        // R4 E2: phone-mic frames feed a pw-loopback
+                                        // virtual source for the life of this session.
+                                        let (mic_tx, mic_rx) = tokio::sync::mpsc::channel(64);
+                                        tokio::spawn(crate::mic_relay::run_mic_relay(
+                                            mic_rx,
+                                            mic_relay_device,
+                                        ));
+                                        streaming_server.set_mic_channel(mic_tx);
+                                        streaming_server.set_session_telemetry(true);
+                                        streaming_server.set_hevc_allowed(allow_hevc);
+                                        streaming_server.set_capture_backend(capture_backend);
+                                        if pairing_required {
+                                            // The stream transport's TLS is anonymous — the
+                                            // gate judges the deviceId the client announces
+                                            // in-band (see core client.rs DEVICE_ID_MARKER).
+                                            streaming_server.set_session_gate(|device_id, peer| {
+            Box::pin(crate::plugins::pair::session_gate(device_id, peer))
+        });
+                                        }
+                                        if let Err(e) = streaming_server
+                                            .run_on_connection(QuinnConnection::shared(conn))
+                                            .await
+                                        {
+                                            tracing::error!("v1 streaming session error: {}", e);
+                                        }
+                                    }
+                                    _ => {
+                                        tracing::warn!("Unknown ALPN on QUIC port: {:?}", alpn.map(|a| String::from_utf8_lossy(&a).into_owned()));
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    Some(reason) = shutdown.recv() => {
+                        tracing::info!("Shutdown requested ({reason})");
+                        break;
+                    }
+                    event = discovery_rx.recv() => {
+                        match event {
+                            Ok(event) => handle_discovery_event(event),
+                            Err(error) => tracing::warn!("Discovery channel error: {}", error),
+                        }
+                    }
+                    lan_event = lan_rx.recv() => {
+                        match lan_event {
+                            Ok(linux_link_core::tailscale::lan::LanEvent::PeerDiscovered(peer)) => {
+                                handle_discovery_event(DiscoveryEvent::PeerDiscovered(peer));
+                            }
+                            Ok(linux_link_core::tailscale::lan::LanEvent::PeerOffline(name)) => {
+                                handle_discovery_event(DiscoveryEvent::PeerOffline(name));
+                            }
+                            Ok(linux_link_core::tailscale::lan::LanEvent::DiscoveryError { method, reason }) => {
+                                handle_discovery_event(DiscoveryEvent::DiscoveryError { method, reason });
+                            }
+                            Ok(linux_link_core::tailscale::lan::LanEvent::ServiceReady) => {
+                                handle_discovery_event(DiscoveryEvent::ServiceReady);
+                            }
+                            _ => {}
+                        }
+                    }
                 }
-            }
-            Some(reason) = shutdown.recv() => {
-                tracing::info!("Shutdown requested ({reason})");
-                break;
-            }
-            event = discovery_rx.recv() => {
-                match event {
-                    Ok(event) => handle_discovery_event(event),
-                    Err(error) => tracing::warn!("Discovery channel error: {}", error),
-                }
-            }
-            lan_event = lan_rx.recv() => {
-                match lan_event {
-                    Ok(linux_link_core::tailscale::lan::LanEvent::PeerDiscovered(peer)) => {
-                        handle_discovery_event(DiscoveryEvent::PeerDiscovered(peer));
-                    }
-                    Ok(linux_link_core::tailscale::lan::LanEvent::PeerOffline(name)) => {
-                        handle_discovery_event(DiscoveryEvent::PeerOffline(name));
-                    }
-                    Ok(linux_link_core::tailscale::lan::LanEvent::DiscoveryError { method, reason }) => {
-                        handle_discovery_event(DiscoveryEvent::DiscoveryError { method, reason });
-                    }
-                    Ok(linux_link_core::tailscale::lan::LanEvent::ServiceReady) => {
-                        handle_discovery_event(DiscoveryEvent::ServiceReady);
-                    }
-                    _ => {}
-                }
-            }
-        }
     }
 
     Ok(())
