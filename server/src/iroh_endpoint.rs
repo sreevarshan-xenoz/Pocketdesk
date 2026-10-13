@@ -228,11 +228,17 @@ pub async fn spawn_wan_endpoint(
                 streaming_server.set_session_telemetry(true);
                 streaming_server.set_hevc_allowed(allow_hevc);
                 streaming_server.set_capture_backend(capture_backend);
-                if pairing_required {
-                    streaming_server.set_session_gate(|device_id, peer| {
-                        Box::pin(crate::plugins::pair::session_gate(device_id, peer))
-                    });
-                }
+                // The stream transport's TLS is anonymous — the gate judges the
+                // deviceId the client announces in-band (see core client.rs
+                // DEVICE_ID_MARKER). It runs with pairing off too, so a paired
+                // device's own permissions still apply.
+                streaming_server.set_session_gate(move |device_id, peer| {
+                    Box::pin(crate::plugins::pair::session_gate(
+                        device_id,
+                        peer,
+                        pairing_required,
+                    ))
+                });
                 if let Err(e) = streaming_server
                     .run_on_connection(IrohConnection::shared(conn))
                     .await

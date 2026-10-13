@@ -126,14 +126,21 @@ fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) ->
     }
 }
 
-/// F5: what a stream from [device_id] may do, or `None` to reject it (not
-/// paired, or no id announced). Read when the session starts; a live session
-/// keeps what it started with.
-pub fn session_permissions(device_id: Option<&str>) -> Option<DevicePermissions> {
+/// F5: what a stream from [device_id] may do, or `None` to reject it. Read
+/// when the session starts; a live session keeps what it started with.
+///
+/// With `pairing_required`, an unpaired device (or one that announced no
+/// id) is rejected. Without it, such a device gets the defaults, while a
+/// paired one still gets its own permissions. An unreadable store rejects
+/// either way, since it could be hiding a denial.
+pub fn session_permissions(
+    device_id: Option<&str>,
+    pairing_required: bool,
+) -> Option<DevicePermissions> {
     let store = state::trust_store_path()
         .ok()
         .and_then(|path| TrustStore::load_or_create(path).ok());
-    session_permissions_in(store.as_ref(), device_id)
+    session_permissions_in(store.as_ref(), device_id, pairing_required)
 }
 
 /// The stream gate (F5): [`session_permissions`], then, for a device whose
@@ -141,19 +148,26 @@ pub fn session_permissions(device_id: Option<&str>) -> Option<DevicePermissions>
 pub async fn session_gate(
     device_id: Option<String>,
     peer: std::net::SocketAddr,
+    pairing_required: bool,
 ) -> Option<DevicePermissions> {
-    let mut permissions = session_permissions(device_id.as_deref())?;
+    let permissions = session_permissions(device_id.as_deref(), pairing_required)?;
     if !permissions.ask_first {
         return Some(permissions);
     }
     let id = device_id?;
-    match crate::approvals::ask(&id, peer).await {
+    let verdict = crate::approvals::ask(&id, peer).await;
+    if verdict == Verdict::AlwaysAllow {
+        stop_asking(&id);
+    }
+    match verdict {
         Verdict::Deny => None,
-        Verdict::AllowOnce => Some(permissions),
-        Verdict::AlwaysAllow => {
-            stop_asking(&id);
-            permissions.ask_first = false;
-            Some(permissions)
+        // Read again: the owner may have changed this phone's switches, or
+        // removed it, while the session waited.
+        Verdict::AllowOnce | Verdict::AlwaysAllow => {
+            session_permissions(Some(&id), pairing_required).map(|mut p| {
+                p.ask_first = false;
+                p
+            })
         }
     }
 }
@@ -178,9 +192,14 @@ fn stop_asking(device_id: &str) {
 fn session_permissions_in(
     store: Option<&TrustStore>,
     device_id: Option<&str>,
+    pairing_required: bool,
 ) -> Option<DevicePermissions> {
-    let (store, id) = (store?, device_id?);
-    store.is_trusted(id).then(|| store.permissions(id))
+    let store = store?;
+    match device_id.filter(|id| store.is_trusted(id)) {
+        Some(id) => Some(store.permissions(id)),
+        None if pairing_required => None,
+        None => Some(DevicePermissions::default()),
+    }
 }
 
 /// The desktop's own device id, for phone-side trust persistence.
@@ -503,20 +522,31 @@ mod tests {
             .set_permissions("phone-s", permissions.clone())
             .unwrap();
 
+        for pairing_required in [true, false] {
+            assert_eq!(
+                session_permissions_in(Some(&store), Some("phone-s"), pairing_required),
+                Some(permissions.clone()),
+                "a paired device gets its own permissions either way"
+            );
+            assert_eq!(
+                session_permissions_in(None, Some("phone-s"), pairing_required),
+                None,
+                "no readable store rejects"
+            );
+        }
         assert_eq!(
-            session_permissions_in(Some(&store), Some("phone-s")),
-            Some(permissions)
+            session_permissions_in(Some(&store), Some("stranger"), true),
+            None
         );
-        assert_eq!(session_permissions_in(Some(&store), Some("stranger")), None);
         assert_eq!(
-            session_permissions_in(Some(&store), None),
+            session_permissions_in(Some(&store), None, true),
             None,
             "no id announced"
         );
         assert_eq!(
-            session_permissions_in(None, Some("phone-s")),
-            None,
-            "no store: not paired"
+            session_permissions_in(Some(&store), Some("stranger"), false),
+            Some(DevicePermissions::default()),
+            "pairing off: an unpaired device gets the defaults"
         );
     }
 
