@@ -711,6 +711,29 @@ async fn seed_desktop_state(
     }
 }
 
+/// The longest handshake line (HELLO, the identity) a peer may send before
+/// it has proved anything; an identity packet is a few hundred bytes.
+const MAX_HANDSHAKE_LINE: u64 = 64 * 1024;
+
+/// Read one handshake line of at most [`MAX_HANDSHAKE_LINE`] bytes.
+async fn read_handshake_line<R>(reader: &mut R, line: &mut String) -> std::io::Result<usize>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let read = (&mut *reader)
+        .take(MAX_HANDSHAKE_LINE)
+        .read_line(line)
+        .await?;
+    if read as u64 == MAX_HANDSHAKE_LINE && !line.ends_with('\n') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "handshake line too long",
+        ));
+    }
+    Ok(read)
+}
+
 /// Tell a client that did not start TLS why it is dropped. What it already
 /// sent is read first and the socket half-closed, then drained: closing with
 /// unread data sends a reset, which can discard the answer before the client
@@ -802,7 +825,7 @@ async fn handle_connection_with_kde(
 
         // Step 1: LINUX_LINK_HELLO handshake
         let mut line = String::new();
-        let bytes = timeout(Duration::from_secs(8), reader.read_line(&mut line))
+        let bytes = timeout(Duration::from_secs(8), read_handshake_line(&mut reader, &mut line))
             .await
             .context("connection handshake timeout")?
             .context("failed to read incoming handshake")?;
@@ -846,7 +869,7 @@ async fn handle_connection_with_kde(
         // proved (phase B). The connection goes by that id from here on, so
         // nothing about it rests on its IP address.
         let mut line = String::new();
-        let bytes = timeout(Duration::from_secs(5), reader.read_line(&mut line))
+        let bytes = timeout(Duration::from_secs(5), read_handshake_line(&mut reader, &mut line))
             .await
             .context("identity timeout")?
             .context("failed to read the peer's identity")?;
@@ -1266,5 +1289,28 @@ mod control_tls_tests {
             .connect(&addr.ip().to_string(), addr.port(), &identity)
             .await
             .expect("the control channel over TLS");
+    }
+}
+
+#[cfg(test)]
+mod handshake_line_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_handshake_line_has_a_limit() {
+        let endless = vec![b'x'; 200 * 1024];
+        let mut reader = BufReader::new(&endless[..]);
+        let mut line = String::new();
+        assert!(
+            read_handshake_line(&mut reader, &mut line).await.is_err(),
+            "a peer that has proved nothing cannot make the desktop buffer this"
+        );
+        let mut reader = BufReader::new(&b"LINUX_LINK_HELLO 1\n"[..]);
+        let mut line = String::new();
+        assert_eq!(
+            read_handshake_line(&mut reader, &mut line).await.unwrap(),
+            19
+        );
+        assert_eq!(line.trim(), HANDSHAKE_HELLO);
     }
 }
