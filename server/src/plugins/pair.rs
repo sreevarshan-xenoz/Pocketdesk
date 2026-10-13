@@ -1034,7 +1034,7 @@ mod tests {
 
     #[test]
     fn a_device_id_is_short_printable_text() {
-        assert!(valid_device_id("4f18245c-b2fa-44e6-a938-eb60e57c4bd6"));
+        assert!(valid_device_id("0d7c3a52-91e4-4b6f-8a2e-5f1c9b3d6e70"));
         assert!(!valid_device_id(""));
         assert!(!valid_device_id(
             "phone
