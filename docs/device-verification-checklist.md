@@ -739,6 +739,16 @@ Built on `feat/wan-insight`. On the Windows box, the server recorded UDP working
 - [ ] A strict-NAT network (or a hotspot behind carrier NAT): "From outside" warns, and the session rides the relay.
 - [ ] A network with public IPv6: the IPv6 line is ok.
 
+## 36. Your own relay (N2)
+
+Built on `feat/own-relay`. On the Windows box, a phone WAN session ran through `pocketdesk relay --allow-paired` with `relay_urls` pointing at it, and the record said `wan_relayed`.
+
+- [x] The desktop announces its own relay, and a phone session rides it.
+- [x] Diagnostics says "ready through your relay", and "From outside" says "not measured".
+- [ ] **From outside:** the phone on mobile data, the relay on the desktop with port 3340 forwarded. A session connects through it.
+- [ ] HTTPS mode on a cloud VM with a real name: the certificate is issued, and a session connects with `--allow` ids from `relay-ids`.
+- [ ] A phone that is not paired (or an id not listed) is refused by the relay.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

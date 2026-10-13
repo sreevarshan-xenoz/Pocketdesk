@@ -66,3 +66,15 @@ Diagnostics' "Internet path" names the relay in use: n0's, or yours.
 - Running the relay inside the desktop app's UI.
 - A phone-side relay setting: the desktop's announced relay is enough.
 - STUN-like QUIC address discovery on our relay: iroh-relay's QUIC server needs TLS and is optional; endpoints already learn their addresses through the relay's HTTP path.
+
+## As built
+
+- **Address discovery mattered more than this spec said.** iroh's net report measures UDP and the NAT through the relay's QUIC address discovery, so with a plain relay of your own, "UDP" reads as false. Diagnostics' "From outside" now says "not measured" when the desktop announces its own relay, instead of "UDP is blocked".
+- **A re-pair with the same certificate kept dropping the WAN key.** It was found on the device run: a phone re-paired over `adb reverse`, then was refused on WAN. Pairing again with the key already bound now keeps the registered iroh key (`6fa2362`).
+- **Device-verified on this box:**
+  - `pocketdesk relay --allow-paired` ran on the desktop;
+  - the server with `relay_urls` announced it in `endpoint.json`;
+  - an A71 WAN session went through it (`wan_relayed`: 15 s through the relay, then direct, since the phone was on the same Wi-Fi);
+  - `relay-ids` listed the desktop and the phones.
+
+  Not yet run: HTTPS mode with a real name, and a relay reached from outside the home network.

@@ -42,6 +42,16 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **N2, your own relay (branch `feat/own-relay`; spec `docs/superpowers/specs/2026-10-13-own-relay-design.md`).**
+  - **New:**
+    - `pocketdesk relay` runs iroh's relay server: plain on a port (default 3340), or HTTPS on 80/443 with Let's Encrypt (`--hostname`).
+    - It admits only listed endpoints. `--allow-paired` admits this desktop and its phones' registered WAN keys, re-read per connection. `--open` admits anyone. With neither, it refuses to start.
+    - `pocketdesk relay-ids` prints the ids to `--allow` on a relay elsewhere.
+    - The desktop's `relay_urls` config points its WAN endpoint at your relays. `endpoint.json` announces them, and the phone learns them on its next home connection.
+    - Diagnostics names the relay in use and says "not measured" for "From outside": a plain relay has no QUIC address discovery, so iroh cannot measure UDP or the NAT through it.
+  - **Fixed on the device run:** pairing again with the same certificate dropped the phone's WAN key, so the next WAN session was refused.
+  - **Verified on the A71 and this box:** a WAN session rode the relay on the desktop (`wan_relayed`). An unlisted endpoint is refused (integration test).
+  - **Owed (checklist §36):** a session from outside the home network, HTTPS mode with a real name, and the relay refusing an unpaired phone on the device.
 - 2026-10-13: **Linux Link is Pocketdesk everywhere (branch `chore/rename-pocketdesk`).**
   - **New names:**
     - the crates `pocketdesk-core`, `pocketdesk-server` and `pocketdesk-android-bridge`;
