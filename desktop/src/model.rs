@@ -117,6 +117,9 @@ pub fn queue_send(
     if !path.is_file() {
         return Err(format!("{} is not a file.", path.display()));
     }
+    // The server resolves the path, from its own working folder: name the
+    // file as this app sees it.
+    let path = &std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -413,6 +416,17 @@ mod tests {
         assert!(queue_send(&dir, "a", &dir, 100).is_err(), "a folder");
         assert!(queue_send(&dir, "a", &dir.join("gone"), 100).is_err());
         assert!(linux_link_core::local::outbox::take_all(&dir, 101).is_empty());
+    }
+
+    #[test]
+    fn a_relative_path_is_queued_as_the_app_sees_it() {
+        let dir = temp_dir("relative");
+        // Tests run in the package folder, which holds Cargo.toml.
+        assert!(queue_send(&dir, "a", std::path::Path::new("Cargo.toml"), 100).is_ok());
+        let queued = linux_link_core::local::outbox::take_all(&dir, 101);
+        let path = std::path::Path::new(&queued[0].path);
+        assert!(path.is_absolute(), "{}", path.display());
+        assert!(path.ends_with("Cargo.toml"));
     }
 
     #[test]
