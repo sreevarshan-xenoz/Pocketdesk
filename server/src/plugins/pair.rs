@@ -91,6 +91,36 @@ pub fn is_paired_device(device_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// F5: may this device send `packet_type`? Packets that use no capability
+/// always pass. [conn_key] is a TCP connection's peer IP (resolved to the
+/// phone's deviceId learned from its identity) or, on QUIC, the deviceId.
+/// The store is re-read per check, so a change in the desktop app applies
+/// to the next packet.
+pub fn permits(conn_key: &str, packet_type: &str) -> bool {
+    let device_id = phone_ids()
+        .lock()
+        .expect("pair state")
+        .get(conn_key)
+        .cloned()
+        .unwrap_or_else(|| conn_key.to_string());
+    let store = state::trust_store_path()
+        .ok()
+        .and_then(|path| TrustStore::load_or_create(path).ok());
+    permits_in(store.as_ref(), &device_id, packet_type)
+}
+
+/// [`permits`] against a given store; without one, the defaults apply.
+fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) -> bool {
+    let Some(capability) = linux_link_core::protocol::permissions::capability_for(packet_type)
+    else {
+        return true;
+    };
+    match store {
+        Some(store) => store.permissions(device_id).allows(capability),
+        None => capability.default_allowed(),
+    }
+}
+
 /// The desktop's own device id, for phone-side trust persistence.
 pub fn host_device_id() -> String {
     crate::kde::host_identity().device_id
@@ -346,6 +376,77 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_store(name: &str) -> TrustStore {
+        let path = std::env::temp_dir().join(format!("ll-perm-{name}-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        TrustStore::load_or_create(path).unwrap()
+    }
+
+    #[test]
+    fn a_denied_capability_blocks_its_packets_and_only_those() {
+        use linux_link_core::protocol::permissions::Capability;
+        let mut store = temp_store("deny");
+        store.trust_device("phone-1").unwrap();
+        let mut permissions = store.permissions("phone-1");
+        permissions.set(Capability::Clipboard, false);
+        store.set_permissions("phone-1", permissions).unwrap();
+
+        assert!(!permits_in(Some(&store), "phone-1", "kdeconnect.clipboard"));
+        assert!(permits_in(
+            Some(&store),
+            "phone-1",
+            "kdeconnect.share.request"
+        ));
+        assert!(permits_in(
+            Some(&store),
+            "phone-1",
+            "kdeconnect.battery.request"
+        ));
+        assert!(
+            !permits_in(Some(&store), "phone-1", "kdeconnect.linuxlink.exec"),
+            "exec is off until granted"
+        );
+        assert!(
+            permits_in(Some(&store), "phone-2", "kdeconnect.clipboard"),
+            "another device keeps its defaults"
+        );
+        assert!(
+            !permits_in(None, "phone-1", "kdeconnect.linuxlink.exec"),
+            "no readable store means the defaults, not everything"
+        );
+    }
+
+    /// A plugin that adds a packet type must either map it to a capability
+    /// or be listed here as always allowed, so nothing slips past the gate.
+    #[test]
+    fn every_incoming_packet_type_is_mapped_or_deliberately_always_allowed() {
+        use linux_link_core::protocol::permissions::capability_for;
+        const ALWAYS_ALLOWED: &[&str] = &[
+            "kdeconnect.identity",
+            "kdeconnect.pair",
+            "kdeconnect.linuxlink.pair",
+            "kdeconnect.battery",
+            "kdeconnect.battery.request",
+            "kdeconnect.notification",
+            "kdeconnect.notification.request",
+            "kdeconnect.linuxlink.notification_reply",
+            "kdeconnect.linuxlink.monitors",
+            "kdeconnect.linuxlink.windows",
+            "kdeconnect.linuxlink.wol",
+            "kdeconnect.findmydevice",
+            "kdeconnect.mousepad.echo",
+            "kdeconnect.filebrowse.response",
+        ];
+        let (incoming, _) = crate::plugins::register_all().capability_sets();
+        for packet_type in incoming {
+            assert!(
+                capability_for(&packet_type).is_some()
+                    || ALWAYS_ALLOWED.contains(&packet_type.as_str()),
+                "{packet_type} has no capability and is not listed as always allowed"
+            );
+        }
+    }
 
     /// A six-digit PIN is 10^6 guesses; without a limit, one TCP connection
     /// can try them all inside the 300 s window.

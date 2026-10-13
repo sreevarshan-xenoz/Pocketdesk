@@ -95,6 +95,15 @@ pub async fn handle_v2_session(
                              );
                              continue;
                          }
+                         // F5: the owner's per-device permissions (spec P3).
+                         if !pairing_packet
+                             && !crate::plugins::pair::permits(&control_device_id, &packet_type)
+                         {
+                             tracing::info!(
+                                 "Denied {packet_type} from {control_device_id}: not permitted for this device"
+                             );
+                             continue;
+                         }
 
                          let packet_span = tracing::debug_span!("packet", type = %packet_type);
                          let registry = Arc::clone(&control_registry);

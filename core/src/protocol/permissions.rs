@@ -44,6 +44,25 @@ impl Capability {
     }
 }
 
+/// The capability a control packet uses (spec P3), or `None` for packets a
+/// paired device may always send: identity, pairing, and status queries
+/// (battery, monitors, windows, notifications, find-my-device, WoL relay).
+///
+/// One table for every plugin: a plugin that adds a packet type adds a row
+/// here, or it is always allowed. The privacy grab takes the desk's own
+/// keyboard and mouse away, so it counts as [`Capability::Power`].
+pub fn capability_for(packet_type: &str) -> Option<Capability> {
+    Some(match packet_type {
+        "kdeconnect.mousepad.request" | "kdeconnect.presenter" => Capability::Input,
+        "kdeconnect.clipboard" | "kdeconnect.clipboard.connect" => Capability::Clipboard,
+        "kdeconnect.share.request" | "kdeconnect.filebrowse.request" => Capability::Files,
+        "kdeconnect.linuxlink.audio" => Capability::Audio,
+        "kdeconnect.linuxlink.power" | "kdeconnect.linuxlink.privacy" => Capability::Power,
+        "kdeconnect.linuxlink.exec" => Capability::Exec,
+        _ => return None,
+    })
+}
+
 /// One device's permissions. `None` is "the default" ([`Capability::default_allowed`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DevicePermissions {
@@ -131,6 +150,30 @@ mod tests {
         permissions.set(Capability::Clipboard, true);
         permissions.set(Capability::Exec, false);
         assert!(permissions.is_default());
+    }
+
+    #[test]
+    fn packet_types_map_to_the_capability_they_use() {
+        let cases = [
+            ("kdeconnect.mousepad.request", Some(Capability::Input)),
+            ("kdeconnect.presenter", Some(Capability::Input)),
+            ("kdeconnect.clipboard", Some(Capability::Clipboard)),
+            ("kdeconnect.clipboard.connect", Some(Capability::Clipboard)),
+            ("kdeconnect.share.request", Some(Capability::Files)),
+            ("kdeconnect.filebrowse.request", Some(Capability::Files)),
+            ("kdeconnect.linuxlink.audio", Some(Capability::Audio)),
+            ("kdeconnect.linuxlink.power", Some(Capability::Power)),
+            ("kdeconnect.linuxlink.privacy", Some(Capability::Power)),
+            ("kdeconnect.linuxlink.exec", Some(Capability::Exec)),
+            // Always allowed for a paired device: identity, pairing, status.
+            ("kdeconnect.identity", None),
+            ("kdeconnect.pair", None),
+            ("kdeconnect.battery.request", None),
+            ("kdeconnect.linuxlink.monitors", None),
+        ];
+        for (packet_type, capability) in cases {
+            assert_eq!(capability_for(packet_type), capability, "{packet_type}");
+        }
     }
 
     #[test]

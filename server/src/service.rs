@@ -822,6 +822,15 @@ async fn handle_connection_with_kde(
                                 );
                                 continue;
                             }
+                            // F5: the owner's per-device permissions (spec P3).
+                            if !pairing_packet
+                                && !crate::plugins::pair::permits(&device_id, &packet_type)
+                            {
+                                tracing::info!(
+                                    "Denied {packet_type} from {device_id}: not permitted for this device"
+                                );
+                                continue;
+                            }
                             let packet_span = tracing::debug_span!("packet", type = %packet_type);
                             async {
                                 tracing::debug!("Processing packet");
