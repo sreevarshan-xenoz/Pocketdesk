@@ -90,6 +90,14 @@ object RustCore {
     private external fun nativeSendFile(address: String, port: Int, filePath: String): String
     private external fun nativeSendFileFd(address: String, port: Int, fd: Int, name: String, size: Long): String
     private external fun nativeTransferProgress(): LongArray?
+    private external fun nativeFetchFile(
+        address: String,
+        port: Int,
+        isOffer: Boolean,
+        value: String,
+        fd: Int,
+    ): String
+    private external fun nativeTakeFileOffers(): String
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
     private external fun nativeGetMonitors(address: String, port: Int): String
     private external fun nativeGetBattery(address: String, port: Int): String
@@ -486,6 +494,17 @@ object RustCore {
         val values = nativeTransferProgress() ?: return 0L to 0L
         return if (values.size == 2) values[0] to values[1] else 0L to 0L
     }
+
+    /**
+     * Download from the desktop into [fd], which the bridge takes over and
+     * closes (F7b): the browsed path [value], or the offer id [value] when
+     * [isOffer]. The bytes saved.
+     */
+    fun fetchFile(address: String, port: Int, isOffer: Boolean, value: String, fd: Int): Result<Long> =
+        envelope(nativeFetchFile(address, port, isOffer, value, fd)).mapCatching { it.toLong() }
+
+    /** Files the desktop offered since the last call, as a JSON array of `{id, name, size}`. */
+    fun takeFileOffers(): String = envelope(nativeTakeFileOffers()).getOrDefault("[]")
 
     fun listRemoteFiles(address: String, port: Int, remotePath: String): Result<String> =
         envelope(nativeListRemoteFiles(address, port, remotePath))

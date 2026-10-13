@@ -248,7 +248,7 @@ pub struct MonitorInfoDto {
 }
 
 /// Get or create the persistent device identity for this Android client.
-fn client_identity() -> linux_link_core::protocol::kdeconnect::DeviceIdentity {
+pub(crate) fn client_identity() -> linux_link_core::protocol::kdeconnect::DeviceIdentity {
     let mut guard = crate::DEVICE_IDENTITY.lock().unwrap();
     if let Some(id) = &*guard {
         return id.clone();
@@ -495,6 +495,14 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                         &pkt.body,
                                         pkt.source.as_deref().unwrap_or("desktop"),
                                     );
+                                }
+                                // A file the desktop's owner sent us (F7b):
+                                // latched for the session to download.
+                                if trimmed.contains("file_offer")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == crate::download::FILE_OFFER
+                                {
+                                    crate::queue_file_offer(&pkt.body);
                                 }
                                 let _ = packet_tx.send(trimmed);
                             }
@@ -1012,8 +1020,10 @@ pub async fn get_clipboard(address: String, port: u16) -> Result<String, String>
 
 /// The running file transfer's bytes sent and total, for the phone's
 /// progress notification (F7). Reset as each transfer starts.
-static TRANSFER_SENT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static TRANSFER_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) static TRANSFER_SENT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static TRANSFER_TOTAL: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 /// `(sent, total)` of the running (or last) file transfer.
 pub fn transfer_progress() -> (u64, u64) {
@@ -1189,7 +1199,10 @@ where
 }
 
 /// Whether a connection opens with `key` and a newline, read within 5 s.
-async fn presents_key<R: tokio::io::AsyncRead + Unpin>(stream: &mut R, key: &str) -> bool {
+pub(crate) async fn presents_key<R: tokio::io::AsyncRead + Unpin>(
+    stream: &mut R,
+    key: &str,
+) -> bool {
     let mut presented = vec![0u8; key.len() + 1];
     matches!(
         tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut presented)).await,

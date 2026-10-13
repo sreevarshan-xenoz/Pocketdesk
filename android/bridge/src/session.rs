@@ -189,6 +189,38 @@ pub(crate) fn queue_notification(body: &serde_json::Value, source: &str) {
     }
 }
 
+/// Files the desktop offered (F7b `file_offer`), waiting for the session
+/// to start their download. Bounded; drained by [`take_file_offers_json`].
+pub(crate) static PENDING_OFFERS: LazyLock<std::sync::Mutex<Vec<serde_json::Value>>> =
+    LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+
+/// Queue one offer `{id, name, size}`, once per id.
+pub(crate) fn queue_file_offer(body: &serde_json::Value) {
+    let (Some(id), Some(name), Some(size)) = (
+        body.get("id").and_then(|v| v.as_str()),
+        body.get("name").and_then(|v| v.as_str()),
+        body.get("size").and_then(|v| v.as_u64()),
+    ) else {
+        return;
+    };
+    let entry = serde_json::json!({ "id": id, "name": name, "size": size });
+    let mut q = PENDING_OFFERS.lock().unwrap_or_else(|e| e.into_inner());
+    if q.iter().any(|o| o.get("id") == entry.get("id")) {
+        return;
+    }
+    q.push(entry);
+    const MAX_QUEUED: usize = 16;
+    if q.len() > MAX_QUEUED {
+        q.remove(0);
+    }
+}
+
+/// Drain the queued offers as a JSON array.
+pub(crate) fn take_file_offers_json() -> String {
+    let drained = std::mem::take(&mut *PENDING_OFFERS.lock().unwrap_or_else(|e| e.into_inner()));
+    serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
+}
+
 /// Holds the live streaming client and its packet receiver.
 pub(crate) struct StreamingHandle {
     pub(crate) address: String,
