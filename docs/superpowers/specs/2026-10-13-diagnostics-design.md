@@ -8,7 +8,7 @@ Date: 2026-10-13. Status: approved (autopilot).
 
 ## What the person sees
 
-A **Diagnostics** tab in the desktop app. It has a **Run checks** button, the results as one line each (✓, ⚠ or ✗, the finding, and a hint when something is wrong), and a **Copy debug report** button.
+A **Diagnostics** tab in the desktop app. It has a **Run checks** button, the results as one line each (ok, check, problem or info, the finding, and a hint when something is wrong), and a **Copy debug report** button.
 
 | Check | How | Wrong looks like |
 |---|---|---|
@@ -30,7 +30,7 @@ Plain text, meant to be pasted publicly. It contains:
 - the config ports and `pairing_required`;
 - the last session.
 
-It leaves out PINs, keys, certificate fingerprints, trusted ids and file names. Device ids are cut to 8 characters. Local addresses are included (they are private-network addresses, needed to diagnose), and the page says so next to the button.
+It leaves out PINs, keys, certificate fingerprints, trusted ids and file names. Device ids are cut to 8 characters. The computer's addresses are included (needed to diagnose; they can include public or Tailscale ones), and the page says so next to the button.
 
 ## Pieces
 
@@ -47,6 +47,24 @@ It leaves out PINs, keys, certificate fingerprints, trusted ids and file names. 
    - The Windows firewall probe lives here.
    - "Copy debug report" puts the report on the clipboard.
 4. **Docs.** README (the desktop app section), AGENTS, and the roadmap entry marked shipped.
+
+## As built (2026-10-13)
+
+- **As designed, with these changes from the fresh review (0 Critical, 4 Important):**
+  - **A starting server.** One whose pid file is under 30 s old is "starting". Its ports are not judged yet, and the stream port is not probed: the server writes its pid file before it opens them, and a probe's brief bind could win the race against the server's own.
+  - **The firewall.**
+    - The check counts the enabled inbound rules that apply to the active network profile, for the running server's own exe and for `install`'s group.
+    - It counts Block rules, which win.
+    - The query answers `allow,block,profiles` within 10 s.
+  - **The internet path.** It is ready only once the running server has reached a relay (`relayUrls` in `endpoint.json`).
+- **Minors fixed:**
+  - a torn last record no longer hides the earlier ones;
+  - a failed run says so and keeps the last results;
+  - the report's note says it includes any public or Tailscale addresses too.
+- **Ruled, not changed:** encoder names (`ffmpeg-sidecar`, `in-process`) do not say software or hardware, nor H.264 or HEVC.
+- **Verified live on this Windows box** (an ignored test that prints the report):
+  - right after a start, the port checks wait and say so;
+  - once running, all six are ok, with 2 rules applying to this server on its Private/Public networks.
 
 ## Out of scope
 

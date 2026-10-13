@@ -720,6 +720,16 @@ Built on `feat/shortcuts`. Checked on 2026-10-13 with the Galaxy A71 against the
 - [ ] Pin a shortcut to the home screen; it survives the computer being reconnected, and stops working once the computer is removed.
 - [ ] Android 13 or older: the tile opens the session (the older collapse path).
 
+## 34. Desktop diagnostics (F10)
+
+Built on `feat/diagnostics`. On the Windows box, an ignored test (`cargo test -p pocketdesk-desktop the_checks_run -- --ignored --nocapture`) printed the report: right after a start the port checks wait; once running all six were ok.
+
+- [x] Windows: the six checks against a running server; the "starting" window.
+- [ ] Open the Diagnostics tab in the app and click Run checks; Copy debug report pastes the same text.
+- [ ] A network Windows files as Public, with only `install`'s rules: the firewall check says no rule lets phones in.
+- [ ] A Block rule for linux-link: the firewall check reports it.
+- [ ] Linux: the checks with the systemd user service (no firewall line).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -52,7 +52,13 @@ The detailed build journal lives in `git log` — one conventional commit per lo
 
     It shows the last session (outcome, encoder, e2e, encode and RTT p50/p99) and copies a debug report (no PINs, keys or file names; device ids cut to 8 characters).
   - **The encoder.** Session records now name it (`encoder`, the last one if a fallback happened).
-  - **Code.** The checks are in `core::local::diagnostics`, tested on loopback. An ignored live test ran them on this box: all six ok.
+  - **Code.** The checks are in `core::local::diagnostics`, tested on loopback.
+  - **Fresh review (4 Important), fixed:**
+    - a starting server is given 30 s before its ports are judged or probed;
+    - the firewall check counts only the rules that apply to the active profile and the running exe, and Block rules;
+    - the internet path is ready only once a relay is reached;
+    - the PowerShell query has a 10 s deadline.
+  - **Verified on this box** (an ignored test that prints the report): during startup the port checks wait; once running, all six are ok. Owed (checklist §34): the Linux host, a Public network without rules, a Block rule.
   - **Next (agreed with the user):** the roadmap's N1–N11, starting with cross-network without Tailscale (N1–N3).
 - 2026-10-13: **F11, shortcuts outside the app (branch `feat/shortcuts`).**
   - **Launcher shortcuts.** "Connect to …" for each saved computer, most recent first, then "Wake …" for those with a Wake-on-LAN address, four at most. They refresh when the app stops, and a connect is reported for launcher ranking.
