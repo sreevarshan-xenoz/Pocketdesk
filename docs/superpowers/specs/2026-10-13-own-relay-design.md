@@ -78,3 +78,19 @@ Diagnostics' "Internet path" names the relay in use: n0's, or yours.
   - `relay-ids` listed the desktop and the phones.
 
   Not yet run: HTTPS mode with a real name, and a relay reached from outside the home network.
+- **Fresh review (0 Critical, 3 Important, plus one Minor raised to Important), fixed one commit each:**
+  - `--allow-paired` admitted every key in `device_keys.json`, including an expired guest's or a phone unpaired by hand, with no way to revoke it. It now admits only devices the trust store trusts now; a missing or unreadable store admits no phone.
+  - The phone still homed on n0's relays, so "nothing but your own machines" was false. When the desktop announces only its own relays, the phone now dials with only those. Device-verified: the phone's home relay became the user's relay, and its log names no n0 host.
+  - A `relay_urls` entry like `relay.example.org:3340` parsed with the host as the scheme, and Diagnostics then blamed internet access. Entries must be `http://` or `https://` with a host. Diagnostics reads `relay_urls` from the config, and says when an entry is refused or the relay is not reached.
+  - The Let's Encrypt cache (`relay-acme`) holds private keys and was created with default permissions. It is now owner-only.
+- **Deferred minors:**
+  - "Relay on https://…" is printed before a certificate exists, and there is no staging option. Only 443 must be reachable for issuance.
+  - Binding 80 and 443 on Linux needs privileges, which the docs do not cover yet.
+  - The desktop id is loaded even without `--allow-paired`, and a failure to load it is swallowed.
+  - The relay process waits only for Ctrl+C, not for the relay to stop.
+  - Access is checked at connect, so an unpaired phone keeps a relay connection that is already open.
+  - Refusals are logged without a limit.
+  - The refusal integration test has no positive control.
+  - A same-certificate re-pair no longer revokes a leaked WAN key; Remove does.
+  - A type error in `relay_urls` stops every subcommand.
+  - Without address discovery, Diagnostics cannot see an outbound UDP block.

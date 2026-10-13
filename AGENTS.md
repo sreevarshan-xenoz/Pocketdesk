@@ -51,6 +51,13 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - Diagnostics names the relay in use and says "not measured" for "From outside": a plain relay has no QUIC address discovery, so iroh cannot measure UDP or the NAT through it.
   - **Fixed on the device run:** pairing again with the same certificate dropped the phone's WAN key, so the next WAN session was refused.
   - **Verified on the A71 and this box:** a WAN session rode the relay on the desktop (`wan_relayed`). An unlisted endpoint is refused (integration test).
+  - **Fresh review (0 Critical, 3 Important, plus one Minor raised), fixed one commit each:**
+    - the relay admitted WAN keys of devices no longer paired (expired guests, unpaired phones);
+    - the phone still homed on n0's relays: it now dials with only the desktop's own relays when it announces only those (device-verified: the phone's home relay became the user's relay);
+    - a wrong `relay_urls` entry failed silently: entries must be `http(s)://` with a host, and Diagnostics says when one is refused or the relay is not reached;
+    - the Let's Encrypt cache's private keys were not owner-only.
+
+    Ten minors are deferred in the spec's as-built section.
   - **Owed (checklist §36):** a session from outside the home network, HTTPS mode with a real name, and the relay refusing an unpaired phone on the device.
 - 2026-10-13: **Linux Link is Pocketdesk everywhere (branch `chore/rename-pocketdesk`).**
   - **New names:**

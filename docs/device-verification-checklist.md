@@ -745,6 +745,7 @@ Built on `feat/own-relay`. On the Windows box, a phone WAN session ran through `
 
 - [x] The desktop announces its own relay, and a phone session rides it.
 - [x] Diagnostics says "ready through your relay", and "From outside" says "not measured".
+- [x] The phone's own home relay is the user's relay too (logcat: `home is now relay http://…:3340/`), and its log names no n0 relay.
 - [ ] **From outside:** the phone on mobile data, the relay on the desktop with port 3340 forwarded. A session connects through it.
 - [ ] HTTPS mode on a cloud VM with a real name: the certificate is issued, and a session connects with `--allow` ids from `relay-ids`.
 - [ ] A phone that is not paired (or an id not listed) is refused by the relay.
