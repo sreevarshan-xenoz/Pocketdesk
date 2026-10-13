@@ -42,6 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **F5, per-device permissions and session approval (branch `feat/approvals-permissions`; spec `docs/superpowers/specs/2026-10-13-approvals-permissions-design.md`, with an as-built section).**
+  - **Permissions.** Each paired device has switches for input, clipboard, files, audio, mic, power and exec, stored in `trusted_devices.json`. Exec is off unless granted. One `capability_for(packet_type)` table gates control packets on TCP and v2. The stream gate forces view-only, skips audio and drops mic per device. The desktop app's Devices tab sets them.
+  - **Approval.** "Ask before each session" holds a stream at the gate for up to 30 s. The request goes in `pending_approvals.json` with a toast, and the app comes to the front with Allow once / Always allow / Deny, answering through `approvals/<id>.json`. No answer is a deny.
+  - **Phone.** The first frame gets 45 s, and a hint appears while the session is held. A connection the desktop closes now reaches the UI within about 1 s with its reason (`Connection::close_reason`, a new JNI export), instead of the frame-gap watchdog.
+  - **Device-verified (Galaxy A71 → Windows, WAN):** hold → Allow once → video; hold → Deny → refusal card in 2 s. Answers were written to the file, not clicked. Owed (checklist §28): the app's prompt clicks, timeout, each switch's effect on the device, and a LAN prompt.
+  - **Limits:** a denied control packet is dropped without a reply; approval holds the stream only, not the control channel.
 - 2026-10-13: **Trackpad gestures (roadmap F3, branch `feat/trackpad-gestures`) and the keyboard's review fix pass.**
   - **F3.** Both trackpads (trackpad mode and the foldable dock) feed one pure, tested `TrackpadGesture` engine and share one sender:
     - one-, two- and three-finger taps are left, right and middle clicks;

@@ -32,6 +32,16 @@ Mapped in detail on 2026-10-13 (file:line in the PR). The points that matter:
 | P5 | **Approval.** A per-device "Ask before each session" (off by default). When on, the stream gate holds the session: the server writes `<state>/pending_approvals.json` and raises a desktop notification. The desktop app shows a prompt with the phone's name and address and **Allow once / Always allow / Deny**, and writes its answer to `<state>/approval` (request id, verdict, time). The server consumes it on its existing 1 s tick. No answer in **30 s** is a deny. "Always allow" turns the per-device setting off. | It reuses the proven file channel, adds no socket, and still works when the app was closed (the request just times out). Off by default, because an owner reaching their own desktop from elsewhere has nobody at the desk to click Allow. |
 | P6 | The Devices tab gets a row of toggles per device, plus the "Ask before each session" switch. Changes apply to the next packet on the control channel and to the next session for streams. | The server re-reads the file per check; a live session keeps the permissions it started with, the way Parsec does. |
 
+## As built (2026-10-13)
+
+Where the build differs from the decisions above:
+
+- **P3:** a denied control packet is dropped and logged (`Denied <type> from <device>`). No error reply goes back to the phone yet, so a denied query looks like no answer.
+- **P5:** each answer is its own file, `<state>/approvals/<id>.json`, not one shared `<state>/approval`, so two phones held at once cannot overwrite each other's answer. The held session polls for its own answer every 250 ms instead of waiting for the 1 s tick. An answer that arrives after its session went away is swept up when the next held session leaves the list. A WAN (iroh) session has no socket address, so the prompt names it "the internet (WAN)".
+- **P5, the phone:** a held phone shows "Connected — waiting for the picture" with a hint to allow it at the computer, and waits up to 45 s for its first frame. A refusal (deny or no answer) closes the stream with the reason `session refused`. The bridge sees the close on its 1 s stats poll, so the phone shows the refusal in about a second.
+- **P6:** a change to a control-channel permission applies to the next packet. Input, desktop sound and the microphone for a session already running keep what that session started with.
+- **Limit:** approval holds the *stream* only. A paired device's control channel (window list, battery, the HUD) keeps working while its session is held or refused, as the permission switches allow.
+
 ## Out of scope
 
 - Per-command allowlists for exec.
