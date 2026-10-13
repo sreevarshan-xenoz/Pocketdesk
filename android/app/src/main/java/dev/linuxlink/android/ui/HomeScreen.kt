@@ -49,6 +49,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun HomeScreen(
     onConnect: (HostStore.Host) -> Unit,
+    onConnectFound: (HostStore.Host) -> Unit,
     onAdd: () -> Unit,
     onScan: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -70,6 +71,7 @@ fun HomeScreen(
     // this screen is in front.
     val found by rememberFoundComputers()
     val network = FoundComputers.merge(found, hosts)
+    var confirming by remember { mutableStateOf<FoundComputer?>(null) }
 
     Column(
         modifier = Modifier
@@ -138,7 +140,7 @@ fun HomeScreen(
                 if (network.unsaved.isNotEmpty()) {
                     item { SectionLabel(stringResource(R.string.found_on_network)) }
                     items(network.unsaved, key = { "found:${it.address}" }) { computer ->
-                        FoundCard(computer, onConnect = { onConnect(computer.toHost()) })
+                        FoundCard(computer, onConnect = { confirming = computer })
                     }
                     if (hosts.isNotEmpty()) {
                         item { SectionLabel(stringResource(R.string.saved_computers)) }
@@ -191,6 +193,34 @@ fun HomeScreen(
                 )
             }
         }
+    }
+
+    // Anyone on the network can announce any name: before the PIN goes to
+    // an address, say so, and point at the QR code, which pins the computer.
+    confirming?.let { computer ->
+        AlertDialog(
+            onDismissRequest = { confirming = null },
+            title = { Text(stringResource(R.string.found_confirm_title)) },
+            text = {
+                Text(stringResource(R.string.found_confirm_message, computer.name, computer.address))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirming = null
+                        onConnectFound(computer.toHost())
+                    },
+                ) { Text(stringResource(R.string.found_confirm_connect)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        confirming = null
+                        onScan()
+                    },
+                ) { Text(stringResource(R.string.scan_pairing_code)) }
+            },
+        )
     }
 
     removing?.let { host ->

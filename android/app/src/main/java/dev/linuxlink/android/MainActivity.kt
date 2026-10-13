@@ -240,6 +240,13 @@ class MainActivity : ComponentActivity() {
                                             sessionKey =
                                                 "${host.address}|${host.port}|${host.controlPort}"
                                         },
+                                        onConnectFound = { host ->
+                                            // Not saved until it pairs: an mDNS
+                                            // announcement proves nothing.
+                                            maybeRequestNotificationPermission()
+                                            sessionKey =
+                                                "${host.address}|${host.port}|${host.controlPort}"
+                                        },
                                         onAdd = { route = Route.FORM },
                                         onScan = { route = Route.SCAN },
                                         onOpenSettings = { route = Route.SETTINGS },

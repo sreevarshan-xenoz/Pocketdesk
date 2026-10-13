@@ -8,7 +8,10 @@
     <string name="home_subtitle">Tus equipos guardados</string>
     <string name="found_on_network">En esta red</string>
     <string name="saved_computers">Guardados</string>
-    <string name="found_subtitle">%1$s · toca para conectar; un ordenador nuevo pide su PIN</string>
+    <string name="found_subtitle">%1$s · sin verificar hasta emparejar; toca para conectar</string>
+    <string name="found_confirm_title">¿Conectar con este ordenador?</string>
+    <string name="found_confirm_message">Se hace llamar «%1$s» en %2$s. Cualquiera en esta red puede anunciar un nombre, así que escribe solo un PIN que Pocketdesk muestre ahora en tu propio ordenador. Escanear su código de emparejamiento asegura que es ese ordenador.</string>
+    <string name="found_confirm_connect">Conectar</string>
     <string name="no_computers">Aún no hay equipos.</string>
     <string name="home_explainer">Necesita un equipo Linux o Windows con el servicio Pocketdesk en su red.</string>
     <string name="settings_title">Ajustes</string>
