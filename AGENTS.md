@@ -50,6 +50,7 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - cursor speed is a Settings slider (0.5×–3×) with sub-pixel carry.
 
     On the A71 → Windows, tap-and-drag selected a Notepad line, and the slider persists. Multi-finger taps are unit-tested only (adb cannot make them; checklist §27).
+- **F3 review fixes (fresh review: 4 Important).**    - Tap-then-drag had reached the desktop as a double click plus a drag (title bars maximised, files opened). A one-finger tap is now held for the 300 ms drag window, and nothing is pressed while it waits.    - A drag torn down mid-gesture is released from a scope that outlives the view; the server has no release-all (2272). Direct touch gets the same fix.    - Two-finger scroll waits for the slop, so a right-click no longer scrolls first. It is now natural, at about a notch per 24 dp; it had been one notch per pixel, and its direction was mislabelled.    - Pinch-zoom in trackpad mode is still open.
   - **Keyboard fix pass (fresh review: 1 Critical, 7 Important).**
     - Re-composing after any reset duplicated text. The shadow's offset now starts over with the IME, and a region it cannot take resyncs.
     - The shadow resyncs whenever the caret may have moved: arrows and other bar keys, shortcuts, a selection away from the end, a touch on the desktop.
