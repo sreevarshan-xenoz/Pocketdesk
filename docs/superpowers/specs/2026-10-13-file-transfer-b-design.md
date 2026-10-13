@@ -1,6 +1,6 @@
 # File transfer, desktop to phone and the remote browser — design
 
-Status: proposed 2026-10-13, branch `feat/file-transfer-b` (cut from `feat/file-transfer`, PR #16). Roadmap F7, second half ([feature roadmap](2026-10-12-feature-roadmap.md); first half: [F7a](2026-10-13-file-transfer-design.md)).
+Status: decided and built 2026-10-13, branch `feat/file-transfer-b` (cut from `feat/file-transfer`, PR #16). Roadmap F7, second half ([feature roadmap](2026-10-12-feature-roadmap.md); first half: [F7a](2026-10-13-file-transfer-design.md)).
 
 ## Why
 
@@ -30,6 +30,28 @@ What exists today:
 | B8 | **Phone UI: a Files sheet in the session.** The Quick Settings sheet gains "Files on this computer". The sheet opens at home, lists folders first and then files with their sizes, has an Up row and the current folder as a title, and downloads a file when it is tapped (after a confirm that shows the size). Downloads queue in `TransferService` beside sends. | The session is when the control connection is up and the computer is in reach. A Home-screen browser can come later. |
 | B9 | **Desktop UI: the Files tab sends.** It gains a "Send to phone" box with a phone picker, listing only devices with a live session, and three ways to name a file: drag and drop (Windows and X11; winit has no Wayland drop), "Choose file…" (the Win32 common dialog, Windows only), and a path field (everywhere). Outcomes go to `<state>/sent.json` (the last 50: name, size, device, time, `offered`/`sent`/`failed: reason`), shown under the received list. | It needs no new dependency: the `windows` crate already has the dialog, and egui reports dropped files. Linux gets a path field instead of GTK. |
 | B10 | **Limits are shared.** Fetches and receives take the same two transfer slots (a full pool refuses at once), the same `30 s + size/32 KiB` deadline and 30 s idle timeout, and the same 8 GiB cap. | One budget for one link. |
+
+## As built (2026-10-13)
+
+- **Nothing hidden is reachable.** A listing leaves out dot-names and anything Windows marks hidden. A browse or a download *by path* refuses any path with a hidden component below home, any path in the server's own state or config folder, and any Windows device name (`COM1`, `NUL`, `CONIN$`), the last as text before the filesystem sees it. The first device run showed a home folder buried under dot-folders. The review then found the path check missing: the server's QUIC identity key sits in home on both systems.
+- **Links to folders are folders.** An entry's kind and size come from what it leads to; whether it is hidden is its own mark.
+- **Every send ends.**
+  - An offer has 10 minutes, not 2: a phone takes a dropped batch one file at a time.
+  - An expired offer is swept into "the phone did not take it in time".
+  - A refusal after redeeming is recorded.
+  - The phone declines an offer it will not fetch (no room, too large) with `kdeconnect.linuxlink.file_offer_declined` `{id, reason}`, under the Files permission and only for its own offers.
+  - The send is listed before the offer is pushed.
+- **Offers are not lost to a transfer's connection.** The desktop pushes to a phone's newest connection. A share now rides the live control connection when it is to that desktop. Otherwise it reads its own connection for the whole transfer, keeping any offer that arrives there. Offers still queued when the control connection ends are dropped.
+- **The desktop app** queues a relative path made absolute. A send to a phone that has left its session is refused with a message, never switched to another phone. "Choose file…" is `IFileOpenDialog` on a thread of its own.
+- **Android 8–9** save into the app's own `Downloads/Pocketdesk`, with no open action (there is no FileProvider).
+- **Limits kept, with reasons:**
+  - **The offer is only as bound to its phone as the in-band device id.** A paired phone can claim another's id; this is the F5 limit, and binding the id to the pinned certificate is the fix.
+  - **Some failures go unanswered.**
+    - A fetch with Files off is dropped by the permission gate with no refusal, so the phone waits out its 30 s listener.
+    - A request the server never takes (the server is down for over 60 s) leaves no sent row.
+  - **Status `1` is sent after the bytes are flushed, without an fsync,** and before the MediaStore row is published.
+  - **The plain-text control channel lets a LAN machine-in-the-middle push offers** that the phone downloads without a prompt. The channel's weakness predates F7b.
+- **A pairing fix found on the device run.** "Show PIN on desktop" had disabled "Enter PIN from desktop" until a push that never came. Pairing a computer found on the network could not be finished from that sheet.
 
 ## Components
 
