@@ -27,20 +27,25 @@ impl FileBrowsePlugin {
     /// Both are resolved first, so a symlink (or a Windows junction) inside
     /// home that points elsewhere cannot lead out of it.
     fn sanitize_path_in(home: &Path, requested: &str) -> Option<PathBuf> {
-        let home = home.canonicalize().ok()?;
         if requested.is_empty() || requested == "/" {
-            return Some(home);
+            return home.canonicalize().ok();
         }
         let path = Path::new(requested);
-        // Reject paths containing ".." components outright.
-        if path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
+        // Checked as text before the filesystem sees it: opening a path is
+        // already an action. On Windows a UNC path (\\host\share) makes the
+        // system connect out and offer the user's NTLM credentials, and a
+        // device path (\\.\pipe\x) opens a device, before any check that
+        // follows could refuse it. So it must be under home as written, and
+        // contain no "..".
+        if !path.starts_with(home)
+            || path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
         {
             return None;
         }
         let real = path.canonicalize().ok()?;
-        real.starts_with(&home).then_some(real)
+        real.starts_with(home.canonicalize().ok()?).then_some(real)
     }
 
     /// List directory contents as a JSON array of file entries.
@@ -176,6 +181,24 @@ mod tests {
             None,
             "a path that does not exist"
         );
+    }
+
+    #[test]
+    fn network_and_device_paths_are_refused_without_being_opened() {
+        let home = temp_home("unc");
+        for path in [
+            r"\\192.0.2.1\share",
+            r"\\?\UNC\192.0.2.1\share",
+            r"\\.\pipe\x",
+            "//192.0.2.1/share",
+            "relative/path",
+        ] {
+            assert_eq!(
+                FileBrowsePlugin::sanitize_path_in(&home, path),
+                None,
+                "{path}"
+            );
+        }
     }
 
     #[cfg(unix)]
