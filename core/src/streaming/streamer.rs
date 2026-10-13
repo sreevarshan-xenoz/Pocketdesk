@@ -1252,10 +1252,11 @@ fn trace_packet_stats(packet: &EncodedPacket) {
 
 /// Read the client's pre-pipeline config streams from the QUIC connection.
 ///
-/// The client may send up to three small uni-streams immediately after
+/// The client may send up to four small uni-streams immediately after
 /// connecting: a monitor-index config (`[0xFF, 0x00] + u32 LE`), a device
-/// identity (`[0xFE, 0x00] + len u8 + utf8`, see `client::DEVICE_ID_MARKER`)
-/// and codec capabilities (`[0xFD, 0x00] + u8`, R4 C1). Each read is bounded
+/// identity (`[0xFE, 0x00] + len u8 + utf8`, see `client::DEVICE_ID_MARKER`),
+/// its WAN key (`[0xFC, 0x00] + len u8 + utf8`, device keys) and codec
+/// capabilities (`[0xFD, 0x00] + u8`, R4 C1). Each read is bounded
 /// by a short timeout so the pipeline is not blocked when a stream (or the
 /// whole handshake, for older clients) is absent.
 /// Returns what the client announced about itself.

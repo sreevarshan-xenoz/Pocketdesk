@@ -25,9 +25,9 @@ pub const DEFAULT_STREAMING_PORT: u16 = 4716;
 pub(crate) const MONITOR_CONFIG_MARKER: [u8; 2] = [0xFF, 0x00];
 
 /// Marker bytes for a client-to-server identity QUIC stream:
-/// `[0xFE, 0x00, len:u8, utf8 deviceId]`. The QUIC TLS layer is anonymous
-/// (`with_no_client_auth` on both ends), so this is how the server binds a
-/// video session to the device that paired over the control channel.
+/// `[0xFE, 0x00, len:u8, utf8 deviceId]`. The id says which paired device
+/// the session claims to be; the TLS client certificate (or iroh key) is the
+/// proof the server holds it to (device keys).
 pub(crate) const DEVICE_ID_MARKER: [u8; 2] = [0xFE, 0x00];
 
 /// Marker bytes for a client-to-server WAN key announcement (device keys):
