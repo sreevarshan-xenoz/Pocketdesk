@@ -50,11 +50,18 @@ impl Capability {
 ///
 /// One table for every plugin: a plugin that adds a packet type adds a row
 /// here, or it is always allowed. The privacy grab takes the desk's own
-/// keyboard and mouse away, so it counts as [`Capability::Power`].
+/// keyboard and mouse away, so it counts as [`Capability::Power`]. A
+/// notification reply is put on the desktop's clipboard, so it counts as
+/// [`Capability::Clipboard`].
+///
+/// An always-allowed type must have no effect beyond answering the phone,
+/// ringing this desk, or waking another machine.
 pub fn capability_for(packet_type: &str) -> Option<Capability> {
     Some(match packet_type {
         "kdeconnect.mousepad.request" | "kdeconnect.presenter" => Capability::Input,
-        "kdeconnect.clipboard" | "kdeconnect.clipboard.connect" => Capability::Clipboard,
+        "kdeconnect.clipboard"
+        | "kdeconnect.clipboard.connect"
+        | "kdeconnect.linuxlink.notification_reply" => Capability::Clipboard,
         "kdeconnect.share.request" | "kdeconnect.filebrowse.request" => Capability::Files,
         "kdeconnect.linuxlink.audio" => Capability::Audio,
         "kdeconnect.linuxlink.power" | "kdeconnect.linuxlink.privacy" => Capability::Power,

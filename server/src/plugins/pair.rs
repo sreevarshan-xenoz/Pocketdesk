@@ -453,6 +453,14 @@ mod tests {
         store.set_permissions("phone-1", permissions).unwrap();
 
         assert!(!permits_in(Some(&store), "phone-1", "kdeconnect.clipboard"));
+        assert!(
+            !permits_in(
+                Some(&store),
+                "phone-1",
+                "kdeconnect.linuxlink.notification_reply"
+            ),
+            "a reply lands on the desktop clipboard"
+        );
         assert!(permits_in(
             Some(&store),
             "phone-1",
@@ -518,7 +526,6 @@ mod tests {
             "kdeconnect.battery.request",
             "kdeconnect.notification",
             "kdeconnect.notification.request",
-            "kdeconnect.linuxlink.notification_reply",
             "kdeconnect.linuxlink.monitors",
             "kdeconnect.linuxlink.windows",
             "kdeconnect.linuxlink.wol",
