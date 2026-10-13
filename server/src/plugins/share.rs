@@ -119,13 +119,15 @@ impl Plugin for SharePlugin {
                     return Ok(());
                 };
 
+                let from = sender.device_id().to_string();
                 tokio::spawn(async move {
                     let _slot = slot;
                     match receive_file(SocketAddr::new(phone_ip, port), &key, &dir, &name, size)
                         .await
                     {
                         Ok(path) => {
-                            tracing::info!("File received: {} ({size} bytes)", path.display())
+                            tracing::info!("File received: {} ({size} bytes)", path.display());
+                            on_received(&path, size, &from);
                         }
                         Err(e) => tracing::warn!("File transfer of {name} failed: {e}"),
                     }
@@ -145,6 +147,56 @@ impl Plugin for SharePlugin {
         }
         Ok(())
     }
+}
+
+/// Tell the owner a file arrived: a desktop notification, and a row in the
+/// received-files list the desktop app shows (roadmap F7).
+fn on_received(path: &Path, size: u64, from: &str) {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if let Ok(dir) = crate::state::state_dir() {
+        record_received_in(&dir, path, &name, size, from);
+    }
+    let body = format!("{name} ({}) is in Downloads.", human_size(size));
+    std::thread::spawn(move || {
+        let summary = "Pocketdesk: file received";
+        if !crate::platform::notify(summary, &body, Duration::from_secs(8)) {
+            tracing::info!("{summary} — {body}");
+        }
+    });
+}
+
+fn record_received_in(state_dir: &Path, path: &Path, name: &str, size: u64, from: &str) {
+    // Transfers run concurrently; the list is read, changed and replaced.
+    static LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LIST.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = linux_link_core::local::received::ReceivedFile {
+        name: name.to_string(),
+        path: path.display().to_string(),
+        size,
+        received_unix: linux_link_core::local::pin::now_unix(),
+        from: from.to_string(),
+    };
+    if let Err(e) = linux_link_core::local::received::record(state_dir, entry) {
+        tracing::warn!("Could not record the received file: {e}");
+    }
+}
+
+/// `2_100_000` -> "2.0 MB".
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 /// A transfer key as the phone makes it: 32 hex digits (a random UUID).
@@ -513,6 +565,20 @@ mod tests {
             socket.write_all(&data).await.unwrap();
         });
         addr
+    }
+
+    #[test]
+    fn a_received_file_is_listed_for_the_desktop_app() {
+        let state = temp_dir("list");
+        let path = state.join("photo.jpg");
+        record_received_in(&state, &path, "photo.jpg", 2_100_000, "192.0.2.7");
+        let files = linux_link_core::local::received::read(&state);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, "photo.jpg");
+        assert_eq!(files[0].size, 2_100_000);
+        assert_eq!(files[0].path, path.display().to_string());
+        assert_eq!(human_size(2_100_000), "2.0 MB");
+        assert_eq!(human_size(512), "512 B");
     }
 
     #[test]

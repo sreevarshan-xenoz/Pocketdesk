@@ -16,6 +16,7 @@ pub const CERT_FILE: &str = "certs/identity.der";
 pub const DEVICE_ID_FILE: &str = "device_id";
 pub const PENDING_APPROVALS_FILE: &str = "pending_approvals.json";
 pub const APPROVAL_DIR: &str = "approvals";
+pub const RECEIVED_FILE: &str = "received.json";
 
 fn missing(what: &str) -> io::Error {
     io::Error::new(
