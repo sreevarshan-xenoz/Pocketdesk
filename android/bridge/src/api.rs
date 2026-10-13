@@ -313,7 +313,7 @@ pub async fn wake_via_relay(
         .await
         .map_err(|e| format!("Connection failed: {e}"))?;
     let (_reader, writer) = tokio::io::split(stream);
-    let sender = TcpDeviceSender::new(writer, address);
+    let sender = TcpDeviceSender::new(writer, address.clone());
     let request = NetworkPacket::new("kdeconnect.linuxlink.wol").with_body(serde_json::json!({
         "mac": mac,
         "broadcast": broadcast,
@@ -1032,7 +1032,7 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .await
         .map_err(|e| e.to_string())?;
     let (_reader, writer) = tokio::io::split(stream);
-    let sender = TcpDeviceSender::new(writer, address);
+    let sender = TcpDeviceSender::new(writer, address.clone());
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(serde_json::json!({
             "filename": filename,
@@ -1043,10 +1043,28 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .send_packet(&request)
         .await
         .map_err(|e| format!("Failed to send share request: {}", e))?;
-    let (mut client_stream, _) = tokio::time::timeout(Duration::from_secs(30), listener.accept())
+    // The desktop connects back for the bytes. The listener is on every
+    // interface, so take the file only to the desktop's own address;
+    // anything else on the network that connects first gets nothing.
+    let desktop_ips: Vec<std::net::IpAddr> = tokio::net::lookup_host((address.as_str(), port))
         .await
-        .map_err(|_| "Timeout waiting for file receiver".to_string())?
-        .map_err(|e| format!("Failed to accept connection: {}", e))?;
+        .map_err(|e| format!("Failed to resolve {address}: {e}"))?
+        .map(|a| a.ip())
+        .collect();
+    let mut client_stream = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let (stream, peer) = listener
+                .accept()
+                .await
+                .map_err(|e| format!("Failed to accept connection: {}", e))?;
+            if is_desktop(peer.ip(), &desktop_ips) {
+                return Ok::<_, String>(stream);
+            }
+            tracing::warn!("File transfer: ignored a connection from {peer}");
+        }
+    })
+    .await
+    .map_err(|_| "Timeout waiting for file receiver".to_string())??;
     let mut file = tokio::fs::File::open(&file_path)
         .await
         .map_err(|e| format!("Failed to open file: {}", e))?;
@@ -1072,6 +1090,19 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .map_err(|e: std::io::Error| e.to_string())?;
     tracing::info!("File sent: {} ({} bytes)", filename, sent);
     Ok(())
+}
+
+/// Whether `peer` is one of the desktop's addresses (an IPv4 peer may show
+/// up IPv4-mapped on a dual-stack listener).
+fn is_desktop(peer: std::net::IpAddr, desktop: &[std::net::IpAddr]) -> bool {
+    let peer = match peer {
+        std::net::IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map(std::net::IpAddr::V4)
+            .unwrap_or(peer),
+        v4 => v4,
+    };
+    desktop.contains(&peer)
 }
 
 /// List files in a remote directory using the file browse protocol.
@@ -2996,5 +3027,22 @@ mod receive_tests {
         assert_eq!(waiting.await.unwrap(), vec![(41, vec![9])]);
         *crate::AUDIO_RX.lock().await = None;
         *crate::VIDEO_RX.lock().await = None;
+    }
+}
+
+#[cfg(test)]
+mod send_file_tests {
+    use super::is_desktop;
+
+    #[test]
+    fn only_the_desktop_may_take_a_file() {
+        let desktop = ["192.0.2.10".parse().unwrap()];
+        assert!(is_desktop("192.0.2.10".parse().unwrap(), &desktop));
+        assert!(
+            is_desktop("::ffff:192.0.2.10".parse().unwrap(), &desktop),
+            "IPv4-mapped on a dual-stack listener"
+        );
+        assert!(!is_desktop("192.0.2.11".parse().unwrap(), &desktop));
+        assert!(!is_desktop("::1".parse().unwrap(), &desktop));
     }
 }
