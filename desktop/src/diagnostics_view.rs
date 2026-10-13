@@ -165,6 +165,10 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
         &linux_link_core::local::network::local_ips(),
     ));
     findings.push(diagnostics::check_internet_path(state_dir, state));
+    findings.extend(diagnostics::check_outside(
+        diagnostics::read_wan_status(state_dir).as_ref(),
+        state,
+    ));
     Report {
         findings,
         last_session: diagnostics::last_session(state_dir),
