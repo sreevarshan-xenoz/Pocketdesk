@@ -106,16 +106,33 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
 /// Where the desktop's replies to a request arrive: the live control
 /// connection's broadcast, or a connection opened for this request alone,
 /// kept open while its lines are read.
-enum Replies {
+pub(crate) enum Replies {
     Shared(broadcast::Receiver<String>),
     Own {
         lines: tokio::io::Lines<tokio::io::BufReader<tokio::net::tcp::OwnedReadHalf>>,
-        // Held so the connection stays open until the download ends.
+        // Held so the connection stays open while its replies are read.
         _writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     },
 }
 
 impl Replies {
+    /// Read this connection's lines until the task is aborted, keeping any
+    /// offer that arrives on it. The desktop pushes to a phone's newest
+    /// connection, which may be one a transfer opened for itself; an offer
+    /// sent there must not be lost unread.
+    pub(crate) fn keep_reading(mut self) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            while let Some(line) = self.next_line().await {
+                if let (Replies::Own { .. }, Ok(packet)) =
+                    (&self, NetworkPacket::from_wire(line.trim()))
+                    && packet.packet_type == FILE_OFFER
+                {
+                    crate::queue_file_offer(&packet.body);
+                }
+            }
+        })
+    }
+
     async fn next_line(&mut self) -> Option<String> {
         match self {
             Replies::Shared(rx) => loop {
@@ -134,7 +151,7 @@ impl Replies {
 /// replies arrive. The live control connection carries it when it is to
 /// this desktop, so pushes keep their usual target; otherwise a connection
 /// of its own does.
-async fn send_watching_replies(
+pub(crate) async fn send_watching_replies(
     address: &str,
     port: u16,
     request: &NetworkPacket,
@@ -470,6 +487,37 @@ mod tests {
         assert_eq!(refusal_for(&line(KEY), KEY), Some("no".to_string()));
         assert_eq!(refusal_for(&line("ffff"), KEY), None);
         assert_eq!(refusal_for("not a packet", KEY), None);
+    }
+
+    #[tokio::test]
+    async fn an_offer_on_a_transfers_own_connection_is_kept() {
+        let (listener, addr) = listener().await;
+        let desktop = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let offer = NetworkPacket::new(super::FILE_OFFER)
+                .with_body(serde_json::json!({ "id": "own-conn", "name": "a.pdf", "size": 3 }))
+                .to_wire()
+                .unwrap();
+            socket.write_all(&offer).await.unwrap();
+            socket
+        });
+        let (reader, writer) = TcpStream::connect(addr).await.unwrap().into_split();
+        let replies = super::Replies::Own {
+            lines: tokio::io::AsyncBufReadExt::lines(tokio::io::BufReader::new(reader)),
+            _writer: std::sync::Arc::new(tokio::sync::Mutex::new(writer)),
+        };
+        let reading = replies.keep_reading();
+        let _socket = desktop.await.unwrap();
+        let mut kept = String::new();
+        for _ in 0..50 {
+            kept = crate::take_file_offers_json();
+            if kept.contains("own-conn") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        reading.abort();
+        assert!(kept.contains("own-conn"), "{kept}");
     }
 
     #[test]

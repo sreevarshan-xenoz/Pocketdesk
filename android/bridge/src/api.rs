@@ -524,6 +524,12 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                         *crate::WAN_IDENTITY.lock().await = None;
                         crate::SIREN_RINGING.store(false, std::sync::atomic::Ordering::SeqCst);
                         *crate::PAIR_RESULT.lock().await = None;
+                        // Offers came from this desktop; another one cannot
+                        // fill them (F7b).
+                        crate::PENDING_OFFERS
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clear();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );
@@ -1105,24 +1111,19 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         .map_err(|e| format!("Failed to bind port: {}", e))?;
     let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let key = uuid::Uuid::new_v4().simple().to_string();
-    let conn_mgr = ConnectionManager::new(Duration::from_secs(10));
-    let identity = client_identity();
-    let stream = conn_mgr
-        .connect(&address, port, &identity)
-        .await
-        .map_err(|e| e.to_string())?;
-    let (_reader, writer) = tokio::io::split(stream);
-    let sender = TcpDeviceSender::new(writer, address.clone());
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(serde_json::json!({
             "filename": filename,
             "payloadTransferInfo": { "port": transfer_port, "key": key },
         }))
         .with_payload_size(file_size);
-    sender
-        .send_packet(&request)
+    // The live control connection carries the request when it is to this
+    // desktop; otherwise a connection of its own does, read for the whole
+    // transfer so an offer the desktop pushes to it is not lost (F7b).
+    let replies = crate::download::send_watching_replies(&address, port, &request)
         .await
-        .map_err(|e| format!("Failed to send share request: {}", e))?;
+        .map_err(|e| format!("Failed to send share request: {e}"))?;
+    let _reading = AbortOnDrop(replies.keep_reading());
     // The desktop connects back for the bytes. The listener is on every
     // interface, so the bytes go only to a connection that first presents
     // the key from the request, which only the desktop has seen; anything
@@ -1161,6 +1162,15 @@ async fn read_status<R: tokio::io::AsyncRead + Unpin>(stream: &mut R) -> Result<
         Ok(Ok(_)) if status[0] == 1 => Ok(()),
         Ok(Ok(_)) => Err("The computer could not save the file".to_string()),
         Ok(Err(_)) | Err(_) => Err("The computer did not confirm the file".to_string()),
+    }
+}
+
+/// Aborts a task when dropped, however the function holding it returns.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
