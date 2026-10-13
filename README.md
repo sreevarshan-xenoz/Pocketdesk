@@ -253,6 +253,7 @@ log_level = "info"         # trace/debug/info/warn/error
 video_quality = "balanced" # low/balanced/high
 pairing_required = true    # PIN-pair devices before the control channel or streaming serves requests
 # allow_hevc = false       # let negotiating phones drive an H.265/HEVC stream (R4 C1)
+# lan_discovery = true     # announce this computer so phones on the network list it
 ```
 
 ### systemd Service

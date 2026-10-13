@@ -22,6 +22,10 @@ video_quality = "balanced"
 # has a working HEVC encoder (libx265 or a hardware hevc path).
 # allow_hevc = false
 
+# Announce this computer on the local network (mDNS), so the phone app lists
+# it under "On this network". Turn off to stay unlisted, e.g. on public Wi-Fi.
+# lan_discovery = true
+
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a
 # program to provide a microphone; apps then record from its other end.

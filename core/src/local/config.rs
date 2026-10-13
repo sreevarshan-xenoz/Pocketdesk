@@ -48,6 +48,14 @@ pub struct Config {
     /// Apps then record from the cable's other end ("CABLE Output").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mic_relay_device: Option<String>,
+    /// Announce this computer on the local network over mDNS, so phones on
+    /// the same network list it (roadmap F6). Read at server start.
+    #[serde(default = "default_lan_discovery")]
+    pub lan_discovery: bool,
+}
+
+fn default_lan_discovery() -> bool {
+    true
 }
 
 fn default_pairing_required() -> bool {
@@ -77,6 +85,7 @@ impl Default for Config {
             allow_hevc: false,
             capture_backend: CaptureBackend::Auto,
             mic_relay_device: None,
+            lan_discovery: true,
         }
     }
 }
@@ -224,6 +233,7 @@ impl Config {
         "allow_hevc",
         "capture_backend",
         "mic_relay_device",
+        "lan_discovery",
     ];
 }
 
@@ -245,6 +255,7 @@ mod tests {
         let config = Config::load_from(&path).unwrap();
         assert_eq!(config.control_port, 1716);
         assert!(config.pairing_required);
+        assert!(config.lan_discovery, "announced on the network by default");
     }
 
     #[test]
@@ -269,6 +280,20 @@ future_key = \"x\"
         assert!(saved.contains("control_port = 1800 # keep"));
         assert!(saved.contains("allow_hevc = true"));
         assert_eq!(Config::load_from(&path).unwrap().control_port, 1800);
+    }
+
+    #[test]
+    fn turning_lan_discovery_off_is_saved_and_read_back() {
+        let path = temp("lan");
+        let mut config = Config::load_from(&path).unwrap();
+        config.lan_discovery = false;
+        config.save_to(&path).unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("lan_discovery = false")
+        );
+        assert!(!Config::load_from(&path).unwrap().lan_discovery);
     }
 
     #[test]

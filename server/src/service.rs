@@ -67,15 +67,26 @@ pub async fn run(config: Config) -> Result<()> {
         trusted_count
     );
 
-    // Register mDNS service for LAN discovery
+    // Announce this computer over mDNS so phones on the network list it
+    // (roadmap F6), unless the owner turned that off.
     let lan_discovery = linux_link_core::tailscale::lan::LanDiscoveryService::new()?;
-    let host_name = kde_service
+    let (host_name, host_id) = kde_service
         .identity
         .as_ref()
-        .map(|i| i.device_name.clone())
-        .unwrap_or_else(|| "linux-link-host".to_string());
+        .map(|i| (i.device_name.clone(), i.device_id.clone()))
+        .unwrap_or_else(|| ("linux-link-host".to_string(), String::new()));
 
-    lan_discovery.register_service(&host_name, config.control_port, local_ips)?;
+    if config.lan_discovery {
+        lan_discovery.register_service(
+            &host_name,
+            &host_id,
+            config.control_port,
+            config.streaming_port,
+            local_ips,
+        )?;
+    } else {
+        tracing::info!("Not announced on the local network (lan_discovery = false)");
+    }
 
     let discovery = DiscoveryService::new(tailscale.clone());
     let mut discovery_rx = discovery.subscribe();
