@@ -11,7 +11,7 @@
 | v1 control handshake | `LINUX_LINK_HELLO 1` | TCP greeting, `protocol::HANDSHAKE_HELLO` |
 | v1 version | `1` | the `1` in the greeting above |
 | KDE Connect identity `protocolVersion` | `1` | `kdeconnect.identity`, a separate namespace |
-| Linux Link extension `llVersion` | `1` | every `kdeconnect.linuxlink.*` packet (R4 D4) |
+| Pocketdesk extension `llVersion` | `1` | every `kdeconnect.linuxlink.*` packet (R4 D4) |
 | v2 negotiated range | `2-2` | `IdentityPacketV2` min/max, QUIC stream 0 |
 | Control payload ceiling | `16777216` bytes | framed v2 control JSON |
 | Ports | control `1716/tcp`, media `4716/udp` | `DEFAULT_CONTROL_PORT`, `DEFAULT_STREAMING_PORT` |

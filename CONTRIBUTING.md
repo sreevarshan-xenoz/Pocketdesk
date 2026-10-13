@@ -1,4 +1,4 @@
-# Contributing to Linux Link
+# Contributing to Pocketdesk
 
 Thank you for your interest in contributing! This document covers the basics.
 
@@ -73,8 +73,13 @@ XDG_CONFIG_HOME=$PWD/devconfig cargo run --bin linux-link -- start
 
 ## Architecture Overview
 
-See `plan.md` for the full architecture and development roadmap.
+See the README's Architecture section, and `AGENTS.md` for the current state of every feature.
 Key components:
 - `core/` — Shared protocol, streaming, and utility code
-- `server/` — Linux daemon (CLI + service)
-- `android/` — Native Kotlin Android client + Rust JNI/UniFFI bridge
+- `server/` — the desktop server for Linux and Windows (the `linux-link` command, CLI + service)
+- `desktop/` — the Pocketdesk desktop app (egui): status, pairing, devices, sessions, files
+- `android/` — Native Kotlin Android client + Rust JNI bridge
+
+The server command, its config and state paths, and the Android package id `dev.linuxlink.android`
+keep their Linux Link-era names on purpose: renaming them would break existing installs, pairings
+and app updates.

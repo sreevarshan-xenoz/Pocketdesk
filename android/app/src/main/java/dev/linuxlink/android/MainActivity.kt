@@ -36,7 +36,7 @@ import dev.linuxlink.android.ui.RemoteScreen
 import dev.linuxlink.android.ui.PairLinkScreen
 import dev.linuxlink.android.ui.QrScanScreen
 import dev.linuxlink.android.ui.SettingsScreen
-import dev.linuxlink.android.ui.theme.LinuxLinkTheme
+import dev.linuxlink.android.ui.theme.PocketdeskTheme
 
 /** Home-family destinations; plain strings so rememberSaveable just works. */
 private object Route {
@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity() {
             pairLinkScanned.value = savedInstanceState.getBoolean(STATE_PAIR_SCANNED)
         }
         setContent {
-            LinuxLinkTheme {
+            PocketdeskTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var sessionKey by rememberSaveable { mutableStateOf<String?>(null) }
                     // Home-family route (home list / add form / settings),

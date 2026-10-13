@@ -29,7 +29,7 @@
         android:localeConfig="@xml/locales_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.LinuxLink">
+        android:theme="@style/Theme.Pocketdesk">
 
         <activity
             android:name=".MainActivity"

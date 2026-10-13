@@ -2,7 +2,7 @@
 
 **Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale or a hole-punched iroh path. No port forwarding required.**
 
-> Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). The name changed when Windows support landed. The `linux-link` command, its config/state paths and the wire protocol keep the old name, so existing installs and pairings carry over.
+> Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). The name changed when Windows support landed. The `linux-link` command, its config/state paths, the wire protocol and the Android package id (`dev.linuxlink.android`) keep the old name on purpose, so existing installs, pairings and app updates carry over.
 
 [![Rust](https://img.shields.io/badge/Rust-Pure%20Rust-orange?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)

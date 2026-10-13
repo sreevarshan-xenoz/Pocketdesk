@@ -1,11 +1,11 @@
 name: Contributor Welcome
-description: Open a discussion about contributing to Linux Link
+description: Open a discussion about contributing to Pocketdesk
 labels: help wanted
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for your interest in contributing to Linux Link!
+        Thanks for your interest in contributing to Pocketdesk!
   - type: textarea
     id: interest
     attributes:

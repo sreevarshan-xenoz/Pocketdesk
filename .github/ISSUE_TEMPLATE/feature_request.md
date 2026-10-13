@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Have an idea for Linux Link? We'd love to hear it!
+        Have an idea for Pocketdesk? We'd love to hear it!
   - type: textarea
     id: feature
     attributes:
