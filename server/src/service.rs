@@ -1021,6 +1021,12 @@ async fn handle_connection_with_kde(
                         }
                     }
                 }
+                // A phone that drops the socket without TLS's close_notify
+                // (the app stopped, the network went) has simply left.
+                Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    tracing::info!("Peer disconnected");
+                    break;
+                }
                 Ok(Err(e)) => {
                     tracing::error!("Read error in control channel: {}", e);
                     break;
