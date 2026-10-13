@@ -27,7 +27,7 @@ Each item is its own branch (`feat/<topic>`), spec, plan and device check on the
 | F6 | **LAN discovery** on the phone home screen (found desktops listed above saved ones, one tap to pair), plus a "visible on the network" switch in the desktop app. | Both | Removes the setup friction users complain about most after input. | M |
 | F7 | **File transfer:** share files into Pocketdesk from any app, a remote file browser with download, and a drop zone plus transfer history in the desktop app. | Both | The bridge has file-list and send-file; there is no UI. | L |
 | F8 | **Image clipboard** both ways. | Both | Expected next to text clipboard. | M |
-| F9 | **Session polish:** in-session monitor quick-switch, optional three-finger swipes for Alt+Tab and workspaces, hardware keyboard and mouse passthrough with pointer capture. | Phone | Power users, on top of F1/F3. | M |
+| F9 | **Session polish:** in-session monitor quick-switch (shipped 2026-10-13: a chip per screen in the session chrome), optional three-finger swipes for Alt+Tab and workspaces, hardware keyboard and mouse passthrough with pointer capture. | Phone | Power users, on top of F1/F3. | M |
 | F10 | **Desktop app diagnostics:** port and firewall check, advertised interfaces, encoder in use, last session's latency tails, "copy debug report". | Desktop | Turns "it doesn't connect" into a fixable message. | M |
 | F11 | **Shortcuts outside the app:** home-screen widget, Quick Settings tile, launcher shortcuts for connect and wake. | Phone | Small, makes the app feel native. | S |
 

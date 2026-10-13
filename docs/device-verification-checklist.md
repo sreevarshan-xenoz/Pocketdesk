@@ -690,6 +690,19 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN:
 - [ ] Android 8 or 9: the file lands in the app's own Downloads/Pocketdesk.
 - [ ] The Linux host: browse `/home/<user>`, a download, and a send from the app's path field.
 
+## 32. Switching screens
+
+Built on `fix/monitor-switch`. Checked on 2026-10-13 with the Galaxy A71 against the Windows host (two monitors, 2560×1080 and 2560×1440):
+- Quick Settings → Monitor switched both ways six times over LAN, with no crash.
+- Three switches made while a WAN connect was still in flight all landed on the last pick. The old build crashed here with "Invalid to call at Released state".
+- The chrome's chips 1 and 2 switched the stream each way with one tap.
+
+- [x] Switch screens from the chips and from Quick Settings → Monitor; the picture follows, and the app stays up.
+- [x] Switch while the stream is still connecting (WAN); no crash, and the last pick wins.
+- [ ] Unplug the monitor being streamed; the session falls back to the primary screen.
+- [ ] Three or more monitors: a chip each, in the desktop's order.
+- [ ] The Linux host (portal or screencopy capture per monitor).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
