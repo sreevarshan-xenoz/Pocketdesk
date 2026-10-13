@@ -322,12 +322,34 @@ impl PocketdeskApp {
             Ok(()) => format!("Removed {} — it must pair again to connect.", short(id)),
             Err(e) => format!("Could not remove {}: {e}", short(id)),
         });
+        // Removing a phone must not leave it in control of a running session.
+        self.end_sessions_of(id);
         self.refresh();
     }
 
+    /// End `id`'s running session, if it has one: a session keeps the
+    /// permissions it started with, so a narrower one takes a new session.
+    fn end_sessions_of(&mut self, id: &str) {
+        let connected = self
+            .snapshot
+            .sessions
+            .iter()
+            .any(|s| s.device_id.as_deref() == Some(id));
+        if !connected {
+            return;
+        }
+        if let Err(e) = sessions::request_kick(&self.state_dir, id, now_unix()) {
+            self.notice = Some(format!("Could not end {}'s session: {e}", short(id)));
+        }
+    }
+
     fn set_permission(&mut self, id: &str, capability: Capability, allowed: bool) {
-        if let Err(e) = model::set_permission(&self.state_dir, id, capability, allowed) {
-            self.notice = Some(format!("Could not change {}: {e}", short(id)));
+        match model::set_permission(&self.state_dir, id, capability, allowed) {
+            Ok(()) if !allowed && model::fixed_at_session_start(capability) => {
+                self.end_sessions_of(id);
+            }
+            Ok(()) => {}
+            Err(e) => self.notice = Some(format!("Could not change {}: {e}", short(id))),
         }
         self.refresh();
     }
@@ -433,7 +455,7 @@ impl PocketdeskApp {
         ui.add_space(12.0);
         ui.label(
             RichText::new(
-                "A change applies at once, except to a session already running: its \n                 control, sound and microphone follow from the next one.",
+                "A change applies at once. Turning off control, sound or the microphone ends that phone's running session, so it reconnects with the change.",
             )
             .color(MUTED),
         );

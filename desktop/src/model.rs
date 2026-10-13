@@ -84,6 +84,15 @@ pub fn set_permission(
     update_permissions(state_dir, id, |p| p.set(capability, allowed))
 }
 
+/// Whether a running session keeps its own copy of this permission, taken at
+/// its start; the control channel re-reads the others for every packet.
+pub fn fixed_at_session_start(capability: Capability) -> bool {
+    matches!(
+        capability,
+        Capability::Input | Capability::Audio | Capability::Mic
+    )
+}
+
 /// Hold each of `id`'s sessions for approval at this desktop, or not.
 pub fn set_ask_first(
     state_dir: &Path,
@@ -244,6 +253,18 @@ mod tests {
         assert_eq!(
             approval::take_answer(&dir, "r1", 102),
             Some(Verdict::AllowOnce)
+        );
+    }
+
+    #[test]
+    fn only_streamed_permissions_are_fixed_for_a_running_session() {
+        let fixed: Vec<_> = Capability::ALL
+            .into_iter()
+            .filter(|c| fixed_at_session_start(*c))
+            .collect();
+        assert_eq!(
+            fixed,
+            [Capability::Input, Capability::Audio, Capability::Mic]
         );
     }
 
