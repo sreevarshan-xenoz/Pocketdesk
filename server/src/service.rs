@@ -67,26 +67,19 @@ pub async fn run(config: Config) -> Result<()> {
         trusted_count
     );
 
-    // Register mDNS service for LAN discovery
+    // This computer's mDNS announcement (roadmap F6), made once the control
+    // listener is up.
     let lan_discovery = linux_link_core::tailscale::lan::LanDiscoveryService::new()?;
-    let host_name = kde_service
+    let (host_name, host_id) = kde_service
         .identity
         .as_ref()
-        .map(|i| i.device_name.clone())
-        .unwrap_or_else(|| "linux-link-host".to_string());
-
-    lan_discovery.register_service(&host_name, config.control_port, local_ips)?;
+        .map(|i| (i.device_name.clone(), i.device_id.clone()))
+        .unwrap_or_else(|| ("linux-link-host".to_string(), String::new()));
 
     let discovery = DiscoveryService::new(tailscale.clone());
     let mut discovery_rx = discovery.subscribe();
     tokio::spawn(async move {
         discovery.run(Duration::from_secs(10)).await;
-    });
-
-    // Also run LAN discovery browser to detect other Linux Link servers
-    let mut lan_rx = lan_discovery.subscribe();
-    tokio::spawn(async move {
-        lan_discovery.run(Duration::from_secs(30)).await;
     });
 
     // R4 D2: mirror live streaming sessions to the state dir, notify the
@@ -120,6 +113,27 @@ pub async fn run(config: Config) -> Result<()> {
         .with_context(|| format!("failed to bind {bind_addr}"))?;
 
     tracing::info!("Control listener ready on {}", bind_addr);
+
+    // Announced only now that the control port answers: a phone checks it
+    // before listing this computer.
+    let announcement = if config.lan_discovery {
+        Some(lan_discovery.register_service(
+            &host_name,
+            &host_id,
+            config.control_port,
+            config.streaming_port,
+            local_ips,
+        )?)
+    } else {
+        tracing::info!("Not announced on the local network (lan_discovery = false)");
+        None
+    };
+
+    // Also run LAN discovery browser to detect other Linux Link servers
+    let mut lan_rx = lan_discovery.subscribe();
+    tokio::spawn(async move {
+        lan_discovery.run(Duration::from_secs(30)).await;
+    });
 
     // QUIC Multiplexer (v2) and Streaming (v1) listener
     let streaming_port = config.streaming_port;
@@ -442,6 +456,10 @@ pub async fn run(config: Config) -> Result<()> {
             }
             Some(reason) = shutdown.recv() => {
                 tracing::info!("Shutdown requested ({reason})");
+                // Tell phones on the network this computer is going away.
+                if let Some(announcement) = announcement {
+                    let _ = tokio::task::spawn_blocking(move || announcement.withdraw()).await;
+                }
                 break;
             }
             event = discovery_rx.recv() => {

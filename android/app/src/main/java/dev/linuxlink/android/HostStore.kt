@@ -65,6 +65,17 @@ object HostStore {
         writeHosts(ctx, listOf(host) + rest)
     }
 
+    /**
+     * Keep [host] in the list without moving it to the front: a computer
+     * reached from discovery is saved only once it has paired, so an
+     * unverified announcement never becomes the auto-connect host.
+     */
+    fun keep(ctx: Context, host: Host) {
+        if (hosts(ctx).none { it.address == host.address }) {
+            writeHosts(ctx, hosts(ctx) + host)
+        }
+    }
+
     /** Forget a desktop and every per-address record hanging off it. */
     fun remove(ctx: Context, address: String) {
         writeHosts(ctx, hosts(ctx).filterNot { it.address == address })

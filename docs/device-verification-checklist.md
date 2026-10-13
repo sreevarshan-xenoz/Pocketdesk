@@ -632,6 +632,26 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host, over WAN. Th
 - [ ] Turning control, sound or the microphone off during a session ends that session; Retry starts one with the change. Removing a connected phone ends its session.
 - [ ] LAN session: the prompt shows the phone's address.
 
+## 29. Computers on this network
+
+Built on `feat/lan-discovery`; spec `docs/superpowers/specs/2026-10-13-lan-discovery-design.md`.
+
+Checked on 2026-10-13 with the Galaxy A71 and the Windows host on the same Wi-Fi:
+- the host was found in about 0.2 s at its LAN address (not its link-local or Tailscale address), and the saved card, saved as 127.0.0.1 and matched by its paired id, showed "On this network";
+- a second computer announced from the PC (a test announcer) appeared under "On this network" with its name, and disappeared live when it withdrew;
+- with `lan_discovery = false` the server logs that it is not announced;
+- a server killed without a goodbye left a cached record, which the phone did not list ("announced but does not answer").
+
+- the confirmation dialog shows on tapping a found computer; Connect opened a session at the found address with the PIN sheet (an address not paired before), and nothing was saved;
+- an announcement that lists an unreachable address first is listed at its reachable one.
+
+- [ ] Pair from a found computer: after the PIN it appears under Saved.
+- [ ] Android 17: the local-network permission prompt at first launch; LAN sessions and discovery work after Allow, and time out after Deny.
+- [ ] Two computers on the network, both listed.
+- [ ] Android 13 or older (the resolveService path).
+- [ ] The Linux host is found (Avahi may also be announcing on the same host).
+- [ ] "Visible on this network" in the desktop app, then a server restart: the computer no longer appears.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -562,6 +562,7 @@ fun RemoteScreen(
         if (serverId != null) {
             pairedServerId = serverId
             HostStore.savePairedDesktop(context, address, serverId)
+            HostStore.keep(context, HostStore.Host(address, port, controlPort))
         } else if (pairedServerId == null) {
             showPairing = true
         }
@@ -1231,6 +1232,8 @@ fun RemoteScreen(
             onPaired = { serverId ->
                 pairedServerId = serverId
                 HostStore.savePairedDesktop(context, address, serverId)
+                // A computer reached from discovery is saved once paired.
+                HostStore.keep(context, HostStore.Host(address, port, controlPort))
             },
         )
     }

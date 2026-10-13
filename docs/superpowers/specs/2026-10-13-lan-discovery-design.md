@@ -1,0 +1,48 @@
+# LAN discovery — design
+
+Status: decided 2026-10-13, branch `feat/lan-discovery`. Roadmap F6 ([feature roadmap](2026-10-12-feature-roadmap.md)).
+
+## Why
+
+To reach a computer the first time, a phone user scans the desktop app's QR code or types an address and two ports. The server already announces itself over mDNS (`_linux-link._tcp`, from `core::tailscale::lan`), but nothing on the phone listens. KDE Connect, Moonlight and RustDesk all list computers on the same network, and the roadmap ranks this as the setup friction users complain about most after input.
+
+## Decisions (made autonomously; each is cheap to revisit)
+
+| # | Decision | Why |
+|---|---|---|
+| L1 | The phone browses `_linux-link._tcp` with Android's `NsdManager` while the Home screen is visible, and stops when it is not. | `NsdManager` takes the multicast lock itself and needs no new permission. Browsing only on Home keeps battery and the network quiet. |
+| L2 | The announcement's TXT record gains `id` (the desktop's device id) and `stream` (the streaming port). The record keeps `name` and `version`; its port stays the control port. | The phone can then fill in both ports, and recognise a saved computer whose address changed, by the id it saved at pairing. |
+| L3 | Home lists found computers that are not saved under **On this network**, above the saved ones. Each shows its name and address. A tap connects, and an unpaired computer opens the PIN sheet as it already does. A saved computer that is found gets an **On this network** label. | One tap to the PIN. Nothing is saved until the user connects. |
+| L4 | When the announcement lists several addresses, the phone prefers a private IPv4 address (10/8, 172.16/12, 192.168/16) over Tailscale's 100.64/10 and over IPv6. | The phone found it on this network, so the LAN address is the direct one. |
+| L5 | Discovery never pins a certificate or trusts anything. Pairing still needs the PIN, and the QR code is still the only way to pin a fingerprint before the first stream. | mDNS is unauthenticated: anyone on the network can announce anything. The name is shown as the computer "calls itself", the same as the pairing link. |
+| L6 | A new `lan_discovery` key in `config.toml` (on by default). The desktop app's Settings has a **Visible on this network** switch for it, and the change applies when the server restarts. | Some owners do not want to announce the machine on a café network. On by default, because that is what makes discovery useful. |
+
+## As built (2026-10-13)
+
+- **A ghost on the network.** mdns-sd sends no goodbye when its daemon just stops, and keeps PTR/TXT records for 75 minutes. With no server running, the phone still "found" the computer from its mDNS cache. Two fixes:
+  - the server now withdraws its announcement (an mDNS goodbye) on a graceful stop;
+  - the phone lists a found computer only once a TCP connect to its control port succeeds within 1.5 s. Each found record costs the server one connection that opens and closes, which appears as one "Incoming v1 TCP" log line.
+- **After review (fresh reviewer: 0 Critical, 5 Important):**
+  - **L3 and L5 changed.** A tap on a found computer now opens a confirmation. It names the computer as what it "calls itself", warns to type only a PIN the user's own Pocketdesk is showing, and offers the QR scan instead. The card says the computer is unverified until paired. A found computer is saved only once pairing succeeds, at the end of the list. A spoofed announcement could otherwise collect the one-time PIN and become the auto-connect host.
+  - **L2 changed.** A saved computer is recognised by its address only. The TXT `id` is unauthenticated, and matching on it hid a moved computer behind its old card, which was then marked online. The id is still announced for later use.
+  - **L4 extended.** Up to four announced addresses are probed, LAN first, and the computer is listed at the first that answers. A failed probe retries at 0.5, 1.5 and 4 s.
+  - The server announces only after its control listener is bound.
+  - **Android 17.** The app targets SDK 37, so every LAN connection needs `ACCESS_LOCAL_NETWORK`. It is now requested at launch on API 37+. This was app-wide, not F6's, and the Android 17 path is untested here.
+- **Server test.** The server-side test is a live, opt-in test of the goodbye, not of the config check, which is a plain `if` at startup. It needs multicast.
+- **Not yet handled:** a computer that crashes while Home is open stays listed until Home is reopened, or until the phone's cache expires.
+
+## Out of scope
+
+- Discovery over Tailscale or the internet (WAN connections go through iroh, by pairing).
+- The desktop app listing phones.
+- Auto-connect to a found computer.
+
+## Testing
+
+| Layer | Tests |
+|---|---|
+| core | The TXT record carries `id` and `stream`; `lan_discovery` defaults on, round-trips, and its key is known to the saver. |
+| server | Registration is skipped when `lan_discovery` is off. |
+| JVM | Choosing an address (private IPv4 first, then the rest), parsing the TXT record (missing or bad ports fall back to the defaults), and merging found computers with saved ones (by address or by device id). |
+| desktop | The Settings switch writes the key. |
+| Device | The A71 on the same Wi-Fi as the Windows host lists it under "On this network" with its name; tapping it opens a session (already paired) and the saved card shows the label. With the switch off and the server restarted, it disappears. |

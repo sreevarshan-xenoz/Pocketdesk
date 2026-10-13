@@ -86,6 +86,12 @@ impl SettingsForm {
                 ui.label("Require pairing");
                 ui.checkbox(&mut e.pairing_required, "only paired phones may connect");
                 ui.end_row();
+                ui.label("Visible on this network");
+                ui.checkbox(
+                    &mut e.lan_discovery,
+                    "phones on the same network list this computer",
+                );
+                ui.end_row();
                 ui.label("Video quality");
                 egui::ComboBox::from_id_salt("quality")
                     .selected_text(format!("{:?}", e.video_quality))

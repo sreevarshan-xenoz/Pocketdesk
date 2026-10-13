@@ -66,7 +66,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 ### Android Client
 - **Native Kotlin app** (Jetpack Compose, Material 3 dark theme)
 - **Rust core** reused via a JNI/UniFFI bridge (no Flutter)
-- **Connection screen** with peer discovery over Tailscale
+- **Computers on this network** — Home lists Pocketdesk computers on the same Wi-Fi (mDNS); a tap connects and an unpaired one asks for its PIN. Saved computers that are reachable get an "On this network" label
 - **Remote desktop** with tap/drag/double-tap gesture input
 - **Link status** — connecting/LAN/WAN indicator on the video surface, with failure reasons and one-tap retry
 - **Session resilience** — QUIC keepalive + bounded idle timeout hold the link through NAT stalls; a wake-locked foreground service keeps screen-off sessions alive
@@ -225,7 +225,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/linux-link/confi
 - **Devices**: paired phones, which one is connected, and Remove. Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
 - **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
 - **Sessions**: live sessions, with End.
-- **Settings**: edits `config.toml`, keeping your comments and unknown keys.
+- **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
 - **Logs**: the server's log.
 
 Closing the window keeps it in the tray on Windows; Linux has no tray yet, so there closing it quits.
@@ -253,6 +253,7 @@ log_level = "info"         # trace/debug/info/warn/error
 video_quality = "balanced" # low/balanced/high
 pairing_required = true    # PIN-pair devices before the control channel or streaming serves requests
 # allow_hevc = false       # let negotiating phones drive an H.265/HEVC stream (R4 C1)
+# lan_discovery = true     # announce this computer so phones on the network list it
 ```
 
 ### systemd Service
