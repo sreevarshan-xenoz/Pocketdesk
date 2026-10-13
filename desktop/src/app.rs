@@ -292,19 +292,31 @@ impl PocketdeskApp {
 
     fn answer(&mut self, request: &ApprovalRequest, verdict: Verdict) {
         let who = short(&request.device_id);
-        self.notice = Some(
-            match model::answer_approval(&self.state_dir, &request.id, verdict, now_unix()) {
-                Ok(()) => match verdict {
-                    Verdict::AllowOnce => format!("Allowed {who} this once."),
-                    Verdict::AlwaysAllow => format!("Allowed {who}; it will not be asked again."),
-                    Verdict::Deny => format!("Denied {who}."),
-                },
-                Err(e) => format!("Could not answer {who}: {e}"),
+        // A phone that retried while it waited has several requests held;
+        // the owner's answer is about the phone, so it answers them all.
+        let ids: Vec<String> = self
+            .snapshot
+            .approvals
+            .iter()
+            .filter(|r| r.device_id == request.device_id)
+            .map(|r| r.id.clone())
+            .collect();
+        let result = ids
+            .iter()
+            .try_for_each(|id| model::answer_approval(&self.state_dir, id, verdict, now_unix()));
+        self.notice = Some(match result {
+            Ok(()) => match verdict {
+                Verdict::AllowOnce => format!("Allowed {who} this once."),
+                Verdict::AlwaysAllow => format!("Allowed {who}; it will not be asked again."),
+                Verdict::Deny => format!("Denied {who}."),
             },
-        );
+            Err(e) => format!("Could not answer {who}: {e}"),
+        });
         // Off the screen at once; the server drops it from the list when it
         // takes the answer.
-        self.snapshot.approvals.retain(|r| r.id != request.id);
+        self.snapshot
+            .approvals
+            .retain(|r| r.device_id != request.device_id);
     }
 
     fn set_ask_first(&mut self, id: &str, ask_first: bool) {
