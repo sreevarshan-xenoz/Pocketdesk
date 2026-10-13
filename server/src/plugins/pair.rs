@@ -812,7 +812,18 @@ fn owner_paired_in(
     use pocketdesk_core::local::device_keys;
     match key {
         Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => {
-            device_keys::replace(dir, phone_id, &hex(hash))
+            let tls = hex(hash);
+            // The same certificate paired again (perhaps over an address
+            // the phone reaches only through the WAN): its keys stand, the
+            // WAN key included, which nothing could register again there.
+            let unchanged = device_keys::read(dir)
+                .ok()
+                .and_then(|keys| keys.get(phone_id).cloned())
+                .is_some_and(|keys| keys.tls.as_deref() == Some(tls.as_str()));
+            if unchanged {
+                return Ok(());
+            }
+            device_keys::replace(dir, phone_id, &tls)
         }
         _ => device_keys::clear(dir, phone_id),
     }
@@ -989,6 +1000,31 @@ mod tests {
                 .unwrap()
                 .get("phone")
                 .is_none_or(|k| k.tls.is_none() && k.iroh.is_none())
+        );
+    }
+
+    #[test]
+    fn pairing_again_with_the_same_key_keeps_the_wan_key() {
+        // A phone paired again over an address it reaches only through the
+        // WAN (no LAN stream to register the key again) must not lose it.
+        let dir = key_dir("pair-same");
+        let phone = PeerKey::Tls([1; 32]);
+        assert!(allowed(
+            &dir,
+            &claim(Some(phone.clone()), Some("phone-wan"))
+        ));
+        owner_paired_in(&dir, "phone", Some(&phone)).unwrap();
+        assert_eq!(
+            pocketdesk_core::local::device_keys::read(&dir).unwrap()["phone"]
+                .iroh
+                .as_deref(),
+            Some("phone-wan")
+        );
+        // A new certificate is a new phone: its old WAN key goes.
+        owner_paired_in(&dir, "phone", Some(&PeerKey::Tls([2; 32]))).unwrap();
+        assert_eq!(
+            pocketdesk_core::local::device_keys::read(&dir).unwrap()["phone"].iroh,
+            None
         );
     }
 
