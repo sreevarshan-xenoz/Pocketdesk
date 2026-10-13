@@ -122,6 +122,14 @@
     <string name="phone_clipboard_no_text">El portapapeles del teléfono no tiene texto</string>
     <string name="row_send_text">Enviar texto…</string>
     <string name="row_type_clipboard">Escribir el portapapeles del teléfono</string>
+    <string name="row_files">Archivos de este ordenador…</string>
+    <string name="files_up">Subir</string>
+    <string name="files_empty">Esta carpeta está vacía.</string>
+    <string name="files_download_title">¿Descargar %1$s?</string>
+    <string name="files_download_text">%1$s, se guarda en Descargas/Pocketdesk.</string>
+    <string name="files_download">Descargar</string>
+    <string name="files_download_started">Descargando %1$s…</string>
+    <string name="files_failed">No se pudo abrir esta carpeta: %1$s</string>
     <string name="row_privacy">Bloqueo de privacidad</string>
     <string name="row_pairing">Emparejamiento</string>
     <string name="value_direct_touch">Toque directo</string>

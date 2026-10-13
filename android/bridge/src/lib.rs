@@ -757,7 +757,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTakeFile
     to_jstring(&mut env, json)
 }
 
-/// List a remote directory: `{"ok": [RemoteFileDto, ...]}`.
+/// A folder on the desktop (F7b): `{"ok": {path, parent, files, error?}}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeListRemoteFiles(
     mut env: JNIEnv<'_>,

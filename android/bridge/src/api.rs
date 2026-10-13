@@ -208,14 +208,6 @@ pub struct FrameDto {
     pub sequence: u64,
 }
 
-/// Remote file metadata for the file browser.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct RemoteFileDto {
-    pub name: String,
-    pub is_directory: bool,
-    pub size: u64,
-    pub modified: u64,
-}
 /// Streaming statistics for display in the client.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StreamingStatsDto {
@@ -1215,40 +1207,24 @@ pub(crate) async fn presents_key<R: tokio::io::AsyncRead + Unpin>(
         && presented[key.len()] == b'\n'
 }
 
-/// List files in a remote directory using the file browse protocol.
+/// A folder on the desktop (F7b): the browse reply as the desktop sent it,
+/// `{path, parent, files: [{name, isDirectory, size, modified, path}]}`, or
+/// with `error` when the folder cannot be listed.
 pub async fn list_remote_files(
     address: String,
     port: u16,
     remote_path: String,
-) -> Result<Vec<RemoteFileDto>, String> {
+) -> Result<serde_json::Value, String> {
     let request = NetworkPacket::new("kdeconnect.filebrowse.request")
         .with_body(serde_json::json!({ "path": remote_path }));
-    let body = query_peer(
+    query_peer(
         &address,
         port,
         &request,
         "kdeconnect.filebrowse.response",
         Duration::from_secs(10),
     )
-    .await?;
-    if let Some(error) = body.get("error").and_then(|v| v.as_str()) {
-        return Err(error.to_string());
-    }
-    let files = body
-        .get("files")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| "Missing 'files' in response".to_string())?;
-    Ok(files
-        .iter()
-        .filter_map(|f| {
-            Some(RemoteFileDto {
-                name: f.get("name")?.as_str()?.to_string(),
-                is_directory: f.get("isDirectory")?.as_bool()?,
-                size: f.get("size")?.as_u64()?,
-                modified: f.get("modified")?.as_u64()?,
-            })
-        })
-        .collect())
+    .await
 }
 
 /// Request remote screen streaming.

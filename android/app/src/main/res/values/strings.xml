@@ -127,6 +127,14 @@
     <string name="phone_clipboard_no_text">The phone\'s clipboard has no text</string>
     <string name="row_send_text">Send text…</string>
     <string name="row_type_clipboard">Type phone clipboard</string>
+    <string name="row_files">Files on this computer…</string>
+    <string name="files_up">Up</string>
+    <string name="files_empty">This folder is empty.</string>
+    <string name="files_download_title">Download %1$s?</string>
+    <string name="files_download_text">%1$s, saved to Downloads/Pocketdesk.</string>
+    <string name="files_download">Download</string>
+    <string name="files_download_started">Downloading %1$s…</string>
+    <string name="files_failed">This folder could not be opened: %1$s</string>
     <string name="row_privacy">Privacy grab</string>
     <string name="row_pairing">Pairing</string>
     <string name="value_direct_touch">Direct touch</string>
