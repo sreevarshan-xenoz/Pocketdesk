@@ -22,6 +22,9 @@ pub const ALPN_V1_STREAM: &[u8] = b"linux-link-stream";
 /// it runs the same handshake and packets the control channel always had.
 pub const ALPN_CONTROL: &[u8] = b"linux-link-control/1";
 
+/// ALPN for a file transfer's own TLS connection (phase C).
+pub const ALPN_TRANSFER: &[u8] = b"linux-link-transfer/1";
+
 /// The first byte of a TLS handshake record. The control port refuses a
 /// connection that starts with anything else.
 pub const TLS_HANDSHAKE_RECORD: u8 = 0x16;

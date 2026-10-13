@@ -117,17 +117,14 @@ pub(crate) fn forget_peer_certificate_in(
     cert_dir: &std::path::Path,
     address: &str,
 ) -> Result<bool, String> {
-    let Ok(ip) = address.trim().parse::<std::net::IpAddr>() else {
-        // Hosts saved by name were never pinned by IP.
+    // The label the control channel pinned it under: its IP, or the name a
+    // computer saved by name was dialed with.
+    let Some(label) = linux_link_core::streaming::transport::peer_label_for_address(address) else {
         return Ok(false);
     };
     let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
         .map_err(|e| e.to_string())?;
-    manager
-        .remove_peer(&linux_link_core::streaming::transport::peer_label_for_ip(
-            ip,
-        ))
-        .map_err(|e| e.to_string())
+    manager.remove_peer(&label).map_err(|e| e.to_string())
 }
 
 /// Check if the LAN discovery service is active.
@@ -1147,23 +1144,18 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         .await
         .map_err(|e| format!("Failed to send share request: {e}"))?;
     let _reading = AbortOnDrop(replies.keep_reading());
-    // The desktop connects back for the bytes. The listener is on every
-    // interface, so the bytes go only to a connection that first presents
-    // the key from the request, which only the desktop has seen; anything
-    // else that connects is dropped. (Its source address is no test: a
-    // desktop with several addresses may connect back from another one.)
-    let mut client_stream = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let (mut stream, peer) = listener
-                .accept()
-                .await
-                .map_err(|e| format!("Failed to accept connection: {}", e))?;
-            if presents_key(&mut stream, &key).await {
-                return Ok::<_, String>(stream);
-            }
-            tracing::warn!("File transfer: dropped a connection from {peer} without the key");
-        }
-    })
+    // Only the desktop this phone pinned for `address` may take the bytes
+    // (phase C). Looked up once the request is out: a connection made for
+    // it may have pinned the desktop just now.
+    let tls = transfer_acceptor(&address)?;
+    // The desktop connects back for the bytes, inside TLS with the pinned
+    // desktop's certificate, then presents the key from the request.
+    // Anything else that connects is dropped. (Its source address is no
+    // test: a desktop with several addresses may connect back from another.)
+    let mut client_stream = tokio::time::timeout(
+        Duration::from_secs(30),
+        accept_transfer(&listener, &key, &tls),
+    )
     .await
     .map_err(|_| "Timeout waiting for file receiver".to_string())??;
     let sent = pump(&mut file, &mut client_stream, file_size).await?;
@@ -1229,6 +1221,102 @@ where
         .await
         .map_err(|e: std::io::Error| e.to_string())?;
     Ok(sent)
+}
+
+/// A transfer connection (phase C): TLS over TCP, the phone's side.
+pub(crate) type TransferStream = tokio_rustls::server::TlsStream<tokio::net::TcpStream>;
+
+/// The phone's side of a transfer's TLS (phase C): its own certificate, and
+/// a dialer required to present exactly the certificate pinned for the
+/// desktop at `address`, the one its control channel proved.
+pub(crate) fn transfer_acceptor(address: &str) -> Result<tokio_rustls::TlsAcceptor, String> {
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    transfer_acceptor_in(&dir, address)
+}
+
+/// [`transfer_acceptor`] with this phone's certificates in `dir`.
+pub(crate) fn transfer_acceptor_in(
+    dir: &std::path::Path,
+    address: &str,
+) -> Result<tokio_rustls::TlsAcceptor, String> {
+    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(dir)
+        .map_err(|e| format!("This phone's certificate: {e}"))?;
+    // The pin's label is the one the control channel used for `address`:
+    // its IP, or the name of a computer saved by name.
+    let label = linux_link_core::streaming::transport::peer_label_for_address(address)
+        .ok_or_else(|| format!("{address} is not an address"))?;
+    let pinned = certs
+        .known_peers()
+        .into_iter()
+        .find(|(known, _)| *known == label)
+        .map(|(_, hash)| hash)
+        .ok_or_else(|| format!("This phone has not verified the computer at {address} yet"))?;
+    let config = certs
+        .transfer_server_config(pinned)
+        .map_err(|e| e.to_string())?;
+    Ok(tokio_rustls::TlsAcceptor::from(config))
+}
+
+/// The desktop's connection for a transfer: TLS, in which it must prove it
+/// is the pinned desktop and speak the transfer protocol, then the
+/// transfer's `key`. Connections are checked side by side (up to
+/// [`MAX_PENDING_TRANSFER_CONNECTIONS`]), so ones that stall cannot hold up
+/// the desktop's; anything that fails is dropped, and the wait goes on.
+pub(crate) async fn accept_transfer(
+    listener: &tokio::net::TcpListener,
+    key: &str,
+    tls: &tokio_rustls::TlsAcceptor,
+) -> Result<TransferStream, String> {
+    let mut pending = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            accepted = listener.accept(), if pending.len() < MAX_PENDING_TRANSFER_CONNECTIONS => {
+                let (stream, peer) =
+                    accepted.map_err(|e| format!("Failed to accept connection: {e}"))?;
+                let tls = tls.clone();
+                let key = key.to_string();
+                pending.spawn(async move {
+                    let checked = check_transfer_connection(stream, &tls, &key).await;
+                    if let Err(why) = &checked {
+                        tracing::warn!("File transfer: dropped a connection from {peer}: {why}");
+                    }
+                    checked.ok()
+                });
+            }
+            Some(done) = pending.join_next(), if !pending.is_empty() => {
+                if let Ok(Some(stream)) = done {
+                    // Dropping the set ends the checks still running.
+                    return Ok(stream);
+                }
+            }
+        }
+    }
+}
+
+/// How many incoming connections are checked at once while a transfer waits.
+const MAX_PENDING_TRANSFER_CONNECTIONS: usize = 16;
+
+/// TLS with the pinned desktop on the transfer protocol, then the key.
+async fn check_transfer_connection(
+    stream: tokio::net::TcpStream,
+    tls: &tokio_rustls::TlsAcceptor,
+    key: &str,
+) -> Result<TransferStream, &'static str> {
+    let mut stream = tokio::time::timeout(Duration::from_secs(5), tls.accept(stream))
+        .await
+        .map_err(|_| "no TLS handshake")?
+        .map_err(|_| "not the computer")?;
+    if stream.get_ref().1.alpn_protocol() != Some(linux_link_core::protocol::ALPN_TRANSFER) {
+        return Err("not a file transfer");
+    }
+    if !presents_key(&mut stream, key).await {
+        return Err("without the key");
+    }
+    Ok(stream)
 }
 
 /// Whether a connection opens with `key` and a newline, read within 5 s.
@@ -3015,6 +3103,40 @@ fn android_to_evdev_keycode(android_keycode: i32) -> u16 {
         141 => 87, // F11 -> KEY_F11
         142 => 88, // F12 -> KEY_F12
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod transfer_pin_tests {
+    use linux_link_core::streaming::transport::{CertManager, peer_label_for_address};
+
+    fn dir(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("ll-transfer-pin-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn a_computer_saved_by_name_can_take_files_and_be_forgotten() {
+        let dir = dir("name");
+        let label = peer_label_for_address("mypc.local").unwrap();
+        CertManager::load_or_create(&dir)
+            .unwrap()
+            .pin_peer(&label, [4u8; 32])
+            .unwrap();
+        assert!(super::transfer_acceptor_in(&dir, "mypc.local").is_ok());
+        assert!(super::forget_peer_certificate_in(&dir, "mypc.local").unwrap());
+        assert!(
+            super::transfer_acceptor_in(&dir, "mypc.local").is_err(),
+            "forgotten: no computer to send to"
+        );
+    }
+
+    #[test]
+    fn files_go_to_no_computer_the_phone_has_not_verified() {
+        let dir = dir("unpinned");
+        assert!(super::transfer_acceptor_in(&dir, "192.0.2.9").is_err());
     }
 }
 

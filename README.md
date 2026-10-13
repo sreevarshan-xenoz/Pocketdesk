@@ -237,7 +237,7 @@ Closing the window keeps it in the tray on Windows; Linux has no tray yet, so th
 cargo run --release -p pocketdesk-desktop   # or run the installed pocketdesk / pocketdesk.exe
 ```
 
-A phone always asks before it acts on a pairing code (a `pocketdesk://pair` link can come from anywhere). A code can never replace the certificate the phone already trusts for an address; remove that computer in the app first. The PIN still travels over the control channel, which is not encrypted, the same as typing it by hand.
+A phone always asks before it acts on a pairing code (a `pocketdesk://pair` link can come from anywhere). A code can never replace the certificate the phone already trusts for an address; remove that computer in the app first. The PIN travels inside the control channel's TLS, and with a scanned code the phone has checked the computer's certificate before sending it.
 
 ### Configuration
 
@@ -361,7 +361,7 @@ Requires JDK 17+ and Android SDK/NDK.
 
 ## Security
 
-Read [SECURITY.md](SECURITY.md) before using Pocketdesk on a network you do not control. In short: the stream and the control channel are encrypted (TLS 1.3) and both ends prove their keys on them, so a paired phone is known by its key, not by an id it announces. File transfers are not encrypted yet. On anything but a trusted home network, run it over Tailscale (or another VPN) and keep "Ask before each session" on. Report vulnerabilities privately through GitHub's **Security → Report a vulnerability**.
+Read [SECURITY.md](SECURITY.md) before using Pocketdesk on a network you do not control. In short: the stream, the control channel and file transfers are all encrypted (TLS 1.3), and both ends prove their keys on each, so a paired phone is known by its key, not by an id it announces. On anything but a trusted home network, run it over Tailscale (or another VPN) and keep "Ask before each session" on. Report vulnerabilities privately through GitHub's **Security → Report a vulnerability**.
 
 ## Architecture
 

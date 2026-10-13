@@ -16,7 +16,7 @@ use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDevi
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, broadcast};
 
-use crate::api::{TRANSFER_SENT, TRANSFER_TOTAL, client_identity, presents_key};
+use crate::api::{TRANSFER_SENT, TRANSFER_TOTAL, accept_transfer, client_identity};
 use crate::{CONTROL_PEER, CONTROL_WRITER};
 
 /// Ask the desktop for a file (F7b): `{path | offer, port, key}`.
@@ -98,8 +98,11 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
     }
     let request = NetworkPacket::new(FETCH).with_body(body);
     let lines = send_watching_replies(address, port, &request).await?;
+    // Only the desktop this phone pinned for `address` may send (phase C),
+    // looked up once the request is out (its connection may have pinned it).
+    let tls = crate::api::transfer_acceptor(address)?;
     let refused = refusal_on(lines, key.clone());
-    await_and_receive(listener, &key, refused, out).await
+    await_and_receive(listener, &key, &tls, refused, out).await
 }
 
 /// The read half of a connection opened for one request.
@@ -245,12 +248,13 @@ fn refusal_for(line: &str, key: &str) -> Option<String> {
     )
 }
 
-/// Wait up to 30 s for the desktop to connect with `key` (dropping anything
-/// else that connects), then receive the file into `out`, unless `refused`
-/// resolves first.
+/// Wait up to 30 s for the desktop to connect inside TLS with `key`
+/// (dropping anything else that connects), then receive the file into
+/// `out`, unless `refused` resolves first.
 async fn await_and_receive<W, F>(
     listener: tokio::net::TcpListener,
     key: &str,
+    tls: &tokio_rustls::TlsAcceptor,
     refused: F,
     out: &mut W,
 ) -> Result<u64, String>
@@ -258,18 +262,10 @@ where
     W: tokio::io::AsyncWrite + Unpin,
     F: std::future::Future<Output = String>,
 {
-    let accept = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let (mut stream, peer) = listener
-                .accept()
-                .await
-                .map_err(|e| format!("Failed to accept connection: {e}"))?;
-            if presents_key(&mut stream, key).await {
-                return Ok::<_, String>(stream);
-            }
-            tracing::warn!("Download: dropped a connection from {peer} without the key");
-        }
-    });
+    let accept = tokio::time::timeout(
+        Duration::from_secs(30),
+        accept_transfer(&listener, key, tls),
+    );
     let mut stream = tokio::select! {
         accepted = accept => accepted.map_err(|_| "The computer did not send the file".to_string())??,
         reason = refused => return Err(reason),
@@ -320,7 +316,12 @@ where
     }
     .await;
     let status = if received.is_ok() { 1 } else { 0 };
-    let _ = tokio::time::timeout(Duration::from_secs(5), stream.write_all(&[status])).await;
+    // Flushed: inside TLS the byte otherwise waits in the session's buffer.
+    let _ = tokio::time::timeout(Duration::from_secs(5), async {
+        stream.write_all(&[status]).await?;
+        stream.flush().await
+    })
+    .await;
     received
 }
 
@@ -336,6 +337,46 @@ mod tests {
 
     const KEY: &str = "0123456789abcdef0123456789abcdef";
 
+    use linux_link_core::streaming::transport::CertManager;
+
+    /// This phone, the desktop it pinned, and another computer.
+    fn certs() -> &'static (CertManager, CertManager, CertManager) {
+        static CERTS: std::sync::OnceLock<(CertManager, CertManager, CertManager)> =
+            std::sync::OnceLock::new();
+        CERTS.get_or_init(|| {
+            (
+                CertManager::new().unwrap(),
+                CertManager::new().unwrap(),
+                CertManager::new().unwrap(),
+            )
+        })
+    }
+
+    /// The phone's side: only the pinned desktop.
+    fn phone_tls() -> tokio_rustls::TlsAcceptor {
+        let (phone, desktop, _) = certs();
+        tokio_rustls::TlsAcceptor::from(
+            phone
+                .transfer_server_config(desktop.cert_fingerprint())
+                .unwrap(),
+        )
+    }
+
+    /// Dial `to` inside TLS as `from` (a desktop), expecting this phone.
+    async fn dial_as(
+        from: &CertManager,
+        to: std::net::SocketAddr,
+    ) -> std::io::Result<tokio_rustls::client::TlsStream<TcpStream>> {
+        let (phone, _, _) = certs();
+        let tcp = TcpStream::connect(to).await?;
+        tokio_rustls::TlsConnector::from(from.transfer_client_config(phone.cert_fingerprint()))
+            .connect(
+                tokio_rustls::rustls::pki_types::ServerName::IpAddress(to.ip().into()),
+                tcp,
+            )
+            .await
+    }
+
     /// The desktop's side of a download: dial, present `key`, send the
     /// size and `data` (all of it unless `short`), and read the status.
     async fn desktop_sending(
@@ -344,13 +385,15 @@ mod tests {
         size: u64,
         data: Vec<u8>,
     ) -> Option<u8> {
-        let mut stream = TcpStream::connect(to).await.unwrap();
+        let mut stream = dial_as(&certs().1, to).await.unwrap();
         stream
             .write_all(format!("{key}\n").as_bytes())
             .await
             .unwrap();
         stream.write_u64(size).await.unwrap();
         stream.write_all(&data).await.unwrap();
+        // TLS's close_notify, then the socket's write side; the status still
+        // comes back.
         stream.shutdown().await.unwrap();
         let mut status = [0u8; 1];
         stream.read_exact(&mut status).await.ok().map(|_| status[0])
@@ -369,7 +412,14 @@ mod tests {
         let data: Vec<u8> = (0..200_000u32).map(|i| (i * 3) as u8).collect();
         let desktop = tokio::spawn(desktop_sending(addr, KEY, data.len() as u64, data.clone()));
         let mut out = Vec::new();
-        let got = await_and_receive(listener, KEY, std::future::pending(), &mut out).await;
+        let got = await_and_receive(
+            listener,
+            KEY,
+            &phone_tls(),
+            std::future::pending(),
+            &mut out,
+        )
+        .await;
         assert_eq!(got, Ok(data.len() as u64));
         assert_eq!(out, data);
         assert_eq!(desktop.await.unwrap(), Some(1));
@@ -382,18 +432,26 @@ mod tests {
         let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let wrong = tokio::spawn(async move {
-            let mut stream = TcpStream::connect(addr).await.unwrap();
+            let mut stream = dial_as(&certs().1, addr).await.unwrap();
             stream
                 .write_all(b"ffffffffffffffffffffffffffffffff\n")
                 .await
                 .unwrap();
+            stream.flush().await.unwrap();
             let mut rest = Vec::new();
             let _ = stream.read_to_end(&mut rest).await;
             rest
         });
         let receiving = tokio::spawn(async move {
             let mut out = Vec::new();
-            let got = await_and_receive(listener, KEY, std::future::pending(), &mut out).await;
+            let got = await_and_receive(
+                listener,
+                KEY,
+                &phone_tls(),
+                std::future::pending(),
+                &mut out,
+            )
+            .await;
             (got, out)
         });
         assert!(
@@ -406,15 +464,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_computer_the_phone_did_not_pin_gets_nothing() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        let (listener, addr) = listener().await;
+        let receiving = tokio::spawn(async move {
+            let mut out = Vec::new();
+            let got = await_and_receive(
+                listener,
+                KEY,
+                &phone_tls(),
+                std::future::pending(),
+                &mut out,
+            )
+            .await;
+            (got, out)
+        });
+        // Another computer, even one that knows the key, is turned away in
+        // the handshake.
+        let other = async {
+            let mut stream = dial_as(&certs().2, addr).await?;
+            stream.write_all(format!("{KEY}\n").as_bytes()).await?;
+            stream.flush().await?;
+            let mut rest = Vec::new();
+            stream.read_to_end(&mut rest).await?;
+            Ok::<_, std::io::Error>(rest)
+        }
+        .await;
+        assert!(other.is_err() || other.unwrap().is_empty());
+        let status = desktop_sending(addr, KEY, 3, b"xyz".to_vec()).await;
+        assert_eq!(status, Some(1));
+        assert_eq!(receiving.await.unwrap(), (Ok(3), b"xyz".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn silent_connections_do_not_hold_up_the_desktop() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        let (listener, addr) = listener().await;
+        // Connections that never start a handshake, ahead of the desktop.
+        let mut silent = Vec::new();
+        for _ in 0..4 {
+            silent.push(TcpStream::connect(addr).await.unwrap());
+        }
+        let receiving = tokio::spawn(async move {
+            let mut out = Vec::new();
+            let got = await_and_receive(
+                listener,
+                KEY,
+                &phone_tls(),
+                std::future::pending(),
+                &mut out,
+            )
+            .await;
+            (got, out)
+        });
+        let sent = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            desktop_sending(addr, KEY, 3, b"abc".to_vec()),
+        )
+        .await;
+        assert_eq!(sent, Ok(Some(1)), "served while the others sit silent");
+        assert_eq!(receiving.await.unwrap(), (Ok(3), b"abc".to_vec()));
+        drop(silent);
+    }
+
+    #[tokio::test]
     async fn a_short_download_fails_and_says_so() {
         let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let desktop = tokio::spawn(desktop_sending(addr, KEY, 10, b"abcd".to_vec()));
         let mut out = Vec::new();
         assert!(
-            await_and_receive(listener, KEY, std::future::pending(), &mut out)
-                .await
-                .is_err()
+            await_and_receive(
+                listener,
+                KEY,
+                &phone_tls(),
+                std::future::pending(),
+                &mut out
+            )
+            .await
+            .is_err()
         );
         assert_eq!(desktop.await.unwrap(), Some(0));
     }
@@ -426,9 +554,15 @@ mod tests {
         let desktop = tokio::spawn(desktop_sending(addr, KEY, 9 << 30, Vec::new()));
         let mut out = Vec::new();
         assert!(
-            await_and_receive(listener, KEY, std::future::pending(), &mut out)
-                .await
-                .is_err()
+            await_and_receive(
+                listener,
+                KEY,
+                &phone_tls(),
+                std::future::pending(),
+                &mut out
+            )
+            .await
+            .is_err()
         );
         assert_eq!(desktop.await.unwrap(), Some(0));
         assert!(out.is_empty());
@@ -458,7 +592,14 @@ mod tests {
         let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let desktop = tokio::spawn(desktop_sending(addr, KEY, 3, b"abc".to_vec()));
-        let got = await_and_receive(listener, KEY, std::future::pending(), &mut Full).await;
+        let got = await_and_receive(
+            listener,
+            KEY,
+            &phone_tls(),
+            std::future::pending(),
+            &mut Full,
+        )
+        .await;
         assert!(got.is_err());
         assert_eq!(desktop.await.unwrap(), Some(0));
     }
@@ -470,7 +611,7 @@ mod tests {
         let mut out = Vec::new();
         let got = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            await_and_receive(listener, KEY, refused, &mut out),
+            await_and_receive(listener, KEY, &phone_tls(), refused, &mut out),
         )
         .await
         .expect("no wait for the listener's timeout");

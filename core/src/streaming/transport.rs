@@ -299,15 +299,50 @@ impl CertManager {
         Ok(removed)
     }
 
+    /// A file transfer's TLS server configuration (phase C; the phone's
+    /// side): this device's certificate, and a client certificate required
+    /// to be exactly `desktop`, the one pinned for the computer the request
+    /// went to.
+    pub fn transfer_server_config(&self, desktop: [u8; 32]) -> Result<Arc<rustls::ServerConfig>> {
+        let cert = CertificateDer::from(self.cert_der.clone());
+        let key = PrivateKeyDer::try_from(self.key_der.clone())
+            .map_err(|_| anyhow::anyhow!("Failed to parse private key"))?;
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut config = rustls::ServerConfig::builder()
+            .with_client_cert_verifier(Arc::new(OnlyCert(desktop)))
+            .with_single_cert(vec![cert], key)
+            .context("Failed to configure the transfer's TLS")?;
+        config.alpn_protocols = vec![crate::protocol::ALPN_TRANSFER.to_vec()];
+        Ok(Arc::new(config))
+    }
+
+    /// A file transfer's TLS client configuration (phase C; the desktop's
+    /// side): this device's certificate, and a server required to be
+    /// exactly `phone`, the key the requesting connection proved.
+    pub fn transfer_client_config(&self, phone: [u8; 32]) -> Arc<rustls::ClientConfig> {
+        let mut config = self.client_with_own_cert(Arc::new(OnlyCert(phone)));
+        config.alpn_protocols = vec![crate::protocol::ALPN_TRANSFER.to_vec()];
+        Arc::new(config)
+    }
+
     /// The TLS half of [`CertManager::client_config`]: TOFU certificate pins.
     fn tls_client_config(&self) -> rustls::ClientConfig {
+        self.client_with_own_cert(Arc::new(TofuVerifier {
+            known_peers: self.known_peers.clone(),
+            peers_path: self.peers_path.clone(),
+        }))
+    }
+
+    /// A client that checks the server with `verifier` and presents this
+    /// device's certificate.
+    fn client_with_own_cert(
+        &self,
+        verifier: Arc<dyn rustls::client::danger::ServerCertVerifier>,
+    ) -> rustls::ClientConfig {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let builder = rustls::ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(TofuVerifier {
-                known_peers: self.known_peers.clone(),
-                peers_path: self.peers_path.clone(),
-            }));
+            .with_custom_certificate_verifier(verifier);
         // This device's own certificate, so the desktop can bind the device
         // to the key behind it. A key that will not load leaves the client
         // anonymous (the desktop then decides) rather than unable to connect.
@@ -409,6 +444,15 @@ fn peer_label(server_name: &ServerName<'_>) -> String {
 /// the IP as its server name).
 pub fn peer_label_for_ip(ip: std::net::IpAddr) -> String {
     peer_label(&ServerName::IpAddress(ip.into()))
+}
+
+/// [`peer_label`] for a connection made to `address`, as the control
+/// channel dials it: an IP address, or a host name (a computer saved by
+/// name). `None` for text that is neither.
+pub fn peer_label_for_address(address: &str) -> Option<String> {
+    ServerName::try_from(address.to_string())
+        .ok()
+        .map(|name| peer_label(&name))
 }
 
 /// TOFU (Trust On First Use) certificate verifier.
@@ -545,6 +589,106 @@ impl rustls::server::danger::ClientCertVerifier for AnyClientCert {
         _intermediates: &[CertificateDer<'_>],
         _now: rustls::pki_types::UnixTime,
     ) -> std::result::Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        Ok(rustls::server::danger::ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        signature_algorithms().supported_schemes()
+    }
+}
+
+/// A peer that must present exactly one certificate (a file transfer, phase
+/// C: each end knows which key the other proved on the control channel),
+/// and prove it holds its key.
+#[derive(Debug)]
+struct OnlyCert([u8; 32]);
+
+impl OnlyCert {
+    fn check(&self, cert: &CertificateDer<'_>) -> std::result::Result<(), rustls::Error> {
+        if CertManager::cert_hash(cert) == self.0 {
+            Ok(())
+        } else {
+            Err(rustls::Error::General(
+                "not the certificate this transfer expects".into(),
+            ))
+        }
+    }
+}
+
+impl rustls::client::danger::ServerCertVerifier for OnlyCert {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        self.check(end_entity)?;
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        signature_algorithms().supported_schemes()
+    }
+}
+
+impl rustls::server::danger::ClientCertVerifier for OnlyCert {
+    fn offer_client_auth(&self) -> bool {
+        true
+    }
+
+    fn client_auth_mandatory(&self) -> bool {
+        true
+    }
+
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+
+    fn verify_client_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _now: rustls::pki_types::UnixTime,
+    ) -> std::result::Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        self.check(end_entity)?;
         Ok(rustls::server::danger::ClientCertVerified::assertion())
     }
 
@@ -1044,6 +1188,21 @@ mod tests {
     }
 
     #[test]
+    fn the_pin_label_for_an_address_is_the_one_its_connection_uses() {
+        let ip: std::net::IpAddr = "192.0.2.5".parse().unwrap();
+        assert_eq!(
+            peer_label_for_address("192.0.2.5").as_deref(),
+            Some(peer_label_for_ip(ip).as_str())
+        );
+        assert_eq!(
+            peer_label_for_address("mypc.local").as_deref(),
+            Some(peer_label(&ServerName::try_from("mypc.local").unwrap()).as_str()),
+            "a computer saved by name is pinned under its name"
+        );
+        assert_eq!(peer_label_for_address(""), None);
+    }
+
+    #[test]
     fn a_pin_one_manager_writes_is_not_lost_by_another() {
         let dir = pin_dir("merge");
         let control = CertManager::load_or_create(&dir).unwrap();
@@ -1173,13 +1332,26 @@ mod tests {
         std::result::Result<Option<super::super::PeerKey>, std::io::Error>,
         std::result::Result<Option<Vec<u8>>, std::io::Error>,
     ) {
+        loopback_handshake(server, client, crate::protocol::ALPN_CONTROL).await
+    }
+
+    /// A TLS handshake over a loopback TCP socket, negotiating `alpn`; what
+    /// each end learned of the other.
+    async fn loopback_handshake(
+        server: Arc<rustls::ServerConfig>,
+        client: Arc<rustls::ClientConfig>,
+        alpn: &'static [u8],
+    ) -> (
+        std::result::Result<Option<super::super::PeerKey>, std::io::Error>,
+        std::result::Result<Option<Vec<u8>>, std::io::Error>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server_side = tokio::spawn(async move {
             let (tcp, _) = listener.accept().await?;
             let tls = tokio_rustls::TlsAcceptor::from(server).accept(tcp).await?;
             let (_, session) = tls.get_ref();
-            assert_eq!(session.alpn_protocol(), Some(crate::protocol::ALPN_CONTROL));
+            assert_eq!(session.alpn_protocol(), Some(alpn));
             Ok(session
                 .peer_certificates()
                 .and_then(super::super::PeerKey::from_tls_certs))
@@ -1223,6 +1395,57 @@ mod tests {
             "the desktop knows the phone's key"
         );
         assert_eq!(client_seen.unwrap().as_deref(), Some(&desktop.cert_der[..]));
+    }
+
+    #[tokio::test]
+    async fn a_transfer_runs_between_the_desktop_and_phone_each_side_expects() {
+        let desktop = CertManager::new().unwrap();
+        let phone = CertManager::new().unwrap();
+        let (phone_saw, desktop_saw) = loopback_handshake(
+            phone
+                .transfer_server_config(desktop.cert_fingerprint())
+                .unwrap(),
+            desktop.transfer_client_config(phone.cert_fingerprint()),
+            crate::protocol::ALPN_TRANSFER,
+        )
+        .await;
+        assert_eq!(
+            phone_saw.unwrap(),
+            Some(super::super::PeerKey::Tls(desktop.cert_fingerprint()))
+        );
+        assert_eq!(desktop_saw.unwrap().as_deref(), Some(&phone.cert_der[..]));
+    }
+
+    #[tokio::test]
+    async fn the_phone_sends_files_to_no_desktop_but_the_one_it_pinned() {
+        let desktop = CertManager::new().unwrap();
+        let impostor = CertManager::new().unwrap();
+        let phone = CertManager::new().unwrap();
+        let (phone_saw, _) = loopback_handshake(
+            phone
+                .transfer_server_config(desktop.cert_fingerprint())
+                .unwrap(),
+            impostor.transfer_client_config(phone.cert_fingerprint()),
+            crate::protocol::ALPN_TRANSFER,
+        )
+        .await;
+        assert!(phone_saw.is_err(), "another computer dialed in");
+    }
+
+    #[tokio::test]
+    async fn the_desktop_sends_files_to_no_phone_but_the_one_that_asked() {
+        let desktop = CertManager::new().unwrap();
+        let phone = CertManager::new().unwrap();
+        let impostor = CertManager::new().unwrap();
+        let (_, desktop_saw) = loopback_handshake(
+            impostor
+                .transfer_server_config(desktop.cert_fingerprint())
+                .unwrap(),
+            desktop.transfer_client_config(phone.cert_fingerprint()),
+            crate::protocol::ALPN_TRANSFER,
+        )
+        .await;
+        assert!(desktop_saw.is_err(), "another device answered");
     }
 
     #[tokio::test]

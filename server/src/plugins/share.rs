@@ -146,6 +146,15 @@ impl Plugin for SharePlugin {
                     tracing::warn!("File share of {name} refused: no transfer key");
                     return Ok(());
                 };
+                // The bytes travel inside TLS with the phone that asked
+                // (phase C): the key its control connection proved.
+                let tls = match transfer_tls(sender) {
+                    Ok(tls) => tls,
+                    Err(reason) => {
+                        tracing::warn!("File share of {name} refused: {reason}");
+                        return Ok(());
+                    }
+                };
                 let Ok(slot) = transfer_slots().clone().try_acquire_owned() else {
                     tracing::warn!("File share of {name} refused: {MAX_TRANSFERS} already running");
                     return Ok(());
@@ -154,8 +163,15 @@ impl Plugin for SharePlugin {
                 let from = sender.device_id().to_string();
                 tokio::spawn(async move {
                     let _slot = slot;
-                    match receive_file(SocketAddr::new(phone_ip, port), &key, &dir, &name, size)
-                        .await
+                    match receive_file(
+                        SocketAddr::new(phone_ip, port),
+                        tls,
+                        &key,
+                        &dir,
+                        &name,
+                        size,
+                    )
+                    .await
                     {
                         Ok(path) => {
                             tracing::info!("File received: {} ({size} bytes)", path.display());
@@ -200,7 +216,7 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             tracing::info!("Sending {} to {}", fetch.path.display(), fetch.to);
             tokio::spawn(async move {
                 let _slot = fetch.slot;
-                let sent = send_file_to(fetch.to, &key, &fetch.path).await;
+                let sent = send_file_to(fetch.to, fetch.tls, &key, &fetch.path).await;
                 match &sent {
                     Ok(size) => {
                         tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
@@ -222,6 +238,8 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
 /// A download that passed every check, holding its transfer slot.
 struct Fetch {
     to: SocketAddr,
+    /// The transfer's TLS, with the phone that asked.
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
     path: PathBuf,
     /// The desktop app's send this download answers, if any.
     offer: Option<String>,
@@ -276,12 +294,86 @@ fn plan_fetch(
         }
         return Err(reason.to_string());
     }
+    // Last, after every check that can refuse: it reads this desktop's
+    // certificate.
+    let tls = match transfer_tls(sender) {
+        Ok(tls) => tls,
+        Err(reason) => {
+            if let Some(id) = &offer {
+                crate::offers::finish(id, Err(reason.clone()));
+            }
+            return Err(reason);
+        }
+    };
     Ok(Fetch {
         to: SocketAddr::new(ip, port),
+        tls,
         path,
         offer,
         slot,
     })
+}
+
+/// This desktop's side of a transfer's TLS with the phone behind `sender`
+/// (phase C): this desktop's certificate, and the phone must present the
+/// key its control connection proved. A connection that proved none gets
+/// no transfer.
+fn transfer_tls(
+    sender: &dyn DeviceSender,
+) -> std::result::Result<std::sync::Arc<tokio_rustls::rustls::ClientConfig>, String> {
+    let Some(key @ linux_link_core::streaming::PeerKey::Tls(phone)) = sender.peer_key() else {
+        return Err("the phone's connection proved no key".to_string());
+    };
+    crate::plugins::pair::may_transfer(sender.device_id(), &key)?;
+    Ok(desktop_certs()?.transfer_client_config(phone))
+}
+
+/// This desktop's identity, read once: the one its control channel and
+/// stream present (loaded at start by the service from the same folder).
+fn desktop_certs()
+-> std::result::Result<std::sync::Arc<linux_link_core::streaming::transport::CertManager>, String> {
+    use linux_link_core::streaming::transport::CertManager;
+    static CERTS: std::sync::Mutex<Option<std::sync::Arc<CertManager>>> =
+        std::sync::Mutex::new(None);
+    let mut cached = CERTS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(certs) = cached.as_ref() {
+        return Ok(certs.clone());
+    }
+    let dir = crate::state::state_dir()
+        .map_err(|e| e.to_string())?
+        .join("certs");
+    let certs = std::sync::Arc::new(
+        CertManager::load_or_create(&dir)
+            .map_err(|e| format!("this desktop's certificate: {e}"))?,
+    );
+    *cached = Some(certs.clone());
+    Ok(certs)
+}
+
+/// Dial the phone at `to` and open the transfer's TLS.
+async fn dial_transfer(
+    to: SocketAddr,
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+) -> Result<tokio_rustls::client::TlsStream<tokio::net::TcpStream>> {
+    let tcp = tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(to))
+        .await
+        .map_err(|_| io_error("connect", "timed out"))?
+        .map_err(|e| io_error("connect", e))?;
+    let name = tokio_rustls::rustls::pki_types::ServerName::IpAddress(to.ip().into());
+    let stream = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        tokio_rustls::TlsConnector::from(tls).connect(name, tcp),
+    )
+    .await
+    .map_err(|_| io_error("tls", "timed out"))?
+    .map_err(|e| io_error("tls", e))?;
+    if stream.get_ref().1.alpn_protocol() != Some(linux_link_core::protocol::ALPN_TRANSFER) {
+        return Err(io_error(
+            "tls",
+            "the phone does not speak the transfer protocol",
+        ));
+    }
+    Ok(stream)
 }
 
 /// The phone behind `sender`: a connection goes by its device's id (phase B).
@@ -299,7 +391,12 @@ async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {
 
 /// Send the file at `path` to the phone listening at `to`, and return its
 /// size once the phone says it saved it.
-pub(crate) async fn send_file_to(to: SocketAddr, key: &str, path: &Path) -> Result<u64> {
+pub(crate) async fn send_file_to(
+    to: SocketAddr,
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+    key: &str,
+    path: &Path,
+) -> Result<u64> {
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|e| io_error("open", e))?;
@@ -311,7 +408,7 @@ pub(crate) async fn send_file_to(to: SocketAddr, key: &str, path: &Path) -> Resu
     if size > MAX_FILE_BYTES {
         return Err(io_error("send", "larger than 8 GB"));
     }
-    send_reader(to, key, &mut file, size).await
+    send_reader(to, tls, key, &mut file, size).await
 }
 
 /// Dial `to`, present `key`, write `size` (u64, big-endian) and exactly
@@ -319,15 +416,13 @@ pub(crate) async fn send_file_to(to: SocketAddr, key: &str, path: &Path) -> Resu
 /// A reader that ends early (the file shrank) fails the send.
 async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
     to: SocketAddr,
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
     key: &str,
     reader: &mut R,
     size: u64,
 ) -> Result<u64> {
     let send = async {
-        let mut stream = tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(to))
-            .await
-            .map_err(|_| io_error("connect", "timed out"))?
-            .map_err(|e| io_error("connect", e))?;
+        let mut stream = dial_transfer(to, tls).await?;
         stream
             .write_all(format!("{key}\n").as_bytes())
             .await
@@ -619,6 +714,7 @@ fn mark_of_the_web(_path: &Path) {}
 /// too slow, or declares no size or too large a size leaves no file behind.
 async fn receive_file(
     from: SocketAddr,
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
     key: &str,
     dir: &Path,
     name: &str,
@@ -630,14 +726,12 @@ async fn receive_file(
             detail: format!("refused a file of declared size {size}"),
         });
     }
-    let mut stream = tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(from))
-        .await
-        .map_err(|_| io_error("connect", "timed out"))?
-        .map_err(|e| io_error("connect", e))?;
+    let mut stream = dial_transfer(from, tls).await?;
     stream
         .write_all(format!("{key}\n").as_bytes())
         .await
         .map_err(|e| io_error("write", e))?;
+    stream.flush().await.map_err(|e| io_error("write", e))?;
     let saved = save_stream(&mut stream, from, dir, name, size).await;
     // Best effort: a phone that is already gone has nothing to hear.
     let status = if saved.is_ok() {
@@ -645,14 +739,19 @@ async fn receive_file(
     } else {
         STATUS_FAILED
     };
-    let _ = tokio::time::timeout(CONNECT_TIMEOUT, stream.write_all(&[status])).await;
+    // Flushed: inside TLS the byte otherwise waits in the session's buffer.
+    let _ = tokio::time::timeout(CONNECT_TIMEOUT, async {
+        stream.write_all(&[status]).await?;
+        stream.flush().await
+    })
+    .await;
     saved
 }
 
 /// Read exactly `size` bytes from `stream` into a new file in `dir` named
 /// like `name`, and return its path; on any failure no file is left.
-async fn save_stream(
-    stream: &mut tokio::net::TcpStream,
+async fn save_stream<S: tokio::io::AsyncRead + Unpin>(
+    stream: &mut S,
     from: SocketAddr,
     dir: &Path,
     name: &str,
@@ -803,17 +902,57 @@ mod tests {
 
     const KEY: &str = "0123456789abcdef0123456789abcdef";
 
+    use linux_link_core::streaming::transport::CertManager;
+
+    /// This desktop, the phone that asks, and another device.
+    fn certs() -> &'static (CertManager, CertManager, CertManager) {
+        static CERTS: std::sync::OnceLock<(CertManager, CertManager, CertManager)> =
+            std::sync::OnceLock::new();
+        CERTS.get_or_init(|| {
+            (
+                CertManager::new().unwrap(),
+                CertManager::new().unwrap(),
+                CertManager::new().unwrap(),
+            )
+        })
+    }
+
+    /// The desktop's side of a transfer with the phone that asked.
+    fn desktop_tls() -> std::sync::Arc<tokio_rustls::rustls::ClientConfig> {
+        let (desktop, phone, _) = certs();
+        desktop.transfer_client_config(phone.cert_fingerprint())
+    }
+
+    /// Accept one connection as `device` (the phone that asked, or another),
+    /// expecting this desktop.
+    async fn accept_as(
+        device: &CertManager,
+        listener: &TcpListener,
+    ) -> std::io::Result<tokio_rustls::server::TlsStream<tokio::net::TcpStream>> {
+        let (desktop, _, _) = certs();
+        let (tcp, _) = listener.accept().await?;
+        tokio_rustls::TlsAcceptor::from(
+            device
+                .transfer_server_config(desktop.cert_fingerprint())
+                .unwrap(),
+        )
+        .accept(tcp)
+        .await
+    }
+
     /// A phone-side listener that sends `data` to whoever presents [`KEY`],
     /// then reads the desktop's status byte (`None`: it sent none).
     async fn phone_sending(data: Vec<u8>) -> (SocketAddr, tokio::task::JoinHandle<Option<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let status = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut socket = accept_as(&certs().1, &listener).await.unwrap();
             let mut presented = [0u8; 33];
             socket.read_exact(&mut presented).await.unwrap();
             assert_eq!(&presented, format!("{KEY}\n").as_bytes());
             socket.write_all(&data).await.unwrap();
+            // TLS's close_notify, then the socket's write side; the status
+            // still comes back.
             socket.shutdown().await.unwrap();
             let mut status = [0u8; 1];
             socket.read_exact(&mut status).await.ok().map(|_| status[0])
@@ -848,7 +987,7 @@ mod tests {
         let dir = temp_dir("receive");
         let data: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
         let (from, status) = phone_sending(data.clone()).await;
-        let path = receive_file(from, KEY, &dir, "big.bin", data.len() as u64)
+        let path = receive_file(from, desktop_tls(), KEY, &dir, "big.bin", data.len() as u64)
             .await
             .unwrap();
         assert_eq!(path, dir.join("big.bin"));
@@ -869,7 +1008,11 @@ mod tests {
     async fn a_short_transfer_leaves_no_file() {
         let dir = temp_dir("short");
         let (from, status) = phone_sending(vec![1; 10]).await;
-        assert!(receive_file(from, KEY, &dir, "x.bin", 20).await.is_err());
+        assert!(
+            receive_file(from, desktop_tls(), KEY, &dir, "x.bin", 20)
+                .await
+                .is_err()
+        );
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
         assert_eq!(status.await.unwrap(), Some(STATUS_FAILED), "told it failed");
     }
@@ -887,9 +1030,13 @@ mod tests {
     async fn an_undeclared_or_huge_size_is_refused_before_connecting() {
         let dir = temp_dir("size");
         let unused: SocketAddr = "127.0.0.1:9".parse().unwrap();
-        assert!(receive_file(unused, KEY, &dir, "x", 0).await.is_err());
         assert!(
-            receive_file(unused, KEY, &dir, "x", MAX_FILE_BYTES + 1)
+            receive_file(unused, desktop_tls(), KEY, &dir, "x", 0)
+                .await
+                .is_err()
+        );
+        assert!(
+            receive_file(unused, desktop_tls(), KEY, &dir, "x", MAX_FILE_BYTES + 1)
                 .await
                 .is_err()
         );
@@ -902,7 +1049,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let got = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut socket = accept_as(&certs().1, &listener).await.unwrap();
             let mut presented = [0u8; 33];
             socket.read_exact(&mut presented).await.unwrap();
             assert_eq!(&presented, format!("{KEY}\n").as_bytes());
@@ -910,6 +1057,7 @@ mod tests {
             let mut data = vec![0u8; size as usize];
             socket.read_exact(&mut data).await.unwrap();
             socket.write_all(&[status]).await.unwrap();
+            socket.flush().await.unwrap();
             data
         });
         (addr, got)
@@ -923,7 +1071,7 @@ mod tests {
         std::fs::write(&path, &data).unwrap();
         let (to, got) = phone_fetching(STATUS_SAVED).await;
         assert_eq!(
-            send_file_to(to, KEY, &path).await.unwrap(),
+            send_file_to(to, desktop_tls(), KEY, &path).await.unwrap(),
             data.len() as u64
         );
         assert_eq!(got.await.unwrap(), data);
@@ -935,7 +1083,7 @@ mod tests {
         let path = dir.join("a.bin");
         std::fs::write(&path, b"abc").unwrap();
         let (to, _) = phone_fetching(STATUS_FAILED).await;
-        assert!(send_file_to(to, KEY, &path).await.is_err());
+        assert!(send_file_to(to, desktop_tls(), KEY, &path).await.is_err());
     }
 
     #[tokio::test]
@@ -943,13 +1091,32 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let to = listener.local_addr().unwrap();
         tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut socket = accept_as(&certs().1, &listener).await.unwrap();
             let mut sink = Vec::new();
             let _ = socket.read_to_end(&mut sink).await;
         });
         // Listed at 10 bytes, holding 4 by the time it is read.
-        let sent = send_reader(to, KEY, &mut &b"abcd"[..], 10).await;
+        let sent = send_reader(to, desktop_tls(), KEY, &mut &b"abcd"[..], 10).await;
         assert!(sent.is_err(), "{sent:?}");
+    }
+
+    #[tokio::test]
+    async fn a_device_other_than_the_phone_that_asked_gets_nothing() {
+        let dir = temp_dir("fetch-impostor");
+        let path = dir.join("a.bin");
+        std::fs::write(&path, b"secret").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let to = listener.local_addr().unwrap();
+        let impostor = tokio::spawn(async move {
+            let Ok(mut socket) = accept_as(&certs().2, &listener).await else {
+                return Vec::new();
+            };
+            let mut got = Vec::new();
+            let _ = socket.read_to_end(&mut got).await;
+            got
+        });
+        assert!(send_file_to(to, desktop_tls(), KEY, &path).await.is_err());
+        assert!(impostor.await.unwrap().is_empty(), "not a byte of it");
     }
 
     /// The phone's control connection, as the plugin sees it.
@@ -981,6 +1148,11 @@ mod tests {
         }
         fn peer_addr(&self) -> Option<SocketAddr> {
             Some(self.peer)
+        }
+        fn peer_key(&self) -> Option<linux_link_core::streaming::PeerKey> {
+            Some(linux_link_core::streaming::PeerKey::Tls(
+                certs().1.cert_fingerprint(),
+            ))
         }
         async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
             self.sent.lock().unwrap().push(packet.clone());
