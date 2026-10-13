@@ -86,8 +86,6 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
         TRANSFER_TOTAL.store(0, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
-    // Only the desktop this phone pinned for `address` may send (phase C).
-    let tls = crate::api::transfer_acceptor(address)?;
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
         .await
         .map_err(|e| format!("Failed to bind port: {e}"))?;
@@ -100,6 +98,9 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
     }
     let request = NetworkPacket::new(FETCH).with_body(body);
     let lines = send_watching_replies(address, port, &request).await?;
+    // Only the desktop this phone pinned for `address` may send (phase C),
+    // looked up once the request is out (its connection may have pinned it).
+    let tls = crate::api::transfer_acceptor(address)?;
     let refused = refusal_on(lines, key.clone());
     await_and_receive(listener, &key, &tls, refused, out).await
 }

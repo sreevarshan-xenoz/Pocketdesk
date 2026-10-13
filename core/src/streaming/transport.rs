@@ -446,6 +446,15 @@ pub fn peer_label_for_ip(ip: std::net::IpAddr) -> String {
     peer_label(&ServerName::IpAddress(ip.into()))
 }
 
+/// [`peer_label`] for a connection made to `address`, as the control
+/// channel dials it: an IP address, or a host name (a computer saved by
+/// name). `None` for text that is neither.
+pub fn peer_label_for_address(address: &str) -> Option<String> {
+    ServerName::try_from(address.to_string())
+        .ok()
+        .map(|name| peer_label(&name))
+}
+
 /// TOFU (Trust On First Use) certificate verifier.
 ///
 /// - **First connection:** auto-accepts any server certificate and stores its
@@ -1176,6 +1185,21 @@ mod tests {
             assert_eq!(manager.cert_der, on_disk.cert_der, "one certificate");
             assert_eq!(manager.key_der, on_disk.key_der, "and its own key");
         }
+    }
+
+    #[test]
+    fn the_pin_label_for_an_address_is_the_one_its_connection_uses() {
+        let ip: std::net::IpAddr = "192.0.2.5".parse().unwrap();
+        assert_eq!(
+            peer_label_for_address("192.0.2.5").as_deref(),
+            Some(peer_label_for_ip(ip).as_str())
+        );
+        assert_eq!(
+            peer_label_for_address("mypc.local").as_deref(),
+            Some(peer_label(&ServerName::try_from("mypc.local").unwrap()).as_str()),
+            "a computer saved by name is pinned under its name"
+        );
+        assert_eq!(peer_label_for_address(""), None);
     }
 
     #[test]

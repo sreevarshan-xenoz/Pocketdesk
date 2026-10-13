@@ -117,17 +117,14 @@ pub(crate) fn forget_peer_certificate_in(
     cert_dir: &std::path::Path,
     address: &str,
 ) -> Result<bool, String> {
-    let Ok(ip) = address.trim().parse::<std::net::IpAddr>() else {
-        // Hosts saved by name were never pinned by IP.
+    // The label the control channel pinned it under: its IP, or the name a
+    // computer saved by name was dialed with.
+    let Some(label) = linux_link_core::streaming::transport::peer_label_for_address(address) else {
         return Ok(false);
     };
     let manager = linux_link_core::streaming::transport::CertManager::load_or_create(cert_dir)
         .map_err(|e| e.to_string())?;
-    manager
-        .remove_peer(&linux_link_core::streaming::transport::peer_label_for_ip(
-            ip,
-        ))
-        .map_err(|e| e.to_string())
+    manager.remove_peer(&label).map_err(|e| e.to_string())
 }
 
 /// Check if the LAN discovery service is active.
@@ -1129,9 +1126,6 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         TRANSFER_TOTAL.store(file_size, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
-    // Only the desktop this phone pinned for `address` may take the bytes
-    // (phase C); without a pin there is no one to send them to.
-    let tls = transfer_acceptor(&address)?;
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
         .await
         .map_err(|e| format!("Failed to bind port: {}", e))?;
@@ -1150,6 +1144,10 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         .await
         .map_err(|e| format!("Failed to send share request: {e}"))?;
     let _reading = AbortOnDrop(replies.keep_reading());
+    // Only the desktop this phone pinned for `address` may take the bytes
+    // (phase C). Looked up once the request is out: a connection made for
+    // it may have pinned the desktop just now.
+    let tls = transfer_acceptor(&address)?;
     // The desktop connects back for the bytes, inside TLS with the pinned
     // desktop's certificate, then presents the key from the request.
     // Anything else that connects is dropped. (Its source address is no
@@ -1232,23 +1230,31 @@ pub(crate) type TransferStream = tokio_rustls::server::TlsStream<tokio::net::Tcp
 /// a dialer required to present exactly the certificate pinned for the
 /// desktop at `address`, the one its control channel proved.
 pub(crate) fn transfer_acceptor(address: &str) -> Result<tokio_rustls::TlsAcceptor, String> {
-    let ip: std::net::IpAddr = address.trim().parse().map_err(|_| {
-        format!("Files go only to a computer reached by its address, not {address}")
-    })?;
     let dir = crate::CERT_DIR
         .lock()
         .unwrap()
         .clone()
         .ok_or_else(|| "no data directory configured".to_string())?;
-    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(&dir)
+    transfer_acceptor_in(&dir, address)
+}
+
+/// [`transfer_acceptor`] with this phone's certificates in `dir`.
+pub(crate) fn transfer_acceptor_in(
+    dir: &std::path::Path,
+    address: &str,
+) -> Result<tokio_rustls::TlsAcceptor, String> {
+    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(dir)
         .map_err(|e| format!("This phone's certificate: {e}"))?;
-    let label = linux_link_core::streaming::transport::peer_label_for_ip(ip);
+    // The pin's label is the one the control channel used for `address`:
+    // its IP, or the name of a computer saved by name.
+    let label = linux_link_core::streaming::transport::peer_label_for_address(address)
+        .ok_or_else(|| format!("{address} is not an address"))?;
     let pinned = certs
         .known_peers()
         .into_iter()
         .find(|(known, _)| *known == label)
         .map(|(_, hash)| hash)
-        .ok_or_else(|| format!("This phone has not verified the computer at {ip} yet"))?;
+        .ok_or_else(|| format!("This phone has not verified the computer at {address} yet"))?;
     let config = certs
         .transfer_server_config(pinned)
         .map_err(|e| e.to_string())?;
@@ -3069,6 +3075,40 @@ fn android_to_evdev_keycode(android_keycode: i32) -> u16 {
         141 => 87, // F11 -> KEY_F11
         142 => 88, // F12 -> KEY_F12
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod transfer_pin_tests {
+    use linux_link_core::streaming::transport::{CertManager, peer_label_for_address};
+
+    fn dir(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("ll-transfer-pin-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn a_computer_saved_by_name_can_take_files_and_be_forgotten() {
+        let dir = dir("name");
+        let label = peer_label_for_address("mypc.local").unwrap();
+        CertManager::load_or_create(&dir)
+            .unwrap()
+            .pin_peer(&label, [4u8; 32])
+            .unwrap();
+        assert!(super::transfer_acceptor_in(&dir, "mypc.local").is_ok());
+        assert!(super::forget_peer_certificate_in(&dir, "mypc.local").unwrap());
+        assert!(
+            super::transfer_acceptor_in(&dir, "mypc.local").is_err(),
+            "forgotten: no computer to send to"
+        );
+    }
+
+    #[test]
+    fn files_go_to_no_computer_the_phone_has_not_verified() {
+        let dir = dir("unpinned");
+        assert!(super::transfer_acceptor_in(&dir, "192.0.2.9").is_err());
     }
 }
 
