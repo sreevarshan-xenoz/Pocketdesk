@@ -828,19 +828,8 @@ async fn control_request(
     // Only the live connection *to this desktop* may carry the request: with
     // another computer connected, reusing it would send this desktop's query -
     // or its pairing PIN - to the wrong machine, and record that machine's
-    // answer as this one's. Locked writer-then-peer, like the control reader.
-    let writer = {
-        let guard = (*CONTROL_WRITER).lock().await;
-        let peer = (*CONTROL_PEER).lock().await;
-        let same_desktop = peer
-            .as_ref()
-            .is_some_and(|(host, live_port)| host == address && *live_port == port);
-        if same_desktop {
-            guard.as_ref().cloned()
-        } else {
-            None
-        }
-    };
+    // answer as this one's.
+    let writer = live_writer_for(address, port).await;
     // Subscribe before sending: the answer can otherwise land in the broadcast
     // before there is anyone listening for it.
     let rx = {
@@ -954,6 +943,26 @@ async fn query_peer(
     }
 }
 
+/// Is the live control connection, made to `live`, the one to `address`:`port`?
+fn same_desktop(live: Option<&(String, u16)>, address: &str, port: u16) -> bool {
+    live.is_some_and(|(host, live_port)| host == address && *live_port == port)
+}
+
+/// The live control connection's writer, if that connection is to
+/// `address`:`port`. Locked writer-then-peer, like the control reader.
+async fn live_writer_for(
+    address: &str,
+    port: u16,
+) -> Option<Arc<Mutex<crate::session::ControlWriter>>> {
+    let guard = (*CONTROL_WRITER).lock().await;
+    let peer = (*CONTROL_PEER).lock().await;
+    if same_desktop(peer.as_ref(), address, port) {
+        guard.as_ref().cloned()
+    } else {
+        None
+    }
+}
+
 /// Fire-and-forget push: write `request` on the live control connection, or on
 /// a dedicated one when the phone is not connected yet.
 ///
@@ -965,11 +974,9 @@ pub(crate) async fn push_packet(
     port: u16,
     request: &NetworkPacket,
 ) -> Result<(), String> {
-    let writer = {
-        let guard = (*CONTROL_WRITER).lock().await;
-        guard.as_ref().cloned()
-    };
-    if let Some(writer) = writer {
+    // The live connection only if it is to this desktop: a push for another
+    // computer (a clipboard, a command) must not reach the connected one.
+    if let Some(writer) = live_writer_for(address, port).await {
         let sender = TcpDeviceSender::from_arc(writer, address.to_string());
         return sender
             .send_packet(request)
@@ -3013,6 +3020,27 @@ fn android_to_evdev_keycode(android_keycode: i32) -> u16 {
         141 => 87, // F11 -> KEY_F11
         142 => 88, // F12 -> KEY_F12
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod live_connection_tests {
+    #[test]
+    fn only_the_connection_to_that_desktop_is_reused() {
+        let live = ("192.0.2.1".to_string(), 1716);
+        assert!(super::same_desktop(Some(&live), "192.0.2.1", 1716));
+        assert!(
+            !super::same_desktop(Some(&live), "192.0.2.2", 1716),
+            "another computer"
+        );
+        assert!(
+            !super::same_desktop(Some(&live), "192.0.2.1", 1717),
+            "another port"
+        );
+        assert!(
+            !super::same_desktop(None, "192.0.2.1", 1716),
+            "nothing connected"
+        );
     }
 }
 
