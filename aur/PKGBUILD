@@ -1,6 +1,6 @@
 # Maintainer: sreevarshan <sreevarshan@example.com>
 pkgname=linux-link
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Remote desktop solution over Tailscale with KDE Connect integration"
 arch=('x86_64')
