@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::protocol::permissions::DevicePermissions;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -353,6 +354,9 @@ pub struct TrustStore {
     /// Entries here are trusted only until they expire; expiry is applied
     /// lazily at load, so no scheduler is required anywhere.
     grants: HashMap<String, u64>,
+    /// F5: deviceId -> what it may do. Only devices whose permissions differ
+    /// from the defaults have an entry.
+    permissions: HashMap<String, DevicePermissions>,
 }
 
 fn unix_now_secs() -> u64 {
@@ -378,6 +382,7 @@ impl TrustStore {
                 path,
                 trusted_device_ids: HashSet::new(),
                 grants: HashMap::new(),
+                permissions: HashMap::new(),
             });
         }
 
@@ -397,6 +402,7 @@ impl TrustStore {
                 .into_iter()
                 .filter(|(_, expires)| *expires > now)
                 .collect(),
+            permissions: decoded.permissions,
         })
     }
 
@@ -431,6 +437,8 @@ impl TrustStore {
     pub fn untrust_device(&mut self, device_id: &str) -> Result<()> {
         self.trusted_device_ids.remove(device_id);
         self.grants.remove(device_id);
+        // A forgotten device that pairs again starts from the defaults.
+        self.permissions.remove(device_id);
         self.persist()
     }
 
@@ -440,6 +448,24 @@ impl TrustStore {
         values.sort();
         values.dedup();
         values
+    }
+
+    /// What [device_id] may do (F5). A device without an entry has the defaults.
+    pub fn permissions(&self, device_id: &str) -> DevicePermissions {
+        self.permissions.get(device_id).cloned().unwrap_or_default()
+    }
+
+    pub fn set_permissions(
+        &mut self,
+        device_id: &str,
+        permissions: DevicePermissions,
+    ) -> Result<()> {
+        if permissions.is_default() {
+            self.permissions.remove(device_id);
+        } else {
+            self.permissions.insert(device_id.to_string(), permissions);
+        }
+        self.persist()
     }
 
     /// Seconds remaining on a device's time-boxed grant (`None` = no grant:
@@ -456,6 +482,7 @@ impl TrustStore {
         let payload = TrustStoreFile {
             trusted_device_ids: permanent,
             grants: self.grants.clone(),
+            permissions: self.permissions.clone(),
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
         // Whole-file replace: the server and the desktop app both write this
@@ -477,6 +504,8 @@ struct TrustStoreFile {
     trusted_device_ids: Vec<String>,
     #[serde(default)]
     grants: HashMap<String, u64>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    permissions: HashMap<String, DevicePermissions>,
 }
 
 #[derive(Default)]
@@ -614,6 +643,54 @@ mod tests {
                 .as_nanos()
         );
         std::env::temp_dir().join(unique)
+    }
+
+    #[test]
+    fn permissions_are_stored_per_device_and_go_with_it() {
+        use crate::protocol::permissions::Capability;
+        let path = temp_store_path("perms");
+        let mut store = TrustStore::load_or_create(&path).expect("create");
+        store.trust_device("phone-p").unwrap();
+        assert!(store.permissions("phone-p").is_default());
+
+        let mut permissions = store.permissions("phone-p");
+        permissions.set(Capability::Clipboard, false);
+        permissions.ask_first = true;
+        store
+            .set_permissions("phone-p", permissions.clone())
+            .unwrap();
+
+        let reloaded = TrustStore::load_or_create(&path).expect("reload");
+        assert_eq!(reloaded.permissions("phone-p"), permissions);
+        assert!(
+            !reloaded
+                .permissions("phone-p")
+                .allows(Capability::Clipboard)
+        );
+
+        // Forgetting a device forgets its permissions; re-pairing starts clean.
+        let mut store = reloaded;
+        store.untrust_device("phone-p").unwrap();
+        store.trust_device("phone-p").unwrap();
+        assert!(store.permissions("phone-p").is_default());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_file_without_permissions_loads_and_defaults_are_not_written() {
+        let path = temp_store_path("perms-old");
+        std::fs::write(&path, r#"{"trusted_device_ids":["phone-o"],"grants":{}}"#).unwrap();
+        let mut store = TrustStore::load_or_create(&path).expect("old file");
+        assert!(store.permissions("phone-o").is_default());
+        store
+            .set_permissions(
+                "phone-o",
+                crate::protocol::permissions::DevicePermissions::default(),
+            )
+            .unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("permissions"), "{raw}");
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
