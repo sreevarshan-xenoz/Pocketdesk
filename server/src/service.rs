@@ -419,10 +419,10 @@ pub async fn run(config: Config) -> Result<()> {
                                     // The stream transport's TLS is anonymous — the
                                     // gate judges the deviceId the client announces
                                     // in-band (see core client.rs DEVICE_ID_MARKER).
-                                    streaming_server.set_pairing_gate(|device_id| {
-                                        device_id
-                                            .as_deref()
-                                            .is_some_and(crate::plugins::pair::is_paired_device)
+                                    streaming_server.set_session_gate(|device_id| {
+                                        Box::pin(async move {
+                                            crate::plugins::pair::session_permissions(device_id.as_deref())
+                                        })
                                     });
                                 }
                                 if let Err(e) = streaming_server

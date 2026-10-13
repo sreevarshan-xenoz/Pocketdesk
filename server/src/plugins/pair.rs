@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use linux_link_core::error::Result;
 use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin, TrustStore};
+use linux_link_core::protocol::permissions::DevicePermissions;
 use serde_json::json;
 
 use crate::state;
@@ -119,6 +120,24 @@ fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) ->
         Some(store) => store.permissions(device_id).allows(capability),
         None => capability.default_allowed(),
     }
+}
+
+/// F5: what a stream from [device_id] may do, or `None` to reject it (not
+/// paired, or no id announced). Read when the session starts; a live session
+/// keeps what it started with.
+pub fn session_permissions(device_id: Option<&str>) -> Option<DevicePermissions> {
+    let store = state::trust_store_path()
+        .ok()
+        .and_then(|path| TrustStore::load_or_create(path).ok());
+    session_permissions_in(store.as_ref(), device_id)
+}
+
+fn session_permissions_in(
+    store: Option<&TrustStore>,
+    device_id: Option<&str>,
+) -> Option<DevicePermissions> {
+    let (store, id) = (store?, device_id?);
+    store.is_trusted(id).then(|| store.permissions(id))
 }
 
 /// The desktop's own device id, for phone-side trust persistence.
@@ -414,6 +433,34 @@ mod tests {
         assert!(
             !permits_in(None, "phone-1", "kdeconnect.linuxlink.exec"),
             "no readable store means the defaults, not everything"
+        );
+    }
+
+    #[test]
+    fn a_stream_gets_its_devices_permissions_and_an_unpaired_one_none() {
+        use linux_link_core::protocol::permissions::Capability;
+        let mut store = temp_store("session");
+        store.trust_device("phone-s").unwrap();
+        let mut permissions = store.permissions("phone-s");
+        permissions.set(Capability::Audio, false);
+        store
+            .set_permissions("phone-s", permissions.clone())
+            .unwrap();
+
+        assert_eq!(
+            session_permissions_in(Some(&store), Some("phone-s")),
+            Some(permissions)
+        );
+        assert_eq!(session_permissions_in(Some(&store), Some("stranger")), None);
+        assert_eq!(
+            session_permissions_in(Some(&store), None),
+            None,
+            "no id announced"
+        );
+        assert_eq!(
+            session_permissions_in(None, Some("phone-s")),
+            None,
+            "no store: not paired"
         );
     }
 

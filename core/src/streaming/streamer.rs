@@ -23,6 +23,14 @@ use super::input_packet::{InputPacket, PRESET_AUTO, preset_bitrate_ceil};
 use super::session_telemetry::{SessionOutcome, SessionRecorder};
 use super::transport::{self, CertManager, StreamServer, StreamTransportConfig};
 use super::{EncodedPacket, StreamingConfig, VideoCodec, VideoFrame};
+use crate::protocol::permissions::{Capability, DevicePermissions};
+
+/// What a session gate answers, eventually: the session's permissions, or
+/// `None` to reject it (see [`StreamingServer::set_session_gate`]).
+pub type SessionGateFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Option<DevicePermissions>> + Send>>;
+type SessionGate =
+    std::sync::Arc<dyn Fn(Option<String>) -> SessionGateFuture + Send + Sync + 'static>;
 
 /// Where a whole-monitor session's absolute pointer input has to land.
 ///
@@ -91,10 +99,11 @@ pub struct StreamingServer {
     /// them into a PipeWire source. Bounded with drop-on-full: stale mic
     /// audio is worse than gaps. If unset, mic packets are discarded.
     mic_tx: Option<tokio::sync::mpsc::Sender<InputPacket>>,
-    /// Optional pairing enforcement: called with the device id the client
-    /// announced in-band (None if it sent none); returning false rejects the
-    /// session before capture starts. See `set_pairing_gate`.
-    pairing_gate: Option<std::sync::Arc<dyn Fn(Option<String>) -> bool + Send + Sync + 'static>>,
+    /// Optional session gate (pairing, F5 permissions and approval): called
+    /// with the device id the client announced in-band (None if it sent
+    /// none); `None` rejects the session before capture starts, `Some` is what
+    /// it may do. See `set_session_gate`.
+    session_gate: Option<SessionGate>,
     /// Record per-session outcome telemetry (R4 A2) through the sink
     /// registered in `session_telemetry`. Off by default.
     telemetry: bool,
@@ -138,7 +147,7 @@ impl StreamingServer {
             bitrate_tx,
             input_tx: None,
             mic_tx: None,
-            pairing_gate: None,
+            session_gate: None,
             telemetry: false,
             view_only: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             full_quality: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -181,17 +190,19 @@ impl StreamingServer {
         self.mic_tx = Some(tx);
     }
 
-    /// Require pairing before any video/input pipeline starts.
+    /// Decide each session before any video/input pipeline starts: `None`
+    /// rejects it (not paired, or denied), `Some` is what it may do (F5). The
+    /// gate is async so it can wait for the owner's approval.
     ///
     /// The QUIC transport authenticates the *endpoint*, not the device (both
     /// TLS configs use `with_no_client_auth`), so the gate judges the device
     /// id the client announces in-band. A client that announces nothing (an
     /// older build) fails the gate while one is set.
-    pub fn set_pairing_gate<F>(&mut self, gate: F)
+    pub fn set_session_gate<F>(&mut self, gate: F)
     where
-        F: Fn(Option<String>) -> bool + Send + Sync + 'static,
+        F: Fn(Option<String>) -> SessionGateFuture + Send + Sync + 'static,
     {
-        self.pairing_gate = Some(std::sync::Arc::new(gate));
+        self.session_gate = Some(std::sync::Arc::new(gate));
     }
 
     /// Update the target bitrate dynamically (for adaptive bitrate control)
@@ -313,20 +324,37 @@ impl StreamingServer {
         });
         let _telemetry_guard = telemetry.as_ref().map(|(r, b)| r.guard(b.clone()));
 
-        if let Some(gate) = &self.pairing_gate
-            && !gate(device_id.clone())
-        {
-            warn!(
-                device_id = device_id.as_deref().unwrap_or("<none announced>"),
-                "Streaming session rejected: device not paired"
+        // F5: what this session may do. No gate (pairing not required) means
+        // the defaults.
+        let permissions = match &self.session_gate {
+            None => DevicePermissions::default(),
+            Some(gate) => match gate(device_id.clone()).await {
+                Some(permissions) => permissions,
+                None => {
+                    warn!(
+                        device_id = device_id.as_deref().unwrap_or("<none announced>"),
+                        "Streaming session rejected: device not paired or not approved"
+                    );
+                    if let Some(guard) = &_telemetry_guard {
+                        guard.record(SessionOutcome::Rejected);
+                    }
+                    connection.close(0u32, b"pairing required");
+                    return Err(anyhow::anyhow!(
+                        "pairing required: this device must pair over the control channel first"
+                    ));
+                }
+            },
+        };
+        // Without input, the session is view-only whatever the phone asks:
+        // the phone's own view-only switch can tighten this, never lift it.
+        let force_view_only = !permissions.allows(Capability::Input);
+        let allow_mic = permissions.allows(Capability::Mic);
+        let allow_audio = permissions.allows(Capability::Audio);
+        if force_view_only || !allow_mic || !allow_audio {
+            info!(
+                force_view_only,
+                allow_mic, allow_audio, "Session limited by device permissions"
             );
-            if let Some(guard) = &_telemetry_guard {
-                guard.record(SessionOutcome::Rejected);
-            }
-            connection.close(0u32, b"pairing required");
-            return Err(anyhow::anyhow!(
-                "pairing required: this device must pair over the control channel first"
-            ));
         }
 
         // R4 D2: publish the accepted session in the live registry so the
@@ -951,15 +979,17 @@ impl StreamingServer {
                                                 // flows to the relay even while
                                                 // view-only is latched.
                                                 if matches!(packet, InputPacket::Mic { .. }) {
-                                                    if let Some(tx) = &monitor_mic_tx
+                                                    // F5: no mic permission, no relay.
+                                                    if allow_mic
+                                                        && let Some(tx) = &monitor_mic_tx
                                                         && tx.try_send(packet).is_err()
                                                     {
                                                         debug!("Mic relay full: dropping frame");
                                                     }
                                                     continue;
                                                 }
-                                                if monitor_view_only
-                                                    .load(Ordering::Relaxed)
+                                                if force_view_only
+                                                    || monitor_view_only.load(Ordering::Relaxed)
                                                 {
                                                     debug!("View-only: dropping input packet");
                                                     continue;
@@ -1008,17 +1038,20 @@ impl StreamingServer {
             }
         }.instrument(monitor_span));
 
-        // Task 6: Audio capture + Opus encoding + QUIC send (F1: Audio Streaming)
-        let audio_cancel = cancel.clone();
-        let audio_conn = connection.clone();
-        tasks.spawn(
-            async move {
-                if let Err(e) = run_audio_pipeline(audio_conn, audio_cancel).await {
-                    error!(error = %e, "Audio pipeline failed");
+        // Task 6: Audio capture + Opus encoding + QUIC send (F1: Audio Streaming).
+        // F5: a device without the audio permission gets no desktop sound.
+        if allow_audio {
+            let audio_cancel = cancel.clone();
+            let audio_conn = connection.clone();
+            tasks.spawn(
+                async move {
+                    if let Err(e) = run_audio_pipeline(audio_conn, audio_cancel).await {
+                        error!(error = %e, "Audio pipeline failed");
+                    }
                 }
-            }
-            .instrument(tracing::info_span!("audio_pipeline")),
-        );
+                .instrument(tracing::info_span!("audio_pipeline")),
+            );
+        }
 
         // Task 7: session telemetry poll (R4 A2) — samples path + RTT every
         // 5 s so the end-of-session report reflects what the link actually
