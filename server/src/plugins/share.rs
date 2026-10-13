@@ -159,7 +159,12 @@ fn on_received(path: &Path, size: u64, from: &str) {
     if let Ok(dir) = crate::state::state_dir() {
         record_received_in(&dir, path, &name, size, from);
     }
-    let body = format!("{name} ({}) is in Downloads.", human_size(size));
+    let folder = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let body = format!("{name} ({}) is in {folder}.", human_size(size));
     std::thread::spawn(move || {
         let summary = "Pocketdesk: file received";
         if !crate::platform::notify(summary, &body, Duration::from_secs(8)) {
