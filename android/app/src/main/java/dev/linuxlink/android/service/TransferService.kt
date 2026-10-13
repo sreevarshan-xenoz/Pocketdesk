@@ -86,7 +86,7 @@ class TransferService : Service() {
         synchronized(lock) {
             // A started foreground service must enter the foreground even
             // when it has nothing to do; keep what is showing if a job runs.
-            enterForeground(current ?: progressNotification(getString(R.string.transfer_sending, 1, 1), "", 0))
+            enterForeground(current ?: progressNotification(getString(R.string.channel_transfers), "", 0))
             if (job == null) {
                 if (queued == 0) stopSelf(startId)
                 return START_NOT_STICKY
