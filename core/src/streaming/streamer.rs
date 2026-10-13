@@ -29,9 +29,29 @@ use crate::protocol::permissions::{Capability, DevicePermissions};
 /// `None` to reject it (see [`StreamingServer::set_session_gate`]).
 pub type SessionGateFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Option<DevicePermissions>> + Send>>;
-type SessionGate = std::sync::Arc<
-    dyn Fn(Option<String>, std::net::SocketAddr) -> SessionGateFuture + Send + Sync + 'static,
->;
+type SessionGate =
+    std::sync::Arc<dyn Fn(SessionClaim) -> SessionGateFuture + Send + Sync + 'static>;
+
+/// What a session says about itself, and what its connection proved, for
+/// the session gate to judge.
+#[derive(Debug, Clone)]
+pub struct SessionClaim {
+    /// The device id the client announced (a claim, not a proof).
+    pub device_id: Option<String>,
+    /// Where it connected from, for the owner's approval prompt.
+    pub peer: std::net::SocketAddr,
+    /// The key the connection proved it holds (device keys).
+    pub peer_key: Option<super::PeerKey>,
+    /// The WAN key the client says it dials with, on this session.
+    pub iroh_id: Option<String>,
+}
+
+/// What a client announced in its config streams.
+#[derive(Debug, Default)]
+struct ClientClaim {
+    device_id: Option<String>,
+    iroh_id: Option<String>,
+}
 
 /// Where a whole-monitor session's absolute pointer input has to land.
 ///
@@ -195,14 +215,14 @@ impl StreamingServer {
     /// rejects it (not paired, or denied), `Some` is what it may do (F5). The
     /// gate is async so it can wait for the owner's approval.
     ///
-    /// The QUIC transport authenticates the *endpoint*, not the device (both
-    /// TLS configs use `with_no_client_auth`), so the gate judges the device
-    /// id the client announces in-band. A client that announces nothing (an
-    /// older build) fails the gate while one is set. The peer address is
-    /// for the owner's approval prompt, not for judging the device.
+    /// The gate judges the device id the client announces in-band against
+    /// the key its connection proved (`SessionClaim::peer_key`: the TLS
+    /// client certificate on QUIC, the endpoint key on iroh). A client that
+    /// announces nothing fails the gate while one is set. The peer address
+    /// is for the owner's approval prompt, not for judging the device.
     pub fn set_session_gate<F>(&mut self, gate: F)
     where
-        F: Fn(Option<String>, std::net::SocketAddr) -> SessionGateFuture + Send + Sync + 'static,
+        F: Fn(SessionClaim) -> SessionGateFuture + Send + Sync + 'static,
     {
         self.session_gate = Some(std::sync::Arc::new(gate));
     }
@@ -309,7 +329,8 @@ impl StreamingServer {
     /// Run the full streaming pipeline for a single connection
     async fn run_pipeline(&mut self, connection: SharedConnection) -> Result<()> {
         // Read optional client config streams before starting the pipeline.
-        let device_id = read_client_config(&connection, &mut self.config, self.hevc_allowed).await;
+        let claim = read_client_config(&connection, &mut self.config, self.hevc_allowed).await;
+        let device_id = claim.device_id.clone();
 
         // R4 A2 session telemetry: a shared recorder observes the connection
         // on a slow poll and an RAII guard emits the outcome report when the
@@ -330,7 +351,14 @@ impl StreamingServer {
         // the defaults.
         let permissions = match &self.session_gate {
             None => DevicePermissions::default(),
-            Some(gate) => match gate(device_id.clone(), connection.remote_address()).await {
+            Some(gate) => match gate(SessionClaim {
+                device_id: device_id.clone(),
+                peer: connection.remote_address(),
+                peer_key: connection.peer_key(),
+                iroh_id: claim.iroh_id.clone(),
+            })
+            .await
+            {
                 Some(permissions) => permissions,
                 None => {
                     warn!(
@@ -1224,22 +1252,25 @@ fn trace_packet_stats(packet: &EncodedPacket) {
 
 /// Read the client's pre-pipeline config streams from the QUIC connection.
 ///
-/// The client may send up to three small uni-streams immediately after
+/// The client may send up to four small uni-streams immediately after
 /// connecting: a monitor-index config (`[0xFF, 0x00] + u32 LE`), a device
-/// identity (`[0xFE, 0x00] + len u8 + utf8`, see `client::DEVICE_ID_MARKER`)
-/// and codec capabilities (`[0xFD, 0x00] + u8`, R4 C1). Each read is bounded
+/// identity (`[0xFE, 0x00] + len u8 + utf8`, see `client::DEVICE_ID_MARKER`),
+/// its WAN key (`[0xFC, 0x00] + len u8 + utf8`, device keys) and codec
+/// capabilities (`[0xFD, 0x00] + u8`, R4 C1). Each read is bounded
 /// by a short timeout so the pipeline is not blocked when a stream (or the
 /// whole handshake, for older clients) is absent.
-/// Returns the announced device id, if any.
+/// Returns what the client announced about itself.
 async fn read_client_config(
     connection: &SharedConnection,
     config: &mut StreamingConfig,
     hevc_allowed: bool,
-) -> Option<String> {
-    use super::client::{CODEC_CAPS_MARKER, DEVICE_ID_MARKER, MONITOR_CONFIG_MARKER};
+) -> ClientClaim {
+    use super::client::{
+        CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER, MONITOR_CONFIG_MARKER,
+    };
 
-    let mut device_id: Option<String> = None;
-    for _ in 0..3 {
+    let mut claim = ClientClaim::default();
+    for _ in 0..4 {
         let stream = tokio::select! {
             biased;
             result = connection.accept_uni() => result,
@@ -1274,9 +1305,22 @@ async fn read_client_config(
             match String::from_utf8(id) {
                 Ok(id) => {
                     info!("Client identity: deviceId={}", id);
-                    device_id = Some(id);
+                    claim.device_id = Some(id);
                 }
                 Err(e) => debug!("Malformed device identity stream: {e}"),
+            }
+        } else if marker == IROH_KEY_MARKER {
+            let mut len = [0u8; 1];
+            if !read_with_timeout(&mut *stream, &mut len).await {
+                break;
+            }
+            let mut id = vec![0u8; len[0] as usize];
+            if !read_with_timeout(&mut *stream, &mut id).await {
+                break;
+            }
+            match String::from_utf8(id) {
+                Ok(id) => claim.iroh_id = Some(id),
+                Err(e) => debug!("Malformed WAN key stream: {e}"),
             }
         } else if marker == CODEC_CAPS_MARKER {
             let mut caps = [0u8; 1];
@@ -1295,7 +1339,7 @@ async fn read_client_config(
             debug!("Unknown config marker: {:02X?}", &marker);
         }
     }
-    device_id
+    claim
 }
 
 /// R4 C1: pick the session codec from the client's capability bits and the
@@ -1633,6 +1677,7 @@ mod tests {
             certs,
             Some(2),
             Some("device-c1"),
+            Some("phone-endpoint"),
             Some(CODEC_CAP_HEVC),
         )
         .await
@@ -1640,9 +1685,14 @@ mod tests {
 
         let server_conn = accept.await.expect("accept task");
         let mut config = StreamingConfig::default();
-        let device_id = read_client_config(&server_conn, &mut config, true).await;
+        let claim = read_client_config(&server_conn, &mut config, true).await;
 
-        assert_eq!(device_id.as_deref(), Some("device-c1"));
+        assert_eq!(claim.device_id.as_deref(), Some("device-c1"));
+        assert_eq!(
+            claim.iroh_id.as_deref(),
+            Some("phone-endpoint"),
+            "device keys: the WAN key it announces"
+        );
         assert_eq!(config.monitor_index, 2);
         assert_eq!(config.codec, VideoCodec::H265);
     }

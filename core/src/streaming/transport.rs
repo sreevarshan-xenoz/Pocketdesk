@@ -178,20 +178,8 @@ impl CertManager {
     /// Build a QUIC server TLS configuration that presents this device's identity
     /// certificate to connecting clients.
     pub fn server_config(&self, alpns: Vec<Vec<u8>>) -> Result<quinn::ServerConfig> {
-        let cert = CertificateDer::from(self.cert_der.clone());
-        let key = PrivateKeyDer::try_from(self.key_der.clone())
-            .map_err(|_| anyhow::anyhow!("Failed to parse private key"))?;
-
         let transport = configured_transport();
-
-        // Feature unification pulls both aws-lc-rs (iroh/reqwest) and ring into
-        // server binaries, so rustls cannot auto-pick a process-level provider.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let mut crypto = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(vec![cert], key)
-            .context("Failed to configure TLS server")?;
+        let mut crypto = self.tls_server_config()?;
 
         if !alpns.is_empty() {
             crypto.alpn_protocols = alpns;
@@ -203,6 +191,26 @@ impl CertManager {
         server_config.transport_config(Arc::new(transport));
 
         Ok(server_config)
+    }
+
+    /// The TLS half of [`CertManager::server_config`].
+    fn tls_server_config(&self) -> Result<rustls::ServerConfig> {
+        let cert = CertificateDer::from(self.cert_der.clone());
+        let key = PrivateKeyDer::try_from(self.key_der.clone())
+            .map_err(|_| anyhow::anyhow!("Failed to parse private key"))?;
+
+        // Feature unification pulls both aws-lc-rs (iroh/reqwest) and ring into
+        // server binaries, so rustls cannot auto-pick a process-level provider.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        // A phone proves its own key here (device keys, phase A): the
+        // certificate is offered for, not required, so a session without one
+        // is refused by the session gate with a reason instead of failing
+        // the handshake.
+        rustls::ServerConfig::builder()
+            .with_client_cert_verifier(Arc::new(AnyClientCert))
+            .with_single_cert(vec![cert], key)
+            .context("Failed to configure TLS server")
     }
 
     /// Build a QUIC client TLS configuration with TOFU certificate verification.
@@ -266,13 +274,35 @@ impl CertManager {
     /// The TLS half of [`CertManager::client_config`]: TOFU certificate pins.
     fn tls_client_config(&self) -> rustls::ClientConfig {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        rustls::ClientConfig::builder()
+        let builder = rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(TofuVerifier {
                 known_peers: self.known_peers.clone(),
                 peers_path: self.peers_path.clone(),
-            }))
-            .with_no_client_auth()
+            }));
+        // This device's own certificate, so the desktop can bind the device
+        // to the key behind it. A key that will not load leaves the client
+        // anonymous (the desktop then decides) rather than unable to connect.
+        let cert = CertificateDer::from(self.cert_der.clone());
+        match PrivateKeyDer::try_from(self.key_der.clone()) {
+            Ok(key) => match builder.clone().with_client_auth_cert(vec![cert], key) {
+                Ok(config) => config,
+                Err(e) => {
+                    warn!("Client certificate not usable, connecting without it: {e}");
+                    builder.with_no_client_auth()
+                }
+            },
+            Err(_) => {
+                warn!("Client key not usable, connecting without it");
+                builder.with_no_client_auth()
+            }
+        }
+    }
+
+    /// SHA-256 of this device's own certificate: what a peer sees as its
+    /// [`PeerKey::Tls`](super::connection::PeerKey::Tls).
+    pub fn cert_fingerprint(&self) -> [u8; 32] {
+        Self::cert_hash(&CertificateDer::from(self.cert_der.clone()))
     }
 
     /// Return the SHA-256 hash of the given DER certificate.
@@ -392,6 +422,58 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
         &self,
         message: &[u8],
         cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        signature_algorithms().supported_schemes()
+    }
+}
+
+/// The server's view of a client certificate (device keys, phase A): any
+/// certificate is welcome, since the session gate decides whether it is the
+/// one bound to the device that claims it, but the handshake signature must
+/// prove the client holds its key.
+#[derive(Debug)]
+struct AnyClientCert;
+
+impl rustls::server::danger::ClientCertVerifier for AnyClientCert {
+    fn offer_client_auth(&self) -> bool {
+        true
+    }
+
+    fn client_auth_mandatory(&self) -> bool {
+        false
+    }
+
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+
+    fn verify_client_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _now: rustls::pki_types::UnixTime,
+    ) -> std::result::Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        Ok(rustls::server::danger::ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         rustls::crypto::verify_tls13_signature(message, cert, dss, &signature_algorithms())
@@ -713,6 +795,94 @@ mod tests {
             }
         }
         Err(rustls::Error::General("handshake did not finish".into()))
+    }
+
+    /// Run a TLS handshake in memory; the server's verdict, and the client
+    /// certificate it was shown.
+    fn handshake_seen_by_server(
+        client: rustls::ClientConfig,
+        server: rustls::ServerConfig,
+    ) -> std::result::Result<Option<Vec<u8>>, rustls::Error> {
+        let name = ServerName::try_from("192.0.2.1").unwrap();
+        let mut c = rustls::ClientConnection::new(Arc::new(client), name)?;
+        let mut s = rustls::ServerConnection::new(Arc::new(server))?;
+        for _ in 0..16 {
+            let mut wire = Vec::new();
+            while c.wants_write() {
+                c.write_tls(&mut wire).unwrap();
+            }
+            if !wire.is_empty() {
+                s.read_tls(&mut &wire[..]).unwrap();
+                s.process_new_packets()?;
+            }
+            let mut wire = Vec::new();
+            while s.wants_write() {
+                s.write_tls(&mut wire).unwrap();
+            }
+            if !wire.is_empty() {
+                c.read_tls(&mut &wire[..]).unwrap();
+                let _ = c.process_new_packets();
+            }
+            if !c.is_handshaking() && !s.is_handshaking() && !c.wants_write() {
+                return Ok(s
+                    .peer_certificates()
+                    .and_then(|certs| certs.first())
+                    .map(|cert| cert.to_vec()));
+            }
+        }
+        Err(rustls::Error::General("handshake did not finish".into()))
+    }
+
+    /// A client that presents `cert` but signs with `signing_key`.
+    fn tls_client(cert: Vec<u8>, signing_key: Vec<u8>) -> rustls::ClientConfig {
+        #[derive(Debug)]
+        struct Fixed(Arc<rustls::sign::CertifiedKey>);
+        impl rustls::client::ResolvesClientCert for Fixed {
+            fn resolve(
+                &self,
+                _hints: &[&[u8]],
+                _schemes: &[rustls::SignatureScheme],
+            ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+                Some(self.0.clone())
+            }
+            fn has_certs(&self) -> bool {
+                true
+            }
+        }
+        let key = rustls::crypto::ring::sign::any_supported_type(&PrivateKeyDer::Pkcs8(
+            signing_key.into(),
+        ))
+        .unwrap();
+        let certified = rustls::sign::CertifiedKey::new(vec![CertificateDer::from(cert)], key);
+        let any_server = CertManager::new().unwrap();
+        let mut config = any_server.tls_client_config();
+        config.client_auth_cert_resolver = Arc::new(Fixed(Arc::new(certified)));
+        config
+    }
+
+    #[test]
+    fn the_phone_proves_its_certificate_to_the_desktop() {
+        let desktop = CertManager::new().unwrap();
+        let phone = CertManager::new().unwrap();
+        let shown = handshake_seen_by_server(
+            phone.tls_client_config(),
+            desktop.tls_server_config().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            shown.as_deref(),
+            Some(&phone.cert_der[..]),
+            "the phone's own certificate"
+        );
+
+        // A copy of the phone's certificate, signed with another key: the
+        // certificate alone proves nothing, so it must be refused.
+        let (_, other_key) = generate_identity().unwrap();
+        let forged = tls_client(phone.cert_der.clone(), other_key);
+        assert!(
+            handshake_seen_by_server(forged, desktop.tls_server_config().unwrap()).is_err(),
+            "a copied client certificate without its key is refused"
+        );
     }
 
     #[test]

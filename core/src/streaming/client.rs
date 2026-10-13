@@ -25,10 +25,16 @@ pub const DEFAULT_STREAMING_PORT: u16 = 4716;
 pub(crate) const MONITOR_CONFIG_MARKER: [u8; 2] = [0xFF, 0x00];
 
 /// Marker bytes for a client-to-server identity QUIC stream:
-/// `[0xFE, 0x00, len:u8, utf8 deviceId]`. The QUIC TLS layer is anonymous
-/// (`with_no_client_auth` on both ends), so this is how the server binds a
-/// video session to the device that paired over the control channel.
+/// `[0xFE, 0x00, len:u8, utf8 deviceId]`. The id says which paired device
+/// the session claims to be; the TLS client certificate (or iroh key) is the
+/// proof the server holds it to (device keys).
 pub(crate) const DEVICE_ID_MARKER: [u8; 2] = [0xFE, 0x00];
+
+/// Marker bytes for a client-to-server WAN key announcement (device keys):
+/// `[0xFC, 0x00, len:u8, utf8 iroh endpoint id]`. Sent on a LAN session,
+/// where the TLS client certificate already proves the device, so the
+/// desktop can trust the WAN key it names.
+pub(crate) const IROH_KEY_MARKER: [u8; 2] = [0xFC, 0x00];
 
 /// Marker bytes for a client-to-server codec-capability QUIC stream (R4 C1):
 /// `[0xFD, 0x00, caps:u8]`. Absent = legacy client that only decodes H.264.
@@ -219,6 +225,7 @@ impl StreamingClient {
         cert_manager: std::sync::Arc<CertManager>,
         monitor_index: Option<u32>,
         device_id: Option<&str>,
+        iroh_id: Option<&str>,
         codec_caps: Option<u8>,
     ) -> Result<(
         Self,
@@ -263,6 +270,7 @@ impl StreamingClient {
                 QuinnConnection::shared(quic_connection),
                 monitor_index,
                 device_id,
+                iroh_id,
                 codec_caps,
                 session_id,
             )
@@ -282,6 +290,7 @@ impl StreamingClient {
         connection: SharedConnection,
         monitor_index: Option<u32>,
         device_id: Option<&str>,
+        iroh_id: Option<&str>,
         codec_caps: Option<u8>,
     ) -> (
         Self,
@@ -292,6 +301,7 @@ impl StreamingClient {
             connection,
             monitor_index,
             device_id,
+            iroh_id,
             codec_caps,
             uuid::Uuid::new_v4().to_string(),
         )
@@ -302,6 +312,7 @@ impl StreamingClient {
         connection: SharedConnection,
         monitor_index: Option<u32>,
         device_id: Option<&str>,
+        iroh_id: Option<&str>,
         codec_caps: Option<u8>,
         session_id: String,
     ) -> (
@@ -359,6 +370,26 @@ impl StreamingClient {
                 }
             } else {
                 warn!("Device id too long to announce — pairing gate will reject");
+            }
+        }
+
+        // Device keys: name the WAN key this device dials with, on a session
+        // whose TLS certificate already proves the device.
+        if let Some(iroh) = iroh_id.filter(|id| id.len() <= u8::MAX as usize) {
+            match connection.open_uni().await {
+                Ok(mut key_stream) => {
+                    let mut buf = Vec::with_capacity(3 + iroh.len());
+                    buf.extend_from_slice(&IROH_KEY_MARKER);
+                    buf.push(iroh.len() as u8);
+                    buf.extend_from_slice(iroh.as_bytes());
+                    if let Err(e) = key_stream.write_all(&buf).await {
+                        warn!(error = %e, "Failed to send the WAN key");
+                    }
+                    if let Err(e) = key_stream.finish() {
+                        warn!(error = %e, "Failed to finish the WAN key stream");
+                    }
+                }
+                Err(e) => warn!(error = %e, "Failed to open the WAN key stream"),
             }
         }
 

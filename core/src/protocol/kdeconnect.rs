@@ -391,7 +391,7 @@ fn unix_now_secs() -> u64 {
 /// removed on drop. The server and the desktop app both change the store, and
 /// each change is load, modify, save; without the lock one of two changes
 /// made at the same moment would be lost.
-struct StoreLock {
+pub(crate) struct StoreLock {
     path: PathBuf,
 }
 
@@ -399,7 +399,7 @@ impl StoreLock {
     /// Give up after this long; a lock this old was left by a crash.
     const STALE: std::time::Duration = std::time::Duration::from_secs(10);
 
-    fn acquire(store_path: &Path) -> Result<Self> {
+    pub(crate) fn acquire(store_path: &Path) -> Result<Self> {
         let mut path = store_path.as_os_str().to_owned();
         path.push(".lock");
         let path = PathBuf::from(path);

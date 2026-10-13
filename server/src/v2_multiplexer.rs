@@ -51,6 +51,23 @@ pub async fn handle_v2_session(
             peer_identity.device_name, peer_identity.device_id
         );
 
+        // Device keys: the id in the handshake is only a claim; the TLS
+        // client certificate is the proof, held to the one bound to that
+        // device.
+        let claim = linux_link_core::streaming::SessionClaim {
+            device_id: Some(peer_identity.device_id.clone()),
+            peer: peer_addr,
+            peer_key: {
+                use linux_link_core::streaming::Connection as _;
+                linux_link_core::streaming::QuinnConnection::new(conn.clone()).peer_key()
+            },
+            iroh_id: None,
+        };
+        if crate::plugins::pair::device_keys_refused(&claim) {
+            conn.close(0u32.into(), b"session refused");
+            anyhow::bail!("v2 session refused: not the key this device proved");
+        }
+
         // Wrap Stream 0 for use with existing v1 plugins (control channel)
         let sender: Arc<dyn DeviceSender> = Arc::new(QuicDeviceSender::new(
             send0,

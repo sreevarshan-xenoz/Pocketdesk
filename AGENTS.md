@@ -42,6 +42,25 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **Device keys, a phone proves who it is (branch `feat/device-keys`, on top of the verifier fix in PR #21; spec `docs/superpowers/specs/2026-10-13-device-keys-design.md`).**
+  - **Verifier fix (#21).** The phone's TLS verifier had accepted every handshake signature, so a pinned desktop certificate proved nothing: anyone could present a copy. It now verifies signatures with the ring provider.
+  - **Phase A of mutual auth.**
+    - The phone presents its persisted certificate as a TLS client certificate on LAN QUIC.
+    - The server offers client auth and verifies the signature.
+    - `Connection::peer_key()` gives the proven key (cert SHA-256, or iroh endpoint id).
+    - The session gate gets a `SessionClaim` and checks `<state>/device_keys.json`.
+  - **Binding rules:**
+    - First use binds only a device with no key (existing pairings migrate), and only a LAN TLS key.
+    - Mismatch, or no key where one is bound, is refused, logged and notified.
+    - The WAN key never binds by first use. It is registered only from a LAN session its TLS key proved (`[0xFC,0x00]` stream); a WAN session from a device with no keys passes by id, as before.
+    - The check only reads. Keys bind after permissions and the owner's approval allow the session, and of two racing first sessions the second is refused.
+    - The phone keeps one iroh key, written atomically.
+    - v2 sessions are checked read-only.
+    - Pairing with the owner's PIN (never a guest grant), unpair and the app's Remove clear keys.
+    - The store takes the trust store's lock file. An unreadable store refuses everyone with its own notification, and Remove or re-pairing sets it aside.
+  - **Fresh review (1 Critical, 3 Important), all fixed, one commit each:** WAN first-use binding (lockout, or an internet squatter binding first), binding before the gate (a denied impostor kept its key), a guest PIN clearing the owner phone's keys, no recovery or lock on the store.
+  - **Device-verified on the A71, again after the review fixes:** a keyless WAN session binds nothing; the first LAN session binds the certificate and registers the iroh key; WAN then matches; a tampered stored key is refused (logged, the phone's refusal card); restoring recovers. An iroh session over a direct LAN path shows the phone's LAN address: read the gate's `Device keys decided` debug line, not the address.
+  - **Still open (phase B):** the TCP control channel (clipboard, files, notifications, pairing) still trusts the announced id and is unencrypted.
 - 2026-10-13: **Repo review fixes (branch `chore/repo-review`) and the screen-switch crash (branch `fix/monitor-switch`, PR #19).**
   - **License.** The root `LICENSE` was garbled text, not a license. It is now `LICENSE-MIT` plus `LICENSE-APACHE` (canonical), matching `MIT OR Apache-2.0`. Every crate declares the license, and the README has a License section.
   - **Rename.** Finished where people read it: CONTRIBUTING, the issue templates, the config example, the dev setup, and the Android theme. `plan.md` is marked historical. Kept on purpose, and documented: the `linux-link` command, its paths, the wire protocol, and the package id `dev.linuxlink.android` (changing it would break updates and pairings).

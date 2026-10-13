@@ -19,6 +19,7 @@ pub const APPROVAL_DIR: &str = "approvals";
 pub const RECEIVED_FILE: &str = "received.json";
 pub const OUTBOX_DIR: &str = "outbox";
 pub const SENT_FILE: &str = "sent.json";
+pub const DEVICE_KEYS_FILE: &str = "device_keys.json";
 
 fn missing(what: &str) -> io::Error {
     io::Error::new(

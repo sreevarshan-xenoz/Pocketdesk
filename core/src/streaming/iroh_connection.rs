@@ -26,7 +26,7 @@ use iroh::endpoint::{
 use iroh::{Endpoint, EndpointAddr, RelayMode};
 
 use super::connection::{
-    Connection, ConnectionError, ConnectionStats, InStream, OutStream, SharedConnection,
+    Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, SharedConnection,
     TransportFamily,
 };
 use super::transport::StreamTransportConfig;
@@ -88,6 +88,10 @@ impl Connection for IrohConnection {
             .await
             .map(|s| Box::new(IrohRecvStream { inner: s }) as Box<dyn InStream>)
             .map_err(classify_conn_error)
+    }
+
+    fn peer_key(&self) -> Option<PeerKey> {
+        Some(PeerKey::Iroh(self.inner.remote_id().to_string()))
     }
 
     fn remote_address(&self) -> SocketAddr {
@@ -201,6 +205,7 @@ impl IrohDial {
         direct_addrs: &[String],
         use_relays: bool,
         timeout: Duration,
+        device_key: Option<iroh::SecretKey>,
     ) -> Result<Self> {
         let id: iroh::EndpointId = endpoint_id.parse().context("invalid iroh EndpointId")?;
         let mut addr = EndpointAddr::new(id);
@@ -218,7 +223,13 @@ impl IrohDial {
         }
 
         let alpn = StreamTransportConfig::default().alpn;
-        let endpoint = Endpoint::builder(Minimal)
+        let mut builder = Endpoint::builder(Minimal);
+        // Device keys: dial as this device's own key, so the desktop can bind
+        // the session to it; without one, iroh makes a throwaway key.
+        if let Some(key) = device_key {
+            builder = builder.secret_key(key);
+        }
+        let endpoint = builder
             .alpns(vec![alpn.clone()])
             .relay_mode(if use_relays {
                 RelayMode::Default
@@ -302,11 +313,56 @@ impl InStream for IrohRecvStream {
     }
 }
 
+/// This device's WAN key, loaded from `path` or created there (device keys).
+/// A damaged file is replaced with a fresh key: the desktop only accepts a
+/// WAN key the device named on a LAN session, and the next LAN session names
+/// this one, where keeping the damaged file would end WAN for good. A new
+/// key is written to a temp file and renamed into place, so a crash cannot
+/// leave a half-written key behind.
+pub fn load_or_create_device_key(path: &std::path::Path) -> Result<iroh::SecretKey> {
+    if let Ok(bytes) = std::fs::read(path) {
+        if let Ok(raw) = <[u8; 32]>::try_from(bytes.as_slice()) {
+            return Ok(iroh::SecretKey::from_bytes(&raw));
+        }
+        tracing::warn!("{} is damaged; making a new WAN key", path.display());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let key = iroh::SecretKey::generate();
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+    let tmp = std::path::PathBuf::from(tmp);
+    crate::secure_fs::write_private(&tmp, &key.to_bytes())
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("placing {}", path.display()))?;
+    Ok(key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::streaming::transport::StreamTransportConfig;
     use iroh::endpoint::VarInt;
+
+    /// Device keys: the phone dials the WAN with one key, kept across runs,
+    /// so the desktop can bind its WAN sessions to it.
+    #[test]
+    fn a_device_keeps_its_wan_key_across_runs() {
+        let dir = std::env::temp_dir().join(format!("ll-irohkey-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("iroh_device.key");
+        let first = load_or_create_device_key(&path).unwrap();
+        let again = load_or_create_device_key(&path).unwrap();
+        assert_eq!(first.public().to_string(), again.public().to_string());
+        // A damaged file is replaced: the next LAN session registers the new
+        // key with the desktop, where an error here would end WAN for good.
+        std::fs::write(&path, b"short").unwrap();
+        let fresh = load_or_create_device_key(&path).unwrap();
+        assert_ne!(fresh.public().to_string(), first.public().to_string());
+        assert_eq!(std::fs::read(&path).unwrap().len(), 32);
+    }
 
     /// Loopback iroh endpoint with relays/DNS disabled — the spike's
     /// zero-infrastructure setup, dialing the direct `EndpointAddr` only.
@@ -439,6 +495,7 @@ mod tests {
                 &[server_addr.to_string()],
                 false,
                 Duration::from_secs(10),
+                None,
             )
             .await
             .expect("loopback dial over direct addr");

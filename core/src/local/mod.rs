@@ -7,6 +7,7 @@
 
 pub mod approval;
 pub mod config;
+pub mod device_keys;
 pub mod identity;
 pub mod network;
 pub mod outbox;
