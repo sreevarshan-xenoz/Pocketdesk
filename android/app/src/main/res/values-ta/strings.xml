@@ -153,9 +153,17 @@
     <string name="share_sent_clipboard">க்ளிப் போர்டுக்கு அனுப்பப்பட்டது.</string>
     <string name="share_failed">தோல்வி: %1$s</string>
     <string name="channel_transfers">கோப்புப் பரிமாற்றங்கள்</string>
-    <string name="channel_transfers_desc">உங்கள் கணினிக்கு அனுப்பிய கோப்புகளின் முன்னேற்றம்</string>
+    <string name="channel_transfers_desc">உங்கள் கணினிக்கும் அதிலிருந்தும் அனுப்பிய கோப்புகளின் முன்னேற்றம்</string>
     <string name="transfer_sending">%2$d இல் %1$d அனுப்பப்படுகிறது</string>
     <string name="transfer_failed">அனுப்பப்படாதவை: %2$d இல் %1$d</string>
+    <string name="transfer_receiving">உங்கள் கணினியிலிருந்து பெறப்படுகிறது</string>
+    <string name="transfer_done_mixed">முடிந்தது. அனுப்பியவை: %1$d, சேமித்தவை: %2$d</string>
+    <string name="transfer_some_failed">தோல்வி: %2$d இல் %1$d</string>
+    <string name="transfer_no_space">%1$s க்குப் போதுமான இடமில்லை</string>
+    <plurals name="transfer_saved">
+        <item quantity="one">%1$d கோப்பு Downloads-இல் சேமிக்கப்பட்டது</item>
+        <item quantity="other">%1$d கோப்புகள் Downloads-இல் சேமிக்கப்பட்டன</item>
+    </plurals>
     <plurals name="share_sending_files">
         <item quantity="one">%2$s க்கு %1$d கோப்பு அனுப்பப்படுகிறது…</item>
         <item quantity="other">%2$s க்கு %1$d கோப்புகள் அனுப்பப்படுகின்றன…</item>

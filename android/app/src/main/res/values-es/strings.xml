@@ -155,9 +155,18 @@
     <string name="share_sent_clipboard">Enviado al portapapeles.</string>
     <string name="share_failed">Error: %1$s</string>
     <string name="channel_transfers">Transferencias de archivos</string>
-    <string name="channel_transfers_desc">Progreso de los archivos enviados a tu ordenador</string>
+    <string name="channel_transfers_desc">Progreso de los archivos enviados a tu ordenador y desde él</string>
     <string name="transfer_sending">Enviando %1$d de %2$d</string>
     <string name="transfer_failed">Sin enviar: %1$d de %2$d</string>
+    <string name="transfer_receiving">Recibiendo de tu ordenador</string>
+    <string name="transfer_done_mixed">Listo. Enviados: %1$d, guardados: %2$d</string>
+    <string name="transfer_some_failed">Fallidas: %1$d de %2$d</string>
+    <string name="transfer_no_space">No hay espacio para %1$s</string>
+    <plurals name="transfer_saved">
+        <item quantity="one">%1$d archivo guardado en Descargas</item>
+        <item quantity="many">%1$d archivos guardados en Descargas</item>
+        <item quantity="other">%1$d archivos guardados en Descargas</item>
+    </plurals>
     <plurals name="share_sending_files">
         <item quantity="one">Enviando %1$d archivo a %2$s…</item>
         <item quantity="many">Enviando %1$d archivos a %2$s…</item>

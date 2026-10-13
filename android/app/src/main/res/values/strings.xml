@@ -160,9 +160,17 @@
     <string name="share_sent_clipboard">Sent to clipboard.</string>
     <string name="share_failed">Failed: %1$s</string>
     <string name="channel_transfers">File transfers</string>
-    <string name="channel_transfers_desc">Progress of files sent to your computer</string>
+    <string name="channel_transfers_desc">Progress of files sent to and from your computer</string>
     <string name="transfer_sending">Sending %1$d of %2$d</string>
     <string name="transfer_failed">Not sent: %1$d of %2$d</string>
+    <string name="transfer_receiving">Receiving from your computer</string>
+    <string name="transfer_done_mixed">Done. Sent: %1$d, saved: %2$d</string>
+    <string name="transfer_some_failed">Failed: %1$d of %2$d</string>
+    <string name="transfer_no_space">Not enough space for %1$s</string>
+    <plurals name="transfer_saved">
+        <item quantity="one">Saved %1$d file to Downloads</item>
+        <item quantity="other">Saved %1$d files to Downloads</item>
+    </plurals>
     <plurals name="share_sending_files">
         <item quantity="one">Sending %1$d file to %2$s…</item>
         <item quantity="other">Sending %1$d files to %2$s…</item>
