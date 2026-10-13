@@ -36,6 +36,24 @@ The pieces for a real proof already exist:
 | bridge | The phone's client config presents its certificate. The iroh key persists across dials. |
 | Device | The A71 streams after the update (LAN and WAN) and its keys are recorded. Then `device_keys.json` is edited to another fingerprint: refused, with a notification. Then re-pairing gets the session back. |
 
+## As built (2026-10-13)
+
+- **The certificate the phone already had.** The phone persists a P-256 certificate in its cert dir, and the rustls client presents it as a TLS client certificate.
+- **The server's side.** `AnyClientCert` offers client authentication and verifies the handshake signature. The first commit on the branch (a3f3c16) fixed the same hole in the opposite direction: the phone's verifier had accepted any signature, so a pinned desktop certificate proved nothing.
+- **Where the proof surfaces.** `Connection::peer_key()` yields `PeerKey::Tls(sha256)` from quinn's `peer_identity()` and `PeerKey::Iroh(id)` from iroh's `remote_id()`. The session gate gets a `SessionClaim`, and the v2 handshake is checked the same way.
+- **The WAN key.** The phone names it on a LAN session in a fourth config stream, `[0xFC, 0x00, len, endpoint id]`. It keeps one iroh key, `iroh_device.key` in its cert dir, and dials with it.
+- **Binding after the fresh review.**
+  - `device_keys::check` only reads. The session gate decides the keys, then runs permissions and the owner's approval, then binds: `bind_first` under the trust store's lock file takes a TLS key only while the device has none, so the second of two racing first sessions is refused.
+  - A WAN key never binds by first use; a WAN session from a device with no keys passes by id and records nothing. The WAN key is registered only from a session whose TLS key matched or was just bound.
+  - v2 checks read-only and never binds.
+  - Pairing clears keys only for the owner's PIN, never a scoped guest grant, and only after the trust store is written.
+  - Writes take the lock, use their own temp file and sync before the rename. An unreadable store refuses with its own reason and notification; `clear` (Remove, unpair, re-pairing) renames it to `device_keys.json.unreadable` and starts afresh.
+- **Device-verified (A71 ↔ Windows, before the review fixes):**
+  - the first LAN session bound both keys;
+  - a WAN session passed on the bound iroh key;
+  - a changed stored fingerprint was refused, with the reason logged, the phone's "session turned down" card, and the desk notified;
+  - restoring the binding brought the stream back.
+
 ## Out of scope
 
 - Phase B: TLS on the control channel, and pairing inside it.
