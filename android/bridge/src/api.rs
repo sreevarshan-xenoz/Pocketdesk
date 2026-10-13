@@ -39,12 +39,12 @@ pub fn set_data_dir(path: String) {
     tracing::info!("Data directory set to: {path}");
 }
 
-/// Pin a desktop's certificate before the first streaming connection to
-/// `address`, from a scanned pairing code (`fp`: hex SHA-256 of its
-/// certificate), so that connection is verified rather than trusted on first
-/// use. Only the QUIC streaming channel is covered: the control channel the
-/// PIN rides is not encrypted. Refused when a different certificate is
-/// already trusted for the address (see below).
+/// Pin a desktop's certificate before the first connection to `address`,
+/// from a scanned pairing code (`fp`: hex SHA-256 of its certificate), so
+/// that connection is verified rather than trusted on first use. The pin
+/// covers the stream and the control channel (phase B), so the PIN that
+/// pairs travels to the right computer. Refused when a different
+/// certificate is already trusted for the address (see below).
 pub fn pin_peer_certificate(address: String, fingerprint_hex: String) -> Result<bool, String> {
     let dir = crate::CERT_DIR
         .lock()
