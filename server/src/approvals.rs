@@ -46,7 +46,7 @@ async fn ask_in(dir: &Path, device_id: &str, peer: SocketAddr, limit: Duration) 
     let request = ApprovalRequest {
         id: uuid::Uuid::new_v4().to_string(),
         device_id: device_id.to_string(),
-        peer: peer.to_string(),
+        peer: peer_label(peer),
         asked_unix: now_unix(),
     };
     tracing::info!("Holding a session from {device_id} ({peer}) for approval at the desk");
@@ -63,6 +63,16 @@ async fn ask_in(dir: &Path, device_id: &str, peer: SocketAddr, limit: Duration) 
             return Verdict::Deny;
         }
         tokio::time::sleep(POLL).await;
+    }
+}
+
+/// Where the session comes from, for the prompt. An iroh (WAN) connection
+/// reports no socket address, only a placeholder.
+fn peer_label(peer: SocketAddr) -> String {
+    if peer.ip().is_unspecified() {
+        "the internet (WAN)".to_string()
+    } else {
+        peer.to_string()
     }
 }
 
@@ -120,7 +130,8 @@ fn publish(dir: &Path, list: &[ApprovalRequest]) {
 fn notify(device_id: &str, peer: SocketAddr) {
     let summary = "Pocketdesk: a phone wants to connect";
     let body = format!(
-        "{device_id} from {peer}. Allow or deny it in the Pocketdesk app within {APPROVAL_TIMEOUT_SECS} s."
+        "{device_id} from {}. Allow or deny it in the Pocketdesk app within {APPROVAL_TIMEOUT_SECS} s.",
+        peer_label(peer)
     );
     tokio::task::spawn_blocking(move || {
         if !crate::platform::notify(summary, &body, Duration::from_secs(APPROVAL_TIMEOUT_SECS)) {
@@ -169,6 +180,15 @@ mod tests {
             assert_eq!(got, verdict);
             assert!(approval::read_pending(&dir, now_unix()).is_empty());
         }
+    }
+
+    #[test]
+    fn a_wan_session_is_named_as_such_not_as_a_placeholder_address() {
+        assert_eq!(peer_label(PEER.parse().unwrap()), PEER);
+        assert_eq!(
+            peer_label("0.0.0.0:0".parse().unwrap()),
+            "the internet (WAN)"
+        );
     }
 
     #[tokio::test]
