@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.linuxlink.android"
+    namespace = "dev.pocketdesk.android"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.linuxlink.android"
+        applicationId = "dev.pocketdesk.android"
         minSdk = 26
         targetSdk = 37
         versionCode = 2

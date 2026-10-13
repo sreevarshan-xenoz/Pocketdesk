@@ -118,7 +118,7 @@ impl std::error::Error for ConfigError {
 }
 
 impl Config {
-    /// `<config dir>/linux-link/config.toml`.
+    /// `<config dir>/pocketdesk/config.toml`.
     pub fn path() -> io::Result<PathBuf> {
         Ok(paths::config_dir()?.join(paths::CONFIG_FILE))
     }

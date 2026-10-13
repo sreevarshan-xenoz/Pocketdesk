@@ -157,11 +157,11 @@ config/secrets.json
 **/*password*
 **/*token*
 **/api_keys.json
-.linux_link_certs/
-.linux_link_users.json
-.linux_link_devices.json
-.linux_link_logs/
-.linux_link_monitoring.db
+.pocketdesk_certs/
+.pocketdesk_users.json
+.pocketdesk_devices.json
+.pocketdesk_logs/
+.pocketdesk_monitoring.db
 
 # Database files
 *.db

@@ -1,8 +1,8 @@
 //! Hyprland workspace-HUD event bridge (R3#8).
 //!
 //! Streams socket2 compositor events and pushes them to connected clients
-//! as `kdeconnect.linuxlink.hyprland.event` packets, plus a full
-//! `kdeconnect.linuxlink.hyprland.state` snapshot whenever a client
+//! as `kdeconnect.pocketdesk.hyprland.event` packets, plus a full
+//! `kdeconnect.pocketdesk.hyprland.state` snapshot whenever a client
 //! registers. The phone renders both into a workspace HUD and switches
 //! workspaces through the existing Super+N input path (Hyprland's socket1
 //! write dispatchers are broken upstream, so actions never ride IPC).
@@ -10,16 +10,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
 
 use crate::hyprland::{HyprEvent, HyprlandIpc};
 use crate::plugins::windows::{entries, screen_box};
 
 /// Packet type for a single Hyprland event (body: `{event, data}`).
-pub const EVENT_PACKET: &str = "kdeconnect.linuxlink.hyprland.event";
+pub const EVENT_PACKET: &str = "kdeconnect.pocketdesk.hyprland.event";
 
 /// Packet type for the full workspace/window snapshot (sent on register).
-pub const STATE_PACKET: &str = "kdeconnect.linuxlink.hyprland.state";
+pub const STATE_PACKET: &str = "kdeconnect.pocketdesk.hyprland.state";
 
 /// Compositor events the HUD consumes. Everything socket2 emits
 /// (`render`, `monitorremoved`, …) that is not listed here is filtered out.

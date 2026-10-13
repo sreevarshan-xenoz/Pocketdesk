@@ -71,11 +71,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Clippy (${{ matrix.features }})
-        run: cargo clippy -p linux-link-core --no-default-features --features ${{ matrix.features }} --all-targets -- -D warnings
+        run: cargo clippy -p pocketdesk-core --no-default-features --features ${{ matrix.features }} --all-targets -- -D warnings
 
       - name: Tests (${{ matrix.features }})
         if: matrix.features == 'wan' || matrix.features == 'encode'
-        run: cargo test -p linux-link-core --features ${{ matrix.features }}
+        run: cargo test -p pocketdesk-core --features ${{ matrix.features }}
 
   # The Windows host (W0-W5, feat/windows-host). The Android bridge and the
   # iroh spike are not Windows targets. Live tests — GPU encoders, capture,
@@ -118,10 +118,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (workspace, all targets)
-        run: cargo clippy --workspace --all-targets --exclude linux-link-android-bridge --exclude iroh-spike -- -D warnings
+        run: cargo clippy --workspace --all-targets --exclude pocketdesk-android-bridge --exclude iroh-spike -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --exclude linux-link-android-bridge --exclude iroh-spike
+        run: cargo test --workspace --exclude pocketdesk-android-bridge --exclude iroh-spike
 
   # The bridge .so is gitignored, so the app build has to produce it first —
   # assembleDebug alone would link whatever stale binary was last copied in,
@@ -168,7 +168,7 @@ jobs:
         run: cargo install cargo-ndk
 
       - name: Bridge clippy (host target)
-        run: cargo clippy -p linux-link-android-bridge --all-targets -- -D warnings
+        run: cargo clippy -p pocketdesk-android-bridge --all-targets -- -D warnings
 
       - name: Build the arm64 bridge
         working-directory: android/bridge
@@ -206,13 +206,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build the CLI
-        run: cargo build --release -p linux-link-server --bin linux-link
+        run: cargo build --release -p pocketdesk-server --bin pocketdesk
 
       - name: Encoder benchmark against the committed baseline
         shell: bash
         run: |
           set +e
-          ./target/release/linux-link bench \
+          ./target/release/pocketdesk bench \
             --target software --repeat 3 --tolerance-pct 50 \
             --baseline bench/baselines --record "$RUNNER_TEMP/bench"
           code=$?

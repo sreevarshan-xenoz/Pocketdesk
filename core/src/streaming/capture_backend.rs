@@ -26,7 +26,7 @@ pub enum CaptureBackend {
 
 impl CaptureBackend {
     /// Every backend this build can drive, in `Auto`'s preference order.
-    /// `linux-link capabilities` enumerates from here (roadmap item 4).
+    /// `pocketdesk capabilities` enumerates from here (roadmap item 4).
     #[cfg(not(windows))]
     pub const ALL: &'static [CaptureBackend] = &[
         CaptureBackend::Auto,
@@ -35,7 +35,7 @@ impl CaptureBackend {
         CaptureBackend::X11,
     ];
     /// Every backend this build can drive, in `Auto`'s preference order.
-    /// `linux-link capabilities` enumerates from here (roadmap item 4).
+    /// `pocketdesk capabilities` enumerates from here (roadmap item 4).
     #[cfg(windows)]
     pub const ALL: &'static [CaptureBackend] = &[
         CaptureBackend::Auto,

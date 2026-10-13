@@ -1,11 +1,11 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 #[cfg(not(windows))]
 use tokio::process::Command;
 
 /// Power management plugin — handles sleep, shutdown, and restart commands.
 ///
-/// Listens for `kdeconnect.linuxlink.power` packets and executes the
+/// Listens for `kdeconnect.pocketdesk.power` packets and executes the
 /// corresponding systemctl command on the host (on Windows: the power APIs,
 /// see [`windows_power`]).
 pub struct PowerPlugin;
@@ -29,7 +29,7 @@ impl Plugin for PowerPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.linuxlink.power"]
+        &["kdeconnect.pocketdesk.power"]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -41,7 +41,7 @@ impl Plugin for PowerPlugin {
         packet: &NetworkPacket,
         _sender: &dyn DeviceSender,
     ) -> Result<()> {
-        if packet.packet_type.as_str() == "kdeconnect.linuxlink.power" {
+        if packet.packet_type.as_str() == "kdeconnect.pocketdesk.power" {
             let body = &packet.body;
             let action = body.get("action").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -49,7 +49,7 @@ impl Plugin for PowerPlugin {
             if let Some(action) = windows_power::Action::parse(action) {
                 return tokio::task::spawn_blocking(move || windows_power::perform(action))
                     .await
-                    .map_err(|e| linux_link_core::error::LinuxLinkError::Other {
+                    .map_err(|e| pocketdesk_core::error::PocketdeskError::Other {
                         detail: e.to_string(),
                     })?;
             }
@@ -110,7 +110,7 @@ async fn execute_systemctl(action: &str) -> Result<()> {
         .arg(action)
         .output()
         .await
-        .map_err(|e| linux_link_core::error::LinuxLinkError::Io {
+        .map_err(|e| pocketdesk_core::error::PocketdeskError::Io {
             operation: "systemctl",
             detail: e.to_string(),
         })?;
@@ -120,7 +120,7 @@ async fn execute_systemctl(action: &str) -> Result<()> {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(linux_link_core::error::LinuxLinkError::Other {
+        Err(pocketdesk_core::error::PocketdeskError::Other {
             detail: format!("Power action '{action}' failed: {stderr}"),
         })
     }
@@ -131,7 +131,7 @@ async fn execute_systemctl(action: &str) -> Result<()> {
 /// `SeShutdownPrivilege` every interactive user holds but has disabled.
 #[cfg(windows)]
 mod windows_power {
-    use linux_link_core::error::{LinuxLinkError, Result};
+    use pocketdesk_core::error::{PocketdeskError, Result};
     use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
     use windows::Win32::Security::{
         AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
@@ -174,8 +174,8 @@ mod windows_power {
         }
     }
 
-    fn other(detail: String) -> LinuxLinkError {
-        LinuxLinkError::Other { detail }
+    fn other(detail: String) -> PocketdeskError {
+        PocketdeskError::Other { detail }
     }
 
     fn enable_shutdown_privilege() -> Result<()> {

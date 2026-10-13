@@ -8,19 +8,19 @@ use crate::notification_monitor::start_notification_monitor;
 use crate::state;
 use crate::v2_multiplexer::handle_v2_session;
 use anyhow::{Context, Result, bail};
-use linux_link_core::local::pin as local_pin;
-use linux_link_core::protocol::ALPN_V1_STREAM;
-use linux_link_core::protocol::connection::ConnectionManager;
-use linux_link_core::protocol::kdeconnect::{
+use pocketdesk_core::local::pin as local_pin;
+use pocketdesk_core::protocol::ALPN_V1_STREAM;
+use pocketdesk_core::protocol::connection::ConnectionManager;
+use pocketdesk_core::protocol::kdeconnect::{
     DeviceIdentity, DeviceSender, NetworkPacket, PluginRegistry, TcpDeviceSender, TrustStore,
 };
-use linux_link_core::protocol::v2::{ALPN_V2, IdentityPacketV2, V2_MAX_VERSION, V2_MIN_VERSION};
-use linux_link_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
-use linux_link_core::streaming::QuinnConnection;
-use linux_link_core::streaming::StreamingServer;
-use linux_link_core::streaming::input_packet::InputPacket;
-use linux_link_core::streaming::transport::{CertManager, StreamTransportConfig};
-use linux_link_core::tailscale::{DiscoveryEvent, DiscoveryService, TailscaleClient};
+use pocketdesk_core::protocol::v2::{ALPN_V2, IdentityPacketV2, V2_MAX_VERSION, V2_MIN_VERSION};
+use pocketdesk_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
+use pocketdesk_core::streaming::QuinnConnection;
+use pocketdesk_core::streaming::StreamingServer;
+use pocketdesk_core::streaming::input_packet::InputPacket;
+use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
+use pocketdesk_core::tailscale::{DiscoveryEvent, DiscoveryService, TailscaleClient};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,7 +46,7 @@ pub async fn run(config: Config) -> Result<()> {
         }
     };
 
-    let mut local_ips = linux_link_core::tailscale::lan::get_local_ips().await;
+    let mut local_ips = pocketdesk_core::tailscale::lan::get_local_ips().await;
     if tailscale_ready && let Ok(ip) = tailscale.get_self_ip().await {
         tracing::info!("Tailscale online at {}", ip);
         if !local_ips.contains(&ip) {
@@ -69,12 +69,12 @@ pub async fn run(config: Config) -> Result<()> {
 
     // This computer's mDNS announcement (roadmap F6), made once the control
     // listener is up.
-    let lan_discovery = linux_link_core::tailscale::lan::LanDiscoveryService::new()?;
+    let lan_discovery = pocketdesk_core::tailscale::lan::LanDiscoveryService::new()?;
     let (host_name, host_id) = kde_service
         .identity
         .as_ref()
         .map(|i| (i.device_name.clone(), i.device_id.clone()))
-        .unwrap_or_else(|| ("linux-link-host".to_string(), String::new()));
+        .unwrap_or_else(|| ("pocketdesk-host".to_string(), String::new()));
 
     let discovery = DiscoveryService::new(tailscale.clone());
     let mut discovery_rx = discovery.subscribe();
@@ -83,7 +83,7 @@ pub async fn run(config: Config) -> Result<()> {
     });
 
     // R4 D2: mirror live streaming sessions to the state dir, notify the
-    // desktop when one starts, and consume `linux-link kick` requests.
+    // desktop when one starts, and consume `pocketdesk kick` requests.
     tokio::spawn(crate::live_sessions::run_watcher());
     // F7b: files the desktop app sends to a phone in a session.
     tokio::spawn(crate::offers::run_watcher());
@@ -137,7 +137,7 @@ pub async fn run(config: Config) -> Result<()> {
         None
     };
 
-    // Also run LAN discovery browser to detect other Linux Link servers
+    // Also run LAN discovery browser to detect other Pocketdesk servers
     let mut lan_rx = lan_discovery.subscribe();
     tokio::spawn(async move {
         lan_discovery.run(Duration::from_secs(30)).await;
@@ -479,16 +479,16 @@ pub async fn run(config: Config) -> Result<()> {
             }
             lan_event = lan_rx.recv() => {
                 match lan_event {
-                    Ok(linux_link_core::tailscale::lan::LanEvent::PeerDiscovered(peer)) => {
+                    Ok(pocketdesk_core::tailscale::lan::LanEvent::PeerDiscovered(peer)) => {
                         handle_discovery_event(DiscoveryEvent::PeerDiscovered(peer));
                     }
-                    Ok(linux_link_core::tailscale::lan::LanEvent::PeerOffline(name)) => {
+                    Ok(pocketdesk_core::tailscale::lan::LanEvent::PeerOffline(name)) => {
                         handle_discovery_event(DiscoveryEvent::PeerOffline(name));
                     }
-                    Ok(linux_link_core::tailscale::lan::LanEvent::DiscoveryError { method, reason }) => {
+                    Ok(pocketdesk_core::tailscale::lan::LanEvent::DiscoveryError { method, reason }) => {
                         handle_discovery_event(DiscoveryEvent::DiscoveryError { method, reason });
                     }
-                    Ok(linux_link_core::tailscale::lan::LanEvent::ServiceReady) => {
+                    Ok(pocketdesk_core::tailscale::lan::LanEvent::ServiceReady) => {
                         handle_discovery_event(DiscoveryEvent::ServiceReady);
                     }
                     _ => {}
@@ -534,7 +534,7 @@ pub async fn stop() -> Result<()> {
     {
         // No stop event: an older or wedged server. Terminate it in-process
         // (no `taskkill` to resolve off PATH), and only if the pid is still
-        // a Linux Link server rather than whatever reused it.
+        // a Pocketdesk server rather than whatever reused it.
         if crate::platform::force_stop(pid).context("failed to terminate the server")? {
             let _ = std::fs::remove_file(&pid_file);
             println!("Pocketdesk server (pid {pid}) force-stopped");
@@ -566,7 +566,7 @@ pub async fn print_status() -> Result<()> {
                 for line in lines {
                     println!("  {line}");
                 }
-                println!("  (end one with: linux-link kick <device-id>)");
+                println!("  (end one with: pocketdesk kick <device-id>)");
             }
         }
     }
@@ -585,7 +585,7 @@ pub async fn kick(device: String) -> Result<()> {
     if target.is_empty() {
         bail!("kick target is empty");
     }
-    linux_link_core::local::sessions::request_kick(
+    pocketdesk_core::local::sessions::request_kick(
         &state::state_dir()?,
         &target,
         local_pin::now_unix(),
@@ -593,7 +593,7 @@ pub async fn kick(device: String) -> Result<()> {
     .context("failed to write the kick request")?;
     println!(
         "Kick request sent for '{target}' — matching sessions end within ~1 s \
-         (verify with: linux-link status)"
+         (verify with: pocketdesk status)"
     );
     Ok(())
 }
@@ -742,7 +742,7 @@ async fn refuse_plain(mut stream: TcpStream) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut sink = [0u8; 1024];
     let _ = timeout(Duration::from_secs(1), stream.read(&mut sink)).await;
-    let refusal = format!("{}\n", linux_link_core::protocol::HANDSHAKE_TLS_REQUIRED);
+    let refusal = format!("{}\n", pocketdesk_core::protocol::HANDSHAKE_TLS_REQUIRED);
     if stream.write_all(refusal.as_bytes()).await.is_err() {
         return;
     }
@@ -785,7 +785,7 @@ async fn handle_connection_with_kde(
         session = %session_id,
         peer = ?peer_addr,
         transport = "tcp",
-        proto = %linux_link_core::protocol::PROTOCOL_VERSION
+        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
     );
 
     async move {
@@ -802,7 +802,7 @@ async fn handle_connection_with_kde(
             tracing::info!("Connection closed by peer before handshake");
             return Ok(());
         }
-        if first[0] != linux_link_core::protocol::TLS_HANDSHAKE_RECORD {
+        if first[0] != pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD {
             tracing::warn!("Refused a control connection without TLS (an outdated app?)");
             refuse_plain(stream).await;
             return Ok(());
@@ -815,7 +815,7 @@ async fn handle_connection_with_kde(
             .get_ref()
             .1
             .peer_certificates()
-            .and_then(linux_link_core::streaming::PeerKey::from_tls_certs);
+            .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
 
         let (reader_half, writer_half) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader_half);
@@ -823,7 +823,7 @@ async fn handle_connection_with_kde(
         // Wrap writer in Arc<Mutex> so both handshake and TcpDeviceSender can use it
         let writer = Arc::new(Mutex::new(writer_half));
 
-        // Step 1: LINUX_LINK_HELLO handshake
+        // Step 1: POCKETDESK_HELLO handshake
         let mut line = String::new();
         let bytes = timeout(Duration::from_secs(8), read_handshake_line(&mut reader, &mut line))
             .await
@@ -840,7 +840,7 @@ async fn handle_connection_with_kde(
         if line.trim() != HANDSHAKE_HELLO {
             tracing::warn!("Invalid handshake preface: {:?}", line.trim());
             let mut w = writer.lock().await;
-            w.write_all(b"LINUX_LINK_ERR 1\n")
+            w.write_all(b"POCKETDESK_ERR 1\n")
                 .await
                 .context("failed writing error handshake")?;
             bail!("invalid handshake preface")
@@ -969,7 +969,7 @@ async fn handle_connection_with_kde(
                             // itself and the identity announcement run.
                             let pairing_packet = matches!(
                                 packet_type.as_str(),
-                                "kdeconnect.pair" | "kdeconnect.linuxlink.pair"
+                                "kdeconnect.pair" | "kdeconnect.pocketdesk.pair"
                             );
                             // Re-read per packet: pairing, unpairing or a key
                             // change applies to a connection already open.
@@ -1050,7 +1050,7 @@ pub async fn print_capabilities(json: bool, markdown: bool) -> Result<()> {
     if json && markdown {
         bail!("--json and --markdown are mutually exclusive");
     }
-    let capabilities = linux_link_core::capabilities::Capabilities::collect();
+    let capabilities = pocketdesk_core::capabilities::Capabilities::collect();
     if json {
         println!("{}", capabilities.render_json());
         return Ok(());
@@ -1139,7 +1139,7 @@ fn humantime(secs: u64) -> String {
     }
 }
 
-/// Remove devices from the persistent trust store (`linux-link unpair`).
+/// Remove devices from the persistent trust store (`pocketdesk unpair`).
 pub async fn unpair(device_id: Option<String>) -> Result<()> {
     TrustStore::update(state::trust_store_path()?, |store| {
         let targets: Vec<String> = match device_id {
@@ -1153,7 +1153,7 @@ pub async fn unpair(device_id: Option<String>) -> Result<()> {
             store.untrust_device(id)?;
             // Its keys go too, so a phone that pairs again can bind new ones.
             if let Ok(dir) = state::state_dir() {
-                let _ = linux_link_core::local::device_keys::clear(&dir, id);
+                let _ = pocketdesk_core::local::device_keys::clear(&dir, id);
             }
             println!("Untrusted {id}");
         }
@@ -1237,7 +1237,7 @@ mod control_tls_tests {
         let tls = tokio_rustls::TlsAcceptor::from(desktop.control_server_config().unwrap());
         tokio::spawn(async move {
             let registry =
-                Arc::new(linux_link_core::protocol::kdeconnect::PluginRegistry::default());
+                Arc::new(pocketdesk_core::protocol::kdeconnect::PluginRegistry::default());
             while let Ok((stream, _)) = listener.accept().await {
                 let tls = tls.clone();
                 let registry = registry.clone();
@@ -1273,7 +1273,7 @@ mod control_tls_tests {
             .unwrap();
         assert_eq!(
             reply.trim(),
-            linux_link_core::protocol::HANDSHAKE_TLS_REQUIRED
+            pocketdesk_core::protocol::HANDSHAKE_TLS_REQUIRED
         );
         let mut rest = String::new();
         let closed = timeout(Duration::from_secs(5), reader.read_line(&mut rest))
@@ -1287,7 +1287,7 @@ mod control_tls_tests {
     async fn a_client_inside_tls_completes_the_handshake() {
         let addr = control_port().await;
         let phone = CertManager::new().unwrap();
-        let identity = linux_link_core::protocol::kdeconnect::DeviceIdentity::new(
+        let identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
             "control-tls-test-phone",
             "Test Phone",
         );
@@ -1311,7 +1311,7 @@ mod handshake_line_tests {
             read_handshake_line(&mut reader, &mut line).await.is_err(),
             "a peer that has proved nothing cannot make the desktop buffer this"
         );
-        let mut reader = BufReader::new(&b"LINUX_LINK_HELLO 1\n"[..]);
+        let mut reader = BufReader::new(&b"POCKETDESK_HELLO 1\n"[..]);
         let mut line = String::new();
         assert_eq!(
             read_handshake_line(&mut reader, &mut line).await.unwrap(),

@@ -1,5 +1,5 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 
 #[derive(Debug)]
 pub struct BatteryPlugin;

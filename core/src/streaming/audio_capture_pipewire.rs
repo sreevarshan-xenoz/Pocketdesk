@@ -75,11 +75,11 @@ fn run_pipewire_audio_capture(
         *pipewire::keys::MEDIA_TYPE => "Audio",
         *pipewire::keys::MEDIA_CATEGORY => "Capture",
         *pipewire::keys::MEDIA_ROLE => "Music",
-        *pipewire::keys::NODE_NAME => "linux-link-audio-capture",
+        *pipewire::keys::NODE_NAME => "pocketdesk-audio-capture",
         *pipewire::keys::STREAM_CAPTURE_SINK => "true",
     };
 
-    let stream = pipewire::stream::StreamBox::new(&core, "linux-link-audio-capture", stream_props)
+    let stream = pipewire::stream::StreamBox::new(&core, "pocketdesk-audio-capture", stream_props)
         .context("Failed to create PipeWire audio stream")?;
 
     // Calculate frames per buffer

@@ -4,7 +4,7 @@
 //! `service.rs`, `v2_multiplexer.rs`, and `kde.rs` don't duplicate logic.
 
 use anyhow::{Context, Result};
-use linux_link_core::protocol::kdeconnect::DeviceSender;
+use pocketdesk_core::protocol::kdeconnect::DeviceSender;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -14,14 +14,12 @@ use tokio::sync::Mutex;
 // State directory paths
 // ---------------------------------------------------------------------------
 
-/// Base state directory for Linux Link server files.
+/// Base state directory for Pocketdesk server files.
 ///
-/// Resolves to `$XDG_STATE_HOME/linux-link` (or equivalent on the current OS).
+/// Resolves to `$XDG_STATE_HOME/pocketdesk` (or equivalent on the current OS).
 pub fn state_dir() -> Result<PathBuf> {
-    let base = dirs::state_dir()
-        .or_else(dirs::data_local_dir)
-        .context("unable to determine local state directory")?;
-    Ok(base.join("linux-link"))
+    // The shared resolver, which also moves a folder from before the rename.
+    pocketdesk_core::local::paths::state_dir().context("unable to determine local state directory")
 }
 
 /// Path to the server PID file.
@@ -169,8 +167,8 @@ pub async fn prune_dead_clients(dead_ids: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::error::Result;
-    use linux_link_core::protocol::kdeconnect::NetworkPacket;
+    use pocketdesk_core::error::Result;
+    use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 
     struct Conn(&'static str, &'static str);
 

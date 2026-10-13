@@ -1,4 +1,4 @@
-//! Linux Link Core Library
+//! Pocketdesk Core Library
 //!
 //! Shared protocol types and cross-platform logic.
 

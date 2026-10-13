@@ -1,6 +1,6 @@
 use dashmap::DashMap;
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use serde_json::json;
 use std::path::PathBuf;
 use tokio::process::Command;
@@ -60,15 +60,15 @@ impl Plugin for ExecPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.linuxlink.exec"]
+        &["kdeconnect.pocketdesk.exec"]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.linuxlink.exec"]
+        &["kdeconnect.pocketdesk.exec"]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
-        if packet.packet_type.as_str() == "kdeconnect.linuxlink.exec" {
+        if packet.packet_type.as_str() == "kdeconnect.pocketdesk.exec" {
             let command = packet.body.get("command").and_then(|v| v.as_str());
 
             if let Some(cmd) = command {
@@ -83,7 +83,7 @@ impl Plugin for ExecPlugin {
                         let exit_code = out.status.code().unwrap_or(-1);
 
                         let response =
-                            NetworkPacket::new("kdeconnect.linuxlink.exec").with_body(json!({
+                            NetworkPacket::new("kdeconnect.pocketdesk.exec").with_body(json!({
                                 "stdout": stdout,
                                 "stderr": stderr,
                                 "exit_code": exit_code,
@@ -92,7 +92,7 @@ impl Plugin for ExecPlugin {
                     }
                     Err(e) => {
                         let response =
-                            NetworkPacket::new("kdeconnect.linuxlink.exec").with_body(json!({
+                            NetworkPacket::new("kdeconnect.pocketdesk.exec").with_body(json!({
                                 "stdout": "",
                                 "stderr": format!("Execution error: {e}"),
                                 "exit_code": -1,

@@ -1,5 +1,5 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use serde_json::json;
 
 use crate::privacy;
@@ -7,7 +7,7 @@ use crate::privacy;
 /// Privacy mode (Tier-3 #15): the phone asks the desktop to block *local*
 /// input while the remote session keeps working.
 ///
-/// Answers `kdeconnect.linuxlink.privacy`:
+/// Answers `kdeconnect.pocketdesk.privacy`:
 /// - `{action: "grab"}` — exclusively grab all physical keyboards/mice
 ///   (`EVIOCGRAB`); the compositor stops seeing local input, our uinput
 ///   injection path is untouched. Re-arms the auto-release TTL on refresh.
@@ -26,7 +26,7 @@ impl Plugin for PrivacyPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.linuxlink.privacy"]
+        &["kdeconnect.pocketdesk.privacy"]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -34,7 +34,7 @@ impl Plugin for PrivacyPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
-        if packet.packet_type != "kdeconnect.linuxlink.privacy" {
+        if packet.packet_type != "kdeconnect.pocketdesk.privacy" {
             return Ok(());
         }
         let action = packet
@@ -73,7 +73,7 @@ impl Plugin for PrivacyPlugin {
             }
         }
 
-        let response = NetworkPacket::new("kdeconnect.linuxlink.privacy").with_body(response);
+        let response = NetworkPacket::new("kdeconnect.pocketdesk.privacy").with_body(response);
         sender.send_packet(&response).await
     }
 }
@@ -87,7 +87,7 @@ mod tests {
         assert!(
             PrivacyPlugin
                 .incoming_capabilities()
-                .contains(&"kdeconnect.linuxlink.privacy")
+                .contains(&"kdeconnect.pocketdesk.privacy")
         );
     }
 
@@ -96,8 +96,8 @@ mod tests {
         let (count, ttl) = privacy::privacy_status();
         assert_eq!(count, 0, "test run must not hold real grabs");
         assert!(ttl.is_none());
-        let packet = NetworkPacket::new("kdeconnect.linuxlink.privacy")
+        let packet = NetworkPacket::new("kdeconnect.pocketdesk.privacy")
             .with_body(json!({ "action": "status" }));
-        assert_eq!(packet.packet_type, "kdeconnect.linuxlink.privacy");
+        assert_eq!(packet.packet_type, "kdeconnect.pocketdesk.privacy");
     }
 }

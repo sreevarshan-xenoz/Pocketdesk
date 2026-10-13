@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use eframe::egui::{self, Color32, RichText};
-use linux_link_core::local::config::{Config, ConfigError};
-use linux_link_core::streaming::{CaptureBackend, VideoQualityPreset};
+use pocketdesk_core::local::config::{Config, ConfigError};
+use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
 /// The settings being edited against what is saved.
 pub struct SettingsForm {
@@ -165,7 +165,7 @@ impl SettingsForm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::local::config::Config;
+    use pocketdesk_core::local::config::Config;
 
     #[test]
     fn an_untouched_form_is_clean_and_valid() {

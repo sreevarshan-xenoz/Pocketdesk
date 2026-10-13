@@ -208,7 +208,7 @@ fn run_pipewire_capture(
     };
 
     // Create the stream
-    let stream = pipewire::stream::StreamBox::new(&core, "linux-link-capture", stream_props)
+    let stream = pipewire::stream::StreamBox::new(&core, "pocketdesk-capture", stream_props)
         .context("Failed to create PipeWire stream")?;
 
     // Set up shared state for callbacks

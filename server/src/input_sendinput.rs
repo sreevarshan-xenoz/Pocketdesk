@@ -18,7 +18,7 @@
 //! per event, and the session carries on.
 
 use anyhow::Result;
-use linux_link_core::input::evdev_codes::KeyCode;
+use pocketdesk_core::input::evdev_codes::KeyCode;
 use tracing::{debug, warn};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardLayoutNameW, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS,
@@ -304,7 +304,7 @@ impl SendInputBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::input::keys::phone_emittable_codes;
+    use pocketdesk_core::input::keys::phone_emittable_codes;
 
     fn key_flags(input: &INPUT) -> (u16, u16, u32) {
         let ki = unsafe { input.Anonymous.ki };
@@ -447,7 +447,7 @@ mod tests {
     /// Live: absolute moves land on the pixel the virtual-desktop math says,
     /// and an injected key is really held. Moves the pointer briefly and
     /// restores it; F24 is a key no app binds. Run on a desktop session:
-    /// `cargo test -p linux-link-server --lib sendinput_drives -- --ignored`.
+    /// `cargo test -p pocketdesk-server --lib sendinput_drives -- --ignored`.
     #[test]
     #[ignore = "moves the real pointer on an interactive Windows desktop"]
     fn sendinput_drives_the_real_pointer_and_keyboard() {

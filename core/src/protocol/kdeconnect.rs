@@ -10,22 +10,22 @@ use tokio::sync::Mutex;
 
 use crate::PROTOCOL_VERSION;
 
-/// Version of **Linux Link's own** control-channel packet extensions (the
-/// `kdeconnect.linuxlink.*` family), tagged on the wire as `llVersion`.
+/// Version of **Pocketdesk's own** control-channel packet extensions (the
+/// `kdeconnect.pocketdesk.*` family), tagged on the wire as `llVersion`.
 ///
 /// Deliberately separate from `PROTOCOL_VERSION` (the KDE Connect *identity*
 /// handshake version): KDE Connect's own doc is explicitly *not a spec* and
 /// their types can drift without notice, so we version the packets WE own and
 /// parse unfamiliar fields defensively instead of trusting them. Bump this only
-/// for a change that alters the meaning of an existing `kdeconnect.linuxlink.*`
+/// for a change that alters the meaning of an existing `kdeconnect.pocketdesk.*`
 /// field — purely additive fields are forward-compatible by design (unknown
 /// fields are ignored) and need no bump.
 pub const LL_EXT_VERSION: u32 = 1;
 
-/// Prefix identifying Linux Link's KDE-Connect-compatible control-channel
+/// Prefix identifying Pocketdesk's KDE-Connect-compatible control-channel
 /// extensions. Every packet sent under this prefix is auto-tagged with
 /// [`LL_EXT_VERSION`] by [`NetworkPacket::to_wire`].
-pub const LINUXLINK_PACKET_PREFIX: &str = "kdeconnect.linuxlink.";
+pub const POCKETDESK_PACKET_PREFIX: &str = "kdeconnect.pocketdesk.";
 
 /// A KDE Connect network packet (JSON, newline-terminated on wire).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,8 +44,8 @@ pub struct NetworkPacket {
     /// Id of the packet this one replies to (notification reply correlation).
     #[serde(default, rename = "replyId", skip_serializing_if = "Option::is_none")]
     pub reply_id: Option<String>,
-    /// Version of *our* `kdeconnect.linuxlink.*` extension protocol (R4 D4).
-    /// Auto-stamped by [`to_wire`] on every `kdeconnect.linuxlink.*` packet, so
+    /// Version of *our* `kdeconnect.pocketdesk.*` extension protocol (R4 D4).
+    /// Auto-stamped by [`to_wire`] on every `kdeconnect.pocketdesk.*` packet, so
     /// no construction site has to remember it; left absent on KDE Connect's
     /// native types and readable-but-ignored by peers that predate the field.
     #[serde(default, rename = "llVersion", skip_serializing_if = "Option::is_none")]
@@ -77,13 +77,13 @@ impl NetworkPacket {
 
     /// Serialize to JSON bytes with a trailing newline (wire format).
     ///
-    /// Any `kdeconnect.linuxlink.*` packet that has not already carried an
+    /// Any `kdeconnect.pocketdesk.*` packet that has not already carried an
     /// explicit [`ll_version`] is tagged with [`LL_EXT_VERSION`] here — the one
     /// choke point every send path (server + bridge) goes through, so plugin
     /// code never has to set it.
     pub fn to_wire(&self) -> Result<Vec<u8>> {
         let mut pkt = self.clone();
-        if pkt.ll_version.is_none() && pkt.packet_type.starts_with(LINUXLINK_PACKET_PREFIX) {
+        if pkt.ll_version.is_none() && pkt.packet_type.starts_with(POCKETDESK_PACKET_PREFIX) {
             pkt.ll_version = Some(LL_EXT_VERSION);
         }
         let mut bytes = serde_json::to_vec(&pkt)?;
@@ -95,11 +95,11 @@ impl NetworkPacket {
     pub fn from_wire(line: &str) -> Result<Self> {
         let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
         if trimmed.is_empty() {
-            return Err(crate::error::LinuxLinkError::ProtocolError {
+            return Err(crate::error::PocketdeskError::ProtocolError {
                 detail: "empty packet line".to_string(),
             });
         }
-        serde_json::from_str(trimmed).map_err(|e| crate::error::LinuxLinkError::Serialization {
+        serde_json::from_str(trimmed).map_err(|e| crate::error::PocketdeskError::Serialization {
             format: "JSON",
             detail: e.to_string(),
         })
@@ -391,7 +391,7 @@ pub struct TrustStore {
     path: PathBuf,
     trusted_device_ids: HashSet<String>,
     /// R4 D3: deviceId -> unix-seconds expiry for *time-boxed* trust
-    /// (one-off support grants from `linux-link pair --grant 15m`).
+    /// (one-off support grants from `pocketdesk pair --grant 15m`).
     /// Entries here are trusted only until they expire; expiry is applied
     /// lazily at load, so no scheduler is required anywhere.
     grants: HashMap<String, u64>,
@@ -776,7 +776,7 @@ mod tests {
     #[test]
     fn trust_store_roundtrip_persists_devices() {
         let unique = format!(
-            "linux-link-trust-{}-{}.json",
+            "pocketdesk-trust-{}-{}.json",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -798,7 +798,7 @@ mod tests {
 
     fn temp_store_path(tag: &str) -> PathBuf {
         let unique = format!(
-            "linux-link-trust-{}-{}-{}.json",
+            "pocketdesk-trust-{}-{}-{}.json",
             tag,
             std::process::id(),
             std::time::SystemTime::now()
@@ -937,8 +937,8 @@ mod tests {
     }
 
     #[test]
-    fn linuxlink_packets_are_version_tagged() {
-        let pkt = NetworkPacket::new("kdeconnect.linuxlink.privacy")
+    fn pocketdesk_packets_are_version_tagged() {
+        let pkt = NetworkPacket::new("kdeconnect.pocketdesk.privacy")
             .with_body(serde_json::json!({ "action": "status" }));
         let wire = String::from_utf8(pkt.to_wire().unwrap()).unwrap();
         let parsed: Value = serde_json::from_str(wire.trim()).unwrap();
@@ -964,7 +964,7 @@ mod tests {
 
     #[test]
     fn explicit_ll_version_is_not_overwritten() {
-        let mut pkt = NetworkPacket::new("kdeconnect.linuxlink.endpoint");
+        let mut pkt = NetworkPacket::new("kdeconnect.pocketdesk.endpoint");
         pkt.ll_version = Some(99);
         let wire = String::from_utf8(pkt.to_wire().unwrap()).unwrap();
         let parsed: Value = serde_json::from_str(wire.trim()).unwrap();
@@ -976,9 +976,9 @@ mod tests {
         // The core D4 guarantee: a peer from a future revision (extra fields,
         // even an extra top-level one we do not model) still parses, and the
         // fields we know keep their values.
-        let future = r#"{"type":"kdeconnect.linuxlink.privacy","id":7,"llVersion":2,"body":{"ok":true},"futureTopLevel":{"nested":1}}"#;
+        let future = r#"{"type":"kdeconnect.pocketdesk.privacy","id":7,"llVersion":2,"body":{"ok":true},"futureTopLevel":{"nested":1}}"#;
         let pkt = NetworkPacket::from_wire(future).unwrap();
-        assert_eq!(pkt.packet_type, "kdeconnect.linuxlink.privacy");
+        assert_eq!(pkt.packet_type, "kdeconnect.pocketdesk.privacy");
         assert_eq!(pkt.ll_version, Some(2));
         assert_eq!(pkt.body["ok"], true);
     }

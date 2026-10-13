@@ -16,17 +16,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use linux_link_core::local::outbox::{self, SendRequest};
-use linux_link_core::local::pin::now_unix;
-use linux_link_core::local::sent::{self, SentFile, SentState};
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TrustStore};
-use linux_link_core::protocol::permissions::Capability;
+use pocketdesk_core::local::outbox::{self, SendRequest};
+use pocketdesk_core::local::pin::now_unix;
+use pocketdesk_core::local::sent::{self, SentFile, SentState};
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TrustStore};
+use pocketdesk_core::protocol::permissions::Capability;
 
 /// Pushed to the phone: a file is waiting for it, `{id, name, size}`.
-pub const OFFER: &str = "kdeconnect.linuxlink.file_offer";
+pub const OFFER: &str = "kdeconnect.pocketdesk.file_offer";
 /// The phone declines an offer it will not fetch: `{id, reason}` (no room,
 /// too large, nowhere to save it).
-pub const DECLINE: &str = "kdeconnect.linuxlink.file_offer_declined";
+pub const DECLINE: &str = "kdeconnect.pocketdesk.file_offer_declined";
 /// How long the phone has to fetch an offered file. Long enough for a phone
 /// that fetches a dropped batch one file after another.
 pub const OFFER_TTL: Duration = Duration::from_secs(10 * 60);
@@ -316,7 +316,7 @@ fn update_sent(dir: &Path, id: &str, state: SentState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::error::Result;
+    use pocketdesk_core::error::Result;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-offers-{name}-{}", std::process::id()));

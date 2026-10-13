@@ -1,6 +1,6 @@
 //! Integration tests for the KDE Connect protocol over TCP.
 //!
-//! Spins up a mock server that speaks TLS, then the LINUX_LINK_HELLO
+//! Spins up a mock server that speaks TLS, then the POCKETDESK_HELLO
 //! handshake, and responds to KDE Connect packets. Tests the full client-side flow
 //! from ConnectionManager through to NetworkPacket dispatch.
 
@@ -10,12 +10,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-use linux_link_core::protocol::connection::ConnectionManager;
-use linux_link_core::protocol::kdeconnect::{
+use pocketdesk_core::protocol::connection::ConnectionManager;
+use pocketdesk_core::protocol::kdeconnect::{
     DeviceIdentity, DeviceSender, NetworkPacket, TcpDeviceSender,
 };
-use linux_link_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
-use linux_link_core::streaming::transport::CertManager;
+use pocketdesk_core::protocol::{HANDSHAKE_HELLO, HANDSHAKE_OK};
+use pocketdesk_core::streaming::transport::CertManager;
 
 /// Accept one connection on `listener` and run the desktop's side of TLS.
 async fn accept_tls(
@@ -53,7 +53,7 @@ async fn start_mock_server() -> (u16, Arc<Mutex<Vec<NetworkPacket>>>) {
         let (reader, mut writer) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader);
 
-        // Step 1: Expect LINUX_LINK_HELLO
+        // Step 1: Expect POCKETDESK_HELLO
         let mut line = String::new();
         reader.read_line(&mut line).await.unwrap();
         assert_eq!(line.trim(), HANDSHAKE_HELLO);
@@ -133,7 +133,7 @@ async fn test_handshake_wrong_protocol() {
         let mut reader = BufReader::new(&mut stream);
         reader.read_line(&mut line).await.unwrap();
         // Send wrong protocol version
-        stream.write_all(b"LINUX_LINK_OK 999\n").await.unwrap();
+        stream.write_all(b"POCKETDESK_OK 999\n").await.unwrap();
     });
 
     let manager = manager(Duration::from_secs(5));

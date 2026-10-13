@@ -1,6 +1,6 @@
 # Encoder benchmark baselines
 
-One pinned clip, one geometry, one bitrate, every run: `linux-link bench` measures the
+One pinned clip, one geometry, one bitrate, every run: `pocketdesk bench` measures the
 encode half of the pipeline on the machine it is running on, and compares that measurement
 to a record committed here.
 
@@ -36,7 +36,7 @@ sidecar baseline is committed yet.
 ## Reading a run
 
 ```
-linux-link bench --target vaapi --repeat 3 --baseline bench/baselines --tolerance-pct 50
+pocketdesk bench --target vaapi --repeat 3 --baseline bench/baselines --tolerance-pct 50
 ```
 
 | exit | meaning                                                        |
@@ -60,8 +60,8 @@ reproduced the 7 ms figure. That is why a baseline is never recorded from a sing
 Run the benchmark there and let it name its own file:
 
 ```
-linux-link bench --target software --record bench/baselines
-linux-link bench --target vaapi   --record bench/baselines   # on a box with a VA node
+pocketdesk bench --target software --record bench/baselines
+pocketdesk bench --target vaapi   --record bench/baselines   # on a box with a VA node
 ```
 
 The filename is the backend plus the host identity, so a machine accumulates one record per

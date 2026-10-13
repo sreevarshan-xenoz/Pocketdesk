@@ -17,7 +17,7 @@
 //! `/dev/dri/renderD128` is the NVIDIA card (no VA driver →
 //! `Failed to initialise VAAPI connection`) while the Intel iHD driver lives
 //! on `renderD129`. `open_vaapi_device` therefore *tries* each node and keeps
-//! the first that opens, honouring a `LINUX_LINK_VAAPI_DEVICE` override for
+//! the first that opens, honouring a `POCKETDESK_VAAPI_DEVICE` override for
 //! operators who want to pin one. This is why the encoder works out of the box
 //! here instead of dying on the hardcoded `renderD128` the sidecar used.
 
@@ -39,7 +39,7 @@ static FFMPEG_INIT: Once = Once::new();
 
 /// Environment override for the VAAPI render node (e.g. an operator pinning
 /// `/dev/dri/renderD130`). When set, only that node is attempted.
-pub const VAAPI_DEVICE_ENV: &str = "LINUX_LINK_VAAPI_DEVICE";
+pub const VAAPI_DEVICE_ENV: &str = "POCKETDESK_VAAPI_DEVICE";
 
 /// First DRM render node index on Linux; subsequent ones are probed for
 /// multi-GPU boxes.

@@ -117,11 +117,11 @@ impl TailscaleClient {
     }
 
     async fn status(&self) -> Result<TailscaleStatus> {
-        if let Ok(ip) = std::env::var("LINUX_LINK_TAILSCALE_IP") {
+        if let Ok(ip) = std::env::var("POCKETDESK_TAILSCALE_IP") {
             return Ok(TailscaleStatus {
                 backend_state: Some("Running".to_string()),
                 self_node: Some(StatusPeer {
-                    host_name: Some("linux-link-dev".to_string()),
+                    host_name: Some("pocketdesk-dev".to_string()),
                     dns_name: None,
                     tailscale_ips: vec![ip],
                     active: Some(true),

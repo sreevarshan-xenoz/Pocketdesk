@@ -4,7 +4,7 @@
 //! `UserNotificationListener`, and only when the program has a *package
 //! identity* (it runs from an MSIX, or a sparse "packaged with external
 //! location" package) and the user has granted access. The plain
-//! `linux-link.exe` has no identity, so on a stock install this reports why
+//! `pocketdesk.exe` has no identity, so on a stock install this reports why
 //! and ends — the phone simply receives no desktop notifications, exactly as
 //! on a Linux desktop without a notification daemon. Packaging is documented
 //! in docs/development-setup.md; once the process has an identity, this code

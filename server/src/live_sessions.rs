@@ -1,14 +1,14 @@
 //! R4 D2 — desktop-side session visibility and kick.
 //!
 //! The truth about live sessions lives in the core registry
-//! (`linux_link_core::streaming::sessions`); the CLI is a separate process,
+//! (`pocketdesk_core::streaming::sessions`); the CLI is a separate process,
 //! so this module mirrors it into the state dir and consumes kick requests,
 //! both through files — the same mechanism R3 #11b uses for pairing PINs
 //! (no admin socket to attack or keep alive).
 //!
 //! - `live_sessions.json` — rewritten whenever the registry changes; read
-//!   by `linux-link status` to show what is watching right now.
-//! - `kick` — written by `linux-link kick <device>` (single line
+//!   by `pocketdesk status` to show what is watching right now.
+//! - `kick` — written by `pocketdesk kick <device>` (single line
 //!   `<target>\n<unix-secs>`); consumed and deleted by the watcher within
 //!   ~1 s, ignored if stale (> 60 s) so a leftover file can't kill a future
 //!   session.
@@ -20,8 +20,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use linux_link_core::local::sessions::{self as shared, MirrorSession};
-use linux_link_core::streaming::sessions::LiveSession;
+use pocketdesk_core::local::sessions::{self as shared, MirrorSession};
+use pocketdesk_core::streaming::sessions::LiveSession;
 
 /// A kick request older than this is dropped unexecuted — the operator
 /// meant it for a session that is no longer (or not yet) live.
@@ -114,7 +114,7 @@ pub async fn run_watcher() {
             match parse_kick_file(&raw, now) {
                 None => tracing::warn!("Ignoring stale/malformed kick request file"),
                 Some(target) => {
-                    let kicked = linux_link_core::streaming::sessions::kick(&target);
+                    let kicked = pocketdesk_core::streaming::sessions::kick(&target);
                     if kicked.is_empty() {
                         tracing::warn!(target = %target, "kick: no live session matched");
                     } else {
@@ -122,7 +122,7 @@ pub async fn run_watcher() {
                             tracing::info!(
                                 device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
                                 peer = %s.peer,
-                                "Kicked streaming session (linux-link kick)"
+                                "Kicked streaming session (pocketdesk kick)"
                             );
                         }
                     }
@@ -131,7 +131,7 @@ pub async fn run_watcher() {
         }
 
         // 2. Consent notification for sessions that appeared since last tick.
-        let live = linux_link_core::streaming::sessions::list();
+        let live = pocketdesk_core::streaming::sessions::list();
         let ids: Vec<u64> = live.iter().map(|s| s.id).collect();
         for s in &live {
             if !prev_ids.contains(&s.id) {
@@ -140,7 +140,7 @@ pub async fn run_watcher() {
         }
         prev_ids = ids;
 
-        // 3. Mirror for `linux-link status`, rewritten only on change.
+        // 3. Mirror for `pocketdesk status`, rewritten only on change.
         let json = render_json(&live, now);
         if json != prev_json {
             if let Err(e) = write_live_json(&json) {
@@ -180,7 +180,7 @@ pub fn format_status_lines(raw: &str, now_unix: u64) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::streaming::sessions::LiveSession;
+    use pocketdesk_core::streaming::sessions::LiveSession;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     fn session(device: Option<&str>, lan: bool) -> LiveSession {

@@ -1,4 +1,4 @@
-//! Linux Link Server Library
+//! Pocketdesk Server Library
 //!
 //! Re-exports for integration testing. The `main.rs` binary uses these same modules.
 

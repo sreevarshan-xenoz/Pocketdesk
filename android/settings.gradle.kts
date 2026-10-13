@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "linux-link-android"
+rootProject.name = "pocketdesk-android"
 include(":app")

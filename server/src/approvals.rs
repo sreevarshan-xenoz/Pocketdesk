@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use linux_link_core::local::approval::{self, APPROVAL_TIMEOUT_SECS, ApprovalRequest, Verdict};
-use linux_link_core::local::paths::APPROVAL_DIR;
-use linux_link_core::local::pin::now_unix;
+use pocketdesk_core::local::approval::{self, APPROVAL_TIMEOUT_SECS, ApprovalRequest, Verdict};
+use pocketdesk_core::local::paths::APPROVAL_DIR;
+use pocketdesk_core::local::pin::now_unix;
 
 /// How often a held session looks for its answer.
 const POLL: Duration = Duration::from_millis(250);

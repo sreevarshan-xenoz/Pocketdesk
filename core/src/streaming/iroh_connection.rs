@@ -184,7 +184,7 @@ impl Connection for IrohConnection {
 /// aborts its socket task with an error if an `Endpoint` is dropped while
 /// live, so callers must `close()` the dial (or at least keep the endpoint
 /// alive until the connection ends). The identity the phone learned from the
-/// server's `kdeconnect.linuxlink.endpoint` announcement is reassembled here
+/// server's `kdeconnect.pocketdesk.endpoint` announcement is reassembled here
 /// from its string parts — relays are dial-reachable fallbacks, direct
 /// addresses the LAN/Tailscale-routable set.
 pub struct IrohDial {

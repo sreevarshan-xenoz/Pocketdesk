@@ -5,8 +5,8 @@ use std::path::Path;
 use std::thread::JoinHandle;
 
 use eframe::egui::{self, Color32};
-use linux_link_core::local::config::Config;
-use linux_link_core::local::diagnostics::{self, Finding, Report, Status};
+use pocketdesk_core::local::config::Config;
+use pocketdesk_core::local::diagnostics::{self, Finding, Report, Status};
 
 const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const WARN: Color32 = Color32::from_rgb(0xd9, 0x9a, 0x2b);
@@ -162,7 +162,7 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
         findings.push(firewall);
     }
     findings.push(diagnostics::check_addresses(
-        &linux_link_core::local::network::local_ips(),
+        &pocketdesk_core::local::network::local_ips(),
     ));
     findings.push(diagnostics::check_internet_path(state_dir, state));
     findings.extend(diagnostics::check_outside(
@@ -180,19 +180,19 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
 
 /// The firewall as it applies to phones (Windows): the enabled inbound
 /// rules for the server that apply to the active network profile, Allow and
-/// Block. The rules are `linux-link install`'s Pocketdesk group, and program
+/// Block. The rules are `pocketdesk install`'s Pocketdesk group, and program
 /// rules for the running server's own exe (Windows adds those when someone
 /// answers its prompt). `None` where there is no such check.
 #[cfg(windows)]
 fn firewall_state(state_dir: &Path) -> Option<Result<diagnostics::FirewallState, String>> {
     // The pid is a number, so it goes into the script as one.
-    let exe = linux_link_core::local::server::server_pid(state_dir)
-        .filter(|_| linux_link_core::local::server::is_running(state_dir))
+    let exe = pocketdesk_core::local::server::server_pid(state_dir)
+        .filter(|_| pocketdesk_core::local::server::is_running(state_dir))
         .map(|pid| format!("(Get-Process -Id {pid}).Path"))
         .unwrap_or_else(|| "''".to_string());
     let script = format!("$Exe = {exe}; {FIREWALL_QUERY}");
     let powershell = crate::restart::system32("WindowsPowerShell\\v1.0\\powershell.exe");
-    let answer = linux_link_core::local::network::output_within(
+    let answer = pocketdesk_core::local::network::output_within(
         &powershell.to_string_lossy(),
         &["-NoProfile", "-NonInteractive", "-Command", &script],
         std::time::Duration::from_secs(10),
@@ -227,12 +227,12 @@ mod tests {
     #[test]
     #[ignore]
     fn the_checks_run_on_this_computer() {
-        let dir = linux_link_core::local::paths::state_dir().unwrap();
-        let config = linux_link_core::local::config::Config::load().ok();
+        let dir = pocketdesk_core::local::paths::state_dir().unwrap();
+        let config = pocketdesk_core::local::config::Config::load().ok();
         let report = super::run(&dir, config);
         println!(
             "{}",
-            linux_link_core::local::diagnostics::report_text(
+            pocketdesk_core::local::diagnostics::report_text(
                 &report,
                 "test",
                 std::env::consts::OS,

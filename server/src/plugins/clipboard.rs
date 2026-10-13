@@ -1,5 +1,5 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -94,7 +94,7 @@ async fn set_clipboard(content: &str) -> Result<()> {
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| linux_link_core::error::LinuxLinkError::Io {
+        .map_err(|e| pocketdesk_core::error::PocketdeskError::Io {
             operation: "spawn wl-copy",
             detail: e.to_string(),
         })?;
@@ -119,7 +119,7 @@ async fn get_clipboard() -> Result<String> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
-        Err(linux_link_core::error::LinuxLinkError::Io {
+        Err(pocketdesk_core::error::PocketdeskError::Io {
             operation: "wl-paste",
             detail: String::from_utf8_lossy(&output.stderr).to_string(),
         })

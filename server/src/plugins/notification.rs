@@ -1,5 +1,5 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 
 #[derive(Debug)]
 pub struct NotificationPlugin;
@@ -61,12 +61,11 @@ impl Plugin for NotificationPlugin {
 async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
     use zbus::Connection;
 
-    let conn =
-        Connection::session()
-            .await
-            .map_err(|e| linux_link_core::error::LinuxLinkError::Other {
-                detail: format!("D-Bus session failed: {e}"),
-            })?;
+    let conn = Connection::session().await.map_err(|e| {
+        pocketdesk_core::error::PocketdeskError::Other {
+            detail: format!("D-Bus session failed: {e}"),
+        }
+    })?;
     let proxy = zbus::Proxy::new(
         &conn,
         "org.freedesktop.Notifications",
@@ -74,7 +73,7 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
         "org.freedesktop.Notifications",
     )
     .await
-    .map_err(|e| linux_link_core::error::LinuxLinkError::Other {
+    .map_err(|e| pocketdesk_core::error::PocketdeskError::Other {
         detail: format!("D-Bus proxy failed: {e}"),
     })?;
 
@@ -82,7 +81,7 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
         .call::<_, _, u32>(
             "Notify",
             &(
-                "linux-link",                                                      // app_name
+                "pocketdesk",                                                      // app_name
                 0u32,                                                              // replaces_id
                 "",                                                                // app_icon
                 summary,                                                           // summary
@@ -93,7 +92,7 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
             ),
         )
         .await
-        .map_err(|e| linux_link_core::error::LinuxLinkError::Other {
+        .map_err(|e| pocketdesk_core::error::PocketdeskError::Other {
             detail: format!("D-Bus call failed: {e}"),
         })?;
 

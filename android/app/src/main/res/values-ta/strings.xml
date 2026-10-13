@@ -196,7 +196,7 @@
     <!-- Pairing sheet -->
     <string name="pair_title">%1$s உடன் இணை</string>
     <string name="pair_read_pin">டெஸ்க்டாப் திரையில் PIN ஐப் படியுங்கள்…</string>
-    <string name="pair_pin_ready">டெஸ்க்டாப்பில் PIN காட்டுகிறது (`linux-link pair`) — கீழே தட்டிடுங்கள்.</string>
+    <string name="pair_pin_ready">டெஸ்க்டாப்பில் PIN காட்டுகிறது (`pocketdesk pair`) — கீழே தட்டிடுங்கள்.</string>
     <string name="pair_error">பிழை: %1$s</string>
     <string name="pair_no_pin">டெஸ்க்டாப் PIN ஐ உறுதிப்படுத்தவில்லை.</string>
     <string name="pair_wrong_pin">தவறான அல்லது காலாவதியான PIN.</string>

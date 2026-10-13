@@ -113,7 +113,7 @@ fn show_shield(instance: HINSTANCE) -> Vec<HWND> {
         let class = WNDCLASSW {
             lpfnWndProc: Some(shield_proc),
             hInstance: instance,
-            lpszClassName: w!("LinuxLinkPrivacyShield"),
+            lpszClassName: w!("PocketdeskPrivacyShield"),
             hbrBackground: unsafe {
                 CreateSolidBrush(COLORREF(
                     u32::from(r) | u32::from(g) << 8 | u32::from(b) << 16,
@@ -132,7 +132,7 @@ fn show_shield(instance: HINSTANCE) -> Vec<HWND> {
                     | WS_EX_TRANSPARENT
                     | WS_EX_NOACTIVATE
                     | WS_EX_TOOLWINDOW,
-                w!("LinuxLinkPrivacyShield"),
+                w!("PocketdeskPrivacyShield"),
                 w!("Pocketdesk session active"),
                 WS_POPUP,
                 monitor.x,

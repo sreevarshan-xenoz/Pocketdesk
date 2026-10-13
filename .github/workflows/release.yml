@@ -73,7 +73,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       - name: Build release binaries
-        run: cargo build --release --bin linux-link --bin pocketdesk
+        run: cargo build --release --bin pocketdesk --bin pocketdesk-app
 
       - name: Run tests
         run: cargo test --workspace
@@ -82,8 +82,8 @@ jobs:
         run: |
           name="pocketdesk-${{ needs.version.outputs.name }}-linux-x86_64"
           mkdir -p "release/$name"
-          cp target/release/linux-link target/release/pocketdesk "release/$name/"
-          cp config.toml.example linux-link.service README.md SECURITY.md LICENSE-MIT LICENSE-APACHE "release/$name/"
+          cp target/release/pocketdesk target/release/pocketdesk-app "release/$name/"
+          cp config.toml.example pocketdesk.service README.md SECURITY.md LICENSE-MIT LICENSE-APACHE "release/$name/"
           cp -r man "release/$name/"
           tar -C release -czf "release/$name.tar.gz" "$name"
 
@@ -129,17 +129,17 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build release binaries
-        run: cargo build --release --bin linux-link --bin pocketdesk
+        run: cargo build --release --bin pocketdesk --bin pocketdesk-app
 
       - name: Run tests
-        run: cargo test --workspace --exclude linux-link-android-bridge --exclude iroh-spike
+        run: cargo test --workspace --exclude pocketdesk-android-bridge --exclude iroh-spike
 
       - name: Create release archive
         shell: pwsh
         run: |
           $name = "pocketdesk-${{ needs.version.outputs.name }}-windows-x86_64"
           New-Item -ItemType Directory -Force "release/$name" | Out-Null
-          Copy-Item target/release/linux-link.exe, target/release/pocketdesk.exe, config.toml.example, README.md, SECURITY.md, LICENSE-MIT, LICENSE-APACHE "release/$name/"
+          Copy-Item target/release/pocketdesk.exe, target/release/pocketdesk-app.exe, config.toml.example, README.md, SECURITY.md, LICENSE-MIT, LICENSE-APACHE "release/$name/"
           Compress-Archive -Path "release/$name" -DestinationPath "release/$name.zip"
 
       - uses: actions/upload-artifact@v4

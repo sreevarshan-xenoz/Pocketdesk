@@ -3507,100 +3507,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4a5ff6bcca6c4867b1c4fd4ef63e4db7436ef363e0ad7531d1558856bae64f4"
 
 [[package]]
-name = "linux-link-android-bridge"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "jni 0.21.1",
- "linux-link-core",
- "quinn",
- "serde",
- "serde_json",
- "tokio",
- "tokio-rustls",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "linux-link-core"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "ashpd",
- "async-trait",
- "base64 0.22.1",
- "bitflags 2.13.2",
- "dirs 5.0.1",
- "evdev",
- "ffmpeg-next",
- "ffmpeg-sidecar",
- "if-addrs",
- "iroh",
- "libc",
- "libspa",
- "mdns-sd",
- "opus",
- "pipewire",
- "quinn",
- "rand 0.8.6",
- "rcgen",
- "reqwest 0.12.28",
- "rustls",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "tokio-rustls",
- "tokio-util",
- "toml 0.8.23",
- "toml_edit 0.22.27",
- "tracing",
- "uuid",
- "wayland-backend",
- "wayland-client",
- "wayland-protocols-wlr",
- "wayland-scanner",
- "windows 0.62.2",
- "x11rb",
- "xcap",
-]
-
-[[package]]
-name = "linux-link-server"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "dashmap",
- "dirs 5.0.1",
- "enigo",
- "evdev",
- "iroh",
- "libc",
- "linux-link-core",
- "quinn",
- "rand 0.8.6",
- "rustls",
- "serde",
- "serde_json",
- "tokio",
- "tokio-rustls",
- "tokio-util",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "uuid",
- "windows 0.62.2",
- "windows-core 0.62.2",
- "xcap",
- "zbus",
-]
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5105,15 +5011,109 @@ dependencies = [
 ]
 
 [[package]]
+name = "pocketdesk-android-bridge"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "jni 0.21.1",
+ "pocketdesk-core",
+ "quinn",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "pocketdesk-core"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "ashpd",
+ "async-trait",
+ "base64 0.22.1",
+ "bitflags 2.13.2",
+ "dirs 5.0.1",
+ "evdev",
+ "ffmpeg-next",
+ "ffmpeg-sidecar",
+ "if-addrs",
+ "iroh",
+ "libc",
+ "libspa",
+ "mdns-sd",
+ "opus",
+ "pipewire",
+ "quinn",
+ "rand 0.8.6",
+ "rcgen",
+ "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "toml 0.8.23",
+ "toml_edit 0.22.27",
+ "tracing",
+ "uuid",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols-wlr",
+ "wayland-scanner",
+ "windows 0.62.2",
+ "x11rb",
+ "xcap",
+]
+
+[[package]]
 name = "pocketdesk-desktop"
 version = "0.2.0"
 dependencies = [
  "eframe",
- "linux-link-core",
+ "pocketdesk-core",
  "qrcode",
  "serde_json",
  "tray-icon",
  "windows 0.62.2",
+]
+
+[[package]]
+name = "pocketdesk-server"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "dashmap",
+ "dirs 5.0.1",
+ "enigo",
+ "evdev",
+ "iroh",
+ "libc",
+ "pocketdesk-core",
+ "quinn",
+ "rand 0.8.6",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "xcap",
+ "zbus",
 ]
 
 [[package]]

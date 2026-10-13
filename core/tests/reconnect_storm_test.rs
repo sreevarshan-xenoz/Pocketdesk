@@ -2,8 +2,8 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
 
-use linux_link_core::protocol::v2::{ALPN_V2, IdentityPacketV2, perform_v2_handshake};
-use linux_link_core::streaming::transport::{
+use pocketdesk_core::protocol::v2::{ALPN_V2, IdentityPacketV2, perform_v2_handshake};
+use pocketdesk_core::streaming::transport::{
     CertManager, StreamClient, StreamServer, StreamTransportConfig,
 };
 

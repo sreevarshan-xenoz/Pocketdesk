@@ -10,7 +10,7 @@
 //! The production counterpart of the
 //! research finding that hole punching succeeds ~70% of the time even after
 //! prerequisites — the relayed share is a number we must measure, not
-//! assume. `linux-link sessions` renders the log for humans.
+//! assume. `pocketdesk sessions` renders the log for humans.
 
 use crate::state;
 use anyhow::Result;
@@ -31,15 +31,15 @@ pub fn session_log_path() -> Result<PathBuf> {
 
 /// JSON-lines counterpart of [`session_log_path`]: one object per session with
 /// every field typed, for tooling and for the benchmark regression check
-/// (roadmap 2167/2168). `linux-link sessions --json` prints it.
+/// (roadmap 2167/2168). `pocketdesk sessions --json` prints it.
 pub fn session_record_path() -> Result<PathBuf> {
-    Ok(state::state_dir()?.join(linux_link_core::local::paths::SESSIONS_FILE))
+    Ok(state::state_dir()?.join(pocketdesk_core::local::paths::SESSIONS_FILE))
 }
 
 /// Install the core telemetry sink → [`record`]. Called once at server
 /// startup; a second call is a no-op (core keeps the first sink).
 pub fn init() {
-    linux_link_core::streaming::set_session_telemetry_callback(|report| {
+    pocketdesk_core::streaming::set_session_telemetry_callback(|report| {
         if let Err(e) = record(report) {
             tracing::warn!("Failed to record session telemetry: {e}");
         }
@@ -48,7 +48,7 @@ pub fn init() {
 
 /// Append one report to both stores: the tab-separated line for humans and the
 /// JSON record for comparison. Each rotates independently.
-pub fn record(report: &linux_link_core::streaming::SessionReport) -> Result<()> {
+pub fn record(report: &pocketdesk_core::streaming::SessionReport) -> Result<()> {
     append(session_log_path()?, report.format(), MAX_LOG_BYTES)?;
     let json = serde_json::to_string(report)?;
     append(session_record_path()?, json, MAX_RECORD_BYTES)
@@ -137,7 +137,7 @@ pub fn latest_record() -> Result<Option<serde_json::Value>> {
 }
 
 /// Human summary: outcome tally + the recent tail. Printed by
-/// `linux-link sessions`. With `json`, emit the retained records instead — one
+/// `pocketdesk sessions`. With `json`, emit the retained records instead — one
 /// object per line, pipeable into `jq` or the benchmark comparison.
 pub fn print_sessions(count: usize, json: bool) -> Result<()> {
     if json {
@@ -214,22 +214,22 @@ pub fn print_sessions(count: usize, json: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::streaming::SessionReport;
+    use pocketdesk_core::streaming::SessionReport;
     use std::io::Write;
 
     fn report(outcome: &'static str) -> SessionReport {
         // Build via the core type's fields (they're public).
         let kind = match outcome {
-            "lan_direct" => linux_link_core::streaming::SessionOutcome::LanDirect,
-            "wan_punched" => linux_link_core::streaming::SessionOutcome::WanPunched,
-            "wan_relayed" => linux_link_core::streaming::SessionOutcome::WanRelayed,
-            "rejected" => linux_link_core::streaming::SessionOutcome::Rejected,
-            _ => linux_link_core::streaming::SessionOutcome::Failed,
+            "lan_direct" => pocketdesk_core::streaming::SessionOutcome::LanDirect,
+            "wan_punched" => pocketdesk_core::streaming::SessionOutcome::WanPunched,
+            "wan_relayed" => pocketdesk_core::streaming::SessionOutcome::WanRelayed,
+            "rejected" => pocketdesk_core::streaming::SessionOutcome::Rejected,
+            _ => pocketdesk_core::streaming::SessionOutcome::Failed,
         };
         SessionReport {
             unix_secs: 100,
             outcome: kind,
-            ever_relayed: kind == linux_link_core::streaming::SessionOutcome::WanRelayed,
+            ever_relayed: kind == pocketdesk_core::streaming::SessionOutcome::WanRelayed,
             duration_secs: 60,
             rtt_avg_ms: 30,
             goodput_kbps: 5000,
@@ -289,7 +289,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("streaming_sessions.jsonl");
 
-        let tails = linux_link_core::metrics::Samples::new();
+        let tails = pocketdesk_core::metrics::Samples::new();
         for i in 0..300u64 {
             tails.push_micros(4_000 + i * 1_000);
         }
@@ -344,7 +344,7 @@ mod tests {
         let path = dir.join("streaming_sessions.jsonl");
 
         let mut report = report("wan_punched");
-        report.link = Some(linux_link_core::streaming::LinkReport {
+        report.link = Some(pocketdesk_core::streaming::LinkReport {
             lost_packets: 12,
             lost_bytes: 4096,
             datagrams_sent: 9_000,

@@ -14,7 +14,7 @@
 //!
 //! R4 E4: on a wlroots desktop that advertises `zwlr_layer_shell_v1`, grabbing
 //! also paints a full-perimeter "session active" shield (core
-//! [`linux_link_core::streaming::shield`]) so bystanders can see the machine is
+//! [`pocketdesk_core::streaming::shield`]) so bystanders can see the machine is
 //! being driven remotely. It rides the same lifecycle — shown on the first
 //! grab, torn down on release/expiry — and is a no-op where the protocol is
 //! absent. (Local input *blocking* is the `EVIOCGRAB` above; this box's
@@ -27,7 +27,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use evdev::{AttributeSetRef, Device, KeyCode};
-use linux_link_core::streaming::shield::{self, PrivacyShield};
+use pocketdesk_core::streaming::shield::{self, PrivacyShield};
 
 /// How long a grab lives without a refresh from the phone. The client
 /// re-arms well before this (see the Kotlin poll cadence).
@@ -57,11 +57,11 @@ fn grab_state() -> &'static Mutex<GrabState> {
 
 /// Classification, factored out for unit tests. A device is grabbed when it
 /// looks like a physical keyboard or mouse. Our own injection devices
-/// (`Linux Link Virtual *`) must never be grabbed — that would silence the
+/// (`Pocketdesk Virtual *`) must never be grabbed — that would silence the
 /// remote path itself — and switch-only devices (lid, power button) stay
 /// visible to logind.
 pub fn should_grab(name: &str, keys: &AttributeSetRef<KeyCode>, has_relative_axes: bool) -> bool {
-    if name.starts_with("Linux Link") {
+    if name.starts_with("Pocketdesk") {
         return false;
     }
     let keyboard = keys.contains(KeyCode::KEY_A);
@@ -237,10 +237,10 @@ mod tests {
     fn virtual_devices_are_never_grabbed() {
         let mut keyboard = AttributeSet::<KeyCode>::new();
         keyboard.insert(KeyCode::KEY_A);
-        assert!(!should_grab("Linux Link Virtual Input", &keyboard, true));
+        assert!(!should_grab("Pocketdesk Virtual Input", &keyboard, true));
         let mut touch = AttributeSet::<KeyCode>::new();
         touch.insert(KeyCode::BTN_LEFT);
-        assert!(!should_grab("Linux Link Virtual Touch", &touch, false));
+        assert!(!should_grab("Pocketdesk Virtual Touch", &touch, false));
     }
 
     #[test]

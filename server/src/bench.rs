@@ -1,4 +1,4 @@
-//! `linux-link bench` — the pinned encoder benchmark and its regression gate
+//! `pocketdesk bench` — the pinned encoder benchmark and its regression gate
 //! (roadmap 2195-2200).
 //!
 //! The measurement itself lives in `core::streaming::bench`; this module is the
@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use linux_link_core::streaming::bench::{self, BenchRecord, BenchTarget};
+use pocketdesk_core::streaming::bench::{self, BenchRecord, BenchTarget};
 
 /// Everything measured fine and the tail is inside its allowance.
 pub const EXIT_PASS: i32 = 0;
@@ -284,7 +284,7 @@ fn load_baseline(path: &Path, candidate: &BenchRecord) -> Result<Option<BenchRec
         }
     );
     eprintln!(
-        "  add one with: linux-link bench --record {}",
+        "  add one with: pocketdesk bench --record {}",
         path.display()
     );
     Ok(None)
@@ -299,8 +299,8 @@ fn read_record(path: &Path) -> Result<BenchRecord> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linux_link_core::metrics::Summary;
-    use linux_link_core::streaming::bench::RECORD_SCHEMA;
+    use pocketdesk_core::metrics::Summary;
+    use pocketdesk_core::streaming::bench::RECORD_SCHEMA;
 
     fn record(host: &str, backend: &str) -> BenchRecord {
         BenchRecord {

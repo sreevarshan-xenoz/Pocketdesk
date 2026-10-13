@@ -1,5 +1,5 @@
-use linux_link_core::error::{LinuxLinkError, Result};
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::{PocketdeskError, Result};
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -26,10 +26,10 @@ const STATUS_FAILED: u8 = 0;
 /// The phone asks for a file (F7b): `{path | offer, port, key}`. It listens
 /// on `port`, and the desktop dials it, as for a share, so the bytes go to
 /// the transport's peer and nowhere the phone names.
-pub const FETCH: &str = "kdeconnect.linuxlink.file_fetch";
+pub const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 /// A download the desktop will not make, and why: `{key, reason}`, so the
 /// phone stops waiting at once instead of at its listener's timeout.
-pub const FETCH_REFUSED: &str = "kdeconnect.linuxlink.file_fetch_refused";
+pub const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
 
 /// The transfer slots, shared by every connection.
 fn transfer_slots() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
@@ -321,7 +321,7 @@ fn plan_fetch(
 fn transfer_tls(
     sender: &dyn DeviceSender,
 ) -> std::result::Result<std::sync::Arc<tokio_rustls::rustls::ClientConfig>, String> {
-    let Some(key @ linux_link_core::streaming::PeerKey::Tls(phone)) = sender.peer_key() else {
+    let Some(key @ pocketdesk_core::streaming::PeerKey::Tls(phone)) = sender.peer_key() else {
         return Err("the phone's connection proved no key".to_string());
     };
     crate::plugins::pair::may_transfer(sender.device_id(), &key)?;
@@ -331,8 +331,8 @@ fn transfer_tls(
 /// This desktop's identity, read once: the one its control channel and
 /// stream present (loaded at start by the service from the same folder).
 fn desktop_certs()
--> std::result::Result<std::sync::Arc<linux_link_core::streaming::transport::CertManager>, String> {
-    use linux_link_core::streaming::transport::CertManager;
+-> std::result::Result<std::sync::Arc<pocketdesk_core::streaming::transport::CertManager>, String> {
+    use pocketdesk_core::streaming::transport::CertManager;
     static CERTS: std::sync::Mutex<Option<std::sync::Arc<CertManager>>> =
         std::sync::Mutex::new(None);
     let mut cached = CERTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -367,7 +367,7 @@ async fn dial_transfer(
     .await
     .map_err(|_| io_error("tls", "timed out"))?
     .map_err(|e| io_error("tls", e))?;
-    if stream.get_ref().1.alpn_protocol() != Some(linux_link_core::protocol::ALPN_TRANSFER) {
+    if stream.get_ref().1.alpn_protocol() != Some(pocketdesk_core::protocol::ALPN_TRANSFER) {
         return Err(io_error(
             "tls",
             "the phone does not speak the transfer protocol",
@@ -497,14 +497,14 @@ fn record_received_in(state_dir: &Path, path: &Path, name: &str, size: u64, from
     // Transfers run concurrently; the list is read, changed and replaced.
     static LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LIST.lock().unwrap_or_else(|e| e.into_inner());
-    let entry = linux_link_core::local::received::ReceivedFile {
+    let entry = pocketdesk_core::local::received::ReceivedFile {
         name: name.to_string(),
         path: path.display().to_string(),
         size,
-        received_unix: linux_link_core::local::pin::now_unix(),
+        received_unix: pocketdesk_core::local::pin::now_unix(),
         from: from.to_string(),
     };
-    if let Err(e) = linux_link_core::local::received::record(state_dir, entry) {
+    if let Err(e) = pocketdesk_core::local::received::record(state_dir, entry) {
         tracing::warn!("Could not record the received file: {e}");
     }
 }
@@ -665,7 +665,7 @@ async fn create_unique(dir: &Path, name: &str) -> Result<(PathBuf, tokio::fs::Fi
             Err(e) => return Err(io_error("create_file", e)),
         }
     }
-    Err(LinuxLinkError::Io {
+    Err(PocketdeskError::Io {
         operation: "create_file",
         detail: format!("too many files named like {name}"),
     })
@@ -721,7 +721,7 @@ async fn receive_file(
     size: u64,
 ) -> Result<PathBuf> {
     if size == 0 || size > MAX_FILE_BYTES {
-        return Err(LinuxLinkError::Io {
+        return Err(PocketdeskError::Io {
             operation: "receive",
             detail: format!("refused a file of declared size {size}"),
         });
@@ -816,8 +816,8 @@ async fn save_stream<S: tokio::io::AsyncRead + Unpin>(
     Ok(incoming.final_path.clone())
 }
 
-fn io_error(operation: &'static str, detail: impl std::fmt::Display) -> LinuxLinkError {
-    LinuxLinkError::Io {
+fn io_error(operation: &'static str, detail: impl std::fmt::Display) -> PocketdeskError {
+    PocketdeskError::Io {
         operation,
         detail: detail.to_string(),
     }
@@ -902,7 +902,7 @@ mod tests {
 
     const KEY: &str = "0123456789abcdef0123456789abcdef";
 
-    use linux_link_core::streaming::transport::CertManager;
+    use pocketdesk_core::streaming::transport::CertManager;
 
     /// This desktop, the phone that asks, and another device.
     fn certs() -> &'static (CertManager, CertManager, CertManager) {
@@ -965,7 +965,7 @@ mod tests {
         let state = temp_dir("list");
         let path = state.join("photo.jpg");
         record_received_in(&state, &path, "photo.jpg", 2_100_000, "192.0.2.7");
-        let files = linux_link_core::local::received::read(&state);
+        let files = pocketdesk_core::local::received::read(&state);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].name, "photo.jpg");
         assert_eq!(files[0].size, 2_100_000);
@@ -1149,8 +1149,8 @@ mod tests {
         fn peer_addr(&self) -> Option<SocketAddr> {
             Some(self.peer)
         }
-        fn peer_key(&self) -> Option<linux_link_core::streaming::PeerKey> {
-            Some(linux_link_core::streaming::PeerKey::Tls(
+        fn peer_key(&self) -> Option<pocketdesk_core::streaming::PeerKey> {
+            Some(pocketdesk_core::streaming::PeerKey::Tls(
                 certs().1.cert_fingerprint(),
             ))
         }

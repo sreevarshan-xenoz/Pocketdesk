@@ -31,9 +31,9 @@ use windows::Win32::System::Com::{
 };
 use windows::core::HSTRING;
 
-use linux_link_core::streaming::{AudioDecoder, InputPacket};
+use pocketdesk_core::streaming::{AudioDecoder, InputPacket};
 
-pub use linux_link_core::streaming::audio::{MIC_CHANNELS, MIC_SAMPLE_RATE};
+pub use pocketdesk_core::streaming::audio::{MIC_CHANNELS, MIC_SAMPLE_RATE};
 
 use crate::platform::audio_windows;
 

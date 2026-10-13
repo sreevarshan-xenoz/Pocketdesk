@@ -1,5 +1,5 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use tracing::info;
 
 #[cfg(not(windows))]
@@ -50,7 +50,7 @@ pub(crate) fn screen_box(monitors: &[HyprMonitor]) -> Option<[i32; 4]> {
 
 /// R3#7: Hyprland window enumeration for the phone-side picker.
 ///
-/// Responds to `kdeconnect.linuxlink.windows` queries with the visible
+/// Responds to `kdeconnect.pocketdesk.windows` queries with the visible
 /// windows (address, title, class, global + monitor-local geometry, size,
 /// workspace) plus the active window address and the monitor layout box.
 /// On non-Hyprland sessions replies `available: false`.
@@ -63,7 +63,7 @@ impl Plugin for WindowsPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.linuxlink.windows"]
+        &["kdeconnect.pocketdesk.windows"]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -71,7 +71,7 @@ impl Plugin for WindowsPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
-        if packet.packet_type != "kdeconnect.linuxlink.windows" {
+        if packet.packet_type != "kdeconnect.pocketdesk.windows" {
             return Ok(());
         }
 
@@ -123,7 +123,7 @@ impl Plugin for WindowsPlugin {
             }),
         };
 
-        let response = NetworkPacket::new("kdeconnect.linuxlink.windows").with_body(body);
+        let response = NetworkPacket::new("kdeconnect.pocketdesk.windows").with_body(body);
         sender.send_packet(&response).await?;
         Ok(())
     }

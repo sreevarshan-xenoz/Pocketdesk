@@ -4,7 +4,7 @@
   LOCAL COPY (BSD-3-Clause, (c) Hyprland contributors, upstream
   hyprwm/hyprland-protocols protocols/hyprland-toplevel-export-v1.xml).
   Trimmed: capture_toplevel_with_wlr_toplevel_handle (v2) removed so the
-  generated bindings need no extra crate deps; Linux Link captures by the
+  generated bindings need no extra crate deps; Pocketdesk captures by the
   window handle that the windows plugin already reports. Bind version 1.
 -->
   <copyright>

@@ -2,7 +2,7 @@
 
 **Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale or a hole-punched iroh path. No port forwarding required.**
 
-> Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). The name changed when Windows support landed. The `linux-link` command, its config/state paths, the wire protocol and the Android package id (`dev.linuxlink.android`) keep the old name on purpose, so existing installs, pairings and app updates carry over.
+> Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). Everything now carries the Pocketdesk name: the `pocketdesk` command (or `pd` for short), the desktop app `pocketdesk-app`, the config and state folders (an existing `linux-link` folder is moved on first start), the wire protocol and the Android app `dev.pocketdesk.android`. A phone with the old app needs the new one installed and paired again once.
 
 [![Rust](https://img.shields.io/badge/Rust-Pure%20Rust-orange?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
@@ -49,7 +49,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **Notifications** — receive Android notifications on your Linux desktop
 - **Notification reply** — answer desktop notifications from the phone; the desktop records the reply, copies it to the clipboard and shows a confirmation
 - **Find my device** — ring the desktop from the phone, or ring the phone from the desktop
-- **PIN pairing** — 6-digit PIN pairing (shown on the desktop or printed by `linux-link pair`); unpaired connections are locked out — the control channel (TCP and v2/QUIC) and the video/input stream all enforce it — unless `pairing_required = false`
+- **PIN pairing** — 6-digit PIN pairing (shown on the desktop or printed by `pocketdesk pair`); unpaired connections are locked out — the control channel (TCP and v2/QUIC) and the video/input stream all enforce it — unless `pairing_required = false`
 - **Privacy mode** — block the desktop's physical keyboard+mouse while remote (EVIOCGRAB with a 10-min auto-release TTL), lock the desktop from the phone or its session notification; uinput remote input keeps flowing
 - **View-only mode** — one tap makes the phone a pure viewer: the *server* drops all remote input for the session (video, clipboard and HUDs keep working), so nothing slips through from a stale tap queue; re-arms automatically after a stream reconnect
 - **Relay bandwidth courtesy** — a WAN session riding a relay automatically drops to a conservative video bitrate (relay bandwidth is shared, not ours to saturate) and restores full quality the moment it punches through to direct; one tap on the "Full quality" toggle overrides the floor if you want every bit of it
@@ -127,12 +127,12 @@ curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/s
 **Management commands** (after install):
 
 ```bash
-linux-link status             # Tailscale status of this machine
-linux-link sessions           # Recent streaming-session outcomes
-linux-link bench --baseline bench/baselines   # Encode tail vs the committed baseline
-linux-link capabilities       # KDE Connect capability sets in use
-linux-link pair --grant 15m   # Time-boxed one-off support PIN
-linux-link kick <id|prefix|peer-ip|all>   # Drop a live session
+pocketdesk status             # Tailscale status of this machine
+pocketdesk sessions           # Recent streaming-session outcomes
+pocketdesk bench --baseline bench/baselines   # Encode tail vs the committed baseline
+pocketdesk capabilities       # KDE Connect capability sets in use
+pocketdesk pair --grant 15m   # Time-boxed one-off support PIN
+pocketdesk kick <id|prefix|peer-ip|all>   # Drop a live session
 ```
 
 The update/rollback/uninstall verbs belong to the install script, not the binary:
@@ -174,13 +174,13 @@ fallback), NVENC/AMF/Quick Sync/Media Foundation through `ffmpeg.exe`,
 - privacy mode: local input blocked, plus a ring that does not appear in the stream;
 - battery, power, exec, siren and the window HUD.
 
-Unzip `linux-link-<version>-x86_64-pc-windows-gnu.zip` from the releases page
+Unzip `pocketdesk-<version>-x86_64-pc-windows-gnu.zip` from the releases page
 (one self-contained exe), install FFmpeg (`winget install Gyan.FFmpeg`, which
 puts `ffmpeg.exe` on `PATH`), then:
 
 ```powershell
-linux-link.exe install   # start at logon + open the firewall (one UAC prompt)
-linux-link.exe pair      # pairing PIN, also shown as a toast
+pocketdesk.exe install   # start at logon + open the firewall (one UAC prompt)
+pocketdesk.exe pair      # pairing PIN, also shown as a toast
 ```
 
 `install` registers a per-user logon task (Windows' answer to the systemd user
@@ -194,11 +194,11 @@ says so in the log. Build notes: [docs/development-setup.md](docs/development-se
 
 ```bash
 # Using an AUR helper
-yay -S linux-link
+yay -S pocketdesk
 
 # Or manually
-git clone https://aur.archlinux.org/linux-link.git
-cd linux-link
+git clone https://aur.archlinux.org/pocketdesk.git
+cd pocketdesk
 makepkg -si
 ```
 
@@ -208,14 +208,14 @@ makepkg -si
 
 ```bash
 # Using the installed binary
-linux-link start
+pocketdesk start
 
 # Or with cargo
-cargo run --release --bin linux-link -- start
+cargo run --release --bin pocketdesk -- start
 ```
 
-There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/linux-link/config.toml`
-(default `~/.config/linux-link/config.toml`) if present, and falls back to built-in defaults.
+There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/config.toml`
+(default `~/.config/pocketdesk/config.toml`) if present, and falls back to built-in defaults.
 `-v`/`--verbose` and `RUST_LOG` control logging.
 
 ### Desktop App
@@ -245,12 +245,12 @@ A phone always asks before it acts on a pairing code (a `pocketdesk://pair` link
 Copy the example config and customize:
 
 ```bash
-mkdir -p ~/.config/linux-link
-cp config.toml.example ~/.config/linux-link/config.toml
+mkdir -p ~/.config/pocketdesk
+cp config.toml.example ~/.config/pocketdesk/config.toml
 ```
 
 ```toml
-# ~/.config/linux-link/config.toml
+# ~/.config/pocketdesk/config.toml
 control_port = 1716        # KDE Connect compatible
 streaming_port = 4716      # QUIC streaming port
 log_level = "info"         # trace/debug/info/warn/error
@@ -268,9 +268,9 @@ never see the graphical session. `install.sh` drops the unit into
 `~/.config/systemd/user/` and enables it for you; from a desktop session:
 
 ```bash
-systemctl --user enable --now linux-link
-systemctl --user status linux-link
-journalctl --user -u linux-link -f
+systemctl --user enable --now pocketdesk
+systemctl --user status pocketdesk
+journalctl --user -u pocketdesk -f
 ```
 
 The unit is `WantedBy=graphical-session.target`, so it starts at login and
@@ -281,25 +281,25 @@ lingering first: `sudo loginctl enable-linger $USER`.
 
 | Command | Description |
 |---------|-------------|
-| `linux-link start` | Start the server daemon |
-| `linux-link stop` | Stop the running daemon |
-| `linux-link status` | Show connection status |
-| `linux-link list` | List available peers on tailnet |
-| `linux-link watch` | Watch for peer discovery events |
-| `linux-link connect <peer>` | Connect to a specific peer |
-| `linux-link pair [pin] [--grant 15m]` | Print a pairing PIN for the phone (generate or set): valid 5 minutes, for one phone, and discarded after 5 wrong guesses; `--grant` time-boxes the trust pairing stores (`s/m/h/d`, e.g. `45s`, `15m`, `2h`, `1h30m`) for one-off support sessions |
-| `linux-link unpair [device-id]` | Remove a paired device from the trust store (all if omitted) |
-| `linux-link sessions [--count N] [--json]` | Show recorded streaming-session outcomes (LAN/WAN-punched/WAN-relayed tally + recent log tail); each line carries the transport's own numbers — packets/bytes lost, datagrams sent, path changes, seconds rode a relay, peak congestion window, discovered path MTU (read off the path the session actually rides, on both transports) — and the p50/p90/p95/p99/max tails for the whole chain: `rtt_*`/`enc_*` measured on the desktop, `dec_*`/`rnd_*`/`e2e_*` reported back by the device doing the decoding, plus its reading of the path as `phone_rtt`/`phone_lost`; `--json` emits the retained per-session records as JSON lines for tooling and benchmark comparison |
-| `linux-link bench [--target software\|vaapi] [--baseline PATH] [--record PATH]` | Run the pinned 720p encode clip on this machine; with `--baseline`, exit non-zero if a percentile regressed past `--tolerance-pct` (exit 3 means no baseline matches this host, which is a skip, not a pass) |
-| `linux-link capabilities [--json\|--markdown]` | Show the negotiated protocol versions, transports, capture backends and codecs this build actually speaks, plus its KDE Connect capability sets |
-| `linux-link kick <id\|prefix\|peer-ip\|all>` | Drop a live streaming session (R4 D2) |
-| `linux-link start --background` | Run detached, logging to daily files under the state directory (what the Windows logon task runs) |
-| `linux-link install [--elevated]` | *Windows:* register the logon task, start it, and open the firewall ports |
-| `linux-link uninstall` | *Windows:* remove the logon task, firewall rules and notification identity |
+| `pocketdesk start` | Start the server daemon |
+| `pocketdesk stop` | Stop the running daemon |
+| `pocketdesk status` | Show connection status |
+| `pocketdesk list` | List available peers on tailnet |
+| `pocketdesk watch` | Watch for peer discovery events |
+| `pocketdesk connect <peer>` | Connect to a specific peer |
+| `pocketdesk pair [pin] [--grant 15m]` | Print a pairing PIN for the phone (generate or set): valid 5 minutes, for one phone, and discarded after 5 wrong guesses; `--grant` time-boxes the trust pairing stores (`s/m/h/d`, e.g. `45s`, `15m`, `2h`, `1h30m`) for one-off support sessions |
+| `pocketdesk unpair [device-id]` | Remove a paired device from the trust store (all if omitted) |
+| `pocketdesk sessions [--count N] [--json]` | Show recorded streaming-session outcomes (LAN/WAN-punched/WAN-relayed tally + recent log tail); each line carries the transport's own numbers — packets/bytes lost, datagrams sent, path changes, seconds rode a relay, peak congestion window, discovered path MTU (read off the path the session actually rides, on both transports) — and the p50/p90/p95/p99/max tails for the whole chain: `rtt_*`/`enc_*` measured on the desktop, `dec_*`/`rnd_*`/`e2e_*` reported back by the device doing the decoding, plus its reading of the path as `phone_rtt`/`phone_lost`; `--json` emits the retained per-session records as JSON lines for tooling and benchmark comparison |
+| `pocketdesk bench [--target software\|vaapi] [--baseline PATH] [--record PATH]` | Run the pinned 720p encode clip on this machine; with `--baseline`, exit non-zero if a percentile regressed past `--tolerance-pct` (exit 3 means no baseline matches this host, which is a skip, not a pass) |
+| `pocketdesk capabilities [--json\|--markdown]` | Show the negotiated protocol versions, transports, capture backends and codecs this build actually speaks, plus its KDE Connect capability sets |
+| `pocketdesk kick <id\|prefix\|peer-ip\|all>` | Drop a live streaming session (R4 D2) |
+| `pocketdesk start --background` | Run detached, logging to daily files under the state directory (what the Windows logon task runs) |
+| `pocketdesk install [--elevated]` | *Windows:* register the logon task, start it, and open the firewall ports |
+| `pocketdesk uninstall` | *Windows:* remove the logon task, firewall rules and notification identity |
 
 ### Capabilities Are Generated, Not Written
 
-`linux-link capabilities` is the single source of truth for the four numbers and
+`pocketdesk capabilities` is the single source of truth for the four numbers and
 lists a reader otherwise has to trust prose for: the negotiated protocol version,
 which transports a given build carries, which capture backends exist and in what
 order `Auto` tries them, and which codecs can be encoded/decoded on each side.
@@ -310,9 +310,9 @@ so a client-profile build reports `capture: unavailable` instead of an empty lis
 and a version bump appears in the report the moment it appears in the code.
 
 ```bash
-linux-link capabilities              # human listing
-linux-link capabilities --json       # for scripts
-linux-link capabilities --markdown   # the source of docs/capabilities.md
+pocketdesk capabilities              # human listing
+pocketdesk capabilities --json       # for scripts
+pocketdesk capabilities --markdown   # the source of docs/capabilities.md
 ```
 
 [`docs/capabilities.md`](docs/capabilities.md) is that Markdown output, committed,
@@ -321,7 +321,7 @@ regenerate it in the same commit as the constant you changed.
 
 ### The Encoder Benchmark Is Pinned, Not Improvised
 
-`linux-link bench` exists because "it felt laggy today" is not a regression test. It encodes
+`pocketdesk bench` exists because "it felt laggy today" is not a regression test. It encodes
 one generated 720p clip — 300 frames, 5 Mbit/s, veryfast, H.264 — and reports the per-frame
 encode distribution (`p50/p90/p95/p99/max`). The clip is a pure function of its frame index
 (`scene_frame`), so the workload is byte-identical between runs without committing a gigabyte
@@ -329,9 +329,9 @@ of raw frames, and it mixes a static gradient with a moving block so the encoder
 on zero-residual skip blocks and measure nothing.
 
 ```bash
-linux-link bench --target vaapi --repeat 5           # measure this machine
-linux-link bench --baseline bench/baselines          # grade against a committed record
-linux-link bench --record bench/baselines            # add this machine's record
+pocketdesk bench --target vaapi --repeat 5           # measure this machine
+pocketdesk bench --baseline bench/baselines          # grade against a committed record
+pocketdesk bench --record bench/baselines            # add this machine's record
 ```
 
 A baseline is only comparable to a run on the same host, backend, geometry, bitrate, preset
@@ -345,7 +345,7 @@ command on every push — see [`bench/README.md`](bench/README.md).
 ### Man Page
 
 ```bash
-man linux-link
+man pocketdesk
 ```
 
 ## Android Client
@@ -426,7 +426,7 @@ Pocketdesk/
 ├── CHANGELOG.md            # Project changelog
 ├── CONTRIBUTING.md         # Contributor guidelines
 ├── config.toml.example     # Example configuration
-├── linux-link.service      # systemd service file
+├── pocketdesk.service      # systemd service file
 └── plan.md                 # Full development plan
 ```
 

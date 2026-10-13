@@ -1,15 +1,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use linux_link_core::protocol::kdeconnect::PluginRegistry;
-use linux_link_core::protocol::v2::{ALPN_V2, IdentityPacketV2, perform_v2_handshake};
-use linux_link_core::streaming::transport::{
+use pocketdesk_core::protocol::kdeconnect::PluginRegistry;
+use pocketdesk_core::protocol::v2::{ALPN_V2, IdentityPacketV2, perform_v2_handshake};
+use pocketdesk_core::streaming::transport::{
     CertManager, StreamClient, StreamServer, StreamTransportConfig,
 };
 
 // We need to access handle_v2_session and the push registry
-use linux_link_server::state::{self, ACTIVE_CLIENTS};
-use linux_link_server::v2_multiplexer::handle_v2_session;
+use pocketdesk_server::state::{self, ACTIVE_CLIENTS};
+use pocketdesk_server::v2_multiplexer::handle_v2_session;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_reconnect_storm_pushes_to_one_connection() -> anyhow::Result<()> {

@@ -355,7 +355,7 @@ mod tests {
 
     /// Live: capture one real frame of the primary monitor and check it is
     /// the monitor's size and not uniformly black. Run on a desktop session:
-    /// `cargo test -p linux-link-core --lib wgc_captures -- --ignored`.
+    /// `cargo test -p pocketdesk-core --lib wgc_captures -- --ignored`.
     #[test]
     #[ignore = "needs an interactive Windows desktop"]
     fn wgc_captures_a_real_frame_of_the_primary_monitor() {

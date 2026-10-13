@@ -167,7 +167,7 @@ pub enum VideoCodec {
 
 impl VideoCodec {
     /// Every codec this build knows about, in negotiation-preference order.
-    /// `linux-link capabilities` enumerates from here (roadmap item 4), so a new
+    /// `pocketdesk capabilities` enumerates from here (roadmap item 4), so a new
     /// variant cannot be added without showing up in the reported set.
     pub const ALL: [VideoCodec; 2] = [VideoCodec::H264, VideoCodec::H265];
 

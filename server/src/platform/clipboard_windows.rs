@@ -29,7 +29,7 @@ impl Owner {
             CreateWindowExW(
                 WINDOW_EX_STYLE(0),
                 w!("STATIC"),
-                w!("Linux Link clipboard"),
+                w!("Pocketdesk clipboard"),
                 WINDOW_STYLE(0),
                 0,
                 0,
@@ -144,12 +144,12 @@ mod tests {
 
     /// Live: round-trips text through the real clipboard, then puts back what
     /// was there. Run on a desktop:
-    /// `cargo test -p linux-link-server --lib clipboard_round_trips -- --ignored`.
+    /// `cargo test -p pocketdesk-server --lib clipboard_round_trips -- --ignored`.
     #[test]
     #[ignore = "uses the real clipboard on an interactive Windows desktop"]
     fn clipboard_round_trips_unicode_text() {
         let previous = get_text().unwrap_or_default();
-        let sample = "Linux Link ✓ — naïve café 😀\nline two";
+        let sample = "Pocketdesk ✓ — naïve café 😀\nline two";
         set_text(sample).unwrap();
         assert_eq!(get_text().unwrap(), sample);
         set_text(&previous).unwrap();

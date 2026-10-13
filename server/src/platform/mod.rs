@@ -37,7 +37,7 @@ pub fn detach_console() {
 /// callers can fall back to the log (the PIN, for one, must reach the user
 /// somehow).
 ///
-/// Linux: `notify-send` as "Linux Link", expiring after `expire`. Windows: a
+/// Linux: `notify-send` as "Pocketdesk", expiring after `expire`. Windows: a
 /// toast under the server's own AppUserModelID (registered per user on first
 /// use; Windows keeps toasts in the Action Center rather than expiring them).
 pub fn notify(summary: &str, body: &str, expire: Duration) -> bool {
@@ -72,7 +72,7 @@ pub type ShutdownReason = &'static str;
 ///
 /// Call once, at startup, and keep the receiver: it is fed by Ctrl-C on every
 /// OS, by SIGTERM on Unix, and on Windows by the named event [`request_stop`]
-/// signals (Windows has no SIGTERM for `linux-link stop` to send).
+/// signals (Windows has no SIGTERM for `pocketdesk stop` to send).
 pub fn shutdown_requests() -> tokio::sync::mpsc::Receiver<ShutdownReason> {
     let (tx, rx) = tokio::sync::mpsc::channel(4);
     let ctrl_c = tx.clone();
@@ -83,7 +83,7 @@ pub fn shutdown_requests() -> tokio::sync::mpsc::Receiver<ShutdownReason> {
     });
     #[cfg(windows)]
     windows::listen_for_stop_event(tx);
-    // `linux-link stop` sends SIGTERM; without a handler the default action
+    // `pocketdesk stop` sends SIGTERM; without a handler the default action
     // killed the server before its PID-file guard could run.
     #[cfg(unix)]
     tokio::spawn(async move {

@@ -1,4 +1,4 @@
-use linux_link_core::streaming::chaos::proxy::{ChaosConfig, ChaosProxy};
+use pocketdesk_core::streaming::chaos::proxy::{ChaosConfig, ChaosProxy};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -7,7 +7,7 @@ use tokio::net::UdpSocket;
 
 /// Coffee-shop Wi-Fi: 10% loss plus 50-150 ms of latency/jitter between a
 /// client and a server. Both endpoints bind port 0 so the suite can never
-/// collide with itself or with a running `linux-link` service.
+/// collide with itself or with a running `pocketdesk` service.
 #[tokio::test]
 async fn test_coffee_shop_wifi() {
     // 1. Dummy server on an ephemeral port.

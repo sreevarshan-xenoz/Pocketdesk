@@ -4,14 +4,14 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText};
-use linux_link_core::local::approval::{ApprovalRequest, Verdict};
-use linux_link_core::local::config::Config;
-use linux_link_core::local::paths::TRUST_FILE;
-use linux_link_core::local::pin::now_unix;
-use linux_link_core::local::sent::SentState;
-use linux_link_core::local::sessions;
-use linux_link_core::protocol::kdeconnect::TrustStore;
-use linux_link_core::protocol::permissions::Capability;
+use pocketdesk_core::local::approval::{ApprovalRequest, Verdict};
+use pocketdesk_core::local::config::Config;
+use pocketdesk_core::local::paths::TRUST_FILE;
+use pocketdesk_core::local::pin::now_unix;
+use pocketdesk_core::local::sent::SentState;
+use pocketdesk_core::local::sessions;
+use pocketdesk_core::protocol::kdeconnect::TrustStore;
+use pocketdesk_core::protocol::permissions::Capability;
 
 use crate::model::{self, Snapshot};
 use crate::pair_view::PairView;
@@ -347,7 +347,7 @@ impl PocketdeskApp {
         });
         // Its keys go too, so the phone can pair again (perhaps reinstalled,
         // with new keys) and bind them.
-        let _ = linux_link_core::local::device_keys::clear(&self.state_dir, id);
+        let _ = pocketdesk_core::local::device_keys::clear(&self.state_dir, id);
         self.notice = Some(match result {
             Ok(()) => format!("Removed {} — it must pair again to connect.", short(id)),
             Err(e) => format!("Could not remove {}: {e}", short(id)),
@@ -410,7 +410,7 @@ impl PocketdeskApp {
             status_line(ui, MUTED, "The server is not running");
             ui.label(
                 "Phones cannot connect until it starts. It starts at logon once \
-                 installed (`linux-link install` on Windows, the systemd user unit on Linux).",
+                 installed (`pocketdesk install` on Windows, the systemd user unit on Linux).",
             );
             if ui
                 .add_enabled(self.job.is_none(), egui::Button::new("Start server"))

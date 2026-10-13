@@ -1,6 +1,6 @@
-//! JNI entry points for the Linux Link Android client.
+//! JNI entry points for the Pocketdesk Android client.
 //!
-//! Kotlin side: `dev.linuxlink.android.bridge.RustCore`. Every async API call
+//! Kotlin side: `dev.pocketdesk.android.bridge.RustCore`. Every async API call
 //! is bridged with `block_on` on a shared Tokio runtime and returns a JSON
 //! envelope string: `{"ok": <value>}` or `{"error": "<message>"}`. Kotlin
 //! polls; there is no callback channel yet.
@@ -58,7 +58,7 @@ fn jstring_to_string(env: &mut JNIEnv<'_>, s: &JString) -> String {
 
 /// Proves the Rust -> JNI -> Kotlin wiring works end to end.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeVersion(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeVersion(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -67,7 +67,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeVersion(
 
 /// Initialize logging and backend state. Idempotent.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeInit(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeInit(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) {
@@ -76,7 +76,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeInit(
 
 /// Set the persistent data directory (certs, trust store).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSetDataDir(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetDataDir(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     path: JString<'_>,
@@ -89,7 +89,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSetDataD
 
 /// Pin a desktop's certificate for `address` from a scanned pairing code.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePinPeerCertificate(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePinPeerCertificate(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -103,7 +103,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePinPeerC
 
 /// Forget the certificate trusted for `address` (the computer was removed).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeForgetPeerCertificate(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeForgetPeerCertificate(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -115,7 +115,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeForgetPe
 
 /// Whether LAN (mDNS) discovery is currently active.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeIsDiscoveryActive(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeIsDiscoveryActive(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jboolean {
@@ -124,7 +124,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeIsDiscov
 
 /// Tailscale availability check: `{"ok": bool}` or `{"error": ...}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeCheckTailscaleStatus(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCheckTailscaleStatus(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -134,7 +134,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeCheckTai
 
 /// Peer list from Tailscale: `{"ok": [PeerInfoDto, ...]}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetPeers(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetPeers(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -145,7 +145,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetPeers
 /// Open the KDE Connect control TCP connection. Returns the new connection
 /// state (Debug formatting) in the envelope.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeConnectToPeer(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectToPeer(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -162,7 +162,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeConnectT
 
 /// Push clipboard content to the remote device.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendClipboard(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendClipboard(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -177,7 +177,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendClip
 
 /// Pull clipboard content from the remote device.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetClipboard(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetClipboard(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -190,7 +190,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetClipb
 
 /// Drain pending KDE Connect packets as JSON strings.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePollIncomingPackets(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePollIncomingPackets(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -201,7 +201,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePollInco
 
 /// High-level session status as JSON (SessionStatus enum).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSessionStatus(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSessionStatus(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -212,7 +212,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSessionS
 
 /// Whether a streaming session is currently active.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeIsStreamingActive(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeIsStreamingActive(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jboolean {
@@ -221,7 +221,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeIsStream
 
 /// Why the streaming connection closed; empty while it is open.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStreamClosedReason(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStreamClosedReason(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -230,7 +230,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStreamCl
 
 /// Last measured streaming RTT in microseconds.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetStreamingRtt(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetStreamingRtt(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jint {
@@ -240,7 +240,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetStrea
 
 /// Streaming stats snapshot (fps, bitrate, ...) as JSON.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetStreamingStats(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetStreamingStats(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -251,7 +251,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetStrea
 
 /// Labels of currently trusted server certificates.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeListTrustedPeers(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeListTrustedPeers(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -262,7 +262,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeListTrus
 
 /// Remove a trusted peer by label. Returns `{"ok": bool}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeForgetTrustedPeer(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeForgetTrustedPeer(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     label: JString<'_>,
@@ -274,7 +274,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeForgetTr
 
 /// Stop the unified v2 connection.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStopV2(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStopV2(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -284,7 +284,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStopV2(
 
 /// Stop the active streaming session.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStopStreaming(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStopStreaming(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -295,7 +295,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStopStre
 /// Start a QUIC streaming session. `monitor_index` < 0 selects the default.
 /// `codec_caps` is the client's decodable codec bitmask (R4 C1: bit 0 = HEVC).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeConnectStreaming(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectStreaming(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -319,10 +319,10 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeConnectS
 }
 
 /// Connect to the streaming server over the iroh WAN path using a cached
-/// endpoint identity (the `kdeconnect.linuxlink.endpoint` body JSON learned
+/// endpoint identity (the `kdeconnect.pocketdesk.endpoint` body JSON learned
 /// from the desktop over the control channel).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeConnectStreamingWan(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectStreamingWan(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -349,7 +349,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeConnectS
 /// The connected desktop's cached iroh WAN identity, or `{"ok": null}` if it
 /// has not announced one.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetWanIdentity(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetWanIdentity(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -359,7 +359,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetWanId
 
 /// Reconnect a dropped streaming session with backoff state.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReconnectStreaming(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeReconnectStreaming(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -386,7 +386,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReconnec
 
 /// Reset the reconnection backoff (after a successful manual connect).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeResetReconnectBackoff(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeResetReconnectBackoff(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) {
@@ -395,7 +395,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeResetRec
 
 /// Connect via the v2 multiplexed QUIC protocol.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeConnectV2(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectV2(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -413,7 +413,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeConnectV
 /// `u64 sequence`, `data_len` bytes of Annex-B NAL data.
 /// Returns an empty byte array when no frames are available.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReceiveFrames(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeReceiveFrames(
     env: JNIEnv<'_>,
     _class: JClass<'_>,
     timeout_ms: jint,
@@ -437,7 +437,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReceiveF
 /// Drain up to 32 Opus audio packets as a binary blob; see
 /// [`api::audio_payload`] for the layout.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReceiveAudio(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeReceiveAudio(
     env: JNIEnv<'_>,
     _class: JClass<'_>,
     timeout_ms: jint,
@@ -451,7 +451,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeReceiveA
 
 /// Send a pointer event over the streaming (QUIC) or control channel.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendMouseEvent(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendMouseEvent(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -475,7 +475,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendMous
 
 /// Send a normalized absolute pointer position (0..=65535 per axis).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendMouseAbs(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendMouseAbs(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     x_norm: jint,
@@ -489,7 +489,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendMous
 /// Send a mouse button press/release. `button` is the wire encoding:
 /// 0=Left, 1=Middle, 2=Right, 3=Back, 4=Forward.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendMouseClick(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendMouseClick(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     button: jint,
@@ -507,7 +507,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendMous
 /// reported by `get_windows` — empty when unknown, which leaves the server
 /// cropping by rect instead.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendWindowCrop(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendWindowCrop(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     x: jint,
@@ -531,7 +531,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendWind
 /// Toggle server-enforced view-only mode (R4 D1): while enabled the server
 /// drops all injected input from this session; video keeps flowing.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSetViewOnly(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetViewOnly(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     enabled: jboolean,
@@ -543,7 +543,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSetViewO
 /// Toggle the R4 A3 full-quality override: opt out of the server's
 /// relayed-path bitrate clamp (one-tap "give me everything" on WAN).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSetFullQuality(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetFullQuality(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     enabled: jboolean,
@@ -555,7 +555,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSetFullQ
 /// R4 E5: select a named link-profile preset (0 Auto, 1 Quality,
 /// 2 Balanced, 3 Economy) the server folds into the live encoder bitrate.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendQualityPreset(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendQualityPreset(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     preset: jint,
@@ -570,7 +570,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendQual
 /// desktop once a second, which is where a session's percentile tails are built.
 /// Fire-and-forget from a decoder thread: no runtime, no envelope, no error.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeRecordSample(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRecordSample(
     _env: JNIEnv<'_>,
     _class: JClass<'_>,
     kind: jint,
@@ -584,7 +584,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeRecordSa
 /// Open the R4 E2 phone→desktop mic (start frame; the server creates its
 /// "Pocketdesk Mic" PipeWire source). Opus encoding happens in Kotlin.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStartMic(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStartMic(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -597,7 +597,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStartMic
 /// # Safety
 /// `opus` must be a valid `jbyteArray` reference from the JNI caller.
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendMicOpus(
+pub unsafe extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendMicOpus(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     opus: jbyteArray,
@@ -611,7 +611,7 @@ pub unsafe extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeS
 
 /// Close the phone→desktop mic (server removes its virtual source).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStopMic(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStopMic(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -622,7 +622,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeStopMic(
 /// Send a keyboard event. `key_code` is an Android KeyCode; the bridge maps
 /// it to evdev internally. `text` carries the char for UTF-8 input paths.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendKeyboardEvent(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendKeyboardEvent(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -645,7 +645,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendKeyb
 // JNI contracts require taking raw array handles; the JVM guarantees validity.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendGamepadEvent(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendGamepadEvent(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     axes: jni::sys::jintArray,
@@ -667,7 +667,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendGame
 
 /// Push a local file to the remote device.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFile(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFile(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -683,7 +683,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFile
 /// Send a file from a file descriptor the caller gives up (F7): `{"ok": null}`
 /// or `{"err": "..."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFileFd(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFileFd(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -702,7 +702,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFile
 
 /// The running file transfer as `[sent, total]` bytes.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTransferProgress(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTransferProgress(
     env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jni::sys::jlongArray {
@@ -726,7 +726,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTransfer
 /// (F7b): a browsed `value` path, or an offer id when `is_offer`.
 /// `{"ok": bytes}` or `{"error": "..."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeFetchFile(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchFile(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -749,7 +749,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeFetchFil
 
 /// Tell the desktop the phone will not fetch offer `id` (F7b).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeDeclineOffer(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeDeclineOffer(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -767,7 +767,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeDeclineO
 
 /// Files the desktop offered since the last call: `{"ok": "[{id,name,size}]"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTakeFileOffers(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeFileOffers(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -777,7 +777,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTakeFile
 
 /// A folder on the desktop (F7b): `{"ok": {path, parent, files, error?}}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeListRemoteFiles(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeListRemoteFiles(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -793,7 +793,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeListRemo
 
 /// Enumerate remote monitors: `{"ok": [MonitorInfoDto, ...]}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetMonitors(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetMonitors(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -806,7 +806,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetMonit
 
 /// Number of remote monitors.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetMonitorCount(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetMonitorCount(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -819,7 +819,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetMonit
 
 /// Desktop battery state JSON (`{currentCharge, isCharging}` / `{noBattery}`).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetBattery(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetBattery(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -834,7 +834,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetBatte
 /// "status"; `lock` additionally engages the desktop screen locker.
 /// Returns the plugin reply as `{"ok": {json}}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeDesktopPrivacy(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeDesktopPrivacy(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -854,9 +854,9 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeDesktopP
 }
 
 /// Desktop audio control (Tier-3 #16): `body_json` is the
-/// `kdeconnect.linuxlink.audio` request body; returns the plugin reply.
+/// `kdeconnect.pocketdesk.audio` request body; returns the plugin reply.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeAudioControl(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeAudioControl(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -872,7 +872,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeAudioCon
 /// Consume the find-my-device siren latch — `{"ok":true}` once per desktop
 /// `kdeconnect.findmydevice` push (R3 Tier-2 #11).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeCheckSiren(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCheckSiren(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -882,7 +882,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeCheckSir
 
 /// Make the remote desktop ring (find-my-device siren, phone → desktop).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFindMyDevice(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFindMyDevice(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -895,7 +895,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendFind
 
 /// Ask the desktop to show a pairing PIN — `{"ok":"pinSent"|"pinReady"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeRequestPairPin(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRequestPairPin(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -909,7 +909,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeRequestP
 /// Submit a pairing PIN; `{"ok":"<deviceId>"}` when the desktop paired us,
 /// `{"ok":null}` for a wrong/expired PIN.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePairWithPin(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePairWithPin(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -925,7 +925,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePairWith
 /// Wait for a pushed pairing decision: `{"ok":"<deviceId>"}` when paired,
 /// `{"ok":null}` while still waiting.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeCheckPairResult(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCheckPairResult(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     wait_secs: jlong,
@@ -938,7 +938,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeCheckPai
 
 /// JSON array of desktop device ids this phone is paired with.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePairedServers(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePairedServers(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -949,7 +949,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativePairedSe
 /// Drain queued desktop notifications as a JSON array
 /// (`[{"id","app","title","text","source"}, …]`).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTakePendingNotifications(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePendingNotifications(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
@@ -959,7 +959,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeTakePend
 
 /// Reply to a desktop notification from the phone (Tier-2 #11c).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendNotificationReply(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendNotificationReply(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -983,7 +983,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendNoti
 /// `{"ok": [[WindowInfoDto, ...], activeAddress, screenBoxOrNull]}` where
 /// `screenBoxOrNull` is the monitor layout `[x, y, w, h]` in desktop coords.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetWindows(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetWindows(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -996,7 +996,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeGetWindo
 
 /// Send a power command (action strings defined by the server protocol).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendPowerCommand(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendPowerCommand(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -1012,7 +1012,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendPowe
 
 /// Execute a shell command remotely; `{"ok": "<stdout>"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeExecuteRemoteCommand(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeExecuteRemoteCommand(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -1028,7 +1028,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeExecuteR
 
 /// Send a Wake-on-LAN magic packet.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendWol(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendWol(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     mac_address: JString<'_>,
@@ -1042,7 +1042,7 @@ pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeSendWol(
 
 /// Ask an always-on LAN relay to send the WoL magic packet (Tier-2 #12).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_linuxlink_android_bridge_RustCore_nativeWakeViaRelay(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeViaRelay(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,

@@ -1,4 +1,4 @@
-//! `linux-link install` / `uninstall` on Windows.
+//! `pocketdesk install` / `uninstall` on Windows.
 //!
 //! The server must run inside the user's interactive session (Session 0, where
 //! Windows services live, has no desktop to capture or inject into), so it is
@@ -297,7 +297,7 @@ pub fn install(elevated: bool) -> Result<()> {
         }
         if !in_program_files(&exe) {
             bail!(
-                "`install --elevated` needs linux-link.exe under Program Files: an elevated task \
+                "`install --elevated` needs pocketdesk.exe under Program Files: an elevated task \
                  that starts a file the user can replace ({}) is a privilege escalation",
                 exe.display()
             );
@@ -330,7 +330,7 @@ pub fn install(elevated: bool) -> Result<()> {
             "Opened TCP 1716, UDP 1716 and UDP 4716 to this program (local subnet + tailnet)"
         ),
         Ok(code) => println!(
-            "Firewall rules were not added (helper exited {code}); add them from an administrator terminal with `linux-link firewall-add`"
+            "Firewall rules were not added (helper exited {code}); add them from an administrator terminal with `pocketdesk firewall-add`"
         ),
         Err(e) => {
             println!("Firewall rules were not added ({e:#}); the phone may not reach this PC")
@@ -364,7 +364,7 @@ pub fn uninstall() -> Result<()> {
     let removed = delete_task(TASK_NAME);
     match removed {
         Ok(()) => println!(
-            "Removed the \"{TASK_NAME}\" logon task (a running server keeps running until `linux-link stop`)"
+            "Removed the \"{TASK_NAME}\" logon task (a running server keeps running until `pocketdesk stop`)"
         ),
         Err(e) => println!("No logon task removed ({e})"),
     }
@@ -373,7 +373,7 @@ pub fn uninstall() -> Result<()> {
         Ok(code) => println!("Firewall rules were not removed (helper exited {code})"),
         Err(e) => println!("Firewall rules were not removed ({e:#})"),
     }
-    let subkey = HSTRING::from(r"Software\Classes\AppUserModelId\LinuxLink.Server");
+    let subkey = HSTRING::from(r"Software\Classes\AppUserModelId\Pocketdesk.Server");
     let _ = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, &subkey) };
     Ok(())
 }
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn the_task_runs_the_server_in_the_background_at_logon() {
         let xml = task_xml(
-            Path::new(r"C:\Apps\Linux & Link\linux-link.exe"),
+            Path::new(r"C:\Apps\Linux & Link\pocketdesk.exe"),
             r"PC\me",
             false,
         );
@@ -393,7 +393,7 @@ mod tests {
         assert!(xml.contains("<LogonType>InteractiveToken</LogonType>"));
         assert!(xml.contains("<RunLevel>LeastPrivilege</RunLevel>"));
         assert!(xml.contains("<Arguments>start --background</Arguments>"));
-        assert!(xml.contains(r"<Command>C:\Apps\Linux &amp; Link\linux-link.exe</Command>"));
+        assert!(xml.contains(r"<Command>C:\Apps\Linux &amp; Link\pocketdesk.exe</Command>"));
         assert!(xml.contains("<RestartOnFailure>"));
         assert!(xml.contains("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"));
         assert!(task_xml(Path::new("x.exe"), "me", true).contains("HighestAvailable"));
@@ -405,14 +405,14 @@ mod tests {
 
     #[test]
     fn lan_rules_are_local_subnet_and_tailnet_rules_are_bound_to_its_adapter() {
-        let script = firewall_add_script(Path::new(r"C:\Program Files\Linux Link\linux-link.exe"));
+        let script = firewall_add_script(Path::new(r"C:\Program Files\Pocketdesk\pocketdesk.exe"));
         let rules: Vec<&str> = script
             .lines()
             .filter(|l| l.contains("New-NetFirewallRule"))
             .collect();
         assert_eq!(rules.len(), PORTS.len() * 2);
         for rule in &rules {
-            assert!(rule.contains(r"-Program 'C:\Program Files\Linux Link\linux-link.exe'"));
+            assert!(rule.contains(r"-Program 'C:\Program Files\Pocketdesk\pocketdesk.exe'"));
             assert!(rule.contains("-Direction Inbound"));
             if rule.contains("(tailnet)") {
                 assert!(rule.contains("-InterfaceAlias 'Tailscale'"), "{rule}");
@@ -459,19 +459,19 @@ mod tests {
     #[test]
     fn powershell_strings_cannot_be_broken_out_of() {
         assert_eq!(ps_quote("it's"), "'it''s'");
-        let script = firewall_add_script(Path::new(r"C:\a'b\linux-link.exe"));
-        assert!(script.contains(r"-Program 'C:\a''b\linux-link.exe'"));
+        let script = firewall_add_script(Path::new(r"C:\a'b\pocketdesk.exe"));
+        assert!(script.contains(r"-Program 'C:\a''b\pocketdesk.exe'"));
     }
 
     #[test]
     fn only_program_files_counts_as_admin_owned_and_env_cannot_move_it() {
         let pf = known_folder(&FOLDERID_ProgramFiles).expect("Program Files exists");
-        assert!(in_program_files(&pf.join(r"Linux Link\linux-link.exe")));
+        assert!(in_program_files(&pf.join(r"Pocketdesk\pocketdesk.exe")));
         assert!(!in_program_files(Path::new(
-            r"C:\Users\me\Downloads\linux-link.exe"
+            r"C:\Users\me\Downloads\pocketdesk.exe"
         )));
         assert!(!in_program_files(Path::new(
-            r"E:\Linux-Link\target\debug\linux-link.exe"
+            r"E:\Linux-Link\target\debug\pocketdesk.exe"
         )));
     }
 

@@ -1,5 +1,5 @@
-use linux_link_core::error::Result;
-use linux_link_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::error::Result;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use serde_json::json;
 
 use crate::audio_control;
@@ -8,7 +8,7 @@ use crate::audio_control;
 /// for the phone, straight against the sound server (wpctl → pactl; Hyprland
 /// `dispatch setvolume` is unusable upstream — hyprwm/Hyprland#16224).
 ///
-/// Answers `kdeconnect.linuxlink.audio`:
+/// Answers `kdeconnect.pocketdesk.audio`:
 /// - `{action: "status"}` → `{ok, volume, muted, sink?}`
 /// - `{action: "setVolume", volume: 0..100}`
 /// - `{action: "setMuted", muted: bool}`
@@ -24,7 +24,7 @@ impl Plugin for AudioControlPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.linuxlink.audio"]
+        &["kdeconnect.pocketdesk.audio"]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -32,7 +32,7 @@ impl Plugin for AudioControlPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
-        if packet.packet_type != "kdeconnect.linuxlink.audio" {
+        if packet.packet_type != "kdeconnect.pocketdesk.audio" {
             return Ok(());
         }
         let action = packet
@@ -82,7 +82,7 @@ impl Plugin for AudioControlPlugin {
             }
             Err(e) => json!({ "ok": false, "error": e.to_string() }),
         };
-        let response = NetworkPacket::new("kdeconnect.linuxlink.audio").with_body(body);
+        let response = NetworkPacket::new("kdeconnect.pocketdesk.audio").with_body(body);
         sender.send_packet(&response).await
     }
 }
@@ -96,7 +96,7 @@ mod tests {
         assert!(
             AudioControlPlugin
                 .incoming_capabilities()
-                .contains(&"kdeconnect.linuxlink.audio")
+                .contains(&"kdeconnect.pocketdesk.audio")
         );
     }
 }

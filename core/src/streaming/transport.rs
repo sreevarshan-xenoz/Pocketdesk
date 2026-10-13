@@ -40,12 +40,12 @@ impl Default for StreamTransportConfig {
 // QUIC transport parameters
 // ---------------------------------------------------------------------------
 
-/// Build the QUIC `TransportConfig` used by every Linux Link endpoint.
+/// Build the QUIC `TransportConfig` used by every Pocketdesk endpoint.
 ///
 /// Tuned for real-time A/V: large datagram buffers and high stream
 /// concurrency (video opens one unidirectional stream per frame). The
 /// congestion controller is selectable for A/B testing via the
-/// `LINUX_LINK_CC` environment variable: `bbr`, `cubic`, or `new_reno`
+/// `POCKETDESK_CC` environment variable: `bbr`, `cubic`, or `new_reno`
 /// (the default, matching quinn's own default).
 ///
 /// Roaming hardening (Tier-3 #13): a bounded idle timeout makes dead peers
@@ -73,7 +73,7 @@ pub fn configured_transport() -> quinn::TransportConfig {
 }
 
 fn apply_congestion_controller(transport: &mut quinn::TransportConfig) {
-    let requested = std::env::var("LINUX_LINK_CC")
+    let requested = std::env::var("POCKETDESK_CC")
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
@@ -88,7 +88,7 @@ fn apply_congestion_controller(transport: &mut quinn::TransportConfig) {
         "" | "new_reno" | "reno" => ("NewReno", reno),
         other => {
             warn!(
-                "LINUX_LINK_CC='{other}' is not one of bbr|cubic|new_reno — falling back to NewReno"
+                "POCKETDESK_CC='{other}' is not one of bbr|cubic|new_reno — falling back to NewReno"
             );
             ("NewReno", reno)
         }
@@ -382,7 +382,7 @@ fn generate_identity() -> Result<(Vec<u8>, Vec<u8>)> {
 
     let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)
         .context("Failed to generate ECDSA key pair")?;
-    let params = CertificateParams::new(vec!["linux-link.local".into()])
+    let params = CertificateParams::new(vec!["pocketdesk.local".into()])
         .context("Failed to create certificate params")?;
     let cert = params
         .self_signed(&key_pair)
@@ -1299,13 +1299,13 @@ mod tests {
     #[test]
     fn test_configured_transport_builds() {
         // Unknown values warn and fall back; any accepted value must build.
-        // (Serial because LINUX_LINK_CC is process-global.)
+        // (Serial because POCKETDESK_CC is process-global.)
         for value in ["", "bbr", "cubic", "new_reno", "bogus"] {
             // Test-only env mutation; no other test in this binary uses the var.
-            unsafe { std::env::set_var("LINUX_LINK_CC", value) };
+            unsafe { std::env::set_var("POCKETDESK_CC", value) };
             let _ = configured_transport();
         }
-        unsafe { std::env::remove_var("LINUX_LINK_CC") };
+        unsafe { std::env::remove_var("POCKETDESK_CC") };
     }
 
     #[test]
