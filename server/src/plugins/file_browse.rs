@@ -192,11 +192,16 @@ fn list_directory(real: &Path, shown: &Path) -> std::io::Result<Vec<serde_json::
     let mut entries: Vec<(bool, String, u64, u64)> = std::fs::read_dir(real)?
         .filter_map(|entry| {
             let entry = entry.ok()?;
-            let metadata = entry.metadata().ok()?;
             let name = entry.file_name().to_string_lossy().to_string();
-            if is_hidden(&name, &metadata) {
+            // Hidden is the entry's own mark; what it is (a folder, its
+            // size) is what a link or junction leads to, so a link to a
+            // folder opens like one.
+            if is_hidden(&name, &entry.metadata().ok()?) {
                 return None;
             }
+            let metadata = std::fs::metadata(entry.path())
+                .or_else(|_| entry.metadata())
+                .ok()?;
             let is_dir = metadata.is_dir();
             let size = if is_dir { 0 } else { metadata.len() };
             let modified = metadata
@@ -413,6 +418,30 @@ mod tests {
         }
         let fine = home.join("docs").join("COM10.txt");
         assert!(!names_a_device(&home, fine.to_str().unwrap()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_to_a_folder_is_listed_as_a_folder() {
+        let home = temp_home("junction");
+        let target = home.join("docs");
+        let link = home.join("Pictures");
+        let made = std::process::Command::new(r"C:\Windows\System32\cmd.exe")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        let reply = browse_reply(&home, "");
+        let pictures = reply["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == "Pictures")
+            .cloned()
+            .unwrap();
+        assert_eq!(pictures["isDirectory"], true, "{pictures}");
     }
 
     #[test]
