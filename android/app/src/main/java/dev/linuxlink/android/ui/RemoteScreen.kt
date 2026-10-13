@@ -247,6 +247,14 @@ fun RemoteScreen(
     }
     var showStream by remember { mutableStateOf(true) }
     var showMonitorPicker by remember { mutableStateOf(false) }
+    // The computer's screens, for the chrome's screen switcher. Read once per
+    // session; the picker in Quick Settings reads them fresh.
+    var screens by remember(address) { mutableStateOf<List<DesktopMonitor>>(emptyList()) }
+    LaunchedEffect(address, controlPort) {
+        withContext(Dispatchers.IO) { RustCore.getMonitors(address, controlPort) }
+            .mapCatching(::parseMonitorsPayload)
+            .onSuccess { screens = it }
+    }
     // Video-link status (LAN/WAN/failed) for the current stream generation.
     var streamStatus by remember {
         mutableStateOf<StreamStatus>(StreamStatus.Connecting)
@@ -1103,6 +1111,17 @@ fun RemoteScreen(
                                 size = 16.dp,
                             )
                         }
+                        // One tap to another screen, when there is more than one.
+                        ScreenSwitcher(
+                            screens = screens,
+                            selected = monitorIndex,
+                            onPick = { index ->
+                                if (ScreenChoices.isSwitch(screens, monitorIndex, index)) {
+                                    haptics.tap()
+                                    switchMonitor(index)
+                                }
+                            },
+                        )
                         }
                         FloatingActionButton(
                             onClick = { haptics.tap(); showQuick = true },

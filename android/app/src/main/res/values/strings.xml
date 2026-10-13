@@ -128,6 +128,7 @@
     <string name="row_send_text">Send text…</string>
     <string name="row_type_clipboard">Type phone clipboard</string>
     <string name="row_files">Files on this computer…</string>
+    <string name="screen_chip">Screen %1$d, %2$d×%3$d</string>
     <string name="files_up">Up</string>
     <string name="files_empty">This folder is empty.</string>
     <string name="files_download_title">Download %1$s?</string>

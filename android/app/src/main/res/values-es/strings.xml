@@ -123,6 +123,7 @@
     <string name="row_send_text">Enviar texto…</string>
     <string name="row_type_clipboard">Escribir el portapapeles del teléfono</string>
     <string name="row_files">Archivos de este ordenador…</string>
+    <string name="screen_chip">Pantalla %1$d, %2$d×%3$d</string>
     <string name="files_up">Subir</string>
     <string name="files_empty">Esta carpeta está vacía.</string>
     <string name="files_download_title">¿Descargar %1$s?</string>

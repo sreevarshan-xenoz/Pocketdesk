@@ -121,6 +121,7 @@
     <string name="row_send_text">உரை அனுப்பு…</string>
     <string name="row_type_clipboard">கைபேசி கிளிப்போர்டை தட்டச்சு செய்</string>
     <string name="row_files">இந்தக் கணினியின் கோப்புகள்…</string>
+    <string name="screen_chip">திரை %1$d, %2$d×%3$d</string>
     <string name="files_up">மேலே</string>
     <string name="files_empty">இந்தக் கோப்புறை காலியாக உள்ளது.</string>
     <string name="files_download_title">%1$s ஐப் பதிவிறக்கவா?</string>

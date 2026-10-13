@@ -8,14 +8,13 @@ import android.util.Log
 import android.view.Surface
 import dev.linuxlink.android.bridge.RustCore
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Low-latency H.264/H.265 decoder that drains encoded access units from the
  * Rust bridge ([RustCore.receiveFrames]) and renders them straight to a
  * [Surface].
  *
- * Runs on a dedicated thread ([start] blocks); stop it by clearing [running]
+ * Runs on a dedicated thread ([start] blocks); stop it with [stop]
  * and joining via [RustCore.stopStreaming] on the caller side. The stream is
  * Annex-B NAL units with in-band SPS/PPS (the encoder keyframes carry them),
  * so buffers are fed to MediaCodec as-is; the decoder signals the real format
@@ -51,7 +50,7 @@ class H264Decoder(
     private val onVideoSize: ((Int, Int) -> Unit)? = null,
     private val onCodec: ((String) -> Unit)? = null,
 ) {
-    val running = AtomicBoolean(false)
+    private val gate = DecodeGate()
 
     /**
      * Fired from the decode thread when the bridge goes silent for
@@ -150,7 +149,8 @@ class H264Decoder(
      * immediately.
      */
     fun start() {
-        running.set(true)
+        // A stop that came while the stream was still connecting wins.
+        if (!gate.open()) return
         var mediaCodec: MediaCodec? = null
         try {
             val bufferInfo = MediaCodec.BufferInfo()
@@ -166,7 +166,7 @@ class H264Decoder(
             // session holds the stream until its owner answers (up to 30 s).
             var lastFrameAt = SystemClock.elapsedRealtime()
             var sawFrame = false
-            while (running.get()) {
+            while (gate.isOpen) {
                 val frames = RustCore.receiveFrames(timeoutMs = POLL_TIMEOUT_MS)
                 if (frames.isEmpty()) {
                     // The desktop closed the stream (refused the session,
@@ -187,7 +187,7 @@ class H264Decoder(
                 lastFrameAt = SystemClock.elapsedRealtime()
                 sawFrame = true
                 for (frame in frames) {
-                    if (!running.get()) break
+                    if (!gate.isOpen) break
                     if (mediaCodec == null) {
                         // Annex-B access-unit sniffing needs a keyframe header.
                         if (!frame.isKeyframe) continue
@@ -213,8 +213,15 @@ class H264Decoder(
                     feed(mediaCodec, bufferInfo, frame.data, frame.isKeyframe)
                 }
             }
+        } catch (e: IllegalStateException) {
+            // MediaCodec throws this (and its CodecException) when the
+            // codec dies under the loop: its surface went away, or the
+            // platform reclaimed it. That ends this stream; it must not
+            // end the app.
+            Log.w(TAG, "decoder stopped working: ${e.message}")
+            if (gate.isOpen) onStalled?.invoke()
         } finally {
-            running.set(false)
+            gate.stop()
             mediaCodec?.let { opened ->
                 runCatching { opened.stop() }
                 runCatching { opened.release() }
@@ -234,7 +241,7 @@ class H264Decoder(
         }
 
     fun stop() {
-        running.set(false)
+        gate.stop()
     }
 
     private fun feed(
