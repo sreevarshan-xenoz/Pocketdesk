@@ -608,25 +608,27 @@ impl PocketdeskApp {
         });
     }
 
-    /// The phone files go to (F7b): the one chosen, if it is still in a
+    /// The phone the send box shows (F7b): the one chosen while it is in a
     /// session, else the first phone that is.
-    fn send_target(&mut self) -> Option<String> {
+    fn send_target(&self) -> Option<String> {
         let targets = model::send_targets(&self.snapshot);
-        let chosen = self
-            .send_to
+        self.send_to
             .as_ref()
             .filter(|id| targets.iter().any(|d| &d.id == *id))
             .cloned()
-            .or_else(|| targets.first().map(|d| d.id.clone()));
-        self.send_to = chosen.clone();
-        chosen
+            .or_else(|| targets.first().map(|d| d.id.clone()))
     }
 
-    /// Queue `path` for the chosen phone and say what happened.
+    /// Queue `path` for the chosen phone and say what happened. A chosen
+    /// phone that has left is reported, never swapped for another.
     fn send_file(&mut self, path: &std::path::Path) {
-        let Some(device) = self.send_target() else {
-            self.notice = Some("No phone is in a session to send to.".to_string());
-            return;
+        let device = match model::target_for_send(&self.snapshot, self.send_to.as_deref()) {
+            Ok(device) => device,
+            Err(e) => {
+                self.send_to = None;
+                self.notice = Some(e);
+                return;
+            }
         };
         self.notice = Some(
             match model::queue_send(&self.state_dir, &device, path, now_unix()) {

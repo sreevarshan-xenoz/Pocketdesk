@@ -106,6 +106,24 @@ pub fn send_targets(snapshot: &Snapshot) -> Vec<&Device> {
     snapshot.devices.iter().filter(|d| d.connected).collect()
 }
 
+/// The phone a send goes to: the one the owner chose, while it is still in
+/// a session; with none chosen, the first phone that is. A chosen phone
+/// that left is an error, never a quiet switch to another phone.
+pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<String, String> {
+    let targets = send_targets(snapshot);
+    match chosen {
+        Some(id) if targets.iter().any(|d| d.id == id) => Ok(id.to_string()),
+        Some(_) => Err(
+            "The phone you chose has left its session. Choose a phone, then send again."
+                .to_string(),
+        ),
+        None => targets
+            .first()
+            .map(|d| d.id.clone())
+            .ok_or_else(|| "No phone is in a session to send to.".to_string()),
+    }
+}
+
 /// Ask the server to send the file at `path` to `device_id`; the file's
 /// name, or why not.
 pub fn queue_send(
@@ -427,6 +445,28 @@ mod tests {
         let path = std::path::Path::new(&queued[0].path);
         assert!(path.is_absolute(), "{}", path.display());
         assert!(path.ends_with("Cargo.toml"));
+    }
+
+    #[test]
+    fn a_send_goes_only_to_the_phone_chosen_while_it_is_in_a_session() {
+        let dir = temp_dir("chosen");
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("a").unwrap();
+        store.trust_device("b").unwrap();
+        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
+        let snap = snapshot_with(&dir, 101, true);
+        assert_eq!(target_for_send(&snap, Some("a")), Ok("a".to_string()));
+        assert_eq!(
+            target_for_send(&snap, None),
+            Ok("a".to_string()),
+            "the one in a session"
+        );
+        assert!(
+            target_for_send(&snap, Some("b")).is_err(),
+            "b left its session: no silent switch to a"
+        );
+        let empty = snapshot_with(&temp_dir("chosen-none"), 101, true);
+        assert!(target_for_send(&empty, None).is_err());
     }
 
     #[test]
