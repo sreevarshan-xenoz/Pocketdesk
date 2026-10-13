@@ -152,9 +152,13 @@ pub async fn run(opts: RelayOptions) -> Result<()> {
         None => RelayConfig::new(SocketAddr::from(([0, 0, 0, 0], opts.port))),
         Some(hostname) => {
             let mut relay = RelayConfig::new(SocketAddr::from(([0, 0, 0, 0], 80)));
+            // The cache holds the certificate's and the account's private keys.
+            let cache = crate::state::state_dir()?.join("relay-acme");
+            pocketdesk_core::secure_fs::create_private_dir(&cache)
+                .with_context(|| format!("could not create {}", cache.display()))?;
             let mut acme = AcmeConfig::letsencrypt(true)
                 .domains(vec![hostname.clone()])
-                .cache_path(crate::state::state_dir()?.join("relay-acme"));
+                .cache_path(cache);
             if let Some(email) = &opts.email {
                 acme = acme.contact(vec![format!("mailto:{email}")]);
             }
