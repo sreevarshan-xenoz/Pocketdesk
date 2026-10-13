@@ -15,6 +15,7 @@ import android.util.Log
 import dev.linuxlink.android.R
 import dev.linuxlink.android.bridge.RustCore
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * Sends shared files to the desktop (F7) in a foreground service, so a
@@ -27,8 +28,15 @@ import java.io.File
 class TransferService : Service() {
     // One transfer at a time: shares made back to back queue here instead of
     // racing (the desktop takes two at once, and progress is per transfer).
-    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private val queued = java.util.concurrent.atomic.AtomicInteger(0)
+    private val worker = Executors.newSingleThreadExecutor()
+
+    // Start and stop are decided under this lock, so a share arriving as the
+    // last job finishes is never left running out of the foreground.
+    private val lock = Any()
+    private var queued = 0
+    private var current: Notification? = null
+
+    // Only the worker thread touches these.
     private var sentTotal = 0
     private var countTotal = 0
     private var lastError: String? = null
@@ -40,48 +48,75 @@ class TransferService : Service() {
         super.onDestroy()
     }
 
+    // Android 15 caps dataSync services; when the cap is hit, stop.
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "foreground time limit reached; stopping")
+        worker.shutdownNow()
+        stopSelf()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createChannel()
         val address = intent?.getStringExtra(EXTRA_ADDRESS)
         val port = intent?.getIntExtra(EXTRA_PORT, 0) ?: 0
-        val uris = intent?.clipData?.let { clip -> (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } }
+        val uris = intent?.clipData
+            ?.let { clip -> (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } }
             .orEmpty()
-        if (address == null || port <= 0 || uris.isEmpty()) {
-            stopSelf(startId)
-            return START_NOT_STICKY
+        synchronized(lock) {
+            // A started foreground service must enter the foreground even
+            // when it has nothing to do; keep what is showing if a job runs.
+            enterForeground(current ?: progressNotification(1, uris.size.coerceAtLeast(1), "", 0))
+            if (address == null || port <= 0 || uris.isEmpty()) {
+                if (queued == 0) stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            queued++
         }
-        createChannel()
-        val first = progressNotification(1, uris.size, "", 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, first, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIFICATION_ID, first)
-        }
-        queued.incrementAndGet()
-        worker.execute { sendAll(address, port, uris, startId) }
+        val target = address ?: return START_NOT_STICKY
+        worker.execute { sendAll(target, port, uris, startId) }
         return START_NOT_STICKY
     }
 
     /** Runs on [worker]; the last job queued reports everything sent since. */
     private fun sendAll(address: String, port: Int, uris: List<Uri>, startId: Int) {
-        uris.forEachIndexed { index, uri ->
-            val name = displayName(uri)
-            val result = sendOne(address, port, uri, name) { percent ->
-                notify(progressNotification(index + 1, uris.size, name, percent))
+        try {
+            uris.forEachIndexed { index, uri ->
+                val name = try {
+                    displayName(uri)
+                } catch (_: Throwable) {
+                    "shared.bin"
+                }
+                show(progressNotification(index + 1, uris.size, name, 0))
+                val result = sendOne(address, port, uri, name) { percent ->
+                    show(progressNotification(index + 1, uris.size, name, percent))
+                }
+                countTotal++
+                if (result.isSuccess) {
+                    sentTotal++
+                } else {
+                    lastError = result.exceptionOrNull()?.message
+                    Log.w(TAG, "sending $name failed: $lastError")
+                }
             }
-            countTotal++
-            if (result.isSuccess) {
-                sentTotal++
-            } else {
-                lastError = result.exceptionOrNull()?.message
-                Log.w(TAG, "sending $name failed: $lastError")
-            }
+        } catch (t: Throwable) {
+            lastError = t.message ?: t.toString()
+            Log.e(TAG, "transfer job failed", t)
+        } finally {
+            finishJob(address, startId)
         }
-        if (queued.decrementAndGet() == 0) {
-            stopForeground(STOP_FOREGROUND_DETACH)
-            notify(doneNotification(sentTotal, countTotal, address, lastError))
+    }
+
+    private fun finishJob(address: String, startId: Int) {
+        synchronized(lock) {
+            queued--
+            if (queued > 0) return
+            val done = doneNotification(sentTotal, countTotal, address, lastError)
             sentTotal = 0
             countTotal = 0
             lastError = null
+            current = null
+            runCatching { stopForeground(STOP_FOREGROUND_DETACH) }
+            runCatching { manager().notify(NOTIFICATION_ID, done) }
             // Stops only if no share arrived after this one.
             stopSelf(startId)
         }
@@ -111,39 +146,51 @@ class TransferService : Service() {
             val descriptor = contentResolver.openFileDescriptor(uri, "r")
                 ?: return Result.failure(IllegalStateException("cannot open $name"))
             size = descriptor.statSize
-            watcher.start()
-            if (size > 0) {
-                RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size)
-            } else {
-                // A provider that cannot say how big the file is (a stream):
-                // copy it so the desktop is told an exact size.
-                descriptor.close()
-                sendCopy(address, port, uri, name)
+            when {
+                size == 0L -> {
+                    descriptor.close()
+                    Result.failure(IllegalStateException("$name is empty"))
+                }
+                size > 0L -> {
+                    watcher.start()
+                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size)
+                }
+                else -> {
+                    // A provider that cannot say how big the file is (a
+                    // stream): copy it so the desktop is told an exact size.
+                    descriptor.close()
+                    sendCopy(address, port, uri, name)
+                }
             }
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (t: Throwable) {
+            Result.failure(t)
         } finally {
+            // Joined, so no late progress update can land on top of the
+            // result notification.
             watcher.interrupt()
+            if (watcher.isAlive) watcher.join()
         }
     }
 
     private fun sendCopy(address: String, port: Int, uri: Uri, name: String): Result<Unit> {
         val dir = File(cacheDir, "share").apply { mkdirs() }
-        val temp = File(dir, "pending.bin")
+        // The bridge names the file after its path: copy straight to a name
+        // that is a plain file name here (the desktop makes it safe there).
+        val safe = name.replace('/', '_').replace('\\', '_').take(120)
+            .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "shared.bin"
+        val copy = File(dir, safe)
         return try {
             contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "content stream unavailable" }
-                temp.outputStream().use { output -> input.copyTo(output) }
+                copy.outputStream().use { output -> input.copyTo(output) }
             }
-            // The bridge names the file after the path, so give it the real name.
-            val named = File(dir, name.replace('/', '_')).also { temp.renameTo(it) }
-            try {
-                RustCore.sendFile(address, port, named.absolutePath)
-            } finally {
-                named.delete()
+            if (copy.length() == 0L) {
+                Result.failure(IllegalStateException("$name is empty"))
+            } else {
+                RustCore.sendFile(address, port, copy.absolutePath)
             }
         } finally {
-            temp.delete()
+            copy.delete()
         }
     }
 
@@ -154,6 +201,23 @@ class TransferService : Service() {
         }.getOrNull()
             ?: uri.lastPathSegment?.substringAfterLast('/')
             ?: "shared.bin"
+
+    private fun enterForeground(notification: Notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    /** Post a progress notification, unless the batch has already finished. */
+    private fun show(notification: Notification) {
+        synchronized(lock) {
+            if (queued == 0) return
+            current = notification
+            runCatching { manager().notify(NOTIFICATION_ID, notification) }
+        }
+    }
 
     private fun createChannel() {
         val channel = NotificationChannel(
@@ -189,8 +253,6 @@ class TransferService : Service() {
             .setAutoCancel(true)
             .build()
     }
-
-    private fun notify(notification: Notification) = manager().notify(NOTIFICATION_ID, notification)
 
     private fun manager(): NotificationManager = getSystemService(NotificationManager::class.java)
 
