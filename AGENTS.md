@@ -42,6 +42,23 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **Linux Link is Pocketdesk everywhere (branch `chore/rename-pocketdesk`).**
+  - **New names:**
+    - the crates `pocketdesk-core`, `pocketdesk-server` and `pocketdesk-android-bridge`;
+    - the server command `pocketdesk`, with `pd` as a short name (the same program);
+    - the desktop app's exe, now `pocketdesk-app`;
+    - the config and state folders `pocketdesk`, migrated from `linux-link` on first use by `core::local::paths`, which the server's own paths now go through;
+    - the wire protocol (ALPNs, `POCKETDESK_HELLO`/`OK`, `kdeconnect.pocketdesk.*`, `_pocketdesk._tcp`), the `POCKETDESK_*` env vars, the uinput names, the systemd unit, AUR, man and CI;
+    - the Android app `dev.pocketdesk.android`, a new install that must pair again.
+  - **Kept on purpose:**
+    - the Windows installer's legacy cleanup (it still removes the old "Linux Link" task and firewall group);
+    - dated specs, plans and this journal, as records.
+  - **The server is matched by its exact names** (`pocketdesk`, `pd`), not a prefix, since `pocketdesk-app` and test runners now share the prefix.
+  - **Verified on the A71 and this box:**
+    - the folders moved with the pairings intact;
+    - `pd --version` works;
+    - the new app found the computer over mDNS, paired by PIN, and streamed.
+  - **Found on the way:** after pairing from the refusal card, the app waits for Retry instead of reconnecting by itself (to fix).
 - 2026-10-13: **N1, reaching the desktop from outside without Tailscale, step 1 (branch `feat/wan-insight`).**
   - **Already there, now confirmed:**
     - the built-in iroh WAN path (hole punching, n0's free relays as the fallback, both ends held to their keys);
