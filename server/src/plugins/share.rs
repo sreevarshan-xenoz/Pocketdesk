@@ -72,14 +72,18 @@ impl Plugin for SharePlugin {
                     return Ok(());
                 };
                 // The phone listens and the desktop connects, as in KDE
-                // Connect. Over TCP the sender is known by its address; the v2
-                // channel names a device id, which is not somewhere to dial.
-                let Ok(phone_ip) = sender.device_id().parse::<IpAddr>() else {
+                // Connect: to the address the transport saw, never to one the
+                // peer names (a v2 device id is the peer's own choice).
+                let Some(phone_ip) = sender.peer_addr().map(|a| a.ip()) else {
                     tracing::warn!(
                         "File share refused: only the TCP control channel can carry one"
                     );
                     return Ok(());
                 };
+                if !dialable(phone_ip) {
+                    tracing::warn!("File share refused: will not connect back to {phone_ip}");
+                    return Ok(());
+                }
                 let Some(dir) = self.download_dir.clone() else {
                     tracing::warn!("File share refused: no downloads or home folder");
                     return Ok(());
@@ -110,6 +114,31 @@ impl Plugin for SharePlugin {
             }
         }
         Ok(())
+    }
+}
+
+/// Whether the desktop may connect back to a phone at `ip`: not itself
+/// (a loopback peer means a local proxy such as `adb reverse`, and the
+/// phone's port would name a service on this machine), and not an address
+/// that is no single host or is the link-local range (cloud metadata).
+fn dialable(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            !(v4.is_loopback()
+                || v4.is_unspecified()
+                || v4.is_link_local()
+                || v4.is_multicast()
+                || v4.is_broadcast())
+        }
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => dialable(IpAddr::V4(v4)),
+            None => {
+                !(v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6.is_multicast()
+                    || v6.is_unicast_link_local())
+            }
+        },
     }
 }
 
@@ -245,6 +274,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_desktop_connects_back_only_to_a_real_remote_host() {
+        for ok in ["192.168.1.20", "10.0.0.2", "100.64.1.2", "2001:db8::1"] {
+            assert!(dialable(ok.parse().unwrap()), "{ok}");
+        }
+        for no in [
+            "127.0.0.1",
+            "::1",
+            "0.0.0.0",
+            "169.254.169.254",
+            "fe80::1",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::ffff:127.0.0.1",
+        ] {
+            assert!(!dialable(no.parse().unwrap()), "{no}");
+        }
     }
 
     #[test]

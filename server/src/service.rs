@@ -783,7 +783,7 @@ async fn handle_connection_with_kde(
             .unwrap_or_else(|| "unknown".to_string());
 
         let sender: Arc<dyn DeviceSender> =
-            Arc::new(TcpDeviceSender::from_arc(writer, device_id.clone()));
+            Arc::new(TcpDeviceSender::from_arc(writer, device_id.clone()).with_peer(peer_addr));
         let sender_ref = &*sender;
 
         // Update span with device_id
