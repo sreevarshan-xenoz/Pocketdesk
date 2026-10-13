@@ -730,6 +730,15 @@ Built on `feat/diagnostics`. On the Windows box, an ignored test (`cargo test -p
 - [ ] A Block rule for linux-link: the firewall check reports it.
 - [ ] Linux: the checks with the systemd user service (no firewall line).
 
+## 35. Reaching the desktop from outside (N1)
+
+Built on `feat/wan-insight`. On the Windows box, the server recorded UDP working, a NAT that allows direct connections, and no public IPv6, and Diagnostics showed both lines.
+
+- [x] Diagnostics shows "From outside" and "IPv6" from the server's own measurement.
+- [ ] **Cellular:** the phone on mobile data, the desktop at home. A session connects, and the HUD says direct or relayed. (Owed: the test phone has no mobile service.)
+- [ ] A strict-NAT network (or a hotspot behind carrier NAT): "From outside" warns, and the session rides the relay.
+- [ ] A network with public IPv6: the IPv6 line is ok.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

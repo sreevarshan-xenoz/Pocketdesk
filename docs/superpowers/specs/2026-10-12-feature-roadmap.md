@@ -35,7 +35,7 @@ Each item is its own branch (`feat/<topic>`), spec, plan and device check on the
 
 | # | Feature | Side |
 |---|---|---|
-| N1 | **Cross-network without Tailscale, step 1.** A real cellular test of the built-in iroh path. Router port mapping (UPnP / NAT-PMP / PCP) for direct connections. "Direct" or "via relay" shown in the HUD and in Diagnostics. | Both |
+| N1 | **Cross-network without Tailscale, step 1.** A real cellular test of the built-in iroh path (owed: the test phone has no mobile service). Router port mapping (UPnP / NAT-PMP / PCP) is iroh's default and already on. The phone's HUD already shows direct or relayed. Diagnostics now says whether this computer's NAT allows direct connections, and whether IPv6 is public (shipped 2026-10-13). | Both |
 | N2 | **Your own relay.** A `linux-link relay` mode running iroh's relay server: on the desktop itself with one port forwarded, on any always-on box, or on a free cloud VM. A "Use my own relay" setting in both apps. | Both |
 | N3 | **Finding the desktop without anyone's server.** iroh discovery over the Mainline DHT (pkarr), so a changed home IP is found again. IPv6 direct where the ISP gives it. | Both |
 | N4 | **Image clipboard** (F8). | Both |

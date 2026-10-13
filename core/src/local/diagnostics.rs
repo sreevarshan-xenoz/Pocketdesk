@@ -7,7 +7,7 @@ use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use super::paths::{ENDPOINT_FILE, PID_FILE, SESSIONS_FILE};
+use super::paths::{ENDPOINT_FILE, PID_FILE, SESSIONS_FILE, WAN_STATUS_FILE};
 
 /// How one check came out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +57,96 @@ pub struct FirewallState {
     pub block: usize,
     /// The active network profiles, as Windows names them ("Private").
     pub profiles: String,
+}
+
+/// What the server's internet path looks like from outside (N1), from its
+/// own measurement: yes/no facts only, never an address, since the debug
+/// report built on it may be pasted publicly.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WanStatus {
+    pub unix_secs: u64,
+    /// UDP reaches the internet (direct connections are possible at all).
+    pub udp: bool,
+    /// The public IPv4 address changes with the destination (a "symmetric"
+    /// NAT, which defeats hole punching). `None` until measured.
+    pub nat_varies: Option<bool>,
+    /// A public IPv6 address was seen (an outbound round trip; inbound may
+    /// still be firewalled, and hole punching then usually gets through).
+    pub public_v6: bool,
+    /// A sign-in page holds the network.
+    pub captive_portal: Option<bool>,
+}
+
+/// Record the server's measurement (temp file, then rename).
+pub fn write_wan_status(state_dir: &Path, status: &WanStatus) -> std::io::Result<()> {
+    std::fs::create_dir_all(state_dir)?;
+    let tmp = state_dir.join(format!("{WAN_STATUS_FILE}.tmp"));
+    std::fs::write(&tmp, serde_json::to_vec(status)?)?;
+    std::fs::rename(&tmp, state_dir.join(WAN_STATUS_FILE))
+}
+
+/// The server's last measurement, if it made one.
+pub fn read_wan_status(state_dir: &Path) -> Option<WanStatus> {
+    let raw = std::fs::read(state_dir.join(WAN_STATUS_FILE)).ok()?;
+    serde_json::from_slice(&raw).ok()
+}
+
+/// Can phones away from home connect directly, or only through a relay?
+/// And can phones on IPv6 networks reach this computer directly?
+pub fn check_outside(status: Option<&WanStatus>, state: ServerState) -> Vec<Finding> {
+    let check = "From outside";
+    if state != ServerState::Running {
+        return vec![finding(
+            check,
+            Status::Info,
+            "not checked: the server is not running yet",
+        )];
+    }
+    let Some(s) = status else {
+        return vec![with_hint(
+            finding(
+                check,
+                Status::Info,
+                "the server has not measured its network yet",
+            ),
+            "Run the checks again in a minute; if it stays like this, see Internet path above.",
+        )];
+    };
+    let mut findings = Vec::new();
+    findings.push(if s.captive_portal == Some(true) {
+        with_hint(
+            finding(check, Status::Warn, "a sign-in page holds this network"),
+            "Sign in to the network in a browser.",
+        )
+    } else if !s.udp {
+        with_hint(
+            finding(check, Status::Warn, "UDP to the internet is blocked: phones away from home go through the relay (slower)"),
+            "A firewall or network policy blocks outgoing UDP.",
+        )
+    } else {
+        match s.nat_varies {
+            Some(false) => finding(
+                check,
+                Status::Good,
+                "this computer's NAT allows direct connections (the phone's network decides the rest)",
+            ),
+            Some(true) => with_hint(
+                finding(check, Status::Warn, "strict NAT: phones away from home may need the relay"),
+                "If UPnP or NAT-PMP is off on the router, turning it on lets phones connect directly.",
+            ),
+            None => finding(check, Status::Info, "the NAT type is not measured yet"),
+        }
+    });
+    findings.push(if s.public_v6 {
+        finding(
+            "IPv6",
+            Status::Good,
+            "a public IPv6 address: phones on IPv6 networks can usually connect directly",
+        )
+    } else {
+        finding("IPv6", Status::Info, "no public IPv6 address")
+    });
+    findings
 }
 
 /// A latency distribution's median and 99th percentile, in milliseconds.
@@ -590,6 +680,59 @@ mod tests {
                 .status,
             Status::Warn
         );
+    }
+
+    fn wan(udp: bool, nat_varies: Option<bool>, public_v6: bool) -> WanStatus {
+        WanStatus {
+            unix_secs: 1,
+            udp,
+            nat_varies,
+            public_v6,
+            captive_portal: Some(false),
+        }
+    }
+
+    #[test]
+    fn from_outside_says_whether_phones_connect_directly() {
+        let friendly = check_outside(Some(&wan(true, Some(false), false)), UP);
+        assert_eq!(friendly[0].status, Status::Good);
+        assert_eq!(friendly[1].check, "IPv6");
+        assert_eq!(friendly[1].status, Status::Info);
+        let strict = check_outside(Some(&wan(true, Some(true), true)), UP);
+        assert_eq!(strict[0].status, Status::Warn);
+        assert!(strict[0].hint.as_deref().unwrap().contains("UPnP"));
+        assert_eq!(
+            strict[1].status,
+            Status::Good,
+            "IPv6 still connects directly"
+        );
+        assert_eq!(
+            check_outside(Some(&wan(false, None, false)), UP)[0].status,
+            Status::Warn,
+            "no UDP"
+        );
+        let mut portal = wan(true, Some(false), false);
+        portal.captive_portal = Some(true);
+        assert!(
+            check_outside(Some(&portal), UP)[0]
+                .detail
+                .contains("sign-in")
+        );
+        assert_eq!(
+            check_outside(None, UP)[0].status,
+            Status::Info,
+            "not measured yet"
+        );
+        assert_eq!(check_outside(None, ServerState::Starting).len(), 1);
+    }
+
+    #[test]
+    fn the_wan_status_is_written_and_read_back() {
+        let dir = temp_dir("wan");
+        assert_eq!(read_wan_status(&dir), None);
+        let status = wan(true, Some(false), true);
+        write_wan_status(&dir, &status).unwrap();
+        assert_eq!(read_wan_status(&dir), Some(status));
     }
 
     #[test]

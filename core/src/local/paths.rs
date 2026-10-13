@@ -20,6 +20,9 @@ pub const RECEIVED_FILE: &str = "received.json";
 pub const OUTBOX_DIR: &str = "outbox";
 pub const SENT_FILE: &str = "sent.json";
 pub const DEVICE_KEYS_FILE: &str = "device_keys.json";
+/// What the server measured about its internet path (N1): yes/no facts,
+/// never an address.
+pub const WAN_STATUS_FILE: &str = "wan_status.json";
 /// One JSON record per streaming session, newest last.
 pub const SESSIONS_FILE: &str = "streaming_sessions.jsonl";
 
