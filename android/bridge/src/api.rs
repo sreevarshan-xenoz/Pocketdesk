@@ -1129,6 +1129,9 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         TRANSFER_TOTAL.store(file_size, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
+    // Only the desktop this phone pinned for `address` may take the bytes
+    // (phase C); without a pin there is no one to send them to.
+    let tls = transfer_acceptor(&address)?;
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
         .await
         .map_err(|e| format!("Failed to bind port: {}", e))?;
@@ -1147,23 +1150,14 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         .await
         .map_err(|e| format!("Failed to send share request: {e}"))?;
     let _reading = AbortOnDrop(replies.keep_reading());
-    // The desktop connects back for the bytes. The listener is on every
-    // interface, so the bytes go only to a connection that first presents
-    // the key from the request, which only the desktop has seen; anything
-    // else that connects is dropped. (Its source address is no test: a
-    // desktop with several addresses may connect back from another one.)
-    let mut client_stream = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let (mut stream, peer) = listener
-                .accept()
-                .await
-                .map_err(|e| format!("Failed to accept connection: {}", e))?;
-            if presents_key(&mut stream, &key).await {
-                return Ok::<_, String>(stream);
-            }
-            tracing::warn!("File transfer: dropped a connection from {peer} without the key");
-        }
-    })
+    // The desktop connects back for the bytes, inside TLS with the pinned
+    // desktop's certificate, then presents the key from the request.
+    // Anything else that connects is dropped. (Its source address is no
+    // test: a desktop with several addresses may connect back from another.)
+    let mut client_stream = tokio::time::timeout(
+        Duration::from_secs(30),
+        accept_transfer(&listener, &key, &tls),
+    )
     .await
     .map_err(|_| "Timeout waiting for file receiver".to_string())??;
     let sent = pump(&mut file, &mut client_stream, file_size).await?;
@@ -1229,6 +1223,66 @@ where
         .await
         .map_err(|e: std::io::Error| e.to_string())?;
     Ok(sent)
+}
+
+/// A transfer connection (phase C): TLS over TCP, the phone's side.
+pub(crate) type TransferStream = tokio_rustls::server::TlsStream<tokio::net::TcpStream>;
+
+/// The phone's side of a transfer's TLS (phase C): its own certificate, and
+/// a dialer required to present exactly the certificate pinned for the
+/// desktop at `address`, the one its control channel proved.
+pub(crate) fn transfer_acceptor(address: &str) -> Result<tokio_rustls::TlsAcceptor, String> {
+    let ip: std::net::IpAddr = address.trim().parse().map_err(|_| {
+        format!("Files go only to a computer reached by its address, not {address}")
+    })?;
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    let certs = linux_link_core::streaming::transport::CertManager::load_or_create(&dir)
+        .map_err(|e| format!("This phone's certificate: {e}"))?;
+    let label = linux_link_core::streaming::transport::peer_label_for_ip(ip);
+    let pinned = certs
+        .known_peers()
+        .into_iter()
+        .find(|(known, _)| *known == label)
+        .map(|(_, hash)| hash)
+        .ok_or_else(|| format!("This phone has not verified the computer at {ip} yet"))?;
+    let config = certs
+        .transfer_server_config(pinned)
+        .map_err(|e| e.to_string())?;
+    Ok(tokio_rustls::TlsAcceptor::from(config))
+}
+
+/// The desktop's connection for a transfer: TLS, in which it must prove it
+/// is the pinned desktop, then the transfer's `key`. Anything else that
+/// connects is dropped, and the wait goes on.
+pub(crate) async fn accept_transfer(
+    listener: &tokio::net::TcpListener,
+    key: &str,
+    tls: &tokio_rustls::TlsAcceptor,
+) -> Result<TransferStream, String> {
+    loop {
+        let (stream, peer) = listener
+            .accept()
+            .await
+            .map_err(|e| format!("Failed to accept connection: {e}"))?;
+        let mut stream =
+            match tokio::time::timeout(Duration::from_secs(5), tls.accept(stream)).await {
+                Ok(Ok(stream)) => stream,
+                _ => {
+                    tracing::warn!(
+                        "File transfer: dropped a connection from {peer} that is not the computer"
+                    );
+                    continue;
+                }
+            };
+        if presents_key(&mut stream, key).await {
+            return Ok(stream);
+        }
+        tracing::warn!("File transfer: dropped a connection from {peer} without the key");
+    }
 }
 
 /// Whether a connection opens with `key` and a newline, read within 5 s.

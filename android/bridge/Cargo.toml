@@ -22,4 +22,6 @@ serde.workspace = true
 serde_json = "1"
 quinn.workspace = true
 tokio-util.workspace = true
+# File transfers run inside TLS (phase C).
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 uuid.workspace = true
