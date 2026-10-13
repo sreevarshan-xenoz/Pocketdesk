@@ -1140,12 +1140,32 @@ fn humantime(secs: u64) -> String {
 }
 
 /// Remove devices from the persistent trust store (`pocketdesk unpair`).
+/// The devices `unpair` removes: the one named, which must be paired, or
+/// every one when none is named. An empty name is refused, not read as
+/// "all".
+fn unpair_targets(
+    device_id: Option<&str>,
+    trusted: &[String],
+) -> std::result::Result<Vec<String>, String> {
+    match device_id {
+        None => Ok(trusted.to_vec()),
+        Some(id) if id.trim().is_empty() => Err(
+            "no device id given; run `pocketdesk unpair` with no argument to remove every paired device"
+                .to_string(),
+        ),
+        Some(id) if trusted.iter().any(|t| t == id) => Ok(vec![id.to_string()]),
+        Some(id) => Err(format!("{id} is not a paired device")),
+    }
+}
+
 pub async fn unpair(device_id: Option<String>) -> Result<()> {
+    // Checked first, so a mistyped id is said plainly; the update below
+    // re-reads the store under its lock.
+    let trusted = TrustStore::load_or_create(state::trust_store_path()?)?.trusted_devices();
+    unpair_targets(device_id.as_deref(), &trusted).map_err(anyhow::Error::msg)?;
     TrustStore::update(state::trust_store_path()?, |store| {
-        let targets: Vec<String> = match device_id {
-            Some(id) => vec![id],
-            None => store.trusted_devices(),
-        };
+        let targets = unpair_targets(device_id.as_deref(), &store.trusted_devices())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         if targets.is_empty() {
             println!("No trusted devices.");
         }
@@ -1318,5 +1338,33 @@ mod handshake_line_tests {
             19
         );
         assert_eq!(line.trim(), HANDSHAKE_HELLO);
+    }
+}
+
+#[cfg(test)]
+mod unpair_tests {
+    use super::unpair_targets;
+
+    #[test]
+    fn unpair_names_a_paired_device_or_every_one() {
+        let trusted = vec!["phone-a".to_string(), "phone-b".to_string()];
+        assert_eq!(
+            unpair_targets(Some("phone-a"), &trusted),
+            Ok(vec!["phone-a".to_string()])
+        );
+        assert_eq!(
+            unpair_targets(None, &trusted),
+            Ok(trusted.clone()),
+            "no id: all of them"
+        );
+        assert!(
+            unpair_targets(Some(""), &trusted).is_err(),
+            "an empty id is not 'all'"
+        );
+        assert!(unpair_targets(Some("  "), &trusted).is_err());
+        assert!(
+            unpair_targets(Some("phone-z"), &trusted).is_err(),
+            "not a paired device"
+        );
     }
 }
