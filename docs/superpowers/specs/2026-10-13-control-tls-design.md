@@ -93,3 +93,36 @@ The PIN now travels inside TLS, so the connection that pairs proves a key, and p
 3. A plain `HELLO` (from a script) gets `tls-required`.
 4. Change the stored TLS key: the control connection is refused, logged and notified, and the phone shows its error.
 5. Restore the key. Pair again (owner PIN through "Show PIN on desktop"): the keys are replaced with the phone's own.
+
+## As built (2026-10-13)
+
+- **Wire.** As designed. A plain client gets `LINUX_LINK_ERR 1 tls-required`. Its bytes are read and the socket half-closed first, because on Windows the reset that otherwise follows discarded the answer before the client read it. The two handshake lines (HELLO, the identity) are capped at 64 KiB.
+- **Changed after the fresh review (1 Critical, 4 Important), one commit each:**
+  - **v2 could re-point a TCP connection** (Critical). The plugin's id maps (`PHONE_IDS`, `TRUSTED_CONNECTIONS`) let any identity packet, including a v2 session's, decide which phone another connection counted as. They are gone.
+    - A connection is trusted, permitted, offered files and paired as its own id only.
+    - An identity naming another device changes nothing.
+  - **Standing, per packet.** A connection admitted while a phone was unpaired would have gained its trust when the owner paired the real phone. Each packet now re-reads the connection's `Standing`:
+    - `Paired`: paired, and it proved the bound key;
+    - `Unpaired`;
+    - `WrongKey`: paired, but not with this key.
+
+    Pushes go only to connections whose key holds, chosen after that filter.
+  - **The recovery the table above lacked.** A paired id presenting another key is not closed. It is held to pairing only, so the owner's PIN binds its new key (a phone whose certificate changed recovers that way). The table's "refused" row now reads "may only pair again".
+  - **The owner's pairing fails closed.** It binds the key before trusting anything, and answers `pair:false` if it cannot.
+  - **The phone's certificate pins** are merged into the file under a lock and replaced atomically.
+    - A first use asks the file before accepting, and a pin set meanwhile wins.
+    - A pin file that will not parse is an error, not an empty list.
+  - **The phone's identity** is created once, under a lock, however many first loads run at once. A test reproduced the race on every run.
+- **Minors also fixed:**
+  - PIN minting is paced to one every 10 s, and expired PINs are dropped.
+  - A phone leaving without a TLS `close_notify` is an ordinary disconnect.
+  - `push_packet` reuses the live connection only to the same desktop.
+- **Ruled, not changed:**
+  - Someone who knows an unpaired phone's id can still get in the way of its pairing (PIN requests, the 5 guesses), though not pair as it.
+  - The handler tests read the real state directory, read-only, under an id that cannot be paired.
+- **Device-verified (A71 ↔ Windows, LAN):**
+  - a plain HELLO is answered `tls-required` and closed;
+  - a paired session runs control over TLS (keyed by the device id, queries answered) and video;
+  - a tampered stored key refuses the stream, holds the control connections to pairing only, and shows the phone's "Pair again";
+  - Pair again → Show PIN on desktop → the PIN binds the phone's real key, and that connection is seeded at once;
+  - the next LAN stream registers the WAN key, and the store ends exactly as it began.
