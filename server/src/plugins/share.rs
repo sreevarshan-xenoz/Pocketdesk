@@ -77,7 +77,11 @@ impl Plugin for SharePlugin {
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.share.request", FETCH_REFUSED]
+        &[
+            "kdeconnect.share.request",
+            FETCH_REFUSED,
+            crate::offers::OFFER,
+        ]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
@@ -185,11 +189,15 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             tracing::info!("Sending {} to {}", fetch.path.display(), fetch.to);
             tokio::spawn(async move {
                 let _slot = fetch.slot;
-                match send_file_to(fetch.to, &key, &fetch.path).await {
+                let sent = send_file_to(fetch.to, &key, &fetch.path).await;
+                match &sent {
                     Ok(size) => {
                         tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
                     }
                     Err(e) => tracing::warn!("Sending {} failed: {e}", fetch.path.display()),
+                }
+                if let Some(id) = fetch.offer {
+                    crate::offers::finish(&id, sent.map(|_| ()).map_err(|e| e.to_string()));
                 }
             });
         }
@@ -204,6 +212,8 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
 struct Fetch {
     to: SocketAddr,
     path: PathBuf,
+    /// The desktop app's send this download answers, if any.
+    offer: Option<String>,
     slot: tokio::sync::OwnedSemaphorePermit,
 }
 
@@ -224,21 +234,41 @@ fn plan_fetch(
     if !dialable(ip) {
         return Err(format!("will not connect back to {ip}"));
     }
-    let (path, size) = if let Some(path) = body.get("path").and_then(|v| v.as_str()) {
-        crate::plugins::file_browse::resolve_file(path)?
+    // Taken before an offer is redeemed, so a busy desktop does not use up
+    // the phone's one try.
+    let slot = transfer_slots()
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| format!("{MAX_TRANSFERS} transfers are already running"))?;
+    let (path, size, offer) = if let Some(path) = body.get("path").and_then(|v| v.as_str()) {
+        let (path, size) = crate::plugins::file_browse::resolve_file(path)?;
+        (path, size, None)
+    } else if let Some(id) = body.get("offer").and_then(|v| v.as_str()) {
+        // A TCP connection is known by its address; the offer names the
+        // phone by the id it announced there.
+        let phone = crate::plugins::pair::phone_id_of(sender.device_id())
+            .unwrap_or_else(|| sender.device_id().to_string());
+        let path = crate::offers::redeem(id, &phone)?;
+        let Some(size) = std::fs::metadata(&path)
+            .ok()
+            .filter(|m| m.is_file())
+            .map(|m| m.len())
+        else {
+            let reason = "the file is no longer there";
+            crate::offers::finish(id, Err(reason.to_string()));
+            return Err(reason.to_string());
+        };
+        (path, size, Some(id.to_string()))
     } else {
         return Err("no file named".to_string());
     };
     if size > MAX_FILE_BYTES {
         return Err("the file is larger than 8 GB".to_string());
     }
-    let slot = transfer_slots()
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| format!("{MAX_TRANSFERS} transfers are already running"))?;
     Ok(Fetch {
         to: SocketAddr::new(ip, port),
         path,
+        offer,
         slot,
     })
 }
@@ -974,6 +1004,20 @@ mod tests {
         let (key, reason) = refusal(&phone).expect("a refusal");
         assert_eq!(key, KEY);
         assert!(!reason.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_offer_made_to_another_phone_is_refused() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("192.0.2.7:51000");
+        let file = temp_dir("offer").join("a.txt");
+        std::fs::write(&file, "a").unwrap();
+        crate::offers::offer_at("offer-for-x", file, "phone-x", std::time::Instant::now());
+        let packet =
+            fetch(serde_json::json!({ "offer": "offer-for-x", "port": 40000, "key": KEY }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        let (_, reason) = refusal(&phone).expect("a refusal");
+        assert_eq!(reason, "the file was offered to another phone");
     }
 
     #[tokio::test]

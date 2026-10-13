@@ -77,6 +77,16 @@ pub fn is_trusted(conn_key: &str) -> bool {
         .contains_key(conn_key)
 }
 
+/// The deviceId the phone at `conn_key` (a TCP peer address) announced in
+/// its identity, if it did (F7b: the desktop app names phones by that id).
+pub fn phone_id_of(conn_key: &str) -> Option<String> {
+    phone_ids()
+        .lock()
+        .expect("pair state")
+        .get(conn_key)
+        .cloned()
+}
+
 /// Is this deviceId in the persisted [`TrustStore`]?
 ///
 /// Used by the QUIC paths (v2 multiplexer + video stream pipeline), which
