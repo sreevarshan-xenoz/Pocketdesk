@@ -302,6 +302,11 @@ pub async fn run(config: Config) -> Result<()> {
     .await
     {
         Ok(endpoint) => Some(endpoint),
+        Err(e) if !config.relay_urls.is_empty() => {
+            // Most likely the user's own relay_urls; say so loudly.
+            tracing::error!("WAN (iroh) endpoint unavailable, away from home is off: {e:#}");
+            None
+        }
         Err(e) => {
             tracing::warn!("WAN (iroh) endpoint unavailable: {e:#}");
             None

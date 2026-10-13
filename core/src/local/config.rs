@@ -243,6 +243,25 @@ impl Config {
     ];
 }
 
+/// Why `url` cannot be a relay in `relay_urls`, or `None` when it can.
+pub fn relay_url_problem(url: &str) -> Option<String> {
+    let url = url.trim();
+    let lower = url.to_ascii_lowercase();
+    let Some(rest) = ["http://", "https://"]
+        .iter()
+        .find_map(|scheme| lower.starts_with(scheme).then(|| &url[scheme.len()..]))
+    else {
+        return Some(format!(
+            "{url:?} is not an http:// or https:// address of a relay"
+        ));
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() || authority.starts_with(':') {
+        return Some(format!("{url:?} names no host"));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +272,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("config.toml")
+    }
+
+    #[test]
+    fn a_relay_url_needs_http_or_https_and_a_host() {
+        for good in [
+            "https://relay.example.org",
+            "http://192.0.2.10:3340",
+            "http://[2001:db8::1]:3340/",
+        ] {
+            assert_eq!(relay_url_problem(good), None, "{good}");
+        }
+        for bad in [
+            "relay.example.org:3340",
+            "localhost:3340",
+            "ftp://relay.example.org",
+            "https://",
+            "http://:3340",
+            "",
+        ] {
+            assert!(relay_url_problem(bad).is_some(), "{bad}");
+        }
     }
 
     #[test]

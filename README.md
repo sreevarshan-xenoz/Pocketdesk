@@ -297,7 +297,7 @@ Then add `relay_urls = ["http://<public address>:3340"]` (or the `https://` name
 - **Who may use it:** only listed endpoints. `--allow-paired` admits this desktop and the phones paired with it now, by the WAN key each registered on a connection at home. It re-reads both on each connection, so a newly paired phone works without a restart and an unpaired one (or an expired guest) is refused; `--allow <id>` is repeatable; `--open` admits anyone and warns. With none of these the relay refuses to start.
 - **What it sees:** sessions stay end-to-end encrypted between the phone and the desktop, so the relay forwards ciphertext. It sees which endpoints talk and how much. In plain mode, so can anyone on the path to the relay.
 - **Where not to run it:** behind the same NAT as an unreachable desktop, with no forwarded port. A relay nobody outside can reach helps no one.
-- **What Diagnostics shows:** "Internet path: ready through your relay". Your relay does not offer the address discovery n0's relays do, so "From outside" says "not measured" instead of judging the NAT.
+- **What Diagnostics shows:** "Internet path: ready through your relay", or that your relay is not reached (is `pocketdesk relay` running?), or that a `relay_urls` entry is not an `http://` or `https://` address, which turns away-from-home off. Your relay does not offer the address discovery n0's relays do, so "From outside" says "not measured" instead of judging the NAT.
 
 ### CLI Commands
 

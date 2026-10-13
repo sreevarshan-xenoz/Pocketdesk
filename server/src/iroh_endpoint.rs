@@ -137,6 +137,9 @@ pub fn relay_mode(relay_urls: &[String]) -> Result<RelayMode> {
     let urls = relay_urls
         .iter()
         .map(|url| {
+            if let Some(problem) = pocketdesk_core::local::config::relay_url_problem(url) {
+                anyhow::bail!("relay_urls: {problem}");
+            }
             url.trim()
                 .parse::<iroh::RelayUrl>()
                 .with_context(|| format!("relay_urls: not a URL: {url}"))
@@ -343,6 +346,9 @@ mod relay_mode_tests {
             RelayMode::Custom(_)
         ));
         assert!(relay_mode(&["not a url".to_string()]).is_err());
+        // These parse as URLs, with the host taken for a scheme.
+        assert!(relay_mode(&["relay.example.org:3340".to_string()]).is_err());
+        assert!(relay_mode(&["localhost:3340".to_string()]).is_err());
     }
 }
 

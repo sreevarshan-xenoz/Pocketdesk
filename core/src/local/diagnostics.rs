@@ -180,11 +180,6 @@ fn is_n0_relay(url: &str) -> bool {
     url.contains("iroh.link")
 }
 
-/// Whether the desktop announces a relay of its own (N2) rather than n0's.
-pub fn uses_own_relay(state_dir: &Path) -> bool {
-    announced_relay(state_dir).is_some_and(|url| !is_n0_relay(&url))
-}
-
 /// A latency distribution's median and 99th percentile, in milliseconds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tail {
@@ -358,13 +353,28 @@ pub fn check_addresses(ips: &[String]) -> Finding {
 /// Can phones away from home reach this computer? Only once the running
 /// server has reached a relay (the file is written before that, and kept
 /// after the server stops).
-pub fn check_internet_path(state_dir: &Path, state: ServerState) -> Finding {
+pub fn check_internet_path(state_dir: &Path, state: ServerState, configured: &[String]) -> Finding {
     let check = "Internet path";
     if state != ServerState::Running {
         return finding(
             check,
             Status::Info,
             "not checked: the server is not running yet",
+        );
+    }
+    if let Some(problem) = configured
+        .iter()
+        .find_map(|url| super::config::relay_url_problem(url))
+    {
+        return with_hint(
+            finding(
+                check,
+                Status::Bad,
+                format!(
+                    "relay_urls has an entry the server refuses ({problem}): away from home is off"
+                ),
+            ),
+            "Write it as http://<address>:3340 or https://<name> in config.toml, then restart the server.",
         );
     }
     let relay = announced_relay(state_dir);
@@ -379,6 +389,11 @@ pub fn check_internet_path(state_dir: &Path, state: ServerState) -> Finding {
             check,
             Status::Good,
             format!("ready through {which} (phones away from home can connect)"),
+        )
+    } else if !configured.is_empty() {
+        with_hint(
+            finding(check, Status::Warn, "not ready: your relay is not reached"),
+            "Is `pocketdesk relay` running, and can this computer reach the address in relay_urls? Until then only this network works.",
         )
     } else {
         with_hint(
@@ -665,7 +680,7 @@ mod tests {
     fn the_internet_path_is_ready_once_a_relay_is_reached() {
         let dir = temp_dir("endpoint");
         assert_eq!(
-            check_internet_path(&dir, UP).status,
+            check_internet_path(&dir, UP, &[]).status,
             Status::Warn,
             "no file"
         );
@@ -675,7 +690,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            check_internet_path(&dir, UP).status,
+            check_internet_path(&dir, UP, &[]).status,
             Status::Warn,
             "no relay yet"
         );
@@ -684,9 +699,9 @@ mod tests {
             r#"{"endpointId":"x","relayUrls":["https://relay.example/"],"directAddrs":[]}"#,
         )
         .unwrap();
-        assert_eq!(check_internet_path(&dir, UP).status, Status::Good);
+        assert_eq!(check_internet_path(&dir, UP, &[]).status, Status::Good);
         assert_eq!(
-            check_internet_path(&dir, ServerState::Stopped).status,
+            check_internet_path(&dir, ServerState::Stopped, &[]).status,
             Status::Info,
             "a file left by a stopped server proves nothing"
         );
@@ -789,7 +804,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            check_internet_path(&dir, UP)
+            check_internet_path(&dir, UP, &[])
                 .detail
                 .contains("n0's public relay")
         );
@@ -798,9 +813,32 @@ mod tests {
             r#"{"endpointId":"x","relayUrls":["http://203.0.113.7:3340/"],"directAddrs":[]}"#,
         )
         .unwrap();
-        let own = check_internet_path(&dir, UP);
+        let own = check_internet_path(&dir, UP, &[]);
         assert_eq!(own.status, Status::Good);
         assert!(own.detail.contains("your relay"), "{}", own.detail);
+    }
+
+    #[test]
+    fn the_internet_path_says_when_your_relay_is_not_reached() {
+        let dir = temp_dir("relay-unreached");
+        let mine = ["http://192.0.2.10:3340".to_string()];
+        let unreached = check_internet_path(&dir, UP, &mine);
+        assert_eq!(unreached.status, Status::Warn);
+        assert!(
+            unreached.detail.contains("your relay is not reached"),
+            "{}",
+            unreached.detail
+        );
+        assert!(
+            unreached
+                .hint
+                .as_deref()
+                .unwrap()
+                .contains("pocketdesk relay")
+        );
+        let typo = check_internet_path(&dir, UP, &["relay.example.org:3340".to_string()]);
+        assert_eq!(typo.status, Status::Bad);
+        assert!(typo.detail.contains("relay_urls"), "{}", typo.detail);
     }
 
     #[test]
