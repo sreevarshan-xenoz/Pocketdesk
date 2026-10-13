@@ -361,6 +361,10 @@ private fun InputOverlay(
                 pxPerNotch = SCROLL_DP_PER_NOTCH.dp.toPx(),
             )
 
+            // Direct touch's press, visible to the finally below so a torn-down
+            // drag is released too.
+            var buttonDown = false
+
             fun sendPad(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { send(it) }
 
             try {
@@ -371,7 +375,7 @@ private fun InputOverlay(
                         // Defer the first packet until we know this is a
                         // one-finger gesture, not the start of a pinch.
                         var cancelled = false
-                        var buttonDown = false
+                        buttonDown = false
                         var lastPos = down.position
                         var done = false
                         while (!done) {
@@ -384,6 +388,7 @@ private fun InputOverlay(
                                         // put the button down; leaving it pressed is a
                                         // stuck drag on the desktop.
                                         if (buttonDown) send { RustCore.sendMouseClick(0, false) }
+                                        buttonDown = false
                                         done = true
                                     }
                                 }
@@ -399,6 +404,7 @@ private fun InputOverlay(
                                             RustCore.sendMouseAbs(xNorm, yNorm)
                                             RustCore.sendMouseClick(0, false)
                                         }
+                                        buttonDown = false
                                     } else {
                                         // Never moved far enough to be a drag: a tap is
                                         // warp, press, release at one point.
@@ -461,6 +467,7 @@ private fun InputOverlay(
                 // The gesture can be torn down mid-drag (layout change, mode switch,
                 // view disposed): never leave the left button pressed on the desktop.
                 cancelPad(address, port, pad)
+                if (buttonDown) releaseLeftButton()
             }
         },
     )
