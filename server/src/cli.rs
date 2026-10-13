@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "linux-link")]
+#[command(name = "linux-link", version)]
 #[command(about = "Pocketdesk - your desktop from your phone, over LAN, Tailscale or iroh")]
 pub struct Cli {
     #[arg(short, long)]
@@ -183,6 +183,16 @@ pub fn parse_grant_secs(input: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::parse_grant_secs;
+
+    /// `scripts/install.sh` reads the installed version this way to decide
+    /// whether an upgrade is due.
+    #[test]
+    fn the_version_flag_prints_the_crate_version() {
+        use clap::Parser;
+        let err = super::Cli::try_parse_from(["linux-link", "--version"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")), "{err}");
+    }
 
     #[test]
     fn grant_durations_parse() {
