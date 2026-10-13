@@ -13,6 +13,9 @@
     <!-- ConnectScreen -->
     <string name="host_address">Host address</string>
     <string name="home_subtitle">Your saved computers</string>
+    <string name="found_on_network">On this network</string>
+    <string name="saved_computers">Saved</string>
+    <string name="found_subtitle">%1$s · tap to connect; a new computer asks for its PIN</string>
     <string name="no_computers">No computers yet.</string>
     <string name="home_explainer">Needs a Linux or Windows computer running the Pocketdesk service on your network.</string>
     <string name="settings_title">Settings</string>

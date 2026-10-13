@@ -33,6 +33,9 @@ import androidx.compose.ui.unit.dp
 import dev.linuxlink.android.HostStore
 import dev.linuxlink.android.R
 import dev.linuxlink.android.bridge.RustCore
+import dev.linuxlink.android.discovery.FoundComputer
+import dev.linuxlink.android.discovery.FoundComputers
+import dev.linuxlink.android.discovery.rememberFoundComputers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -63,6 +66,10 @@ fun HomeScreen(
     // stale configuration) — same discipline as the mic/view-only toasts.
     var wakeStatusRes by remember { mutableStateOf<Int?>(null) }
     var wakeStatusArg by remember { mutableStateOf<String?>(null) }
+    // F6: computers announcing themselves on this network, browsed while
+    // this screen is in front.
+    val found by rememberFoundComputers()
+    val network = FoundComputers.merge(found, hosts) { HostStore.pairedDesktopId(context, it) }
 
     Column(
         modifier = Modifier
@@ -89,7 +96,7 @@ fun HomeScreen(
         }
         Spacer(Modifier.height(20.dp))
 
-        if (hosts.isEmpty()) {
+        if (hosts.isEmpty() && network.unsaved.isEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -128,9 +135,19 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (network.unsaved.isNotEmpty()) {
+                    item { SectionLabel(stringResource(R.string.found_on_network)) }
+                    items(network.unsaved, key = { "found:${it.address}" }) { computer ->
+                        FoundCard(computer, onConnect = { onConnect(computer.toHost()) })
+                    }
+                    if (hosts.isNotEmpty()) {
+                        item { SectionLabel(stringResource(R.string.saved_computers)) }
+                    }
+                }
                 items(hosts, key = { it.address }) { host ->
                     HostCard(
                         host = host,
+                        online = host.address in network.savedOnline,
                         isAuto = autoConnect && host == hosts.first(),
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         hasWake = HostStore.wolMac(context, host.address).isNotBlank(),
@@ -203,8 +220,42 @@ fun HomeScreen(
 }
 
 @Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+}
+
+/**
+ * A computer found on this network but not saved. Its name is only what it
+ * calls itself (mDNS is unauthenticated); a tap connects, and an unpaired
+ * computer asks for its PIN.
+ */
+@Composable
+private fun FoundCard(computer: FoundComputer, onConnect: () -> Unit) {
+    Card(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LlIcon(LlIcons.Desktop, null, size = 22.dp, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Text(computer.name, style = MaterialTheme.typography.titleMedium)
+            }
+            Text(
+                stringResource(R.string.found_subtitle, computer.address),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
 private fun HostCard(
     host: HostStore.Host,
+    online: Boolean,
     isAuto: Boolean,
     paired: Boolean,
     hasWake: Boolean,
@@ -221,6 +272,14 @@ private fun HostCard(
             ) {
                 Text(host.address, style = MaterialTheme.typography.titleMedium)
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (online) {
+                        Text(
+                            stringResource(R.string.found_on_network),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
                     if (isAuto) {
                         Text(
                             stringResource(R.string.auto_badge),

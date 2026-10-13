@@ -6,6 +6,9 @@
     <!-- ConnectScreen -->
     <string name="host_address">ஹோஸ்ட் முகவரி</string>
     <string name="home_subtitle">உங்கள் சேமித்த கணினிகள்</string>
+    <string name="found_on_network">இந்த நெட்வொர்க்கில்</string>
+    <string name="saved_computers">சேமித்தவை</string>
+    <string name="found_subtitle">%1$s · இணைக்கத் தட்டவும்; புதிய கணினி அதன் PIN-ஐக் கேட்கும்</string>
     <string name="no_computers">இன்னும் கணினிகள் இல்லை.</string>
     <string name="home_explainer">உங்கள் பிணையத்தில் Pocketdesk சேவையை இயக்கும் ஒரு Linux அல்லது Windows கணினி தேவை.</string>
     <string name="settings_title">அமைப்புகள்</string>
