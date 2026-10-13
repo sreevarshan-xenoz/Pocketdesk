@@ -115,6 +115,24 @@ fn browse_reply(home: &Path, requested: &str) -> serde_json::Value {
     }
 }
 
+/// Entries the system keeps out of sight: a name starting with a dot, and
+/// on Windows anything marked hidden. A home folder is full of them
+/// (`.cache`, `AppData`, `desktop.ini`), and on a phone they bury the
+/// folders a person means to open.
+fn is_hidden(name: &str, metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0 {
+            return true;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = metadata;
+    name.starts_with('.')
+}
+
 /// The folder's entries, folders first and then by name ignoring case.
 /// Each carries the path a request names it by: `shown` and its name.
 fn list_directory(real: &Path, shown: &Path) -> std::io::Result<Vec<serde_json::Value>> {
@@ -123,6 +141,9 @@ fn list_directory(real: &Path, shown: &Path) -> std::io::Result<Vec<serde_json::
             let entry = entry.ok()?;
             let metadata = entry.metadata().ok()?;
             let name = entry.file_name().to_string_lossy().to_string();
+            if is_hidden(&name, &metadata) {
+                return None;
+            }
             let is_dir = metadata.is_dir();
             let size = if is_dir { 0 } else { metadata.len() };
             let modified = metadata
@@ -280,6 +301,29 @@ mod tests {
             resolve_file_in(&home, file_path),
             Ok((home.join("docs").join("b.txt").canonicalize().unwrap(), 2))
         );
+    }
+
+    #[test]
+    fn hidden_entries_are_not_listed() {
+        let home = temp_home("hidden");
+        std::fs::create_dir(home.join(".cache")).unwrap();
+        std::fs::write(home.join(".bashrc"), "x").unwrap();
+        std::fs::write(home.join("notes.txt"), "x").unwrap();
+        assert_eq!(names(&browse_reply(&home, "")), ["docs", "notes.txt"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_file_windows_marks_hidden_is_not_listed() {
+        use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
+        use windows::core::HSTRING;
+        let home = temp_home("winhidden");
+        let secret = home.join("desktop.ini");
+        std::fs::write(&secret, "x").unwrap();
+        // SAFETY: a plain call with a valid, NUL-terminated path.
+        unsafe { SetFileAttributesW(&HSTRING::from(secret.as_os_str()), FILE_ATTRIBUTE_HIDDEN) }
+            .unwrap();
+        assert_eq!(names(&browse_reply(&home, "")), ["docs"]);
     }
 
     #[test]
