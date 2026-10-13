@@ -294,7 +294,7 @@ pocketdesk relay-ids                             # on the desktop: the ids to --
 
 Then add `relay_urls = ["http://<public address>:3340"]` (or the `https://` name) to the desktop's `config.toml` and restart the server. The desktop announces its relay, and the phone picks it up the next time it connects on the home network; nothing is set on the phone.
 
-- **Who may use it:** only listed endpoints. `--allow-paired` admits this desktop and every phone paired to it, re-read on each connection, so a newly paired phone works without a restart; `--allow <id>` is repeatable; `--open` admits anyone and warns. With none of these the relay refuses to start.
+- **Who may use it:** only listed endpoints. `--allow-paired` admits this desktop and the phones paired with it now, by the WAN key each registered on a connection at home. It re-reads both on each connection, so a newly paired phone works without a restart and an unpaired one (or an expired guest) is refused; `--allow <id>` is repeatable; `--open` admits anyone and warns. With none of these the relay refuses to start.
 - **What it sees:** sessions stay end-to-end encrypted between the phone and the desktop, so the relay forwards ciphertext. It sees which endpoints talk and how much. In plain mode, so can anyone on the path to the relay.
 - **Where not to run it:** behind the same NAT as an unreachable desktop, with no forwarded port. A relay nobody outside can reach helps no one.
 - **What Diagnostics shows:** "Internet path: ready through your relay". Your relay does not offer the address discovery n0's relays do, so "From outside" says "not measured" instead of judging the NAT.

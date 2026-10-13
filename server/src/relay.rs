@@ -79,7 +79,7 @@ impl Allowlist {
             || self
                 .paired
                 .as_ref()
-                .is_some_and(|dir| paired_wan_keys(dir).contains(id))
+                .is_some_and(|dir| paired_wan_keys(dir).iter().any(|(_, key)| key == id))
     }
 }
 
@@ -97,12 +97,24 @@ impl AccessControl for Allowlist {
     }
 }
 
-/// The WAN keys this desktop's paired phones registered (device keys).
-fn paired_wan_keys(state_dir: &std::path::Path) -> HashSet<EndpointId> {
+/// The WAN keys registered by the phones paired with this desktop now
+/// (device keys), by device id. A key whose device is no longer trusted (an
+/// expired guest grant, an unpaired phone) is left out; a missing or
+/// unreadable trust store leaves every key out.
+fn paired_wan_keys(state_dir: &std::path::Path) -> Vec<(String, EndpointId)> {
+    let trust_path = state_dir.join(pocketdesk_core::local::paths::TRUST_FILE);
+    if !trust_path.exists() {
+        return Vec::new();
+    }
+    let Ok(trust) = pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(&trust_path)
+    else {
+        return Vec::new();
+    };
     pocketdesk_core::local::device_keys::read(state_dir)
         .unwrap_or_default()
-        .into_values()
-        .filter_map(|keys| keys.iroh?.parse().ok())
+        .into_iter()
+        .filter(|(device, _)| trust.is_trusted(device))
+        .filter_map(|(device, keys)| Some((device, keys.iroh?.parse().ok()?)))
         .collect()
 }
 
@@ -115,15 +127,12 @@ pub fn own_endpoint_id() -> Result<EndpointId> {
 }
 
 /// What `pocketdesk relay-ids` prints: this desktop's id, and each paired
-/// phone's registered WAN key (its id cut to 8 characters).
+/// currently paired phone's registered WAN key (its id cut to 8 characters).
 pub fn relay_ids() -> Result<Vec<(String, String)>> {
     let mut ids = vec![("this computer".to_string(), own_endpoint_id()?.to_string())];
-    let dir = crate::state::state_dir()?;
-    for (device, keys) in pocketdesk_core::local::device_keys::read(&dir).unwrap_or_default() {
-        if let Some(iroh) = keys.iroh {
-            let short: String = device.chars().take(8).collect();
-            ids.push((format!("phone {short}"), iroh));
-        }
+    for (device, key) in paired_wan_keys(&crate::state::state_dir()?) {
+        let short: String = device.chars().take(8).collect();
+        ids.push((format!("phone {short}"), key.to_string()));
     }
     Ok(ids)
 }
@@ -241,14 +250,56 @@ mod tests {
             !list.allows(&id(3)),
             "a phone that has not registered its key"
         );
-        pocketdesk_core::local::device_keys::bind_first(&dir, "phone", "tls-key").unwrap();
-        pocketdesk_core::local::device_keys::register(
-            &dir,
-            "phone",
-            pocketdesk_core::local::device_keys::Slot::Iroh,
-            &id(3).to_string(),
+        trust(&dir, "phone");
+        register(&dir, "phone", id(3));
+        assert!(list.allows(&id(3)), "registered since: no restart needed");
+    }
+
+    fn trust(dir: &std::path::Path, device: &str) {
+        pocketdesk_core::protocol::kdeconnect::TrustStore::update(
+            dir.join(pocketdesk_core::local::paths::TRUST_FILE),
+            |store| store.trust_device(device),
         )
         .unwrap();
-        assert!(list.allows(&id(3)), "registered since: no restart needed");
+    }
+
+    fn register(dir: &std::path::Path, device: &str, key: EndpointId) {
+        pocketdesk_core::local::device_keys::bind_first(dir, device, "tls-key").unwrap();
+        pocketdesk_core::local::device_keys::register(
+            dir,
+            device,
+            pocketdesk_core::local::device_keys::Slot::Iroh,
+            &key.to_string(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_key_left_behind_by_a_device_no_longer_paired_is_refused() {
+        let dir = dir("unpaired");
+        let opts = RelayOptions {
+            allow_paired: true,
+            ..Default::default()
+        };
+        let list = Allowlist::from_options(&opts, Some(dir.clone()), Some(id(9))).unwrap();
+        // A key in device_keys.json with no trust: an expired guest grant,
+        // or a device unpaired by hand.
+        register(&dir, "gone", id(4));
+        assert!(!list.allows(&id(4)), "not paired: refused");
+        assert!(list.allows(&id(9)), "this desktop still admitted");
+        trust(&dir, "gone");
+        assert!(list.allows(&id(4)), "paired: admitted");
+        pocketdesk_core::protocol::kdeconnect::TrustStore::update(
+            dir.join(pocketdesk_core::local::paths::TRUST_FILE),
+            |store| store.untrust_device("gone"),
+        )
+        .unwrap();
+        assert!(!list.allows(&id(4)), "unpaired again: refused");
+        std::fs::write(
+            dir.join(pocketdesk_core::local::paths::TRUST_FILE),
+            "{not json",
+        )
+        .unwrap();
+        assert!(!list.allows(&id(4)), "an unreadable store admits no phone");
     }
 }
