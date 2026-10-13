@@ -29,7 +29,7 @@ Every comparable tool (KDE Connect, Phone Link, Quick Share) shows progress on t
 - **A share that arrives while the share screen is closing** comes in through `onNewIntent` and is handled. On the device, three shell intents fired within half a second still lost two to an activity pause timeout. Through the share sheet a person cannot do that; shares 1.5 s apart all went through.
 - **Names.** The phone sends the provider's display name as is. The desktop's `safe_file_name` is what makes it safe; the phone no longer turns non-ASCII names into underscores.
 
-- **"Sent" on the phone** means the desktop took every byte. There is no acknowledgement after it saves the file, so a failure at the very end on the desktop (a full disk, the final rename) still reads as sent on the phone; the desktop's notification and Files tab are the record. An acknowledgement is a protocol change, left for F7b.
+- **"Sent" on the phone** means the desktop saved the file. Since F7b, the desktop answers each transfer with one status byte after the data: `1` once the file has its real name, `0` on any failure. The phone reports success only on `1`, and a missing answer within 10 s is a failure.
 - **After review** (fresh reviewer, 0 Critical / 3 Important, all fixed): progress counters start at zero per file; errors are contained and never strand the service in the foreground; the progress watcher is joined; start and stop share a lock; empty files fail at once; `onTimeout` stops at Android 15's limit. The desktop toast names the real folder, and the Files tab no longer touches the disk on every repaint.
 
 ## Out of scope (F7b)

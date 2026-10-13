@@ -17,6 +17,11 @@ const MAX_NAME_BYTES: usize = 200;
 const MAX_TRANSFERS: usize = 2;
 /// The slowest transfer allowed, so a trickle cannot hold a slot forever.
 const MIN_BYTES_PER_SEC: u64 = 32 * 1024;
+/// The receiver's last word on a transfer, one byte after the data: the
+/// file is saved under its real name, or it is not (F7b). Without it, the
+/// sender could only say every byte was taken.
+const STATUS_SAVED: u8 = 1;
+const STATUS_FAILED: u8 = 0;
 
 /// The transfer slots, shared by every connection.
 fn transfer_slots() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
@@ -413,6 +418,26 @@ async fn receive_file(
         .write_all(format!("{key}\n").as_bytes())
         .await
         .map_err(|e| io_error("write", e))?;
+    let saved = save_stream(&mut stream, from, dir, name, size).await;
+    // Best effort: a phone that is already gone has nothing to hear.
+    let status = if saved.is_ok() {
+        STATUS_SAVED
+    } else {
+        STATUS_FAILED
+    };
+    let _ = tokio::time::timeout(CONNECT_TIMEOUT, stream.write_all(&[status])).await;
+    saved
+}
+
+/// Read exactly `size` bytes from `stream` into a new file in `dir` named
+/// like `name`, and return its path; on any failure no file is left.
+async fn save_stream(
+    stream: &mut tokio::net::TcpStream,
+    from: SocketAddr,
+    dir: &Path,
+    name: &str,
+    size: u64,
+) -> Result<PathBuf> {
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| io_error("create_dir", e))?;
@@ -558,18 +583,22 @@ mod tests {
 
     const KEY: &str = "0123456789abcdef0123456789abcdef";
 
-    /// A phone-side listener that sends `data` to whoever presents [`KEY`].
-    async fn phone_sending(data: Vec<u8>) -> SocketAddr {
+    /// A phone-side listener that sends `data` to whoever presents [`KEY`],
+    /// then reads the desktop's status byte (`None`: it sent none).
+    async fn phone_sending(data: Vec<u8>) -> (SocketAddr, tokio::task::JoinHandle<Option<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        let status = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut presented = [0u8; 33];
             socket.read_exact(&mut presented).await.unwrap();
             assert_eq!(&presented, format!("{KEY}\n").as_bytes());
             socket.write_all(&data).await.unwrap();
+            socket.shutdown().await.unwrap();
+            let mut status = [0u8; 1];
+            socket.read_exact(&mut status).await.ok().map(|_| status[0])
         });
-        addr
+        (addr, status)
     }
 
     #[test]
@@ -598,11 +627,16 @@ mod tests {
     async fn the_desktop_dials_the_phone_and_saves_exactly_the_declared_bytes() {
         let dir = temp_dir("receive");
         let data: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
-        let from = phone_sending(data.clone()).await;
+        let (from, status) = phone_sending(data.clone()).await;
         let path = receive_file(from, KEY, &dir, "big.bin", data.len() as u64)
             .await
             .unwrap();
         assert_eq!(path, dir.join("big.bin"));
+        assert_eq!(
+            status.await.unwrap(),
+            Some(STATUS_SAVED),
+            "told it was saved"
+        );
         assert_eq!(std::fs::read(path).unwrap(), data);
         let names: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
@@ -614,9 +648,10 @@ mod tests {
     #[tokio::test]
     async fn a_short_transfer_leaves_no_file() {
         let dir = temp_dir("short");
-        let from = phone_sending(vec![1; 10]).await;
+        let (from, status) = phone_sending(vec![1; 10]).await;
         assert!(receive_file(from, KEY, &dir, "x.bin", 20).await.is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        assert_eq!(status.await.unwrap(), Some(STATUS_FAILED), "told it failed");
     }
 
     #[test]

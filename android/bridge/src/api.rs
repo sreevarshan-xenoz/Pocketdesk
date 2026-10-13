@@ -1138,8 +1138,20 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
             "The file changed while it was sent ({sent} of {file_size} bytes)"
         ));
     }
+    read_status(&mut client_stream).await?;
     tracing::info!("File sent: {} ({} bytes)", filename, sent);
     Ok(())
+}
+
+/// The receiver's status byte after the data: `1` is saved under its real
+/// name; `0`, or nothing within 10 s, is a failure (F7b).
+async fn read_status<R: tokio::io::AsyncRead + Unpin>(stream: &mut R) -> Result<(), String> {
+    let mut status = [0u8; 1];
+    match tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut status)).await {
+        Ok(Ok(_)) if status[0] == 1 => Ok(()),
+        Ok(Ok(_)) => Err("The computer could not save the file".to_string()),
+        Ok(Err(_)) | Err(_) => Err("The computer did not confirm the file".to_string()),
+    }
 }
 
 /// Copy `reader` to `writer` until the reader ends, counting into the
@@ -3113,8 +3125,20 @@ mod receive_tests {
 
 #[cfg(test)]
 mod send_file_tests {
-    use super::{presents_key, pump, transfer_progress};
+    use super::{presents_key, pump, read_status, transfer_progress};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn a_file_is_sent_only_once_the_receiver_says_it_saved_it() {
+        for (answer, ok) in [(Some(1u8), true), (Some(0u8), false), (None, false)] {
+            let (mut desktop, mut phone) = tokio::io::duplex(64);
+            if let Some(byte) = answer {
+                desktop.write_all(&[byte]).await.unwrap();
+            }
+            drop(desktop);
+            assert_eq!(read_status(&mut phone).await.is_ok(), ok, "{answer:?}");
+        }
+    }
 
     #[tokio::test]
     async fn progress_runs_from_zero_to_the_total() {
