@@ -42,6 +42,18 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **F10, desktop diagnostics (branch `feat/diagnostics`; spec `docs/superpowers/specs/2026-10-13-diagnostics-design.md`).**
+  - **The tab.** The desktop app's new Diagnostics tab checks:
+    - the server;
+    - the control port (it answers) and the stream port (it is held);
+    - the firewall on Windows: the enabled inbound rules, both `install`'s Pocketdesk group and program rules Windows added for linux-link.exe;
+    - the addresses phones can use;
+    - the internet path (`endpoint.json`).
+
+    It shows the last session (outcome, encoder, e2e, encode and RTT p50/p99) and copies a debug report (no PINs, keys or file names; device ids cut to 8 characters).
+  - **The encoder.** Session records now name it (`encoder`, the last one if a fallback happened).
+  - **Code.** The checks are in `core::local::diagnostics`, tested on loopback. An ignored live test ran them on this box: all six ok.
+  - **Next (agreed with the user):** the roadmap's N1–N11, starting with cross-network without Tailscale (N1–N3).
 - 2026-10-13: **F11, shortcuts outside the app (branch `feat/shortcuts`).**
   - **Launcher shortcuts.** "Connect to …" for each saved computer, most recent first, then "Wake …" for those with a Wake-on-LAN address, four at most. They refresh when the app stops, and a connect is reported for launcher ranking.
   - **Quick Settings tile and a home-screen widget.** Both connect to the last computer, or open the app when none is saved.

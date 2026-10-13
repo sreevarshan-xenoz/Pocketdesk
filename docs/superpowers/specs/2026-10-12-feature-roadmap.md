@@ -28,8 +28,24 @@ Each item is its own branch (`feat/<topic>`), spec, plan and device check on the
 | F7 | **File transfer:** share files into Pocketdesk from any app, a remote file browser with download, and a drop zone plus transfer history in the desktop app. | Both | The bridge has file-list and send-file; there is no UI. | L |
 | F8 | **Image clipboard** both ways. | Both | Expected next to text clipboard. | M |
 | F9 | **Session polish:** in-session monitor quick-switch (shipped 2026-10-13: a chip per screen in the session chrome), optional three-finger swipes for Alt+Tab and workspaces, hardware keyboard and mouse passthrough with pointer capture. | Phone | Power users, on top of F1/F3. | M |
-| F10 | **Desktop app diagnostics:** port and firewall check, advertised interfaces, encoder in use, last session's latency tails, "copy debug report". | Desktop | Turns "it doesn't connect" into a fixable message. | M |
+| F10 | **Desktop app diagnostics:** port and firewall check, advertised interfaces, encoder in use, last session's latency tails, "copy debug report" (shipped 2026-10-13). | Desktop | Turns "it doesn't connect" into a fixable message. | M |
 | F11 | **Shortcuts outside the app:** home-screen widget, Quick Settings tile, launcher shortcuts for connect and wake (shipped 2026-10-13). | Phone | Small, makes the app feel native. | S |
+
+**Next, agreed 2026-10-13 (in this order; each gets its own spec, review, device test and PR):**
+
+| # | Feature | Side |
+|---|---|---|
+| N1 | **Cross-network without Tailscale, step 1.** A real cellular test of the built-in iroh path. Router port mapping (UPnP / NAT-PMP / PCP) for direct connections. "Direct" or "via relay" shown in the HUD and in Diagnostics. | Both |
+| N2 | **Your own relay.** A `linux-link relay` mode running iroh's relay server: on the desktop itself with one port forwarded, on any always-on box, or on a free cloud VM. A "Use my own relay" setting in both apps. | Both |
+| N3 | **Finding the desktop without anyone's server.** iroh discovery over the Mainline DHT (pkarr), so a changed home IP is found again. IPv6 direct where the ISP gives it. | Both |
+| N4 | **Image clipboard** (F8). | Both |
+| N5 | **Notifications both ways, with actions**, and the phone's notifications and SMS on the desktop. | Both |
+| N6 | **Wake and connect in one tap from anywhere**: the wake packet relayed over the WAN path. | Both |
+| N7 | **Multiple phones at once**, with a desktop-side picker. | Desktop |
+| N8 | **Gamepad mode**: an on-screen controller layout. | Phone |
+| N9 | **Session recording and a screenshot button.** | Both |
+| N10 | **Drawing-tablet mode**: stylus pressure into the desktop. | Both |
+| N11 | **The phone as a second monitor**: a virtual display (Windows indirect display driver, Linux virtual output). | Both |
 
 **Deferred, with reason:**
 - A virtual display sized to the phone: Hyprland's write IPC is broken upstream, and Windows needs an indirect display driver.
