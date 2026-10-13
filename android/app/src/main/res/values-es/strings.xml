@@ -164,6 +164,16 @@
     <string name="share_sent_clipboard">Enviado al portapapeles.</string>
     <string name="share_failed">Error: %1$s</string>
     <string name="share_unreadable">La app que lo compartió no permitió que Pocketdesk lo leyera.</string>
+    <string name="shortcut_connect">Conectar a %1$s</string>
+    <string name="shortcut_wake">Encender %1$s</string>
+    <string name="tile_label">Pocketdesk</string>
+    <string name="tile_no_computer">Ningún equipo guardado</string>
+    <string name="widget_name">Pocketdesk: conectar</string>
+    <string name="widget_description">Conéctate a tu último equipo con un toque.</string>
+    <string name="widget_connect">Conectar</string>
+    <string name="widget_open">Abrir Pocketdesk</string>
+    <string name="shortcut_not_saved">Ese equipo ya no está guardado.</string>
+    <string name="shortcut_no_wake">No hay dirección Wake-on-LAN guardada para %1$s.</string>
     <string name="channel_transfers">Transferencias de archivos</string>
     <string name="channel_transfers_desc">Progreso de los archivos enviados a tu ordenador y desde él</string>
     <string name="transfer_sending">Enviando %1$d de %2$d</string>

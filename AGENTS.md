@@ -42,6 +42,13 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-13: **F11, shortcuts outside the app (branch `feat/shortcuts`).**
+  - **Launcher shortcuts.** "Connect to …" for each saved computer, most recent first, then "Wake …" for those with a Wake-on-LAN address, four at most. They refresh when the app stops, and a connect is reported for launcher ranking.
+  - **Quick Settings tile and a home-screen widget.** Both connect to the last computer, or open the app when none is saved.
+  - **One path for all three.** Each opens `MainActivity` with `ACTION_CONNECT` or `ACTION_WAKE` and an address, which opens only a computer already saved. The intent can come from any app, so it never adds one. A launch from Recents replays nothing.
+  - **Tests.** `ShortcutPlan` holds the choices, under JVM tests.
+  - **Device-verified (A71):** the shortcuts listed; a connect shortcut opening a LAN session; an unsaved address opening nothing; the tile connecting; the widget provider registered.
+  - **Owed (checklist §33):** placing the widget, a Wake shortcut, pinned shortcuts, and Android ≤13's tile path.
 - 2026-10-13: **Phase C of mutual auth: file transfers inside TLS (branch `feat/transfer-tls`; spec `docs/superpowers/specs/2026-10-13-transfer-tls-design.md`, with an as-built section).**
   - **Roles.** The phone still listens and the desktop still dials, but each transfer opens with TLS 1.3 (ALPN `linux-link-transfer/1`), and each end accepts exactly one certificate:
     - the phone, the desktop it pinned for the address it asked (an IP or a saved name);

@@ -68,6 +68,66 @@ class MainActivity : ComponentActivity() {
     /** Whether [pairLink] came from this app's scanner rather than a link. */
     private val pairLinkScanned = mutableStateOf(false)
 
+    /** A session a shortcut, the tile or the widget asked for (F11). */
+    private val shortcutSession = mutableStateOf<String?>(null)
+
+    /**
+     * Act on a shortcut, the tile or the widget (F11): connect to, or wake,
+     * a computer already saved. Recents replays the original intent, so a
+     * launch from history acts on nothing.
+     */
+    private fun takeShortcut(intent: Intent) {
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        val action = intent.action
+        if (action != dev.linuxlink.android.shortcuts.Shortcuts.ACTION_CONNECT &&
+            action != dev.linuxlink.android.shortcuts.Shortcuts.ACTION_WAKE
+        ) {
+            return
+        }
+        setIntent(Intent(intent).setAction(Intent.ACTION_MAIN))
+        val host = dev.linuxlink.android.shortcuts.ShortcutPlan.savedHost(
+            intent.getStringExtra(dev.linuxlink.android.shortcuts.Shortcuts.EXTRA_ADDRESS),
+            HostStore.hosts(this),
+        )
+        if (host == null) {
+            android.widget.Toast.makeText(this, R.string.shortcut_not_saved, android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        if (action == dev.linuxlink.android.shortcuts.Shortcuts.ACTION_CONNECT) {
+            HostStore.save(this, host)
+            dev.linuxlink.android.shortcuts.Shortcuts.reportConnected(this, host.address)
+            shortcutSession.value = "${host.address}|${host.port}|${host.controlPort}"
+            return
+        }
+        val mac = HostStore.wolMac(this, host.address)
+        if (mac.isBlank()) {
+            android.widget.Toast.makeText(
+                this,
+                getString(R.string.shortcut_no_wake, host.address),
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        val app = applicationContext
+        Thread {
+            val result = RustCore.wakeViaRelay(host.address, host.controlPort, mac)
+            runOnUiThread {
+                val message = if (result.isSuccess) {
+                    app.getString(R.string.wake_sent, host.address)
+                } else {
+                    app.getString(R.string.wake_failed, result.exceptionOrNull()?.message)
+                }
+                android.widget.Toast.makeText(app, message, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // The saved computers may have changed; shortcuts follow them.
+        dev.linuxlink.android.shortcuts.Shortcuts.refresh(this)
+    }
+
     private fun pairUriFrom(intent: Intent?): String? =
         intent?.data?.takeIf { it.scheme == "pocketdesk" && it.host == "pair" }?.toString()
 
@@ -133,6 +193,8 @@ class MainActivity : ComponentActivity() {
             maybeRequestLocalNetworkPermission()
             pairLink.value = takePairUri(intent)
             pairLinkScanned.value = false
+            takeShortcut(intent)
+            dev.linuxlink.android.shortcuts.Shortcuts.refresh(this)
         } else {
             pairLink.value = savedInstanceState.getString(STATE_PAIR_LINK)
             pairLinkScanned.value = savedInstanceState.getBoolean(STATE_PAIR_SCANNED)
@@ -152,6 +214,14 @@ class MainActivity : ComponentActivity() {
                             HostStore.lastHost(this@MainActivity)?.let {
                                 sessionKey = "${it.address}|${it.port}|${it.controlPort}"
                             }
+                        }
+                    }
+
+                    LaunchedEffect(shortcutSession.value) {
+                        shortcutSession.value?.let {
+                            maybeRequestNotificationPermission()
+                            sessionKey = it
+                            shortcutSession.value = null
                         }
                     }
 
@@ -236,6 +306,10 @@ class MainActivity : ComponentActivity() {
                                     else -> HomeScreen(
                                         onConnect = { host ->
                                             HostStore.save(this@MainActivity, host)
+                                            dev.linuxlink.android.shortcuts.Shortcuts.reportConnected(
+                                                this@MainActivity,
+                                                host.address,
+                                            )
                                             maybeRequestNotificationPermission()
                                             sessionKey =
                                                 "${host.address}|${host.port}|${host.controlPort}"
@@ -281,6 +355,7 @@ class MainActivity : ComponentActivity() {
             pairLinkScanned.value = false
             pairLink.value = it
         }
+        takeShortcut(intent)
         if (intent.getBooleanExtra(EXTRA_DISCONNECT, false)) {
             Thread { runCatching { RustCore.stopStreaming() } }.start()
             disconnectSignal.intValue += 1
