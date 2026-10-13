@@ -1461,6 +1461,10 @@ pub async fn connect_streaming_wan(
 /// a data directory, or if the key cannot be read; the dial then uses a
 /// throwaway key, which a desktop that has bound one refuses.
 fn device_wan_key() -> Option<linux_link_core::streaming::IrohSecretKey> {
+    // One caller at a time: two first calls at once (a LAN connect and a WAN
+    // dial) must not each make a key.
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = crate::CERT_DIR.lock().ok()?.clone()?;
     match linux_link_core::streaming::load_or_create_device_key(&dir.join("iroh_device.key")) {
         Ok(key) => Some(key),

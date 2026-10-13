@@ -314,24 +314,29 @@ impl InStream for IrohRecvStream {
 }
 
 /// This device's WAN key, loaded from `path` or created there (device keys).
-/// A damaged file is an error rather than a silent new key: the desktop has
-/// bound the old one, and a new key would be refused there.
+/// A damaged file is replaced with a fresh key: the desktop only accepts a
+/// WAN key the device named on a LAN session, and the next LAN session names
+/// this one, where keeping the damaged file would end WAN for good. A new
+/// key is written to a temp file and renamed into place, so a crash cannot
+/// leave a half-written key behind.
 pub fn load_or_create_device_key(path: &std::path::Path) -> Result<iroh::SecretKey> {
-    if path.exists() {
-        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-        let raw: [u8; 32] = bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("{} is not a 32-byte key", path.display()))?;
-        return Ok(iroh::SecretKey::from_bytes(&raw));
+    if let Ok(bytes) = std::fs::read(path) {
+        if let Ok(raw) = <[u8; 32]>::try_from(bytes.as_slice()) {
+            return Ok(iroh::SecretKey::from_bytes(&raw));
+        }
+        tracing::warn!("{} is damaged; making a new WAN key", path.display());
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
     }
     let key = iroh::SecretKey::generate();
-    crate::secure_fs::write_private(path, &key.to_bytes())
-        .with_context(|| format!("writing {}", path.display()))?;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+    let tmp = std::path::PathBuf::from(tmp);
+    crate::secure_fs::write_private(&tmp, &key.to_bytes())
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("placing {}", path.display()))?;
     Ok(key)
 }
 
@@ -351,11 +356,12 @@ mod tests {
         let first = load_or_create_device_key(&path).unwrap();
         let again = load_or_create_device_key(&path).unwrap();
         assert_eq!(first.public().to_string(), again.public().to_string());
+        // A damaged file is replaced: the next LAN session registers the new
+        // key with the desktop, where an error here would end WAN for good.
         std::fs::write(&path, b"short").unwrap();
-        assert!(
-            load_or_create_device_key(&path).is_err(),
-            "a damaged key is not replaced silently"
-        );
+        let fresh = load_or_create_device_key(&path).unwrap();
+        assert_ne!(fresh.public().to_string(), first.public().to_string());
+        assert_eq!(std::fs::read(&path).unwrap().len(), 32);
     }
 
     /// Loopback iroh endpoint with relays/DNS disabled — the spike's
