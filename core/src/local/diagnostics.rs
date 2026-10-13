@@ -93,7 +93,11 @@ pub fn read_wan_status(state_dir: &Path) -> Option<WanStatus> {
 
 /// Can phones away from home connect directly, or only through a relay?
 /// And can phones on IPv6 networks reach this computer directly?
-pub fn check_outside(status: Option<&WanStatus>, state: ServerState) -> Vec<Finding> {
+pub fn check_outside(
+    status: Option<&WanStatus>,
+    state: ServerState,
+    own_relay: bool,
+) -> Vec<Finding> {
     let check = "From outside";
     if state != ServerState::Running {
         return vec![finding(
@@ -117,6 +121,14 @@ pub fn check_outside(status: Option<&WanStatus>, state: ServerState) -> Vec<Find
         with_hint(
             finding(check, Status::Warn, "a sign-in page holds this network"),
             "Sign in to the network in a browser.",
+        )
+    } else if !s.udp && own_relay {
+        // The UDP and NAT facts come from the relay's QUIC address
+        // discovery, which a plain relay of your own does not offer.
+        finding(
+            check,
+            Status::Info,
+            "not measured: your relay does not offer address discovery (direct connections may still work)",
         )
     } else if !s.udp {
         with_hint(
@@ -147,6 +159,30 @@ pub fn check_outside(status: Option<&WanStatus>, state: ServerState) -> Vec<Find
         finding("IPv6", Status::Info, "no public IPv6 address")
     });
     findings
+}
+
+/// The home relay `endpoint.json` announces, if any.
+fn announced_relay(state_dir: &Path) -> Option<String> {
+    std::fs::read_to_string(state_dir.join(ENDPOINT_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| {
+            v.get("relayUrls")?
+                .as_array()?
+                .first()?
+                .as_str()
+                .map(str::to_string)
+        })
+}
+
+/// n0's public relays live under `iroh.link`; anything else is the user's own.
+fn is_n0_relay(url: &str) -> bool {
+    url.contains("iroh.link")
+}
+
+/// Whether the desktop announces a relay of its own (N2) rather than n0's.
+pub fn uses_own_relay(state_dir: &Path) -> bool {
+    announced_relay(state_dir).is_some_and(|url| !is_n0_relay(&url))
 }
 
 /// A latency distribution's median and 99th percentile, in milliseconds.
@@ -331,16 +367,18 @@ pub fn check_internet_path(state_dir: &Path, state: ServerState) -> Finding {
             "not checked: the server is not running yet",
         );
     }
-    let relays = std::fs::read_to_string(state_dir.join(ENDPOINT_FILE))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|v| v.get("relayUrls").and_then(|r| r.as_array()).map(Vec::len))
-        .unwrap_or(0);
-    if relays > 0 {
+    let relay = announced_relay(state_dir);
+    if let Some(url) = relay {
+        // Named, not shown: the report may be pasted publicly (N2).
+        let which = if is_n0_relay(&url) {
+            "n0's public relay"
+        } else {
+            "your relay"
+        };
         finding(
             check,
             Status::Good,
-            "ready (a relay is reached; phones away from home can connect)",
+            format!("ready through {which} (phones away from home can connect)"),
         )
     } else {
         with_hint(
@@ -694,11 +732,11 @@ mod tests {
 
     #[test]
     fn from_outside_says_whether_phones_connect_directly() {
-        let friendly = check_outside(Some(&wan(true, Some(false), false)), UP);
+        let friendly = check_outside(Some(&wan(true, Some(false), false)), UP, false);
         assert_eq!(friendly[0].status, Status::Good);
         assert_eq!(friendly[1].check, "IPv6");
         assert_eq!(friendly[1].status, Status::Info);
-        let strict = check_outside(Some(&wan(true, Some(true), true)), UP);
+        let strict = check_outside(Some(&wan(true, Some(true), true)), UP, false);
         assert_eq!(strict[0].status, Status::Warn);
         assert!(strict[0].hint.as_deref().unwrap().contains("UPnP"));
         assert_eq!(
@@ -707,23 +745,30 @@ mod tests {
             "IPv6 still connects directly"
         );
         assert_eq!(
-            check_outside(Some(&wan(false, None, false)), UP)[0].status,
+            check_outside(Some(&wan(false, None, false)), UP, false)[0].status,
             Status::Warn,
             "no UDP"
         );
+        let unmeasured = check_outside(Some(&wan(false, None, false)), UP, true);
+        assert_eq!(
+            unmeasured[0].status,
+            Status::Info,
+            "your relay: not measured, not blocked"
+        );
+        assert!(unmeasured[0].detail.contains("not measured"));
         let mut portal = wan(true, Some(false), false);
         portal.captive_portal = Some(true);
         assert!(
-            check_outside(Some(&portal), UP)[0]
+            check_outside(Some(&portal), UP, false)[0]
                 .detail
                 .contains("sign-in")
         );
         assert_eq!(
-            check_outside(None, UP)[0].status,
+            check_outside(None, UP, false)[0].status,
             Status::Info,
             "not measured yet"
         );
-        assert_eq!(check_outside(None, ServerState::Starting).len(), 1);
+        assert_eq!(check_outside(None, ServerState::Starting, false).len(), 1);
     }
 
     #[test]
@@ -733,6 +778,29 @@ mod tests {
         let status = wan(true, Some(false), true);
         write_wan_status(&dir, &status).unwrap();
         assert_eq!(read_wan_status(&dir), Some(status));
+    }
+
+    #[test]
+    fn the_internet_path_names_the_relay_in_use() {
+        let dir = temp_dir("relay-name");
+        std::fs::write(
+            dir.join(ENDPOINT_FILE),
+            r#"{"endpointId":"x","relayUrls":["https://use1-1.relay.n0.iroh.link./"],"directAddrs":[]}"#,
+        )
+        .unwrap();
+        assert!(
+            check_internet_path(&dir, UP)
+                .detail
+                .contains("n0's public relay")
+        );
+        std::fs::write(
+            dir.join(ENDPOINT_FILE),
+            r#"{"endpointId":"x","relayUrls":["http://203.0.113.7:3340/"],"directAddrs":[]}"#,
+        )
+        .unwrap();
+        let own = check_internet_path(&dir, UP);
+        assert_eq!(own.status, Status::Good);
+        assert!(own.detail.contains("your relay"), "{}", own.detail);
     }
 
     #[test]

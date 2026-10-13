@@ -168,6 +168,7 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
     findings.extend(diagnostics::check_outside(
         diagnostics::read_wan_status(state_dir).as_ref(),
         state,
+        diagnostics::uses_own_relay(state_dir),
     ));
     Report {
         findings,
