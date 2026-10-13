@@ -874,14 +874,22 @@ async fn handle_connection_with_kde(
         let Some(peer_addr) = peer_addr else {
             return Ok(());
         };
-        if !crate::plugins::pair::admit_control(&device_id, peer_addr, peer_key.as_ref()) {
-            return Ok(());
+        // A connection that claims a paired device without its key is kept
+        // for pairing only (the owner's PIN recovers a phone whose key
+        // changed); the per-packet gate below holds it there.
+        if let crate::plugins::pair::Standing::WrongKey(refusal) =
+            crate::plugins::pair::admit_control(&device_id, peer_addr, peer_key.as_ref())
+        {
+            tracing::warn!(
+                "Control connection for {device_id} held to pairing only: {}",
+                refusal.reason()
+            );
         }
 
         let sender: Arc<dyn DeviceSender> = Arc::new(
             TcpDeviceSender::from_arc(writer, device_id.clone())
                 .with_peer(Some(peer_addr))
-                .with_peer_key(peer_key),
+                .with_peer_key(peer_key.clone()),
         );
         let sender_ref = &*sender;
 
@@ -902,7 +910,7 @@ async fn handle_connection_with_kde(
         // on this connection is seeded the moment it does (below), rather
         // than waiting for the periodic pushes.
         let mut seeded = false;
-        if state::may_receive_pushes(&device_id) {
+        if state::may_receive_pushes(&*sender) {
             seed_desktop_state(&sender, hypr_ipc, wan_endpoint).await;
             seeded = true;
         }
@@ -938,17 +946,23 @@ async fn handle_connection_with_kde(
                             // itself and the identity announcement run.
                             let pairing_packet = matches!(
                                 packet_type.as_str(),
-                                "kdeconnect.identity"
-                                    | "kdeconnect.pair"
-                                    | "kdeconnect.linuxlink.pair"
+                                "kdeconnect.pair" | "kdeconnect.linuxlink.pair"
                             );
-                            if pairing_required
-                                && !pairing_packet
-                                && !crate::plugins::pair::is_trusted(&device_id)
-                            {
+                            // Re-read per packet: pairing, unpairing or a key
+                            // change applies to a connection already open.
+                            use crate::plugins::pair::Standing;
+                            let may_act = match crate::plugins::pair::standing(
+                                &device_id,
+                                peer_key.as_ref(),
+                            ) {
+                                Standing::Paired => true,
+                                Standing::Unpaired => !pairing_required,
+                                Standing::WrongKey(_) => false,
+                            };
+                            if !pairing_packet && !may_act {
                                 tracing::debug!(
-                                    "Blocking {packet_type} from unpaired {device_id} \
-                                     (set pairing_required = false to disable)"
+                                    "Blocking {packet_type} from {device_id}: not paired, \
+                                     or not with this key"
                                 );
                                 continue;
                             }
@@ -971,7 +985,7 @@ async fn handle_connection_with_kde(
                             }
                             .instrument(packet_span)
                             .await;
-                            if pairing_packet && !seeded && state::may_receive_pushes(&device_id) {
+                            if pairing_packet && !seeded && state::may_receive_pushes(&*sender) {
                                 tracing::info!(
                                     "Peer paired on this connection; seeding desktop state"
                                 );
@@ -1244,7 +1258,10 @@ mod control_tls_tests {
     async fn a_client_inside_tls_completes_the_handshake() {
         let addr = control_port().await;
         let phone = CertManager::new().unwrap();
-        let identity = linux_link_core::protocol::kdeconnect::DeviceIdentity::new("phone", "Phone");
+        let identity = linux_link_core::protocol::kdeconnect::DeviceIdentity::new(
+            "control-tls-test-phone",
+            "Test Phone",
+        );
         ConnectionManager::new(Duration::from_secs(5), phone.control_client_config())
             .connect(&addr.ip().to_string(), addr.port(), &identity)
             .await

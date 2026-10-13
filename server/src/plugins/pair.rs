@@ -36,56 +36,19 @@ struct PinEntry {
     created: Instant,
 }
 
-/// connection key (peer IP) -> pending/used PIN
+/// connection key (the deviceId a connection goes by) -> pending/used PIN
 static PINS: OnceLock<Mutex<HashMap<String, PinEntry>>> = OnceLock::new();
-/// connection key -> the phone's deviceId as learned from its identity packet
-static PHONE_IDS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-/// connection key -> deviceIds that completed pairing on this connection
-/// (survives re-registration from a second socket of the same phone)
-static TRUSTED_CONNECTIONS: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
 fn pins() -> &'static Mutex<HashMap<String, PinEntry>> {
     PINS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn phone_ids() -> &'static Mutex<HashMap<String, String>> {
-    PHONE_IDS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn trusted_connections() -> &'static Mutex<HashMap<String, Vec<String>>> {
-    TRUSTED_CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Is this control connection allowed to use plugins (pairing enforcement)?
-/// Always true for connections whose peer device is in the persisted
-/// [`TrustStore`], or once pairing succeeded on this connection.
+/// Is the device a connection goes by paired? On both transports the
+/// connection key is the deviceId itself (phase B), so trust is never
+/// borrowed from another connection's announcement. The TCP control channel
+/// also holds the connection to its key on every packet ([`standing`]).
 pub fn is_trusted(conn_key: &str) -> bool {
-    let phone_id = phone_ids()
-        .lock()
-        .expect("pair state")
-        .get(conn_key)
-        .cloned();
-    if let Some(id) = &phone_id
-        && let Ok(store) = TrustStore::load_or_create(state::trust_store_path().expect("state dir"))
-        && store.is_trusted(id)
-    {
-        return true;
-    }
-    trusted_connections()
-        .lock()
-        .expect("pair state")
-        .contains_key(conn_key)
-}
-
-/// The deviceId the phone on connection `conn_key` announced in its
-/// identity, if it did (F7b: the desktop app names phones by that id). On
-/// TCP the connection key is that id already (phase B).
-pub fn phone_id_of(conn_key: &str) -> Option<String> {
-    phone_ids()
-        .lock()
-        .expect("pair state")
-        .get(conn_key)
-        .cloned()
+    is_paired_device(conn_key)
 }
 
 /// Is this deviceId in the persisted [`TrustStore`]?
@@ -111,16 +74,10 @@ pub fn is_paired_device(device_id: &str) -> bool {
 /// The store is re-read per check, so a change in the desktop app applies
 /// to the next packet.
 pub fn permits(conn_key: &str, packet_type: &str) -> bool {
-    let device_id = phone_ids()
-        .lock()
-        .expect("pair state")
-        .get(conn_key)
-        .cloned()
-        .unwrap_or_else(|| conn_key.to_string());
     let store = state::trust_store_path()
         .ok()
         .and_then(|path| TrustStore::load_or_create(path).ok());
-    permits_in(store.as_ref(), &device_id, packet_type)
+    permits_in(store.as_ref(), conn_key, packet_type)
 }
 
 /// [`permits`] against a given store; without one, nothing that needs a
@@ -307,29 +264,64 @@ pub(crate) fn valid_device_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
 }
 
-/// Phase B: may a control connection that proved `key` go by `device_id`?
-/// Refusals are logged and notified as the stream's are.
+/// Where a control connection stands (phase B), re-read for every packet so
+/// a pairing, an unpairing or a key change applies at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Standing {
+    /// The device is paired and the connection proved its key.
+    Paired,
+    /// The device is not paired; it may pair (or, with pairing off, act).
+    Unpaired,
+    /// The device is paired, but the connection did not prove its key: it
+    /// may only pair again, with the owner's PIN.
+    WrongKey(linux_link_core::local::device_keys::Refusal),
+}
+
+/// The standing of a connection that goes by `device_id` and proved `key`.
+pub(crate) fn standing(
+    device_id: &str,
+    key: Option<&linux_link_core::streaming::PeerKey>,
+) -> Standing {
+    match state::state_dir() {
+        Ok(dir) => standing_in(&dir, device_id, key, is_paired_device(device_id)),
+        Err(_) => Standing::WrongKey(linux_link_core::local::device_keys::Refusal::StoreUnreadable),
+    }
+}
+
+fn standing_in(
+    dir: &std::path::Path,
+    device_id: &str,
+    key: Option<&linux_link_core::streaming::PeerKey>,
+    paired: bool,
+) -> Standing {
+    match decide_control_identity_in(dir, device_id, key, paired) {
+        Ok(()) if paired => Standing::Paired,
+        Ok(()) => Standing::Unpaired,
+        Err(refusal) => Standing::WrongKey(refusal),
+    }
+}
+
+/// Phase B: the standing of a control connection that proved `key` and
+/// goes by `device_id`, as it opens. A connection that claims a paired
+/// device without its key is logged and notified as the stream's are, and
+/// kept only so that the owner's PIN can pair it again (a phone whose key
+/// changed recovers that way).
 pub(crate) fn admit_control(
     device_id: &str,
     peer: std::net::SocketAddr,
     key: Option<&linux_link_core::streaming::PeerKey>,
-) -> bool {
-    let Ok(dir) = state::state_dir() else {
-        tracing::warn!("No state directory: refusing the control connection of {device_id}");
-        return false;
-    };
-    let paired = is_paired_device(device_id);
-    match decide_control_identity_in(&dir, device_id, key, paired) {
-        Ok(()) => true,
-        Err(refusal) => {
-            let presented = match key {
-                Some(linux_link_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
-                _ => None,
-            };
-            report_refusal(&dir, device_id, peer, refusal, presented.as_deref());
-            false
-        }
+) -> Standing {
+    let standing = standing(device_id, key);
+    if let Standing::WrongKey(refusal) = standing
+        && let Ok(dir) = state::state_dir()
+    {
+        let presented = match key {
+            Some(linux_link_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
+            _ => None,
+        };
+        report_refusal(&dir, device_id, peer, refusal, presented.as_deref());
     }
+    standing
 }
 
 /// The control channel's half of device keys: a paired device must prove
@@ -516,16 +508,14 @@ impl Plugin for PairPlugin {
         let conn = sender.device_id().to_string();
         match packet.packet_type.as_str() {
             "kdeconnect.identity" => {
-                if let Some(id) = packet.body.get("deviceId").and_then(|v| v.as_str()) {
-                    phone_ids()
-                        .lock()
-                        .expect("pair state")
-                        .insert(conn.clone(), id.to_string());
-                    // A fresh identity announcement resets per-connection trust.
-                    trusted_connections()
-                        .lock()
-                        .expect("pair state")
-                        .remove(&conn);
+                // A connection is known by the id it opened with (the TCP
+                // handshake, the v2 handshake); an identity naming another
+                // device changes nothing.
+                let named = packet.body.get("deviceId").and_then(|v| v.as_str());
+                if named.is_some_and(|id| id != conn) {
+                    tracing::warn!(
+                        "Ignored an identity naming another device on {conn}'s connection"
+                    );
                 }
             }
             "kdeconnect.linuxlink.pair" => {
@@ -624,10 +614,9 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     let Some(pin) = packet.body.get("pin").and_then(|v| v.as_str()) else {
         return;
     };
-    let Some(phone_id) = phone_ids().lock().expect("pair state").get(conn).cloned() else {
-        respond_pair(sender, false, "").await;
-        return;
-    };
+    // The connection's own id (the TCP or v2 handshake's), never one named
+    // later in a packet.
+    let phone_id = conn.to_string();
 
     let matches_pending = pins()
         .lock()
@@ -668,6 +657,20 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             respond_pair(sender, false, "").await;
             return;
         }
+        // The owner's own PIN, inside TLS, binds the key that paired (phase
+        // B), replacing any older one (perhaps a reinstalled phone's), before
+        // anything is trusted: a pairing that cannot bind fails, rather than
+        // trusting an id with stale keys or none.
+        if grant_secs.is_none() {
+            let bound = state::state_dir()
+                .map_err(|e| std::io::Error::other(e.to_string()))
+                .and_then(|dir| owner_paired_in(&dir, &phone_id, sender.peer_key().as_ref()));
+            if let Err(e) = bound {
+                tracing::error!("Pairing refused: could not bind the keys of {phone_id}: {e}");
+                respond_pair(sender, false, "").await;
+                return;
+            }
+        }
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
             match grant_secs {
                 Some(secs) => {
@@ -678,25 +681,12 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         });
         match outcome {
             Ok(()) => {
-                // The owner's own PIN, inside TLS, binds the key that paired
-                // (phase B), replacing any older one (perhaps a reinstalled
-                // phone's). A guest's key was bound above.
-                if grant_secs.is_none()
-                    && let Ok(dir) = state::state_dir()
-                    && let Err(e) = owner_paired_in(&dir, &phone_id, sender.peer_key().as_ref())
-                {
-                    tracing::warn!("Could not bind the keys of {phone_id}: {e}");
-                }
                 match grant_secs {
                     Some(secs) => tracing::info!(
                         "Paired phone {phone_id} on connection {conn} (scoped grant: {secs}s)"
                     ),
                     None => tracing::info!("Paired phone {phone_id} on connection {conn}"),
                 }
-                trusted_connections()
-                    .lock()
-                    .expect("pair state")
-                    .insert(conn.to_string(), vec![phone_id.clone()]);
                 respond_pair(sender, true, &desktop_id_field()).await;
             }
             Err(e) => {
@@ -841,6 +831,31 @@ mod tests {
         assert!(
             decide_control_identity_in(&dir, "phone", None, true).is_err(),
             "no key, now that the phone has one"
+        );
+    }
+
+    #[test]
+    fn a_connection_with_another_key_may_only_pair_and_the_owners_pin_recovers_it() {
+        let dir = key_dir("standing");
+        assert!(allowed(&dir, &claim(Some(PeerKey::Tls([1; 32])), None)));
+        let reinstalled = PeerKey::Tls([5; 32]);
+        assert!(matches!(
+            standing_in(&dir, "phone", Some(&reinstalled), true),
+            Standing::WrongKey(_)
+        ));
+        assert_eq!(
+            standing_in(&dir, "phone", Some(&PeerKey::Tls([1; 32])), true),
+            Standing::Paired
+        );
+        assert_eq!(
+            standing_in(&dir, "stranger", Some(&reinstalled), false),
+            Standing::Unpaired
+        );
+        // Pairing again with the owner's PIN, on that same connection.
+        owner_paired_in(&dir, "phone", Some(&reinstalled)).unwrap();
+        assert_eq!(
+            standing_in(&dir, "phone", Some(&reinstalled), true),
+            Standing::Paired
         );
     }
 
