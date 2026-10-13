@@ -210,15 +210,7 @@ impl CertManager {
     /// The client verifies the server's certificate against the stored known_peers
     /// map and auto-accepts unknown peers on first use.
     pub fn client_config(&self, alpns: Vec<Vec<u8>>) -> Result<quinn::ClientConfig> {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let mut crypto = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(TofuVerifier {
-                known_peers: self.known_peers.clone(),
-                peers_path: self.peers_path.clone(),
-            }))
-            .with_no_client_auth();
+        let mut crypto = self.tls_client_config();
 
         if !alpns.is_empty() {
             crypto.alpn_protocols = alpns;
@@ -269,6 +261,18 @@ impl CertManager {
     pub fn remove_peer(&self, label: &str) -> bool {
         let mut peers = self.known_peers.lock().unwrap();
         peers.remove(label).is_some()
+    }
+
+    /// The TLS half of [`CertManager::client_config`]: TOFU certificate pins.
+    fn tls_client_config(&self) -> rustls::ClientConfig {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(TofuVerifier {
+                known_peers: self.known_peers.clone(),
+                peers_path: self.peers_path.clone(),
+            }))
+            .with_no_client_auth()
     }
 
     /// Return the SHA-256 hash of the given DER certificate.
@@ -370,31 +374,37 @@ impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
         }
     }
 
+    // The pin above only says which certificate the desktop has; anyone can
+    // present a copy of it (every handshake sends it). The handshake
+    // signature is what proves the peer holds that certificate's private
+    // key, so it is checked for real, with the same provider the connection
+    // uses.
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
     ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &signature_algorithms())
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
     ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &signature_algorithms())
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ED25519,
-        ]
+        signature_algorithms().supported_schemes()
     }
+}
+
+/// The handshake signature algorithms of the provider the connections use.
+fn signature_algorithms() -> rustls::crypto::WebPkiSupportedAlgorithms {
+    rustls::crypto::ring::default_provider().signature_verification_algorithms
 }
 
 /// Server-side streaming transport
@@ -645,6 +655,92 @@ impl PacketHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server that presents `cert` but signs the handshake with `signing_key`.
+    fn tls_server(cert: Vec<u8>, signing_key: Vec<u8>) -> rustls::ServerConfig {
+        #[derive(Debug)]
+        struct Fixed(Arc<rustls::sign::CertifiedKey>);
+        impl rustls::server::ResolvesServerCert for Fixed {
+            fn resolve(
+                &self,
+                _hello: rustls::server::ClientHello<'_>,
+            ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+                Some(self.0.clone())
+            }
+        }
+        let key = rustls::crypto::ring::sign::any_supported_type(&PrivateKeyDer::Pkcs8(
+            signing_key.into(),
+        ))
+        .unwrap();
+        let certified = rustls::sign::CertifiedKey::new(vec![CertificateDer::from(cert)], key);
+        rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(Fixed(Arc::new(certified))))
+    }
+
+    /// Run a TLS handshake in memory; the client's verdict.
+    fn handshake(
+        client: rustls::ClientConfig,
+        server: rustls::ServerConfig,
+    ) -> std::result::Result<(), rustls::Error> {
+        let name = ServerName::try_from("192.0.2.1").unwrap();
+        let mut c = rustls::ClientConnection::new(Arc::new(client), name)?;
+        let mut s = rustls::ServerConnection::new(Arc::new(server))?;
+        for _ in 0..16 {
+            let mut wire = Vec::new();
+            while c.wants_write() {
+                c.write_tls(&mut wire).unwrap();
+            }
+            if !wire.is_empty() {
+                s.read_tls(&mut &wire[..]).unwrap();
+                // The server's own complaints are not the question here.
+                let _ = s.process_new_packets();
+            }
+            let mut wire = Vec::new();
+            while s.wants_write() {
+                s.write_tls(&mut wire).unwrap();
+            }
+            if !wire.is_empty() {
+                c.read_tls(&mut &wire[..]).unwrap();
+                c.process_new_packets()?;
+            }
+            if !c.is_handshaking() && !s.is_handshaking() {
+                return Ok(());
+            }
+        }
+        Err(rustls::Error::General("handshake did not finish".into()))
+    }
+
+    #[test]
+    fn the_desktop_must_hold_the_key_of_the_certificate_it_presents() {
+        let (cert, key) = generate_identity().unwrap();
+        let (_, other_key) = generate_identity().unwrap();
+        let phone = CertManager::new().unwrap();
+        // Pinned, as a pairing code pins it.
+        let label = peer_label(&ServerName::try_from("192.0.2.1").unwrap());
+        phone
+            .pin_peer(
+                &label,
+                CertManager::cert_hash(&CertificateDer::from(cert.clone())),
+            )
+            .unwrap();
+
+        assert!(
+            handshake(phone.tls_client_config(), tls_server(cert.clone(), key)).is_ok(),
+            "the real desktop connects"
+        );
+        // Anyone can copy the certificate (every handshake sends it); only
+        // the desktop has its key. A pin is worth nothing if a signature by
+        // another key passes.
+        assert!(
+            handshake(phone.tls_client_config(), tls_server(cert, other_key)).is_err(),
+            "a copied certificate without its key is refused"
+        );
+    }
 
     /// A pairing code pins the desktop's certificate before the phone ever
     /// connects; the pin must sit under the exact label the verifier looks up
