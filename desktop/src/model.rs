@@ -102,6 +102,27 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
 
 /// The phones a file can be sent to: those in a session now, since only
 /// then does a phone hold the connection an offer reaches (F7b).
+/// What the Sessions tab shows about who drives (roadmap N7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlCell {
+    /// This session's phone drives.
+    Driving,
+    /// Another phone drives or no one does: a button hands control here.
+    Give(u64),
+    /// One phone, or a server too old to say.
+    Nothing,
+}
+
+pub fn control_cell(session: &sessions::MirrorSession, sessions_live: usize) -> ControlCell {
+    if sessions_live < 2 || session.id == 0 {
+        ControlCell::Nothing
+    } else if session.driving {
+        ControlCell::Driving
+    } else {
+        ControlCell::Give(session.id)
+    }
+}
+
 pub fn send_targets(snapshot: &Snapshot) -> Vec<&Device> {
     snapshot.devices.iter().filter(|d| d.connected).collect()
 }
@@ -494,5 +515,28 @@ mod tests {
             .map(|f| f.name.clone())
             .collect();
         assert_eq!(names, ["f1", "f0"]);
+    }
+
+    fn session(id: u64, driving: bool) -> sessions::MirrorSession {
+        sessions::MirrorSession {
+            id,
+            device_id: Some(format!("phone-{id}")),
+            peer: "192.0.2.1:5".into(),
+            transport: "lan".into(),
+            started_unix: 1,
+            driving,
+        }
+    }
+
+    #[test]
+    fn with_several_phones_the_driver_is_marked_and_the_others_can_be_given_control() {
+        assert_eq!(control_cell(&session(1, true), 2), ControlCell::Driving);
+        assert_eq!(control_cell(&session(2, false), 2), ControlCell::Give(2));
+    }
+
+    #[test]
+    fn one_phone_or_an_old_server_shows_no_control() {
+        assert_eq!(control_cell(&session(1, true), 1), ControlCell::Nothing);
+        assert_eq!(control_cell(&session(0, false), 2), ControlCell::Nothing);
     }
 }
