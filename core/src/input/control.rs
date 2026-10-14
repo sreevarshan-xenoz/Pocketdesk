@@ -58,8 +58,12 @@ impl InputControl {
         }
     }
 
-    /// The desktop hands control to `session`. Returns whether it moved.
+    /// The desktop hands control to `session`. Returns whether it moved;
+    /// with Shared there is nothing to hand over.
     pub fn give(&mut self, session: u64, now: Instant) -> bool {
+        if self.policy == Policy::Shared {
+            return false;
+        }
         let moved = self.driver(now) != Some(session);
         self.driver = Some((session, now));
         moved
@@ -158,6 +162,8 @@ mod tests {
         let mut control = InputControl::new(Policy::Shared);
         assert_eq!(control.admit(1, t), Admit::Yes { took: false });
         assert_eq!(control.admit(2, t), Admit::Yes { took: false });
+        assert_eq!(control.driver(t), None);
+        assert!(!control.give(2, t), "nothing to hand over when everyone drives");
         assert_eq!(control.driver(t), None);
     }
 }
