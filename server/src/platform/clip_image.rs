@@ -11,6 +11,11 @@
 /// 16384 x 16384 is a 1 GiB RGBA buffer.
 const MAX_SIDE: u32 = 16384;
 
+/// The most pixels an image may have, checked before anything is decoded or
+/// allocated: 40 megapixels (an 8K screenshot is 33). A few hundred bytes of
+/// PNG can claim 16384 x 16384, which would be gigabytes of buffers.
+const MAX_PIXELS: u64 = 40_000_000;
+
 const BI_RGB: u32 = 0;
 const BI_BITFIELDS: u32 = 3;
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
@@ -45,6 +50,15 @@ fn checked_side(side: u32) -> Result<u32, String> {
         return Err(format!("an image side of {side} pixels is not supported"));
     }
     Ok(side)
+}
+
+/// `width` x `height`, each side checked, refused over [`MAX_PIXELS`].
+fn checked_size(width: u32, height: u32) -> Result<(u32, u32), String> {
+    let (width, height) = (checked_side(width)?, checked_side(height)?);
+    if u64::from(width) * u64::from(height) > MAX_PIXELS {
+        return Err(format!("a {width} x {height} image is too large"));
+    }
+    Ok((width, height))
 }
 
 /// Read a 24- or 32-bit uncompressed DIB.
@@ -86,8 +100,9 @@ fn decode_dib(dib: &[u8]) -> Result<Rgba, String> {
     if header == 40 {
         offset += le_u32(dib, 32).ok_or_else(short)? as usize * 4;
     }
-    let width = checked_side(raw_width.unsigned_abs())?;
-    let height = checked_side(raw_height.unsigned_abs())?;
+    // The width is never negative; only the height says which way up.
+    let width = u32::try_from(raw_width).map_err(|_| format!("a width of {raw_width}"))?;
+    let (width, height) = checked_size(width, raw_height.unsigned_abs())?;
     let bottom_up = raw_height > 0;
     let step = usize::from(bits / 8);
     let stride = (width as usize * usize::from(bits)).div_ceil(32) * 4;
@@ -154,15 +169,16 @@ fn decode_png(png_bytes: &[u8]) -> Result<Rgba, String> {
     let mut reader = decoder.read_info().map_err(|e| format!("not a PNG: {e}"))?;
     let (width, height) = {
         let info = reader.info();
-        (checked_side(info.width)?, checked_side(info.height)?)
+        checked_size(info.width, info.height)?
     };
     let mut buffer = vec![0; reader.output_buffer_size().ok_or("the PNG is too large")?];
     let frame = reader
         .next_frame(&mut buffer)
         .map_err(|e| format!("the PNG does not decode: {e}"))?;
-    let data = &buffer[..frame.buffer_size()];
+    buffer.truncate(frame.buffer_size());
+    let data = &buffer;
     let pixels = match frame.color_type {
-        png::ColorType::Rgba => data.to_vec(),
+        png::ColorType::Rgba => buffer,
         png::ColorType::Rgb => data
             .chunks(3)
             .flat_map(|p| [p[0], p[1], p[2], 255])
@@ -279,10 +295,37 @@ mod tests {
     }
 
     #[test]
+    fn an_image_claiming_too_many_pixels_is_refused_before_decoding() {
+        assert_eq!(checked_size(7680, 4320), Ok((7680, 4320)), "8K");
+        assert!(checked_size(16384, 16384).is_err(), "a decode bomb");
+        assert!(checked_size(16384, 2441).is_ok());
+        assert!(checked_size(16384, 2442).is_err());
+        // A PNG whose header claims 16384 x 16384 with one row of data: the
+        // header is all that is read before refusing it.
+        let mut bomb = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bomb, 16384, 16384);
+            encoder.set_color(png::ColorType::Grayscale);
+            let mut writer = encoder.write_header().unwrap();
+            let mut rows = writer.stream_writer().unwrap();
+            std::io::Write::write_all(&mut rows, &[0; 16384]).unwrap();
+            std::io::Write::flush(&mut rows).unwrap();
+            // Dropped unfinished: the rest of the image never comes.
+        }
+        assert!(decode_png(&bomb).unwrap_err().contains("too large"));
+        // A bitmap header claims the same.
+        assert!(decode_dib(&header(16384, 16384, 24, BI_RGB)).is_err());
+    }
+
+    #[test]
     fn malformed_bitmaps_and_pngs_are_refused() {
         assert!(decode_dib(&[]).is_err());
         assert!(decode_dib(&header(3, 2, 24, BI_RGB)).is_err(), "no rows");
         assert!(decode_dib(&header(0, 2, 24, BI_RGB)).is_err(), "no width");
+        assert!(
+            decode_dib(&header(-3, 2, 24, BI_RGB)).is_err(),
+            "negative width"
+        );
         assert!(
             decode_dib(&header(70000, 1, 24, BI_RGB)).is_err(),
             "too wide"
