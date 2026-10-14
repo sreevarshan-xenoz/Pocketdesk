@@ -86,3 +86,34 @@ On Windows the check reads `Get-NetAdapterPowerManagement` (`WakeOnMagicPacket`)
 4. App: `HostStore` facts, `WakePlan`, the Wake button and "Wake and connect", and the per-computer Wake settings.
 5. Desktop: Settings "Wake from the phone", and the Diagnostics row.
 6. Docs: README, checklist §42, roadmap N6, AGENTS.
+
+## As built
+
+- **Followed the design,** with three deviations:
+  - **Desktop Settings** names the adapter, whether it is wired, and its MAC. Whether the adapter allows wake is in Diagnostics only: the query can take seconds, too long for the Settings tab.
+  - **The phone's MAC field** is left blank to mean "the one it announced", rather than pre-filled with it.
+  - **Connect checks first.** Connect on a computer that can be woken probes its control port (1.5 s). If it does not answer, the phone offers "Wake and connect" or "Connect anyway". Settings "Offer to wake a computer that does not answer" (on by default) turns the check off.
+- **Reading wake on Windows.** `Get-NetAdapterPowerManagement` fails on this box's Realtek driver ("A device attached to the system is not functioning"). NDIS's standard `*WakeOnMagicPacket` keyword answers for it, and does not depend on the display language. On Linux only `ethtool`'s `Wake-on:` counts. sysfs' `power/wakeup` does not say the wake is by magic packet, so without ethtool the answer is "unknown".
+- **Fresh review (0 Critical, 4 Important, 9 Minor), fixed one commit each:**
+  - **Wrong computer's MAC.** The bridge kept one wake-info slot whatever connection filled it, so a session could save another computer's MAC. The slot carries the host and port it came from, and is handed out only for that computer.
+  - **Awake detection.** It matched mDNS addresses, so a computer saved by its tailnet address never counted as awake. The phone now probes the control port every 2 s.
+  - **Old relay setups.** A legacy MAC with no new settings stays a relay to the saved computer itself, unless that computer announced the same MAC (then it is the sleeping one).
+  - **"Wake and connect"** on Connect was missing (above).
+  - **Minors fixed:**
+    - away from home the MAC is no longer broadcast on someone else's network (a new "Away" outcome says when nothing can be sent);
+    - learned targets must be IPv4 addresses;
+    - the outside address takes no port, and IPv6 is bracketed;
+    - a computer that stops announcing makes phones forget (an empty `wake_info`);
+    - the relay no longer logs the MAC;
+    - PowerShell's typographic quotes are escaped in adapter names;
+    - the Linux sysfs fallback (above);
+    - the docs.
+  - **Accepted, not fixed:**
+    - "at home" is judged by the phone sharing the computer's broadcast address, so a different network with the same numbering counts as home and gets the broadcast;
+    - the outside address is whatever the user or the computer's last public address says. A paired computer can make each Wake tap send 3 packets per target to an address of its choosing, with no amplification.
+- **Device run (A71 and this box), with a UDP listener standing in for the sleeping computer:**
+  - the session taught the phone the MAC and broadcast;
+  - Wake sent the 9 expected packets, and the card said the computer was awake;
+  - the Wake settings dialog and the "does not answer" offer appeared as designed.
+
+  A real wake, at home and from outside, is owed (checklist §42).

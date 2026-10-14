@@ -42,6 +42,24 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **N6, wake the computer from anywhere without a second device (branch `feat/wake`; spec `docs/superpowers/specs/2026-10-14-wake-anywhere-design.md`, with an as-built section).** Wake had asked the sleeping computer to wake itself.
+  - **Desktop:**
+    - `core::local::wake` finds the adapter a phone reaches (netdev): its MAC, subnet broadcast, and whether it is wired.
+    - The server pushes `kdeconnect.pocketdesk.wake_info` to paired phones; empty when `wake_announce` is off, so phones forget.
+    - Settings "Wake from the phone" and "Outside wake port" (`wake_port`), and a Diagnostics "Wake" row (Windows power management, else the NDIS `*WakeOnMagicPacket` keyword; ethtool on Linux).
+  - **Phone:**
+    - The bridge sends the magic packet itself (`nativeWake`, three times per target) and keeps `wake_info` per computer.
+    - `WakePlan` (JVM-tested) picks the targets: broadcasts at home, the public address at the outside port from away, or a relay computer.
+    - Each card has "Wake settings" (method, relay, outside address and port, MAC). After Wake it probes the control port and connects ("Connect after waking"). Connect on a computer that does not answer offers "Wake and connect".
+  - **Fresh review (0 Critical, 4 Important, 9 Minor), fixed:**
+    - another computer's MAC could be saved;
+    - awake detection missed tailnet-saved computers;
+    - old relay setups regressed;
+    - "Wake and connect" was missing;
+    - plus the minors: no broadcast while away, validated targets, forgetting, no MAC in logs, and quoting.
+  - **Verified on the A71 and this box** (a UDP listener stood in for a sleeping computer): the session taught the MAC, Wake sent the 9 expected packets, "is awake", the dialog and the offer.
+  - **Owed (checklist §42):** a real wake at home and from outside through a router forward, hibernate/shutdown, Wi-Fi, a relay, and Linux.
+  - **N5b merged** as PR #36.
 - 2026-10-14: **N5b, texts (SMS) on the computer and replies from it (branch `feat/sms`; spec `docs/superpowers/specs/2026-10-14-sms-design.md`, with Settings and as-built sections).** Built on the user's word; its device checks wait for a SIM.
   - **Phone:**
     - `SmsReceiver` forwards incoming texts.
