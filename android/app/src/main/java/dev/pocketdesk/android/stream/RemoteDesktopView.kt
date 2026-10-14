@@ -573,6 +573,11 @@ private class DecoderHost {
                 } finally {
                     DesktopAudio.streamDown(gen)
                 }
+                // The decode loop ended on its own (the feed stalled, or the
+                // desktop closed it): close the session now, so the desktop
+                // does not keep a session for a phone showing an error card.
+                // A stop() that already ran took `decoder`, so this skips.
+                if (decoder === active) runCatching { RustCore.stopStreaming() }
             }
         }, "h264-decode").apply {
             isDaemon = true
