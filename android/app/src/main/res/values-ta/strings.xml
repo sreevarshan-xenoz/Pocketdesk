@@ -338,7 +338,6 @@
     <string name="doctor_action_allow">அனுமதி</string>
     <string name="doctor_action_wake">எழுப்பு</string>
     <string name="doctor_action_pair">மீண்டும் இணை</string>
-    <string name="doctor_suggest">இணைக்க முடியவில்லையா? என்ன தவறு என்று சரிபார்.</string>
     <string name="doctor_on_wifi">Wi-Fi உடன் இணைக்கப்பட்டுள்ளது.</string>
     <string name="doctor_on_mobile">மொபைல் டேட்டாவுடன் இணைக்கப்பட்டுள்ளது.</string>
     <string name="doctor_on_network">ஒரு பிணையத்துடன் இணைக்கப்பட்டுள்ளது.</string>
@@ -373,8 +372,8 @@
     <string name="doctor_no_route_fix_wake">அதை எழுப்பு, அல்லது அது இந்த Wi-Fi-இல் உள்ளதா எனச் சரிபார்.</string>
     <string name="doctor_net_unreachable">அந்த முகவரிக்கு இந்தத் தொலைபேசிக்கு வழி இல்லை.</string>
     <string name="doctor_denied">Pocketdesk கணினியை அடைவதை Android தடுத்தது.</string>
-    <string name="doctor_timeout">கணினி பதிலளிக்கவில்லை. ஒரு ஃபயர்வால் Pocketdesk-ஐத் தடுக்கலாம், அல்லது இந்த Wi-Fi சாதனங்களைப் பிரித்து வைக்கலாம்.</string>
-    <string name="doctor_timeout_fix">கணினியில் Pocketdesk › கண்டறிதலைத் திற. Windows-இல் பிணையத்தை தனிப்பட்டது என அமை. விருந்தினர் Wi-Fi-இல் வேறு பிணையத்தைப் பயன்படுத்து.</string>
+    <string name="doctor_timeout">கணினி பதிலளிக்கவில்லை. அங்கே Pocketdesk இயங்காமல் இருக்கலாம், ஒரு ஃபயர்வால் அதைத் தடுக்கலாம், அல்லது இந்த Wi-Fi சாதனங்களைப் பிரித்து வைக்கலாம்.</string>
+    <string name="doctor_timeout_fix">கணினியில் Pocketdesk இயங்குகிறதா எனச் சரிபார்; அதைத் தடுப்பது என்ன என்று அதன் கண்டறிதல் தாவல் சொல்லும். Windows-இல் பிணையத்தை தனிப்பட்டது என அமை. விருந்தினர் Wi-Fi-இல் வேறு பிணையத்தைப் பயன்படுத்து.</string>
     <string name="doctor_no_name">இந்தப் பிணையத்தில் கணினியின் பெயரைக் கண்டறிய முடியவில்லை.</string>
     <string name="doctor_no_name_fix">கணினியை அதன் முகவரியால் சேமி, அல்லது இந்தத் தொலைபேசியின் தனிப்பட்ட DNS அமைப்பைச் சரிபார்.</string>
     <string name="doctor_not_checked">சரிபார்க்கவில்லை.</string>

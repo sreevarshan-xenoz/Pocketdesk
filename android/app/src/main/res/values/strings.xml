@@ -345,7 +345,6 @@
     <string name="doctor_action_allow">Allow</string>
     <string name="doctor_action_wake">Wake</string>
     <string name="doctor_action_pair">Pair again</string>
-    <string name="doctor_suggest">Can\'t connect? Check what\'s wrong.</string>
     <string name="doctor_on_wifi">Connected to Wi-Fi.</string>
     <string name="doctor_on_mobile">Connected to mobile data.</string>
     <string name="doctor_on_network">Connected to a network.</string>
@@ -380,8 +379,8 @@
     <string name="doctor_no_route_fix_wake">Wake it, or check that it is on this Wi-Fi.</string>
     <string name="doctor_net_unreachable">This phone has no route to that address.</string>
     <string name="doctor_denied">Android blocked Pocketdesk from reaching the computer.</string>
-    <string name="doctor_timeout">The computer doesn\'t answer. A firewall may be blocking Pocketdesk, or this Wi-Fi keeps devices apart.</string>
-    <string name="doctor_timeout_fix">On the computer, open Pocketdesk › Diagnostics. On Windows, set the network to Private. On guest Wi-Fi, use another network.</string>
+    <string name="doctor_timeout">The computer doesn\'t answer. Pocketdesk may not be running there, a firewall may be blocking it, or this Wi-Fi keeps devices apart.</string>
+    <string name="doctor_timeout_fix">On the computer, check that Pocketdesk is running; its Diagnostics tab says what blocks it. On Windows, set the network to Private. On guest Wi-Fi, use another network.</string>
     <string name="doctor_no_name">The computer\'s name can\'t be found on this network.</string>
     <string name="doctor_no_name_fix">Save the computer by its address, or check this phone\'s Private DNS setting.</string>
     <string name="doctor_not_checked">Not checked.</string>

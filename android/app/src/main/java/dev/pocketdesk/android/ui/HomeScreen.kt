@@ -80,6 +80,8 @@ fun HomeScreen(
     var waking by remember { mutableStateOf<Waking?>(null) }
     var wakingLeft by remember { mutableIntStateOf(0) }
     var wakeSettingsFor by remember { mutableStateOf<String?>(null) }
+    // T1: the computer the Connection Doctor is checking.
+    var checking by remember { mutableStateOf<HostStore.Host?>(null) }
     // Bumped when wake settings change, so the cards re-read their plans.
     var wakeVersion by remember { mutableIntStateOf(0) }
     // A computer that does not answer Connect, offered "Wake and connect".
@@ -232,6 +234,7 @@ fun HomeScreen(
                         },
                         onWake = { startWake(host, Prefs.connectAfterWake(context)) },
                         onWakeSettings = { wakeSettingsFor = host.address },
+                        onCheck = { checking = host },
                         onRemove = { removing = host },
                     )
                 }
@@ -326,6 +329,24 @@ fun HomeScreen(
         )
     }
 
+    checking?.let { host ->
+        ConnectionDoctorSheet(
+            address = host.address,
+            streamPort = host.port,
+            controlPort = host.controlPort,
+            canWake = Waker.canWake(Waker.planFor(context, host.address)),
+            onWake = {
+                checking = null
+                startWake(host, Prefs.connectAfterWake(context))
+            },
+            onPairAgain = {
+                checking = null
+                onScan()
+            },
+            onDismiss = { checking = null },
+        )
+    }
+
     wakeSettingsFor?.let { address ->
         WakeSettingsDialog(address) {
             wakeSettingsFor = null
@@ -402,6 +423,7 @@ private fun HostCard(
     onConnect: () -> Unit,
     onWake: () -> Unit,
     onWakeSettings: () -> Unit,
+    onCheck: () -> Unit,
     onRemove: () -> Unit,
 ) {
     Card(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
@@ -453,6 +475,9 @@ private fun HostCard(
                     TextButton(onClick = onWake) {
                         Text(stringResource(R.string.wake), style = MaterialTheme.typography.labelMedium)
                     }
+                }
+                TextButton(onClick = onCheck) {
+                    Text(stringResource(R.string.doctor_title), style = MaterialTheme.typography.labelMedium)
                 }
                 TextButton(onClick = onWakeSettings) {
                     Text(stringResource(R.string.wake_settings), style = MaterialTheme.typography.labelMedium)
