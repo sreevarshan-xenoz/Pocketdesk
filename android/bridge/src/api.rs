@@ -332,22 +332,37 @@ pub async fn wake_via_relay(
     mac: String,
     broadcast: String,
 ) -> Result<(), String> {
-    let conn_mgr = control_manager(Duration::from_secs(5))?;
-    let identity = client_identity();
-    let stream = conn_mgr
-        .connect(&address, port, &identity)
-        .await
-        .map_err(|e| format!("Connection failed: {e}"))?;
-    let (_reader, writer) = tokio::io::split(stream);
-    let sender = TcpDeviceSender::new(writer, address.clone());
     let request = NetworkPacket::new("kdeconnect.pocketdesk.wol").with_body(serde_json::json!({
         "mac": mac,
         "broadcast": broadcast,
     }));
-    sender
-        .send_packet(&request)
-        .await
-        .map_err(|e| format!("Failed to send wake request: {e}"))
+    relay_outcome(
+        query_peer(
+            &address,
+            port,
+            &request,
+            "kdeconnect.pocketdesk.wol",
+            Duration::from_secs(5),
+        )
+        .await,
+    )
+}
+
+/// What the relay computer's answer means. It answers `{ok, error}` once it
+/// has sent the magic packet, or refused to; no answer means it dropped the
+/// request, which is what it does when this phone may not use Power there.
+fn relay_outcome(answer: Result<serde_json::Value, String>) -> Result<(), String> {
+    let body = answer.map_err(|e| {
+        format!("The relay computer did not answer ({e}). Is Power allowed for this phone on it?")
+    })?;
+    if body.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        return Ok(());
+    }
+    let reason = body
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or("no reason given");
+    Err(format!("The relay computer refused: {reason}"))
 }
 
 /// Check Tailscale status
@@ -3696,6 +3711,25 @@ mod receive_tests {
         assert_eq!(waiting.await.unwrap(), vec![(41, vec![9])]);
         *crate::AUDIO_RX.lock().await = None;
         *crate::VIDEO_RX.lock().await = None;
+    }
+}
+
+#[cfg(test)]
+mod wake_relay_tests {
+    use super::relay_outcome;
+
+    #[test]
+    fn the_relay_s_answer_decides_the_outcome() {
+        assert_eq!(relay_outcome(Ok(serde_json::json!({"ok": true}))), Ok(()));
+        assert_eq!(
+            relay_outcome(Ok(
+                serde_json::json!({"ok": false, "error": "not on this computer's network"})
+            )),
+            Err("The relay computer refused: not on this computer's network".to_string())
+        );
+        assert!(relay_outcome(Ok(serde_json::json!({}))).is_err());
+        let silent = relay_outcome(Err("Timeout waiting".to_string())).unwrap_err();
+        assert!(silent.contains("Power"), "{silent}");
     }
 }
 
