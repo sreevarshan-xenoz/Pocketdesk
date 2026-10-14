@@ -699,6 +699,7 @@ fun RemoteScreen(
         mode = if (mode == InputMode.DirectTouch) InputMode.Trackpad else InputMode.DirectTouch
     }
 
+    ControlLinkEffect(address, controlPort)
     ClipboardSyncEffect(address, controlPort, enabled = clipboardSync)
     SirenWatcher(context)
     DesktopNotificationRelay(address = address, controlPort = controlPort)
