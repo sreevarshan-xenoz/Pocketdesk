@@ -730,6 +730,61 @@ mod dht_tests {
         );
     }
 
+    /// The real publish path on a local Mainline DHT: what `dht_lookup`
+    /// lets through `publishable` is what a stranger reads back. A LAN or
+    /// tailnet address handed to it never reaches the DHT.
+    #[tokio::test]
+    async fn only_publishable_addresses_reach_the_dht() {
+        use super::dht_lookup;
+        use futures_lite::StreamExt as _;
+        use iroh::address_lookup::{AddressLookup as _, EndpointData};
+        use pocketdesk_core::local::config::DhtPublish;
+        use pocketdesk_core::streaming::dht::{DhtAddressLookup, dht_builder};
+        use std::collections::BTreeSet;
+
+        let testnet = n0_mainline::Testnet::new(5).await.expect("testnet");
+        let reader = DhtAddressLookup::builder()
+            .dht_builder(dht_builder(&testnet.bootstrap))
+            .no_publish()
+            .build()
+            .expect("reader");
+        let handed = [
+            relay("https://relay.example.org/"),
+            relay("http://nas:3340/"),
+            ip("1.1.1.1:4501"),
+            ip("192.168.0.10:4501"),
+            ip("[fd7a:115c:a1e0::1]:4501"),
+        ];
+        for (mode, want) in [
+            (DhtPublish::Relay, vec![handed[0].clone()]),
+            (
+                DhtPublish::Addresses,
+                vec![handed[0].clone(), handed[2].clone()],
+            ),
+        ] {
+            let key = SecretKey::generate();
+            let lookup = dht_lookup(mode, &key, dht_builder(&testnet.bootstrap)).expect("lookup");
+            lookup.publish(&EndpointData::from_iter(handed.iter().cloned()));
+            let want: BTreeSet<_> = want.into_iter().collect();
+            let read = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    let items: Vec<_> = reader
+                        .resolve(key.public())
+                        .expect("stream")
+                        .collect()
+                        .await;
+                    if let Some(item) = items.into_iter().flatten().next() {
+                        break item.into_endpoint_addr().addrs;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+            })
+            .await
+            .expect("the record reached the DHT");
+            assert_eq!(read, want, "{mode:?}");
+        }
+    }
+
     #[test]
     fn a_record_is_looked_for_only_once_there_is_something_to_publish() {
         use super::{DhtCheck, expected_record};
