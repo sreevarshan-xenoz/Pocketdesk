@@ -56,7 +56,7 @@ object Shortcuts {
         val app = ctx.applicationContext
         val plan = ShortcutPlan.plan(
             HostStore.hosts(app),
-            hasWake = { HostStore.wolMac(app, it).isNotBlank() },
+            hasWake = { dev.pocketdesk.android.wake.Waker.canWake(dev.pocketdesk.android.wake.Waker.planFor(app, it)) },
         )
         val wake = ShortcutPlan.Kind.WAKE
         val shortcuts = plan.map { entry ->

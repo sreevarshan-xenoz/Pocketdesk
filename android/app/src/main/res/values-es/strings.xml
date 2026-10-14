@@ -44,11 +44,11 @@
     <string name="host_ports">transmisión %1$d · control %2$d</string>
     <string name="streaming_port">Puerto de transmisión</string>
     <string name="control_port">Puerto de control (portapapeles, archivos)</string>
-    <string name="wol_mac_label">MAC de Wake-on-LAN (despertar usando este host como relé)</string>
+    <string name="wol_mac_label">Dirección MAC para encender por red</string>
     <string name="auto_connect">Conectar automáticamente al iniciar</string>
     <string name="connect">Conectar</string>
     <string name="send_wol">Enviar Wake-on-LAN</string>
-    <string name="wake_sent">Paquete de despertar enviado vía %1$s.</string>
+    <string name="wake_sent">Encendido enviado a %1$s.</string>
     <string name="wake_failed">Error al despertar: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>
     <string name="language">Idioma</string>
@@ -173,7 +173,7 @@
     <string name="widget_connect">Conectar</string>
     <string name="widget_open">Abrir Pocketdesk</string>
     <string name="shortcut_not_saved">Ese equipo ya no está guardado.</string>
-    <string name="shortcut_no_wake">No hay dirección Wake-on-LAN guardada para %1$s.</string>
+    <string name="shortcut_no_wake">Pocketdesk aún no sabe cómo encender %1$s.</string>
     <string name="channel_transfers">Transferencias de archivos</string>
     <string name="channel_transfers_desc">Progreso de los archivos enviados a tu ordenador y desde él</string>
     <string name="transfer_sending">Enviando %1$d de %2$d</string>
@@ -288,4 +288,33 @@
     <string name="texts_reply">Responder desde mi ordenador</string>
     <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono. Desactivado por defecto.</string>
     <string name="texts_reply_needs_access">Toca para permitir el acceso a las notificaciones: las respuestas llegan por ahí</string>
+    <!-- N6: waking a computer from the phone -->
+    <string name="save">Guardar</string>
+    <string name="wake_settings">Ajustes de encendido</string>
+    <string name="wake_method">Cómo encenderlo</string>
+    <string name="wake_method_auto">Automático</string>
+    <string name="wake_method_auto_summary">Desde este teléfono en su red, y desde fuera cuando hay un puerto configurado</string>
+    <string name="wake_method_lan">Solo esta red</string>
+    <string name="wake_method_lan_summary">Desde este teléfono, cuando está en la misma red</string>
+    <string name="wake_method_relay">A través de otro ordenador</string>
+    <string name="wake_method_relay_summary">Un ordenador siempre encendido en su red lo envía</string>
+    <string name="wake_method_off">Desactivado</string>
+    <string name="wake_relay_label">Ordenador que lo envía</string>
+    <string name="wake_relay_none">Guarda antes otro ordenador.</string>
+    <string name="wake_outside_host">Dirección exterior (vacía: su última dirección pública)</string>
+    <string name="wake_outside_port">Puerto exterior (vacío: el que anunció)</string>
+    <string name="wake_mac_label">Dirección MAC (vacía: la que anunció)</string>
+    <string name="wake_bad_port">Un puerto va de 1 a 65535.</string>
+    <string name="wake_bad_mac">No es una dirección MAC, como AA:BB:CC:DD:EE:FF.</string>
+    <string name="wake_learned">Indicó: %1$s, %2$s, puerto exterior %3$s.</string>
+    <string name="wake_wired">por cable</string>
+    <string name="wake_wifi">Wi-Fi (quizá solo despierte de la suspensión)</string>
+    <string name="wake_port_none">ninguno</string>
+    <string name="wake_not_learned">Aún no ha indicado cómo encenderlo: conéctate una vez mientras esté encendido.</string>
+    <string name="wake_waking">Encendiendo %1$s… (%2$d s)</string>
+    <string name="wake_awake">%1$s está encendido.</string>
+    <string name="wake_no_answer">Sin respuesta de %1$s. Comprueba que el ordenador permite encenderse por red.</string>
+    <string name="settings_wake">Encendido</string>
+    <string name="settings_connect_after_wake">Conectar tras encender</string>
+    <string name="settings_connect_after_wake_summary">Encender abre la sesión cuando el ordenador responde</string>
 </resources>

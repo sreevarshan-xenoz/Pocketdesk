@@ -51,11 +51,11 @@
     <string name="host_ports">stream %1$d · control %2$d</string>
     <string name="streaming_port">Streaming port</string>
     <string name="control_port">Control port (clipboard, files)</string>
-    <string name="wol_mac_label">Wake-on-LAN MAC (wake via this host as relay)</string>
+    <string name="wol_mac_label">Wake-on-LAN MAC address</string>
     <string name="auto_connect">Auto-connect on launch</string>
     <string name="connect">Connect</string>
     <string name="send_wol">Send Wake-on-LAN</string>
-    <string name="wake_sent">Wake packet sent via %1$s.</string>
+    <string name="wake_sent">Wake sent to %1$s.</string>
     <string name="wake_failed">Wake failed: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>
     <string name="language">Language</string>
@@ -178,7 +178,7 @@
     <string name="widget_connect">Connect</string>
     <string name="widget_open">Open Pocketdesk</string>
     <string name="shortcut_not_saved">That computer is no longer saved.</string>
-    <string name="shortcut_no_wake">No Wake-on-LAN address is saved for %1$s.</string>
+    <string name="shortcut_no_wake">Pocketdesk does not know how to wake %1$s yet.</string>
     <string name="channel_transfers">File transfers</string>
     <string name="channel_transfers_desc">Progress of files sent to and from your computer</string>
     <string name="transfer_sending">Sending %1$d of %2$d</string>
@@ -290,4 +290,33 @@
     <string name="texts_reply">Reply from my computer</string>
     <string name="texts_reply_summary">The computer can send texts through this phone. Off by default.</string>
     <string name="texts_reply_needs_access">Tap to allow notification access: replies arrive through it</string>
+    <!-- N6: waking a computer from the phone -->
+    <string name="save">Save</string>
+    <string name="wake_settings">Wake settings</string>
+    <string name="wake_method">How to wake it</string>
+    <string name="wake_method_auto">Automatic</string>
+    <string name="wake_method_auto_summary">From this phone on its network, and from outside when a port is set up</string>
+    <string name="wake_method_lan">This network only</string>
+    <string name="wake_method_lan_summary">From this phone, when it is on the same network</string>
+    <string name="wake_method_relay">Through another computer</string>
+    <string name="wake_method_relay_summary">An always-on computer on its network sends it</string>
+    <string name="wake_method_off">Off</string>
+    <string name="wake_relay_label">Computer that sends it</string>
+    <string name="wake_relay_none">Save another computer first.</string>
+    <string name="wake_outside_host">Outside address (blank: its last public address)</string>
+    <string name="wake_outside_port">Outside port (blank: the one it announced)</string>
+    <string name="wake_mac_label">MAC address (blank: the one it announced)</string>
+    <string name="wake_bad_port">A port is 1 to 65535.</string>
+    <string name="wake_bad_mac">Not a MAC address, like AA:BB:CC:DD:EE:FF.</string>
+    <string name="wake_learned">It said: %1$s, %2$s, outside port %3$s.</string>
+    <string name="wake_wired">wired</string>
+    <string name="wake_wifi">Wi-Fi (may wake only from sleep)</string>
+    <string name="wake_port_none">none</string>
+    <string name="wake_not_learned">It has not said how to wake it yet: connect once while it is awake.</string>
+    <string name="wake_waking">Waking %1$s… (%2$d s)</string>
+    <string name="wake_awake">%1$s is awake.</string>
+    <string name="wake_no_answer">No answer from %1$s. Check that wake is allowed on the computer.</string>
+    <string name="settings_wake">Wake</string>
+    <string name="settings_connect_after_wake">Connect after waking</string>
+    <string name="settings_connect_after_wake_summary">Wake opens the session once the computer answers</string>
 </resources>

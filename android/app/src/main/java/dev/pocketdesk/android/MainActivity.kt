@@ -107,8 +107,7 @@ class MainActivity : ComponentActivity() {
             shortcutSession.value = "${host.address}|${host.port}|${host.controlPort}"
             return
         }
-        val mac = HostStore.wolMac(this, host.address)
-        if (mac.isBlank()) {
+        if (!dev.pocketdesk.android.wake.Waker.canWake(dev.pocketdesk.android.wake.Waker.planFor(this, host.address))) {
             android.widget.Toast.makeText(
                 this,
                 getString(R.string.shortcut_no_wake, host.address),
@@ -116,11 +115,11 @@ class MainActivity : ComponentActivity() {
             ).show()
             return
         }
-        // The application context, posted to the main thread: the relay may
+        // The application context, posted to the main thread: a relay may
         // take a while, and must not hold this screen.
         val app = applicationContext
         Thread {
-            val result = RustCore.wakeViaRelay(host.address, host.controlPort, mac)
+            val result = dev.pocketdesk.android.wake.Waker.wake(app, host.address)
             val message = if (result.isSuccess) {
                 app.getString(R.string.wake_sent, host.address)
             } else {
