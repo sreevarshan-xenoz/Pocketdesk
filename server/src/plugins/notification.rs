@@ -57,6 +57,16 @@ impl FloodGuard {
     }
 }
 
+/// Whether one more notification from `phone` may be shown now, under the
+/// same per-phone limit as its notifications (texts use it too, N5b).
+pub(crate) fn admit(phone: &str) -> bool {
+    let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
+    flood_guard()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .admit(phone, Instant::now(), limit)
+}
+
 fn flood_guard() -> &'static Mutex<FloodGuard> {
     static GUARD: std::sync::OnceLock<Mutex<FloodGuard>> = std::sync::OnceLock::new();
     GUARD.get_or_init(Default::default)

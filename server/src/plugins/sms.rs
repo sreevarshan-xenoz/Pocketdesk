@@ -118,22 +118,27 @@ impl Plugin for SmsPlugin {
                 let phone = sender.device_id().to_string();
                 {
                     let _held = store_lock().lock().await;
-                    for (address, body, at) in &texts {
-                        let message = Message {
+                    let messages = texts
+                        .iter()
+                        .map(|(address, body, at)| Message {
                             device_id: phone.clone(),
                             address: address.clone(),
                             body: body.clone(),
                             at_unix: *at,
                             direction: Direction::Received,
                             reply: None,
-                        };
-                        if let Err(e) = sms::record(&dir, message, keep()) {
-                            tracing::warn!("Could not keep a text: {e}");
-                        }
+                        })
+                        .collect();
+                    if let Err(e) = sms::record_all(&dir, messages, keep()) {
+                        tracing::warn!("Could not keep texts: {e}");
                     }
                 }
                 if NOTIFY.load(Ordering::Relaxed) {
+                    // The phone's notification limit holds for texts too.
                     for (address, body, _) in texts {
+                        if !crate::plugins::notification::admit(&phone) {
+                            continue;
+                        }
                         let summary = format!("Text from {address}");
                         let _ = tokio::task::spawn_blocking(move || {
                             crate::platform::notify(&summary, &body, Duration::from_secs(8))
@@ -232,10 +237,20 @@ async fn handle_request(
             && s.permissions(&request.device_id).allows(Capability::Texts)
     });
     let now = now_unix();
-    let _held = store_lock().lock().await;
-    let handed = sms::read(dir)
-        .iter()
-        .any(|m| m.reply.as_ref().is_some_and(|r| r.id == request.id));
+    // Read under the lock, but never hold it while a phone's socket is
+    // written: a stalled phone must not stop texts being kept.
+    let handed = {
+        let _held = store_lock().lock().await;
+        match sms::read_checked(dir) {
+            Ok(messages) => messages
+                .iter()
+                .any(|m| m.reply.as_ref().is_some_and(|r| r.id == request.id)),
+            Err(e) => {
+                tracing::warn!("The texts history cannot be read, replies wait: {e}");
+                return;
+            }
+        }
+    };
     match plan(&request, handed, target.is_some(), permitted, now) {
         Plan::Wait => {}
         Plan::Forget => forget(dir, &request.id),
@@ -243,30 +258,131 @@ async fn handle_request(
             let failed = ReplyState::Failed {
                 reason: reason.to_string(),
             };
-            let _ = sms::record(dir, reply_message(&request, failed, now), keep());
-            forget(dir, &request.id);
+            let _held = store_lock().lock().await;
+            if sms::record(dir, reply_message(&request, failed, now), keep()).is_ok() {
+                forget(dir, &request.id);
+            }
             tracing::info!("Reply {} not sent: {reason}", request.id);
         }
         Plan::Deliver => {
             let Some(target) = target else { return };
-            let packet = NetworkPacket::new(REQUEST).with_body(serde_json::json!({
-                "id": request.id,
-                "address": request.address,
-                "body": request.body,
-            }));
-            match target.send_packet(&packet).await {
+            match target
+                .send_packet(&request_packet(
+                    &request.id,
+                    &request.address,
+                    &request.body,
+                ))
+                .await
+            {
                 Ok(()) => {
                     let sending = ReplyState::Sending {
                         since_unix: now,
                         attempts: 1,
                     };
-                    let _ = sms::record(dir, reply_message(&request, sending, now), keep());
-                    forget(dir, &request.id);
+                    let _held = store_lock().lock().await;
+                    if sms::record(dir, reply_message(&request, sending, now), keep()).is_ok() {
+                        forget(dir, &request.id);
+                    }
                     tracing::info!("Reply {} handed to the phone", request.id);
                 }
                 Err(e) => tracing::debug!("Reply {} not handed over yet: {e}", request.id),
             }
         }
+    }
+}
+
+fn request_packet(id: &str, address: &str, body: &str) -> NetworkPacket {
+    NetworkPacket::new(REQUEST).with_body(serde_json::json!({
+        "id": id,
+        "address": address,
+        "body": body,
+    }))
+}
+
+/// A reply handed over and not confirmed is handed over again after this
+/// long, while its phone is connected: the phone may have taken it on a
+/// connection it was closing, or on one that had silently died.
+const RETRY_SECS: u64 = 120;
+/// The most hand-overs of one reply.
+const MAX_ATTEMPTS: u32 = 3;
+
+/// What becomes of a reply handed over and still unconfirmed.
+#[derive(Debug, PartialEq, Eq)]
+enum Retry {
+    Keep,
+    Rehand,
+    Fail,
+}
+
+fn retry(since_unix: u64, attempts: u32, connected: bool, now: u64) -> Retry {
+    let waited = now.saturating_sub(since_unix);
+    if waited >= sms::CONFIRM_TTL_SECS {
+        Retry::Fail
+    } else if waited < RETRY_SECS {
+        Retry::Keep
+    } else if attempts >= MAX_ATTEMPTS {
+        Retry::Fail
+    } else if connected {
+        Retry::Rehand
+    } else {
+        Retry::Keep
+    }
+}
+
+/// Hand unconfirmed replies over again, or give up on them.
+async fn retry_unconfirmed(dir: &Path, clients: &[Arc<dyn DeviceSender>]) {
+    let now = now_unix();
+    let waiting: Vec<Message> = {
+        let _held = store_lock().lock().await;
+        sms::read(dir)
+            .into_iter()
+            .filter(|m| {
+                matches!(
+                    m.reply,
+                    Some(Reply {
+                        state: ReplyState::Sending { .. },
+                        ..
+                    })
+                )
+            })
+            .collect()
+    };
+    for message in waiting {
+        let Some(Reply {
+            id,
+            state:
+                ReplyState::Sending {
+                    since_unix,
+                    attempts,
+                },
+        }) = &message.reply
+        else {
+            continue;
+        };
+        let target = clients.iter().find(|c| c.device_id() == message.device_id);
+        let next = match retry(*since_unix, *attempts, target.is_some(), now) {
+            Retry::Keep => continue,
+            Retry::Fail => ReplyState::Failed {
+                reason: "the phone did not confirm it".to_string(),
+            },
+            Retry::Rehand => {
+                let Some(target) = target else { continue };
+                if target
+                    .send_packet(&request_packet(id, &message.address, &message.body))
+                    .await
+                    .is_err()
+                {
+                    continue;
+                }
+                tracing::info!("Reply {id} handed to the phone again");
+                ReplyState::Sending {
+                    since_unix: now,
+                    attempts: attempts + 1,
+                }
+            }
+        };
+        let _held = store_lock().lock().await;
+        let _ = sms::set_reply_state(dir, id, next, keep());
     }
 }
 
@@ -296,13 +412,8 @@ pub async fn run_watcher() {
                 handle_request(&dir, request, &clients, store.as_ref()).await;
             }
         }
-        let _held = store_lock().lock().await;
-        for id in sms::unconfirmed(&sms::read(&dir), now_unix()) {
-            let failed = ReplyState::Failed {
-                reason: "the phone did not confirm it".to_string(),
-            };
-            let _ = sms::set_reply_state(&dir, &id, failed, keep());
-        }
+        let clients = crate::state::clone_clients().await;
+        retry_unconfirmed(&dir, &clients).await;
     }
 }
 
@@ -331,6 +442,25 @@ mod tests {
         let many = json!({"messages": (0..80).map(|i| json!({"address": "+1", "body": format!("m{i}")})).collect::<Vec<_>>()});
         assert_eq!(received_texts(&many, now).len(), MAX_PER_PACKET);
         assert!(received_texts(&json!({}), now).is_empty());
+    }
+
+    #[test]
+    fn an_unconfirmed_reply_is_handed_over_again_then_given_up() {
+        assert_eq!(retry(100, 1, true, 100 + RETRY_SECS - 1), Retry::Keep);
+        assert_eq!(retry(100, 1, true, 100 + RETRY_SECS), Retry::Rehand);
+        assert_eq!(
+            retry(100, 1, false, 100 + RETRY_SECS),
+            Retry::Keep,
+            "phone away"
+        );
+        assert_eq!(
+            retry(100, MAX_ATTEMPTS, true, 100 + RETRY_SECS),
+            Retry::Fail
+        );
+        assert_eq!(
+            retry(100, 1, false, 100 + sms::CONFIRM_TTL_SECS),
+            Retry::Fail
+        );
     }
 
     #[test]
