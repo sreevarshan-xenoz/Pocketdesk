@@ -8,6 +8,8 @@ pub mod bitrate;
 pub mod chaos;
 pub mod client;
 pub mod connection;
+#[cfg(feature = "wan")]
+pub mod dht;
 pub mod encoder_detect;
 pub mod input_packet;
 #[cfg(feature = "wan")]
@@ -76,6 +78,8 @@ pub use connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, QuinnConnection,
     SharedConnection, TransportFamily,
 };
+#[cfg(feature = "wan")]
+pub use dht::{DhtAddressLookup, dht_resolver};
 pub use encoder_detect::{AvailableEncoders, HardwareEncoder, probe_encoders, resolve_encoder};
 pub use input_packet::{
     InputPacket, MAX_SAMPLES_PER_FRAME, SAMPLE_DECODE, SAMPLE_E2E, SAMPLE_RENDER, SampleBatch,
@@ -83,9 +87,7 @@ pub use input_packet::{
 #[cfg(feature = "wan")]
 pub use iroh::SecretKey as IrohSecretKey;
 #[cfg(feature = "wan")]
-pub use iroh_connection::{
-    DhtAddressLookup, IrohConnection, IrohDial, dht_resolver, load_or_create_device_key,
-};
+pub use iroh_connection::{IrohConnection, IrohDial, load_or_create_device_key};
 pub use session::{SessionType, detect_session_type};
 pub use session_telemetry::{
     LinkReport, SessionGuard, SessionOutcome, SessionRecorder, SessionReport,

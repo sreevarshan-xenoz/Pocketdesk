@@ -198,35 +198,65 @@ enum DhtCheck {
 
 type DhtCheckState = Arc<std::sync::Mutex<Option<DhtCheck>>>;
 
-/// The DHT lookup per `dht_publish`, publishing with this endpoint's key.
-/// `None` when off, or when the DHT cannot start (logged; the WAN endpoint
-/// then works as before, by the address learned at home).
-fn dht_lookup(mode: DhtPublish, key: &SecretKey) -> Option<DhtAddressLookup> {
-    if mode == DhtPublish::Off {
-        return None;
-    }
+/// The DHT lookup per `dht_publish`, publishing with `key` through the
+/// [`publishable`] filter, on a DHT node bootstrapped by `dht`.
+fn dht_lookup(
+    mode: DhtPublish,
+    key: &SecretKey,
+    dht: pocketdesk_core::streaming::dht::DhtBuilder,
+) -> Result<DhtAddressLookup> {
     let with_ips = mode == DhtPublish::Addresses;
     let filter = AddrFilter::new(move |addrs| Cow::Owned(publishable(addrs, with_ips)));
-    match DhtAddressLookup::builder()
+    DhtAddressLookup::builder()
+        .dht_builder(dht)
         .secret_key(key.clone())
         .addr_filter(filter)
         .build()
-    {
-        Ok(lookup) => {
-            tracing::info!("WAN: publishing on the Mainline DHT ({})", mode.as_str());
-            Some(lookup)
-        }
-        Err(e) => {
-            tracing::warn!("WAN: the Mainline DHT could not start, not published: {e}");
-            None
-        }
-    }
+        .context("the Mainline DHT could not start")
 }
 
-/// Read this endpoint's record back from the DHT a minute after start, then
-/// every 15 minutes: publishing is fire-and-forget, so this is what says it
-/// worked.
-fn spawn_dht_check(
+/// Join the DHT in the background, so the WAN endpoint never waits on it:
+/// resolve the bootstrap nodes (each minute until DNS answers, as after a
+/// boot before the network is up), add the lookup to the endpoint (iroh
+/// publishes the current addresses to it at once), then keep checking the
+/// record.
+fn spawn_dht(endpoint: Endpoint, mode: DhtPublish, state: DhtCheckState) {
+    if mode == DhtPublish::Off {
+        return;
+    }
+    tokio::spawn(async move {
+        let lookup = loop {
+            let nodes = pocketdesk_core::streaming::dht::bootstrap_nodes(
+                std::time::Duration::from_secs(10),
+            )
+            .await;
+            if nodes.is_empty() {
+                tracing::debug!("WAN: the DHT's bootstrap nodes do not resolve yet");
+            } else {
+                let dht = pocketdesk_core::streaming::dht::dht_builder(&nodes);
+                match dht_lookup(mode, endpoint.secret_key(), dht) {
+                    Ok(lookup) => break lookup,
+                    Err(e) => tracing::warn!("WAN: {e:#}"),
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            if endpoint.is_closed() {
+                return;
+            }
+        };
+        match endpoint.address_lookup() {
+            Ok(services) => services.add(lookup.clone()),
+            Err(_) => return,
+        }
+        tracing::info!("WAN: publishing on the Mainline DHT ({})", mode.as_str());
+        check_dht_record(lookup, endpoint, mode, state).await;
+    });
+}
+
+/// Read this endpoint's record back from the DHT a minute after it joined,
+/// then every 15 minutes: publishing is fire-and-forget, so this is what says
+/// it worked.
+async fn check_dht_record(
     lookup: DhtAddressLookup,
     endpoint: Endpoint,
     mode: DhtPublish,
@@ -234,7 +264,7 @@ fn spawn_dht_check(
 ) {
     use futures_lite::StreamExt as _;
     let with_ips = mode == DhtPublish::Addresses;
-    tokio::spawn(async move {
+    {
         let mut wait = std::time::Duration::from_secs(60);
         loop {
             tokio::time::sleep(wait).await;
@@ -268,7 +298,7 @@ fn spawn_dht_check(
             tracing::debug!(?check, "WAN: DHT record checked");
             *state.lock().unwrap_or_else(|e| e.into_inner()) = Some(check);
         }
-    });
+    }
 }
 
 /// `wan_status.json`'s DHT fields: what the record holds ("empty" when
@@ -456,16 +486,11 @@ pub async fn spawn_wan_endpoint(
         .max_concurrent_uni_streams(1024u32.into())
         .max_concurrent_bidi_streams(128u32.into())
         .build();
-    let dht = dht_lookup(dht_publish, &secret_key);
-    let mut builder = Endpoint::builder(Minimal)
+    let endpoint = Endpoint::builder(Minimal)
         .alpns(vec![StreamTransportConfig::default().alpn])
         .relay_mode(relay_mode(&relay_urls)?)
         .secret_key(secret_key)
-        .transport_config(transport);
-    if let Some(dht) = &dht {
-        builder = builder.address_lookup(dht.clone());
-    }
-    let endpoint = builder
+        .transport_config(transport)
         .bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)))
         .context("iroh bind_addr rejected wildcard socket addr")?
         .bind()
@@ -474,9 +499,7 @@ pub async fn spawn_wan_endpoint(
 
     tracing::info!(id = %endpoint.id(), "WAN (iroh) endpoint ready");
     let dht_check = DhtCheckState::default();
-    if let Some(dht) = dht {
-        spawn_dht_check(dht, endpoint.clone(), dht_publish, Arc::clone(&dht_check));
-    }
+    spawn_dht(endpoint.clone(), dht_publish, Arc::clone(&dht_check));
     spawn_endpoint_recorder(endpoint.clone(), dht_publish, dht_check);
 
     let accept = endpoint.clone();

@@ -1500,18 +1500,6 @@ pub async fn connect_streaming_wan(
     };
     let relay_urls = read_list("relayUrls");
     let direct_addrs = read_list("directAddrs");
-    let dht = if identity["dht"].as_bool() == Some(true) {
-        match pocketdesk_core::streaming::dht_resolver() {
-            Ok(lookup) => Some(lookup),
-            Err(e) => {
-                // The cached address may still work.
-                tracing::warn!("WAN: no DHT lookup this time: {e:#}");
-                None
-            }
-        }
-    } else {
-        None
-    };
 
     // WAN sessions are keyed by the desktop address with a 0 port sentinel
     // (there is no TCP port on the iroh path).
@@ -1537,6 +1525,20 @@ pub async fn connect_streaming_wan(
     };
 
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
+    // Built only now that a dial will happen: it resolves the DHT's bootstrap
+    // nodes and binds a socket.
+    let dht = if identity["dht"].as_bool() == Some(true) {
+        match pocketdesk_core::streaming::dht_resolver().await {
+            Ok(lookup) => Some(lookup),
+            Err(e) => {
+                // The cached address may still work.
+                tracing::warn!("WAN: no DHT lookup this time: {e:#}");
+                None
+            }
+        }
+    } else {
+        None
+    };
     tracing::info!(
         "Dialing {address} over iroh WAN (endpoint {endpoint_id}, DHT lookup: {})",
         dht.is_some()

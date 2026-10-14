@@ -16,6 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::dht::DhtAddressLookup;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use iroh::endpoint::presets::Minimal;
@@ -24,7 +25,6 @@ use iroh::endpoint::{
     RecvStream, SendStream, WriteError,
 };
 use iroh::{Endpoint, EndpointAddr, RelayMode};
-pub use iroh_mainline_address_lookup::DhtAddressLookup;
 
 use super::connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, SharedConnection,
@@ -207,16 +207,6 @@ fn dial_relay_mode(announced: &[iroh::RelayUrl], use_relays: bool) -> RelayMode 
     } else {
         RelayMode::Custom(announced.iter().cloned().collect())
     }
-}
-
-/// A lookup on the public Mainline DHT that only reads (N3): the phone finds
-/// the desktop's signed record by its id, and never publishes its own. Must
-/// be called inside a Tokio runtime (the DHT binds its UDP socket).
-pub fn dht_resolver() -> Result<DhtAddressLookup> {
-    DhtAddressLookup::builder()
-        .no_publish()
-        .build()
-        .context("the Mainline DHT could not start")
 }
 
 impl IrohDial {
@@ -607,9 +597,8 @@ mod tests {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let testnet = n0_mainline::Testnet::new(5).await.expect("testnet");
         let on_testnet = || {
-            let mut builder = n0_mainline::DhtBuilder::default();
-            builder.bootstrap(&testnet.bootstrap);
-            DhtAddressLookup::builder().dht_builder(builder)
+            DhtAddressLookup::builder()
+                .dht_builder(super::super::dht::dht_builder(&testnet.bootstrap))
         };
 
         let alpn = StreamTransportConfig::default().alpn;

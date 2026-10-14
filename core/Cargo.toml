@@ -33,7 +33,7 @@ client = []
 # WAN transport (R1 stage 2): iroh (noq) implementation of the streaming
 # connection traits. Opt-in so neither the default build nor the Android
 # bridge pulls iroh into the graph.
-wan = ["dep:iroh", "dep:iroh-mainline-address-lookup"]
+wan = ["dep:iroh", "dep:iroh-mainline-address-lookup", "dep:n0-mainline"]
 
 # The files the server and the desktop app share (config, pairing PIN, live
 # sessions, identity): `core::local`. No tokio, no transport.
@@ -80,6 +80,8 @@ quinn.workspace = true
 iroh = { version = "1.2", optional = true }
 # N3: the phone looks the desktop up by id on the Mainline DHT.
 iroh-mainline-address-lookup = { version = "0.6", optional = true }
+# Its DHT node, built with bootstrap addresses we resolve off the runtime.
+n0-mainline = { version = "0.7", optional = true }
 
 # TLS and certificates for QUIC
 rcgen.workspace = true
