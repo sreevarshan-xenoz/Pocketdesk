@@ -46,7 +46,11 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **Clipboard sync** — text and images, both ways, while a session is open (the Win32 clipboard on Windows, `wl-clipboard` on Linux). An image goes as PNG, up to 32 MB, through the same TLS-pinned transfer as files, and needs only the phone's clipboard permission. A copied screenshot pastes on the phone, and a copied photo pastes into Paint. Text wins when both are on the clipboard.
 - **File transfer** — files both ways over the LAN; each transfer ends with the receiver confirming the save
 - **Remote file browsing** — browse the computer's home folder from a session and download a file to the phone's Downloads/Pocketdesk
-- **Notifications** — receive Android notifications on your Linux desktop
+- **The phone's notifications on the computer** — off until you turn it on in the phone's Settings ("This phone's notifications") and grant notification access. They go to the computer you used last, as system notifications (a toast on Windows).
+  - **Which apps:** each app is listed once it has notified, and shares nothing until you switch it on.
+  - **Never sent:** ongoing ones (music, navigation, calls), Pocketdesk's own, ones an app keeps on the device, and a work profile's.
+  - **Lock-screen privacy carries over:** anything the phone hides there stays hidden. A private notification arrives as only "New notification", and a one-time code is replaced.
+  - **On the computer:** at most 20 a minute are shown from one phone, and each phone's Notifications switch in the Devices tab can turn them off.
 - **Notification reply** — answer desktop notifications from the phone; the desktop records the reply, copies it to the clipboard and shows a confirmation
 - **Find my device** — ring the desktop from the phone, or ring the phone from the desktop
 - **PIN pairing** — 6-digit PIN pairing (shown on the desktop or printed by `pocketdesk pair`); unpaired connections are locked out — the control channel (TCP and v2/QUIC) and the video/input stream all enforce it — unless `pairing_required = false`

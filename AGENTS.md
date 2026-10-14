@@ -42,6 +42,16 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **N5a, the phone's notifications on the computer (branch `feat/phone-notifications`; spec `docs/superpowers/specs/2026-10-14-phone-notifications-design.md`, with an as-built section).** N5 is split three ways: N5a this, N5b SMS, N5c actions and dismissal both ways.
+  - **New:**
+    - A `NotificationListenerService` sends the phone's notifications to the most recently used paired computer.
+    - Off by default. Settings "This phone's notifications" has the switch, which opens Android's access page, and a per-app opt-in list.
+    - `NotificationForwardRule` (JVM-tested) applies the lock-screen privacy, the one-time-code filter, and the never-send cases.
+    - On the desktop, a new per-device permission, Notifications, gates the packet, and at most 20 a minute are shown.
+    - README's old claim ("receive Android notifications on your Linux desktop") had nothing behind it; it is now true.
+  - **Fresh review (1 Critical, 6 Important), all fixed:** the Critical was the desktop relay echoing the server's own notifications, a phone's and the pairing PIN's, to every paired phone.
+  - **Verified on the A71 and this box:** private shown as "New notification", flood 31 → 20, opt-in, the desktop permission.
+  - **Owed (checklist §39):** a real chat app, a messaging app that hides its content, battery when the computer is out of reach, and Linux.
 - 2026-10-14: **N4, image clipboard both ways (branch `feat/image-clipboard`; spec `docs/superpowers/specs/2026-10-14-image-clipboard-design.md`, with an as-built section).**
   - **New:**
     - When the desktop's clipboard holds an image and no text, its reply to the phone's 4 s poll carries `{image: {id, size}}`, the id being the PNG's SHA-256. The phone fetches it with `clipboard_image_fetch`, and sends its own with `clipboard_image`.

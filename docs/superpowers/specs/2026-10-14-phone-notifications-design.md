@@ -80,3 +80,28 @@ Phone notifications are private. A new Settings section, "This phone's notificat
 - Action buttons.
 - Replying to a phone notification from the desktop.
 - Icons and images.
+
+## As built
+
+- **Device-verified on the A71 and this box,** with no session open:
+  - the switch opened Android's access page;
+  - a shell notification reached Windows as "New notification" (it is private);
+  - of 31 within a minute, 20 were shown;
+  - an app left off sent nothing;
+  - the desktop's Notifications permission off was logged as denied.
+
+  Afterwards the switch was turned off and access revoked.
+- **Fresh review (1 Critical, 6 Important), fixed:**
+  - **Critical, a notification echo.** The desktop-to-phone relay forwarded every notification the desktop shows, the server's own included. A phone's notification therefore came back to it and reached every other paired phone. The relay already did the same for the pairing PIN's toast. Notifications whose app is Pocketdesk are no longer relayed.
+  - **Hostile text.** A phone's text is now cut to 64/200/1000 characters with control characters dropped. On Linux, markup is escaped and notify-send's arguments follow `--`.
+  - **Lock-screen privacy** takes the strictest of the notification's, its channel's, the user's override and the system's "hide sensitive content". This spec first read only the notification's own.
+  - **Never sent:** `FLAG_LOCAL_ONLY` notifications and other profiles'.
+  - **Per-app sharing is opt-in,** not opt-out: no app's first notification leaves the phone before the user chose the app. This changes the Settings design above.
+  - **One-time codes** are replaced.
+  - **A failed send pauses sending for a minute.**
+- **Minors fixed:** work moved off the main thread; `isClearable` comes from the notification; the permission doc comment.
+- **Deferred:**
+  - the label lookup for other apps on Android 11+ falls back to the package name if the system hides the app;
+  - the Settings list updates on resume, not live;
+  - each send opens its own TLS connection when no session is open;
+  - the target is the most recently used paired computer only.
