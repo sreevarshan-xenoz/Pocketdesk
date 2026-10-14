@@ -1324,10 +1324,16 @@ async fn read_client_config(
                 break;
             }
             match String::from_utf8(id) {
-                Ok(id) => {
+                Ok(id) if crate::protocol::kdeconnect::valid_device_id(&id) => {
                     info!("Client identity: deviceId={}", id);
                     claim.device_id = Some(id);
                 }
+                // Control characters would reach logs, notifications and the
+                // owner's approval prompt: no id, which the gate refuses.
+                Ok(id) => warn!(
+                    "Ignored an invalid device id: {:?}",
+                    id.chars().take(40).collect::<String>()
+                ),
                 Err(e) => debug!("Malformed device identity stream: {e}"),
             }
         } else if marker == IROH_KEY_MARKER {

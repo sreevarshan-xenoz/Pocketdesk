@@ -668,9 +668,25 @@ impl KdeConnectService {
     }
 }
 
+/// Whether `id` can be a device id: 1 to 128 bytes, no control characters
+/// (it reaches logs, notifications and the owner's approval prompts). One
+/// rule for the control channel and the stream.
+pub fn valid_device_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_device_id_is_short_and_printable() {
+        assert!(valid_device_id("0d7c3a52-91e4-4b6f-8a2e-5f1c9b3d6e70"));
+        assert!(!valid_device_id(""));
+        assert!(!valid_device_id("phone\nWARN forged log line"));
+        assert!(!valid_device_id("\u{1b}[31mred"));
+        assert!(!valid_device_id(&"x".repeat(300)));
+    }
 
     /// Two writers changing different devices at the same moment both land.
     #[test]

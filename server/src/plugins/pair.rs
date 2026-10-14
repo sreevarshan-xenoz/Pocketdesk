@@ -260,9 +260,7 @@ fn decide_keys_in(
 
 /// A deviceId a connection may go by: short printable text. It keys the
 /// connection's state and appears in logs and notifications.
-pub(crate) fn valid_device_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
-}
+pub(crate) use pocketdesk_core::protocol::kdeconnect::valid_device_id;
 
 /// Where a control connection stands (phase B), re-read for every packet so
 /// a pairing, an unpairing or a key change applies at once.
