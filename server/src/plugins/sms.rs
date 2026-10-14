@@ -256,7 +256,10 @@ async fn handle_request(
             }));
             match target.send_packet(&packet).await {
                 Ok(()) => {
-                    let sending = ReplyState::Sending { since_unix: now };
+                    let sending = ReplyState::Sending {
+                        since_unix: now,
+                        attempts: 1,
+                    };
                     let _ = sms::record(dir, reply_message(&request, sending, now), keep());
                     forget(dir, &request.id);
                     tracing::info!("Reply {} handed to the phone", request.id);

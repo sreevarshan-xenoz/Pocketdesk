@@ -43,9 +43,11 @@ pub enum Direction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "lowercase")]
 pub enum ReplyState {
-    /// Handed to the phone, not yet confirmed.
+    /// Handed to the phone, not yet confirmed; `attempts` hand-overs so far.
     Sending {
         since_unix: u64,
+        #[serde(default = "one")]
+        attempts: u32,
     },
     Sent,
     Failed {
@@ -100,6 +102,10 @@ struct Store {
     messages: Vec<Message>,
 }
 
+fn one() -> u32 {
+    1
+}
+
 /// `text` cut to [`MAX_BODY`] characters.
 pub fn bounded(text: &str) -> String {
     text.chars().take(MAX_BODY).collect()
@@ -107,13 +113,25 @@ pub fn bounded(text: &str) -> String {
 
 /// The conversation, oldest first. A missing or unreadable file is empty.
 pub fn read(state_dir: &Path) -> Vec<Message> {
-    std::fs::read_to_string(state_dir.join(SMS_FILE))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<Store>(&raw).ok())
-        .map(|store| store.messages)
-        .unwrap_or_default()
+    read_checked(state_dir).unwrap_or_default()
 }
 
+/// The conversation for a writer: a missing file is empty, but one that
+/// cannot be read or parsed is an error, so a bad read never becomes "no
+/// history" that the next write would save over everything.
+pub fn read_checked(state_dir: &Path) -> io::Result<Vec<Message>> {
+    match std::fs::read(state_dir.join(SMS_FILE)) {
+        Ok(raw) => serde_json::from_slice::<Store>(&raw)
+            .map(|store| store.messages)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Replace the conversation, keeping the newest `keep`: written to a private
+/// temp file beside it and renamed over it, so a crash mid-write leaves the
+/// old file whole and a reader never sees a half-written one.
 fn write(state_dir: &Path, mut messages: Vec<Message>, keep: usize) -> io::Result<()> {
     let excess = messages.len().saturating_sub(keep.max(1));
     messages.drain(..excess);
@@ -121,15 +139,25 @@ fn write(state_dir: &Path, mut messages: Vec<Message>, keep: usize) -> io::Resul
     // The state folder is shared (the trust store, the keys…): only this
     // file is made private, never the folder's own permissions.
     std::fs::create_dir_all(state_dir)?;
-    secure_fs::write_private(&state_dir.join(SMS_FILE), &json)
+    let tmp = state_dir.join(format!("{SMS_FILE}.tmp"));
+    secure_fs::write_private(&tmp, &json)?;
+    std::fs::rename(&tmp, state_dir.join(SMS_FILE))
 }
 
 /// Add `message`, keeping the newest `keep` (the server's side). The caller
 /// serializes calls.
 pub fn record(state_dir: &Path, message: Message, keep: usize) -> io::Result<()> {
-    let mut messages = read(state_dir);
-    messages.push(message);
-    write(state_dir, messages, keep)
+    record_all(state_dir, vec![message], keep)
+}
+
+/// Add `messages` in one write, keeping the newest `keep`.
+pub fn record_all(state_dir: &Path, messages: Vec<Message>, keep: usize) -> io::Result<()> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+    let mut all = read_checked(state_dir)?;
+    all.extend(messages);
+    write(state_dir, all, keep)
 }
 
 /// Set reply `id`'s state (the server's side). An unknown id is ignored.
@@ -139,7 +167,7 @@ pub fn set_reply_state(
     state: ReplyState,
     keep: usize,
 ) -> io::Result<()> {
-    let mut messages = read(state_dir);
+    let mut messages = read_checked(state_dir)?;
     let Some(reply) = messages
         .iter_mut()
         .filter_map(|m| m.reply.as_mut())
@@ -158,7 +186,7 @@ pub fn unconfirmed(messages: &[Message], now_unix: u64) -> Vec<String> {
         .iter()
         .filter_map(|m| m.reply.as_ref())
         .filter(|r| {
-            matches!(r.state, ReplyState::Sending { since_unix }
+            matches!(r.state, ReplyState::Sending { since_unix, .. }
                 if now_unix.saturating_sub(since_unix) >= CONFIRM_TTL_SECS)
         })
         .map(|r| r.id.clone())
@@ -291,7 +319,19 @@ mod tests {
         assert_eq!(messages.len(), KEEP);
         assert_eq!(messages[0].body, "m3", "the oldest went first");
         std::fs::write(dir.join(SMS_FILE), "not json").unwrap();
-        assert!(read(&dir).is_empty(), "unreadable is empty, not an error");
+        assert!(
+            read(&dir).is_empty(),
+            "the app shows nothing for an unreadable file"
+        );
+        assert!(read_checked(&dir).is_err(), "but a writer is stopped");
+        assert!(
+            record(&dir, received("p", "+1", "new", 1), KEEP).is_err(),
+            "and does not save one text over a history it could not read"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(SMS_FILE)).unwrap(),
+            "not json"
+        );
     }
 
     #[test]
@@ -313,7 +353,10 @@ mod tests {
                 direction: Direction::Reply,
                 reply: Some(Reply {
                     id: request.id.clone(),
-                    state: ReplyState::Sending { since_unix: 20 },
+                    state: ReplyState::Sending {
+                        since_unix: 20,
+                        attempts: 1,
+                    },
                 }),
             },
             KEEP,

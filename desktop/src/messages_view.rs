@@ -292,7 +292,10 @@ mod tests {
             "not sent: no signal"
         );
         assert_eq!(
-            status_text(&ReplyState::Sending { since_unix: 1 }),
+            status_text(&ReplyState::Sending {
+                since_unix: 1,
+                attempts: 1
+            }),
             "sending…"
         );
     }
