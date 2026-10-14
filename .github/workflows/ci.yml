@@ -178,6 +178,11 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
+      # The instrumented tests need a device, so CI only compiles them.
+      - name: Compile instrumented tests
+        working-directory: android
+        run: ./gradlew assembleDebugAndroidTest --no-daemon
+
       - name: Android Lint
         working-directory: android
         run: ./gradlew lintDebug --no-daemon

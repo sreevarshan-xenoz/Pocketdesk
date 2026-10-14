@@ -6,6 +6,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -39,6 +41,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.pair.firstPairingCode
+import android.util.Log
+import android.util.Size
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import zxingcpp.BarcodeReader
@@ -99,8 +103,9 @@ private fun CameraPreview(onCode: (String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
-    // A code on a monitor: glare, moiré and a dark theme (inverted) are the
-    // hard cases, hence tryHarder and tryInvert.
+    // A code on a monitor: glare and moiré are the hard cases, hence
+    // tryHarder; tryInvert reads a code shown light-on-dark (a dark-themed
+    // page, or a screenshot of one).
     val reader = remember {
         BarcodeReader(
             BarcodeReader.Options(
@@ -113,9 +118,9 @@ private fun CameraPreview(onCode: (String) -> Unit) {
     }
     val delivered = remember { AtomicBoolean(false) }
     // The camera binds to the Activity, which outlives this screen: without
-    // an explicit unbind it stays on (and keeps analysing into a closed
-    // scanner) after the user leaves. `provider` is touched on the main thread
-    // only; the analyser also reads `disposed`.
+    // an explicit unbind it stays on (and keeps analysing) after the user
+    // leaves. `provider` is touched on the main thread only; the analyser
+    // also reads `disposed`.
     val camera = remember { CameraHold() }
     DisposableEffect(Unit) {
         onDispose {
@@ -135,18 +140,45 @@ private fun CameraPreview(onCode: (String) -> Unit) {
                 if (camera.disposed) return@addListener
                 val provider = providerFuture.get()
                 val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
+                // Not CameraX's default 640x480: a code on a monitor at arm's
+                // length needs a few pixels per module, and a large one (relay
+                // and address details) has small modules. Only the latest
+                // frame is kept, so a slower decode just skips frames.
                 val analysis = ImageAnalysis.Builder()
+                    .setResolutionSelector(
+                        ResolutionSelector.Builder()
+                            .setResolutionStrategy(
+                                // About 2 MP, at the sensor's usual 4:3: enough for
+                                // a code at arm's length, without decoding a 5 MP
+                                // frame every time.
+                                ResolutionStrategy(
+                                    Size(1920, 1440),
+                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
+                                ),
+                            )
+                            .build(),
+                    )
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                 analysis.setAnalyzer(analysisExecutor) { proxy ->
                     // read() leaves the frame open; it is closed here, always.
                     proxy.use { frame ->
                         if (delivered.get() || camera.disposed) return@use
-                        // A QR reads at any rotation, so the frame goes in as it is.
-                        val texts = runCatching { reader.read(frame) }.getOrDefault(emptyList()).map { it.text }
+                        // The reader applies the frame's rotation and crop itself.
+                        val texts = runCatching { reader.read(frame) }
+                            .onFailure { e ->
+                                if (camera.failureSaid.compareAndSet(false, true)) {
+                                    Log.w("QrScan", "decoding a frame failed", e)
+                                }
+                            }
+                            .getOrDefault(emptyList()).map { it.text }
                         val code = firstPairingCode(texts)
-                        if (code != null && delivered.compareAndSet(false, true)) {
-                            ContextCompat.getMainExecutor(ctx).execute { onCode(code) }
+                        // A frame read as the screen left must not reopen
+                        // the pairing prompt after Back.
+                        if (code != null && !camera.disposed && delivered.compareAndSet(false, true)) {
+                            ContextCompat.getMainExecutor(ctx).execute {
+                                if (!camera.disposed) onCode(code)
+                            }
                         }
                     }
                 }
@@ -167,5 +199,8 @@ private fun CameraPreview(onCode: (String) -> Unit) {
 /** The camera this screen bound, so it can let go of it. */
 private class CameraHold {
     @Volatile var disposed = false
+
+    /** The first decode failure is logged, not every frame's. */
+    val failureSaid = AtomicBoolean(false)
     var provider: ProcessCameraProvider? = null
 }

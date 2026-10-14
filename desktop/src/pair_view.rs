@@ -366,6 +366,8 @@ impl PairView {
 mod tests {
     use super::*;
     use pocketdesk_core::local::config::Config;
+    use pocketdesk_core::local::paths::CERT_FILE;
+    use pocketdesk_core::local::{identity, pin};
 
     /// The cross-language pairing link (core's `pair_link` fixture).
     const FIXTURE: &str = "pocketdesk://pair?v=1&name=Desk%20%26%20Co&id=d-1&a=192.168.1.5,100.80.1.2&cp=1716&sp=4716&pin=012345&fp=abababababababababababababababababababababababababababababababab&ep=eyJlbmRwb2ludElkIjoieCIsInJlbGF5VXJscyI6W10sImRpcmVjdEFkZHJzIjpbXX0";
@@ -398,8 +400,6 @@ mod tests {
             .replace("\r\n", "\n");
         assert_eq!(committed, text, "{path} is stale; regenerate it");
     }
-    use pocketdesk_core::local::paths::CERT_FILE;
-    use pocketdesk_core::local::{identity, pin};
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("pd-pair-{name}-{}", std::process::id()));

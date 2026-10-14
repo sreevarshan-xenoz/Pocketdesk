@@ -16,8 +16,11 @@ android {
         versionCode = 2
         versionName = "0.2.0"
         // The Rust bridge is built for arm64 only, so no other ABI can run
-        // the app; libraries' other ABIs would only add size.
-        ndk { abiFilters += "arm64-v8a" }
+        // the app; libraries' other ABIs would only add size. A build for an
+        // emulator names its ABIs: -Ppocketdesk.abis=arm64-v8a,x86_64.
+        ndk {
+            abiFilters += (findProperty("pocketdesk.abis") as String? ?: "arm64-v8a").split(",")
+        }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -81,8 +84,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     // R4 E6: foldable / large-screen posture (FoldingFeature) for the dual-pane layout.
     implementation("androidx.window:window:1.5.0")
-    // Pairing-code scanner: CameraX preview + ML Kit's bundled QR model
-    // (no Google Play services needed).
+    // Pairing-code scanner: CameraX preview.
     implementation("androidx.camera:camera-camera2:1.6.2")
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")

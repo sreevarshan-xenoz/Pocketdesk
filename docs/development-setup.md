@@ -116,8 +116,11 @@ Notes:
   `ANDROID_HOME`.
 - The generated `.so` under `jniLibs/` is gitignored (`*.so`) — every Android build
   must run step 1 first, or the APK will crash at `System.loadLibrary`.
-- Add more ABIs with extra `-t` flags (`x86_64-linux-android` target is installed for
-  emulator testing).
+- The APK holds only the ABIs the bridge is built for: arm64-v8a by default. For an
+  emulator, build the bridge with an extra `-t x86_64` and pass
+  `-Ppocketdesk.abis=arm64-v8a,x86_64` to Gradle.
+- `./gradlew connectedDebugAndroidTest` uninstalls the app when it ends, which wipes
+  the phone's pairings. Add `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`.
 
 The bridge now exposes the full client session/streaming/input API (ported from
 the Flutter-era `android/rust/src/api.rs`) via 34 `native*` JNI functions under
