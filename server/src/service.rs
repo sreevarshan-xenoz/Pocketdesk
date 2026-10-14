@@ -1469,6 +1469,99 @@ mod control_tls_tests {
         addr
     }
 
+    /// Counts the packets the connection handler dispatches to it.
+    struct Counting(Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::protocol::kdeconnect::Plugin for Counting {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+        fn incoming_capabilities(&self) -> &'static [&'static str] {
+            &["kdeconnect.ping"]
+        }
+        fn outgoing_capabilities(&self) -> &'static [&'static str] {
+            &[]
+        }
+        async fn handle_packet(
+            &self,
+            _packet: &NetworkPacket,
+            _sender: &dyn pocketdesk_core::protocol::kdeconnect::DeviceSender,
+        ) -> pocketdesk_core::error::Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// A control port served by the real handler with one counting plugin.
+    async fn counting_port(
+        pairing_required: bool,
+    ) -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+        // The gates read a throwaway state folder, never the user's.
+        pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let desktop = CertManager::new().unwrap();
+        let tls = tokio_rustls::TlsAcceptor::from(desktop.control_server_config().unwrap());
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut registry = pocketdesk_core::protocol::kdeconnect::PluginRegistry::default();
+        registry.register(Counting(count.clone()));
+        let registry = Arc::new(registry);
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let tls = tls.clone();
+                let registry = registry.clone();
+                tokio::spawn(async move {
+                    let _ = handle_connection_with_kde(
+                        stream,
+                        tls,
+                        None,
+                        &registry,
+                        None,
+                        None,
+                        pairing_required,
+                    )
+                    .await;
+                });
+            }
+        });
+        (addr, count)
+    }
+
+    /// Connect as a new phone and send one ping; the dispatch count after.
+    async fn ping(addr: std::net::SocketAddr, count: &std::sync::atomic::AtomicUsize) -> usize {
+        let phone = CertManager::new().unwrap();
+        let identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
+            format!("gate-test-{}", uuid::Uuid::new_v4()),
+            "Gate Test Phone",
+        );
+        let mut stream =
+            ConnectionManager::new(Duration::from_secs(5), phone.control_client_config())
+                .connect(&addr.ip().to_string(), addr.port(), &identity)
+                .await
+                .expect("the control channel over TLS");
+        let mut line = NetworkPacket::new("kdeconnect.ping").to_wire().unwrap();
+        if !line.ends_with(b"\n") {
+            line.push(b'\n');
+        }
+        stream.write_all(&line).await.unwrap();
+        stream.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn an_unpaired_phones_packets_are_never_dispatched() {
+        let (addr, count) = counting_port(true).await;
+        assert_eq!(ping(addr, &count).await, 0, "refused before any plugin");
+        // The same packet with pairing off reaches the plugin: the refusal
+        // above is the gate, not a test that cannot see dispatches.
+        let (open_addr, open_count) = counting_port(false).await;
+        assert_eq!(ping(open_addr, &open_count).await, 1);
+    }
+
     #[tokio::test]
     async fn a_client_without_tls_is_told_and_dropped() {
         let addr = control_port().await;
