@@ -10,6 +10,8 @@ pub const PIN_FILE: &str = "pairing.pin";
 pub const TRUST_FILE: &str = "trusted_devices.json";
 pub const LIVE_FILE: &str = "live_sessions.json";
 pub const KICK_FILE: &str = "kick";
+/// Requests from the desktop app to hand input control to a session (N7).
+pub const CONTROL_DIR: &str = "control";
 pub const ENDPOINT_FILE: &str = "endpoint.json";
 pub const LOG_DIR: &str = "logs";
 pub const CERT_FILE: &str = "certs/identity.der";

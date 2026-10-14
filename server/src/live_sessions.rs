@@ -48,10 +48,12 @@ pub fn parse_kick_file(raw: &str, now_unix: u64) -> Option<String> {
 
 /// Serialize the registry snapshot in the mirror format the CLI's `status`
 /// and the desktop app read.
-pub fn render_json(live: &[LiveSession], now_unix: u64) -> String {
+pub fn render_json(live: &[LiveSession], driver: Option<u64>, now_unix: u64) -> String {
     let sessions: Vec<MirrorSession> = live
         .iter()
         .map(|s| MirrorSession {
+            id: s.id,
+            driving: driver == Some(s.id),
             device_id: s.device_id.clone(),
             peer: s.peer.to_string(),
             transport: if s.lan { "lan" } else { "wan" }.to_string(),
@@ -71,6 +73,21 @@ fn write_live_json(json: &str) -> anyhow::Result<()> {
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, &path)?;
     Ok(())
+}
+
+/// The phones in a session (session id, device id) and the driver, as
+/// last told to them.
+type Told = (Vec<(u64, String)>, Option<u64>);
+
+/// Tell each phone in a session who drives now (N7), on its control
+/// connection.
+async fn tell_phones(sessions: &[(u64, String)], driver: Option<u64>) {
+    let clients = crate::state::clone_clients().await;
+    for (device, packet) in crate::driving::control_bodies(sessions, driver) {
+        if let Some(client) = clients.iter().find(|c| c.device_id() == device) {
+            let _ = client.send_packet(&packet).await;
+        }
+    }
 }
 
 /// "phone is watching this desktop" — desktop notification, log fallback
@@ -99,6 +116,8 @@ fn notify_session_started(session: &LiveSession) {
 pub async fn run_watcher() {
     let mut prev_ids: Vec<u64> = Vec::new();
     let mut prev_json = String::new();
+    // What the phones were last told about who drives (roadmap N7).
+    let mut told: Option<Told> = None;
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let now = std::time::SystemTime::now()
@@ -132,6 +151,25 @@ pub async fn run_watcher() {
 
         // 2. Consent notification for sessions that appeared since last tick.
         let live = pocketdesk_core::streaming::sessions::list();
+        let live_ids: Vec<u64> = live.iter().map(|s| s.id).collect();
+
+        // N7: the desktop app hands control to a session.
+        if let Ok(dir) = crate::state::state_dir() {
+            for session in shared::take_control_requests(&dir, now) {
+                if live_ids.contains(&session) && crate::driving::give(session) {
+                    tracing::info!(session, "Input control handed over by the desktop");
+                }
+            }
+        }
+        let driver = crate::driving::driver(&live_ids);
+        let in_sessions: Vec<(u64, String)> = live
+            .iter()
+            .filter_map(|s| s.device_id.clone().map(|d| (s.id, d)))
+            .collect();
+        if told.as_ref() != Some(&(in_sessions.clone(), driver)) {
+            tell_phones(&in_sessions, driver).await;
+            told = Some((in_sessions, driver));
+        }
         let ids: Vec<u64> = live.iter().map(|s| s.id).collect();
         for s in &live {
             if !prev_ids.contains(&s.id) {
@@ -141,7 +179,7 @@ pub async fn run_watcher() {
         prev_ids = ids;
 
         // 3. Mirror for `pocketdesk status`, rewritten only on change.
-        let json = render_json(&live, now);
+        let json = render_json(&live, driver, now);
         if json != prev_json {
             if let Err(e) = write_live_json(&json) {
                 tracing::warn!(error = %e, "Failed to mirror live sessions file");
@@ -216,7 +254,7 @@ mod tests {
             session(Some("abcdef0123456789"), true),
             session(None, false),
         ];
-        let json = render_json(&live, 1_030);
+        let json = render_json(&live, None, 1_030);
         let lines = format_status_lines(&json, 1_030).expect("parseable");
         assert_eq!(lines.len(), 2);
         assert!(lines[0].starts_with("abcdef012345…"));

@@ -27,9 +27,8 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAd
 use iroh_mainline_address_lookup::DhtAddressLookup;
 use pocketdesk_core::local::config::DhtPublish;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
-use pocketdesk_core::streaming::input_packet::InputPacket;
 use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
-use pocketdesk_core::streaming::{IrohConnection, StreamingConfig, StreamingServer};
+use pocketdesk_core::streaming::{IrohConnection, SessionInput, StreamingConfig, StreamingServer};
 use tokio::sync::broadcast;
 
 /// Packet type carrying the server's WAN identity to registered clients.
@@ -545,7 +544,7 @@ pub struct WanSettings {
 /// closed.
 pub async fn spawn_wan_endpoint(
     config: StreamingConfig,
-    input_tx: broadcast::Sender<InputPacket>,
+    input_tx: broadcast::Sender<SessionInput>,
     cert_manager: Arc<CertManager>,
     settings: WanSettings,
 ) -> Result<Endpoint> {

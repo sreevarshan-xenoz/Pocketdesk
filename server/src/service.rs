@@ -131,6 +131,7 @@ pub async fn run(config: Config) -> Result<()> {
     );
     crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
     crate::wake_info::configure(config.wake_announce, config.wake_port);
+    crate::driving::configure(config.input_control, config.input_idle_secs);
     let announcement = if config.lan_discovery {
         Some(lan_discovery.register_service(
             &host_name,
@@ -289,7 +290,8 @@ pub async fn run(config: Config) -> Result<()> {
     hypr_events::start_windows_hud();
 
     // Input injection channel shared between v1 and v2
-    let (input_tx, mut input_rx) = tokio::sync::broadcast::channel::<InputPacket>(16);
+    let (input_tx, mut input_rx) =
+        tokio::sync::broadcast::channel::<pocketdesk_core::streaming::SessionInput>(16);
     let streaming_config = config.video_quality.to_streaming_config();
 
     // R1 stage 3: WAN (iroh) endpoint alongside the quinn LAN listener.
@@ -352,12 +354,45 @@ pub async fn run(config: Config) -> Result<()> {
             }
         };
 
+        // Each phone's gamepad buttons, so one phone's snapshot never
+        // releases another's (roadmap N7).
+        let mut gamepads: std::collections::HashMap<u64, u16> = std::collections::HashMap::new();
+        let mut last_session: Option<u64> = None;
         loop {
             match input_rx.recv().await {
-                Ok(packet) => {
+                Ok((session, packet)) => {
+                    let live: Vec<u64> = pocketdesk_core::streaming::sessions::list()
+                        .iter()
+                        .map(|s| s.id)
+                        .collect();
+                    gamepads.retain(|id, _| live.contains(id));
+                    if let pocketdesk_core::input::control::Admit::No { driver } =
+                        crate::driving::admit(session, &live)
+                    {
+                        tracing::trace!(session, driver, "Input dropped: another phone drives");
+                        continue;
+                    }
+                    // Control moved: let go of what the last phone's gamepad held.
+                    if let Some(previous) = last_session.filter(|p| *p != session)
+                        && let Some(held) = gamepads.get_mut(&previous).filter(|h| **h != 0)
+                    {
+                        let saved = injector.swap_gamepad_buttons(*held);
+                        let _ = handle_input_packet(
+                            &mut injector,
+                            InputPacket::Gamepad {
+                                axes: [0; 6],
+                                buttons: 0,
+                            },
+                        );
+                        *held = injector.swap_gamepad_buttons(saved);
+                    }
+                    last_session = Some(session);
+                    let state = gamepads.entry(session).or_insert(0);
+                    let saved = injector.swap_gamepad_buttons(*state);
                     if let Err(e) = handle_input_packet(&mut injector, packet) {
                         tracing::warn!("Input injection error: {e}");
                     }
+                    *state = injector.swap_gamepad_buttons(saved);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!("Input injection lagged by {n} messages, dropped oldest");
