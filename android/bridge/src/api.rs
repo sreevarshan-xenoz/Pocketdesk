@@ -501,6 +501,14 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                         pkt.source.as_deref().unwrap_or("desktop"),
                                     );
                                 }
+                                // A reply the desktop asks us to text (N5b):
+                                // latched for the app to send.
+                                if trimmed.contains("kdeconnect.sms.request")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == "kdeconnect.sms.request"
+                                {
+                                    crate::queue_sms_request(&pkt.body);
+                                }
                                 // A file the desktop's owner sent us (F7b):
                                 // latched for the session to download.
                                 if trimmed.contains("file_offer")
@@ -763,6 +771,43 @@ pub fn take_pending_notifications() -> String {
         std::mem::take(&mut *q)
     };
     serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Drain the replies the desktop asked this phone to text (N5b), as a JSON
+/// array of `{id, address, body}`.
+pub fn take_sms_requests() -> String {
+    let drained = {
+        let mut q = crate::PENDING_SMS_REQUESTS.lock().expect("sms queue");
+        std::mem::take(&mut *q)
+    };
+    serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// The packets the app may send through [`send_phone_packet`]: its texts
+/// and the results of the replies it sent (N5b).
+const PHONE_PACKETS: [&str; 2] = ["kdeconnect.sms.messages", "kdeconnect.pocketdesk.sms_sent"];
+
+/// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
+pub async fn send_phone_packet(
+    address: String,
+    port: u16,
+    packet_type: String,
+    body: String,
+) -> Result<(), String> {
+    if !PHONE_PACKETS.contains(&packet_type.as_str()) {
+        return Err(format!("{packet_type} is not sent this way"));
+    }
+    let body: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Invalid {packet_type}: {e}"))?;
+    if !body.is_object() {
+        return Err(format!("Invalid {packet_type}: not an object"));
+    }
+    push_packet(
+        &address,
+        port,
+        &NetworkPacket::new(packet_type).with_body(body),
+    )
+    .await
 }
 
 /// Reply to a desktop notification (R3 Tier-2 #11c) over the control
@@ -3617,5 +3662,44 @@ mod notification_body_tests {
         assert!(notification_body(r#"{"app":"Chat"}"#).is_err(), "no id");
         assert!(notification_body("[1]").is_err());
         assert!(notification_body("not json").is_err());
+    }
+}
+
+#[cfg(test)]
+mod sms_tests {
+    #[test]
+    fn a_reply_request_is_queued_once_and_drained() {
+        let _ = super::take_sms_requests();
+        let request = serde_json::json!({"id": "r1", "address": "+1", "body": "hi"});
+        crate::queue_sms_request(&request);
+        crate::queue_sms_request(&request);
+        crate::queue_sms_request(&serde_json::json!({"id": "r2", "address": "+1"}));
+        let drained: Vec<serde_json::Value> =
+            serde_json::from_str(&super::take_sms_requests()).unwrap();
+        assert_eq!(
+            drained,
+            vec![request],
+            "one per id, and only whole requests"
+        );
+        assert_eq!(super::take_sms_requests(), "[]");
+    }
+
+    #[test]
+    fn only_the_phones_own_packets_go_out_this_way() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let refused = runtime.block_on(super::send_phone_packet(
+            "127.0.0.1".into(),
+            9,
+            "kdeconnect.pocketdesk.exec".into(),
+            "{}".into(),
+        ));
+        assert!(refused.unwrap_err().contains("not sent this way"));
+        let bad = runtime.block_on(super::send_phone_packet(
+            "127.0.0.1".into(),
+            9,
+            "kdeconnect.sms.messages".into(),
+            "[1]".into(),
+        ));
+        assert!(bad.unwrap_err().contains("not an object"));
     }
 }

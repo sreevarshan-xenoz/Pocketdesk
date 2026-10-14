@@ -192,6 +192,33 @@ pub(crate) fn queue_notification(body: &serde_json::Value, source: &str) {
     }
 }
 
+/// Replies the desktop asked this phone to send as texts (N5b
+/// `kdeconnect.sms.request`), waiting for the app. Bounded; drained by
+/// `take_sms_requests`.
+pub(crate) static PENDING_SMS_REQUESTS: LazyLock<std::sync::Mutex<Vec<serde_json::Value>>> =
+    LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+
+/// Queue one `kdeconnect.sms.request` body: `{id, address, body}`, all
+/// strings, or it is dropped. One per id.
+pub(crate) fn queue_sms_request(body: &serde_json::Value) {
+    let field = |key: &str| body.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    let (Some(id), Some(address), Some(text)) = (field("id"), field("address"), field("body"))
+    else {
+        return;
+    };
+    let mut q = PENDING_SMS_REQUESTS.lock().expect("sms queue");
+    if q.iter()
+        .any(|r| r.get("id").and_then(|v| v.as_str()) == Some(id.as_str()))
+    {
+        return;
+    }
+    q.push(serde_json::json!({ "id": id, "address": address, "body": text }));
+    const MAX_QUEUED: usize = 50;
+    if q.len() > MAX_QUEUED {
+        q.remove(0);
+    }
+}
+
 /// Files the desktop offered (F7b `file_offer`), waiting for the session
 /// to start their download. Bounded; drained by [`take_file_offers_json`].
 pub(crate) static PENDING_OFFERS: LazyLock<std::sync::Mutex<Vec<serde_json::Value>>> =
