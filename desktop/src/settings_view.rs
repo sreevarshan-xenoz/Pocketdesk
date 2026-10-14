@@ -3,7 +3,9 @@
 use std::path::Path;
 
 use eframe::egui::{self, Color32, RichText};
-use pocketdesk_core::local::config::{Config, ConfigError, DhtPublish, relay_url_problem};
+use pocketdesk_core::local::config::{
+    Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
+};
 use pocketdesk_core::local::wake::WakeFacts;
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
@@ -72,6 +74,9 @@ impl SettingsForm {
                 "The outside wake port must differ from the streaming port, so the two router forwards do not clash."
                     .to_string(),
             );
+        }
+        if !(3..=120).contains(&self.edited.input_idle_secs) {
+            problems.push("Control is handed back after 3 to 120 seconds.".to_string());
         }
         for url in &self.edited.relay_urls {
             if let Some(problem) = relay_url_problem(url) {
@@ -241,6 +246,27 @@ impl SettingsForm {
                     );
                 });
                 ui.end_row();
+                ui.label("Several phones");
+                egui::ComboBox::from_id_salt("input-control")
+                    .selected_text(input_control_label(e.input_control))
+                    .show_ui(ui, |ui| {
+                        for mode in [InputControlMode::One, InputControlMode::Shared] {
+                            ui.selectable_value(
+                                &mut e.input_control,
+                                mode,
+                                input_control_label(mode),
+                            );
+                        }
+                    });
+                ui.end_row();
+                ui.label("Hand control back after");
+                ui.add_enabled(
+                    e.input_control == InputControlMode::One,
+                    egui::DragValue::new(&mut e.input_idle_secs)
+                        .range(3..=120)
+                        .suffix(" s without input"),
+                );
+                ui.end_row();
                 if cfg!(windows) {
                     ui.label("Phone mic plays into");
                     ui.add(
@@ -269,6 +295,14 @@ impl SettingsForm {
             }
         });
         save
+    }
+}
+
+/// How the several-phones choice reads in the form.
+fn input_control_label(mode: InputControlMode) -> &'static str {
+    match mode {
+        InputControlMode::One => "one phone drives at a time",
+        InputControlMode::Shared => "every phone drives",
     }
 }
 
@@ -336,6 +370,15 @@ mod tests {
         form.edited.control_port = 1;
         assert!(form.save_to(&path).is_err(), "an invalid form is not saved");
         assert!(!Config::load_from(&path).unwrap().control_port.eq(&1));
+    }
+
+    #[test]
+    fn the_hand_back_time_is_3_to_120_seconds() {
+        let mut form = SettingsForm::from_config(Config::default());
+        form.edited.input_idle_secs = 2;
+        assert!(form.problems().iter().any(|p| p.contains("3 to 120")));
+        form.edited.input_idle_secs = 120;
+        assert!(form.problems().is_empty());
     }
 
     #[test]
