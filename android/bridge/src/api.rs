@@ -422,6 +422,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
     // first connection is still up would tear down a working control session
     // and re-register the same device_id, which the server reads as a
     // reconnect storm. Reuse what is already connected.
+    let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
     {
         // Locked in the same order as the control reader (writer, then peer) so
         // the two can never dead-lock against each other.
@@ -460,9 +461,12 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
             Ok(stream) => {
                 let (reader, writer) = tokio::io::split(stream);
                 let writer_arc = Arc::new(Mutex::new(writer));
-                {
-                    let mut writer_guard = (*CONTROL_WRITER).lock().await;
-                    *writer_guard = Some(writer_arc.clone());
+                let replaced = (*CONTROL_WRITER).lock().await.replace(writer_arc.clone());
+                // A connection this one replaces (to another computer, or one
+                // the check above found dead) is closed, so its reader ends
+                // instead of holding the socket and a server slot.
+                if let Some(old) = replaced {
+                    let _ = old.lock().await.shutdown().await;
                 }
                 *crate::CONTROL_PEER.lock().await = Some((address.clone(), port));
 
