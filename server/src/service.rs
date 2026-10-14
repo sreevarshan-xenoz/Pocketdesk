@@ -130,6 +130,7 @@ pub async fn run(config: Config) -> Result<()> {
         config.notifications_per_minute,
     );
     crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
+    crate::wake_info::configure(config.wake_announce, config.wake_port);
     let announcement = if config.lan_discovery {
         Some(lan_discovery.register_service(
             &host_name,
@@ -715,6 +716,7 @@ async fn seed_desktop_state(
     sender: &Arc<dyn DeviceSender>,
     hypr_ipc: Option<&HyprlandIpc>,
     wan_endpoint: Option<&iroh::Endpoint>,
+    local: Option<std::net::IpAddr>,
 ) {
     // Workspace HUD with the current compositor state (R3#8)
     if let Some(ipc) = hypr_ipc {
@@ -727,6 +729,14 @@ async fn seed_desktop_state(
     // WAN identity so the phone can cache it for iroh dialing (R1 stage 3)
     if let Some(endpoint) = wan_endpoint {
         iroh_endpoint::push_endpoint_to(sender, endpoint).await;
+    }
+    // How to wake this computer, for the adapter the phone reached (N6).
+    let wake = tokio::task::spawn_blocking(move || crate::wake_info::packet_for_connection(local))
+        .await
+        .ok()
+        .flatten();
+    if let Some(packet) = wake {
+        let _ = sender.send_packet(&packet).await;
     }
 }
 
@@ -795,6 +805,7 @@ async fn handle_connection_with_kde(
     use tracing::Instrument;
 
     let peer_addr = stream.peer_addr().ok();
+    let local_ip = stream.local_addr().ok().map(|a| a.ip());
     let conn_id = uuid::Uuid::new_v4().to_string();
     let session_id = uuid::Uuid::new_v4().to_string(); // In v1, session == connection for now
 
@@ -953,7 +964,7 @@ async fn handle_connection_with_kde(
         // than waiting for the periodic pushes.
         let mut seeded = false;
         if state::may_receive_pushes(&*sender) {
-            seed_desktop_state(&sender, hypr_ipc, wan_endpoint).await;
+            seed_desktop_state(&sender, hypr_ipc, wan_endpoint, local_ip).await;
             seeded = true;
         }
 
@@ -1031,7 +1042,7 @@ async fn handle_connection_with_kde(
                                 tracing::info!(
                                     "Peer paired on this connection; seeding desktop state"
                                 );
-                                seed_desktop_state(&sender, hypr_ipc, wan_endpoint).await;
+                                seed_desktop_state(&sender, hypr_ipc, wan_endpoint, local_ip).await;
                                 seeded = true;
                             }
                         }
