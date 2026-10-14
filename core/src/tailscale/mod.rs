@@ -299,17 +299,26 @@ impl TailscaleClient {
             });
         }
 
-        // If all methods failed (common on Android without root),
-        // return empty peers gracefully instead of failing hard.
-        tracing::warn!(
-            "Tailscale peer discovery unavailable on this platform; returning empty peers"
-        );
+        // If all methods failed (no tailscale CLI or daemon here, or Android
+        // without root), return empty peers gracefully instead of failing
+        // hard. Said once: discovery polls every few seconds.
+        if first_time(&NO_TAILSCALE_SAID) {
+            tracing::info!("Tailscale is not reachable here, so no tailnet peers are listed");
+        }
         Ok(TailscaleStatus {
             backend_state: Some("Running".to_string()),
             self_node: None,
             peer: HashMap::new(),
         })
     }
+}
+
+/// Whether "no Tailscale here" was already said this run.
+static NO_TAILSCALE_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True the first time it is called with `flag`, false after.
+fn first_time(flag: &std::sync::atomic::AtomicBool) -> bool {
+    !flag.swap(true, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Debug, Deserialize)]
@@ -348,6 +357,14 @@ struct StatusPeer {
 #[cfg(test)]
 mod status_json_tests {
     use super::*;
+
+    #[test]
+    fn a_missing_tailscale_is_said_once() {
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        assert!(first_time(&flag));
+        assert!(!first_time(&flag));
+        assert!(!first_time(&flag));
+    }
 
     /// The shape `tailscale status --json` has while the daemon is stopped
     /// (fields trimmed): empty lists come out as `null`. Parsing it used to
