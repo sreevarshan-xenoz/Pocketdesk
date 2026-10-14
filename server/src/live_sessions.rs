@@ -97,6 +97,17 @@ pub fn untrusted_sessions(
         .collect()
 }
 
+/// Phones are told again this often even when nothing changed: a phone
+/// whose control connection reconnected mid-session, or whose last push was
+/// lost, learns who drives within this long.
+const RETELL: Duration = Duration::from_secs(5);
+
+/// Whether to tell the phones who drives: on any change, and every
+/// [`RETELL`] while phones are in sessions.
+fn retell(told: Option<&Told>, current: &Told, since: Duration) -> bool {
+    told != Some(current) || (!current.0.is_empty() && since >= RETELL)
+}
+
 /// Tell each phone in a session who drives now (N7), on its control
 /// connection.
 async fn tell_phones(sessions: &[(u64, String)], driver: Option<u64>) {
@@ -136,6 +147,7 @@ pub async fn run_watcher() {
     let mut prev_json = String::new();
     // What the phones were last told about who drives (roadmap N7).
     let mut told: Option<Told> = None;
+    let mut told_at = std::time::Instant::now();
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let now = std::time::SystemTime::now()
@@ -197,7 +209,9 @@ pub async fn run_watcher() {
             .iter()
             .filter_map(|s| s.device_id.clone().map(|d| (s.id, d)))
             .collect();
-        if told.as_ref() != Some(&(in_sessions.clone(), driver)) {
+        let current = (in_sessions.clone(), driver);
+        if retell(told.as_ref(), &current, told_at.elapsed()) {
+            told_at = std::time::Instant::now();
             tell_phones(&in_sessions, driver).await;
             told = Some((in_sessions, driver));
         }
@@ -251,6 +265,21 @@ mod tests {
     use super::*;
     use pocketdesk_core::streaming::sessions::LiveSession;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    #[test]
+    fn phones_are_told_on_a_change_and_again_every_few_seconds() {
+        let phones: Told = (vec![(1, "phone-a".to_string())], Some(1));
+        let none: Told = (Vec::new(), None);
+        assert!(retell(None, &phones, Duration::ZERO), "first time");
+        assert!(!retell(Some(&phones), &phones, Duration::from_secs(1)));
+        assert!(
+            retell(Some(&phones), &phones, RETELL),
+            "again after a while"
+        );
+        let moved: Told = (vec![(1, "phone-a".to_string())], None);
+        assert!(retell(Some(&phones), &moved, Duration::ZERO), "on a change");
+        assert!(!retell(Some(&none), &none, RETELL), "no one to tell");
+    }
 
     #[test]
     fn a_session_whose_phone_is_no_longer_paired_is_ended() {
