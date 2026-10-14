@@ -192,6 +192,12 @@ class SmsSentReceiver : BroadcastReceiver() {
                 SmsManager.RESULT_ERROR_RADIO_OFF -> "the phone's mobile radio is off"
                 SmsManager.RESULT_ERROR_NULL_PDU -> "the phone could not encode the text"
                 SmsManager.RESULT_ERROR_GENERIC_FAILURE -> "the phone could not send it"
+                SmsManager.RESULT_ERROR_LIMIT_EXCEEDED -> "the phone has sent too many texts for now"
+                SmsManager.RESULT_ERROR_SHORT_CODE_NOT_ALLOWED,
+                SmsManager.RESULT_ERROR_SHORT_CODE_NEVER_ALLOWED,
+                -> "the phone does not allow texts to that short number"
+                SmsManager.RESULT_RADIO_NOT_AVAILABLE -> "the phone's mobile radio is not available"
+                SmsManager.RESULT_NO_DEFAULT_SMS_APP -> "the phone has no SIM chosen for texts"
                 else -> "the phone could not send it (error $code)"
             }
     }
