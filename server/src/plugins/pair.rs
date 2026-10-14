@@ -1363,11 +1363,16 @@ forged log line"
             "kdeconnect.notification.request",
             "kdeconnect.pocketdesk.monitors",
             "kdeconnect.pocketdesk.windows",
-            "kdeconnect.pocketdesk.wol",
             "kdeconnect.findmydevice",
             "kdeconnect.mousepad.echo",
             "kdeconnect.filebrowse.response",
         ];
+        for packet_type in ALWAYS_ALLOWED {
+            assert!(
+                capability_for(packet_type).is_none(),
+                "{packet_type} is gated, so it does not belong in the list"
+            );
+        }
         let (incoming, _) = crate::plugins::register_all().capability_sets();
         for packet_type in incoming {
             assert!(
