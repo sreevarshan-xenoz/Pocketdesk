@@ -60,7 +60,7 @@ The flow is the same for a phone-to-desktop share, a desktop-to-phone download o
    - The phone's server accepts only the desktop certificate pinned for that address (`transfer_server_config(desktop)`).
    - The ALPN must be `pocketdesk-transfer/1` on both ends.
    - A phone whose key is not bound gets no transfer (`transfer_tls` → `pair::may_transfer`).
-4. **Inside TLS.** The key is sent, then the size, then the bytes. The receiver ends with one status byte: `1` for saved, `0` for failed (`share.rs`, `STATUS_SAVED`/`STATUS_FAILED`). It then sends TLS close_notify and reads what is still in flight before closing, so a reset cannot overtake the status byte (`share.rs` `send_status`, `download.rs`).
+4. **Inside TLS.** The key is sent, then the size, then the bytes. The receiver ends with one status byte: `1` for saved, `0` for failed (`share.rs`, `STATUS_SAVED`/`STATUS_FAILED`). It then sends TLS close_notify and, after a save, reads what is still in flight before closing (within the transfer's deadline), so a reset cannot overtake the status byte (`share.rs` `send_status`, `download.rs`).
 5. **Limits.** Each connect and each TLS handshake has 10 s, and the stream may sit idle 30 s. The minimum rate is 32 KiB/s, files are at most 8 GiB and clipboard images at most 32 MiB. Transfers take four slots on the desktop, two per phone (§6).
 
 Text clipboard does not use this path. It rides the control channel (`core/src/protocol/clipboard.rs`).

@@ -386,15 +386,19 @@ where
     .await;
     let status = if received.is_ok() { 1 } else { 0 };
     // Flushed: inside TLS the byte otherwise waits in the session's buffer.
-    // Then close_notify, and what the desktop still has in flight is read
-    // and dropped: a socket closed with unread data is reset, and the reset
-    // can reach the desktop before the status byte does.
+    // Then close_notify, and after a save what the desktop still has in
+    // flight is read and dropped: a socket closed with unread data is reset,
+    // and the reset can reach the desktop before the status byte does. Not
+    // after a failure, which can stop with the desktop's bytes still coming;
+    // a lost "failed" byte reads as failed anyway.
     let _ = tokio::time::timeout(Duration::from_secs(5), async {
         stream.write_all(&[status]).await?;
         stream.flush().await?;
         stream.shutdown().await?;
-        let mut sink = [0u8; 512];
-        while stream.read(&mut sink).await? > 0 {}
+        if status == 1 {
+            let mut sink = [0u8; 512];
+            while stream.read(&mut sink).await? > 0 {}
+        }
         Ok::<_, std::io::Error>(())
     })
     .await;

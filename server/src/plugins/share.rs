@@ -871,8 +871,13 @@ where
     stream.write_all(&[status]).await?;
     stream.flush().await?;
     stream.shutdown().await?;
-    let mut sink = [0u8; 512];
-    while stream.read(&mut sink).await? > 0 {}
+    // Only after a save: a failed transfer can stop with the sender's bytes
+    // still coming, and reading them would hold the slot until the deadline.
+    // A lost "failed" byte reads as failed anyway.
+    if status == STATUS_SAVED {
+        let mut sink = [0u8; 512];
+        while stream.read(&mut sink).await? > 0 {}
+    }
     Ok(())
 }
 
