@@ -83,6 +83,20 @@ pub fn markup_escaped(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Show a phone's notification (N5a) as a toast tagged `tag`, so
+/// [`remove_tagged`] can take it back (N5c). Windows only; Linux shows and
+/// closes them over D-Bus in the notification plugin.
+#[cfg(windows)]
+pub fn notify_tagged(summary: &str, body: &str, tag: &str) -> bool {
+    windows::notify_tagged(summary, body, tag)
+}
+
+/// Take back the toast [`notify_tagged`] showed with `tag`.
+#[cfg(windows)]
+pub fn remove_tagged(tag: &str) {
+    windows::remove_tagged(tag)
+}
+
 /// Why the server is shutting down.
 pub type ShutdownReason = &'static str;
 

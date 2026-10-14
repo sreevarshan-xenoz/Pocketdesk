@@ -50,10 +50,12 @@ class NotificationForwardRule(private val ownPackage: String) {
         return Outgoing(note.key, note.appLabel, title, text, note.clearable)
     }
 
-    /** The notification is gone, or its send failed: the same key posted again is sent again. */
-    fun removed(key: String) {
-        sent.remove(key)
-    }
+    /**
+     * The notification is gone, or its send failed: the same key posted
+     * again is sent again. Returns whether it had been sent, so the desktop
+     * is told to close only notifications it was shown (N5c).
+     */
+    fun removed(key: String): Boolean = sent.remove(key) != null
 
     private fun shown(note: PostedNote): Pair<String, String>? {
         if (note.visibility == VISIBILITY_PRIVATE) {

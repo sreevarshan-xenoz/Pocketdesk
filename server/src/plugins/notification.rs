@@ -48,6 +48,54 @@ fn flood_guard() -> &'static Mutex<FloodGuard> {
     GUARD.get_or_init(Default::default)
 }
 
+/// How a phone's notification is known on this desktop (N5c): 16 hex digits
+/// of the SHA-256 of the phone's id and the notification's, so one phone's
+/// cancel can never close another's.
+fn tag_for(phone: &str, id: &str) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, format!("{phone}\n{id}").as_bytes());
+    digest.as_ref()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Linux: the D-Bus ids of the phone notifications shown, by tag, the newest
+/// [`MAX_SHOWN`], so an update replaces its notification and a cancel can
+/// close it. Built on every OS so it is tested everywhere.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const MAX_SHOWN: usize = 500;
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn shown_ids() -> &'static Mutex<std::collections::VecDeque<(String, u32)>> {
+    static SHOWN: std::sync::OnceLock<Mutex<std::collections::VecDeque<(String, u32)>>> =
+        std::sync::OnceLock::new();
+    SHOWN.get_or_init(Default::default)
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn remember_shown(tag: &str, dbus_id: u32) {
+    let mut shown = shown_ids().lock().unwrap_or_else(|e| e.into_inner());
+    shown.retain(|(t, _)| t != tag);
+    shown.push_back((tag.to_string(), dbus_id));
+    while shown.len() > MAX_SHOWN {
+        shown.pop_front();
+    }
+}
+
+/// The D-Bus id `tag` was shown with, if it is still remembered.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn shown_id(tag: &str) -> Option<u32> {
+    let shown = shown_ids().lock().unwrap_or_else(|e| e.into_inner());
+    shown.iter().find(|(t, _)| t == tag).map(|(_, id)| *id)
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn take_shown(tag: &str) -> Option<u32> {
+    let mut shown = shown_ids().lock().unwrap_or_else(|e| e.into_inner());
+    let at = shown.iter().position(|(t, _)| t == tag)?;
+    shown.remove(at).map(|(_, id)| id)
+}
+
 /// The longest app name, title and text shown, in characters.
 const MAX_APP: usize = 64;
 const MAX_TITLE: usize = 200;
@@ -131,6 +179,17 @@ impl Plugin for NotificationPlugin {
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         match packet.packet_type.as_str() {
             "kdeconnect.notification" => {
+                let id = packet.body.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                // A notification without an id cannot be closed or updated
+                // later, and is shown untagged so it never replaces another.
+                let tag = (!id.is_empty()).then(|| tag_for(sender.device_id(), id));
+                if packet.body.get("isCancel").and_then(|v| v.as_bool()) == Some(true) {
+                    // Closed on the phone (N5c): close it here too.
+                    if let Some(tag) = &tag {
+                        close_desktop_notification(tag).await;
+                    }
+                    return Ok(());
+                }
                 let Some((app, title, text)) = to_show(&packet.body) else {
                     return Ok(());
                 };
@@ -138,7 +197,10 @@ impl Plugin for NotificationPlugin {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .admit(sender.device_id(), Instant::now());
-                if admitted && let Err(e) = show_desktop_notification(&app, &title, &text).await {
+                if admitted
+                    && let Err(e) =
+                        show_desktop_notification(tag.as_deref(), &app, &title, &text).await
+                {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
             }
@@ -153,17 +215,15 @@ impl Plugin for NotificationPlugin {
     }
 }
 
-/// Send a desktop notification via D-Bus (native, no external binary).
+/// The session bus's notification server.
 #[cfg(target_os = "linux")]
-async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
-    use zbus::Connection;
-
-    let conn = Connection::session().await.map_err(|e| {
+async fn notifications_proxy() -> Result<zbus::Proxy<'static>> {
+    let conn = zbus::Connection::session().await.map_err(|e| {
         pocketdesk_core::error::PocketdeskError::Other {
             detail: format!("D-Bus session failed: {e}"),
         }
     })?;
-    let proxy = zbus::Proxy::new(
+    zbus::Proxy::new(
         &conn,
         "org.freedesktop.Notifications",
         "/org/freedesktop/Notifications",
@@ -172,8 +232,15 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
     .await
     .map_err(|e| pocketdesk_core::error::PocketdeskError::Other {
         detail: format!("D-Bus proxy failed: {e}"),
-    })?;
+    })
+}
 
+/// Send a desktop notification via D-Bus (native, no external binary),
+/// replacing the one with id `replaces` (0: none), and return the id the
+/// notification server gave it.
+#[cfg(target_os = "linux")]
+async fn send_notification_dbus(summary: &str, body: &str, replaces: u32) -> Result<u32> {
+    let proxy = notifications_proxy().await?;
     // Markup is escaped: the text may be a stranger's (N5a).
     let summary = crate::platform::markup_escaped(summary);
     let body = crate::platform::markup_escaped(body);
@@ -181,8 +248,8 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
         .call::<_, _, u32>(
             "Notify",
             &(
-                "pocketdesk",                                                      // app_name
-                0u32,                                                              // replaces_id
+                "Pocketdesk",                                                      // app_name
+                replaces,                                                          // replaces_id
                 "",                                                                // app_icon
                 summary.as_str(),                                                  // summary
                 body.as_str(),                                                     // body
@@ -194,43 +261,94 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
         .await
         .map_err(|e| pocketdesk_core::error::PocketdeskError::Other {
             detail: format!("D-Bus call failed: {e}"),
-        })?;
-
-    Ok(())
+        })
 }
 
-/// Show a desktop notification (notify-send / a Windows toast), falling back
-/// to native D-Bus on Linux.
-async fn show_desktop_notification(app: &str, title: &str, text: &str) -> Result<()> {
+/// Show a phone's notification, known by `tag` so an update replaces it and
+/// a cancel can close it: a tagged toast on Windows (the same tag replaces);
+/// over D-Bus on Linux, replacing the id shown before for that tag and
+/// keeping the new one, with notify-send as the fallback (which can neither).
+async fn show_desktop_notification(
+    tag: Option<&str>,
+    app: &str,
+    title: &str,
+    text: &str,
+) -> Result<()> {
     let summary = format!("{}: {}", app, title);
 
-    let (toast_summary, toast_text) = (summary.clone(), text.to_string());
+    #[cfg(target_os = "linux")]
+    {
+        let replaces = tag.and_then(shown_id).unwrap_or(0);
+        match send_notification_dbus(&summary, text, replaces).await {
+            Ok(id) => {
+                if let Some(tag) = tag {
+                    remember_shown(tag, id);
+                }
+                tracing::info!("Desktop notification shown: {}", title);
+                return Ok(());
+            }
+            Err(e) => tracing::debug!("D-Bus notification failed, trying notify-send: {e}"),
+        }
+    }
+
+    let (toast_summary, toast_text, toast_tag) =
+        (summary, text.to_string(), tag.map(str::to_string));
     let shown = tokio::task::spawn_blocking(move || {
-        crate::platform::notify(
-            &toast_summary,
-            &toast_text,
-            std::time::Duration::from_secs(5),
-        )
+        #[cfg(windows)]
+        {
+            match &toast_tag {
+                Some(tag) => crate::platform::notify_tagged(&toast_summary, &toast_text, tag),
+                None => crate::platform::notify(
+                    &toast_summary,
+                    &toast_text,
+                    std::time::Duration::from_secs(5),
+                ),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = toast_tag;
+            crate::platform::notify(
+                &toast_summary,
+                &toast_text,
+                std::time::Duration::from_secs(5),
+            )
+        }
     })
     .await
     .unwrap_or(false);
     if shown {
         tracing::info!("Desktop notification shown: {}", title);
-        return Ok(());
-    }
-    tracing::debug!("desktop notification failed, trying D-Bus");
-
-    // Fall back to native D-Bus
-    #[cfg(target_os = "linux")]
-    if let Err(e) = send_notification_dbus(&summary, text).await {
-        tracing::warn!("Failed to send notification via D-Bus: {e}");
     } else {
-        tracing::info!("Notification sent via D-Bus: {}", title);
+        tracing::warn!("Desktop notification could not be shown; dropped: {title}");
     }
-    #[cfg(not(target_os = "linux"))]
-    tracing::warn!("Desktop notification could not be shown; dropped: {title}");
-
     Ok(())
+}
+
+/// Close the phone notification shown as `tag`, if it is still here.
+async fn close_desktop_notification(tag: &str) {
+    #[cfg(windows)]
+    {
+        let tag = tag.to_string();
+        let _ = tokio::task::spawn_blocking(move || crate::platform::remove_tagged(&tag)).await;
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(id) = take_shown(tag) {
+        let closed = async {
+            notifications_proxy()
+                .await?
+                .call::<_, _, ()>("CloseNotification", &(id,))
+                .await
+                .map_err(|e| pocketdesk_core::error::PocketdeskError::Other {
+                    detail: format!("D-Bus call failed: {e}"),
+                })
+        };
+        if let Err(e) = closed.await {
+            tracing::debug!("Could not close notification {id}: {e}");
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let _ = tag;
 }
 
 #[cfg(test)]
@@ -266,6 +384,35 @@ mod tests {
         assert_eq!(
             (app.chars().count(), title.chars().count()),
             (MAX_APP, MAX_TITLE)
+        );
+    }
+
+    #[test]
+    fn an_update_finds_the_notification_it_replaces_and_a_cancel_takes_it() {
+        remember_shown("t-update", 7);
+        assert_eq!(shown_id("t-update"), Some(7), "an update replaces id 7");
+        remember_shown("t-update", 9);
+        assert_eq!(shown_id("t-update"), Some(9), "one entry per tag");
+        assert_eq!(take_shown("t-update"), Some(9));
+        assert_eq!(take_shown("t-update"), None, "closed once");
+        for i in 0..MAX_SHOWN + 5 {
+            remember_shown(&format!("t-bound-{i}"), i as u32);
+        }
+        assert_eq!(shown_id("t-bound-0"), None, "the oldest is forgotten");
+        assert!(shown_id(&format!("t-bound-{}", MAX_SHOWN + 4)).is_some());
+        assert!(shown_ids().lock().unwrap().len() <= MAX_SHOWN);
+    }
+
+    #[test]
+    fn a_notification_is_known_by_a_tag_of_its_phone_and_id() {
+        let tag = tag_for("phone-a", "0|com.chat|7|null|10123");
+        assert_eq!(tag.len(), 16);
+        assert!(tag.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(tag, tag_for("phone-a", "0|com.chat|7|null|10123"), "stable");
+        assert_ne!(
+            tag,
+            tag_for("phone-b", "0|com.chat|7|null|10123"),
+            "another phone's cancel cannot close it"
         );
     }
 

@@ -42,6 +42,16 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **N5c part 1, a phone notification closed on the phone closes on the computer (branch `feat/notification-dismissal`; spec `docs/superpowers/specs/2026-10-14-notification-dismissal-design.md`).**
+  - **How:**
+    - The phone sends `kdeconnect.notification {id, isCancel}` for a notification the computer was shown, and for no other.
+    - The server knows each one by a phone-scoped tag (16 hex digits of SHA-256 of phone id and notification id).
+    - Windows shows tagged toasts in a "phone" group and removes them from the Action Center (`RemoveGroupedTagWithId`).
+    - Linux shows phone notifications over D-Bus first, keeping their ids, and closes them with `CloseNotification`.
+  - **Verified on the A71 and this box:** a toast leaves the Action Center when its notification is swiped away on the phone.
+  - **Not done:**
+    - desktop → phone dismissal and action buttons: the Windows listener needs a package identity, and toast buttons need activation;
+    - N5b SMS waits for a phone with a SIM.
 - 2026-10-14: **N5a, the phone's notifications on the computer (branch `feat/phone-notifications`; spec `docs/superpowers/specs/2026-10-14-phone-notifications-design.md`, with an as-built section).** N5 is split three ways: N5a this, N5b SMS, N5c actions and dismissal both ways.
   - **New:**
     - A `NotificationListenerService` sends the phone's notifications to the most recently used paired computer.
