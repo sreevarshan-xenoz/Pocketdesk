@@ -197,23 +197,44 @@ pub(crate) fn get_image_png() -> io::Result<Option<Vec<u8>>> {
     }
 }
 
+/// Global memory not yet handed to the clipboard, freed if it never is.
+struct Pending(Option<HGLOBAL>);
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if let Some(memory) = self.0.take() {
+            let _ = unsafe { GlobalFree(Some(memory)) };
+        }
+    }
+}
+
 /// Replace the clipboard with the image in `png_bytes`, as "PNG" and as
-/// `CF_DIB` (Paint and older apps read only the bitmap).
-pub(crate) fn set_image_png(png_bytes: &[u8]) -> io::Result<()> {
+/// `CF_DIB` (Paint and older apps read only the bitmap), and return the
+/// clipboard sequence number this write left. Windows moves the number when
+/// the clipboard closes, so it is read just after; another app copying in
+/// that instant would be taken for this write, a race accepted here.
+///
+/// Both blocks are allocated before the clipboard is emptied: a failure to
+/// allocate leaves what was there.
+pub(crate) fn set_image_png(png_bytes: &[u8]) -> io::Result<u32> {
     let dib = super::clip_image::dib_from_png(png_bytes).map_err(io::Error::other)?;
     let png = png_format()?;
+    let mut blocks = [
+        (png, Pending(Some(global_copy(png_bytes)?))),
+        (u32::from(CF_DIB.0), Pending(Some(global_copy(&dib)?))),
+    ];
     let owner = Owner::new()?;
-    let _open = Open::new(Some(owner.0))?;
-    unsafe { EmptyClipboard() }.map_err(os_err)?;
-    for (format, bytes) in [(png, png_bytes), (u32::from(CF_DIB.0), dib.as_slice())] {
-        let memory = global_copy(bytes)?;
-        if let Err(e) = unsafe { SetClipboardData(format, Some(HANDLE(memory.0))) } {
-            let _ = unsafe { GlobalFree(Some(memory)) };
-            return Err(os_err(e));
+    {
+        let _open = Open::new(Some(owner.0))?;
+        unsafe { EmptyClipboard() }.map_err(os_err)?;
+        for (format, block) in &mut blocks {
+            let memory = block.0.expect("set once, taken below");
+            unsafe { SetClipboardData(*format, Some(HANDLE(memory.0))) }.map_err(os_err)?;
+            // The clipboard owns the memory now.
+            block.0 = None;
         }
-        // The clipboard owns the memory now.
     }
-    Ok(())
+    Ok(sequence())
 }
 
 /// The clipboard's text, or an empty string when it holds no text.
@@ -274,8 +295,9 @@ mod tests {
                 .unwrap();
         }
         let before = sequence();
-        set_image_png(&png_bytes).unwrap();
-        assert_ne!(sequence(), before, "the sequence number moves");
+        let written = set_image_png(&png_bytes).unwrap();
+        assert_ne!(written, before, "the sequence number moves");
+        assert_eq!(sequence(), written, "and is the one the write returned");
         assert!(!has_text());
         assert_eq!(get_image_png().unwrap().unwrap(), png_bytes);
         let _open = Open::new(None).unwrap();

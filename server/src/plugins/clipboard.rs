@@ -343,8 +343,8 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
     use crate::platform::clipboard_windows as win;
     let image = image.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
-        win::set_image_png(&image.png)?;
-        remember(Some(win::sequence()), Some(image));
+        let sequence = win::set_image_png(&image.png)?;
+        remember(Some(sequence), Some(image));
         Ok(())
     })
     .await
