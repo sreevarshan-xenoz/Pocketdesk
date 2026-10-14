@@ -61,10 +61,12 @@ impl Image {
 
 /// The last image read from or put on the clipboard: what a fetch may take,
 /// and on Windows the clipboard sequence number it was read at, so an
-/// unchanged clipboard is not read and encoded again every poll.
+/// unchanged clipboard is not read and encoded again every poll. `image` is
+/// `None` when what the clipboard held at that number gave no usable image
+/// (too large, a bitmap kind not read), so it is not tried again either.
 struct Cached {
     sequence: Option<u32>,
-    image: Arc<Image>,
+    image: Option<Arc<Image>>,
 }
 
 fn cache() -> &'static Mutex<Option<Cached>> {
@@ -72,8 +74,13 @@ fn cache() -> &'static Mutex<Option<Cached>> {
     &CACHE
 }
 
-fn remember(sequence: Option<u32>, image: Arc<Image>) {
+fn remember(sequence: Option<u32>, image: Option<Arc<Image>>) {
     *cache().lock().unwrap_or_else(|e| e.into_inner()) = Some(Cached { sequence, image });
+}
+
+/// The clipboard holds text now: no image is the clipboard's any more.
+fn forget_image() {
+    *cache().lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// The answer to `kdeconnect.clipboard.connect`.
@@ -94,8 +101,8 @@ fn reply_body(clip: &Clip) -> serde_json::Value {
 
 /// The image a fetch names, while it is still the clipboard's.
 fn image_for_fetch(cached: Option<&Cached>, id: &str) -> std::result::Result<Arc<Image>, String> {
-    match cached {
-        Some(cached) if cached.image.id == id => Ok(cached.image.clone()),
+    match cached.and_then(|cached| cached.image.as_ref()) {
+        Some(image) if image.id == id => Ok(image.clone()),
         _ => Err("the clipboard no longer holds that image".to_string()),
     }
 }
@@ -130,15 +137,16 @@ impl Plugin for ClipboardPlugin {
                 }
             }
             "kdeconnect.clipboard.connect" => {
-                // Remote requested our clipboard - get and send it
-                match read_clipboard().await {
-                    Ok(clip) => {
-                        let response =
-                            NetworkPacket::new("kdeconnect.clipboard").with_body(reply_body(&clip));
-                        sender.send_packet(&response).await?;
-                    }
-                    Err(e) => tracing::debug!("Could not read the clipboard: {e}"),
-                }
+                // Remote requested our clipboard - get and send it. A
+                // clipboard that cannot be read is answered as empty, so the
+                // phone is not left waiting out its query.
+                let clip = read_clipboard().await.unwrap_or_else(|e| {
+                    tracing::debug!("Could not read the clipboard: {e}");
+                    Clip::Empty
+                });
+                let response =
+                    NetworkPacket::new("kdeconnect.clipboard").with_body(reply_body(&clip));
+                sender.send_packet(&response).await?;
             }
             CLIPBOARD_IMAGE => receive_image(packet, sender).await,
             CLIPBOARD_IMAGE_FETCH => send_image(packet, sender).await,
@@ -290,6 +298,7 @@ async fn read_clipboard() -> Result<Clip> {
     use crate::platform::clipboard_windows as win;
     tokio::task::spawn_blocking(|| -> Result<Clip> {
         if win::has_text() {
+            forget_image();
             let text = win::get_text()?;
             return Ok(if text.is_empty() {
                 Clip::Empty
@@ -303,21 +312,25 @@ async fn read_clipboard() -> Result<Clip> {
             if let Some(cached) = cached.as_ref()
                 && cached.sequence == Some(sequence)
             {
-                return Ok(Clip::Image(cached.image.clone()));
+                return Ok(cached.image.clone().map_or(Clip::Empty, Clip::Image));
             }
         }
-        match win::get_image_png()? {
-            Some(png) if png.len() as u64 <= MAX_CLIPBOARD_IMAGE => {
-                let image = Arc::new(Image::new(png));
-                remember(Some(sequence), image.clone());
-                Ok(Clip::Image(image))
+        let image = match win::get_image_png() {
+            Ok(Some(png)) if png.len() as u64 <= MAX_CLIPBOARD_IMAGE => {
+                Some(Arc::new(Image::new(png)))
             }
-            Some(png) => {
+            Ok(Some(png)) => {
                 tracing::debug!("The clipboard image is too large ({} bytes)", png.len());
-                Ok(Clip::Empty)
+                None
             }
-            None => Ok(Clip::Empty),
-        }
+            Ok(None) => None,
+            Err(e) => {
+                tracing::debug!("The clipboard image is not read: {e}");
+                None
+            }
+        };
+        remember(Some(sequence), image.clone());
+        Ok(image.map_or(Clip::Empty, Clip::Image))
     })
     .await
     .map_err(other)?
@@ -331,7 +344,7 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
     let image = image.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
         win::set_image_png(&image.png)?;
-        remember(Some(win::sequence()), image);
+        remember(Some(win::sequence()), Some(image));
         Ok(())
     })
     .await
@@ -402,6 +415,7 @@ async fn read_clipboard() -> Result<Clip> {
     let types = String::from_utf8_lossy(&types);
     let has = |prefix: &str| types.lines().any(|t| t.trim().starts_with(prefix));
     if has("text/plain") || has("UTF8_STRING") || has("TEXT") || has("STRING") {
+        forget_image();
         let text = String::from_utf8_lossy(&wl_paste(&["--no-newline"]).await?).to_string();
         return Ok(Clip::Text(text));
     }
@@ -413,7 +427,7 @@ async fn read_clipboard() -> Result<Clip> {
         return Ok(Clip::Empty);
     }
     let image = Arc::new(Image::new(png));
-    remember(None, image.clone());
+    remember(None, Some(image.clone()));
     Ok(Clip::Image(image))
 }
 
@@ -421,7 +435,7 @@ async fn read_clipboard() -> Result<Clip> {
 #[cfg(not(windows))]
 async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
     wl_copy(Some("image/png"), &image.png).await?;
-    remember(None, image.clone());
+    remember(None, Some(image.clone()));
     Ok(())
 }
 
@@ -456,10 +470,18 @@ mod tests {
         let image = Arc::new(Image::new(vec![7; 10]));
         let cached = Cached {
             sequence: Some(4),
-            image: image.clone(),
+            image: Some(image.clone()),
         };
         assert_eq!(image_for_fetch(Some(&cached), &image.id).unwrap(), image);
         assert!(image_for_fetch(Some(&cached), "0000").is_err(), "stale id");
         assert!(image_for_fetch(None, &image.id).is_err(), "nothing cached");
+        let unusable = Cached {
+            sequence: Some(5),
+            image: None,
+        };
+        assert!(
+            image_for_fetch(Some(&unusable), &image.id).is_err(),
+            "the clipboard moved on to something that is not an image"
+        );
     }
 }

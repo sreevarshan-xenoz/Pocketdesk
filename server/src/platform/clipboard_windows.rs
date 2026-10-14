@@ -175,16 +175,21 @@ pub(crate) fn has_text() -> bool {
 
 /// The clipboard's image as PNG: the "PNG" format as it is when an app put
 /// one there (so a PNG this wrote reads back byte for byte), else `CF_DIB`
-/// converted. `None` when it holds no image.
+/// converted. `None` when it holds no image. The bytes are copied out and the
+/// clipboard closed before any conversion, so other apps are not kept
+/// waiting while a large bitmap is encoded.
 pub(crate) fn get_image_png() -> io::Result<Option<Vec<u8>>> {
     let png = png_format()?;
-    let _open = Open::new(None)?;
-    if let Some(bytes) = read_format(png)?
-        && super::clip_image::is_png(&bytes)
-    {
-        return Ok(Some(bytes));
-    }
-    match read_format(u32::from(CF_DIB.0))? {
+    let dib = {
+        let _open = Open::new(None)?;
+        if let Some(bytes) = read_format(png)?
+            && super::clip_image::is_png(&bytes)
+        {
+            return Ok(Some(bytes));
+        }
+        read_format(u32::from(CF_DIB.0))?
+    };
+    match dib {
         Some(dib) => super::clip_image::png_from_dib(&dib)
             .map(Some)
             .map_err(io::Error::other),
