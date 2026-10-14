@@ -69,6 +69,10 @@ These are real gaps in the current design. Plan around them.
    - The id is in the pairing QR code, on each paired phone and on every relay the desktop uses. A forged record gets nowhere: it is signed, and the phone checks the desktop's key again when it connects.
 5. **The connection limits are shared.** Phones behind one public address (carrier NAT, or a forwarded port) share that address's 8 connections, so one can use up the others'. Anyone who can reach the internet listener can hold its 128 until each handshake times out; the gate still refuses them.
 6. **Privacy mode is held to its phone's id, as strongly as that id is held to a key** (limit 2). If that phone's Power permission is turned off, it cannot end the grab and no other phone may, so the local keyboard and mouse stay blocked until it expires (10 minutes).
+7. **The desktop names itself to anyone who connects.** Any client that completes the TLS or QUIC handshake, with any certificate, gets the desktop's device id, name and plugin list before it is judged, and its certificate. Anyone on the network sees the same id and name in the mDNS announcement unless `lan_discovery = false`.
+8. **The permissions limit what a phone may ask for, not what the desktop tells it.** A paired phone with every permission off still receives the desktop's notifications, its window titles (window list and workspace HUD), its battery, the wake details (the MAC) and the internet endpoint. Unpair a phone to stop them.
+
+[docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
 ## Using it safely today
 
