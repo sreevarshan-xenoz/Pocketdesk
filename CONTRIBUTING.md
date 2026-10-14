@@ -65,6 +65,8 @@ XDG_CONFIG_HOME=$PWD/devconfig cargo run --bin pocketdesk -- start
 6. Push and open a PR with a clear description of changes
 7. Wait for review
 
+Releases follow [docs/release-checklist.md](docs/release-checklist.md): every step there comes before the tag, since the tag publishes.
+
 ## Reporting Issues
 
 - **Bug reports:** Use the bug report template
