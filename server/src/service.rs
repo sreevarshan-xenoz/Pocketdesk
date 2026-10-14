@@ -800,20 +800,36 @@ async fn seed_desktop_state(
 /// it has proved anything; an identity packet is a few hundred bytes.
 const MAX_HANDSHAKE_LINE: u64 = 64 * 1024;
 
+/// The longest control packet a connection may send, as one line. The
+/// largest real ones (a clipboard text, a batch of texts) are far smaller;
+/// without a cap, one endless line from any TLS client, paired or not,
+/// would grow the server's memory until it ran out.
+const MAX_PACKET_LINE: u64 = 4 * 1024 * 1024;
+
 /// Read one handshake line of at most [`MAX_HANDSHAKE_LINE`] bytes.
 async fn read_handshake_line<R>(reader: &mut R, line: &mut String) -> std::io::Result<usize>
 where
     R: tokio::io::AsyncBufRead + Unpin,
 {
+    read_line_capped(reader, line, MAX_HANDSHAKE_LINE).await
+}
+
+/// Read one line of at most `limit` bytes; a longer one is an error, and
+/// the connection is dropped.
+async fn read_line_capped<R>(
+    reader: &mut R,
+    line: &mut String,
+    limit: u64,
+) -> std::io::Result<usize>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
     use tokio::io::AsyncReadExt;
-    let read = (&mut *reader)
-        .take(MAX_HANDSHAKE_LINE)
-        .read_line(line)
-        .await?;
-    if read as u64 == MAX_HANDSHAKE_LINE && !line.ends_with('\n') {
+    let read = (&mut *reader).take(limit).read_line(line).await?;
+    if read as u64 == limit && !line.ends_with('\n') {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "handshake line too long",
+            format!("line longer than {limit} bytes"),
         ));
     }
     Ok(read)
@@ -1027,7 +1043,11 @@ async fn handle_connection_with_kde(
         tracing::info!("Entering main packet loop");
         loop {
             let mut line = String::new();
-            let read_result = timeout(Duration::from_secs(60), reader.read_line(&mut line)).await;
+            let read_result = timeout(
+                Duration::from_secs(60),
+                read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE),
+            )
+            .await;
 
             match read_result {
                 Ok(Ok(0)) => {
@@ -1458,6 +1478,32 @@ mod handshake_line_tests {
             19
         );
         assert_eq!(line.trim(), HANDSHAKE_HELLO);
+    }
+
+    #[tokio::test]
+    async fn a_packet_line_has_a_limit_too() {
+        let endless = vec![b'x'; (MAX_PACKET_LINE + 1024) as usize];
+        let mut reader = BufReader::new(&endless[..]);
+        let mut line = String::new();
+        assert!(
+            read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE)
+                .await
+                .is_err(),
+            "one endless line cannot fill the desktop's memory"
+        );
+        let packet = format!(
+            "{{\"type\":\"kdeconnect.ping\",\"body\":\"{}\"}}
+",
+            "y".repeat(100_000)
+        );
+        let mut reader = BufReader::new(packet.as_bytes());
+        let mut line = String::new();
+        assert_eq!(
+            read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE)
+                .await
+                .unwrap(),
+            packet.len()
+        );
     }
 }
 
