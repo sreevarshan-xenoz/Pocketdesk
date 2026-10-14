@@ -1,6 +1,6 @@
 # Pocketdesk
 
-**Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale or a hole-punched iroh path. No port forwarding required.**
+**Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale, or the internet (iroh: a hole-punched path, or a relay when that fails). Using it from outside needs no port forward; only waking a sleeping computer from outside does.**
 
 > Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). Everything now carries the Pocketdesk name: the `pocketdesk` command (or `pd` for short), the desktop app `pocketdesk-app`, the config and state folders (an existing `linux-link` folder is moved on first start), the wire protocol and the Android app `dev.pocketdesk.android`. A phone with the old app needs the new one installed and paired again once.
 
@@ -10,7 +10,7 @@
 [![Issues](https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk)](https://github.com/sreevarshan-xenoz/Pocketdesk/issues)
 [![Status](https://img.shields.io/badge/status-beta%20-%20feature%20complete%2C%20gates%20green-orange)](#roadmap)
 
-> **Target:** Sub-100ms latency screen streaming + KDE Connect integration + zero-config Tailscale connectivity
+> **Target:** Sub-100ms latency screen streaming + KDE Connect integration + reaching your computer from anywhere without opening ports
 
 ## What is Pocketdesk?
 
@@ -18,7 +18,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 
 - **Low-latency screen streaming** — wlroots/PipeWire capture → FFmpeg H.264 encoding → QUIC transport → Android MediaCodec decode
 - **KDE Connect-style features** — clipboard sync, files both ways and a remote file browser (LAN), notifications, input control, battery info
-- **Tailscale-native connectivity** — No manual port forwarding or NAT traversal; just pair and connect
+- **Reaches your computer anywhere** — on the LAN, through Tailscale, or over the internet with no VPN and no port forward (see [Before you start](#before-you-start))
 
 ### Key Differentiators
 
@@ -31,6 +31,32 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 | Screen streaming | ✅ | ✅ | ✅ | ❌ |
 | Pure Rust | ✅ | ✅ | ❌ (C++) | ❌ (C++) |
 | Open Source | ✅ | ✅ | ✅ | ✅ |
+
+## Before you start
+
+Three things worth knowing before you pair a phone. [SECURITY.md](SECURITY.md) has the full picture.
+
+### Reaching your computer
+
+| From | What it needs | Port forward on your router |
+|---|---|---|
+| The same network | nothing | no |
+| Anywhere, through Tailscale | both on one tailnet | no |
+| Anywhere, over the internet | nothing: on by default. iroh punches a direct path, and falls back to a relay (n0's free ones, or [your own](#away-from-home-your-own-relay)) | no |
+| Your own relay | a machine the internet can reach | one port, on the relay's machine |
+| Waking a sleeping computer from outside | Wake-on-LAN set up on the computer | yes: one UDP port to the computer ([Wake from the phone](#kde-connect-integration)) |
+
+Tailscale is not required. It adds a second encrypted layer and closes the first-contact gap below, which is why it is the advice for networks you do not trust.
+
+### Trust at first contact
+
+- **Scan the QR code** that the desktop app's Pair tab shows. The phone then checks the desktop's certificate before its first byte, so the PIN and everything after reach only that computer.
+- **Typing an address instead trusts whatever answers first** there (trust on first use). Someone who could intercept that very first connection could relay it. On a network you do not trust, scan.
+
+### What the internet path shows
+
+- **Relays** (n0's or yours) carry encrypted traffic. They see which endpoints talk, when, and how much, never the content.
+- **The Mainline DHT** (on by default, `dht_publish = "relay"`) holds a signed record that lets the phone find the computer again after its home IP changes. Its nodes see the home IP it was published from, linked to the computer's WAN id. `dht_publish = "off"` turns it off; the phone then finds the computer through the relay alone.
 
 ## Features
 
@@ -428,7 +454,7 @@ Requires JDK 17+ and Android SDK/NDK.
 
 ## Security
 
-Read [SECURITY.md](SECURITY.md) before using Pocketdesk on a network you do not control. In short: the stream, the control channel and file transfers are all encrypted (TLS 1.3), and both ends prove their keys on each, so a paired phone is known by its key, not by an id it announces. On anything but a trusted home network, run it over Tailscale (or another VPN) and keep "Ask before each session" on. Report vulnerabilities privately through GitHub's **Security → Report a vulnerability**.
+Read [SECURITY.md](SECURITY.md) before using Pocketdesk on a network you do not control, and [Before you start](#before-you-start) for first-contact trust and what the internet path shows. In short: the stream, the control channel and file transfers are all encrypted (TLS 1.3), and both ends prove their keys on each, so a paired phone is known by its key, not by an id it announces. On anything but a trusted home network, run it over Tailscale (or another VPN) and keep "Ask before each session" on. Report vulnerabilities privately through GitHub's **Security → Report a vulnerability**.
 
 ## Architecture
 
