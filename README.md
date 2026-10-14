@@ -58,6 +58,30 @@ Tailscale is not required. It adds a second encrypted layer and closes the first
 - **Relays** (n0's or yours) carry encrypted traffic. They see which endpoints talk, when, and how much, never the content.
 - **The Mainline DHT** (on by default, `dht_publish = "relay"`) holds a signed record that lets the phone find the computer again after its home IP changes. Its nodes see the home IP it was published from, linked to the computer's WAN id. `dht_publish = "off"` turns it off; the phone then finds the computer through the relay alone.
 
+## What works where
+
+The desktop end runs on Linux and Windows; the phone end is the Android app. "Device-checked" means a person ran it on real hardware (dates and details in [the checklist](docs/device-verification-checklist.md)); everything else is unit- or integration-tested only.
+
+| | Linux host | Windows host |
+|---|---|---|
+| Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE), X11 | Windows.Graphics.Capture, DXGI duplication |
+| Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation |
+| Remote input | uinput (Wayland), XTEST (X11) | `SendInput` (not elevated windows or UAC unless installed elevated) |
+| Clipboard, text and images | `wl-clipboard` | Win32 clipboard |
+| Files both ways, remote browsing | yes | yes |
+| Desktop sound on the phone | PipeWire | WASAPI loopback |
+| The phone's mic on the desktop | a PipeWire source, "Pocketdesk Mic" | needs a virtual audio cable (VB-CABLE) |
+| The phone's notifications and texts | D-Bus notifications | toasts |
+| The desktop's notifications on the phone | yes | no: needs a package identity the plain exe lacks |
+| Privacy mode | `EVIOCGRAB` and an on-screen ring (wlroots) | low-level hooks and a ring hidden from the stream |
+| Single-window streaming | Hyprland (the window itself, even when covered) | a crop of the window as it shows on screen |
+| Window and workspace HUD | Hyprland | windows (polled) |
+| Start at login | systemd user unit | `pocketdesk install` (a logon task and firewall rules) |
+| Desktop app tray | no (closing quits) | yes |
+| Device-checked | Hyprland on a laptop (2026-09), a headless Sway VM across the internet (2026-10-14) | most features, with a Galaxy A71 (2026-10) |
+
+The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 (Android 16) and an OPPO Reno8 (ColorOS).
+
 ## Features
 
 ### Screen Streaming
