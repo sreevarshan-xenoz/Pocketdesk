@@ -118,12 +118,20 @@ pub fn current_packet(endpoint: &Endpoint) -> NetworkPacket {
     endpoint_packet(&endpoint.addr(), endpoint.id(), on_dht(endpoint))
 }
 
-/// Whether this endpoint publishes on the DHT: its only address lookup is
-/// the DHT's, added when `dht_publish` is not "off".
+/// This process's `dht_publish`, set when its one WAN endpoint binds.
+static DHT_MODE: std::sync::OnceLock<DhtPublish> = std::sync::OnceLock::new();
+
+/// Whether a phone should look this endpoint up on the DHT: it has joined
+/// the DHT (its only address lookup is the DHT's), and its record holds
+/// something. A desktop whose only relay has a private address publishes
+/// nothing, and a phone looking it up would only tell the DHT it looks.
 fn on_dht(endpoint: &Endpoint) -> bool {
+    let with_ips = DHT_MODE.get() == Some(&DhtPublish::Addresses);
+    let now: Vec<TransportAddr> = endpoint.addr().addrs.into_iter().collect();
     endpoint
         .address_lookup()
         .is_ok_and(|lookup| !lookup.is_empty())
+        && !publishable(&now, with_ips).is_empty()
 }
 
 /// An IP a phone anywhere could reach: not private, loopback, link-local,
@@ -582,6 +590,7 @@ pub async fn spawn_wan_endpoint(
         .context("iroh endpoint bind failed")?;
 
     tracing::info!(id = %endpoint.id(), "WAN (iroh) endpoint ready");
+    let _ = DHT_MODE.set(dht_publish);
     let dht_check = DhtCheckState::default();
     spawn_dht(endpoint.clone(), dht_publish, Arc::clone(&dht_check));
     spawn_endpoint_recorder(endpoint.clone(), dht_publish, dht_check);
