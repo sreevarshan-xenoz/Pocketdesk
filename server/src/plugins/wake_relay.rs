@@ -61,11 +61,11 @@ impl Plugin for WakeRelayPlugin {
 
         let response = match outcome {
             Ok(Ok(())) => {
-                tracing::info!("Wake-relay: magic packet sent for {mac} via {broadcast}");
+                tracing::info!("Wake-relay: magic packet sent via {broadcast}");
                 serde_json::json!({ "ok": true, "mac": mac })
             }
             Ok(Err(e)) => {
-                tracing::warn!("Wake-relay: WoL send failed for {mac}: {e}");
+                tracing::warn!("Wake-relay: WoL send failed: {e}");
                 serde_json::json!({ "ok": false, "mac": mac, "error": e })
             }
             Err(e) => serde_json::json!({ "ok": false, "mac": mac, "error": e.to_string() }),
