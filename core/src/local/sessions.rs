@@ -2,7 +2,9 @@
 //!
 //! The server mirrors its live streaming sessions to
 //! `<state>/live_sessions.json` every second (atomically), and ends sessions
-//! named in `<state>/kick` (`<target>\n<unix-secs>\n`). The CLI's `status` and
+//! named in kick requests: one file each in `<state>/kicks/`
+//! (`<target>\n<unix-secs>\n`), so two quick requests are both seen, or the
+//! single `<state>/kick` an older CLI writes. The CLI's `status` and
 //! `kick` and the desktop app go through these files. The desktop hands input
 //! control to a session through `<state>/control/` (roadmap N7), one file per
 //! request.
@@ -12,7 +14,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::paths::{CONTROL_DIR, KICK_FILE};
+use super::paths::{CONTROL_DIR, KICK_FILE, KICKS_DIR};
 
 /// A kick request older than this is dropped unexecuted — the operator
 /// meant it for a session that is no longer (or not yet) live.
@@ -77,8 +79,39 @@ pub fn request_kick(state_dir: &Path, target: &str, now_unix: u64) -> io::Result
             "kick target is empty",
         ));
     }
-    std::fs::create_dir_all(state_dir)?;
-    std::fs::write(state_dir.join(KICK_FILE), format!("{target}\n{now_unix}\n"))
+    let dir = state_dir.join(KICKS_DIR);
+    std::fs::create_dir_all(&dir)?;
+    let name = uuid::Uuid::new_v4().to_string();
+    let tmp = dir.join(format!("{name}.tmp"));
+    std::fs::write(&tmp, format!("{target}\n{now_unix}\n"))?;
+    std::fs::rename(tmp, dir.join(format!("{name}.kick")))
+}
+
+/// The targets of every fresh kick request, each taken once: the files in
+/// `kicks/` and an older CLI's single `kick` file. Every request read is
+/// removed (a stale or malformed one too).
+pub fn take_kicks(state_dir: &Path, now_unix: u64) -> Vec<String> {
+    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(state_dir.join(KICKS_DIR))
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("kick"))
+                .collect()
+        })
+        .unwrap_or_default();
+    paths.push(state_dir.join(KICK_FILE));
+    let mut targets = Vec::new();
+    for path in paths {
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let _ = std::fs::remove_file(&path);
+        if let Some(target) = parse_kick(&raw, now_unix) {
+            targets.push(target);
+        }
+    }
+    targets
 }
 
 /// A control request older than this is dropped unapplied.
@@ -210,15 +243,33 @@ mod tests {
     }
 
     #[test]
-    fn a_kick_request_round_trips_and_expires() {
-        let dir = temp_dir("kick");
-        request_kick(&dir, "all", 1_000).unwrap();
-        let raw = std::fs::read_to_string(dir.join(KICK_FILE)).unwrap();
-        assert_eq!(parse_kick(&raw, 1_030).as_deref(), Some("all"));
-        assert_eq!(parse_kick(&raw, 1_061), None);
+    fn a_kick_request_parses_and_expires() {
+        assert_eq!(parse_kick("all\n1000\n", 1_030).as_deref(), Some("all"));
+        assert_eq!(parse_kick("all\n1000\n", 1_061), None);
+        let dir = temp_dir("kick-empty");
         assert!(
             request_kick(&dir, "  ", 1).is_err(),
             "an empty target is refused"
         );
+    }
+
+    #[test]
+    fn two_quick_kicks_are_both_taken_once() {
+        let dir = temp_dir("kicks");
+        request_kick(&dir, "phone-a", 1_000).unwrap();
+        request_kick(&dir, "phone-b", 1_000).unwrap();
+        request_kick(&dir, "stale", 900).unwrap();
+        let mut taken = take_kicks(&dir, 1_010);
+        taken.sort();
+        assert_eq!(taken, vec!["phone-a", "phone-b"]);
+        assert!(take_kicks(&dir, 1_010).is_empty(), "taken once");
+    }
+
+    #[test]
+    fn a_kick_file_from_an_older_cli_is_still_taken() {
+        let dir = temp_dir("kick-legacy");
+        std::fs::write(dir.join(KICK_FILE), "all\n1000\n").unwrap();
+        assert_eq!(take_kicks(&dir, 1_010), vec!["all"]);
+        assert!(!dir.join(KICK_FILE).exists());
     }
 }

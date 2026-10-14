@@ -35,10 +35,6 @@ pub fn live_sessions_path() -> anyhow::Result<PathBuf> {
     state_file("live_sessions.json")
 }
 
-pub fn kick_file_path() -> anyhow::Result<PathBuf> {
-    state_file("kick")
-}
-
 /// Parse the CLI-written kick file: `<target>\n<unix-secs>`. Returns the
 /// target only if the request is well-formed and fresh (shared with the
 /// desktop app: `core::local::sessions`).
@@ -125,25 +121,20 @@ pub async fn run_watcher() {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // 1. Kick requests (consume-then-act: a crash can't replay a kick).
-        if let Ok(path) = kick_file_path()
-            && let Ok(raw) = std::fs::read_to_string(&path)
-        {
-            let _ = std::fs::remove_file(&path);
-            match parse_kick_file(&raw, now) {
-                None => tracing::warn!("Ignoring stale/malformed kick request file"),
-                Some(target) => {
-                    let kicked = pocketdesk_core::streaming::sessions::kick(&target);
-                    if kicked.is_empty() {
-                        tracing::warn!(target = %target, "kick: no live session matched");
-                    } else {
-                        for s in &kicked {
-                            tracing::info!(
-                                device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
-                                peer = %s.peer,
-                                "Kicked streaming session (pocketdesk kick)"
-                            );
-                        }
+        // 1. Kick requests (consume-then-act: a crash can't replay a kick),
+        //    every one since the last tick.
+        if let Ok(dir) = crate::state::state_dir() {
+            for target in shared::take_kicks(&dir, now) {
+                let kicked = pocketdesk_core::streaming::sessions::kick(&target);
+                if kicked.is_empty() {
+                    tracing::warn!(target = %target, "kick: no live session matched");
+                } else {
+                    for s in &kicked {
+                        tracing::info!(
+                            device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
+                            peer = %s.peer,
+                            "Kicked streaming session (pocketdesk kick)"
+                        );
                     }
                 }
             }
