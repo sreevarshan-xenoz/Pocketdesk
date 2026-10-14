@@ -162,23 +162,6 @@ pub(crate) enum Replies {
 }
 
 impl Replies {
-    /// Read this connection's lines until the task is aborted, keeping any
-    /// offer that arrives on it. The desktop pushes to a phone's newest
-    /// connection, which may be one a transfer opened for itself; an offer
-    /// sent there must not be lost unread.
-    pub(crate) fn keep_reading(mut self) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            while let Some(line) = self.next_line().await {
-                if let (Replies::Own { .. }, Ok(packet)) =
-                    (&self, NetworkPacket::from_wire(line.trim()))
-                    && packet.packet_type == FILE_OFFER
-                {
-                    crate::queue_file_offer(&packet.body);
-                }
-            }
-        })
-    }
-
     async fn next_line(&mut self) -> Option<String> {
         match self {
             Replies::Shared(rx) => loop {
@@ -732,7 +715,8 @@ mod tests {
             )),
             _writer: Box::new(writer),
         };
-        let reading = replies.keep_reading();
+        // Waiting for a refusal also keeps any offer that arrives meanwhile.
+        let reading = tokio::spawn(super::refusal_on(replies, KEY.to_string()));
         let _socket = desktop.await.unwrap();
         let mut kept = String::new();
         for _ in 0..50 {
