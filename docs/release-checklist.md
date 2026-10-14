@@ -4,9 +4,9 @@ What has to be true before a `vX.Y.Z` (or `vX.Y.Z-beta.N`) tag is pushed. The ta
 
 ## 1. The tree
 
-- [ ] `main` is green in CI on the commit to be tagged: `rust`, every `profiles` job, `windows`, `android`, and `audit` (or each audit finding written down in the release notes with why it stays).
+- [ ] `main` is green in CI on the commit to be tagged: `rust`, every `profiles` job, `windows`, `android`, `bench` and `audit`. The release workflow audits again before it builds, so an advisory that must stay is ignored in `.cargo/audit.toml` with its reason, never left to fail.
 - [ ] The version is the same in `Cargo.toml` (the workspace) and `android/app/build.gradle.kts` (`versionName`), and `versionCode` went up. The workflow refuses a tag that does not match them.
-- [ ] `docs/capabilities.md` was regenerated on Linux and `docs/capabilities-windows.md` on Windows (`cargo run -q -p pocketdesk-server -- capabilities --markdown > <that file>`). `server/tests/capabilities_doc.rs` fails if either is stale for its own OS, but each OS checks only its own file.
+- [ ] `docs/capabilities.md` was regenerated on Linux and `docs/capabilities-windows.md` on Windows (`cargo run -q -p pocketdesk-server -- capabilities --markdown > <that file>`; on Windows from Git Bash, since PowerShell's `>` writes UTF-16 or a BOM). `server/tests/capabilities_doc.rs` fails if either is stale for its own OS, but each OS checks only its own file.
 - [ ] `.github/release-notes.md` says what changed for a person using it, and lists what is **not** device-checked in this release (from the checklist's open items).
 
 ## 2. The docs
@@ -23,15 +23,15 @@ What has to be true before a `vX.Y.Z` (or `vX.Y.Z-beta.N`) tag is pushed. The ta
   - the Windows zip;
   - the APK, **release-signed** (`apksigner verify --print-certs`). Without the signing secrets the workflow falls back to the debug build, which must never ship as a release;
   - `SHA256SUMS`, matching each file.
-- [ ] `pocketdesk --version` from each archive prints the tag's version.
+- [ ] `pocketdesk --version` from each archive prints the version in `Cargo.toml` (the tag without its `v`, and without a `-beta.N` suffix).
 
 ## 4. On real machines
 
 Run from the dry run's files, not from a dev build.
 
-- [ ] **Linux:** unpack on a clean machine or a throwaway VM (see the checklist, §44, for the Azure recipe and its cost rules), start the server, pair the phone by QR, and open a session.
+- [ ] **Linux:** unpack on a clean machine or a throwaway VM, start the server, pair the phone by QR, and open a session. (The R1 run used an Azure VM with a headless Sway; see the checklist, §44.)
 - [ ] **Windows:** unzip, `pocketdesk.exe install`, sign out and in, and check that the server came back. Pair and open a session.
-- [ ] **Android:** install the APK over the previous release (an update, not a fresh install) and check that the saved computers and pairings survived.
+- [ ] **Android:** install the APK over the previous release, once there is one (an update, not a fresh install), and check that the saved computers and pairings survived.
 - [ ] One session over the internet (iroh), from another network.
 
 ## 5. Publish

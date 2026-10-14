@@ -46,10 +46,11 @@ XDG_CONFIG_HOME=$PWD/devconfig cargo run --bin pocketdesk -- start
 - **Rust:** Follow `cargo fmt` and `cargo clippy -D warnings`. No warnings allowed.
 - **Kotlin:** Follow Android Lint; format with `ktfmt`/`ktlint` defaults.
 - **Commits:** Use conventional commit messages (`feat:`, `fix:`, `docs:`, `chore:`, etc.)
-- **Generated docs:** `docs/capabilities.md` is the output of
-  `pocketdesk capabilities --markdown`. If you change a protocol version constant, an ALPN,
-  a capture backend, or a codec, regenerate it in the same commit —
-  `cargo test -p pocketdesk-server --test capabilities_doc` fails while it is stale.
+- **Generated docs:** `docs/capabilities.md` (Linux) and `docs/capabilities-windows.md` (Windows)
+  are the output of `pocketdesk capabilities --markdown` on each OS. If you change a protocol
+  version constant, an ALPN, a capture backend, or a codec, regenerate both in the same commit
+  (on Windows from Git Bash, so the file stays UTF-8) —
+  `cargo test -p pocketdesk-server --test capabilities_doc` fails while the one for its OS is stale.
   A command's log output goes to stderr, never stdout, because stdout is data.
 
 ## Pull Request Process
