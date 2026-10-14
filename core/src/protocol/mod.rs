@@ -1,4 +1,5 @@
 pub mod backoff;
+pub mod clipboard;
 pub mod connection;
 pub mod kdeconnect;
 pub mod permissions;

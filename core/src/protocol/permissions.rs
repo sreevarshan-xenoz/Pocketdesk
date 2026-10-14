@@ -61,6 +61,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         "kdeconnect.mousepad.request" | "kdeconnect.presenter" => Capability::Input,
         "kdeconnect.clipboard"
         | "kdeconnect.clipboard.connect"
+        | "kdeconnect.pocketdesk.clipboard_image"
+        | "kdeconnect.pocketdesk.clipboard_image_fetch"
         | "kdeconnect.pocketdesk.notification_reply" => Capability::Clipboard,
         "kdeconnect.share.request"
         | "kdeconnect.filebrowse.request"
@@ -181,6 +183,14 @@ mod tests {
             ("kdeconnect.presenter", Some(Capability::Input)),
             ("kdeconnect.clipboard", Some(Capability::Clipboard)),
             ("kdeconnect.clipboard.connect", Some(Capability::Clipboard)),
+            (
+                super::super::clipboard::CLIPBOARD_IMAGE,
+                Some(Capability::Clipboard),
+            ),
+            (
+                super::super::clipboard::CLIPBOARD_IMAGE_FETCH,
+                Some(Capability::Clipboard),
+            ),
             ("kdeconnect.share.request", Some(Capability::Files)),
             ("kdeconnect.filebrowse.request", Some(Capability::Files)),
             ("kdeconnect.pocketdesk.audio", Some(Capability::Audio)),

@@ -32,7 +32,7 @@ pub const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 pub const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
 
 /// The transfer slots, shared by every connection.
-fn transfer_slots() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
+pub(crate) fn transfer_slots() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
     static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
     SLOTS.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_TRANSFERS)))
@@ -318,7 +318,7 @@ fn plan_fetch(
 /// (phase C): this desktop's certificate, and the phone must present the
 /// key its control connection proved. A connection that proved none gets
 /// no transfer.
-fn transfer_tls(
+pub(crate) fn transfer_tls(
     sender: &dyn DeviceSender,
 ) -> std::result::Result<std::sync::Arc<tokio_rustls::rustls::ClientConfig>, String> {
     let Some(key @ pocketdesk_core::streaming::PeerKey::Tls(phone)) = sender.peer_key() else {
@@ -381,7 +381,7 @@ fn phone_of(sender: &dyn DeviceSender) -> String {
     sender.device_id().to_string()
 }
 
-async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {
+pub(crate) async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {
     let packet = NetworkPacket::new(FETCH_REFUSED)
         .with_body(serde_json::json!({ "key": key, "reason": reason }));
     if let Err(e) = sender.send_packet(&packet).await {
@@ -414,7 +414,7 @@ pub(crate) async fn send_file_to(
 /// Dial `to`, present `key`, write `size` (u64, big-endian) and exactly
 /// that many bytes from `reader`, then wait for the phone's status byte.
 /// A reader that ends early (the file shrank) fails the send.
-async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
+pub(crate) async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
     to: SocketAddr,
     tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
     key: &str,
@@ -525,7 +525,7 @@ fn human_size(bytes: u64) -> String {
 }
 
 /// A transfer key as the phone makes it: 32 hex digits (a random UUID).
-fn is_transfer_key(key: &str) -> bool {
+pub(crate) fn is_transfer_key(key: &str) -> bool {
     key.len() == 32 && key.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
@@ -533,7 +533,7 @@ fn is_transfer_key(key: &str) -> bool {
 /// (a loopback peer means a local proxy such as `adb reverse`, and the
 /// phone's port would name a service on this machine), and not an address
 /// that is no single host or is the link-local range (cloud metadata).
-fn dialable(ip: IpAddr) -> bool {
+pub(crate) fn dialable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             !(v4.is_loopback()
@@ -748,6 +748,70 @@ async fn receive_file(
     saved
 }
 
+/// Connect to the phone at `from`, read exactly `size` bytes (at most `max`)
+/// into memory and hand them to `keep`. The phone hears "saved" only when
+/// `keep` succeeds, so its status byte means the bytes were used, not only
+/// received (the clipboard image, roadmap N4).
+pub(crate) async fn receive_bytes<F, Fut>(
+    from: SocketAddr,
+    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+    key: &str,
+    size: u64,
+    max: u64,
+    keep: F,
+) -> Result<()>
+where
+    F: FnOnce(Vec<u8>) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    if size == 0 || size > max {
+        return Err(io_error(
+            "receive",
+            format!("refused a declared size of {size}"),
+        ));
+    }
+    let mut stream = dial_transfer(from, tls).await?;
+    stream
+        .write_all(format!("{key}\n").as_bytes())
+        .await
+        .map_err(|e| io_error("write", e))?;
+    stream.flush().await.map_err(|e| io_error("write", e))?;
+    let read = async {
+        let mut bytes = vec![0u8; usize::try_from(size).map_err(|e| io_error("read", e))?];
+        let mut received = 0;
+        while received < bytes.len() {
+            let n = tokio::time::timeout(IDLE_TIMEOUT, stream.read(&mut bytes[received..]))
+                .await
+                .map_err(|_| io_error("read", "stalled"))?
+                .map_err(|e| io_error("read", e))?;
+            if n == 0 {
+                return Err(io_error(
+                    "read",
+                    format!("ended after {received} of {size} bytes"),
+                ));
+            }
+            received += n;
+        }
+        Ok(bytes)
+    };
+    let kept = match tokio::time::timeout(transfer_deadline(size), read).await {
+        Ok(Ok(bytes)) => keep(bytes).await,
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(io_error("read", "too slow")),
+    };
+    let status = if kept.is_ok() {
+        STATUS_SAVED
+    } else {
+        STATUS_FAILED
+    };
+    let _ = tokio::time::timeout(CONNECT_TIMEOUT, async {
+        stream.write_all(&[status]).await?;
+        stream.flush().await
+    })
+    .await;
+    kept
+}
+
 /// Read exactly `size` bytes from `stream` into a new file in `dir` named
 /// like `name`, and return its path; on any failure no file is left.
 async fn save_stream<S: tokio::io::AsyncRead + Unpin>(
@@ -816,7 +880,7 @@ async fn save_stream<S: tokio::io::AsyncRead + Unpin>(
     Ok(incoming.final_path.clone())
 }
 
-fn io_error(operation: &'static str, detail: impl std::fmt::Display) -> PocketdeskError {
+pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) -> PocketdeskError {
     PocketdeskError::Io {
         operation,
         detail: detail.to_string(),
@@ -980,6 +1044,57 @@ mod tests {
         assert!(!is_transfer_key(""));
         assert!(!is_transfer_key(&KEY[1..]));
         assert!(!is_transfer_key("0123456789abcdef0123456789abcdeg"));
+    }
+
+    #[tokio::test]
+    async fn bytes_taken_into_memory_are_saved_only_once_they_are_used() {
+        let data = vec![9u8; 70_000];
+        let (from, status) = phone_sending(data.clone()).await;
+        let got = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = got.clone();
+        receive_bytes(
+            from,
+            desktop_tls(),
+            KEY,
+            data.len() as u64,
+            1 << 20,
+            |b| async move {
+                *sink.lock().unwrap() = b;
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(status.await.unwrap(), Some(STATUS_SAVED));
+        assert_eq!(*got.lock().unwrap(), data);
+
+        let (from, status) = phone_sending(vec![1, 2, 3]).await;
+        let refused = receive_bytes(from, desktop_tls(), KEY, 3, 1 << 20, |_| async {
+            Err(io_error("clipboard", "not a PNG"))
+        })
+        .await;
+        assert!(refused.is_err());
+        assert_eq!(
+            status.await.unwrap(),
+            Some(STATUS_FAILED),
+            "received but not used is not saved"
+        );
+    }
+
+    #[tokio::test]
+    async fn bytes_over_the_limit_are_refused_before_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let from = listener.local_addr().unwrap();
+        for size in [0, 11] {
+            assert!(
+                receive_bytes(from, desktop_tls(), KEY, size, 10, |_| async { Ok(()) })
+                    .await
+                    .is_err()
+            );
+        }
+        let accepted =
+            tokio::time::timeout(std::time::Duration::from_millis(200), listener.accept()).await;
+        assert!(accepted.is_err(), "no connection was made");
     }
 
     #[tokio::test]
