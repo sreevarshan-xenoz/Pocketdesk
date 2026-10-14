@@ -17,11 +17,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -30,6 +30,8 @@ import androidx.core.net.toUri
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.doctor.BackgroundLimit
+import dev.pocketdesk.android.doctor.BackgroundRunning
 
 /** Appearance, session behavior and About — everything the old footer deep-link did, in one place. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -193,6 +195,36 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             PhoneNotificationsSection()
             TextsSection()
+
+            // T2: whether Android lets those run in the background.
+            Header(stringResource(R.string.settings_background))
+            val limit = BackgroundRunning.limit(context)
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_background_status), style = MaterialTheme.typography.bodyLarge) },
+                supportingContent = {
+                    Text(
+                        stringResource(
+                            when (limit) {
+                                BackgroundLimit.NONE -> R.string.bg_allowed
+                                BackgroundLimit.OPTIMIZED -> R.string.bg_optimized
+                                BackgroundLimit.RESTRICTED -> R.string.bg_restricted
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                leadingContent = { LlIcon(LlIcons.Settings, null) },
+                trailingContent = { LlIcon(LlIcons.ChevronRight, null) },
+                modifier = Modifier.clickable {
+                    runCatching { context.startActivity(BackgroundRunning.settingsIntent(context, limit)) }
+                },
+            )
+            boolRow(
+                LlIcons.Notifications,
+                stringResource(R.string.settings_background_remind),
+                stringResource(R.string.settings_background_remind_summary),
+                Prefs.backgroundReminder(context),
+            ) { Prefs.setBackgroundReminder(context, it) }
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 Header(stringResource(R.string.settings_system))

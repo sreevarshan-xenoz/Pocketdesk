@@ -139,6 +139,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **Computers on this network** — Home lists Pocketdesk computers on the same Wi-Fi (mDNS); a tap connects and an unpaired one asks for its PIN. Saved computers that are reachable get an "On this network" label
 - **Remote desktop** with tap/drag/double-tap gesture input
 - **Link status** — connecting/LAN/WAN indicator on the video surface, with failure reasons and one-tap retry
+- **Staying connected in the background** — when phone notifications or texts are on and Android may stop Pocketdesk (battery optimization, or battery use set to Restricted), Home says so, opens the page that allows it, and links this phone maker's own setting (dontkillmyapp.com). Settings shows the status and turns the reminder off
 - **Check connection** — on each saved computer and on the session's error card, the phone says why it cannot reach the computer, and what to do:
   - **What it checks:** the phone's network; a VPN that swallows home traffic; Tailscale being off; being on another network; whether the computer answers (and if not, whether nothing listens, nothing answers at all, or something drops it); that it is your computer (by its security key, without trusting anything new); the video port; and Android's battery and permission settings.
   - **Fixes:** buttons open the right settings page, Wake, or Pair again.

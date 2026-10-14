@@ -409,4 +409,16 @@
     <string name="doctor_video_closed_fix">Pocketdesk பதிலளிக்கிறது, ஆனால் அதன் வீடியோ போர்ட்டில் அல்ல. இந்தக் கணினிக்குச் சேமித்த ஸ்ட்ரீம் போர்ட்டைச் சரிபார், அல்லது அங்கே Pocketdesk-ஐ மீண்டும் தொடங்கு.</string>
     <string name="doctor_scan_again_title">அதன் இணைப்புக் குறியீட்டை மீண்டும் ஸ்கேன் செய்யவா?</string>
     <string name="doctor_scan_again_text">இது இந்தத் தொலைபேசியிலிருந்து கணினியையும் அதன் சேமித்த பாதுகாப்பு விசையையும் நீக்கி, ஸ்கேனரைத் திறக்கும். அங்கே Pocketdesk-ஐ மீண்டும் நிறுவியிருந்தால் மட்டும் இதைச் செய்.</string>
+    <!-- Staying connected in the background (T2) -->
+    <string name="bg_optimized">Android பின்னணியில் Pocketdesk-ஐ நிறுத்தக்கூடும்</string>
+    <string name="bg_restricted">Pocketdesk-இன் பேட்டரி பயன்பாடு கட்டுப்படுத்தப்பட்டது என அமைக்கப்பட்டுள்ளது</string>
+    <string name="bg_allowed">Pocketdesk பின்னணியில் இயங்கலாம்</string>
+    <string name="bg_why">Pocketdesk பின்னணியில் இயங்க முடியும் வரை மட்டுமே தொலைபேசி அறிவிப்புகளும் குறுஞ்செய்திகளும் உங்கள் கணினியை அடையும்.</string>
+    <string name="bg_allow">அனுமதி</string>
+    <string name="bg_dont_remind">நினைவூட்டாதே</string>
+    <string name="bg_maker_guide">இந்தத் தொலைபேசியின் தனி அமைப்பு</string>
+    <string name="settings_background">பின்னணி</string>
+    <string name="settings_background_status">பின்னணியில் இயங்குதல்</string>
+    <string name="settings_background_remind">முகப்பில் நினைவூட்டு</string>
+    <string name="settings_background_remind_summary">தொலைபேசி அறிவிப்புகள் அல்லது குறுஞ்செய்திகள் இயக்கத்தில் இருந்து Android அவற்றை நிறுத்தக்கூடும்போது</string>
 </resources>
