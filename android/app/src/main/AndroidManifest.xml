@@ -113,6 +113,17 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_connect_info" />
         </receiver>
+        <!-- Images received from the desktop's clipboard (N4): the clipboard
+             grants each app that reads it access to the URI. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.clipboard"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/clipboard_paths" />
+        </provider>
     </application>
 
 </manifest>

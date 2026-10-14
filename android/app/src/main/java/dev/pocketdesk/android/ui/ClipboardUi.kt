@@ -70,7 +70,8 @@ object ClipHistory {
 fun localClipboardText(ctx: Context): String? =
     ctx.getSystemService(ClipboardManager::class.java)
         ?.primaryClip
-        ?.takeIf { it.itemCount > 0 }
+        // An image clip is not text: coerced, it would be its URI (N4).
+        ?.takeIf { it.itemCount > 0 && !it.description.hasMimeType("image/*") }
         ?.getItemAt(0)
         ?.coerceToText(ctx)
         ?.toString()
