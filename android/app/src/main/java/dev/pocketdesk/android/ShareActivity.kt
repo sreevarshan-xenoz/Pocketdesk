@@ -19,7 +19,7 @@ import dev.pocketdesk.android.service.TransferService
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        RustCore.start(filesDir)
+        RustCore.start(this)
         handle(intent)
     }
 

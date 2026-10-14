@@ -31,6 +31,19 @@ use tokio::time::timeout;
 use uuid;
 
 pub async fn run(config: Config) -> Result<()> {
+    let state_dir = state::state_dir()?;
+    std::fs::create_dir_all(&state_dir)
+        .with_context(|| format!("failed to create {}", state_dir.display()))?;
+    match pocketdesk_core::local::paths::protect_state_dir(&state_dir) {
+        Ok(true) => tracing::info!("Made {} owner-only (0700)", state_dir.display()),
+        Ok(false) => {}
+        // A folder the user chose and does not own, or a filesystem without
+        // modes: the server still runs, and says the files are not private.
+        Err(e) => tracing::warn!(
+            "Could not make {} owner-only, so other local users may read it: {e}",
+            state_dir.display()
+        ),
+    }
     let pid_file = state::pid_file_path()?;
     state::write_pid_file(&pid_file)?;
     let _pid_guard = PidFileGuard { path: pid_file };
@@ -46,12 +59,10 @@ pub async fn run(config: Config) -> Result<()> {
         }
     };
 
-    let mut local_ips = pocketdesk_core::tailscale::lan::get_local_ips().await;
+    // For the LAN announcement only, which leaves the tailnet's addresses out.
+    let local_ips = pocketdesk_core::tailscale::lan::get_local_ips().await;
     if tailscale_ready && let Ok(ip) = tailscale.get_self_ip().await {
         tracing::info!("Tailscale online at {}", ip);
-        if !local_ips.contains(&ip) {
-            local_ips.push(ip);
-        }
     }
 
     let kde_service = kde::build_default_service().context("failed to initialize KDE service")?;

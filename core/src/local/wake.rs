@@ -120,9 +120,57 @@ pub fn wake_facts(local: Option<Ipv4Addr>) -> Option<WakeFacts> {
     facts_for(&adapters(), local)
 }
 
+/// Whether this computer may send a magic packet to `target` for a phone
+/// (the wake relay): the limited broadcast, or an address inside one of its
+/// own IPv4 subnets, which is where a magic packet can wake anything.
+/// Anything else would let a phone use the desktop to send packets
+/// elsewhere.
+pub fn may_relay_to(target: Ipv4Addr, adapters: &[Adapter]) -> bool {
+    if target == Ipv4Addr::BROADCAST {
+        return true;
+    }
+    adapters
+        .iter()
+        .flat_map(|a| a.ipv4.iter())
+        .any(|&(addr, prefix)| {
+            // Loopback is no network a computer can be woken on.
+            if prefix == 0 || prefix > 32 || addr.is_loopback() {
+                return false;
+            }
+            let mask = u32::MAX << (32 - u32::from(prefix));
+            u32::from(addr) & mask == u32::from(target) & mask
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_wake_relay_sends_only_on_this_computers_own_networks() {
+        let adapters = vec![Adapter {
+            name: "lan".into(),
+            mac: None,
+            ipv4: vec![(Ipv4Addr::new(192, 168, 1, 20), 24)],
+            wired: true,
+            physical: true,
+            default: true,
+        }];
+        assert!(may_relay_to(Ipv4Addr::BROADCAST, &adapters));
+        let with_loopback = vec![Adapter {
+            name: "lo".into(),
+            mac: None,
+            ipv4: vec![(Ipv4Addr::LOCALHOST, 8)],
+            wired: false,
+            physical: false,
+            default: false,
+        }];
+        assert!(!may_relay_to(Ipv4Addr::new(127, 0, 0, 5), &with_loopback));
+        assert!(may_relay_to(Ipv4Addr::new(192, 168, 1, 255), &adapters));
+        assert!(may_relay_to(Ipv4Addr::new(192, 168, 1, 7), &adapters));
+        assert!(!may_relay_to(Ipv4Addr::new(192, 168, 2, 255), &adapters));
+        assert!(!may_relay_to(Ipv4Addr::new(203, 0, 113, 9), &adapters));
+    }
 
     fn ethernet() -> Adapter {
         Adapter {

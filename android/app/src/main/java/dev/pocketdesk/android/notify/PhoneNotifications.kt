@@ -100,7 +100,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         rule = NotificationForwardRule(packageName)
-        RustCore.start(filesDir)
+        RustCore.start(this)
         // On a thread of its own: connecting can take seconds while the
         // computer is away, and must not hold up notifications.
         replyTicker.scheduleWithFixedDelay(

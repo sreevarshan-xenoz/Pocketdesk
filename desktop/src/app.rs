@@ -51,8 +51,8 @@ const PERMISSIONS: [(Capability, &str, &str); 9] = [
     ),
     (
         Capability::Power,
-        "Lock, sleep and privacy mode",
-        "Lock the screen, put the computer to sleep or shut it down, and blank it for privacy.",
+        "Lock, sleep, privacy mode and waking others",
+        "Lock the screen, put the computer to sleep or shut it down, blank it for privacy, and send a wake to another computer on this network.",
     ),
     (
         Capability::Exec,

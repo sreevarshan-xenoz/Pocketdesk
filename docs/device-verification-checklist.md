@@ -943,6 +943,20 @@ On the A71, 2026-10-14:
 - [ ] With the app allowed, phone notifications and texts keep arriving overnight with the screen off (the reason for all this).
 - [ ] Other makers (Xiaomi, OPPO): the guide link and their own battery managers.
 
+## 49. Protocol audit (what Pocketdesk sends, and to whom)
+
+`docs/protocol.md` is the map. On the A71 and this box, 2026-10-14:
+- [x] A WAN dial (stream port closed to force it) resolves n0's relay through the network's DNS: no `android context was not initialized` panic and no `failed to read system DNS configuration, using fallback` in logcat (the build before logged both).
+
+Owed:
+- [ ] Linux: after `pocketdesk start`, `stat -c %a ~/.local/state/pocketdesk` is `700`, and the log says "Made … owner-only" once; a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts.
+- [ ] Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
+- [ ] The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
+- [ ] Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing, and a device-to-device move (Smart Switch) leaves the app unpaired on the new phone.
+- [ ] Windows: after `pocketdesk install`, the firewall has TCP 1716 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
+- [ ] A Wi-Fi with Tailscale up: a phone browsing mDNS sees the LAN address and no 100.x or fd7a: address.
+- [ ] Transfers both ways still end "saved" over many runs (the clean close after the status byte), and a desktop share to a full disk fails at once instead of after 10 s.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

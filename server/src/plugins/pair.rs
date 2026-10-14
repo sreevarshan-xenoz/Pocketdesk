@@ -629,8 +629,9 @@ async fn request_pin(conn: &str, sender: &dyn DeviceSender) {
             },
         );
     }
+    // The PIN itself goes to the log only when no notification can show it.
     tracing::info!(
-        "Pairing PIN for {conn}: {pin} (valid {}s)",
+        "Pairing PIN minted for {conn} (valid {}s)",
         PIN_TTL.as_secs()
     );
     show_pin_notification(&pin);
@@ -890,16 +891,19 @@ async fn respond_pair(sender: &dyn DeviceSender, paired: bool, server_id: &str) 
     }
 }
 
-/// Show the PIN on the desktop, log fallback — never fails the pairing flow.
+/// Show the PIN on the desktop. Only when no notification can show it does
+/// it go to the log, the one place left to read it (a headless desktop);
+/// never fails the pairing flow. Off the caller's task: a hung notification
+/// daemon would otherwise hold a runtime worker for as long as it hangs.
 fn show_pin_notification(pin: &str) {
+    let fallback = pin.to_string();
     let summary = format!("Pocketdesk pairing PIN: {pin}");
     let body = "Enter it on your phone. It expires in 5 minutes.";
-    let handle = std::thread::spawn(move || {
-        crate::platform::notify(&summary, body, std::time::Duration::from_secs(300))
+    std::thread::spawn(move || {
+        if !crate::platform::notify(&summary, body, std::time::Duration::from_secs(300)) {
+            tracing::info!("No desktop notification available; the pairing PIN is {fallback}");
+        }
     });
-    if !handle.join().unwrap_or(false) {
-        tracing::info!("No desktop notification available; PIN is only in the log");
-    }
 }
 
 #[cfg(test)]
@@ -1359,11 +1363,16 @@ forged log line"
             "kdeconnect.notification.request",
             "kdeconnect.pocketdesk.monitors",
             "kdeconnect.pocketdesk.windows",
-            "kdeconnect.pocketdesk.wol",
             "kdeconnect.findmydevice",
             "kdeconnect.mousepad.echo",
             "kdeconnect.filebrowse.response",
         ];
+        for packet_type in ALWAYS_ALLOWED {
+            assert!(
+                capability_for(packet_type).is_none(),
+                "{packet_type} is gated, so it does not belong in the list"
+            );
+        }
         let (incoming, _) = crate::plugins::register_all().capability_sets();
         for packet_type in incoming {
             assert!(

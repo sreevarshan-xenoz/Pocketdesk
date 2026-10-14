@@ -52,8 +52,8 @@ impl Capability {
 
 /// The capability a control packet uses (spec P3), or `None` for packets a
 /// paired device may always send: identity, pairing, and status queries
-/// (battery, monitors, windows, the notification request, find-my-device,
-/// WoL relay). A phone's own notifications need [`Capability::Notifications`].
+/// (battery, monitors, windows, the notification request, find-my-device).
+/// A phone's own notifications need [`Capability::Notifications`].
 ///
 /// One table for every plugin: a plugin that adds a packet type adds a row
 /// here, or it is always allowed. The privacy grab takes the desk's own
@@ -61,8 +61,8 @@ impl Capability {
 /// notification reply is put on the desktop's clipboard, so it counts as
 /// [`Capability::Clipboard`].
 ///
-/// An always-allowed type must have no effect beyond answering the phone,
-/// ringing this desk, or waking another machine.
+/// An always-allowed type must have no effect beyond answering the phone or
+/// ringing this desk. Waking another machine through this one is Power.
 pub fn capability_for(packet_type: &str) -> Option<Capability> {
     Some(match packet_type {
         "kdeconnect.mousepad.request" | "kdeconnect.presenter" => Capability::Input,
@@ -76,7 +76,10 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         | "kdeconnect.pocketdesk.file_fetch"
         | "kdeconnect.pocketdesk.file_offer_declined" => Capability::Files,
         "kdeconnect.pocketdesk.audio" => Capability::Audio,
-        "kdeconnect.pocketdesk.power" | "kdeconnect.pocketdesk.privacy" => Capability::Power,
+        // Waking another machine through this one is a power action too.
+        "kdeconnect.pocketdesk.power"
+        | "kdeconnect.pocketdesk.privacy"
+        | "kdeconnect.pocketdesk.wol" => Capability::Power,
         "kdeconnect.pocketdesk.exec" => Capability::Exec,
         "kdeconnect.notification" => Capability::Notifications,
         "kdeconnect.sms.messages" | "kdeconnect.pocketdesk.sms_sent" => Capability::Texts,
@@ -213,6 +216,7 @@ mod tests {
             ("kdeconnect.pocketdesk.audio", Some(Capability::Audio)),
             ("kdeconnect.pocketdesk.power", Some(Capability::Power)),
             ("kdeconnect.pocketdesk.privacy", Some(Capability::Power)),
+            ("kdeconnect.pocketdesk.wol", Some(Capability::Power)),
             ("kdeconnect.pocketdesk.exec", Some(Capability::Exec)),
             ("kdeconnect.notification", Some(Capability::Notifications)),
             ("kdeconnect.notification.request", None),

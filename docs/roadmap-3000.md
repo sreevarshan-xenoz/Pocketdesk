@@ -1176,7 +1176,7 @@ false-positive for any future audit)
 **Identity & secrets**
 - 2357 move the phone's identity key into the Android Keystore (or at minimum EncryptedSharedPreferences).
 - 2358 move the desktop's identity key into the secret service with a file fallback that warns.
-- 2359 owner-only `0600` on every state file (key, trust store, known peers).
+- 2359 owner-only `0600` on every state file (key, trust store, known peers). **DONE (2026-10-14)** — the server makes the state folder `0700` at start on Unix, which covers every file in it; Windows keeps `%LOCALAPPDATA%`'s per-user DACL.
 - 2360 a versioned trust-store format with a schema field.
 - 2361 a trust-store backup and restore path.
 - 2362 refuse to start, loudly, when the trust store is unreadable instead of treating it as empty.

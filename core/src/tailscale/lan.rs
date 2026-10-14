@@ -99,6 +99,7 @@ impl LanDiscoveryService {
 
         let properties = announcement_properties(name, device_id, stream_port);
 
+        let ips = announceable(ips);
         let service_info = ServiceInfo::new(
             &service_type,
             &instance_name,
@@ -229,6 +230,40 @@ impl LanDiscoveryService {
     pub fn tx(&self) -> &broadcast::Sender<LanEvent> {
         &self.tx
     }
+}
+
+/// The addresses worth announcing on the local network: not the tailnet's
+/// (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). A phone on the LAN reaches the
+/// computer by its LAN address, and the multicast answer would otherwise
+/// tell every device on the network this computer's tailnet address.
+/// Anything that does not parse is dropped too. A network that numbers its
+/// LAN inside `100.64.0.0/10` (some hotspots and carrier routers do) would
+/// leave nothing, so then every parsable address is announced.
+fn announceable(ips: Vec<String>) -> Vec<String> {
+    use std::net::IpAddr;
+    let parsed: Vec<(String, IpAddr)> = ips
+        .into_iter()
+        .filter_map(|ip| ip.parse::<IpAddr>().ok().map(|addr| (ip, addr)))
+        .collect();
+    let off_tailnet: Vec<String> = parsed
+        .iter()
+        .filter(|(_, addr)| match addr {
+            IpAddr::V4(v4) => {
+                let [a, b, ..] = v4.octets();
+                !(a == 100 && (b & 0xc0) == 64)
+            }
+            IpAddr::V6(v6) => {
+                let s = v6.segments();
+                !(s[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0)
+            }
+        })
+        .map(|(ip, _)| ip.clone())
+        .collect();
+    if off_tailnet.is_empty() {
+        debug!("Only 100.64.0.0/10 addresses here, so they are announced");
+        return parsed.into_iter().map(|(ip, _)| ip).collect();
+    }
+    off_tailnet
 }
 
 /// The TXT record of this server's announcement.
@@ -417,6 +452,29 @@ mod tests {
             }
         }
         let _ = browser.shutdown();
+    }
+
+    #[test]
+    fn the_announcement_leaves_tailnet_addresses_out() {
+        let ips = [
+            "192.168.1.10",
+            "100.64.0.9",
+            "100.127.255.1",
+            "100.128.0.1",
+            "fd7a:115c:a1e0::9",
+            "2001:db8::4",
+            "not an address",
+        ];
+        assert_eq!(
+            announceable(ips.iter().map(|s| s.to_string()).collect()),
+            ["192.168.1.10", "100.128.0.1", "2001:db8::4"],
+            "the tailnet's 100.64.0.0/10 and fd7a:115c:a1e0::/48 stay off the LAN"
+        );
+        assert_eq!(
+            announceable(vec!["100.70.0.5".into(), "junk".into()]),
+            ["100.70.0.5"],
+            "a LAN numbered in 100.64.0.0/10 is still announced"
+        );
     }
 
     #[test]

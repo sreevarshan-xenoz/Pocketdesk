@@ -58,11 +58,7 @@ const LEGACY_NAME: &str = "Linux Link";
 const TAILSCALE_ADAPTER: &str = "Tailscale";
 
 /// Ports the phone reaches, with the protocol and what each carries.
-const PORTS: [(&str, u16, &str); 3] = [
-    ("TCP", 1716, "control"),
-    ("UDP", 1716, "discovery"),
-    ("UDP", 4716, "media"),
-];
+const PORTS: [(&str, u16, &str); 2] = [("TCP", 1716, "control"), ("UDP", 4716, "media")];
 
 /// Tailscale's address ranges (IPv4 CGNAT block and its IPv6 ULA prefix).
 const TAILNET: &str = "100.64.0.0/10,fd7a:115c:a1e0::/48";
@@ -326,9 +322,7 @@ pub fn install(elevated: bool) -> Result<()> {
     }
 
     match run_elevated("firewall-add") {
-        Ok(0) => println!(
-            "Opened TCP 1716, UDP 1716 and UDP 4716 to this program (local subnet + tailnet)"
-        ),
+        Ok(0) => println!("Opened TCP 1716 and UDP 4716 to this program (local subnet + tailnet)"),
         Ok(code) => println!(
             "Firewall rules were not added (helper exited {code}); add them from an administrator terminal with `pocketdesk firewall-add`"
         ),
@@ -401,6 +395,14 @@ mod tests {
         let doc = windows::Data::Xml::Dom::XmlDocument::new().unwrap();
         doc.LoadXml(&HSTRING::from(xml.replacen("UTF-16", "UTF-8", 1)))
             .expect("well-formed task XML");
+    }
+
+    #[test]
+    fn only_the_ports_the_server_listens_on_are_opened() {
+        // TCP 1716 control, UDP 4716 QUIC. Discovery is mDNS; nothing
+        // listens on UDP 1716, so an open rule there is only exposure.
+        let opened: Vec<(&str, u16)> = PORTS.iter().map(|(p, port, _)| (*p, *port)).collect();
+        assert_eq!(opened, [("TCP", 1716), ("UDP", 4716)]);
     }
 
     #[test]
