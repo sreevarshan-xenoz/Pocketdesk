@@ -46,10 +46,9 @@ struct Offer {
     path: PathBuf,
     device_id: String,
     expires: Instant,
-    /// Fetches begun.
+    /// Fetches begun. One runs at a time: a retry replaces an attempt
+    /// still running (`share::running`).
     attempts: u8,
-    /// A fetch is running: another waits for it to end.
-    in_flight: bool,
 }
 
 /// Offers by id. The server has one ([`offers`]); a test that sweeps uses
@@ -75,14 +74,13 @@ fn offer_in(table: &Table, id: &str, path: PathBuf, device_id: &str, now: Instan
             device_id: device_id.to_string(),
             expires: now + OFFER_TTL,
             attempts: 0,
-            in_flight: false,
         },
     );
 }
 
 /// The file offered as `id`, for a fetch by `device_id`. The offer stays
-/// until that fetch settles ([`finish`]), one fetch at a time; an offer for
-/// another phone is refused and left for its own phone.
+/// until a fetch settles it ([`finish`]); an offer for another phone is
+/// refused and left for its own phone.
 pub fn redeem(id: &str, device_id: &str) -> Result<PathBuf, &'static str> {
     let redeemed = redeem_at(id, device_id, Instant::now());
     if redeemed == Err(OFFER_EXPIRED) {
@@ -114,10 +112,10 @@ fn redeem_in(
         offers.remove(id);
         return Err(OFFER_EXPIRED);
     }
-    if offer.in_flight {
-        return Err("the file is already being sent");
+    if offer.attempts >= MAX_ATTEMPTS {
+        offers.remove(id);
+        return Err("the phone tried too many times");
     }
-    offer.in_flight = true;
     offer.attempts += 1;
     Ok(offer.path.clone())
 }
@@ -138,7 +136,6 @@ fn settle_in(table: &Table, id: &str, sent: bool) -> Settled {
     let Some(offer) = offers.get_mut(id) else {
         return if sent { Settled::Done } else { Settled::GaveUp };
     };
-    offer.in_flight = false;
     if sent {
         offers.remove(id);
         Settled::Done
@@ -426,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn an_offer_is_fetched_by_its_phone_one_attempt_at_a_time() {
+    fn an_offer_is_fetched_by_its_phone_until_one_attempt_succeeds() {
         let table = Table::default();
         let now = Instant::now();
         offer_in(&table, "o-1", PathBuf::from("/a.pdf"), "phone-a", now);
@@ -438,11 +435,6 @@ mod tests {
             redeem_in(&table, "o-1", "phone-a", now),
             Ok(PathBuf::from("/a.pdf")),
             "another phone's attempt does not use it up"
-        );
-        assert_eq!(
-            redeem_in(&table, "o-1", "phone-a", now),
-            Err("the file is already being sent"),
-            "one attempt at a time"
         );
         assert_eq!(settle_in(&table, "o-1", false), Settled::Retry);
         assert!(

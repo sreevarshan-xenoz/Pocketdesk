@@ -155,6 +155,63 @@ pub(crate) fn transfer_slots() -> &'static TransferSlots {
     SLOTS.get_or_init(|| TransferSlots::new(MAX_TRANSFERS, MAX_TRANSFERS_PER_PHONE))
 }
 
+/// The transfer running for each file, by a key naming it (T6a). A phone
+/// whose Wi-Fi dropped retries before this side notices the old connection
+/// is dead (no reset arrives, so it waits out its idle limit); its retry
+/// replaces the old attempt, which would otherwise hold a transfer slot and
+/// work on the same partial file.
+#[derive(Default)]
+pub(crate) struct Running {
+    tasks: tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>,
+}
+
+impl Running {
+    /// End the attempt running under `key`, if any, and wait until it is
+    /// gone (its slot and files released).
+    pub(crate) async fn supersede(&self, key: &str) {
+        let old = self.tasks.lock().await.remove(key);
+        if let Some(old) = old {
+            tracing::info!("A retry replaces the transfer still running for {key}");
+            old.abort();
+            let _ = old.await;
+        }
+    }
+
+    /// Run `work` under `key`; it forgets itself when done.
+    pub(crate) async fn spawn(
+        &'static self,
+        key: String,
+        work: impl std::future::Future<Output = ()> + Send + 'static,
+    ) {
+        let mut tasks = self.tasks.lock().await;
+        let handle = tokio::spawn({
+            let key = key.clone();
+            async move {
+                work.await;
+                let mut tasks = self.tasks.lock().await;
+                if tasks
+                    .get(&key)
+                    .is_some_and(|t| Some(t.id()) == tokio::task::try_id())
+                {
+                    tasks.remove(&key);
+                }
+            }
+        });
+        tasks.insert(key, handle);
+    }
+
+    #[cfg(test)]
+    async fn is_running(&self, key: &str) -> bool {
+        self.tasks.lock().await.contains_key(key)
+    }
+}
+
+/// The running transfers, shared by every connection.
+pub(crate) fn running() -> &'static Running {
+    static RUNNING: std::sync::OnceLock<Running> = std::sync::OnceLock::new();
+    RUNNING.get_or_init(Running::default)
+}
+
 #[derive(Debug)]
 pub struct SharePlugin {
     /// Where received files go; `None` when this system has neither a
@@ -281,11 +338,6 @@ impl Plugin for SharePlugin {
                     Ok(tls) => tls,
                     Err(reason) => return refused(reason.to_string()).await,
                 };
-                let slot = match transfer_slots().take(sender.device_id()) {
-                    Ok(slot) => slot,
-                    Err(reason) => return refused(reason.to_string()).await,
-                };
-
                 let Some(store) = partials() else {
                     return refused("no state folder for the transfer".into()).await;
                 };
@@ -297,33 +349,46 @@ impl Plugin for SharePlugin {
                     .filter(|s| pocketdesk_core::protocol::partials::valid_source(s))
                     .map(str::to_string);
                 let from = sender.device_id().to_string();
-                tokio::spawn(async move {
-                    match receive_file(
-                        SocketAddr::new(phone_ip, port),
-                        tls,
-                        &key,
-                        Incoming {
-                            dir: &dir,
-                            name: &name,
-                            size,
-                            device: &from,
-                            source: source.as_deref(),
-                            store: &store,
-                            limits: partial_limits(),
-                        },
-                    )
-                    .await
-                    {
-                        Ok(path) => {
-                            // The bytes are in: give the slot back before the
-                            // bookkeeping, for the phone's next file.
-                            drop(slot);
-                            tracing::info!("File received: {} ({size} bytes)", path.display());
-                            on_received(&path, size, &from);
+                // A retry of this file replaces an attempt still running for
+                // it, before the slot is taken.
+                let running_key = source
+                    .as_ref()
+                    .map(|s| format!("share:{from}:{s}"))
+                    .unwrap_or_else(|| format!("share:{}", uuid::Uuid::new_v4().simple()));
+                running().supersede(&running_key).await;
+                let slot = match transfer_slots().take(sender.device_id()) {
+                    Ok(slot) => slot,
+                    Err(reason) => return refused(reason.to_string()).await,
+                };
+                running()
+                    .spawn(running_key, async move {
+                        match receive_file(
+                            SocketAddr::new(phone_ip, port),
+                            tls,
+                            &key,
+                            Incoming {
+                                dir: &dir,
+                                name: &name,
+                                size,
+                                device: &from,
+                                source: source.as_deref(),
+                                store: &store,
+                                limits: partial_limits(),
+                            },
+                        )
+                        .await
+                        {
+                            Ok(path) => {
+                                // The bytes are in: give the slot back before the
+                                // bookkeeping, for the phone's next file.
+                                drop(slot);
+                                tracing::info!("File received: {} ({size} bytes)", path.display());
+                                on_received(&path, size, &from);
+                            }
+                            Err(e) => tracing::warn!("File transfer of {name} failed: {e}"),
                         }
-                        Err(e) => tracing::warn!("File transfer of {name} failed: {e}"),
-                    }
-                });
+                    })
+                    .await;
             } else if let Some(url) = body.get("url").and_then(|v| v.as_str()) {
                 // URL share - just log it (could be enhanced to auto-download)
                 tracing::info!("URL shared: {}", url);
@@ -355,22 +420,36 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         tracing::warn!("Download refused: no transfer key");
         return;
     };
+    // A retry of this download replaces an attempt still running for it,
+    // before plan_fetch takes a slot (T6a).
+    let body = &packet.body;
+    let running_key = match (
+        body.get("offer").and_then(|v| v.as_str()),
+        body.get("path").and_then(|v| v.as_str()),
+    ) {
+        (Some(offer), _) => format!("offer:{offer}"),
+        (None, Some(path)) => format!("path:{}:{path}", sender.device_id()),
+        (None, None) => format!("fetch:{}", uuid::Uuid::new_v4().simple()),
+    };
+    running().supersede(&running_key).await;
     match plan_fetch(&packet.body, sender) {
         Ok(fetch) => {
             tracing::info!("Sending {} to {}", fetch.path.display(), fetch.to);
-            tokio::spawn(async move {
-                let _slot = fetch.slot;
-                let sent = send_file_to(fetch.to, fetch.tls, &key, &fetch.path).await;
-                match &sent {
-                    Ok(size) => {
-                        tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
+            running()
+                .spawn(running_key, async move {
+                    let _slot = fetch.slot;
+                    let sent = send_file_to(fetch.to, fetch.tls, &key, &fetch.path).await;
+                    match &sent {
+                        Ok(size) => {
+                            tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
+                        }
+                        Err(e) => tracing::warn!("Sending {} failed: {e}", fetch.path.display()),
                     }
-                    Err(e) => tracing::warn!("Sending {} failed: {e}", fetch.path.display()),
-                }
-                if let Some(id) = fetch.offer {
-                    crate::offers::finish(&id, sent.map(|_| ()).map_err(|e| e.to_string()));
-                }
-            });
+                    if let Some(id) = fetch.offer {
+                        crate::offers::finish(&id, sent.map(|_| ()).map_err(|e| e.to_string()));
+                    }
+                })
+                .await;
         }
         Err(reason) => {
             tracing::warn!("Download refused: {reason}");
@@ -1004,6 +1083,39 @@ mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn a_retry_replaces_the_attempt_still_running_for_its_file() {
+        static RUNNING: std::sync::OnceLock<Running> = std::sync::OnceLock::new();
+        let running = RUNNING.get_or_init(Running::default);
+        let slots = std::sync::Arc::new(TransferSlots::new(2, 1));
+        // A stale attempt: holds the phone's one slot and never ends.
+        let slot = slots.take("phone").unwrap();
+        running
+            .spawn("file-a".into(), async move {
+                let _slot = slot;
+                std::future::pending::<()>().await;
+            })
+            .await;
+        assert!(
+            slots.take("phone").is_err(),
+            "the stale attempt holds the slot"
+        );
+        running.supersede("file-a").await;
+        assert!(!running.is_running("file-a").await);
+        let slot = slots.take("phone").expect("the slot came back");
+        // A finished attempt forgets itself.
+        running
+            .spawn("file-b".into(), async move { drop(slot) })
+            .await;
+        for _ in 0..50 {
+            if !running.is_running("file-b").await {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(!running.is_running("file-b").await);
+    }
 
     #[test]
     fn a_phones_next_file_is_not_refused_while_its_last_one_finishes() {
