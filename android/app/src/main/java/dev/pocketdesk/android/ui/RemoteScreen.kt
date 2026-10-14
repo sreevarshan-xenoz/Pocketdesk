@@ -52,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -246,6 +247,11 @@ fun RemoteScreen(
         mutableStateOf(HostStore.monitorIndex(context, address))
     }
     var showStream by remember { mutableStateOf(true) }
+    // Each restart (Retry, pairing, a screen switch, a network change) gets
+    // a new stream view, so a new surface and a new connection. Toggling
+    // showStream off and on alone could land in one frame, which Compose
+    // merges into no change: the old view stayed, and nothing reconnected.
+    var streamEpoch by remember { mutableIntStateOf(0) }
     var showMonitorPicker by remember { mutableStateOf(false) }
     // The computer's screens, for the chrome's screen switcher. Read once per
     // session; the picker in Quick Settings reads them fresh.
@@ -592,6 +598,7 @@ fun RemoteScreen(
         streamStatus = StreamStatus.Connecting
         scope.launch {
             withContext(Dispatchers.IO) { RustCore.stopStreaming() }
+            streamEpoch++
             showStream = true
         }
     }
@@ -652,6 +659,7 @@ fun RemoteScreen(
         showStream = false
         scope.launch {
             withContext(Dispatchers.IO) { RustCore.stopStreaming() }
+            streamEpoch++
             showStream = true
         }
     }
@@ -800,7 +808,7 @@ fun RemoteScreen(
                 }
             },
         ) {
-        if (showStream) {
+        if (showStream) key(streamEpoch) {
             RemoteDesktopView(
                 address = address,
                 port = port,
