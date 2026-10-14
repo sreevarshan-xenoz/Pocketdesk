@@ -614,6 +614,8 @@ fun RemoteScreen(
     var reconnectAttempt by remember { mutableIntStateOf(0) }
     var droppedAtMs by remember { mutableLongStateOf(0L) }
     var reconnectInS by remember { mutableStateOf<Int?>(null) }
+    // T1: the Connection Doctor, from the error card.
+    var showDoctor by remember { mutableStateOf(false) }
     var reconnectGaveUp by remember { mutableStateOf(false) }
     fun restartReconnectWindow() {
         reconnectAttempt = 0
@@ -966,6 +968,9 @@ fun RemoteScreen(
                                         retryStream()
                                     }) {
                                         Text(stringResource(R.string.retry))
+                                    }
+                                    TextButton(onClick = { showDoctor = true }) {
+                                        Text(stringResource(R.string.doctor_title))
                                     }
                                     if (errorSuggestsRepair(s.reason)) {
                                         TextButton(
@@ -1374,6 +1379,20 @@ fun RemoteScreen(
                 // refused stream comes back without a tap on Retry.
                 if (streamStatus is StreamStatus.Down) retryStream()
             },
+        )
+    }
+
+    if (showDoctor) {
+        ConnectionDoctorSheet(
+            address = address,
+            streamPort = port,
+            controlPort = controlPort,
+            canWake = false,
+            onWake = {},
+            // A changed key is fixed only by scanning the code again from
+            // Home; the PIN sheet would trust whoever answers.
+            onPairAgain = null,
+            onDismiss = { showDoctor = false },
         )
     }
 

@@ -415,6 +415,32 @@ pub(crate) fn control_manager(timeout: Duration) -> Result<ConnectionManager, St
     ))
 }
 
+/// Who answers at `address:port`, compared with this phone's pin for that
+/// address, for the Connection Doctor (T1): `matches`, `changed`,
+/// `not_pinned`, `not_pocketdesk`, `closed` or `failed`. Never saves a pin.
+pub async fn check_identity(address: String, port: u16) -> Result<String, String> {
+    use pocketdesk_core::streaming::transport::IdentityProbe;
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    let certs = pocketdesk_core::streaming::transport::CertManager::load_or_create(&dir)
+        .map_err(|e| format!("This phone's certificate: {e}"))?;
+    let verdict = certs
+        .probe_identity(&address, port, Duration::from_secs(3))
+        .await;
+    Ok(match verdict {
+        IdentityProbe::Matches => "matches",
+        IdentityProbe::Changed => "changed",
+        IdentityProbe::NotPinned => "not_pinned",
+        IdentityProbe::NotPocketdesk => "not_pocketdesk",
+        IdentityProbe::Closed => "closed",
+        IdentityProbe::Failed => "failed",
+    }
+    .to_string())
+}
+
 /// Connect to a peer
 pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionState, String> {
     // Kotlin calls this from several poll loops (clipboard sync, quick

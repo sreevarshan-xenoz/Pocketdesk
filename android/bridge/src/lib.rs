@@ -972,6 +972,20 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRequest
     to_jstring(&mut env, json)
 }
 
+/// The Connection Doctor's identity check (T1): `{"ok":"matches"|"changed"|
+/// "not_pinned"|"not_pocketdesk"|"failed"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCheckIdentity(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope(RUNTIME.block_on(api::check_identity(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
 /// Submit a pairing PIN; `{"ok":"<deviceId>"}` when the desktop paired us,
 /// `{"ok":null}` for a wrong/expired PIN.
 #[unsafe(no_mangle)]
