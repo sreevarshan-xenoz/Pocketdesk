@@ -932,6 +932,17 @@ On the A71 against this Windows box, 2026-10-14:
 - [ ] Copy report on a device: no address or id in the text.
 - [ ] The Linux host (a stopped server there should be "nothing is listening").
 
+## 48. Staying connected in the background (T2)
+
+On the A71, 2026-10-14:
+- [x] With phone notifications on and battery optimization on, Home shows "Android may stop Pocketdesk in the background", with "This phone's own setting" (Samsung's dontkillmyapp.com page).
+- [x] "Allow" opens Android's battery optimization page, and Back returns to the app.
+- [x] Settings, Background shows the status; "Remind me on Home" off hides the card, and on brings it back.
+- [ ] After allowing it in the battery settings, the card is gone on return.
+- [ ] Battery use set to Restricted: the card says so, and "Allow" opens the app's page.
+- [ ] With the app allowed, phone notifications and texts keep arriving overnight with the screen off (the reason for all this).
+- [ ] Other makers (Xiaomi, OPPO): the guide link and their own battery managers.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
