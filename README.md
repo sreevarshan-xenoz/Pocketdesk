@@ -51,6 +51,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
   - **Never sent:** ongoing ones (music, navigation, calls), Pocketdesk's own, ones an app keeps on the device, and a work profile's.
   - **Lock-screen privacy carries over:** anything the phone hides there stays hidden. A private notification arrives as only "New notification", and a one-time code is replaced.
   - **On the computer:** at most 20 a minute are shown from one phone, and each phone's Notifications switch in the Devices tab can turn them off.
+  - **Closed on the phone, closed here:** read, swipe or clear one on the phone, and it leaves the computer too (the Action Center on Windows; on Linux, any notification server that closes on request).
 - **Notification reply** — answer desktop notifications from the phone; the desktop records the reply, copies it to the clipboard and shows a confirmation
 - **Find my device** — ring the desktop from the phone, or ring the phone from the desktop
 - **PIN pairing** — 6-digit PIN pairing (shown on the desktop or printed by `pocketdesk pair`); unpaired connections are locked out — the control channel (TCP and v2/QUIC) and the video/input stream all enforce it — unless `pairing_required = false`

@@ -48,3 +48,12 @@ A cancel goes through the same Notifications permission as the notification, and
 ## Device check (A71 ↔ this box)
 
 Post a shell notification (shared), see the toast in the Action Center, cancel it on the phone (`cmd notification cancel`), and it leaves the Action Center.
+
+## As built
+
+- **Device-verified on the A71 and this box:**
+  - a shared shell notification's toast was in the Action Center with its tag;
+  - swiping the notification away on the phone sent one cancel, and the toast left the Action Center;
+  - a live ignored test shows a tagged toast and takes it back.
+- **This Android has no `cmd notification cancel`,** so the device check dismisses from the shade, as a person would.
+- **Owed (checklist §40):** the Linux host, and a chat app that clears its notification when read.

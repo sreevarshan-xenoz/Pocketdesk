@@ -792,6 +792,16 @@ Built on `feat/phone-notifications`. On the A71, with no session open: the app's
 - [ ] With no computer reachable, the phone's battery and the queue stay calm over an hour.
 - [ ] The Linux host (`notify-send`).
 
+## 40. Closed on the phone, closed on the computer (N5c, part 1)
+
+Built on `feat/notification-dismissal`. On the A71 with sharing on for Shell: a notification was posted, its toast found in the Windows Action Center by its tag, and the notification swiped away on the phone. The phone sent one cancel, and the toast left the Action Center. Afterwards sharing was turned off and access revoked.
+
+- [x] A notification swiped away on the phone leaves the Windows Action Center.
+- [x] A live ignored test shows a tagged toast and takes it back.
+- [x] Only a notification the computer was shown is mentioned (one cancel for a group of 35, of which one had been sent).
+- [ ] The Linux host: a notification closed on the phone closes in the notification server (D-Bus `CloseNotification`).
+- [ ] A chat app that clears its notification when read on the phone.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
