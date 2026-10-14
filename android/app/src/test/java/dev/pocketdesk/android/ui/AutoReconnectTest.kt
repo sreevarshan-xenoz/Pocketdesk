@@ -20,22 +20,48 @@ class AutoReconnectTest {
     }
 
     @Test
+    fun `with no cached internet identity, the LAN failure decides`() {
+        assertTrue(
+            AutoReconnect.retryable(
+                "LAN connect failed (Connection to streaming server timed out: deadline has elapsed); " +
+                    "no cached WAN identity for 192.0.2.10 — pair/connect on LAN first.",
+            ),
+        )
+        assertFalse(
+            AutoReconnect.retryable(
+                "LAN connect failed (certificate does not match the pin); " +
+                    "no cached WAN identity for 192.0.2.10 — pair/connect on LAN first.",
+            ),
+        )
+    }
+
+    @Test
     fun `an end the desktop chose is not retried`() {
         assertFalse(AutoReconnect.retryable("stream closed by the desktop: kicked by user"))
         assertFalse(AutoReconnect.retryable("stream closed by the desktop: session refused"))
         assertFalse(AutoReconnect.retryable("stream closed by the desktop: not paired"))
         assertFalse(AutoReconnect.retryable("stream closed by the desktop: permissions changed"))
+        assertFalse(AutoReconnect.retryable("stream closed by the desktop: session end"))
+    }
+
+    @Test
+    fun `a transport error the bridge reports as a close is retried`() {
+        assertTrue(AutoReconnect.retryable("stream closed by the desktop: timed out"))
+        assertTrue(AutoReconnect.retryable("stream closed by the desktop: connection reset by peer"))
+        assertTrue(AutoReconnect.retryable("stream closed by the desktop: "))
     }
 
     @Test
     fun `trust and pairing problems wait for the person`() {
         assertFalse(AutoReconnect.retryable("Connection failed: certificate does not match the pin"))
         assertFalse(AutoReconnect.retryable("pairing declined"))
-        assertFalse(
-            AutoReconnect.retryable(
-                "LAN connect failed (timed out); no cached WAN identity for 192.0.2.10 — pair/connect on LAN first.",
-            ),
-        )
+    }
+
+    @Test
+    fun `a word that merely contains pin is not a pairing problem`() {
+        assertTrue(AutoReconnect.retryable("LAN: timed out · WAN: ping timed out while mapping ports"))
+        assertFalse(errorSuggestsRepair("LAN: timed out · WAN: ping timed out while mapping ports"))
+        assertTrue(errorSuggestsRepair("wrong PIN"))
     }
 
     @Test

@@ -102,6 +102,7 @@ import dev.pocketdesk.android.stream.keyboard.TextSend
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.pocketdesk.android.ui.theme.Space
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -593,10 +594,14 @@ fun RemoteScreen(
         }
     }
 
+    // One rebuild at a time: a newer trigger (auto-retry, the network
+    // changing, Retry, pairing) replaces one still stopping the old stream.
+    var retryJob by remember { mutableStateOf<Job?>(null) }
     fun retryStream() {
         showStream = false
         streamStatus = StreamStatus.Connecting
-        scope.launch {
+        retryJob?.cancel()
+        retryJob = scope.launch {
             withContext(Dispatchers.IO) { RustCore.stopStreaming() }
             streamEpoch++
             showStream = true
@@ -609,19 +614,35 @@ fun RemoteScreen(
     var reconnectAttempt by remember { mutableIntStateOf(0) }
     var droppedAtMs by remember { mutableLongStateOf(0L) }
     var reconnectInS by remember { mutableStateOf<Int?>(null) }
+    var reconnectGaveUp by remember { mutableStateOf(false) }
+    fun restartReconnectWindow() {
+        reconnectAttempt = 0
+        droppedAtMs = 0L
+        reconnectGaveUp = false
+    }
+    // The backoff starts over only once a picture has played for a while: a
+    // stream that connects and then fails (a decoder that cannot take it, a
+    // desktop that never sends a frame) must not retry every few seconds
+    // forever.
+    LaunchedEffect(streamStatus, awaitingPicture) {
+        if (streamStatus is StreamStatus.Up && !awaitingPicture) {
+            delay(AutoReconnect.HEALTHY_MS)
+            restartReconnectWindow()
+        }
+    }
     LaunchedEffect(streamStatus) {
         reconnectInS = null
         val s = streamStatus
-        if (s is StreamStatus.Up) {
-            reconnectAttempt = 0
-            droppedAtMs = 0L
-        }
         if (s !is StreamStatus.Down || !Prefs.autoReconnect(context) || !AutoReconnect.retryable(s.reason)) {
             return@LaunchedEffect
         }
         val now = SystemClock.elapsedRealtime()
         if (droppedAtMs == 0L) droppedAtMs = now
-        val wait = AutoReconnect.delayMs(reconnectAttempt, now - droppedAtMs) ?: return@LaunchedEffect
+        val wait = AutoReconnect.delayMs(reconnectAttempt, now - droppedAtMs)
+        if (wait == null) {
+            reconnectGaveUp = true
+            return@LaunchedEffect
+        }
         val due = now + wait
         while (true) {
             val left = due - SystemClock.elapsedRealtime()
@@ -666,6 +687,7 @@ fun RemoteScreen(
                             "RemoteScreen",
                             "default network changed — rebinding stream",
                         )
+                        restartReconnectWindow()
                         retryStream()
                     }
                 }
@@ -932,7 +954,17 @@ fun RemoteScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
-                                    Button(onClick = ::retryStream) {
+                                    if (reconnectGaveUp) {
+                                        Text(
+                                            stringResource(R.string.reconnect_gave_up),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Button(onClick = {
+                                        restartReconnectWindow()
+                                        retryStream()
+                                    }) {
                                         Text(stringResource(R.string.retry))
                                     }
                                     if (errorSuggestsRepair(s.reason)) {

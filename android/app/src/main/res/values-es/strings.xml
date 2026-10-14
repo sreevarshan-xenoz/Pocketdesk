@@ -28,6 +28,7 @@
     <string name="settings_auto_reconnect">Reconectar automáticamente</string>
     <string name="settings_auto_reconnect_summary">Si el enlace se corta (el equipo reinicia su servidor, despierta o vuelve la red), reintentar durante 10 minutos</string>
     <string name="reconnecting_in">Reconectando en %1$d s…</string>
+    <string name="reconnect_gave_up">Se dejó de intentar tras 10 minutos.</string>
     <string name="settings_reveal_pin">Mostrar PIN por defecto</string>
     <string name="settings_reveal_pin_summary">Dígitos de emparejamiento visibles sin tocar el ojo</string>
     <string name="settings_haptics">Vibración</string>
