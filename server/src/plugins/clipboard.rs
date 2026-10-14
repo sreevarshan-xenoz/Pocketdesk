@@ -65,6 +65,8 @@ impl Image {
 /// `None` when what the clipboard held at that number gave no usable image
 /// (too large, a bitmap kind not read), so it is not tried again either.
 struct Cached {
+    // Only Windows has a sequence number to compare; Linux records `None`.
+    #[cfg_attr(not(windows), allow(dead_code))]
     sequence: Option<u32>,
     image: Option<Arc<Image>>,
 }
@@ -277,6 +279,7 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     });
 }
 
+#[cfg(windows)]
 fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
     share::io_error("clipboard", e)
 }
