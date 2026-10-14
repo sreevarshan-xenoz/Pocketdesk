@@ -75,7 +75,9 @@ impl SettingsForm {
                     .to_string(),
             );
         }
-        if !(3..=120).contains(&self.edited.input_idle_secs) {
+        if self.edited.input_control == InputControlMode::One
+            && !(3..=120).contains(&self.edited.input_idle_secs)
+        {
             problems.push("Control is handed back after 3 to 120 seconds.".to_string());
         }
         for url in &self.edited.relay_urls {

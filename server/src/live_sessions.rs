@@ -56,7 +56,7 @@ pub fn render_json(live: &[LiveSession], driver: Option<u64>, now_unix: u64) -> 
             started_unix: s.started_unix,
         })
         .collect();
-    shared::render_mirror(&sessions, now_unix)
+    shared::render_mirror(&sessions, crate::driving::is_shared(), now_unix)
 }
 
 /// Atomic mirror write: tmp + rename, so `status` never sees a torn file.

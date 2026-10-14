@@ -580,7 +580,7 @@ impl PocketdeskApp {
                         "for {}",
                         human_duration(now.saturating_sub(session.started_unix))
                     ));
-                    match model::control_cell(session, count) {
+                    match model::control_cell(session, count, self.snapshot.shared_control) {
                         model::ControlCell::Driving => {
                             ui.label(
                                 RichText::new("Driving").color(Color32::from_rgb(0x4c, 0xaf, 0x50)),

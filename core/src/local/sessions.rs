@@ -45,6 +45,10 @@ pub struct MirrorSession {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveMirror {
     pub updated_unix: u64,
+    /// Every phone drives (`input_control = "shared"`), so there is no
+    /// control to hand over (roadmap N7).
+    #[serde(default)]
+    pub shared_control: bool,
     pub sessions: Vec<MirrorSession>,
 }
 
@@ -57,9 +61,10 @@ impl LiveMirror {
 }
 
 /// The mirror's JSON, as the server writes it.
-pub fn render_mirror(sessions: &[MirrorSession], now_unix: u64) -> String {
+pub fn render_mirror(sessions: &[MirrorSession], shared_control: bool, now_unix: u64) -> String {
     serde_json::to_string(&LiveMirror {
         updated_unix: now_unix,
+        shared_control,
         sessions: sessions.to_vec(),
     })
     .unwrap_or_default()
@@ -212,10 +217,12 @@ mod tests {
                 started_unix: 7,
                 driving: true,
             }],
+            true,
             8,
         );
         let mirror = parse_mirror(&rendered).unwrap();
         assert_eq!(mirror.updated_unix, 8);
+        assert!(mirror.shared_control);
         assert_eq!(mirror.sessions[0].device_id, None);
         assert_eq!(
             (mirror.sessions[0].id, mirror.sessions[0].driving),
@@ -226,7 +233,9 @@ mod tests {
     #[test]
     fn a_mirror_from_before_n7_still_reads() {
         let raw = r#"{"updated_unix":1,"sessions":[{"device_id":null,"peer":"p","transport":"lan","started_unix":1}]}"#;
-        let session = &parse_mirror(raw).unwrap().sessions[0];
+        let mirror = parse_mirror(raw).unwrap();
+        assert!(!mirror.shared_control);
+        let session = &mirror.sessions[0];
         assert_eq!((session.id, session.driving), (0, false));
     }
 

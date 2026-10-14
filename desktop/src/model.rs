@@ -29,6 +29,8 @@ pub struct Snapshot {
     pub running: bool,
     pub devices: Vec<Device>,
     pub sessions: Vec<sessions::MirrorSession>,
+    /// Every phone drives, as the running server says (N7).
+    pub shared_control: bool,
     /// Sessions the server is holding for the owner's answer (F5).
     pub approvals: Vec<ApprovalRequest>,
     /// Files received from phones, newest first (F7).
@@ -55,12 +57,12 @@ pub fn snapshot(state_dir: &Path, now_unix: u64) -> Snapshot {
 pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot {
     // A mirror is believed only while the server that writes it is alive
     // and has written it recently; a crash leaves the last one behind.
-    let sessions = std::fs::read_to_string(state_dir.join(LIVE_FILE))
+    let mirror = std::fs::read_to_string(state_dir.join(LIVE_FILE))
         .ok()
         .and_then(|raw| sessions::parse_mirror(&raw))
-        .filter(|m| running && m.is_fresh(now_unix))
-        .map(|m| m.sessions)
-        .unwrap_or_default();
+        .filter(|m| running && m.is_fresh(now_unix));
+    let shared_control = mirror.as_ref().is_some_and(|m| m.shared_control);
+    let sessions = mirror.map(|m| m.sessions).unwrap_or_default();
     let devices = match TrustStore::load_or_create(state_dir.join(TRUST_FILE)) {
         Ok(store) => store
             .trusted_devices()
@@ -94,6 +96,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         running,
         devices,
         sessions,
+        shared_control,
         approvals,
         received,
         sent,
@@ -113,8 +116,12 @@ pub enum ControlCell {
     Nothing,
 }
 
-pub fn control_cell(session: &sessions::MirrorSession, sessions_live: usize) -> ControlCell {
-    if sessions_live < 2 || session.id == 0 {
+pub fn control_cell(
+    session: &sessions::MirrorSession,
+    sessions_live: usize,
+    shared_control: bool,
+) -> ControlCell {
+    if sessions_live < 2 || session.id == 0 || shared_control {
         ControlCell::Nothing
     } else if session.driving {
         ControlCell::Driving
@@ -530,13 +537,30 @@ mod tests {
 
     #[test]
     fn with_several_phones_the_driver_is_marked_and_the_others_can_be_given_control() {
-        assert_eq!(control_cell(&session(1, true), 2), ControlCell::Driving);
-        assert_eq!(control_cell(&session(2, false), 2), ControlCell::Give(2));
+        assert_eq!(
+            control_cell(&session(1, true), 2, false),
+            ControlCell::Driving
+        );
+        assert_eq!(
+            control_cell(&session(2, false), 2, false),
+            ControlCell::Give(2)
+        );
     }
 
     #[test]
     fn one_phone_or_an_old_server_shows_no_control() {
-        assert_eq!(control_cell(&session(1, true), 1), ControlCell::Nothing);
-        assert_eq!(control_cell(&session(0, false), 2), ControlCell::Nothing);
+        assert_eq!(
+            control_cell(&session(1, true), 1, false),
+            ControlCell::Nothing
+        );
+        assert_eq!(
+            control_cell(&session(0, false), 2, false),
+            ControlCell::Nothing
+        );
+        assert_eq!(
+            control_cell(&session(2, false), 2, true),
+            ControlCell::Nothing,
+            "nothing to hand over when every phone drives"
+        );
     }
 }
