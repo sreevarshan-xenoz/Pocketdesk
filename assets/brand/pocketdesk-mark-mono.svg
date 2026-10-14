@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Pocketdesk</title>
+  <!-- One colour (currentColor), for small sizes, monochrome themes and print. -->
+  <g fill="none" stroke="currentColor" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="rotate(9 266 216)">
+      <rect x="158" y="92" width="216" height="244" rx="30"/>
+    </g>
+    <path d="M90 240 Q90 222 108 226 L256 272 L404 226 Q422 222 422 240 L422 358 Q422 398 384 412 L286 450 Q256 460 226 450 L128 412 Q90 398 90 358 Z" fill="currentColor" stroke="none"/>
+  </g>
+  <g fill="currentColor">
+    <g transform="rotate(9 266 216)">
+      <circle cx="208" cy="144" r="15"/>
+      <circle cx="246" cy="144" r="15"/>
+      <circle cx="284" cy="144" r="15"/>
+    </g>
+  </g>
+</svg>

@@ -12,3 +12,6 @@
 *.webp binary
 *.wav binary
 *.ico binary
+
+# Raw pixels for the desktop app icon (desktop/src/icon.rs).
+*.rgba binary

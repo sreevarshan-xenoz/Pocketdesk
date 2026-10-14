@@ -1,25 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Pocketdesk mark (assets/brand/pocketdesk-mark.svg): a desktop
+     window tucked into a pocket. ColorOS zooms an adaptive foreground to
+     fill its plate, so the group keeps the mark in the central ~40% of the
+     canvas, which survives that zoom on a stock launcher (no zoom) and on
+     ColorOS (about 1.5x). Every layer is filled: ColorOS fails to rasterize
+     stroke-only foregrounds. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <!-- ColorOS zooms an adaptive foreground to fill its plate, so a glyph
-         drawn to the 108dp safe zone gets clipped by the mask. The group puts
-         the mark in the central ~40% of the canvas, which survives that zoom
-         on both a stock launcher (no zoom) and ColorOS (about 1.5x).
-         Filled paths only: ColorOS fails to rasterize stroke-only adaptive
-         foregrounds and substitutes a placeholder, so each frame is an
-         even-odd ring rather than a stroke. -->
+    android:viewportWidth="512" android:viewportHeight="512">
     <group android:scaleX="0.6" android:scaleY="0.6"
-        android:pivotX="54" android:pivotY="54">
-        <!-- Remote desktop, in the brand accent. -->
-        <path android:fillColor="#FFF6B23C" android:pathData="M40,26h42v20h-42z"/>
-        <!-- Monitor bezel + stand. -->
-        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
-            android:pathData="M34,20h54v32h-54z M40,26v20h42v-20z"/>
-        <path android:fillColor="#FFFFFFFF" android:pathData="M57,52h10v10h-10z M48,62h28v5h-28z"/>
-        <!-- Phone in front of it, bottom-left: the mark reads phone -> computer. -->
-        <path android:fillColor="#FFF6B23C" android:pathData="M24,58h16v26h-16z"/>
-        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
-            android:pathData="M20,54h24v34h-24z M24,58v26h16v-26z"/>
-        <path android:fillColor="#FFFFFFFF" android:pathData="M28,80h8v3h-8z"/>
+        android:pivotX="256" android:pivotY="256"
+        android:translateY="-9">
+        <!-- The pocket's back wall. -->
+        <path android:pathData="M104,236 Q104,204 136,200 L376,200 Q408,204 408,236 L408,262 L104,262 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="96" android:startY="180"
+                    android:endX="416" android:endY="260">
+                    <item android:offset="0" android:color="#FF2563EB"/>
+                    <item android:offset="1" android:color="#FF4338CA"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- The desktop window, tilted. -->
+        <group android:rotation="9" android:pivotX="266" android:pivotY="216">
+            <path android:fillColor="#FF0B1222"
+                android:pathData="M186,86 H346 A34,34 0 0 1 380,120 V308 A34,34 0 0 1 346,342 H186 A34,34 0 0 1 152,308 V120 A34,34 0 0 1 186,86 Z"/>
+            <path android:fillType="evenOdd"
+                android:pathData="M186,80 H346 A40,40 0 0 1 386,120 V308 A40,40 0 0 1 346,348 H186 A40,40 0 0 1 146,308 V120 A40,40 0 0 1 186,80 Z M186,92 A28,28 0 0 0 158,120 V308 A28,28 0 0 0 186,336 H346 A28,28 0 0 0 374,308 V120 A28,28 0 0 0 346,92 Z">
+                <aapt:attr name="android:fillColor">
+                    <gradient android:type="linear" android:startX="150" android:startY="90"
+                        android:endX="380" android:endY="340">
+                        <item android:offset="0" android:color="#FF8FD8FF"/>
+                        <item android:offset="1" android:color="#FF7B6CFF"/>
+                    </gradient>
+                </aapt:attr>
+            </path>
+            <path android:fillColor="#FFFF5F57" android:pathData="M190,140 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 Z"/>
+            <path android:fillColor="#FFFEBC2E" android:pathData="M228,140 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 Z"/>
+            <path android:fillColor="#FF28C840" android:pathData="M266,140 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 Z"/>
+        </group>
+        <!-- The pocket's front: two faces meeting at a fold. -->
+        <path android:pathData="M84,238 Q84,214 108,220 L256,266 L256,462 Q240,462 224,456 L124,418 Q84,402 84,360 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="80" android:startY="220"
+                    android:endX="256" android:endY="460">
+                    <item android:offset="0" android:color="#FF5AD1FF"/>
+                    <item android:offset="1" android:color="#FF2F7BFF"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M256,266 L404,220 Q428,214 428,238 L428,360 Q428,402 388,418 L288,456 Q272,462 256,462 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="256" android:startY="230"
+                    android:endX="430" android:endY="450">
+                    <item android:offset="0" android:color="#FF2E8BFF"/>
+                    <item android:offset="1" android:color="#FF5B4BFF"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- Light along the opening, and the stitched seam. -->
+        <path android:strokeColor="#8CB9ECFF" android:strokeWidth="6"
+            android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M92,226 L256,276 L420,226"/>
+        <path android:strokeColor="#BFC7D2FE" android:strokeWidth="7" android:strokeLineCap="round"
+            android:pathData="M296,318 L311.3,313.2 M324.6,309 L339.9,304.2 M353.2,300 L368.5,295.2 M381.8,291 L397.1,286.2"/>
     </group>
 </vector>

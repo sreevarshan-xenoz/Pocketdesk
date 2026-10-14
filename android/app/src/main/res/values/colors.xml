@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Launcher icon plate: the brand pine from ui/theme/Color.kt. Fixed
-         rather than theme-following because the launcher draws it outside the
-         app's own light/dark context. -->
-    <color name="ic_launcher_background">#166B5D</color>
+    <!-- Launcher icon plate: the brand navy of the Pocketdesk mark
+         (assets/brand). Fixed rather than theme-following because the
+         launcher draws it outside the app's own light/dark context. -->
+    <color name="ic_launcher_background">#0B1230</color>
 </resources>

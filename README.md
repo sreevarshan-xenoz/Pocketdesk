@@ -1,24 +1,36 @@
-# Pocketdesk
+<p align="center">
+  <img src="assets/brand/pocketdesk-banner.png" alt="Pocketdesk: your desktop. Anywhere." width="100%">
+</p>
 
-**Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale, or the internet (iroh: a hole-punched path, or a relay when that fails). A session from outside needs no port forward and no VPN once the phone has met the computer at home.**
+<h1 align="center">Pocketdesk</h1>
 
-> Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). Everything now carries the Pocketdesk name: the `pocketdesk` command (or `pd` for short), the desktop app `pocketdesk-app`, the config and state folders (an existing `linux-link` folder is moved on first start), the wire protocol and the Android app `dev.pocketdesk.android`. A phone with the old app needs the new one installed and paired again once.
+<p align="center"><b>Your Windows or Linux computer, on your Android phone.</b><br>
+Its live screen under your fingers, its sound, and the clipboard, files, notifications and texts moving both ways: on your network, through Tailscale, or over the internet with no port forward and no account.</p>
 
-[![Rust](https://img.shields.io/badge/Rust-Pure%20Rust-orange?logo=rust)](https://www.rust-lang.org/)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
-[![CI](https://github.com/sreevarshan-xenoz/Pocketdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/sreevarshan-xenoz/Pocketdesk/actions)
-[![Issues](https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk)](https://github.com/sreevarshan-xenoz/Pocketdesk/issues)
-[![Status](https://img.shields.io/badge/status-beta%20-%20feature%20complete%2C%20gates%20green-orange)](#roadmap)
+<p align="center">
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-Pure%20Rust-orange?logo=rust" alt="Rust"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue" alt="License: MIT OR Apache-2.0"></a>
+  <a href="https://github.com/sreevarshan-xenoz/Pocketdesk/actions"><img src="https://github.com/sreevarshan-xenoz/Pocketdesk/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/sreevarshan-xenoz/Pocketdesk/issues"><img src="https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk" alt="Issues"></a>
+  <a href="#roadmap"><img src="https://img.shields.io/badge/status-beta-orange" alt="Status: beta"></a>
+</p>
 
-> **Target:** Sub-100ms latency screen streaming + KDE Connect integration + reaching your computer from anywhere without opening ports
+<p align="center">
+  <a href="assets/brand/pocketdesk-launch.mp4"><img src="assets/brand/pocketdesk-launch.jpg" alt="Watch the 21-second launch video" width="720"></a><br>
+  <sub>▶ <a href="assets/brand/pocketdesk-launch.mp4">Watch Pocketdesk in 21 seconds</a></sub>
+</p>
 
 ## What is Pocketdesk?
 
-Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wayland/Hyprland) and now also for Windows 10/11. It combines:
+Pocketdesk is a **pure Rust** server for Linux (Wayland-native, Hyprland first) and Windows 10/11, a desktop app to manage it, and a native Android app. Together they give you:
 
-- **Low-latency screen streaming** — wlroots/PipeWire capture → FFmpeg H.264 encoding → QUIC transport → Android MediaCodec decode
-- **KDE Connect-style features** — clipboard sync, files both ways and a remote file browser (LAN), notifications, input control, battery info
-- **Reaches your computer anywhere** — on the LAN, through Tailscale, or a session over the internet with no VPN and no port forward (see [Before you start](#before-you-start) for what crosses each)
+- **Your screen on the phone, at low latency.** wlroots or PipeWire capture on Linux, Windows.Graphics.Capture on Windows, hardware H.264/HEVC encoding, QUIC transport, Android MediaCodec decoding.
+- **Control from the phone.** Direct touch, a trackpad with gestures, a full keyboard with a modifier and function-key bar, and the desktop's sound on the phone (the phone's mic works the other way).
+- **The KDE Connect set, both ways.** The clipboard (text and images), files in both directions and a remote file browser, the phone's notifications and texts on the computer, the computer's battery, ringing the computer to find it, and waking it from the phone.
+- **Your computer from anywhere.** On the same network, through Tailscale, or over the internet with no VPN and no port forward (iroh punches a direct path, or uses a relay). [Before you start](#before-you-start) says what crosses each.
+- **Yours alone.** No account and no Pocketdesk server. The phone and the computer each hold the other to its key (TLS 1.3), each phone has its own permissions, and the owner can be asked before each session. [docs/protocol.md](docs/protocol.md) lists everything that is sent, and to whom.
+
+> Formerly *Linux Link*: the repository, the commands (`pocketdesk`, or `pd`), the folders and the Android app (`dev.pocketdesk.android`) now carry the Pocketdesk name. A phone with the old app installs the new one and pairs once more.
 
 ### Key Differentiators
 

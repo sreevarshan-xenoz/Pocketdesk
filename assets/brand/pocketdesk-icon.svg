@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Pocketdesk</title>
+  <defs>
+    <radialGradient id="pd-glow" cx="512" cy="560" r="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1B2A6B"/>
+      <stop offset="0.55" stop-color="#0D1430"/>
+      <stop offset="1" stop-color="#070B1A"/>
+    </radialGradient>
+    <linearGradient id="pd-edge" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3B82F6" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0.55"/>
+    </linearGradient>
+    <filter id="pd-blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="60"/>
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="992" height="992" rx="224" fill="url(#pd-glow)" stroke="url(#pd-edge)" stroke-width="6"/>
+  <ellipse cx="512" cy="600" rx="280" ry="200" fill="#3B6BFF" opacity="0.35" filter="url(#pd-blur)"/>
+  <g transform="translate(132 112) scale(1.484375)">
+<defs>
+    <linearGradient id="pd-left" x1="80" y1="220" x2="256" y2="460" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5AD1FF"/>
+      <stop offset="1" stop-color="#2F7BFF"/>
+    </linearGradient>
+    <linearGradient id="pd-right" x1="256" y1="230" x2="430" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2E8BFF"/>
+      <stop offset="1" stop-color="#5B4BFF"/>
+    </linearGradient>
+    <linearGradient id="pd-back" x1="96" y1="180" x2="416" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+    <linearGradient id="pd-rim" x1="150" y1="90" x2="380" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8FD8FF"/>
+      <stop offset="1" stop-color="#7B6CFF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- The pocket's back wall, seen over the front's dipped opening. -->
+  <path d="M104 236 Q104 204 136 200 L376 200 Q408 204 408 236 L408 262 L104 262 Z" fill="url(#pd-back)"/>
+
+  <!-- The desktop window, tucked in and tilted. -->
+  <g transform="rotate(9 266 216)">
+    <rect x="152" y="86" width="228" height="256" rx="34" fill="#0B1222" stroke="url(#pd-rim)" stroke-width="12"/>
+    <circle cx="204" cy="140" r="14" fill="#FF5F57"/>
+    <circle cx="242" cy="140" r="14" fill="#FEBC2E"/>
+    <circle cx="280" cy="140" r="14" fill="#28C840"/>
+  </g>
+
+  <!-- The pocket's front: two faces meeting at a soft centre fold. -->
+  <path d="M84 238 Q84 214 108 220 L256 266 L256 462 Q240 462 224 456 L124 418 Q84 402 84 360 Z" fill="url(#pd-left)"/>
+  <path d="M256 266 L404 220 Q428 214 428 238 L428 360 Q428 402 388 418 L288 456 Q272 462 256 462 Z" fill="url(#pd-right)"/>
+
+  <!-- Light along the opening's edge, and a stitched seam. -->
+  <path d="M92 226 L256 276 L420 226" fill="none" stroke="#B9ECFF" stroke-opacity="0.55" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M296 318 L404 284" fill="none" stroke="#C7D2FE" stroke-opacity="0.75" stroke-width="7" stroke-linecap="round" stroke-dasharray="16 14"/>
+  </g>
+</svg>
