@@ -1,5 +1,6 @@
 package dev.pocketdesk.android.bridge
 
+import android.content.Context
 import android.media.MediaCodec
 import org.json.JSONObject
 import java.io.File
@@ -21,7 +22,7 @@ object RustCore {
     }
 
     private external fun nativeVersion(): String
-    private external fun nativeInit()
+    private external fun nativeInit(context: Context)
     private external fun nativeSetDataDir(path: String)
     private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
     private external fun nativeForgetPeerCertificate(address: String): String
@@ -177,10 +178,14 @@ object RustCore {
     val version: String
         get() = nativeVersion()
 
-    /** Initialize logging and point the bridge at the app-private data dir. */
-    fun start(dataDir: File) {
-        nativeInit()
-        nativeSetDataDir(dataDir.absolutePath)
+    /**
+     * Initialize logging, hand the bridge the application context (iroh reads
+     * the network's DNS servers through it; without it, relay names went to
+     * public resolvers), and point it at the app-private data dir.
+     */
+    fun start(context: Context) {
+        nativeInit(context.applicationContext)
+        nativeSetDataDir(context.filesDir.absolutePath)
     }
 
     // ---- Session / discovery ----

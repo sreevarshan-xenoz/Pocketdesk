@@ -157,7 +157,7 @@ class SmsReceiver : BroadcastReceiver() {
                 JSONObject().put("address", address).put("body", body).put("date", now).put("event", "received")
             },
         )
-        RustCore.start(app.filesDir)
+        RustCore.start(app)
         PhoneLink.worker.execute { Texts.flush(app) }
     }
 }
@@ -302,7 +302,7 @@ class SmsSentReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         val error = if (resultCode == Activity.RESULT_OK) null else reason(resultCode)
         val (outcome, host, port) = TextPrefs.partAnswered(app, id, error) ?: return
-        RustCore.start(app.filesDir)
+        RustCore.start(app)
         Texts.report(app, id, outcome, host, port)
     }
 

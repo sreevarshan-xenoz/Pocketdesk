@@ -26,6 +26,11 @@ use iroh::endpoint::{
 };
 use iroh::{Endpoint, EndpointAddr, RelayMode};
 
+/// Lets the Android bridge give iroh's DNS resolver the JVM and application
+/// context, so it can read the network's DNS servers.
+#[cfg(target_os = "android")]
+pub use iroh::dns::install_android_jni_context;
+
 use super::connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, SharedConnection,
     TransportFamily,

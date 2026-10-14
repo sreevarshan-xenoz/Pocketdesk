@@ -422,14 +422,13 @@ All of these are inside the app's private storage unless noted. None of it is ba
 
 ## 7. Not found in the code / to confirm
 
-Resolved on 2026-10-14 and folded into the sections above: the capabilities report's ALPNs, TLS 1.2 on TCP, the UDP 1716 firewall rule, the PIN in the log, state-file permissions on Unix, Android backup, tailnet addresses in mDNS, `tailscale netcheck`, and the wake relay's targets.
+Resolved on 2026-10-14 and folded into the sections above: the capabilities report's ALPNs, TLS 1.2 on TCP, the UDP 1716 firewall rule, the PIN in the log, state-file permissions on Unix, Android backup, tailnet addresses in mDNS, `tailscale netcheck`, the wake relay's targets, and the phone's DNS: the bridge hands iroh the application context, so relay names go to the network's DNS servers (`LinkProperties.getDnsServers`), not public resolvers (`android/bridge/src/lib.rs`, `install_android_context`).
 
-1. **iroh's DNS on Android.** The bridge does not call `install_android_jni_context`, and iroh-dns says the default resolver then uses its fallback nameservers. Confirm on a device whether the phone resolves relay names through public resolvers such as Cloudflare instead of the network's DNS. Also confirm the full fallback list (it comes from the resolver crate's `default_fallback_nameservers`, not read here).
-2. **The Tailscale LocalAPI fallback to `100.100.100.100:1053`.** Off a tailnet, that address (CGNAT space) goes to the default route. Confirm whether this is acceptable.
-3. **Desktop-to-phone data needs no permission.** Desktop notifications, window titles (monitors, windows, HUD), battery, wake info (MAC) and the WAN endpoint go to every phone that may receive pushes. No per-device permission gates them; the permission table covers only packets from the phone.
-4. **v2 checks the device key once, at session start.** It also does not use `standing` per packet, as TCP does (`v2_multiplexer.rs`). The Android UI does not use v2. Confirm whether v2 is still meant to be reachable on UDP 4716.
-5. **DHT node mode.** Not checked: whether the desktop's n0-mainline node runs in server mode, which would store and route other people's records, or client mode.
-6. **The `--hostname` relay.** Not traced: which ACME challenge type it uses (port 80 vs 443), and what iroh-relay logs about client IPs by default.
-7. **The phone's Tailscale code is unreachable from the UI.** `get_peers` and `check_tailscale_status` in the bridge include Tailscale LocalAPI calls, but no UI caller was found. Confirm whether they can be removed.
-8. **The rest of the v2 channel kinds.** Video, audio, input and file handling over v2 was not traced.
-9. **The desktop identifies itself before the client does.** On TCP 1716 and on v2, any client that completes a handshake with any certificate learns the desktop's id, name and plugin list (§1.2 step 4, §1.3).
+1. **The Tailscale LocalAPI fallback to `100.100.100.100:1053`.** Off a tailnet, that address (CGNAT space) goes to the default route. Confirm whether this is acceptable.
+2. **Desktop-to-phone data needs no permission.** Desktop notifications, window titles (monitors, windows, HUD), battery, wake info (MAC) and the WAN endpoint go to every phone that may receive pushes. No per-device permission gates them; the permission table covers only packets from the phone.
+3. **v2 checks the device key once, at session start.** It also does not use `standing` per packet, as TCP does (`v2_multiplexer.rs`). The Android UI does not use v2. Confirm whether v2 is still meant to be reachable on UDP 4716.
+4. **DHT node mode.** Not checked: whether the desktop's n0-mainline node runs in server mode, which would store and route other people's records, or client mode.
+5. **The `--hostname` relay.** Not traced: which ACME challenge type it uses (port 80 vs 443), and what iroh-relay logs about client IPs by default.
+6. **The phone's Tailscale code is unreachable from the UI.** `get_peers` and `check_tailscale_status` in the bridge include Tailscale LocalAPI calls, but no UI caller was found. Confirm whether they can be removed.
+7. **The rest of the v2 channel kinds.** Video, audio, input and file handling over v2 was not traced.
+8. **The desktop identifies itself before the client does.** On TCP 1716 and on v2, any client that completes a handshake with any certificate learns the desktop's id, name and plugin list (§1.2 step 4, §1.3).

@@ -198,7 +198,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        RustCore.start(filesDir)
+        RustCore.start(this)
         if (savedInstanceState == null) {
             maybeRequestLocalNetworkPermission()
             pairLink.value = takePairUri(intent)

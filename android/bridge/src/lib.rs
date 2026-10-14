@@ -65,14 +65,58 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeVersion
     to_jstring(&mut env, api::version())
 }
 
-/// Initialize logging and backend state. Idempotent.
+/// Initialize logging and backend state, and hand iroh the application
+/// context. Idempotent.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeInit(
-    _env: JNIEnv<'_>,
+    env: JNIEnv<'_>,
     _class: JClass<'_>,
+    context: JObject<'_>,
 ) {
     api::init_app();
+    install_android_context(&env, &context);
 }
+
+/// Give iroh's resolver the JVM and the application context, once per
+/// process. Through them it reads the network's DNS servers
+/// (`LinkProperties.getDnsServers`); without them it has no system
+/// configuration and sends every relay lookup to its public fallback
+/// resolvers (Cloudflare, Google, Quad9), which also fails on networks that
+/// allow only their own DNS. The global reference is kept for the process's
+/// life, as the context must stay valid until it exits.
+#[cfg(target_os = "android")]
+fn install_android_context(env: &JNIEnv<'_>, context: &JObject<'_>) {
+    static INSTALLED: std::sync::Once = std::sync::Once::new();
+    INSTALLED.call_once(|| {
+        let vm = match env.get_java_vm() {
+            Ok(vm) => vm,
+            Err(e) => {
+                tracing::warn!("No JVM for the DNS resolver: {e}");
+                return;
+            }
+        };
+        let context = match env.new_global_ref(context) {
+            Ok(global) => global,
+            Err(e) => {
+                tracing::warn!("No application context for the DNS resolver: {e}");
+                return;
+            }
+        };
+        let raw = context.as_obj().as_raw();
+        std::mem::forget(context);
+        // SAFETY: the JVM outlives the process's native code, and the
+        // context's global reference is never deleted (forgotten above).
+        unsafe {
+            pocketdesk_core::streaming::iroh_connection::install_android_jni_context(
+                vm.get_java_vm_pointer().cast(),
+                raw.cast(),
+            );
+        }
+    });
+}
+
+#[cfg(not(target_os = "android"))]
+fn install_android_context(_env: &JNIEnv<'_>, _context: &JObject<'_>) {}
 
 /// Set the persistent data directory (certs, trust store).
 #[unsafe(no_mangle)]
