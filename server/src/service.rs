@@ -124,6 +124,10 @@ pub async fn run(config: Config) -> Result<()> {
 
     // Announced only now that the control port answers: a phone checks it
     // before listing this computer.
+    crate::plugins::notification::configure(
+        config.phone_notifications,
+        config.notifications_per_minute,
+    );
     let announcement = if config.lan_discovery {
         Some(lan_discovery.register_service(
             &host_name,
