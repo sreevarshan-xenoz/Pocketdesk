@@ -3,6 +3,7 @@ pub mod clipboard;
 pub mod connection;
 pub mod kdeconnect;
 pub mod permissions;
+pub mod transfer;
 pub mod v2;
 
 #[cfg(test)]
