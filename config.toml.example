@@ -64,6 +64,12 @@ video_quality = "balanced"
 # wake_announce = true
 # wake_port = 0
 
+# Several phones at once: "one" lets the first phone to send input drive
+# until it has been quiet for input_idle_secs (the desktop app can hand
+# control over); "shared" lets every phone with the Input permission drive.
+# input_control = "one"
+# input_idle_secs = 10
+
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a
 # program to provide a microphone; apps then record from its other end.
