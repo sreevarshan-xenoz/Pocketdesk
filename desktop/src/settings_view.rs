@@ -4,6 +4,7 @@ use std::path::Path;
 
 use eframe::egui::{self, Color32, RichText};
 use pocketdesk_core::local::config::{Config, ConfigError, DhtPublish, relay_url_problem};
+use pocketdesk_core::local::wake::WakeFacts;
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
 /// The settings being edited against what is saved.
@@ -16,6 +17,9 @@ pub struct SettingsForm {
     pub relay_urls_text: String,
     /// Saved since the server last read it.
     pub restart_needed: bool,
+    /// The adapter a phone on this network would wake this computer
+    /// through, read when the tab opens (N6).
+    wake: Option<WakeFacts>,
 }
 
 impl SettingsForm {
@@ -26,6 +30,7 @@ impl SettingsForm {
             saved: config.clone(),
             edited: config,
             restart_needed: false,
+            wake: pocketdesk_core::local::wake::wake_facts(None),
         }
     }
 
@@ -61,6 +66,12 @@ impl SettingsForm {
         }
         if self.edited.control_port == self.edited.streaming_port {
             problems.push("The control and streaming ports must be different.".to_string());
+        }
+        if self.edited.wake_port != 0 && self.edited.wake_port == self.edited.streaming_port {
+            problems.push(
+                "The outside wake port must differ from the streaming port, so the two router forwards do not clash."
+                    .to_string(),
+            );
         }
         for url in &self.edited.relay_urls {
             if let Some(problem) = relay_url_problem(url) {
@@ -185,6 +196,51 @@ impl SettingsForm {
                         .suffix(" texts"),
                 );
                 ui.end_row();
+                ui.label("Wake from the phone");
+                ui.checkbox(
+                    &mut e.wake_announce,
+                    "tell paired phones how to wake this computer",
+                );
+                ui.end_row();
+                ui.label("Adapter");
+                ui.label(match &self.wake {
+                    Some(w) => format!(
+                        "{} ({}), {}",
+                        w.adapter,
+                        if w.wired {
+                            "wired"
+                        } else {
+                            "Wi-Fi: usually wakes only from sleep"
+                        },
+                        w.mac
+                    ),
+                    None => "none found with a hardware address".to_string(),
+                });
+                ui.end_row();
+                ui.label("Outside wake port");
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut e.wake_port)
+                            .range(0..=65535)
+                            .custom_formatter(|n, _| {
+                                if n == 0.0 {
+                                    "none".to_string()
+                                } else {
+                                    format!("{n}")
+                                }
+                            }),
+                    );
+                    ui.label(
+                        RichText::new(
+                            "To wake it from outside, forward this UDP port on the router to this computer's address. \
+                             It reaches the computer while the router still remembers it (minutes to hours after it sleeps), \
+                             or always when the router can forward to the network's broadcast address.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                });
+                ui.end_row();
                 if cfg!(windows) {
                     ui.label("Phone mic plays into");
                     ui.add(
@@ -280,6 +336,19 @@ mod tests {
         form.edited.control_port = 1;
         assert!(form.save_to(&path).is_err(), "an invalid form is not saved");
         assert!(!Config::load_from(&path).unwrap().control_port.eq(&1));
+    }
+
+    #[test]
+    fn the_outside_wake_port_must_not_be_the_streaming_port() {
+        let mut form = SettingsForm::from_config(Config::default());
+        form.edited.wake_port = 40009;
+        assert!(form.problems().is_empty());
+        form.edited.wake_port = form.edited.streaming_port;
+        assert!(
+            form.problems().iter().any(|p| p.contains("wake port")),
+            "{:?}",
+            form.problems()
+        );
     }
 
     #[test]
