@@ -912,7 +912,8 @@ On the A71 against this Windows box (LAN, release build, input off), 2026-10-14.
 - [x] The desktop's server stopped for 20 s: **the phone waited for Retry** (fixed; re-run: back 4 s after the server listened again, with no tap).
 - [x] 30 minutes after the fixes: private memory 85 → 89 MB, handles flat at about 680, CPU 10–13 %.
 - [x] Session start: one control connection that stays, plus two one-off queries.
-- [ ] An hour or more, to see whether the server's memory levels off.
+- [x] An hour (2026-10-14): steady for 30 minutes (82 → 87 MB), then a reconnect left the old session running on the desktop, at up to 177 MB and double CPU. **Fixed:** the phone closes a stopped stream on the wire, and the desktop ends a session unheard from for 30 s. Re-run: a monitor switch leaves one live session.
+- [ ] An hour with one session from start to end, to confirm the memory levels off.
 - [ ] The computer sleeping and waking (the user's to run), and the phone switching between Wi-Fi and mobile data (needs a SIM).
 - [ ] The same on the Linux host.
 - [ ] A file transfer cut by a drop (today it fails and is sent again whole).

@@ -1868,9 +1868,18 @@ fn device_wan_key() -> Option<pocketdesk_core::streaming::IrohSecretKey> {
 /// Why a connect that a stop or a newer connect overtook did not install.
 const SUPERSEDED: &str = "the stream was stopped or replaced while it connected";
 
+/// The reason a stream the phone stops is closed with, so the desktop ends
+/// the session at once (R2).
+const STOPPED_BY_PHONE: &[u8] = b"stopped by the phone";
+
 async fn teardown_streaming_handle(handle: StreamingHandle) {
     VIDEO_RX.lock().await.take();
     AUDIO_RX.lock().await.take();
+    // Closed on the wire, so the desktop ends the session at once. Waiting
+    // for the last handle to drop is not enough: a clone that outlives this
+    // one keeps the connection open on keep-alives, and the desktop went on
+    // encoding a stream to nobody (R2).
+    handle.connection.close(0, STOPPED_BY_PHONE);
     handle.cancel.cancel();
     let _ = handle.task.await;
     let _ = handle.rtt_task.await;
@@ -1897,16 +1906,21 @@ async fn install_streaming(
     // not take over. Checked again under the handle lock below, where it
     // counts; this early check only saves starting tasks for nothing.
     if !crate::CONNECT_GENERATION.is_current(generation) {
+        if let Some(connection) = client.connection() {
+            connection.close(0, STOPPED_BY_PHONE);
+        }
         client.cancel_token().cancel();
         if let Some(dial) = wan_dial {
             dial.close().await;
         }
         return Err(SUPERSEDED.to_string());
     }
-    let connection = client
-        .connection()
-        .ok_or_else(|| "Connection not available after connect".to_string())?
-        .clone();
+    let Some(connection) = client.connection().cloned() else {
+        if let Some(dial) = wan_dial {
+            dial.close().await;
+        }
+        return Err("Connection not available after connect".to_string());
+    };
 
     // Samples the last session's decoder measured must not join this one's
     // record, and nothing is going to report them now that its server is gone.
@@ -2000,6 +2014,7 @@ async fn install_streaming(
     // the stop tears it down.
     if !crate::CONNECT_GENERATION.is_current(generation) {
         drop(handle);
+        connection.close(0, STOPPED_BY_PHONE);
         client_cancel.cancel();
         let _ = task.await;
         let _ = rtt_task.await;
@@ -3577,7 +3592,7 @@ mod receive_tests {
     use super::*;
 
     /// Tests that swap the session statics run one at a time.
-    static SESSION_STATICS: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    pub(super) static SESSION_STATICS: std::sync::LazyLock<tokio::sync::Mutex<()>> =
         std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
 
     fn frame(sequence: u64) -> pocketdesk_core::streaming::EncodedPacket {
@@ -3833,5 +3848,71 @@ mod wake_tests {
         assert!(super::wake("AA:BB:CC:DD:EE:FF".into(), "[]".into()).is_err());
         assert!(super::wake("AA:BB:CC:DD:EE:FF".into(), "[\"no port\"]".into()).is_err());
         assert!(super::wake("AA:BB:CC:DD:EE:FF".into(), "not json".into()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod teardown_tests {
+    use pocketdesk_core::streaming::{
+        Connection, ConnectionError, ConnectionStats, InStream, OutStream, SharedConnection,
+        TransportFamily,
+    };
+    use std::net::SocketAddr;
+    use std::sync::{Arc, Mutex};
+
+    /// The close a connection was given: its code and reason.
+    type Closed = Arc<Mutex<Option<(u32, Vec<u8>)>>>;
+
+    /// Records the close it is given; nothing else is used.
+    struct Recording(Closed);
+
+    #[async_trait::async_trait]
+    impl Connection for Recording {
+        async fn open_uni(&self) -> Result<Box<dyn OutStream>, ConnectionError> {
+            unimplemented!()
+        }
+        async fn accept_uni(&self) -> Result<Box<dyn InStream>, ConnectionError> {
+            unimplemented!()
+        }
+        fn remote_address(&self) -> SocketAddr {
+            "192.0.2.10:4716".parse().unwrap()
+        }
+        fn stats(&self) -> ConnectionStats {
+            ConnectionStats::default()
+        }
+        fn transport_family(&self) -> TransportFamily {
+            TransportFamily::Quinn
+        }
+        fn close(&self, code: u32, reason: &[u8]) {
+            *self.0.lock().unwrap() = Some((code, reason.to_vec()));
+        }
+    }
+
+    /// R2: a session the phone stops is closed on the wire, not left to the
+    /// last handle being dropped. A clone that outlived the handle kept the
+    /// desktop encoding a stream to nobody, with keep-alives holding it open.
+    #[tokio::test]
+    async fn a_stopped_session_closes_its_connection() {
+        // Teardown clears the shared frame receivers.
+        let _serial = super::receive_tests::SESSION_STATICS.lock().await;
+        let closed: Closed = Arc::new(Mutex::new(None));
+        let connection: SharedConnection = Arc::new(Recording(closed.clone()));
+        let lingering = connection.clone();
+        let handle = crate::session::StreamingHandle {
+            address: "192.0.2.10".into(),
+            port: 4716,
+            monitor_index: None,
+            cancel: tokio_util::sync::CancellationToken::new(),
+            task: tokio::spawn(async {}),
+            rtt_task: tokio::spawn(async {}),
+            connection,
+            wan_dial: None,
+        };
+        super::teardown_streaming_handle(handle).await;
+        assert!(
+            closed.lock().unwrap().is_some(),
+            "closed although a clone lives on"
+        );
+        drop(lingering);
     }
 }

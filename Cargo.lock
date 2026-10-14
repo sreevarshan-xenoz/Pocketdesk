@@ -5099,6 +5099,7 @@ name = "pocketdesk-android-bridge"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "jni 0.21.1",
  "pocketdesk-core",
  "quinn",

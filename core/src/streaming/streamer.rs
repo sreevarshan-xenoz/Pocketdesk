@@ -25,6 +25,22 @@ use super::transport::{self, CertManager, StreamServer, StreamTransportConfig};
 use super::{EncodedPacket, StreamingConfig, VideoCodec, VideoFrame};
 use crate::protocol::permissions::{Capability, DevicePermissions};
 
+/// How long a session may hear nothing from its client before it is ended.
+/// Clients report their link every second, so this is many missed reports,
+/// not a quiet desktop.
+const CLIENT_SILENT_LIMIT: Duration = Duration::from_secs(30);
+
+/// The longest one input packet may take to arrive once its stream opens.
+const CLIENT_PACKET_READ: Duration = Duration::from_secs(5);
+
+/// How often the connection monitor checks for that silence.
+const SILENCE_CHECK: Duration = Duration::from_secs(5);
+
+/// Whether a client unheard for `silent` has abandoned its session.
+fn client_went_silent(silent: Duration) -> bool {
+    silent >= CLIENT_SILENT_LIMIT
+}
+
 /// What a session gate answers, eventually: the session's permissions, or
 /// `None` to reject it (see [`StreamingServer::set_session_gate`]).
 pub type SessionGateFuture =
@@ -942,9 +958,18 @@ impl StreamingServer {
             info!("Connection monitor started");
             // A cropped session's taps arrive layout-normalized already.
             let mut cropped = false;
+            // Every client reports its link once a second, so a session that
+            // hears nothing for a while has been abandoned, even if its
+            // connection is kept open (R2).
+            let mut last_heard = tokio::time::Instant::now();
+            let mut silence_check = tokio::time::interval(SILENCE_CHECK);
 
             loop {
+                // Biased: a client stream already waiting is heard before the
+                // silence check judges, so a slow iteration cannot make a
+                // healthy session look silent.
                 tokio::select! {
+                    biased;
                     _ = monitor_cancel.cancelled() => {
                         info!("Connection monitor cancelled");
                         break;
@@ -956,7 +981,21 @@ impl StreamingServer {
                             Ok(mut stream) => {
                                 debug!("Accepted client stream");
                                 // Read the entire payload (max 64KB per input packet)
-                                let data = stream.read_to_end(64 * 1024).await;
+                                // Bounded: a stream opened and never finished
+                                // must not hold the monitor, and with it all
+                                // input and the silence check.
+                                let data = match tokio::time::timeout(
+                                    CLIENT_PACKET_READ,
+                                    stream.read_to_end(64 * 1024),
+                                )
+                                .await
+                                {
+                                    Ok(read) => read,
+                                    Err(_) => Err(super::connection::ConnectionError::Other(
+                                        "a client packet took too long to arrive".into(),
+                                    )),
+                                };
+                                last_heard = tokio::time::Instant::now();
                                 match data {
                                     Ok(data) if !data.is_empty() => {
                                         debug!(size = data.len(), "Received client data");
@@ -1083,6 +1122,17 @@ impl StreamingServer {
                                 warn!(error = %e, "Connection error in monitor");
                                 break;
                             }
+                        }
+                    }
+
+                    _ = silence_check.tick() => {
+                        if client_went_silent(last_heard.elapsed()) {
+                            warn!(
+                                silent_s = last_heard.elapsed().as_secs(),
+                                "The client sent nothing for too long; ending the session"
+                            );
+                            conn_for_monitor.close(0u32, b"phone went silent");
+                            break;
                         }
                     }
                 }
@@ -1507,6 +1557,15 @@ async fn send_audio_packet(
 mod tests {
     use super::*;
     use crate::streaming::{EncoderPreset, H264Profile, HardwareEncoder, VideoCodec};
+
+    /// R2: a session whose client stopped reporting is ended, but a few
+    /// missed reports (a busy phone, a lost packet) are not silence.
+    #[test]
+    fn a_client_silent_for_half_a_minute_has_left() {
+        assert!(!client_went_silent(Duration::from_secs(3)));
+        assert!(!client_went_silent(Duration::from_secs(29)));
+        assert!(client_went_silent(Duration::from_secs(30)));
+    }
 
     /// This PC's layout: a 2560x1080 primary at the origin and a 2048x1152
     /// screen to its right, 91 px higher.

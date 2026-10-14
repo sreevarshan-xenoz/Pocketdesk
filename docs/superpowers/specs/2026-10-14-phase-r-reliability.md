@@ -33,8 +33,18 @@ The phone was on USB power, so these runs say nothing about battery (R4).
 - the double dial above;
 - plus transport errors read as the desktop's choice, "pin" matching "ping", Retry not restarting the window, overlapping rebuilds, the keeper's backoff and background, and no word when retrying stops.
 
+**The hour-long run found a leak, fixed:**
+- For its first half hour, with one session, the server held steady (private memory 82 → 87 MB).
+- Then the phone's watchdog gave up on 10 s of silent video and reconnected. That is right, but the desktop kept the old session, still encoding at full rate, so memory reached 177 MB with 83 threads, and CPU doubled.
+- Stopping a stream only cancelled the phone's tasks and dropped its handle; a clone of the connection outlived it, and keep-alives held the link open.
+- Fixed both ways:
+  - the phone now closes the connection on the wire when it stops a stream;
+  - the desktop ends a session that has heard nothing from its client for 30 s, since every client reports its link once a second.
+- Re-verified: a monitor switch closes the old session within 0.1 s and leaves one live session.
+
 **Not done in R2:**
-- **The server's memory still rises slowly** without the churn (85 → 89 MB in 30 minutes, with brief 10 MB peaks). An hour-long run will say whether it levels off.
+- **Why the video went silent for 10 s** in the middle of a healthy session is not known. The loss controller had been backing off just before, so the link was congested. It is recovered from now, not explained.
+- **An hour-long run with one session from start to end,** to confirm the memory levels off.
 - **The computer sleeping** is the user's to run (AGENTS.md: no power actions on this box).
 - **A Linux host** for any of this.
 - **Resuming a file transfer** across a drop: a transfer that breaks fails and is sent again whole.

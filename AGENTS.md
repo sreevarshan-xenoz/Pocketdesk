@@ -52,7 +52,8 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - the bridge dials one control connection at a time.
   - **Re-verified:** one control reconnect after a drop; back 4 s after a server restart with no tap.
   - **Fresh review (3 Important), fixed:** retries forever after a frameless connect, no retry without a cached internet identity, and the double dial.
-  - **Measured:** 35 and 30 minute sessions, with the server at 10–24 % of one core. Private memory still rises slowly (85 → 89 MB in 30 minutes), so an hour-long run is owed.
+  - **Measured:** 35 and 30 minute sessions, with the server at 10–24 % of one core.
+  - **The hour-long run (branch `fix/r2-session-leak`) found a leak:** a reconnect left the old session encoding on the desktop (up to 177 MB, double CPU), because the phone never closed a stopped stream on the wire. Now the phone closes it, and the server ends a session unheard from for 30 s. Re-verified with a monitor switch.
 - 2026-10-14: **Phase R5, honest docs (branch `docs/r5-honest-docs`, stacked on `fix/r3-security`).**
   - README's "Before you start": each way a phone reaches the computer, and whether a router forward is needed (only for waking a sleeping computer from outside, or on your own relay's machine); first-contact trust; what relays and the DHT see. SECURITY.md leads with the same.
   - README's "What works where": a Linux / Windows parity table, with where each was device-checked.
