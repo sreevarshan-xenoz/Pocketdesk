@@ -280,25 +280,6 @@ impl TailscaleClient {
             }
         }
 
-        // As a last resort, try to parse tailscale net status (network check)
-        // This helps determine if tailscale is running even without API access
-        let ts_net = Command::new("tailscale")
-            .args(["netcheck", "--json"])
-            .output()
-            .await;
-
-        if let Ok(output) = ts_net
-            && output.status.success()
-            && String::from_utf8_lossy(&output.stdout).contains("DNSChecked")
-        {
-            tracing::debug!("Tailscale network stack is active");
-            return Ok(TailscaleStatus {
-                backend_state: Some("Running".to_string()),
-                self_node: None,
-                peer: HashMap::new(),
-            });
-        }
-
         // If all methods failed (no tailscale CLI or daemon here, or Android
         // without root), return empty peers gracefully instead of failing
         // hard. Said once: discovery polls every few seconds.
