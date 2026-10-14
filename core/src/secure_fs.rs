@@ -32,6 +32,22 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
+/// Create `path` (and its parents) as a directory only the current user can
+/// open: mode `0700` on Unix, an owner-only DACL on Windows. For folders that
+/// other code fills with secrets, such as the relay's Let's Encrypt keys.
+pub fn create_private_dir(path: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        restrict_to_owner(path)
+    }
+}
+
 /// Replace `path`'s DACL with one entry granting the current user full
 /// control, and stop inheriting the parent's entries.
 #[cfg(windows)]
@@ -116,6 +132,22 @@ mod tests {
             "pocketdesk-secure-fs-{}-{label}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn a_private_dir_is_created_and_can_hold_files() {
+        let dir = temp("dir").join("nested");
+        create_private_dir(&dir).unwrap();
+        create_private_dir(&dir).unwrap();
+        std::fs::write(dir.join("key.pem"), b"secret").unwrap();
+        assert_eq!(std::fs::read(dir.join("key.pem")).unwrap(), b"secret");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+        std::fs::remove_dir_all(temp("dir")).ok();
     }
 
     #[test]

@@ -100,6 +100,30 @@ async fn main() -> Result<()> {
         cli::Commands::Pair { pin, grant } => service::pair(pin, grant).await,
         cli::Commands::Unpair { device_id } => service::unpair(device_id).await,
         cli::Commands::Kick { device } => service::kick(device).await,
+        cli::Commands::Relay {
+            port,
+            hostname,
+            email,
+            allow,
+            allow_paired,
+            open,
+        } => {
+            relay::run(relay::RelayOptions {
+                port,
+                hostname,
+                email,
+                allow,
+                allow_paired,
+                open,
+            })
+            .await
+        }
+        cli::Commands::RelayIds => {
+            for (who, id) in relay::relay_ids()? {
+                println!("{who}: {id}");
+            }
+            Ok(())
+        }
         #[cfg(windows)]
         cli::Commands::Install { elevated } => install_windows::install(elevated),
         #[cfg(windows)]

@@ -33,7 +33,7 @@ pub const ENDPOINT_PACKET: &str = "kdeconnect.pocketdesk.endpoint";
 /// Persisted iroh identity key, next to `config.toml`.
 const KEY_FILE: &str = "iroh_secret.key";
 
-fn key_path() -> Result<PathBuf> {
+pub fn key_path() -> Result<PathBuf> {
     Ok(pocketdesk_core::local::paths::config_dir()
         .context("unable to determine config directory")?
         .join(KEY_FILE))
@@ -129,6 +129,26 @@ pub fn record_endpoint_in(
     }
 }
 
+/// n0's public relays, or your own (`relay_urls`, N2).
+pub fn relay_mode(relay_urls: &[String]) -> Result<RelayMode> {
+    if relay_urls.is_empty() {
+        return Ok(RelayMode::Default);
+    }
+    let urls = relay_urls
+        .iter()
+        .map(|url| {
+            if let Some(problem) = pocketdesk_core::local::config::relay_url_problem(url) {
+                anyhow::bail!("relay_urls: {problem}");
+            }
+            url.trim()
+                .parse::<iroh::RelayUrl>()
+                .with_context(|| format!("relay_urls: not a URL: {url}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    tracing::info!("WAN relays: your own ({})", relay_urls.join(", "));
+    Ok(RelayMode::Custom(urls.into_iter().collect()))
+}
+
 /// What the Diagnostics tab shows about reaching this computer from outside
 /// (N1), from iroh's own network report: yes/no facts, no address.
 pub fn wan_status_from(
@@ -191,6 +211,17 @@ pub async fn push_endpoint_to(sender: &Arc<dyn DeviceSender>, endpoint: &Endpoin
         .await;
 }
 
+/// The settings the WAN endpoint takes from config.toml.
+#[derive(Debug, Clone)]
+pub struct WanSettings {
+    pub pairing_required: bool,
+    pub allow_hevc: bool,
+    pub capture_backend: pocketdesk_core::streaming::CaptureBackend,
+    pub mic_relay_device: Option<String>,
+    /// Your own relays (N2); empty uses n0's.
+    pub relay_urls: Vec<String>,
+}
+
 /// Bind the WAN endpoint and spawn its accept loop.
 ///
 /// Each accepted connection runs one v1 streaming session — identical to the
@@ -203,11 +234,15 @@ pub async fn spawn_wan_endpoint(
     config: StreamingConfig,
     input_tx: broadcast::Sender<InputPacket>,
     cert_manager: Arc<CertManager>,
-    pairing_required: bool,
-    allow_hevc: bool,
-    capture_backend: pocketdesk_core::streaming::CaptureBackend,
-    mic_relay_device: Option<String>,
+    settings: WanSettings,
 ) -> Result<Endpoint> {
+    let WanSettings {
+        pairing_required,
+        allow_hevc,
+        capture_backend,
+        mic_relay_device,
+        relay_urls,
+    } = settings;
     // What an earlier run recorded about its internet path is not this
     // run's: dropped before anything can fail, so a run whose endpoint never
     // binds shows nothing measured rather than the last network's facts.
@@ -231,7 +266,7 @@ pub async fn spawn_wan_endpoint(
         .build();
     let endpoint = Endpoint::builder(Minimal)
         .alpns(vec![StreamTransportConfig::default().alpn])
-        .relay_mode(RelayMode::Default)
+        .relay_mode(relay_mode(&relay_urls)?)
         .secret_key(secret_key)
         .transport_config(transport)
         .bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)))
@@ -296,6 +331,25 @@ pub async fn spawn_wan_endpoint(
     });
 
     Ok(endpoint)
+}
+
+#[cfg(test)]
+mod relay_mode_tests {
+    use super::relay_mode;
+    use iroh::RelayMode;
+
+    #[test]
+    fn the_relays_are_n0s_unless_you_name_your_own() {
+        assert!(matches!(relay_mode(&[]).unwrap(), RelayMode::Default));
+        assert!(matches!(
+            relay_mode(&["http://192.0.2.10:3340".to_string()]).unwrap(),
+            RelayMode::Custom(_)
+        ));
+        assert!(relay_mode(&["not a url".to_string()]).is_err());
+        // These parse as URLs, with the host taken for a scheme.
+        assert!(relay_mode(&["relay.example.org:3340".to_string()]).is_err());
+        assert!(relay_mode(&["localhost:3340".to_string()]).is_err());
+    }
 }
 
 #[cfg(test)]

@@ -366,8 +366,8 @@ is still filling in is dimmed. What to confirm on a real phone:
 - [ ] Phone reconnects to the auto-started server WITHOUT re-pairing (QUIC identity persisted in `~/.local/state/pocketdesk/certs/`; a regenerated cert would trip the TOFU pin).
 - [ ] Log out / session end → service stops with the session (PartOf), never orphaned.
 - [ ] `install.sh` run → unit lands in `~/.config/systemd/user/`, ExecStart points at the real prefix path, prompt enables it; `--status` reports the user unit; `--uninstall` removes it and any legacy `/etc/systemd/system` unit.
-- [x] Phone on the tailnet (not on the LAN): connect to the laptop's 100.x Tailscale IP → pairing + video + taps work end to end. **(verified 2026-09-22: oppo-reno8-5g 100.82.170.9 → 100.117.27.83)**
-- [x] Re-verified 2026-09-22 with the new home screen over tailnet (both ends on the same Wi-Fi, Tailscale direct path): auto-connect + card tap → session Up (26 fps, 1.4 Mbit/s, rtt ~55 ms, drops 0), server log shows the peer as 100.82.170.9, and a direct-touch tap moved the desktop cursor (1142,37 → 768,390). Note: Alt+Tab and PrtSc shortcut buttons are no-ops on THIS desktop (no Hyprland binding for either) — not transport failures.
+- [x] Phone on the tailnet (not on the LAN): connect to the laptop's 100.x Tailscale IP → pairing + video + taps work end to end. **(verified 2026-09-22: oppo-reno8-5g <phone tailnet IP> → <laptop tailnet IP>)**
+- [x] Re-verified 2026-09-22 with the new home screen over tailnet (both ends on the same Wi-Fi, Tailscale direct path): auto-connect + card tap → session Up (26 fps, 1.4 Mbit/s, rtt ~55 ms, drops 0), server log shows the peer as <phone tailnet IP>, and a direct-touch tap moved the desktop cursor (1142,37 → 768,390). Note: Alt+Tab and PrtSc shortcut buttons are no-ops on THIS desktop (no Hyprland binding for either) — not transport failures.
 - [ ] Phone on cellular (Wi-Fi off): same connect via tailnet IP works (Tailscale traverses NAT). Then iroh WAN fallback (`## 11`) with the two machines on genuinely different networks — still pending (phone cellular was OUT_OF_SERVICE at test time).
 
 ## 19. Session chrome refresh (action disc + quick-settings sheet + fading HUD)
@@ -707,7 +707,7 @@ Built on `fix/monitor-switch`. Checked on 2026-10-13 with the Galaxy A71 against
 
 Built on `feat/shortcuts`. Checked on 2026-10-13 with the Galaxy A71 against the Windows host:
 - The launcher lists "Connect to …" for each saved computer, most recent first.
-- Firing the "Connect to 192.168.1.101" shortcut opened a LAN session.
+- Firing the "Connect to <desktop LAN IP>" shortcut opened a LAN session.
 - A connect request for an address that is not saved opened nothing.
 - The Quick Settings tile, added and clicked with `cmd statusbar`, connected to the last computer.
 - The widget's provider is registered.
@@ -738,6 +738,17 @@ Built on `feat/wan-insight`. On the Windows box, the server recorded UDP working
 - [ ] **Cellular:** the phone on mobile data, the desktop at home. A session connects, and the HUD says direct or relayed. (Owed: the test phone has no mobile service.)
 - [ ] A strict-NAT network (or a hotspot behind carrier NAT): "From outside" warns, and the session rides the relay.
 - [ ] A network with public IPv6: the IPv6 line is ok.
+
+## 36. Your own relay (N2)
+
+Built on `feat/own-relay`. On the Windows box, a phone WAN session ran through `pocketdesk relay --allow-paired` with `relay_urls` pointing at it, and the record said `wan_relayed`.
+
+- [x] The desktop announces its own relay, and a phone session rides it.
+- [x] Diagnostics says "ready through your relay", and "From outside" says "not measured".
+- [x] The phone's own home relay is the user's relay too (logcat: `home is now relay http://…:3340/`), and its log names no n0 relay.
+- [ ] **From outside:** the phone on mobile data, the relay on the desktop with port 3340 forwarded. A session connects through it.
+- [ ] HTTPS mode on a cloud VM with a real name: the certificate is issued, and a session connects with `--allow` ids from `relay-ids`.
+- [ ] A phone that is not paired (or an id not listed) is refused by the relay.
 
 ## Recording results
 

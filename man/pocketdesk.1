@@ -5,7 +5,7 @@ pocketdesk \- Remote desktop over Tailscale with KDE Connect integration
 .B pocketdesk
 [\fIOPTIONS\fR] [\fICOMMAND\fR]
 .SH DESCRIPTION
-Pocketdesk (formerly Pocketdesk) is a pure-Rust remote desktop solution for Linux and Windows.
+Pocketdesk (formerly Linux Link) is a pure-Rust remote desktop solution for Linux and Windows.
 It combines KDE Connect device integration with low-latency
 screen streaming over Tailscale.
 .SH COMMANDS
@@ -93,6 +93,30 @@ Remove a paired device from the trust store (all devices if omitted)
 Drop a live streaming session: device id, a unique id prefix of >=6 chars,
 the peer IP, or
 .B all
+.TP
+.B relay [\-\-port \fIPORT\fR] [\-\-hostname \fINAME\fR [\-\-email \fIADDR\fR]] [\-\-allow \fIID\fR]... [\-\-allow\-paired] [\-\-open]
+Run a relay for phones away from home, in place of n0's public one.
+Plain HTTP on
+.I PORT
+(default 3340), or with
+.B \-\-hostname
+HTTPS on ports 80 and 443 with a Let's Encrypt certificate.
+It admits only the endpoints listed with
+.B \-\-allow
+(repeatable) and, with
+.BR \-\-allow\-paired ,
+this desktop and the phones paired with it now (by the WAN key each
+registered on a connection at home);
+.B \-\-open
+admits anyone. With none of these it refuses to start.
+Point the desktop at it with
+.B relay_urls
+in config.toml.
+.TP
+.B relay\-ids
+Print this desktop's WAN id and each paired phone's, for
+.B \-\-allow
+on a relay that runs elsewhere
 .SH OPTIONS
 .TP
 .B \-v, \-\-verbose
@@ -121,6 +145,9 @@ baseline is compared against \- rotated at 4 MiB
 .TP
 .I ~/.local/state/pocketdesk/certs/
 Streaming TLS/QUIC identity (private key); never copy this into a repository
+.TP
+.I ~/.local/state/pocketdesk/relay\-acme/
+The relay's Let's Encrypt account and certificates (HTTPS mode)
 .SH ENVIRONMENT
 .TP
 .B RUST_LOG

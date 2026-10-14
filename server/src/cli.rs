@@ -139,6 +139,32 @@ pub enum Commands {
         /// Session target — see the subcommand help
         device: String,
     },
+    /// Run your own relay for phones away from home (instead of n0's public
+    /// ones). It must be reachable from the internet; set its URL as
+    /// `relay_urls` in the desktop's config.toml
+    Relay {
+        /// Plain HTTP port (ignored with --hostname, which serves 80 and 443)
+        #[arg(long, default_value_t = 3340)]
+        port: u16,
+        /// Serve HTTPS for this name, with a Let's Encrypt certificate
+        #[arg(long)]
+        hostname: Option<String>,
+        /// Contact address for Let's Encrypt
+        #[arg(long, requires = "hostname")]
+        email: Option<String>,
+        /// Admit this endpoint id (repeatable; see `pocketdesk relay-ids`)
+        #[arg(long)]
+        allow: Vec<String>,
+        /// Admit this desktop and its paired phones (when the relay runs here)
+        #[arg(long)]
+        allow_paired: bool,
+        /// Admit anyone (strangers can use its bandwidth)
+        #[arg(long)]
+        open: bool,
+    },
+    /// Print the endpoint ids a relay elsewhere should --allow: this
+    /// computer's, and each paired phone's
+    RelayIds,
 }
 
 /// Parse a `--grant` duration (`45s`, `15m`, `2h`, `7d`, combinable like

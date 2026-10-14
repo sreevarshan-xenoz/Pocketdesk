@@ -164,10 +164,15 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
     findings.push(diagnostics::check_addresses(
         &pocketdesk_core::local::network::local_ips(),
     ));
-    findings.push(diagnostics::check_internet_path(state_dir, state));
+    findings.push(diagnostics::check_internet_path(
+        state_dir,
+        state,
+        &config.relay_urls,
+    ));
     findings.extend(diagnostics::check_outside(
         diagnostics::read_wan_status(state_dir).as_ref(),
         state,
+        !config.relay_urls.is_empty(),
     ));
     Report {
         findings,

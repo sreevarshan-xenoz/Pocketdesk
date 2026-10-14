@@ -258,6 +258,7 @@ video_quality = "balanced" # low/balanced/high
 pairing_required = true    # PIN-pair devices before the control channel or streaming serves requests
 # allow_hevc = false       # let negotiating phones drive an H.265/HEVC stream (R4 C1)
 # lan_discovery = true     # announce this computer so phones on the network list it
+# relay_urls = ["https://relay.example.org"]  # your own relay instead of n0's (see below)
 ```
 
 ### systemd Service
@@ -277,6 +278,27 @@ The unit is `WantedBy=graphical-session.target`, so it starts at login and
 stops with the session. To run it without a login session (headless), enable
 lingering first: `sudo loginctl enable-linger $USER`.
 
+### Away From Home: Your Own Relay
+
+Away from home, a phone reaches the desktop directly when the desktop's network allows it (Diagnostics' "From outside" says whether it does), and through a relay when it does not. By default that relay is n0's free public service. To keep only your own machines in the path, run the relay yourself:
+
+```bash
+# On a machine the internet can reach on that port: the desktop itself
+# (forward one port on the router), any always-on box at home with a
+# forwarded port, or a free cloud VM.
+pocketdesk relay --allow-paired                  # on the desktop: plain, port 3340
+pocketdesk relay --hostname relay.example.org \
+    --email you@example.org --allow <id> ...     # elsewhere: HTTPS on 80/443, Let's Encrypt
+pocketdesk relay-ids                             # on the desktop: the ids to --allow elsewhere
+```
+
+Then add `relay_urls = ["http://<public address>:3340"]` (or the `https://` name) to the desktop's `config.toml` and restart the server. The desktop announces its relay, and the phone picks it up the next time it connects on the home network; nothing is set on the phone.
+
+- **Who may use it:** only listed endpoints. `--allow-paired` admits this desktop and the phones paired with it now, by the WAN key each registered on a connection at home. It re-reads both on each connection, so a newly paired phone works without a restart and an unpaired one (or an expired guest) is refused; `--allow <id>` is repeatable; `--open` admits anyone and warns. With none of these the relay refuses to start.
+- **What it sees:** sessions stay end-to-end encrypted between the phone and the desktop, so the relay forwards ciphertext. It sees which endpoints talk and how much. In plain mode, so can anyone on the path to the relay. n0 sees neither end: when the desktop announces only relays of its own, the phone dials with only those too.
+- **Where not to run it:** behind the same NAT as an unreachable desktop, with no forwarded port. A relay nobody outside can reach helps no one.
+- **What Diagnostics shows:** "Internet path: ready through your relay", or that your relay is not reached (is `pocketdesk relay` running?), or that a `relay_urls` entry is not an `http://` or `https://` address, which turns away-from-home off. Your relay does not offer the address discovery n0's relays do, so "From outside" says "not measured" instead of judging the NAT.
+
 ### CLI Commands
 
 | Command | Description |
@@ -293,6 +315,8 @@ lingering first: `sudo loginctl enable-linger $USER`.
 | `pocketdesk bench [--target software\|vaapi] [--baseline PATH] [--record PATH]` | Run the pinned 720p encode clip on this machine; with `--baseline`, exit non-zero if a percentile regressed past `--tolerance-pct` (exit 3 means no baseline matches this host, which is a skip, not a pass) |
 | `pocketdesk capabilities [--json\|--markdown]` | Show the negotiated protocol versions, transports, capture backends and codecs this build actually speaks, plus its KDE Connect capability sets |
 | `pocketdesk kick <id\|prefix\|peer-ip\|all>` | Drop a live streaming session (R4 D2) |
+| `pocketdesk relay [--port 3340] [--hostname NAME --email ADDR] [--allow ID]... [--allow-paired] [--open]` | Run your own relay for phones away from home (see *Away From Home*) |
+| `pocketdesk relay-ids` | Print this desktop's and its paired phones' WAN ids, for `--allow` on a relay elsewhere |
 | `pocketdesk start --background` | Run detached, logging to daily files under the state directory (what the Windows logon task runs) |
 | `pocketdesk install [--elevated]` | *Windows:* register the logon task, start it, and open the firewall ports |
 | `pocketdesk uninstall` | *Windows:* remove the logon task, firewall rules and notification identity |
