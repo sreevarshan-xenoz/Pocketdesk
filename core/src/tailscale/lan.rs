@@ -99,6 +99,7 @@ impl LanDiscoveryService {
 
         let properties = announcement_properties(name, device_id, stream_port);
 
+        let ips = announceable(ips);
         let service_info = ServiceInfo::new(
             &service_type,
             &instance_name,
@@ -232,6 +233,28 @@ impl LanDiscoveryService {
 }
 
 /// The TXT record of this server's announcement.
+/// The addresses worth announcing on the local network: not the tailnet's
+/// (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). A phone on the LAN reaches the
+/// computer by its LAN address, and the multicast answer would otherwise
+/// tell every device on the network this computer's tailnet address.
+/// Anything that does not parse is dropped too.
+fn announceable(ips: Vec<String>) -> Vec<String> {
+    use std::net::IpAddr;
+    ips.into_iter()
+        .filter(|ip| match ip.parse::<IpAddr>() {
+            Ok(IpAddr::V4(v4)) => {
+                let [a, b, ..] = v4.octets();
+                !(a == 100 && (b & 0xc0) == 64)
+            }
+            Ok(IpAddr::V6(v6)) => {
+                let s = v6.segments();
+                !(s[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0)
+            }
+            Err(_) => false,
+        })
+        .collect()
+}
+
 fn announcement_properties(
     name: &str,
     device_id: &str,
@@ -417,6 +440,24 @@ mod tests {
             }
         }
         let _ = browser.shutdown();
+    }
+
+    #[test]
+    fn the_announcement_leaves_tailnet_addresses_out() {
+        let ips = [
+            "192.168.1.10",
+            "100.64.0.9",
+            "100.127.255.1",
+            "100.128.0.1",
+            "fd7a:115c:a1e0::9",
+            "2001:db8::4",
+            "not an address",
+        ];
+        assert_eq!(
+            announceable(ips.iter().map(|s| s.to_string()).collect()),
+            ["192.168.1.10", "100.128.0.1", "2001:db8::4"],
+            "the tailnet's 100.64.0.0/10 and fd7a:115c:a1e0::/48 stay off the LAN"
+        );
     }
 
     #[test]
