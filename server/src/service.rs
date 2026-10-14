@@ -486,6 +486,9 @@ pub async fn run(config: Config) -> Result<()> {
             }
             quic_incoming = quic_endpoint.accept() => {
                 if let Some(incoming) = quic_incoming {
+                    let Some(incoming) = crate::conn_budget::proven(incoming) else {
+                        continue;
+                    };
                     let peer = incoming.remote_address();
                     let Some(slot) = budget.admit(peer.ip()) else {
                         if refused_said.elapsed() >= Duration::from_secs(10) {

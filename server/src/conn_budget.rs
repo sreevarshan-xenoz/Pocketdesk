@@ -72,10 +72,63 @@ impl Drop for Slot {
     }
 }
 
+/// The QUIC attempt if its source address is proven, else none, after asking
+/// the peer to prove it with a Retry. An Initial packet's source can be
+/// forged, so only a proven address may be counted against its share; a
+/// spoofer could otherwise fill a phone's share and lock it out (R3 review).
+pub fn proven(incoming: quinn::Incoming) -> Option<quinn::Incoming> {
+    if incoming.remote_address_validated() {
+        return Some(incoming);
+    }
+    if let Err(e) = incoming.retry() {
+        e.into_incoming().ignore();
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+
+    /// A real client answers the Retry and connects; only its second,
+    /// proven attempt reaches the budget.
+    #[tokio::test]
+    async fn a_quic_attempt_is_counted_only_once_its_address_is_proven() {
+        use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let desktop = CertManager::new().expect("desktop certs");
+        let phone = CertManager::new().expect("phone certs");
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server = quinn::Endpoint::server(
+            desktop.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let mut unproven = 0;
+            loop {
+                let incoming = server.accept().await.expect("incoming");
+                match proven(incoming) {
+                    Some(incoming) => return (unproven, incoming.await.expect("accept")),
+                    None => unproven += 1,
+                }
+            }
+        });
+        let mut client = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).expect("client");
+        client.set_default_client_config(phone.client_config(alpn).expect("client config"));
+        let _conn = client
+            .connect(addr, "pocketdesk.local")
+            .expect("dial")
+            .await
+            .expect("connect after the retry");
+        let (unproven, _accepted) = accept.await.expect("accept task");
+        assert_eq!(
+            unproven, 1,
+            "the first attempt was asked to prove its address"
+        );
+    }
 
     fn ip(last: u8) -> IpAddr {
         IpAddr::V4(Ipv4Addr::new(192, 0, 2, last))
