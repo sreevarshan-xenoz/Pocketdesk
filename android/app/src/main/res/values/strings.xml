@@ -417,15 +417,16 @@
     <string name="doctor_scan_again_title">Scan its pairing code again?</string>
     <string name="doctor_scan_again_text">This removes the computer and its saved security key from this phone, then opens the scanner. Do it only if you reinstalled Pocketdesk there.</string>
     <!-- Staying connected in the background (T2) -->
-    <string name="bg_optimized">Android may stop Pocketdesk in the background</string>
+    <string name="bg_optimized">Android may hold Pocketdesk back while the phone sleeps</string>
     <string name="bg_restricted">Pocketdesk\'s battery use is set to Restricted</string>
-    <string name="bg_allowed">Pocketdesk may run in the background</string>
-    <string name="bg_why">Phone notifications and texts reach your computer only while Pocketdesk can run in the background.</string>
+    <string name="bg_allowed">Android lets Pocketdesk run in the background</string>
+    <string name="bg_why">While the phone sleeps, notifications sent to your computer can be lost and texts can arrive late.</string>
     <string name="bg_allow">Allow</string>
     <string name="bg_dont_remind">Don\'t remind me</string>
     <string name="bg_maker_guide">This phone\'s own setting</string>
     <string name="settings_background">Background</string>
     <string name="settings_background_status">Running in the background</string>
     <string name="settings_background_remind">Remind me on Home</string>
-    <string name="settings_background_remind_summary">When phone notifications or texts are on and Android may stop them</string>
+    <string name="settings_background_remind_summary">When phone notifications or texts are on and Android may hold them back</string>
+    <string name="bg_maker_guide_summary">Many phones add their own battery saver on top of Android\'s</string>
 </resources>

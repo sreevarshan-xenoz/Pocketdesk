@@ -34,7 +34,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.pocketdesk.android.HostStore
@@ -100,8 +99,11 @@ fun HomeScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    // Read once per resume (system services), not on every recomposition.
     val backgroundLimit = remember(resumes) { BackgroundRunning.limit(context) }
-    val remindBackground = resumes.let { BackgroundRunning.shouldRemind(context) }
+    val backgroundFeatures = remember(resumes) { BackgroundRunning.featuresOn(context) }
+    val remindBackground =
+        BackgroundRunning.shouldRemind(backgroundFeatures, backgroundLimit, Prefs.backgroundReminder(context))
     // A computer whose key changed, to remove and scan again (T1).
     var rescanning by remember { mutableStateOf<HostStore.Host?>(null) }
     // Bumped when wake settings change, so the cards re-read their plans.
@@ -223,15 +225,13 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // Only here, not on the empty Home: the background features
+                // need a paired computer to send to.
                 if (remindBackground) {
-                    item(key = "background") {
+                    item(key = "#background") {
                         BackgroundCard(
                             limit = backgroundLimit,
-                            onAllow = {
-                                runCatching {
-                                    context.startActivity(BackgroundRunning.settingsIntent(context, backgroundLimit))
-                                }
-                            },
+                            onAllow = { BackgroundRunning.openSettings(context, backgroundLimit) },
                             onDismiss = { Prefs.setBackgroundReminder(context, false) },
                         )
                     }
@@ -583,10 +583,8 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 if (guide != null) {
                     TextButton(onClick = {
-                        runCatching {
-                            context.startActivity(
-                                android.content.Intent(android.content.Intent.ACTION_VIEW, guide.toUri()),
-                            )
+                        if (!BackgroundRunning.openGuide(context, guide)) {
+                            android.widget.Toast.makeText(context, guide, android.widget.Toast.LENGTH_LONG).show()
                         }
                     }) { Text(stringResource(R.string.bg_maker_guide)) }
                 }

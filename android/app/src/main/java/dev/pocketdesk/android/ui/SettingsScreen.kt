@@ -18,8 +18,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -196,29 +198,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             PhoneNotificationsSection()
             TextsSection()
 
-            // T2: whether Android lets those run in the background.
+            // T2: whether Android holds those back while the phone sleeps.
             Header(stringResource(R.string.settings_background))
-            val limit = BackgroundRunning.limit(context)
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_background_status), style = MaterialTheme.typography.bodyLarge) },
-                supportingContent = {
-                    Text(
-                        stringResource(
-                            when (limit) {
-                                BackgroundLimit.NONE -> R.string.bg_allowed
-                                BackgroundLimit.OPTIMIZED -> R.string.bg_optimized
-                                BackgroundLimit.RESTRICTED -> R.string.bg_restricted
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                },
-                leadingContent = { LlIcon(LlIcons.Settings, null) },
-                trailingContent = { LlIcon(LlIcons.ChevronRight, null) },
-                modifier = Modifier.clickable {
-                    runCatching { context.startActivity(BackgroundRunning.settingsIntent(context, limit)) }
-                },
-            )
+            BackgroundSection()
             boolRow(
                 LlIcons.Notifications,
                 stringResource(R.string.settings_background_remind),
@@ -271,3 +253,61 @@ private fun appVersionName(context: android.content.Context): String =
     runCatching {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
     }.getOrNull().orEmpty()
+
+/**
+ * T2: the battery status, read again each time the app comes back (from the
+ * battery page, say), and the maker's own guide, which matters whatever
+ * Android's own setting says.
+ */
+@Composable
+private fun BackgroundSection() {
+    val context = LocalContext.current
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    var version by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) version++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val limit = remember(version) { BackgroundRunning.limit(context) }
+    val guide = remember { BackgroundRunning.makerGuide(android.os.Build.MANUFACTURER) }
+    ListItem(
+        headlineContent = {
+            Text(stringResource(R.string.settings_background_status), style = MaterialTheme.typography.bodyLarge)
+        },
+        supportingContent = {
+            Text(
+                stringResource(
+                    when (limit) {
+                        BackgroundLimit.NONE -> R.string.bg_allowed
+                        BackgroundLimit.OPTIMIZED -> R.string.bg_optimized
+                        BackgroundLimit.RESTRICTED -> R.string.bg_restricted
+                    },
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        },
+        leadingContent = { LlIcon(LlIcons.Settings, null) },
+        trailingContent = { LlIcon(LlIcons.ChevronRight, null) },
+        modifier = Modifier.clickable { BackgroundRunning.openSettings(context, limit) },
+    )
+    if (guide != null) {
+        ListItem(
+            headlineContent = {
+                Text(stringResource(R.string.bg_maker_guide), style = MaterialTheme.typography.bodyLarge)
+            },
+            supportingContent = {
+                Text(stringResource(R.string.bg_maker_guide_summary), style = MaterialTheme.typography.bodySmall)
+            },
+            leadingContent = { LlIcon(LlIcons.Info, null) },
+            trailingContent = { LlIcon(LlIcons.ChevronRight, null) },
+            modifier = Modifier.clickable {
+                if (!BackgroundRunning.openGuide(context, guide)) {
+                    android.widget.Toast.makeText(context, guide, android.widget.Toast.LENGTH_LONG).show()
+                }
+            },
+        )
+    }
+}
