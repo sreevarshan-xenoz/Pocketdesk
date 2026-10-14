@@ -2,6 +2,7 @@ pub mod backoff;
 pub mod clipboard;
 pub mod connection;
 pub mod kdeconnect;
+pub mod partials;
 pub mod permissions;
 pub mod transfer;
 pub mod v2;
