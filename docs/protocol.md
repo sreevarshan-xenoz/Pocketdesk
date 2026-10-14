@@ -72,7 +72,7 @@ Text clipboard does not use this path. It rides the control channel (`core/src/p
 | TCP 1716 "control" and UDP 4716 "media", limited to `pocketdesk.exe` | Private and Domain profiles, `RemoteAddress LocalSubnet` | `server/src/install_windows.rs` (`PORTS`, `firewall_add_script`) |
 | The same two ports again | Interface `Tailscale`, remote `100.64.0.0/10,fd7a:115c:a1e0::/48`, any profile, added only if that adapter exists | same |
 
-Discovery is mDNS (UDP 5353), so no rule is made for UDP 1716. `install` removes the whole rule group first, so an older install's UDP 1716 rule goes the next time it runs.
+Discovery is mDNS (UDP 5353), so no rule is made for UDP 1716. `install` removes the whole rule group first, so an older install's UDP 1716 rule goes the next time it runs. `install` makes no rule for UDP 5353 either; whether phones see the announcement then depends on the rules Windows already has (its own mDNS rule, or one it added when `pocketdesk.exe` first listened). Not confirmed on a fresh machine.
 
 ---
 
