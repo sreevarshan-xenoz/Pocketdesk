@@ -19,30 +19,26 @@ pub fn configure(announce: bool, outside_port: u16) {
     OUTSIDE_PORT.store(outside_port, Ordering::Relaxed);
 }
 
-/// The packet for `facts`, or `None` when announcing is off or there is
-/// nothing to tell.
-pub fn packet_for(
-    announce: bool,
-    facts: Option<&WakeFacts>,
-    outside_port: u16,
-) -> Option<NetworkPacket> {
-    if !announce {
-        return None;
-    }
-    let facts = facts?;
-    Some(NetworkPacket::new(WAKE_INFO).with_body(serde_json::json!({
-        "mac": facts.mac,
-        "broadcast": facts.broadcast.to_string(),
-        "wired": facts.wired,
-        "port": outside_port,
-    })))
+/// The packet for `facts`. With announcing off or nothing to tell, its body
+/// is empty, so a phone forgets what an earlier connection told it.
+pub fn packet_for(announce: bool, facts: Option<&WakeFacts>, outside_port: u16) -> NetworkPacket {
+    let body = match facts {
+        Some(facts) if announce => serde_json::json!({
+            "mac": facts.mac,
+            "broadcast": facts.broadcast.to_string(),
+            "wired": facts.wired,
+            "port": outside_port,
+        }),
+        _ => serde_json::json!({}),
+    };
+    NetworkPacket::new(WAKE_INFO).with_body(body)
 }
 
 /// The packet for a connection that arrived on `local`, with the settings.
-pub fn packet_for_connection(local: Option<IpAddr>) -> Option<NetworkPacket> {
+pub fn packet_for_connection(local: Option<IpAddr>) -> NetworkPacket {
     let announce = ANNOUNCE.load(Ordering::Relaxed);
     if !announce {
-        return None;
+        return packet_for(false, None, 0);
     }
     let local: Option<Ipv4Addr> = match local {
         Some(IpAddr::V4(v4)) => Some(v4),
@@ -72,7 +68,7 @@ mod tests {
 
     #[test]
     fn the_packet_says_how_to_wake_and_nothing_else() {
-        let packet = packet_for(true, Some(&facts()), 40009).unwrap();
+        let packet = packet_for(true, Some(&facts()), 40009);
         assert_eq!(packet.packet_type, WAKE_INFO);
         assert_eq!(
             packet.body,
@@ -86,8 +82,10 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_told_when_announcing_is_off_or_unknown() {
-        assert!(packet_for(false, Some(&facts()), 9).is_none());
-        assert!(packet_for(true, None, 9).is_none());
+    fn nothing_is_told_when_announcing_is_off_or_unknown_so_phones_forget() {
+        let off = packet_for(false, Some(&facts()), 9);
+        assert_eq!(off.packet_type, WAKE_INFO);
+        assert_eq!(off.body, serde_json::json!({}));
+        assert_eq!(packet_for(true, None, 9).body, serde_json::json!({}));
     }
 }

@@ -733,8 +733,7 @@ async fn seed_desktop_state(
     // How to wake this computer, for the adapter the phone reached (N6).
     let wake = tokio::task::spawn_blocking(move || crate::wake_info::packet_for_connection(local))
         .await
-        .ok()
-        .flatten();
+        .ok();
     if let Some(packet) = wake {
         let _ = sender.send_packet(&packet).await;
     }
