@@ -17,7 +17,9 @@ use serde::Serialize;
 
 use crate::protocol::kdeconnect::LL_EXT_VERSION;
 use crate::protocol::v2::{ALPN_V2, MAX_CONTROL_PAYLOAD_SIZE, V2_MAX_VERSION, V2_MIN_VERSION};
-use crate::protocol::{ALPN_V1_STREAM, HANDSHAKE_HELLO, PROTOCOL_VERSION};
+use crate::protocol::{
+    ALPN_CONTROL, ALPN_TRANSFER, ALPN_V1_STREAM, HANDSHAKE_HELLO, PROTOCOL_VERSION,
+};
 use crate::streaming::audio::{MIC_CHANNELS, MIC_SAMPLE_RATE};
 use crate::streaming::client::CODEC_CAPS_MARKER;
 use crate::streaming::{AudioConfig, VideoCodec};
@@ -161,11 +163,19 @@ impl Capabilities {
             transports: vec![
                 TransportInfo {
                     id: "tcp-v1",
-                    label: "KDE Connect-style control channel",
+                    label: "KDE Connect-style control channel, inside TLS 1.3",
                     endpoint: format!("tcp://0.0.0.0:{DEFAULT_CONTROL_PORT}"),
-                    alpn: None,
+                    alpn: Some(String::from_utf8_lossy(ALPN_CONTROL).into_owned()),
                     available: true,
-                    note: "plugin traffic (clipboard, battery, notifications, files); the plane Phase 3 retires",
+                    note: "pairing and plugin traffic (clipboard, battery, notifications, texts, file requests); both ends present certificates",
+                },
+                TransportInfo {
+                    id: "tcp-transfer",
+                    label: "File transfer, inside TLS 1.3",
+                    endpoint: "tcp://<phone>:<port the phone names>".to_string(),
+                    alpn: Some(String::from_utf8_lossy(ALPN_TRANSFER).into_owned()),
+                    available: true,
+                    note: "the phone listens and the desktop dials it, both ways; one-time key, size, bytes, status byte",
                 },
                 TransportInfo {
                     id: "quic-v2",
@@ -187,7 +197,7 @@ impl Capabilities {
                     id: "iroh-noq",
                     label: "iroh hole-punched WAN endpoint",
                     endpoint: "address-free (endpoint id over any link)".to_string(),
-                    alpn: Some(String::from_utf8_lossy(ALPN_V2).into_owned()),
+                    alpn: Some(String::from_utf8_lossy(ALPN_V1_STREAM).into_owned()),
                     available: cfg!(feature = "wan"),
                     note: "behind the `wan` feature; the Android bridge builds with it",
                 },
