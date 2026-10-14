@@ -407,8 +407,8 @@ fn plan_fetch(
     if !dialable(ip) {
         return Err(format!("will not connect back to {ip}"));
     }
-    // Taken before an offer is redeemed, so a busy desktop does not use up
-    // the phone's one try.
+    // Taken before an offer is redeemed, so a busy desktop does not spend
+    // one of the phone's tries.
     let slot = transfer_slots().take(sender.device_id())?;
     let (path, size, offer) = if let Some(path) = body.get("path").and_then(|v| v.as_str()) {
         let (path, size) = crate::plugins::file_browse::resolve_file(path)?;
@@ -421,7 +421,7 @@ fn plan_fetch(
             .map(|m| m.len())
         else {
             let reason = "the file is no longer there";
-            crate::offers::finish(id, Err(reason.to_string()));
+            crate::offers::fail(id, reason.to_string());
             return Err(reason.to_string());
         };
         (path, size, Some(id.to_string()))
@@ -431,7 +431,7 @@ fn plan_fetch(
     if size > MAX_FILE_BYTES {
         let reason = "the file is larger than 8 GB";
         if let Some(id) = &offer {
-            crate::offers::finish(id, Err(reason.to_string()));
+            crate::offers::fail(id, reason.to_string());
         }
         return Err(reason.to_string());
     }
@@ -441,7 +441,7 @@ fn plan_fetch(
         Ok(tls) => tls,
         Err(reason) => {
             if let Some(id) = &offer {
-                crate::offers::finish(id, Err(reason.clone()));
+                crate::offers::fail(id, reason.clone());
             }
             return Err(reason);
         }

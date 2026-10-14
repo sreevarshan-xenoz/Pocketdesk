@@ -36,6 +36,9 @@ const EXPIRED: &str = "the phone did not take it in time";
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// How often the outbox is read.
 const POLL: Duration = Duration::from_millis(250);
+/// How many times a phone may try to fetch an offer (T6a): a failed
+/// attempt leaves it for the phone's retry, which continues the file.
+pub const MAX_ATTEMPTS: u8 = 4;
 
 /// A file offered to one phone.
 #[derive(Debug, Clone)]
@@ -43,6 +46,10 @@ struct Offer {
     path: PathBuf,
     device_id: String,
     expires: Instant,
+    /// Fetches begun.
+    attempts: u8,
+    /// A fetch is running: another waits for it to end.
+    in_flight: bool,
 }
 
 /// Offers by id. The server has one ([`offers`]); a test that sweeps uses
@@ -67,12 +74,15 @@ fn offer_in(table: &Table, id: &str, path: PathBuf, device_id: &str, now: Instan
             path,
             device_id: device_id.to_string(),
             expires: now + OFFER_TTL,
+            attempts: 0,
+            in_flight: false,
         },
     );
 }
 
-/// The file offered as `id`, taken by `device_id`: the offer is used up.
-/// An offer for another phone is refused and left for its own phone.
+/// The file offered as `id`, for a fetch by `device_id`. The offer stays
+/// until that fetch settles ([`finish`]), one fetch at a time; an offer for
+/// another phone is refused and left for its own phone.
 pub fn redeem(id: &str, device_id: &str) -> Result<PathBuf, &'static str> {
     let redeemed = redeem_at(id, device_id, Instant::now());
     if redeemed == Err(OFFER_EXPIRED) {
@@ -94,17 +104,60 @@ fn redeem_in(
     now: Instant,
 ) -> Result<PathBuf, &'static str> {
     let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
-    let offer = offers.get(id).ok_or("the offer was used or is unknown")?;
+    let offer = offers
+        .get_mut(id)
+        .ok_or("the offer was used or is unknown")?;
     if offer.device_id != device_id {
         return Err("the file was offered to another phone");
     }
-    let offer = offers
-        .remove(id)
-        .ok_or("the offer was used or is unknown")?;
     if offer.expires <= now {
+        offers.remove(id);
         return Err(OFFER_EXPIRED);
     }
-    Ok(offer.path)
+    if offer.in_flight {
+        return Err("the file is already being sent");
+    }
+    offer.in_flight = true;
+    offer.attempts += 1;
+    Ok(offer.path.clone())
+}
+
+/// How a fetch of an offer settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Settled {
+    /// Sent: the offer is gone.
+    Done,
+    /// Failed, and the phone may try again.
+    Retry,
+    /// Failed for the last time: the offer is gone.
+    GaveUp,
+}
+
+fn settle_in(table: &Table, id: &str, sent: bool) -> Settled {
+    let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(offer) = offers.get_mut(id) else {
+        return if sent { Settled::Done } else { Settled::GaveUp };
+    };
+    offer.in_flight = false;
+    if sent {
+        offers.remove(id);
+        Settled::Done
+    } else if offer.attempts >= MAX_ATTEMPTS {
+        offers.remove(id);
+        Settled::GaveUp
+    } else {
+        Settled::Retry
+    }
+}
+
+fn remove_in(table: &Table, id: &str, device_id: &str) -> bool {
+    let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
+    if offers.get(id).is_some_and(|o| o.device_id == device_id) {
+        offers.remove(id);
+        true
+    } else {
+        false
+    }
 }
 
 /// Take every offer whose time is up at `now`; their ids.
@@ -134,8 +187,8 @@ pub fn decline(id: &str, device_id: &str, reason: &str) {
     decline_in(&dir, id, device_id, reason, Instant::now());
 }
 
-fn decline_in(dir: &Path, id: &str, device_id: &str, reason: &str, now: Instant) {
-    if redeem_at(id, device_id, now).is_err() {
+fn decline_in(dir: &Path, id: &str, device_id: &str, reason: &str, _now: Instant) {
+    if !remove_in(offers(), id, device_id) {
         return;
     }
     // The phone's words go into the desktop app: short, and one line.
@@ -153,12 +206,32 @@ fn decline_in(dir: &Path, id: &str, device_id: &str, reason: &str, now: Instant)
     update_sent(dir, id, SentState::Failed(reason));
 }
 
-/// Record how the fetch of offer `id` ended.
+/// Record how a fetch of offer `id` ended. A failure leaves the offer for
+/// the phone's retry until its attempts run out.
 pub fn finish(id: &str, outcome: Result<(), String>) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
-    finish_in(&dir, id, outcome);
+    match settle_in(offers(), id, outcome.is_ok()) {
+        Settled::Done | Settled::GaveUp => finish_in(&dir, id, outcome),
+        Settled::Retry => {
+            if let Err(reason) = outcome {
+                tracing::info!("Offer {id} failed this time ({reason}); the phone may try again");
+            }
+        }
+    }
+}
+
+/// End offer `id` with `reason`: nothing a retry could change (the file is
+/// gone, or too large, or the phone may not take it).
+pub fn fail(id: &str, reason: String) {
+    offers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(id);
+    if let Ok(dir) = crate::state::state_dir() {
+        finish_in(&dir, id, Err(reason));
+    }
 }
 
 fn finish_in(dir: &Path, id: &str, outcome: Result<(), String>) {
@@ -260,6 +333,7 @@ async fn deliver(
         "id": request.id,
         "name": name,
         "size": size,
+        "source": source_of(&path, size),
     }));
     if target.send_packet(&packet).await.is_err() {
         offers()
@@ -274,6 +348,32 @@ async fn deliver(
         return;
     }
     tracing::info!("Offered {} to {}", path.display(), request.device_id);
+}
+
+/// The file's source id (T6a): 32 hex digits naming this file at this
+/// size and modified time, so the phone continues a download it began of
+/// the same file and never one of another.
+pub(crate) fn source_of(path: &Path, size: u64) -> String {
+    let modified = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis());
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let digest = ring::digest::digest(
+        &ring::digest::SHA256,
+        format!(
+            "{}
+{size}
+{modified}",
+            canonical.display()
+        )
+        .as_bytes(),
+    );
+    digest.as_ref()[..16]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Whether `request` may be offered: the file, the phone's permission, and
@@ -326,22 +426,67 @@ mod tests {
     }
 
     #[test]
-    fn an_offer_is_taken_once_and_only_by_its_phone() {
+    fn an_offer_is_fetched_by_its_phone_one_attempt_at_a_time() {
+        let table = Table::default();
         let now = Instant::now();
-        offer_at("o-1", PathBuf::from("/a.pdf"), "phone-a", now);
+        offer_in(&table, "o-1", PathBuf::from("/a.pdf"), "phone-a", now);
         assert_eq!(
-            redeem_at("o-1", "phone-b", now),
+            redeem_in(&table, "o-1", "phone-b", now),
             Err("the file was offered to another phone")
         );
         assert_eq!(
-            redeem_at("o-1", "phone-a", now),
+            redeem_in(&table, "o-1", "phone-a", now),
             Ok(PathBuf::from("/a.pdf")),
             "another phone's attempt does not use it up"
         );
         assert_eq!(
-            redeem_at("o-1", "phone-a", now),
-            Err("the offer was used or is unknown")
+            redeem_in(&table, "o-1", "phone-a", now),
+            Err("the file is already being sent"),
+            "one attempt at a time"
         );
+        assert_eq!(settle_in(&table, "o-1", false), Settled::Retry);
+        assert!(
+            redeem_in(&table, "o-1", "phone-a", now).is_ok(),
+            "a failed attempt leaves it"
+        );
+        assert_eq!(settle_in(&table, "o-1", true), Settled::Done);
+        assert_eq!(
+            redeem_in(&table, "o-1", "phone-a", now),
+            Err("the offer was used or is unknown"),
+            "a sent file's offer is gone"
+        );
+    }
+
+    #[test]
+    fn a_source_id_names_the_file_as_it_is() {
+        let dir = temp_dir("source");
+        let path = dir.join("a.bin");
+        std::fs::write(&path, b"abc").unwrap();
+        let id = source_of(&path, 3);
+        assert!(pocketdesk_core::protocol::partials::valid_source(&id));
+        assert_eq!(id, source_of(&path, 3));
+        assert_ne!(id, source_of(&path, 4), "another size");
+        assert_ne!(id, source_of(&dir.join("b.bin"), 3), "another file");
+    }
+
+    #[test]
+    fn an_offer_gives_up_after_four_failed_attempts() {
+        let table = Table::default();
+        let now = Instant::now();
+        offer_in(&table, "o-4", PathBuf::from("/a.pdf"), "phone-a", now);
+        for attempt in 1..=MAX_ATTEMPTS {
+            assert!(
+                redeem_in(&table, "o-4", "phone-a", now).is_ok(),
+                "{attempt}"
+            );
+            let settled = settle_in(&table, "o-4", false);
+            if attempt < MAX_ATTEMPTS {
+                assert_eq!(settled, Settled::Retry);
+            } else {
+                assert_eq!(settled, Settled::GaveUp);
+            }
+        }
+        assert!(redeem_in(&table, "o-4", "phone-a", now).is_err());
     }
 
     #[test]
