@@ -16,6 +16,19 @@ pub fn control_peer_addr(stream: &ControlStream) -> std::io::Result<std::net::So
     stream.get_ref().0.peer_addr()
 }
 
+/// Probe an idle control connection: after 30 s of silence, then every
+/// 10 s. A peer that vanished without closing (it slept, or left the
+/// network) is found within about a minute instead of never, so the reader
+/// ends and the phone dials again.
+pub fn keep_alive(stream: &TcpStream) -> std::io::Result<()> {
+    let probing = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(30))
+        .with_interval(Duration::from_secs(10));
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
+    let probing = probing.with_retries(3);
+    socket2::SockRef::from(stream).set_tcp_keepalive(&probing)
+}
+
 #[derive(Debug, Clone)]
 pub struct ConnectionManager {
     timeout: Duration,
@@ -59,6 +72,7 @@ impl ConnectionManager {
                 })?;
 
             stream.set_nodelay(true)?;
+            keep_alive(&stream)?;
 
             // The channel runs inside TLS. The desktop's certificate is
             // checked against the pin for the address dialed (the server

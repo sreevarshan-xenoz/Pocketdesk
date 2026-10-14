@@ -87,6 +87,7 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::live_sessions::run_watcher());
     // F7b: files the desktop app sends to a phone in a session.
     tokio::spawn(crate::offers::run_watcher());
+    tokio::spawn(crate::plugins::sms::run_watcher());
 
     // Prepare shared state for v2 multiplexer and v1 streaming.
     // The QUIC identity must be STABLE across restarts: clients pin it with
@@ -124,6 +125,11 @@ pub async fn run(config: Config) -> Result<()> {
 
     // Announced only now that the control port answers: a phone checks it
     // before listing this computer.
+    crate::plugins::notification::configure(
+        config.phone_notifications,
+        config.notifications_per_minute,
+    );
+    crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
     let announcement = if config.lan_discovery {
         Some(lan_discovery.register_service(
             &host_name,
@@ -372,6 +378,9 @@ pub async fn run(config: Config) -> Result<()> {
                 match accepted {
                     Ok((stream, peer_addr)) => {
                         tracing::info!("Incoming v1 TCP connection from {}", peer_addr);
+                        if let Err(e) = pocketdesk_core::protocol::connection::keep_alive(&stream) {
+                            tracing::debug!("No keepalive on {peer_addr}: {e}");
+                        }
                         let identity_packet = kde_service.identity_packet().clone();
                         let registry_clone = Arc::clone(&registry);
                         let hypr = hypr_ipc.clone();

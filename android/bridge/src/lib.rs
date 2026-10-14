@@ -1023,6 +1023,48 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePen
     to_jstring(&mut env, json)
 }
 
+/// The computer the live control connection is to, as JSON, or "".
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeControlPeer(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = RUNTIME.block_on(api::control_peer()).unwrap_or_default();
+    to_jstring(&mut env, json)
+}
+
+/// The replies the desktop asked this phone to text (N5b), as JSON.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeSmsRequests(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(api::take_sms_requests()));
+    to_jstring(&mut env, json)
+}
+
+/// Send the phone's texts or a reply's result to the desktop (N5b).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendPhonePacket(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    packet_type: JString<'_>,
+    body: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let packet_type = jstring_to_string(&mut env, &packet_type);
+    let body = jstring_to_string(&mut env, &body);
+    let json = envelope_unit(RUNTIME.block_on(api::send_phone_packet(
+        address,
+        port as u16,
+        packet_type,
+        body,
+    )));
+    to_jstring(&mut env, json)
+}
+
 /// Reply to a desktop notification from the phone (Tier-2 #11c).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendNotificationReply(

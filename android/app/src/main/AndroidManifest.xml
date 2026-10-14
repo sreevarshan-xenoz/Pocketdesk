@@ -11,6 +11,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- N5b: texts on the computer and replies from it; both asked for only
+         when the user turns them on. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- Texts are optional: the app installs on tablets and phones without a
+         SIM, and simply has nothing to forward there. -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Scanning a desktop's pairing code; the app works without a camera. -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -113,6 +120,22 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_connect_info" />
         </receiver>
+        <!-- N5b: incoming texts forwarded to the computer, once the user
+             turns it on in Settings and grants RECEIVE_SMS. -->
+        <receiver
+            android:name=".notify.SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- N5b: the radio's answer for each part of a reply. -->
+        <receiver
+            android:name=".notify.SmsSentReceiver"
+            android:exported="false" />
+
         <!-- N5a: the phone's notifications shown on the desktop, once the
              user turns it on in Settings and grants notification access. -->
         <service

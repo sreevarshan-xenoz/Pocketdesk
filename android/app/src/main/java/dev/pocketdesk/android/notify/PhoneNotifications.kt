@@ -5,18 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Process
-import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
-import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.bridge.RustCore
 import org.json.JSONObject
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 /**
@@ -82,20 +78,28 @@ object PhoneNotificationPrefs {
  */
 class PhoneNotificationListener : NotificationListenerService() {
     private lateinit var rule: NotificationForwardRule
-    private val worker =
-        ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue(20), ThreadPoolExecutor.DiscardOldestPolicy())
+    private val worker get() = PhoneLink.worker
 
-    /** Until when sends are paused after a failure (elapsed realtime). */
-    private var pausedUntilMs = 0L
+    /** Replies from the computer (N5b): Android keeps this service bound, so it hosts them. */
+    private val replies by lazy { SmsReplies(applicationContext) }
+    private val replyTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
     override fun onCreate() {
         super.onCreate()
         rule = NotificationForwardRule(packageName)
         RustCore.start(filesDir)
+        // On a thread of its own: connecting can take seconds while the
+        // computer is away, and must not hold up notifications.
+        replyTicker.scheduleWithFixedDelay(
+            { runCatching { replies.tick() }.onFailure { Log.w("PhoneNotifications", "reply tick failed", it) } },
+            5,
+            5,
+            TimeUnit.SECONDS,
+        )
     }
 
     override fun onDestroy() {
-        worker.shutdownNow()
+        replyTicker.shutdownNow()
         super.onDestroy()
     }
 
@@ -110,7 +114,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             // Closed on the phone: closed on the computer too (N5c), but only
             // one the computer was shown.
             if (rule.removed(sbn.key) && PhoneNotificationPrefs.enabled(this)) {
-                send(JSONObject().put("id", sbn.key).put("isCancel", true))
+                PhoneLink.sendNow(this, "kdeconnect.notification", JSONObject().put("id", sbn.key).put("isCancel", true))
             }
         }
     }
@@ -130,21 +134,7 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("text", out.text)
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
-        if (!send(body)) rule.removed(out.id)
-    }
-
-    /**
-     * Send [body] to the most recently used paired computer; on failure,
-     * pause sends for a minute. Returns whether it was sent.
-     */
-    private fun send(body: JSONObject): Boolean {
-        if (SystemClock.elapsedRealtime() < pausedUntilMs) return false
-        val host = HostStore.hosts(this).firstOrNull { HostStore.pairedDesktopId(this, it.address) != null } ?: return false
-        return RustCore.sendNotification(host.address, host.controlPort, body.toString())
-            .onFailure {
-                Log.d(TAG, "not sent to ${host.address}, pausing a minute: ${it.message}")
-                pausedUntilMs = SystemClock.elapsedRealtime() + PAUSE_MS
-            }.isSuccess
+        if (!PhoneLink.sendNow(this, "kdeconnect.notification", body)) rule.removed(out.id)
     }
 
     /** The channel's and the user's lock-screen overrides for [sbn]. */
@@ -200,8 +190,5 @@ class PhoneNotificationListener : NotificationListenerService() {
         runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
             .getOrDefault(pkg)
 
-    private companion object {
-        const val TAG = "PhoneNotifications"
-        const val PAUSE_MS = 60_000L
-    }
+
 }

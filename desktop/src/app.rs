@@ -23,7 +23,7 @@ const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 8] = [
+const PERMISSIONS: [(Capability, &str, &str); 9] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -64,6 +64,11 @@ const PERMISSIONS: [(Capability, &str, &str); 8] = [
         "Show its notifications here",
         "The phone's notifications appear on this computer, when the phone shares them.",
     ),
+    (
+        Capability::Texts,
+        "Show its texts and send replies",
+        "Texts the phone receives appear in Messages here, and replies go out through the phone.",
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +78,7 @@ pub enum Tab {
     Devices,
     Sessions,
     Files,
+    Messages,
     Settings,
     Diagnostics,
     Logs,
@@ -109,6 +115,8 @@ pub struct PocketdeskApp {
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
     /// The Diagnostics tab (F10).
     diagnostics: crate::diagnostics_view::DiagnosticsView,
+    /// The Messages tab (N5b).
+    messages: crate::messages_view::MessagesView,
 }
 
 impl PocketdeskApp {
@@ -133,6 +141,7 @@ impl PocketdeskApp {
             send_path: String::new(),
             picking: None,
             diagnostics: Default::default(),
+            messages: Default::default(),
         }
     }
 
@@ -872,6 +881,7 @@ impl eframe::App for PocketdeskApp {
                     (Tab::Devices, "Devices"),
                     (Tab::Sessions, "Sessions"),
                     (Tab::Files, "Files"),
+                    (Tab::Messages, "Messages"),
                     (Tab::Settings, "Settings"),
                     (Tab::Diagnostics, "Diagnostics"),
                     (Tab::Logs, "Logs"),
@@ -898,6 +908,10 @@ impl eframe::App for PocketdeskApp {
             Tab::Devices => self.devices_tab(ui),
             Tab::Sessions => self.sessions_tab(ui),
             Tab::Files => self.files_tab(ui),
+            Tab::Messages => {
+                self.messages
+                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
+            }
             Tab::Settings => self.settings_tab(ui),
             Tab::Diagnostics => self
                 .diagnostics

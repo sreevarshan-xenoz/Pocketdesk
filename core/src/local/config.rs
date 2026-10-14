@@ -62,6 +62,31 @@ pub struct Config {
     /// (roadmap N3). Read at server start.
     #[serde(default)]
     pub dht_publish: DhtPublish,
+    /// Show the phones' own notifications here, when a phone shares them
+    /// (roadmap N5a). Each phone's Notifications permission still applies.
+    #[serde(default = "default_true")]
+    pub phone_notifications: bool,
+    /// The most notifications shown from one phone in a minute.
+    #[serde(default = "default_notifications_per_minute")]
+    pub notifications_per_minute: u32,
+    /// A notification for each text a phone forwards (roadmap N5b).
+    #[serde(default = "default_true")]
+    pub sms_notify: bool,
+    /// How many texts the Messages history keeps.
+    #[serde(default = "default_sms_keep")]
+    pub sms_keep: u32,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_notifications_per_minute() -> u32 {
+    20
+}
+
+fn default_sms_keep() -> u32 {
+    1000
 }
 
 /// What the desktop's signed DHT record holds (roadmap N3). Private, LAN and
@@ -123,6 +148,10 @@ impl Default for Config {
             lan_discovery: true,
             relay_urls: Vec::new(),
             dht_publish: DhtPublish::Relay,
+            phone_notifications: true,
+            notifications_per_minute: default_notifications_per_minute(),
+            sms_notify: true,
+            sms_keep: default_sms_keep(),
         }
     }
 }
@@ -271,6 +300,12 @@ impl Config {
         "capture_backend",
         "mic_relay_device",
         "lan_discovery",
+        "relay_urls",
+        "dht_publish",
+        "phone_notifications",
+        "notifications_per_minute",
+        "sms_notify",
+        "sms_keep",
     ];
 }
 
@@ -361,6 +396,40 @@ mod tests {
         assert!(
             Config::load_from(&path).is_err(),
             "an unknown value is refused"
+        );
+    }
+
+    #[test]
+    fn notification_and_text_settings_have_safe_defaults_and_save() {
+        let config = Config::default();
+        assert!(config.phone_notifications && config.sms_notify);
+        assert_eq!(
+            (config.notifications_per_minute, config.sms_keep),
+            (20, 1000)
+        );
+        let path = temp("notify-settings");
+        let mut config = Config::load_from(&path).unwrap();
+        config.notifications_per_minute = 5;
+        config.sms_notify = false;
+        config.dht_publish = DhtPublish::Off;
+        config.relay_urls = vec!["https://relay.example.org".into()];
+        config.save_to(&path).unwrap();
+        let back = Config::load_from(&path).unwrap();
+        assert_eq!(back.notifications_per_minute, 5);
+        assert!(!back.sms_notify);
+        assert_eq!(back.dht_publish, DhtPublish::Off);
+        assert_eq!(
+            back.relay_urls,
+            vec!["https://relay.example.org".to_string()]
+        );
+        let mut cleared = back;
+        cleared.relay_urls.clear();
+        cleared.save_to(&path).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("relay_urls"),
+            "an emptied list leaves the file"
         );
     }
 

@@ -45,6 +45,18 @@ video_quality = "balanced"
 # server after changing it.
 # dht_publish = "relay"
 
+# The phones' own notifications (a phone shares them only when its owner turns
+# it on, app by app): show them here at all, and at most how many a minute
+# from one phone. Each phone's Notifications permission (desktop app, Devices)
+# still applies.
+# phone_notifications = true
+# notifications_per_minute = 20
+
+# Texts a phone forwards (Messages in the desktop app): a notification for
+# each, and how many the history keeps.
+# sms_notify = true
+# sms_keep = 1000
+
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a
 # program to provide a microphone; apps then record from its other end.

@@ -19,3 +19,4 @@ pub mod received;
 pub mod sent;
 pub mod server;
 pub mod sessions;
+pub mod sms;

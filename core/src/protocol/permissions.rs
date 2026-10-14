@@ -25,10 +25,12 @@ pub enum Capability {
     Exec,
     /// Show the phone's notifications on this computer (roadmap N5a).
     Notifications,
+    /// Show the phone's texts here and send replies through it (roadmap N5b).
+    Texts,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 8] = [
+    pub const ALL: [Capability; 9] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -37,6 +39,7 @@ impl Capability {
         Capability::Power,
         Capability::Exec,
         Capability::Notifications,
+        Capability::Texts,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -76,6 +79,7 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         "kdeconnect.pocketdesk.power" | "kdeconnect.pocketdesk.privacy" => Capability::Power,
         "kdeconnect.pocketdesk.exec" => Capability::Exec,
         "kdeconnect.notification" => Capability::Notifications,
+        "kdeconnect.sms.messages" | "kdeconnect.pocketdesk.sms_sent" => Capability::Texts,
         _ => return None,
     })
 }
@@ -99,6 +103,8 @@ pub struct DevicePermissions {
     pub exec: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texts: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -115,6 +121,7 @@ impl DevicePermissions {
             Capability::Power => &mut self.power,
             Capability::Exec => &mut self.exec,
             Capability::Notifications => &mut self.notifications,
+            Capability::Texts => &mut self.texts,
         }
     }
 
@@ -128,6 +135,7 @@ impl DevicePermissions {
             Capability::Power => self.power,
             Capability::Exec => self.exec,
             Capability::Notifications => self.notifications,
+            Capability::Texts => self.texts,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -208,6 +216,8 @@ mod tests {
             ("kdeconnect.pocketdesk.exec", Some(Capability::Exec)),
             ("kdeconnect.notification", Some(Capability::Notifications)),
             ("kdeconnect.notification.request", None),
+            ("kdeconnect.sms.messages", Some(Capability::Texts)),
+            ("kdeconnect.pocketdesk.sms_sent", Some(Capability::Texts)),
             // Always allowed for a paired device: identity, pairing, status.
             ("kdeconnect.identity", None),
             ("kdeconnect.pair", None),

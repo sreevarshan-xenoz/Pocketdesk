@@ -433,6 +433,9 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                     let mut incoming = crate::INCOMING_PACKETS.lock().await;
                     *incoming = Some(packet_tx.clone());
                 }
+                // Which computer this connection is to: a reply request is
+                // acted on only when it came from the phone's own computer.
+                let from_peer = (address.clone(), port);
 
                 tokio::spawn(
                     async move {
@@ -501,6 +504,14 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                         pkt.source.as_deref().unwrap_or("desktop"),
                                     );
                                 }
+                                // A reply the desktop asks us to text (N5b):
+                                // latched for the app to send.
+                                if trimmed.contains("kdeconnect.sms.request")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == "kdeconnect.sms.request"
+                                {
+                                    crate::queue_sms_request(&pkt.body, &from_peer.0, from_peer.1);
+                                }
                                 // A file the desktop's owner sent us (F7b):
                                 // latched for the session to download.
                                 if trimmed.contains("file_offer")
@@ -540,6 +551,12 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                         // Offers came from this desktop; another one cannot
                         // fill them (F7b).
                         crate::PENDING_OFFERS
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clear();
+                        // So did reply requests (N5b): none outlives the
+                        // connection that carried it.
+                        crate::PENDING_SMS_REQUESTS
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .clear();
@@ -763,6 +780,53 @@ pub fn take_pending_notifications() -> String {
         std::mem::take(&mut *q)
     };
     serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// The computer the live control connection is to, as JSON `{host, port}`,
+/// or `None` when there is none.
+pub async fn control_peer() -> Option<String> {
+    let writer_live = (*CONTROL_WRITER).lock().await.is_some();
+    let peer = crate::CONTROL_PEER.lock().await.clone();
+    peer.filter(|_| writer_live)
+        .map(|(host, port)| serde_json::json!({ "host": host, "port": port }).to_string())
+}
+
+/// Drain the replies the desktop asked this phone to text (N5b), as a JSON
+/// array of `{id, address, body, fromHost, fromPort}`: the computer each
+/// came from, so only the phone's own computer's are acted on.
+pub fn take_sms_requests() -> String {
+    let drained = {
+        let mut q = crate::PENDING_SMS_REQUESTS.lock().expect("sms queue");
+        std::mem::take(&mut *q)
+    };
+    serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// The packets the app may send through [`send_phone_packet`]: its texts
+/// and the results of the replies it sent (N5b).
+const PHONE_PACKETS: [&str; 2] = ["kdeconnect.sms.messages", "kdeconnect.pocketdesk.sms_sent"];
+
+/// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
+pub async fn send_phone_packet(
+    address: String,
+    port: u16,
+    packet_type: String,
+    body: String,
+) -> Result<(), String> {
+    if !PHONE_PACKETS.contains(&packet_type.as_str()) {
+        return Err(format!("{packet_type} is not sent this way"));
+    }
+    let body: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Invalid {packet_type}: {e}"))?;
+    if !body.is_object() {
+        return Err(format!("Invalid {packet_type}: not an object"));
+    }
+    push_packet(
+        &address,
+        port,
+        &NetworkPacket::new(packet_type).with_body(body),
+    )
+    .await
 }
 
 /// Reply to a desktop notification (R3 Tier-2 #11c) over the control
@@ -3617,5 +3681,51 @@ mod notification_body_tests {
         assert!(notification_body(r#"{"app":"Chat"}"#).is_err(), "no id");
         assert!(notification_body("[1]").is_err());
         assert!(notification_body("not json").is_err());
+    }
+}
+
+#[cfg(test)]
+mod sms_tests {
+    #[test]
+    fn a_reply_request_is_queued_once_and_drained() {
+        let _ = super::take_sms_requests();
+        let request = serde_json::json!({"id": "r1", "address": "+1", "body": "hi"});
+        crate::queue_sms_request(&request, "192.0.2.1", 1716);
+        crate::queue_sms_request(&request, "192.0.2.1", 1716);
+        crate::queue_sms_request(
+            &serde_json::json!({"id": "r2", "address": "+1"}),
+            "192.0.2.1",
+            1716,
+        );
+        let drained: Vec<serde_json::Value> =
+            serde_json::from_str(&super::take_sms_requests()).unwrap();
+        assert_eq!(
+            drained,
+            vec![serde_json::json!({
+                "id": "r1", "address": "+1", "body": "hi",
+                "fromHost": "192.0.2.1", "fromPort": 1716,
+            })],
+            "one per id, only whole requests, with the computer they came from"
+        );
+        assert_eq!(super::take_sms_requests(), "[]");
+    }
+
+    #[test]
+    fn only_the_phones_own_packets_go_out_this_way() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let refused = runtime.block_on(super::send_phone_packet(
+            "127.0.0.1".into(),
+            9,
+            "kdeconnect.pocketdesk.exec".into(),
+            "{}".into(),
+        ));
+        assert!(refused.unwrap_err().contains("not sent this way"));
+        let bad = runtime.block_on(super::send_phone_packet(
+            "127.0.0.1".into(),
+            9,
+            "kdeconnect.sms.messages".into(),
+            "[1]".into(),
+        ));
+        assert!(bad.unwrap_err().contains("not an object"));
     }
 }

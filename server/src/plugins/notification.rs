@@ -2,7 +2,9 @@
 //! answer to a phone asking whether this desktop takes them.
 //!
 //! A phone that shares its notifications may send many at once; at most
-//! [`PER_MINUTE`] a minute from one phone are shown, the rest dropped.
+//! `notifications_per_minute` (config, default [`PER_MINUTE`]) a minute from
+//! one phone are shown, the rest dropped. `phone_notifications = false` shows
+//! none (a phone's cancels still close what is shown).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -11,8 +13,20 @@ use std::time::{Duration, Instant};
 use pocketdesk_core::error::Result;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 
-/// The most notifications shown from one phone in a minute.
+/// The most notifications shown from one phone in a minute, unless config
+/// says otherwise.
 const PER_MINUTE: usize = 20;
+
+static SHOW_PHONES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static LIMIT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(PER_MINUTE);
+
+/// Apply config.toml's `phone_notifications` and `notifications_per_minute`
+/// (read once, at server start).
+pub fn configure(show_phones: bool, per_minute: u32) {
+    use std::sync::atomic::Ordering;
+    SHOW_PHONES.store(show_phones, Ordering::Relaxed);
+    LIMIT.store((per_minute as usize).max(1), Ordering::Relaxed);
+}
 
 /// How many notifications each phone had shown in the last minute.
 #[derive(Default)]
@@ -24,10 +38,10 @@ struct FloodGuard {
 
 impl FloodGuard {
     /// Whether one more notification from `phone` may be shown at `now`.
-    fn admit(&mut self, phone: &str, now: Instant) -> bool {
+    fn admit(&mut self, phone: &str, now: Instant, limit: usize) -> bool {
         let recent = self.shown.entry(phone.to_string()).or_default();
         recent.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
-        if recent.len() < PER_MINUTE {
+        if recent.len() < limit {
             recent.push(now);
             return true;
         }
@@ -37,10 +51,20 @@ impl FloodGuard {
             .is_none_or(|at| now.duration_since(*at) >= Duration::from_secs(60));
         if quiet {
             self.logged.insert(phone.to_string(), now);
-            tracing::info!("Notifications from {phone} dropped: more than {PER_MINUTE} a minute");
+            tracing::info!("Notifications from {phone} dropped: more than {limit} a minute");
         }
         false
     }
+}
+
+/// Whether one more notification from `phone` may be shown now, under the
+/// same per-phone limit as its notifications (texts use it too, N5b).
+pub(crate) fn admit(phone: &str) -> bool {
+    let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
+    flood_guard()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .admit(phone, Instant::now(), limit)
 }
 
 fn flood_guard() -> &'static Mutex<FloodGuard> {
@@ -190,13 +214,17 @@ impl Plugin for NotificationPlugin {
                     }
                     return Ok(());
                 }
+                if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok(());
+                }
                 let Some((app, title, text)) = to_show(&packet.body) else {
                     return Ok(());
                 };
+                let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 let admitted = flood_guard()
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .admit(sender.device_id(), Instant::now());
+                    .admit(sender.device_id(), Instant::now(), limit);
                 if admitted
                     && let Err(e) =
                         show_desktop_notification(tag.as_deref(), &app, &title, &text).await
@@ -360,15 +388,23 @@ mod tests {
     fn at_most_twenty_a_minute_are_shown_from_one_phone() {
         let mut guard = FloodGuard::default();
         let start = Instant::now();
-        let shown = (0..30).filter(|_| guard.admit("phone", start)).count();
+        let shown = (0..30)
+            .filter(|_| guard.admit("phone", start, PER_MINUTE))
+            .count();
         assert_eq!(shown, PER_MINUTE);
         assert!(
-            guard.admit("other", start),
+            guard.admit("other", start, PER_MINUTE),
             "another phone has its own count"
         );
         assert!(
-            guard.admit("phone", start + Duration::from_secs(61)),
+            guard.admit("phone", start + Duration::from_secs(61), PER_MINUTE),
             "a minute later it may show again"
+        );
+        let mut strict = FloodGuard::default();
+        assert_eq!(
+            (0..10).filter(|_| strict.admit("p", start, 3)).count(),
+            3,
+            "the configured limit"
         );
     }
 

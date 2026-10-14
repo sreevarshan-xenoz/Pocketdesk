@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use eframe::egui::{self, Color32, RichText};
-use pocketdesk_core::local::config::{Config, ConfigError};
+use pocketdesk_core::local::config::{Config, ConfigError, DhtPublish, relay_url_problem};
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
 /// The settings being edited against what is saved.
@@ -12,6 +12,8 @@ pub struct SettingsForm {
     pub edited: Config,
     /// The text box behind `mic_relay_device` (blank means the default).
     pub mic_device_text: String,
+    /// The text box behind `relay_urls`: one per line, or comma separated.
+    pub relay_urls_text: String,
     /// Saved since the server last read it.
     pub restart_needed: bool,
 }
@@ -20,6 +22,7 @@ impl SettingsForm {
     pub fn from_config(config: Config) -> Self {
         Self {
             mic_device_text: config.mic_relay_device.clone().unwrap_or_default(),
+            relay_urls_text: config.relay_urls.join("\n"),
             saved: config.clone(),
             edited: config,
             restart_needed: false,
@@ -30,6 +33,13 @@ impl SettingsForm {
     pub fn apply_text_fields(&mut self) {
         let text = self.mic_device_text.trim();
         self.edited.mic_relay_device = (!text.is_empty()).then(|| text.to_string());
+        self.edited.relay_urls = self
+            .relay_urls_text
+            .split(['\n', ','])
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .map(str::to_string)
+            .collect();
     }
 
     pub fn dirty(&self) -> bool {
@@ -51,6 +61,11 @@ impl SettingsForm {
         }
         if self.edited.control_port == self.edited.streaming_port {
             problems.push("The control and streaming ports must be different.".to_string());
+        }
+        for url in &self.edited.relay_urls {
+            if let Some(problem) = relay_url_problem(url) {
+                problems.push(format!("Relay: {problem}."));
+            }
         }
         problems
     }
@@ -131,6 +146,45 @@ impl SettingsForm {
                         }
                     });
                 ui.end_row();
+                ui.label("Your own relays");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.relay_urls_text)
+                        .desired_rows(2)
+                        .hint_text("blank: n0's public relays\nhttps://relay.example.org"),
+                );
+                ui.end_row();
+                ui.label("Found by id (DHT)");
+                egui::ComboBox::from_id_salt("dht")
+                    .selected_text(dht_label(e.dht_publish))
+                    .show_ui(ui, |ui| {
+                        for mode in [DhtPublish::Relay, DhtPublish::Addresses, DhtPublish::Off] {
+                            ui.selectable_value(&mut e.dht_publish, mode, dht_label(mode));
+                        }
+                    });
+                ui.end_row();
+                ui.label("Phone notifications");
+                ui.checkbox(
+                    &mut e.phone_notifications,
+                    "show the notifications phones share",
+                );
+                ui.end_row();
+                ui.label("At most, per phone");
+                ui.add(
+                    egui::DragValue::new(&mut e.notifications_per_minute)
+                        .range(1..=600)
+                        .suffix(" a minute"),
+                );
+                ui.end_row();
+                ui.label("Texts");
+                ui.checkbox(&mut e.sms_notify, "a notification for each text");
+                ui.end_row();
+                ui.label("Messages history");
+                ui.add(
+                    egui::DragValue::new(&mut e.sms_keep)
+                        .range(50..=100_000)
+                        .suffix(" texts"),
+                );
+                ui.end_row();
                 if cfg!(windows) {
                     ui.label("Phone mic plays into");
                     ui.add(
@@ -162,10 +216,34 @@ impl SettingsForm {
     }
 }
 
+/// How the DHT choice reads in the form.
+fn dht_label(mode: DhtPublish) -> &'static str {
+    match mode {
+        DhtPublish::Relay => "publish the relay only",
+        DhtPublish::Addresses => "publish the relay and public addresses",
+        DhtPublish::Off => "off",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pocketdesk_core::local::config::Config;
+
+    #[test]
+    fn relays_are_read_one_per_line_or_comma_and_checked() {
+        let mut form = SettingsForm::from_config(Config::default());
+        form.relay_urls_text = " https://a.example.org \n\nhttp://192.0.2.1:3340, ".into();
+        form.apply_text_fields();
+        assert_eq!(
+            form.edited.relay_urls,
+            vec!["https://a.example.org", "http://192.0.2.1:3340"]
+        );
+        assert!(form.problems().is_empty());
+        form.relay_urls_text = "relay.example.org:3340".into();
+        form.apply_text_fields();
+        assert!(form.problems().iter().any(|p| p.starts_with("Relay:")));
+    }
 
     #[test]
     fn an_untouched_form_is_clean_and_valid() {

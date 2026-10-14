@@ -164,6 +164,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
 
             PhoneNotificationsSection()
+            TextsSection()
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 Header(stringResource(R.string.settings_system))
