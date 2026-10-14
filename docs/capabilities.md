@@ -13,7 +13,7 @@
 | KDE Connect identity `protocolVersion` | `1` | `kdeconnect.identity`, a separate namespace |
 | Pocketdesk extension `llVersion` | `1` | every `kdeconnect.pocketdesk.*` packet (R4 D4) |
 | v2 negotiated range | `2-2` | `IdentityPacketV2` min/max, QUIC stream 0 |
-| Control payload ceiling | `16777216` bytes | framed v2 control JSON |
+| Control payload ceiling | `4194304` bytes | framed v2 control JSON |
 | Ports | control `1716/tcp`, media `4716/udp` | `DEFAULT_CONTROL_PORT`, `DEFAULT_STREAMING_PORT` |
 
 ## Transports

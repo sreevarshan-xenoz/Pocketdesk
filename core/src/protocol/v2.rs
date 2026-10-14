@@ -15,8 +15,10 @@ pub const ALPN_V2: &[u8] = b"pocketdesk-v2";
 pub const V2_MIN_VERSION: u32 = 2;
 pub const V2_MAX_VERSION: u32 = 2;
 
-/// Maximum size for control payloads to prevent OOM attacks.
-pub const MAX_CONTROL_PAYLOAD_SIZE: usize = 16 * 1024 * 1024; // 16 MB
+/// Maximum size for control payloads to prevent OOM attacks: the same 4 MiB
+/// as a v1 control packet line. Control packets are small; a frame this
+/// size buffers before any plugin looks at it.
+pub const MAX_CONTROL_PAYLOAD_SIZE: usize = 4 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
