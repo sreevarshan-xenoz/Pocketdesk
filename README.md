@@ -101,7 +101,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **The phone's notifications on the computer** — off until you turn it on in the phone's Settings ("This phone's notifications") and grant notification access. They go to the computer you used last, as system notifications (a toast on Windows).
   - **Which apps:** each app is listed once it has notified, and shares nothing until you switch it on.
   - **Never sent:** ongoing ones (music, navigation, calls), Pocketdesk's own, ones an app keeps on the device, and a work profile's.
-  - **Lock-screen privacy carries over:** anything the phone hides there stays hidden. A private notification arrives as only "New notification", and a one-time code is replaced.
+  - **Lock-screen privacy carries over:** anything the phone hides there stays hidden. A private notification arrives as only "New notification", and a one-time code is replaced. On Android 15 and newer, the system itself also hides the content of sensitive notifications, such as one-time codes, from apps like this one.
   - **On the computer:** at most 20 a minute are shown from one phone, and each phone's Notifications switch in the Devices tab can turn them off.
   - **Texts (SMS):** the phone's Settings has "Texts on my computer", two switches, both off by default:
     - "Show texts on my computer" sends incoming texts to the computer you used last. They appear in the desktop app's Messages tab, with a notification each.
