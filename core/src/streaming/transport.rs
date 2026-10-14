@@ -235,7 +235,9 @@ impl CertManager {
         // server binaries, so rustls cannot auto-pick a process-level provider.
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        rustls::ServerConfig::builder()
+        // TLS 1.3 only: QUIC needs it, and on the control channel both ends
+        // are Pocketdesk, so there is nothing older to speak to.
+        rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
             .with_client_cert_verifier(Arc::new(verifier))
             .with_single_cert(vec![cert], key)
             .context("Failed to configure TLS server")
@@ -308,10 +310,11 @@ impl CertManager {
         let key = PrivateKeyDer::try_from(self.key_der.clone())
             .map_err(|_| anyhow::anyhow!("Failed to parse private key"))?;
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let mut config = rustls::ServerConfig::builder()
-            .with_client_cert_verifier(Arc::new(OnlyCert(desktop)))
-            .with_single_cert(vec![cert], key)
-            .context("Failed to configure the transfer's TLS")?;
+        let mut config =
+            rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .with_client_cert_verifier(Arc::new(OnlyCert(desktop)))
+                .with_single_cert(vec![cert], key)
+                .context("Failed to configure the transfer's TLS")?;
         config.alpn_protocols = vec![crate::protocol::ALPN_TRANSFER.to_vec()];
         Ok(Arc::new(config))
     }
@@ -340,9 +343,10 @@ impl CertManager {
         verifier: Arc<dyn rustls::client::danger::ServerCertVerifier>,
     ) -> rustls::ClientConfig {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let builder = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(verifier);
+        let builder =
+            rustls::ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .dangerous()
+                .with_custom_certificate_verifier(verifier);
         // This device's own certificate, so the desktop can bind the device
         // to the key behind it. A key that will not load leaves the client
         // anonymous (the desktop then decides) rather than unable to connect.
@@ -1494,6 +1498,82 @@ mod tests {
             rendered.contains("max_idle_timeout: Some(45000)"),
             "idle timeout missing: {rendered}"
         );
+    }
+
+    /// Accepts any server certificate, for tests that only care whether a
+    /// handshake gets as far as a certificate at all.
+    #[derive(Debug)]
+    struct AnyCert;
+
+    impl rustls::client::danger::ServerCertVerifier for AnyCert {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &CertificateDer<'_>,
+            _intermediates: &[CertificateDer<'_>],
+            _server_name: &ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error>
+        {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            _message: &[u8],
+            _cert: &CertificateDer<'_>,
+            _dss: &rustls::DigitallySignedStruct,
+        ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+        {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn verify_tls13_signature(
+            &self,
+            _message: &[u8],
+            _cert: &CertificateDer<'_>,
+            _dss: &rustls::DigitallySignedStruct,
+        ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+        {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            signature_algorithms().supported_schemes()
+        }
+    }
+
+    /// SECURITY.md's "TLS 1.3": a client that offers only TLS 1.2 is refused
+    /// by the control channel, which speaks nothing older, while the same
+    /// client (with a certificate, as the channel requires) gets in on 1.3.
+    #[tokio::test]
+    async fn the_control_channel_refuses_tls_1_2() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let desktop = CertManager::new().expect("desktop certs");
+        let phone = CertManager::new().expect("phone certs");
+        let attempt = |version: &'static rustls::SupportedProtocolVersion| {
+            let mut config = rustls::ClientConfig::builder_with_protocol_versions(&[version])
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(AnyCert))
+                .with_client_auth_cert(
+                    vec![CertificateDer::from(phone.cert_der.clone())],
+                    PrivateKeyDer::try_from(phone.key_der.clone()).unwrap(),
+                )
+                .unwrap();
+            config.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+            Arc::new(config)
+        };
+        for (version, ok) in [
+            (&rustls::version::TLS12, false),
+            (&rustls::version::TLS13, true),
+        ] {
+            let port = one_control_server(&desktop).await;
+            let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .unwrap();
+            let name = ServerName::try_from("127.0.0.1").unwrap();
+            let result = tokio_rustls::TlsConnector::from(attempt(version))
+                .connect(name, tcp)
+                .await;
+            assert_eq!(result.is_ok(), ok, "{version:?}");
+        }
     }
 
     /// A control-channel TLS server on loopback for one connection; its port.
