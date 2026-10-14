@@ -151,18 +151,39 @@ fn is_public_ip(ip: IpAddr) -> bool {
                 return is_public_ip(IpAddr::V4(v4));
             }
             let s = v6.segments();
-            // Global unicast (2000::/3), less the documentation prefix.
-            (s[0] & 0xe000) == 0x2000 && !(s[0] == 0x2001 && s[1] == 0x0db8)
+            // Global unicast (2000::/3), less the documentation prefixes
+            // (2001:db8::/32 and 3fff::/20).
+            (s[0] & 0xe000) == 0x2000
+                && !(s[0] == 0x2001 && s[1] == 0x0db8)
+                && !(s[0] == 0x3fff && (s[1] & 0xf000) == 0)
         }
     }
 }
 
-/// A relay a phone anywhere could reach: one with a name, or a public IP.
+/// Name suffixes that only mean something on a home or office network.
+const LAN_SUFFIXES: [&str; 9] = [
+    "localhost",
+    "local",
+    "lan",
+    "home",
+    "home.arpa",
+    "internal",
+    "localdomain",
+    "intranet",
+    "corp",
+];
+
+/// A relay a phone anywhere could reach: one with a public name, or a public
+/// IP. A single-label name (`nas`) or a LAN suffix (`pi.lan`) names a
+/// machine on the home network, and publishing it would name the network.
 fn is_public_relay(url: &iroh::RelayUrl) -> bool {
     match url.host() {
         Some(url::Host::Domain(name)) => {
             let name = name.trim_end_matches('.').to_ascii_lowercase();
-            !(name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local"))
+            name.contains('.')
+                && !LAN_SUFFIXES
+                    .iter()
+                    .any(|suffix| name == *suffix || name.ends_with(&format!(".{suffix}")))
         }
         Some(url::Host::Ipv4(v4)) => is_public_ip(IpAddr::V4(v4)),
         Some(url::Host::Ipv6(v6)) => is_public_ip(IpAddr::V6(v6)),
@@ -678,6 +699,14 @@ mod dht_tests {
             relay("http://192.168.0.10:3340/"),
             relay("http://[fd7a:115c:a1e0::1]:3340/"),
             relay("http://localhost:3340/"),
+            relay("http://nas:3340/"),
+            relay("http://pi.lan:3340/"),
+            relay("http://relay.home.arpa:3340/"),
+            relay("http://box.internal:3340/"),
+            relay("http://box.localdomain:3340/"),
+            relay("http://printer.home:3340/"),
+            relay("http://desk.local:3340/"),
+            ip("[3fff::1]:4501"), // documentation (RFC 9637)
         ];
         let all: Vec<_> = public.iter().chain(private.iter()).cloned().collect();
         assert_eq!(publishable(&all, true), public.to_vec());
