@@ -125,6 +125,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.keepScreenOn(context),
             ) { Prefs.setKeepScreenOn(context, it) }
             boolRow(
+                LlIcons.Wifi,
+                stringResource(R.string.settings_auto_reconnect),
+                stringResource(R.string.settings_auto_reconnect_summary),
+                Prefs.autoReconnect(context),
+            ) { Prefs.setAutoReconnect(context, it) }
+            boolRow(
                 LlIcons.Pin,
                 stringResource(R.string.settings_reveal_pin),
                 stringResource(R.string.settings_reveal_pin_summary),

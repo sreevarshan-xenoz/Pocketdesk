@@ -139,7 +139,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **Computers on this network** — Home lists Pocketdesk computers on the same Wi-Fi (mDNS); a tap connects and an unpaired one asks for its PIN. Saved computers that are reachable get an "On this network" label
 - **Remote desktop** with tap/drag/double-tap gesture input
 - **Link status** — connecting/LAN/WAN indicator on the video surface, with failure reasons and one-tap retry
-- **Session resilience** — QUIC keepalive + bounded idle timeout hold the link through NAT stalls; a wake-locked foreground service keeps screen-off sessions alive
+- **Session resilience** — QUIC keepalive + bounded idle timeout hold the link through NAT stalls; a wake-locked foreground service keeps screen-off sessions alive; a link that went away (the computer restarting its server, waking up, or the network coming back) reconnects by itself, backing off from 2 s to 30 s, for 10 minutes. An end the computer chose (ended, refused, unpaired) waits for you. Settings "Reconnect by itself" turns it off
 - **Several phones at once** — each phone gets its own stream, and one drives at a time:
   - The first phone to send input drives. The others watch, and their sessions say "Another phone is driving", until it has been quiet for 10 s or leaves.
   - The desktop app's Sessions tab marks the driver and can hand control to another phone.

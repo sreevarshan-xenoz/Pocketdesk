@@ -25,6 +25,10 @@
     <string name="settings_session">அமர்வு</string>
     <string name="settings_keep_screen_on">திரையை ஒளிரவிடு</string>
     <string name="settings_keep_screen_on_summary">ஒளிப்பரப்பு அமர்வின்போது</string>
+    <string name="settings_auto_reconnect">தானாக மீண்டும் இணை</string>
+    <string name="settings_auto_reconnect_summary">இணைப்பு துண்டிக்கப்பட்டால் (கணினி தன் சேவையகத்தை மீண்டும் தொடங்கினால், விழித்தெழுந்தால், அல்லது பிணையம் திரும்பினால்) 10 நிமிடங்கள் மீண்டும் முயலும்</string>
+    <string name="reconnecting_in">%1$d வினாடிகளில் மீண்டும் இணைகிறது…</string>
+    <string name="reconnect_gave_up">10 நிமிடங்களுக்குப் பிறகு முயற்சி நிறுத்தப்பட்டது.</string>
     <string name="settings_reveal_pin">PIN-ஐ இயல்பாகக் காட்டு</string>
     <string name="settings_reveal_pin_summary">கண் ஐகானைத் தொடாமல் இணைப்பு எண்கள் தெரியும்</string>
     <string name="settings_haptics">அதிர்வு</string>

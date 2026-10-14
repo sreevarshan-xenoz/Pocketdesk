@@ -31,6 +31,13 @@ pub(crate) type ControlWriter =
 pub(crate) static CONTROL_WRITER: LazyLock<TokioMutex<Option<Arc<TokioMutex<ControlWriter>>>>> =
     LazyLock::new(|| TokioMutex::new(None));
 
+/// Held across `connect_to_peer`'s check, dial and install, so two callers
+/// that both find no connection (the session's keeper and the clipboard
+/// loop, at session start) open one, not two: the loser's reader would keep
+/// its socket open and the three shared slots could end up from different
+/// connections (R2 review).
+pub(crate) static CONNECT_LOCK: LazyLock<TokioMutex<()>> = LazyLock::new(|| TokioMutex::new(()));
+
 /// `{address, port}` the writer above belongs to, so `connect_to_peer` can
 /// tell a live session to the requested desktop from one to another host.
 pub(crate) static CONTROL_PEER: LazyLock<TokioMutex<Option<(String, u16)>>> =
