@@ -124,6 +124,11 @@ pub fn set_pairing_required(required: bool) {
     PAIRING_REQUIRED.store(required, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Whether only paired phones may connect (`pairing_required`).
+pub fn pairing_required() -> bool {
+    PAIRING_REQUIRED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Whether a connection may be sent desktop state: never one that claims a
 /// paired device without its key (phase B); otherwise always with pairing
 /// off, and only a paired device's with it on.

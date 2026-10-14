@@ -75,6 +75,28 @@ fn write_live_json(json: &str) -> anyhow::Result<()> {
 /// last told to them.
 type Told = (Vec<(u64, String)>, Option<u64>);
 
+/// Kick targets for the live sessions whose phone may no longer stream:
+/// with pairing required, a device that is not (or no longer) paired, which
+/// covers an unpair from the CLI or the app, an expired guest grant and a
+/// hand-edited trust store; and a session that never said which device it
+/// is, by its address. Nothing with pairing off.
+pub fn untrusted_sessions(
+    live: &[LiveSession],
+    pairing_required: bool,
+    is_paired: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    if !pairing_required {
+        return Vec::new();
+    }
+    live.iter()
+        .filter_map(|s| match &s.device_id {
+            Some(id) if is_paired(id) => None,
+            Some(id) => Some(id.clone()),
+            None => Some(s.peer.ip().to_string()),
+        })
+        .collect()
+}
+
 /// Tell each phone in a session who drives now (N7), on its control
 /// connection.
 async fn tell_phones(sessions: &[(u64, String)], driver: Option<u64>) {
@@ -141,6 +163,24 @@ pub async fn run_watcher() {
         }
 
         // 2. Consent notification for sessions that appeared since last tick.
+        let live = pocketdesk_core::streaming::sessions::list();
+        // A phone that stopped being paired loses its session at once,
+        // however that happened.
+        if !live.is_empty() {
+            let store = crate::state::trust_store_path().ok().and_then(|path| {
+                pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(path).ok()
+            });
+            let paired = |id: &str| store.as_ref().is_some_and(|s| s.is_trusted(id));
+            for target in untrusted_sessions(&live, crate::state::pairing_required(), paired) {
+                for s in pocketdesk_core::streaming::sessions::kick(&target) {
+                    tracing::warn!(
+                        device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
+                        peer = %s.peer,
+                        "Ended a streaming session: its phone is no longer paired"
+                    );
+                }
+            }
+        }
         let live = pocketdesk_core::streaming::sessions::list();
         let live_ids: Vec<u64> = live.iter().map(|s| s.id).collect();
 
@@ -211,6 +251,28 @@ mod tests {
     use super::*;
     use pocketdesk_core::streaming::sessions::LiveSession;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    #[test]
+    fn a_session_whose_phone_is_no_longer_paired_is_ended() {
+        let live = vec![
+            session(Some("paired-phone"), true),
+            session(Some("unpaired-phone"), true),
+            session(None, false),
+        ];
+        let paired = |id: &str| id == "paired-phone";
+        let mut ended = untrusted_sessions(&live, true, paired);
+        ended.sort();
+        assert_eq!(
+            ended,
+            vec!["10.0.0.5".to_string(), "unpaired-phone".to_string()]
+        );
+    }
+
+    #[test]
+    fn with_pairing_off_no_session_is_ended_for_it() {
+        let live = vec![session(Some("unpaired-phone"), true), session(None, false)];
+        assert!(untrusted_sessions(&live, false, |_| false).is_empty());
+    }
 
     fn session(device: Option<&str>, lan: bool) -> LiveSession {
         LiveSession {
