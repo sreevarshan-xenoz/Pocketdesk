@@ -165,6 +165,7 @@ pub async fn run(config: Config) -> Result<()> {
             tracing::info!("Notification broadcast task started");
             loop {
                 match notify_rx.recv().await {
+                    Ok(notification) if notification.is_own() => {}
                     Ok(notification) => {
                         let packet_json = notification.to_kdeconnect_payload();
                         match NetworkPacket::from_wire(&packet_json) {

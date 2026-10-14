@@ -13,6 +13,14 @@ pub struct ForwardedNotification {
 }
 
 impl ForwardedNotification {
+    /// Shown by this server itself: a phone's notification (N5a), a pairing
+    /// PIN, a received file. Never relayed to phones: a phone's notification
+    /// would come back to it and reach every other paired phone, and a PIN
+    /// must stay on the desk.
+    pub fn is_own(&self) -> bool {
+        self.app_name.trim().eq_ignore_ascii_case("pocketdesk")
+    }
+
     /// Serialize to a JSON-encoded KDE Connect notification packet.
     #[allow(dead_code)]
     pub fn to_kdeconnect_payload(&self) -> String {
@@ -302,4 +310,25 @@ fn extract_gdbus_string(line: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod own_tests {
+    use super::ForwardedNotification;
+
+    fn from(app: &str) -> ForwardedNotification {
+        ForwardedNotification {
+            app_name: app.to_string(),
+            summary: "s".into(),
+            body: "b".into(),
+            urgency: "normal".into(),
+        }
+    }
+
+    #[test]
+    fn what_this_server_shows_is_never_relayed_back_to_phones() {
+        assert!(from("Pocketdesk").is_own());
+        assert!(from(" pocketdesk ").is_own());
+        assert!(!from("Mail").is_own());
+    }
 }
