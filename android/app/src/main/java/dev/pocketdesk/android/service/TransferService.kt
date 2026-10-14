@@ -11,8 +11,11 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import java.io.File
@@ -142,8 +145,22 @@ class TransferService : Service() {
             }
             val title = getString(R.string.transfer_sending, index + 1, job.uris.size)
             show(progressNotification(title, name, 0))
-            val result = sendOne(job.address, job.port, uri, name) { percent ->
+            var result = sendOne(job.address, job.port, uri, name) { percent ->
                 show(progressNotification(title, name, percent))
+            }
+            // A failed file goes again a few times: the computer kept what
+            // arrived, so each retry continues where the last one stopped.
+            var attempt = 1
+            while (result.isFailure) {
+                val error = result.exceptionOrNull()?.message
+                val wait = TransferRetry.delayBefore(attempt, error, Prefs.retryTransfers(this)) ?: break
+                Log.i(TAG, "sending $name failed ($error); trying again in $wait s")
+                show(progressNotification(getString(R.string.transfer_retrying, attempt), name, 0))
+                Thread.sleep(wait * 1000)
+                attempt++
+                result = sendOne(job.address, job.port, uri, name) { percent ->
+                    show(progressNotification(title, name, percent))
+                }
             }
             sendCount++
             if (result.isSuccess) {
@@ -228,8 +245,11 @@ class TransferService : Service() {
                 descriptor.close()
                 Result.failure(IllegalStateException("$name is empty"))
             }
-            size > 0L -> withProgress({ size }, onProgress) {
-                RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size)
+            size > 0L -> {
+                val source = SourceId.of(uri.toString(), size, lastModified(uri))
+                withProgress({ size }, onProgress) {
+                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source)
+                }
             }
             else -> {
                 // A provider that cannot say how big the file is (a
@@ -299,6 +319,22 @@ class TransferService : Service() {
             copy.delete()
         }
     }
+
+    /** When the provider says [uri] last changed, if it says. */
+    private fun lastModified(uri: Uri): Long? =
+        runCatching {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                listOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED, MediaStore.MediaColumns.DATE_MODIFIED)
+                    .map { cursor.getColumnIndex(it) }
+                    .firstOrNull { it >= 0 && !cursor.isNull(it) }
+                    ?.let { column ->
+                        val value = cursor.getLong(column)
+                        // MediaStore counts seconds, DocumentsContract milliseconds.
+                        if (cursor.getColumnName(column) == MediaStore.MediaColumns.DATE_MODIFIED) value * 1000 else value
+                    }
+            }
+        }.getOrNull()
 
     private fun displayName(uri: Uri): String =
         runCatching {

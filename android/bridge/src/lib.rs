@@ -790,8 +790,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
     to_jstring(&mut env, json)
 }
 
-/// Send a file from a file descriptor the caller gives up (F7): `{"ok": null}`
-/// or `{"err": "..."}`.
+/// Send a file from a file descriptor the caller gives up (F7), naming it by
+/// `source` so a retry continues it (T6a): `{"ok": null}` or `{"err": "..."}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFileFd(
     mut env: JNIEnv<'_>,
@@ -801,12 +801,20 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
     fd: jint,
     name: JString<'_>,
     size: jlong,
+    source: JString<'_>,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let name = jstring_to_string(&mut env, &name);
+    let source = jstring_to_string(&mut env, &source);
     let size = u64::try_from(size).unwrap_or(0);
-    let json =
-        envelope_unit(RUNTIME.block_on(api::send_file_fd(address, port as u16, fd, name, size)));
+    let json = envelope_unit(RUNTIME.block_on(api::send_file_fd(
+        address,
+        port as u16,
+        fd,
+        name,
+        size,
+        source,
+    )));
     to_jstring(&mut env, json)
 }
 

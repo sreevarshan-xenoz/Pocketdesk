@@ -101,7 +101,14 @@ object RustCore {
 
     private external fun nativeSendGamepadEvent(axes: IntArray, buttons: Int): String
     private external fun nativeSendFile(address: String, port: Int, filePath: String): String
-    private external fun nativeSendFileFd(address: String, port: Int, fd: Int, name: String, size: Long): String
+    private external fun nativeSendFileFd(
+        address: String,
+        port: Int,
+        fd: Int,
+        name: String,
+        size: Long,
+        source: String,
+    ): String
     private external fun nativeTransferProgress(): LongArray?
     private external fun nativeFetchFile(
         address: String,
@@ -559,8 +566,9 @@ object RustCore {
         envelope(nativeSendFile(address, port, filePath)).map { }
 
     /** Send [size] bytes from [fd], which the bridge takes over and closes (F7). */
-    fun sendFileFd(address: String, port: Int, fd: Int, name: String, size: Long): Result<Unit> =
-        envelope(nativeSendFileFd(address, port, fd, name, size)).map { }
+    /** Send [size] bytes from [fd] as [name]; [source] names the file so a retry continues it (T6a). */
+    fun sendFileFd(address: String, port: Int, fd: Int, name: String, size: Long, source: String): Result<Unit> =
+        envelope(nativeSendFileFd(address, port, fd, name, size, source)).map { }
 
     /** The running file transfer as (bytes sent, total). */
     fun transferProgress(): Pair<Long, Long> {

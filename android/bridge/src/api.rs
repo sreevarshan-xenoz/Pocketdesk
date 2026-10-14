@@ -3,6 +3,7 @@
 
 use pocketdesk_core::protocol::connection::ConnectionManager;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDeviceSender};
+use pocketdesk_core::protocol::transfer::{self, Pace, TransferError};
 use pocketdesk_core::protocol::v2::{ALPN_V2, IdentityPacketV2, perform_v2_handshake};
 use pocketdesk_core::streaming::QuinnConnection;
 use pocketdesk_core::streaming::StreamingClient;
@@ -1310,13 +1311,9 @@ pub async fn send_clipboard_image(address: String, port: u16, path: String) -> R
         accepted = accept => accepted.map_err(|_| "The computer did not take the image".to_string())??,
         reason = refused => return Err(reason),
     };
-    let sent = pump_counted(&mut file, &mut stream, size, false).await?;
-    if sent != size {
-        return Err(format!(
-            "The image changed while it was sent ({sent} of {size} bytes)"
-        ));
-    }
-    read_status(&mut stream).await
+    send_over(&mut file, size, &mut stream, false, Pace::DEFAULT)
+        .await
+        .map(|_| ())
 }
 
 /// The running file transfer's bytes sent and total, for the phone's
@@ -1354,7 +1351,24 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .and_then(|n| n.to_str())
         .unwrap_or("unknown_file")
         .to_string();
-    send_stream(address, port, filename, file_size, file).await
+    let modified = std::fs::metadata(&file_path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis());
+    let source = source_id(&format!("{file_path}\n{file_size}\n{modified}"));
+    send_stream(address, port, filename, file_size, file, Some(source)).await
+}
+
+/// A file's source id (T6a): 32 hex digits naming the file at its source,
+/// the same on every attempt to send it, so the desktop continues what an
+/// earlier attempt left. `what` should change whenever the file might.
+pub fn source_id(what: &str) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(what.as_bytes())[..16]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Send `size` bytes read from `fd` as `name`, taking ownership of the file
@@ -1367,6 +1381,7 @@ pub async fn send_file_fd(
     fd: i32,
     name: String,
     size: u64,
+    source: String,
 ) -> Result<(), String> {
     use std::os::fd::FromRawFd;
     if fd < 0 {
@@ -1375,7 +1390,16 @@ pub async fn send_file_fd(
     // SAFETY: the caller gives up `fd` (ParcelFileDescriptor.detachFd), so
     // this File is its only owner and closes it.
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
-    send_stream(address, port, name, size, tokio::fs::File::from_std(file)).await
+    let source = pocketdesk_core::protocol::partials::valid_source(&source).then_some(source);
+    send_stream(
+        address,
+        port,
+        name,
+        size,
+        tokio::fs::File::from_std(file),
+        source,
+    )
+    .await
 }
 
 #[cfg(not(unix))]
@@ -1385,18 +1409,21 @@ pub async fn send_file_fd(
     _fd: i32,
     _name: String,
     _size: u64,
+    _source: String,
 ) -> Result<(), String> {
     Err("file descriptors are only passed on Android".to_string())
 }
 
 /// Offer `file_size` bytes from `file` to the desktop as `filename`, and send
-/// them when it connects back with the key.
+/// them when it connects back with the key: from where the desktop's partial
+/// copy of the same `source` ends, if it kept one (T6a).
 async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
     address: String,
     port: u16,
     filename: String,
     file_size: u64,
     mut file: R,
+    source: Option<String>,
 ) -> Result<(), String> {
     // This transfer's counters from the start: the phone reads them while
     // waiting for the desktop too, and must not see the last file's.
@@ -1410,11 +1437,15 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         .map_err(|e| format!("Failed to bind port: {}", e))?;
     let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let key = uuid::Uuid::new_v4().simple().to_string();
+    let mut body = serde_json::json!({
+        "filename": filename,
+        "payloadTransferInfo": { "port": transfer_port, "key": key },
+    });
+    if let Some(source) = &source {
+        body["sourceId"] = serde_json::json!(source);
+    }
     let request = NetworkPacket::new("kdeconnect.share.request")
-        .with_body(serde_json::json!({
-            "filename": filename,
-            "payloadTransferInfo": { "port": transfer_port, "key": key },
-        }))
+        .with_body(body)
         .with_payload_size(file_size);
     // The live control connection carries the request when it is to this
     // desktop; otherwise a connection of its own does, read for the whole
@@ -1449,26 +1480,55 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
             .map_err(|_| "Timeout waiting for file receiver".to_string())??,
         Ok(reason) = refused_rx => return Err(format!("The computer refused the file: {reason}")),
     };
-    let sent = pump(&mut file, &mut client_stream, file_size).await?;
-    if sent != file_size {
-        return Err(format!(
-            "The file changed while it was sent ({sent} of {file_size} bytes)"
-        ));
+    let from = send_over(
+        &mut file,
+        file_size,
+        &mut client_stream,
+        true,
+        Pace::DEFAULT,
+    )
+    .await?;
+    if from > 0 {
+        tracing::info!("File sent: {filename} ({file_size} bytes, continued from {from})");
+    } else {
+        tracing::info!("File sent: {filename} ({file_size} bytes)");
     }
-    read_status(&mut client_stream).await?;
-    tracing::info!("File sent: {} ({} bytes)", filename, sent);
     Ok(())
 }
 
-/// The receiver's status byte after the data: `1` is saved under its real
-/// name; `0`, or nothing within 10 s, is a failure (F7b).
-async fn read_status<R: tokio::io::AsyncRead + Unpin>(stream: &mut R) -> Result<(), String> {
-    let mut status = [0u8; 1];
-    match tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut status)).await {
-        Ok(Ok(_)) if status[0] == 1 => Ok(()),
-        Ok(Ok(_)) => Err("The computer could not save the file".to_string()),
-        Ok(Err(_)) | Err(_) => Err("The computer did not confirm the file".to_string()),
+/// Send `size` bytes of `file` over a transfer the desktop has opened, with
+/// the resumable exchange (T6a), counting into the transfer progress when
+/// `counted`. Returns where it continued from, once the desktop says it
+/// saved the file.
+async fn send_over<R, S>(
+    file: &mut R,
+    size: u64,
+    stream: &mut S,
+    counted: bool,
+    pace: Pace,
+) -> Result<u64, String>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    use std::sync::atomic::Ordering;
+    if counted {
+        TRANSFER_TOTAL.store(size, Ordering::Relaxed);
+        TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
+    transfer::send(file, size, stream, pace, |n| {
+        if counted {
+            TRANSFER_SENT.store(n, Ordering::Relaxed);
+        }
+    })
+    .await
+    .map_err(|e| match e {
+        TransferError::Size(sent) => {
+            format!("The file changed while it was sent ({sent} of {size} bytes)")
+        }
+        TransferError::NotSaved => "The computer could not save the file".to_string(),
+        other => format!("The transfer failed: {other}"),
+    })
 }
 
 /// Aborts a task when dropped, however the function holding it returns.
@@ -1478,90 +1538,6 @@ impl Drop for AbortOnDrop {
     fn drop(&mut self) {
         self.0.abort();
     }
-}
-
-/// Copy `reader` to `writer` until the reader ends, counting into the
-/// transfer progress (`total` is what the reader is expected to hold).
-async fn pump<R, W>(reader: &mut R, writer: &mut W, total: u64) -> Result<u64, String>
-where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
-{
-    pump_counted(reader, writer, total, true).await
-}
-
-/// [`pump`], counting into the transfer progress only when `counted`: a
-/// clipboard image (N4) must not move a file share's progress notification.
-async fn pump_counted<R, W>(
-    reader: &mut R,
-    writer: &mut W,
-    total: u64,
-    counted: bool,
-) -> Result<u64, String>
-where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
-{
-    pump_within(reader, writer, total, counted, SEND_IDLE).await
-}
-
-/// How long one read or write of a send may wait, as on the desktop.
-const SEND_IDLE: Duration = Duration::from_secs(30);
-
-/// The slowest a whole send may be, as on the desktop: 32 KiB/s.
-const SEND_MIN_BYTES_PER_SEC: u64 = 32 * 1024;
-
-/// [`pump_counted`] with `idle` as the limit on each write, and the whole
-/// send held to `idle` plus the minimum rate: a receiver that stops
-/// reading fails the send instead of holding it, and the phone's foreground
-/// service, open for ever.
-async fn pump_within<R, W>(
-    reader: &mut R,
-    writer: &mut W,
-    total: u64,
-    counted: bool,
-    idle: Duration,
-) -> Result<u64, String>
-where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
-{
-    use std::sync::atomic::Ordering;
-    if counted {
-        TRANSFER_TOTAL.store(total, Ordering::Relaxed);
-        TRANSFER_SENT.store(0, Ordering::Relaxed);
-    }
-    let deadline =
-        tokio::time::Instant::now() + idle + Duration::from_secs(total / SEND_MIN_BYTES_PER_SEC);
-    let mut buffer = vec![0u8; 64 * 1024];
-    let mut sent: u64 = 0;
-    loop {
-        if tokio::time::Instant::now() >= deadline {
-            return Err("The computer took the file too slowly".to_string());
-        }
-        // Reads get the whole send's deadline, not the idle limit: a file
-        // from a cloud provider can take a while to arrive.
-        let n = tokio::time::timeout_at(deadline, reader.read(&mut buffer))
-            .await
-            .map_err(|_| "Reading the file took too long".to_string())?
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-        if n == 0 {
-            break;
-        }
-        tokio::time::timeout(idle, writer.write_all(&buffer[..n]))
-            .await
-            .map_err(|_| "The computer stopped taking the file".to_string())?
-            .map_err(|e| format!("Failed to write to stream: {}", e))?;
-        sent += n as u64;
-        if counted {
-            TRANSFER_SENT.store(sent, Ordering::Relaxed);
-        }
-    }
-    tokio::time::timeout(idle, writer.flush())
-        .await
-        .map_err(|_| "The computer stopped taking the file".to_string())?
-        .map_err(|e: std::io::Error| e.to_string())?;
-    Ok(sent)
 }
 
 /// A transfer connection (phase C): TLS over TCP, the phone's side.
@@ -3778,67 +3754,115 @@ mod wake_relay_tests {
 
 #[cfg(test)]
 mod send_file_tests {
-    use super::{presents_key, pump, pump_within, read_status, transfer_progress};
+    use super::{presents_key, send_over, source_id, transfer_progress};
+    use pocketdesk_core::protocol::transfer::{self, Have, Memory, Pace};
+    use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A desktop that receives with the resumable transfer into `partial`,
+    /// continuing from `have`, and says saved when `saved`.
+    async fn desktop(
+        mut stream: tokio::io::DuplexStream,
+        mut partial: Memory,
+        have: Option<Have>,
+        saved: bool,
+    ) -> Vec<u8> {
+        let received = transfer::receive(
+            &mut stream,
+            &mut partial,
+            have,
+            None,
+            1 << 30,
+            Pace::DEFAULT,
+            |_, _| {},
+        )
+        .await;
+        transfer::finish(&mut stream, saved && received.is_ok(), Pace::DEFAULT).await;
+        partial.into_bytes()
+    }
 
     /// A receiver that stops reading must not hold the phone's send (and its
     /// foreground service) open for ever.
     #[tokio::test]
     async fn a_send_to_a_receiver_that_stops_reading_fails() {
         let (mut desktop, mut phone) = tokio::io::duplex(1024);
+        let quick = Pace {
+            idle: Duration::from_millis(100),
+            min_bytes_per_sec: 1 << 20,
+        };
         let mut file: &[u8] = &[7u8; 64 * 1024];
         let outcome = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            pump_within(
-                &mut file,
-                &mut phone,
-                64 * 1024,
-                false,
-                std::time::Duration::from_millis(100),
-            ),
+            Duration::from_secs(5),
+            send_over(&mut file, 64 * 1024, &mut phone, false, quick),
         )
         .await
-        .expect("the pump gives up by itself");
+        .expect("the send gives up by itself");
         assert!(outcome.is_err(), "{outcome:?}");
-        // The desktop end is still open: it simply stopped reading.
-        let mut some = [0u8; 16];
-        desktop.read_exact(&mut some).await.unwrap();
+        let mut size = [0u8; 8];
+        desktop.read_exact(&mut size).await.unwrap();
     }
 
     #[tokio::test]
     async fn a_file_is_sent_only_once_the_receiver_says_it_saved_it() {
-        for (answer, ok) in [(Some(1u8), true), (Some(0u8), false), (None, false)] {
-            let (mut desktop, mut phone) = tokio::io::duplex(64);
-            if let Some(byte) = answer {
-                desktop.write_all(&[byte]).await.unwrap();
-            }
-            drop(desktop);
-            assert_eq!(read_status(&mut phone).await.is_ok(), ok, "{answer:?}");
+        for saved in [true, false] {
+            let (theirs, mut ours) = tokio::io::duplex(1 << 20);
+            let receiver = tokio::spawn(desktop(theirs, Memory::holding(&[]), None, saved));
+            let sent = send_over(&mut &b"hello"[..], 5, &mut ours, false, Pace::DEFAULT).await;
+            drop(ours);
+            assert_eq!(sent.is_ok(), saved, "{sent:?}");
+            receiver.await.unwrap();
         }
     }
 
     #[tokio::test]
-    async fn progress_runs_from_zero_to_the_total() {
+    async fn progress_counts_what_the_desktop_already_had() {
         let _counters = super::TRANSFER_TEST_LOCK.lock().await;
         let data: Vec<u8> = (0..300_000u32).map(|i| i as u8).collect();
-        let (mut ours, mut theirs) = tokio::io::duplex(1 << 20);
-        let reader = tokio::spawn(async move {
-            let mut got = Vec::new();
-            theirs.read_to_end(&mut got).await.unwrap();
-            got
-        });
-        let sent = pump(&mut &data[..], &mut ours, data.len() as u64)
+        let (theirs, mut ours) = tokio::io::duplex(1 << 20);
+        let have = Have {
+            size: 300_000,
+            committed: 100_000,
+        };
+        let receiver = tokio::spawn(desktop(
+            theirs,
+            Memory::holding(&data[..100_000]),
+            Some(have),
+            true,
+        ));
+        let from = send_over(&mut &data[..], 300_000, &mut ours, true, Pace::DEFAULT)
             .await
             .unwrap();
         drop(ours);
-        assert_eq!(sent, data.len() as u64);
-        assert_eq!(transfer_progress(), (sent, sent));
-        assert_eq!(reader.await.unwrap(), data);
-        // The next transfer starts from zero.
-        pump(&mut &b""[..], &mut tokio::io::sink(), 10)
-            .await
-            .unwrap();
-        assert_eq!(transfer_progress(), (0, 10));
+        assert_eq!(from, 100_000);
+        assert_eq!(transfer_progress(), (300_000, 300_000));
+        assert_eq!(receiver.await.unwrap(), data);
+    }
+
+    #[test]
+    fn a_source_id_is_32_hex_digits_and_stable() {
+        let a = source_id(
+            "content://media/1
+300
+5",
+        );
+        assert_eq!(a.len(), 32);
+        assert!(pocketdesk_core::protocol::partials::valid_source(&a));
+        assert_eq!(
+            a,
+            source_id(
+                "content://media/1
+300
+5"
+            )
+        );
+        assert_ne!(
+            a,
+            source_id(
+                "content://media/1
+301
+5"
+            )
+        );
     }
 
     #[tokio::test]
