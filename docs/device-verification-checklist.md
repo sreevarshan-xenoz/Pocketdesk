@@ -921,10 +921,10 @@ On the A71 against this Windows box (LAN, release build, input off), 2026-10-14.
 ## 47. Check connection (T1)
 
 On the A71 against this Windows box, 2026-10-14:
-- [x] From Home, with the server running, every check passes: Wi-Fi, same network, answers, the security key matches, the video port answers (the UDP probe gets Version Negotiation). Battery optimization is flagged, because auto-reconnect is on.
+- [x] From Home, with the server running, every check passes: Wi-Fi, same network, answers, the security key matches (now with the handshake signature checked), the video port answers (the UDP probe gets a real Version Negotiation reply). No battery warning without a background feature on.
 - [x] With the server stopped, the computer "doesn't answer" (Windows' firewall turns a stopped server into a timeout, not a refusal), and the key and video port say "not checked".
 - [x] From the session's error card, "Check connection" opens the same check.
-- [ ] A changed security key (pin a wrong one), and Pair again from the finding.
+- [ ] A changed security key (pin a wrong one), and "Scan code again" from the finding: the computer and its key removed, the scanner opened, and the new code trusted.
 - [ ] A VPN that captures home traffic, and Tailscale off for a tailnet address.
 - [ ] Guest Wi-Fi with AP isolation, and another subnet.
 - [ ] A UDP-only block (the computer's firewall dropping the stream port).

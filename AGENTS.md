@@ -55,6 +55,12 @@ The detailed build journal lives in `git log` — one conventional commit per lo
   - **Where:** each saved computer on Home, and the session's error card. Buttons open settings, Wake or Pair again. Copy report names outcomes only.
   - **Device-checked (A71 → Windows):** all pass with the server up; "doesn't answer" with it stopped (Windows turns a stopped server into a timeout); the error card's entry.
   - **Found on the device:** the probe crashed until it installed the TLS crypto provider.
+  - **Fresh review (5 Important), fixed:**
+    - the key match now needs the handshake signature (a replayed certificate had passed);
+    - a closed connection is not "something else";
+    - "Scan code again" removes the computer and its key, then scans;
+    - a non-Tailscale VPN is named;
+    - no battery warning without a background feature.
 - 2026-10-14: **Phase R2, long sessions and recovery (branch `fix/r2-control-link`; results in `docs/superpowers/specs/2026-10-14-phase-r-reliability.md`, checklist §46).**
   - **Found on the A71 against Windows:**
     - after a Wi-Fi drop the stream came back by itself, but the control connection did not, so desktop pushes stopped and every query used a throwaway connection;

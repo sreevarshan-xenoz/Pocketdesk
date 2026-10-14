@@ -141,9 +141,27 @@ Status: version 1 built and device-checked, 2026-10-14 (as-built notes at the en
 - **The checks** are in `android/.../doctor/`:
   - `ConnectionChecks`, the judgement and its wording, under 14 JVM tests, including one that holds the report to no address, MAC or long hex id;
   - `ConnectionProbe`, the phone's state and the three probes.
-- **The identity check** is `CertManager::probe_identity` in core, through the bridge's `nativeCheckIdentity`. It never saves a pin; a loopback test covers each outcome.
+- **The identity check** is `CertManager::probe_identity` in core, through the bridge's `nativeCheckIdentity`.
+  - It records the certificate, then checks the handshake signature before stopping, so a match needs proof of the key, not just a copy of the certificate.
+  - It answers matches, changed, not pinned, not TLS, closed or failed.
+  - It never saves a pin. A loopback test covers each outcome, a replayed certificate, and an accept-then-drop server, and checks the pin file is unchanged after each.
 - **Entry points:** each saved computer on Home, and the session's error card.
-- **Not built:** the automatic suggestion after two failed connects, and with it the Settings switch. The error card's button covers the same moment.
+- **Not built:**
+  - the automatic suggestion after two failed connects, and with it the Settings switch (the error card's button covers the same moment);
+  - the session rows (the path it was on, and why it ended).
 - **Found on the device:**
   - On Windows a stopped server is a timeout, not a refusal (the firewall's program rules and stealth mode), so the timeout's wording says Pocketdesk may not be running.
   - The identity probe crashed the app until it installed the TLS crypto provider itself, as the other configurations do. The unit test had installed it.
+- **Fresh review (0 Critical, 5 Important, 10 Minor).** Fixed:
+  - the key match was forgeable by replaying the certificate;
+  - a busy Pocketdesk read as "something else";
+  - "Pair again" could not fix a changed key (Home now removes the computer and its key, after a confirmation, and opens the scanner; the session offers the advice only);
+  - any VPN read as Tailscale;
+  - the battery warning showed for nearly everyone;
+  - and most minors.
+
+  Deferred:
+  - a bound on name resolution time;
+  - the IPv6-only row on 464XLAT networks;
+  - a finding of its own for a damaged pin file;
+  - the desktop logging a warning for each probe's aborted handshake.
