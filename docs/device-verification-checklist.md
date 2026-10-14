@@ -957,6 +957,20 @@ Owed:
 - [ ] A Wi-Fi with Tailscale up: a phone browsing mDNS sees the LAN address and no 100.x or fd7a: address.
 - [ ] Transfers both ways still end "saved" over many runs (the clean close after the status byte), and a desktop share to a full disk fails at once instead of after 10 s.
 
+## 50. Resumable transfers (T6a)
+
+On the A71 against Windows, 2026-10-15:
+- [x] An offer of 150 MB with the phone's Wi-Fi off 2 s in: the retry continued ("The phone had 16580608 of 157286400 bytes"), one file in Downloads/Pocketdesk, MD5 matches.
+- [x] A share of 120 MB the same way: the retry replaced the stale attempt and continued from 12.6 MB, MD5 matches, nothing left in `<state>/partials`.
+
+Owed:
+- [ ] A file from the remote browser broken and continued.
+- [ ] "Retry failed files" off: a broken file fails at once, and no part is kept.
+- [ ] "Unfinished files: not kept" on the desktop: a retry starts over.
+- [ ] A file that changes between attempts starts over (the prefix hash).
+- [ ] The app killed mid-download, then the offer fetched again within its 10 minutes.
+- [ ] Android 8–9 (the legacy download file), and the Linux host.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

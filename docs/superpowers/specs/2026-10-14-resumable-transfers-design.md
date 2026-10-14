@@ -104,3 +104,15 @@ The receiver keeps at most one partial per `(device id, source id)`. The source 
   The path is built under the new top folder, and its canonical form must stay inside it.
 - **Limits:** 10 000 files and 32 GiB per folder; the 8 GiB per-file cap stays.
 - **Progress:** one notification for the folder (files done of total, bytes).
+
+## As built: T6a (2026-10-15)
+
+- **Core:** `protocol::transfer` (the exchange, `finish` for the status after the file is kept) and `protocol::partials` (the record store and its sweep). The ALPN is `pocketdesk-transfer/2`.
+- **Desktop:** shares keep their parts in `<state>/partials/`, swept at start and hourly, under `transfer_keep_hours` (Settings "Unfinished files"), 4 per phone, 16 GiB in all. Offers carry `source` and allow 4 attempts within their 10 minutes. A retry of a file replaces the attempt still running for it (`share::running`), which a silent Wi-Fi drop otherwise leaves holding a slot for 30 s.
+- **Phone:** sends and downloads both resume. A download's part is the pending MediaStore row (Android 10+) or the legacy file, opened read-write; the bridge records it in `files/pocketdesk/partials/`. TransferService retries 3 times (5, 15, 45 s); Settings "Retry failed files" turns retries, and kept parts, off. Parts are swept after 24 hours.
+- **Differences from the design:**
+  - the phone has one switch, not a separate "keep for" choice: with retries off nothing is kept;
+  - the desktop app's sent list says "waiting for the phone" while an offer is retried, not "retrying";
+  - progress moves in 4 MiB steps while receiving (it follows what is durable).
+- **Found on the device run:** the stale attempt holding a slot (fixed as above), and shell-granted content URIs are not readable by the app (a test-harness limit, not a product one).
+- **Device-verified (A71 ↔ Windows, LAN):** a 150 MB offer with Wi-Fi off 2 s in: the phone's retry continued from 16.6 MB and the MD5s match; a 120 MB share the same way, continued from 12.6 MB after the retry replaced the stale attempt, MD5s match.

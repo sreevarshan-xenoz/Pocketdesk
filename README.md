@@ -108,7 +108,9 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 
 ### KDE Connect Integration
 - **Clipboard sync** — text and images, both ways, while a session is open (the Win32 clipboard on Windows, `wl-clipboard` on Linux). An image goes as PNG, up to 32 MB, through the same TLS-pinned transfer as files, and needs only the phone's clipboard permission. A copied screenshot pastes on the phone, and a copied photo pastes into Paint. Text wins when both are on the clipboard.
-- **File transfer** — files both ways over the LAN; each transfer ends with the receiver confirming the save
+- **File transfer** — files both ways over the LAN; each transfer ends with the receiver confirming the save, and every file is checked against a SHA-256 of the whole.
+  - **Resumable:** a file that stops part way (Wi-Fi drops, the phone moves out of range) is sent again up to 3 times, 5, 15 and 45 s apart, and continues where it stopped instead of starting over. The phone's Settings has "Retry failed files", and the desktop app's Settings "Unfinished files" (how long the computer keeps a part: not at all, 1 hour or 24 hours).
+  - **Where the parts wait:** on the computer in its state folder, never in Downloads; on the phone in a download entry that stays hidden until it is complete.
 - **Remote file browsing** — browse the computer's home folder from a session and download a file to the phone's Downloads/Pocketdesk
 - **The phone's notifications on the computer** — off until you turn it on in the phone's Settings ("This phone's notifications") and grant notification access. They go to the computer you used last, as system notifications (a toast on Windows).
   - **Which apps:** each app is listed once it has notified, and shares nothing until you switch it on.
