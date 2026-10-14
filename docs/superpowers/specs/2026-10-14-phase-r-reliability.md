@@ -62,4 +62,4 @@ Done on 2026-10-14 (branch `docs/r5-honest-docs`):
 - **First contact and the internet path, up front.** README and the top of SECURITY.md say: scan the QR code (a typed address is trust on first use), and relays and the DHT see who talks, and the home IP.
 - **What works where.** A Linux / Windows table, with where each host was device-checked, and the phone's minimum Android version.
 - **A release checklist,** `docs/release-checklist.md`, linked from CONTRIBUTING: CI, versions, the capability docs on each OS, a dry run with a release-signed APK, the archives on real machines, and what to do if a release is wrong.
-- **Found on the way:** the docs asked for Rust 1.80, but edition 2024 needs 1.85; and Tailscale was listed as needed for testing.
+- **Found on the way:** the docs asked for Rust 1.80, but the tree needs 1.95 (egui 0.36; iroh needs 1.91), now declared as `rust-version` in Cargo; and Tailscale was listed as needed for testing.

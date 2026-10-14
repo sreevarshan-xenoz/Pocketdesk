@@ -6,7 +6,7 @@ Thank you for your interest in contributing! This document covers the basics.
 
 ### Prerequisites
 
-- Rust 1.85+ (edition 2024)
+- Rust 1.95+ (the desktop app's egui 0.36; the server and the bridge need 1.91)
 - JDK 17+ (for Android client)
 - Android SDK & NDK (for Android builds)
 - Tailscale (optional: one of the ways a phone reaches the computer)

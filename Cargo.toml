@@ -11,6 +11,9 @@ members = [
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
+# The oldest Rust that builds the workspace: the desktop app's egui 0.36
+# needs 1.95 (iroh, for the server and the bridge, needs 1.91).
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]

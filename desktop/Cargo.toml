@@ -3,6 +3,7 @@ name = "pocketdesk-desktop"
 description = "Pocketdesk desktop app: pair phones, manage sessions and settings"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 publish = false
 

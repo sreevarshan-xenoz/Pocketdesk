@@ -46,7 +46,7 @@ The detailed build journal lives in `git log` — one conventional commit per lo
   - README's "Before you start": each way a phone reaches the computer, and whether a router forward is needed (only for waking a sleeping computer from outside, or on your own relay's machine); first-contact trust; what relays and the DHT see. SECURITY.md leads with the same.
   - README's "What works where": a Linux / Windows parity table, with where each was device-checked.
   - `docs/release-checklist.md`: what comes before a tag, since the tag publishes.
-  - Fixed on the way: the docs asked for Rust 1.80 (edition 2024 needs 1.85) and listed Tailscale as required.
+  - Fixed on the way: the docs asked for Rust 1.80, but the tree needs 1.95 (egui 0.36; now `rust-version` in Cargo) and listed Tailscale as required.
 - 2026-10-14: **Phase R3, hostile connections, and R4's first number (branch `fix/r3-security`; results in `docs/superpowers/specs/2026-10-14-phase-r-reliability.md`).**
   - **Fixed, each with a test:**
     - a phone no longer paired, or with Input, Sound or Mic turned off, loses its session within a second;

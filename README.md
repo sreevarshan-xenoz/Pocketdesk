@@ -563,7 +563,7 @@ Pocketdesk is actively developed and looking for contributors!
 
 ### Prerequisites
 
-- Rust 1.85+ (edition 2024)
+- Rust 1.95+ (the desktop app's egui 0.36; the server and the bridge need 1.91)
 - JDK 17+ and Android SDK/NDK (for the Kotlin client)
 - Tailscale (optional)
 - FFmpeg (runtime **and** dev libraries — the server encodes in-process via
