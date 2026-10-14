@@ -60,18 +60,19 @@ fn tag_for(phone: &str, id: &str) -> String {
 }
 
 /// Linux: the D-Bus ids of the phone notifications shown, by tag, the newest
-/// [`MAX_SHOWN`], so a cancel can close one.
-#[cfg(target_os = "linux")]
+/// [`MAX_SHOWN`], so an update replaces its notification and a cancel can
+/// close it. Built on every OS so it is tested everywhere.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const MAX_SHOWN: usize = 500;
 
-#[cfg(target_os = "linux")]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn shown_ids() -> &'static Mutex<std::collections::VecDeque<(String, u32)>> {
     static SHOWN: std::sync::OnceLock<Mutex<std::collections::VecDeque<(String, u32)>>> =
         std::sync::OnceLock::new();
     SHOWN.get_or_init(Default::default)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn remember_shown(tag: &str, dbus_id: u32) {
     let mut shown = shown_ids().lock().unwrap_or_else(|e| e.into_inner());
     shown.retain(|(t, _)| t != tag);
@@ -81,7 +82,14 @@ fn remember_shown(tag: &str, dbus_id: u32) {
     }
 }
 
-#[cfg(target_os = "linux")]
+/// The D-Bus id `tag` was shown with, if it is still remembered.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn shown_id(tag: &str) -> Option<u32> {
+    let shown = shown_ids().lock().unwrap_or_else(|e| e.into_inner());
+    shown.iter().find(|(t, _)| t == tag).map(|(_, id)| *id)
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn take_shown(tag: &str) -> Option<u32> {
     let mut shown = shown_ids().lock().unwrap_or_else(|e| e.into_inner());
     let at = shown.iter().position(|(t, _)| t == tag)?;
@@ -172,11 +180,13 @@ impl Plugin for NotificationPlugin {
         match packet.packet_type.as_str() {
             "kdeconnect.notification" => {
                 let id = packet.body.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                let tag = tag_for(sender.device_id(), id);
+                // A notification without an id cannot be closed or updated
+                // later, and is shown untagged so it never replaces another.
+                let tag = (!id.is_empty()).then(|| tag_for(sender.device_id(), id));
                 if packet.body.get("isCancel").and_then(|v| v.as_bool()) == Some(true) {
                     // Closed on the phone (N5c): close it here too.
-                    if !id.is_empty() {
-                        close_desktop_notification(&tag).await;
+                    if let Some(tag) = &tag {
+                        close_desktop_notification(tag).await;
                     }
                     return Ok(());
                 }
@@ -188,7 +198,8 @@ impl Plugin for NotificationPlugin {
                     .unwrap_or_else(|e| e.into_inner())
                     .admit(sender.device_id(), Instant::now());
                 if admitted
-                    && let Err(e) = show_desktop_notification(&tag, &app, &title, &text).await
+                    && let Err(e) =
+                        show_desktop_notification(tag.as_deref(), &app, &title, &text).await
                 {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
@@ -224,10 +235,11 @@ async fn notifications_proxy() -> Result<zbus::Proxy<'static>> {
     })
 }
 
-/// Send a desktop notification via D-Bus (native, no external binary), and
-/// return the id the notification server gave it.
+/// Send a desktop notification via D-Bus (native, no external binary),
+/// replacing the one with id `replaces` (0: none), and return the id the
+/// notification server gave it.
 #[cfg(target_os = "linux")]
-async fn send_notification_dbus(summary: &str, body: &str) -> Result<u32> {
+async fn send_notification_dbus(summary: &str, body: &str, replaces: u32) -> Result<u32> {
     let proxy = notifications_proxy().await?;
     // Markup is escaped: the text may be a stranger's (N5a).
     let summary = crate::platform::markup_escaped(summary);
@@ -236,8 +248,8 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<u32> {
         .call::<_, _, u32>(
             "Notify",
             &(
-                "pocketdesk",                                                      // app_name
-                0u32,                                                              // replaces_id
+                "Pocketdesk",                                                      // app_name
+                replaces,                                                          // replaces_id
                 "",                                                                // app_icon
                 summary.as_str(),                                                  // summary
                 body.as_str(),                                                     // body
@@ -252,27 +264,46 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<u32> {
         })
 }
 
-/// Show a phone's notification, known by `tag` so a cancel can close it:
-/// a tagged toast on Windows; over D-Bus on Linux, keeping its id, with
-/// notify-send as the fallback (which cannot be closed).
-async fn show_desktop_notification(tag: &str, app: &str, title: &str, text: &str) -> Result<()> {
+/// Show a phone's notification, known by `tag` so an update replaces it and
+/// a cancel can close it: a tagged toast on Windows (the same tag replaces);
+/// over D-Bus on Linux, replacing the id shown before for that tag and
+/// keeping the new one, with notify-send as the fallback (which can neither).
+async fn show_desktop_notification(
+    tag: Option<&str>,
+    app: &str,
+    title: &str,
+    text: &str,
+) -> Result<()> {
     let summary = format!("{}: {}", app, title);
 
     #[cfg(target_os = "linux")]
-    match send_notification_dbus(&summary, text).await {
-        Ok(id) => {
-            remember_shown(tag, id);
-            tracing::info!("Desktop notification shown: {}", title);
-            return Ok(());
+    {
+        let replaces = tag.and_then(shown_id).unwrap_or(0);
+        match send_notification_dbus(&summary, text, replaces).await {
+            Ok(id) => {
+                if let Some(tag) = tag {
+                    remember_shown(tag, id);
+                }
+                tracing::info!("Desktop notification shown: {}", title);
+                return Ok(());
+            }
+            Err(e) => tracing::debug!("D-Bus notification failed, trying notify-send: {e}"),
         }
-        Err(e) => tracing::debug!("D-Bus notification failed, trying notify-send: {e}"),
     }
 
-    let (toast_summary, toast_text, toast_tag) = (summary, text.to_string(), tag.to_string());
+    let (toast_summary, toast_text, toast_tag) =
+        (summary, text.to_string(), tag.map(str::to_string));
     let shown = tokio::task::spawn_blocking(move || {
         #[cfg(windows)]
         {
-            crate::platform::notify_tagged(&toast_summary, &toast_text, &toast_tag)
+            match &toast_tag {
+                Some(tag) => crate::platform::notify_tagged(&toast_summary, &toast_text, tag),
+                None => crate::platform::notify(
+                    &toast_summary,
+                    &toast_text,
+                    std::time::Duration::from_secs(5),
+                ),
+            }
         }
         #[cfg(not(windows))]
         {
@@ -354,6 +385,22 @@ mod tests {
             (app.chars().count(), title.chars().count()),
             (MAX_APP, MAX_TITLE)
         );
+    }
+
+    #[test]
+    fn an_update_finds_the_notification_it_replaces_and_a_cancel_takes_it() {
+        remember_shown("t-update", 7);
+        assert_eq!(shown_id("t-update"), Some(7), "an update replaces id 7");
+        remember_shown("t-update", 9);
+        assert_eq!(shown_id("t-update"), Some(9), "one entry per tag");
+        assert_eq!(take_shown("t-update"), Some(9));
+        assert_eq!(take_shown("t-update"), None, "closed once");
+        for i in 0..MAX_SHOWN + 5 {
+            remember_shown(&format!("t-bound-{i}"), i as u32);
+        }
+        assert_eq!(shown_id("t-bound-0"), None, "the oldest is forgotten");
+        assert!(shown_id(&format!("t-bound-{}", MAX_SHOWN + 4)).is_some());
+        assert!(shown_ids().lock().unwrap().len() <= MAX_SHOWN);
     }
 
     #[test]

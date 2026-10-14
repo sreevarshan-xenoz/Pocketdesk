@@ -57,3 +57,12 @@ Post a shell notification (shared), see the toast in the Action Center, cancel i
   - a live ignored test shows a tagged toast and takes it back.
 - **This Android has no `cmd notification cancel`,** so the device check dismisses from the shade, as a person would.
 - **Owed (checklist §40):** the Linux host, and a chat app that clears its notification when read.
+- **Fresh review (0 Critical, 1 Important), fixed:**
+  - **Linux showed an updated notification as a second one,** so a cancel closed only the newest. An update now replaces the id shown before for its tag (`replaces_id`).
+  - **Minors fixed:**
+    - a notification without an id is shown untagged, so it never replaces another;
+    - the D-Bus app name is "Pocketdesk" again, matching notify-send;
+    - the Linux id bookkeeping is tested on every OS.
+  - **Accepted:**
+    - with no session open, a cancel can race its own show on a separate connection, and the notification then stays until it expires;
+    - with the Notifications permission turned off, cancels are dropped too.
