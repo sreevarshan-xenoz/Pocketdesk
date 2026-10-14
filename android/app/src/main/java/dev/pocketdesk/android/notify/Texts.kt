@@ -14,6 +14,7 @@ import android.telephony.SmsManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.bridge.RustCore
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,12 +22,26 @@ import org.json.JSONObject
 /**
  * Texts (SMS) on the computer (N5b): whether incoming texts are shown there,
  * and whether the computer may send replies through this phone. Both off
- * until the user turns them on.
+ * until the user turns them on. Also the little state that must survive the
+ * app's process: texts not yet delivered, replies whose parts the radio has
+ * not answered yet, and the replies already handled.
  */
 object TextPrefs {
     private const val PREFS = "pocketdesk-texts"
     private const val KEY_SHOW = "show"
     private const val KEY_REPLY = "reply"
+    private const val KEY_QUEUE = "queue"
+    private const val KEY_PARTS = "parts"
+    private const val KEY_HANDLED = "handled"
+
+    /** Texts kept for a computer out of reach, at most. */
+    private const val MAX_QUEUED = 200
+
+    /** Reply ids remembered as handled, at most. */
+    private const val MAX_HANDLED = 200
+
+    /** Marks a reply handed to the radio whose parts have not all answered. */
+    const val PENDING = "…"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -40,9 +55,90 @@ object TextPrefs {
 
     fun granted(ctx: Context, permission: String): Boolean =
         ContextCompat.checkSelfPermission(ctx, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun array(ctx: Context, key: String) =
+        runCatching { JSONArray(prefs(ctx).getString(key, "[]")) }.getOrDefault(JSONArray())
+
+    private fun obj(ctx: Context, key: String) =
+        runCatching { JSONObject(prefs(ctx).getString(key, "{}") ?: "{}") }.getOrDefault(JSONObject())
+
+    /** Keep [texts] until the computer takes them; the oldest go past [MAX_QUEUED]. */
+    @Synchronized
+    fun enqueue(ctx: Context, texts: List<JSONObject>) {
+        val queue = array(ctx, KEY_QUEUE)
+        texts.forEach { queue.put(it) }
+        val kept = JSONArray()
+        for (i in maxOf(0, queue.length() - MAX_QUEUED) until queue.length()) kept.put(queue.get(i))
+        prefs(ctx).edit { putString(KEY_QUEUE, kept.toString()) }
+    }
+
+    /** Up to 50 texts waiting for the computer. */
+    @Synchronized
+    fun queued(ctx: Context): List<JSONObject> {
+        val queue = array(ctx, KEY_QUEUE)
+        return List(minOf(50, queue.length())) { queue.getJSONObject(it) }
+    }
+
+    /** The first [count] queued texts were delivered. */
+    @Synchronized
+    fun dequeue(ctx: Context, count: Int) {
+        val queue = array(ctx, KEY_QUEUE)
+        val kept = JSONArray()
+        for (i in count until queue.length()) kept.put(queue.get(i))
+        prefs(ctx).edit { putString(KEY_QUEUE, kept.toString()) }
+    }
+
+    /** Reply [id] went to the radio in [parts] parts, for the computer at [host]:[port]. */
+    @Synchronized
+    fun expectParts(ctx: Context, id: String, parts: Int, host: String, port: Int) {
+        val all = obj(ctx, KEY_PARTS)
+        all.put(id, JSONObject().put("left", parts.coerceAtLeast(1)).put("host", host).put("port", port))
+        prefs(ctx).edit { putString(KEY_PARTS, all.toString()) }
+    }
+
+    /**
+     * One part of reply [id] answered ([error] null: sent). Once all have,
+     * returns the outcome (the first error, or null) and where to report it.
+     */
+    @Synchronized
+    fun partAnswered(ctx: Context, id: String, error: String?): Triple<String?, String, Int>? {
+        val all = obj(ctx, KEY_PARTS)
+        val entry = all.optJSONObject(id) ?: return null
+        val first = entry.optString("error").ifEmpty { null } ?: error
+        val left = entry.optInt("left", 1) - 1
+        if (left > 0) {
+            entry.put("left", left)
+            if (first != null) entry.put("error", first)
+            all.put(id, entry)
+            prefs(ctx).edit { putString(KEY_PARTS, all.toString()) }
+            return null
+        }
+        all.remove(id)
+        prefs(ctx).edit { putString(KEY_PARTS, all.toString()) }
+        return Triple(first, entry.optString("host"), entry.optInt("port"))
+    }
+
+    /** What became of reply [id], if handled before: "" sent, [PENDING], else the error. */
+    @Synchronized
+    fun handled(ctx: Context, id: String): String? {
+        val all = obj(ctx, KEY_HANDLED)
+        return if (all.has(id)) all.optString(id) else null
+    }
+
+    @Synchronized
+    fun setHandled(ctx: Context, id: String, outcome: String) {
+        val all = obj(ctx, KEY_HANDLED)
+        all.remove(id)
+        all.put(id, outcome)
+        while (all.length() > MAX_HANDLED) all.remove(all.keys().next())
+        prefs(ctx).edit { putString(KEY_HANDLED, all.toString()) }
+    }
 }
 
-/** Forwards each incoming text to the computer, when the user turned it on. */
+/**
+ * Keeps each incoming text, when the user turned it on, until the computer
+ * takes it: a computer that is asleep or away gets it later, not never.
+ */
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
@@ -55,52 +151,105 @@ class SmsReceiver : BroadcastReceiver() {
         val texts = SmsReplyRule.joinParts(parts)
         if (texts.isEmpty()) return
         val now = System.currentTimeMillis()
-        val messages = JSONArray()
-        texts.forEach { (address, body) ->
-            messages.put(JSONObject().put("address", address).put("body", body).put("date", now).put("event", "received"))
-        }
-        val pending = goAsync()
+        TextPrefs.enqueue(
+            app,
+            texts.map { (address, body) ->
+                JSONObject().put("address", address).put("body", body).put("date", now).put("event", "received")
+            },
+        )
         RustCore.start(app.filesDir)
+        PhoneLink.worker.execute { Texts.flush(app) }
+    }
+}
+
+object Texts {
+    private const val TAG = "Texts"
+
+    /** Deliver the texts waiting for the computer, if it is reachable. */
+    fun flush(ctx: Context) {
+        if (!TextPrefs.show(ctx)) return
+        val batch = TextPrefs.queued(ctx)
+        if (batch.isEmpty()) return
+        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(batch)))
+        if (sent) TextPrefs.dequeue(ctx, batch.size)
+    }
+
+    /** Tell the computer at [host]:[port] how reply [id] went: sent (null), or why not. */
+    fun report(ctx: Context, id: String, error: String?, host: String, port: Int) {
+        TextPrefs.setHandled(ctx, id, error ?: "")
+        val result = JSONObject().put("id", id).put("ok", error == null)
+        if (error != null) result.put("error", error)
+        // A result is not held back by a pause after some failed send, and
+        // goes to the computer that asked.
         PhoneLink.worker.execute {
-            try {
-                PhoneLink.sendNow(app, "kdeconnect.sms.messages", JSONObject().put("messages", messages))
-            } finally {
-                pending.finish()
-            }
+            RustCore.sendPhonePacket(host, port, "kdeconnect.pocketdesk.sms_sent", result.toString())
+                .onFailure { Log.d(TAG, "result of $id not delivered: ${it.message}") }
         }
     }
 }
 
 /**
  * The replies the computer asks this phone to text (N5b). The notification
- * listener runs it every few seconds while "Reply from my computer" is on:
- * it keeps the control connection to the computer up (trying at most once a
- * minute), takes the queued requests, sends each allowed one and reports the
- * result.
+ * listener runs it every few seconds on a thread of its own. It first
+ * delivers texts that waited. While "Reply from my computer" is on, it opens
+ * a control connection to the phone's computer when there is none (at most
+ * once a minute; a session's connection to another computer is left alone),
+ * takes the queued requests and sends each allowed one. While it is off,
+ * requests are dropped.
  */
 class SmsReplies(private val ctx: Context) {
     private var lastConnectMs = 0L
+    private val budget = SmsReplyRule.SendBudget()
 
     fun tick() {
-        if (!TextPrefs.reply(ctx)) return
-        val host = PhoneLink.target(ctx) ?: return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastConnectMs >= 60_000L) {
-            lastConnectMs = now
-            RustCore.connectToPeer(host.address, host.controlPort)
+        Texts.flush(ctx)
+        if (!TextPrefs.reply(ctx)) {
+            RustCore.takeSmsRequests()
+            return
         }
-        for (request in RustCore.takeSmsRequests()) {
-            val permitted = TextPrefs.granted(ctx, Manifest.permission.SEND_SMS)
-            when (val decision = SmsReplyRule.decide(request, TextPrefs.reply(ctx), permitted)) {
-                // The result is reported when the radio answers every part
-                // (SmsSentReceiver), not when Android merely accepts the text.
-                SmsReplyRule.Decision.Send ->
+        val own = PhoneLink.target(ctx) ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (RustCore.controlPeer() == null && now - lastConnectMs >= 60_000L) {
+            lastConnectMs = now
+            RustCore.connectToPeer(own.address, own.controlPort)
+        }
+        for (request in RustCore.takeSmsRequests()) handle(request, own, now)
+    }
+
+    private fun handle(request: SmsRequest, own: HostStore.Host, now: Long) {
+        val fromOwn = request.fromHost == own.address && request.fromPort == own.controlPort
+        if (!fromOwn) {
+            // Not this phone's computer: ignored, without a word to it.
+            Log.w(TAG, "reply request from ${request.fromHost} ignored: not this phone's computer")
+            return
+        }
+        // Handed over again (the computer did not hear back): never sent twice.
+        when (val before = TextPrefs.handled(ctx, request.id)) {
+            null -> {}
+            TextPrefs.PENDING -> return
+            else -> {
+                Texts.report(ctx, request.id, before.ifEmpty { null }, request.fromHost, request.fromPort)
+                return
+            }
+        }
+        val permitted = TextPrefs.granted(ctx, Manifest.permission.SEND_SMS)
+        when (val decision = SmsReplyRule.decide(request, TextPrefs.reply(ctx), permitted, fromOwn)) {
+            SmsReplyRule.Decision.Send ->
+                if (!budget.take(now)) {
+                    Texts.report(ctx, request.id, SmsReplyRule.TOO_MANY, request.fromHost, request.fromPort)
+                } else {
                     runCatching { send(request) }.onFailure {
                         Log.w(TAG, "reply ${request.id} not sent", it)
-                        report(ctx, request.id, it.message ?: "the phone could not send it")
+                        Texts.report(
+                            ctx,
+                            request.id,
+                            it.message ?: "the phone could not send it",
+                            request.fromHost,
+                            request.fromPort,
+                        )
                     }
-                is SmsReplyRule.Decision.Refuse -> report(ctx, request.id, decision.reason)
-            }
+                }
+            is SmsReplyRule.Decision.Refuse -> Texts.report(ctx, request.id, decision.reason, request.fromHost, request.fromPort)
         }
     }
 
@@ -114,7 +263,8 @@ class SmsReplies(private val ctx: Context) {
                 SmsManager.getDefault()
             } ?: error("this phone has no SMS service")
         val parts = manager.divideMessage(request.body.trim())
-        SmsSentTracker.expect(request.id, parts.size)
+        TextPrefs.setHandled(ctx, request.id, TextPrefs.PENDING)
+        TextPrefs.expectParts(ctx, request.id, parts.size, request.fromHost, request.fromPort)
         val sentIntents =
             ArrayList(
                 parts.indices.map { part ->
@@ -133,52 +283,24 @@ class SmsReplies(private val ctx: Context) {
         manager.sendMultipartTextMessage(request.address.trim(), null, parts, sentIntents, null)
     }
 
-    companion object {
-        private const val TAG = "SmsReplies"
-
-        /** Tell the computer how reply [id] went: sent, or why not. */
-        fun report(ctx: Context, id: String, error: String?) {
-            val result = JSONObject().put("id", id).put("ok", error == null)
-            if (error != null) result.put("error", error)
-            PhoneLink.worker.execute { PhoneLink.sendNow(ctx, "kdeconnect.pocketdesk.sms_sent", result) }
-        }
+    private companion object {
+        const val TAG = "SmsReplies"
     }
 }
 
-/** The parts of each reply still waiting for the radio's answer, and the first failure. */
-object SmsSentTracker {
-    private val waiting = HashMap<String, Pair<Int, String?>>()
-
-    @Synchronized
-    fun expect(id: String, parts: Int) {
-        waiting[id] = parts.coerceAtLeast(1) to null
-    }
-
-    /**
-     * One part of [id] answered ([error] null: sent). Returns the reply's
-     * outcome once every part has: `null` while some are still out, else
-     * `Result` with the first error, if any.
-     */
-    @Synchronized
-    fun answered(id: String, error: String?): kotlin.Result<String?>? {
-        val (left, firstError) = waiting[id] ?: return null
-        val now = firstError ?: error
-        if (left > 1) {
-            waiting[id] = (left - 1) to now
-            return null
-        }
-        waiting.remove(id)
-        return kotlin.Result.success(now)
-    }
-}
-
-/** The radio's answer for one part of a reply (N5b). */
+/**
+ * The radio's answer for one part of a reply (N5b). The parts left and where
+ * to report are kept in [TextPrefs], so a process Android recreated to
+ * deliver this still reports.
+ */
 class SmsSentReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = intent.getStringExtra(EXTRA_ID) ?: return
+        val app = context.applicationContext
         val error = if (resultCode == Activity.RESULT_OK) null else reason(resultCode)
-        val outcome = SmsSentTracker.answered(id, error) ?: return
-        SmsReplies.report(context.applicationContext, id, outcome.getOrNull())
+        val (outcome, host, port) = TextPrefs.partAnswered(app, id, error) ?: return
+        RustCore.start(app.filesDir)
+        Texts.report(app, id, outcome, host, port)
     }
 
     companion object {

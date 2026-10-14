@@ -35,6 +35,7 @@ object RustCore {
     private external fun nativeSendNotification(address: String, port: Int, body: String): String
     private external fun nativeSendPhonePacket(address: String, port: Int, packetType: String, body: String): String
     private external fun nativeTakeSmsRequests(): String
+    private external fun nativeControlPeer(): String
     private external fun nativeSendClipboardImage(address: String, port: Int, path: String): String
     private external fun nativeFetchClipboardImage(
         address: String,
@@ -237,13 +238,25 @@ object RustCore {
     fun sendPhonePacket(address: String, port: Int, packetType: String, body: String): Result<Unit> =
         envelope(nativeSendPhonePacket(address, port, packetType, body)).map { }
 
+    /** The computer the live control connection is to, or null. */
+    fun controlPeer(): Pair<String, Int>? =
+        nativeControlPeer().takeIf { it.isNotBlank() }?.let { json ->
+            runCatching { JSONObject(json).let { it.getString("host") to it.getInt("port") } }.getOrNull()
+        }
+
     /** The replies the desktop asked this phone to text (N5b). */
     fun takeSmsRequests(): List<dev.pocketdesk.android.notify.SmsRequest> =
         envelope(nativeTakeSmsRequests()).mapCatching { json ->
             val array = org.json.JSONArray(json)
             List(array.length()) { i ->
                 val o = array.getJSONObject(i)
-                dev.pocketdesk.android.notify.SmsRequest(o.getString("id"), o.getString("address"), o.getString("body"))
+                dev.pocketdesk.android.notify.SmsRequest(
+                    o.getString("id"),
+                    o.getString("address"),
+                    o.getString("body"),
+                    o.optString("fromHost"),
+                    o.optInt("fromPort"),
+                )
             }
         }.getOrDefault(emptyList())
 

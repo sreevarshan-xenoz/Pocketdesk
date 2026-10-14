@@ -63,6 +63,8 @@ fun TextsSection() {
             askSend.launch(Manifest.permission.SEND_SMS)
         } else {
             TextPrefs.setReply(context, on)
+            // Turned off: requests waiting from before are never sent later.
+            if (!on) dev.pocketdesk.android.bridge.RustCore.takeSmsRequests()
             version++
         }
     }

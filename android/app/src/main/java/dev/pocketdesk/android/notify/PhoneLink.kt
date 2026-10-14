@@ -24,7 +24,8 @@ object PhoneLink {
     val worker: ThreadPoolExecutor =
         ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue(20), ThreadPoolExecutor.DiscardOldestPolicy())
 
-    /** Until when sends are paused after a failure (elapsed realtime). Worker thread only. */
+    /** Until when sends are paused after a failure (elapsed realtime). */
+    @Volatile
     private var pausedUntilMs = 0L
 
     /** The computer the phone sends to. */
