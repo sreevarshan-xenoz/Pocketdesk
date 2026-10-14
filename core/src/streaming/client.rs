@@ -461,7 +461,7 @@ impl StreamingClient {
             // Spawn the receive loop using our cancel-aware receiver
             let recv_cancel = cancel.clone();
             let recv_span = tracing::info_span!("packet_recv");
-            let recv_handle = tokio::spawn(
+            let mut recv_handle = tokio::spawn(
                 async move {
                     let result =
                         recv_with_cancel(&connection, frame_tx, audio_tx, recv_cancel, e2e_samples)
@@ -478,7 +478,7 @@ impl StreamingClient {
             // own view of the link, plus whatever it measured since the last tick
             let stats_cancel = cancel.clone();
             let stats_span = tracing::info_span!("stats_feedback");
-            let _stats_handle = tokio::spawn(
+            let stats_handle = tokio::spawn(
                 async move {
                     send_stats_loop(&stats_connection, stats_cancel, &stats_samples).await;
                 }
@@ -486,15 +486,26 @@ impl StreamingClient {
             );
 
             // Wait for cancellation or receive task completion
-            tokio::select! {
+            let recv_done = tokio::select! {
                 _ = cancel.cancelled() => {
                     info!("Streaming client loop cancelled");
+                    false
                 }
-                result = recv_handle => {
+                result = &mut recv_handle => {
                     if let Err(e) = result {
                         warn!(error = %e, "Receive task panicked");
                     }
+                    true
                 }
+            };
+            // Neither task outlives the session: each holds the connection,
+            // and the stats loop could wait forever on a send, keeping the
+            // link alive (and the desktop encoding) after the phone moved on.
+            stats_handle.abort();
+            let _ = stats_handle.await;
+            if !recv_done {
+                recv_handle.abort();
+                let _ = recv_handle.await;
             }
         }
         .instrument(span)
