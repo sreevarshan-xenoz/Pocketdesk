@@ -88,6 +88,10 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **Remote desktop** with tap/drag/double-tap gesture input
 - **Link status** — connecting/LAN/WAN indicator on the video surface, with failure reasons and one-tap retry
 - **Session resilience** — QUIC keepalive + bounded idle timeout hold the link through NAT stalls; a wake-locked foreground service keeps screen-off sessions alive
+- **Several phones at once** — each phone gets its own stream, and one drives at a time:
+  - The first phone to send input drives. The others watch, and their sessions say "Another phone is driving", until it has been quiet for 10 s or leaves.
+  - The desktop app's Sessions tab marks the driver and can hand control to another phone.
+  - Settings can let every phone drive instead, and set the quiet time.
 - **Picture-in-picture** — shrink the live session into a video-only PiP window (desktop aspect ratio, chrome hidden) and keep working in other apps; also enables DeX/docked windows
 - **Blackout / pocket mode** — black, touch-locked screen while the session keeps streaming: the phone and its video surface go secure (no screenshots or Recents leakage), brightness drops; double-tap or back to unlock
 - **Localized UI** — English, Spanish and Tamil; pick per-app language from the "Language" button on the connect screen (Android 13+)
@@ -244,7 +248,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/confi
 - **Pair**: a QR code and the same PIN in digits. The phone's "Scan pairing code" reads it and pins the desktop's certificate before its first streaming connection.
 - **Devices**: paired phones, which one is connected, and Remove. Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
 - **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
-- **Sessions**: live sessions, with End.
+- **Sessions**: live sessions, with End, and with several phones, which one drives and Give control.
 - **Files**: send a file to a phone that is in a session (pick the phone, then a path, "Choose file…" on Windows, or drop files on the window), the files sent and whether each was saved, and files received from phones, newest first, with Show in folder.
 - **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
 - **Diagnostics**: why a phone might not connect. It checks the server, its ports, the firewall, the addresses phones can use and the internet path, shows the last session (encoder and latency), and copies a debug report for an issue.

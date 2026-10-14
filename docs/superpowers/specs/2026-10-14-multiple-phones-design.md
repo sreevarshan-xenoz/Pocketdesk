@@ -91,3 +91,36 @@ Shared capture (one capture fanned out to several encoders) is a performance cha
 4. Desktop: the Sessions tab and Settings.
 5. N7b, each item its own commit.
 6. Docs: README, checklist §43, roadmap N7 (and remove "Multi-session" from Deferred), AGENTS.
+
+## As built
+
+- **N7a as designed, with these differences:**
+  - **Names.** The push is `kdeconnect.pocketdesk.control {driving, other}`, and the chip says "Another phone is driving: this one watches". Phone names are not stored anywhere on the desktop.
+  - **Kick folder.** Kick requests live in `kicks/`, not `kick/`. An older CLI's single `kick` file is still read.
+  - **Who may drive.** A phone's newer session (a reconnect, a Retry) takes over from its own stale one at once.
+  - **Shared mode.** Nothing is handed over, and the desktop shows no control column.
+  - **Re-telling.** The phones are told who drives again every 5 s.
+- **N7b mostly paused** (roadmap, Phase R): mic choice, the NVENC refcount and the Files picker wait. The kick folder shipped. The privacy grab's owner moved to R3.
+- **Fresh review (0 Critical, 5 Important), fixed one commit each:**
+  - a phone's stale session blocked its own new one;
+  - buttons and keys stayed held when control moved;
+  - the push was lost after a control reconnect;
+  - the control channel's input bypassed the rule;
+  - a compositor that answers an unchanged copy at once (Hyprland) got no heartbeat.
+
+  Minors fixed: input from ended sessions, Shared mode's Give, Settings validation, and the spec text.
+
+  Accepted:
+  - control requests are ordered only to the second;
+  - control can be given to a view-only session, which then blocks the others until it goes quiet;
+  - the old video view's own stop could, in a rare race, end the next view's session.
+- **Checked with one phone only.** The rule, the hand-over and the releases are unit-tested; two phones are owed (checklist §43).
+- **Found on the Linux run (Phase R1, checklist §44) and fixed on this branch:**
+  - a still wlroots screen stalled;
+  - Retry and pairing did not reconnect;
+  - a dead link was kept open;
+  - input was lost until a restart;
+  - the computer's name was wrong;
+  - an unpaired phone kept streaming;
+  - Tailscale log spam;
+  - a phone fresh from doze called the computer asleep.
