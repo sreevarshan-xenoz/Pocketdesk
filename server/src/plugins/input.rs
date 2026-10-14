@@ -54,6 +54,16 @@ impl Plugin for InputPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
+        // Several phones (N7): while another phone drives, this one's mouse
+        // and keyboard packets are dropped here too, as on the stream.
+        if !crate::driving::may_drive(sender.device_id()) {
+            debug!(
+                "Dropped {} from {}: another phone drives",
+                packet.packet_type,
+                sender.device_id()
+            );
+            return Ok(());
+        }
         match packet.packet_type.as_str() {
             "kdeconnect.mousepad.request" => {
                 let body = &packet.body;
