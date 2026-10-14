@@ -175,7 +175,7 @@ impl Capabilities {
                     endpoint: "tcp://<phone>:<port the phone names>".to_string(),
                     alpn: Some(String::from_utf8_lossy(ALPN_TRANSFER).into_owned()),
                     available: true,
-                    note: "the phone listens and the desktop dials it, both ways; one-time key, size, bytes, status byte",
+                    note: "the phone listens and the desktop dials it, both ways; one-time key, then the resumable exchange: size, resume point, the rest, SHA-256, status byte",
                 },
                 TransportInfo {
                     id: "quic-v2",

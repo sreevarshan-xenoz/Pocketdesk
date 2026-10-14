@@ -143,6 +143,8 @@ pub async fn run(config: Config) -> Result<()> {
     crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
     crate::wake_info::configure(config.wake_announce, config.wake_port);
     crate::driving::configure(config.input_control, config.input_idle_secs);
+    crate::plugins::share::configure(config.transfer_keep_hours);
+    crate::plugins::share::spawn_partials_sweep();
     let announcement = if config.lan_discovery {
         Some(lan_discovery.register_service(
             &host_name,

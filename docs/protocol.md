@@ -17,7 +17,7 @@ Read from the code as of 2026-10-14. Every row names the file it was read from, 
 | Desktop | iroh endpoint, `0.0.0.0:0` UDP (port picked by the OS) | iroh QUIC (noq). Each end is identified by its iroh key | `pocketdesk-stream` (`StreamTransportConfig::default().alpn`) | Any iroh key can dial, up to 128 at once. The session gate holds the phone to the iroh key it registered on the LAN | `server/src/iroh_endpoint.rs` (`spawn_wan_endpoint`), `core/src/streaming/transport.rs` (default ALPN) |
 | Desktop | mDNS, UDP 5353 multicast (mdns-sd) | Plain mDNS | — | Anyone on the link | `core/src/tailscale/lan.rs`, `server/src/service.rs` |
 | Desktop | Mainline DHT node, UDP port picked by the OS (never 6881) | Mainline DHT (plain UDP, signed records) | — | The public DHT | `core/src/streaming/dht.rs` (`dht_builder`), `server/src/iroh_endpoint.rs` (`spawn_dht`) |
-| Phone | `0.0.0.0:<random>` TCP, one per transfer, open only while that transfer is waiting | TLS 1.3. The phone's server accepts exactly one client certificate: the one pinned for the desktop it asked | `pocketdesk-transfer/1` | Only that desktop, which must also present the one-time key | `android/bridge/src/api.rs` (`send_clipboard_image`, share), `android/bridge/src/download.rs`, `core/src/streaming/transport.rs` (`transfer_server_config`) |
+| Phone | `0.0.0.0:<random>` TCP, one per transfer, open only while that transfer is waiting | TLS 1.3. The phone's server accepts exactly one client certificate: the one pinned for the desktop it asked | `pocketdesk-transfer/2` | Only that desktop, which must also present the one-time key | `android/bridge/src/api.rs` (`send_clipboard_image`, share), `android/bridge/src/download.rs`, `core/src/streaming/transport.rs` (`transfer_server_config`) |
 | Phone | iroh endpoint, `0.0.0.0:0` UDP, one per WAN dial | iroh QUIC | `pocketdesk-stream` | — (outbound dial) | `core/src/streaming/iroh_connection.rs` (`IrohDial::dial`) |
 | Relay host | `0.0.0.0:3340` TCP plain HTTP by default (`--port`), or `:80` + `:443` with `--hostname` (HTTPS, Let's Encrypt) | iroh relay protocol. The relay forwards traffic that stays end-to-end encrypted between the two endpoints | — | Only listed endpoint ids. With `--allow-paired`, this desktop and the WAN keys of its currently paired phones, re-read on every connection. With `--open`, anyone. The relay refuses to start with none of these | `server/src/relay.rs`, `server/src/cli.rs` (`Relay`) |
 
@@ -58,9 +58,15 @@ The flow is the same for a phone-to-desktop share, a desktop-to-phone download o
 3. **TLS, pinned both ways.**
    - The desktop's client accepts only the phone certificate its control connection proved (`transfer_client_config(phone)`).
    - The phone's server accepts only the desktop certificate pinned for that address (`transfer_server_config(desktop)`).
-   - The ALPN must be `pocketdesk-transfer/1` on both ends.
+   - The ALPN must be `pocketdesk-transfer/2` on both ends.
    - A phone whose key is not bound gets no transfer (`transfer_tls` → `pair::may_transfer`).
-4. **Inside TLS.** The desktop, which dials, always sends the key first, ended by a newline. When the desktop sends, a big-endian u64 size and the bytes follow. When the phone sends (a share, a clipboard image), only the bytes follow; the size went in the control packet. The receiver ends with one status byte: `1` for saved, `0` for failed (`share.rs`, `STATUS_SAVED`/`STATUS_FAILED`). It then sends TLS close_notify and, after a save, reads what is still in flight before closing (within the transfer's deadline), so a reset cannot overtake the status byte (`share.rs` `send_status`, `download.rs`).
+4. **Inside TLS** (`core/src/protocol/transfer.rs`). The desktop, which dials, sends the key first, ended by a newline. Then, whichever way the file goes:
+   - the sender gives the size (a big-endian u64; for a share it must equal the control packet's);
+   - the receiver answers how much of this file it already has (`offset`, u64) and the SHA-256 of those bytes;
+   - the sender continues from there only if its own first `offset` bytes hash the same, else both start over;
+   - the sender sends the rest, then the SHA-256 of the whole file;
+   - the receiver keeps the file only if its own hash matches, and only once it is in place answers one status byte: `1` saved, `0` failed. After a save it sends TLS close_notify and reads what is still in flight before closing (within the deadline), so a reset cannot overtake the status byte.
+   A share names its file with a `sourceId` (32 hex digits, the same on every attempt). The desktop keeps a broken share's bytes in `<state>/partials/` for `transfer_keep_hours` (default 24), at most 4 per phone and 16 GiB in all, and continues them when that phone retries the same file. Clipboard images never resume, but their hash is checked.
 5. **Limits.** Each connect and each TLS handshake has 10 s, and the stream may sit idle 30 s. The minimum rate is 32 KiB/s, files are at most 8 GiB and clipboard images at most 32 MiB. Transfers take four slots on the desktop, two per phone (§6).
 
 Text clipboard does not use this path. It rides the control channel (`core/src/protocol/clipboard.rs`).
