@@ -445,6 +445,9 @@ fn run_capture_loop(
     // order), so a still screen can repeat them; None before the first frame
     // and after the buffer is reallocated.
     let mut last_inverted: Option<bool> = None;
+    // When a frame last went to the encoder: a still screen still sends one
+    // each STATIC_HEARTBEAT, whichever way the compositor reports it.
+    let mut last_sent = Instant::now();
 
     loop {
         if cancel.is_cancelled() {
@@ -560,11 +563,12 @@ fn run_capture_loop(
             // Once the compositor has handled the destroy it no longer
             // writes into the buffer, so the last frame in it can be read.
             queue.roundtrip(&mut state)?;
-            if let Some(inverted) = last_inverted
-                && !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h)
-            {
-                debug!("Frame channel closed, stopping screencopy capture");
-                break;
+            if let Some(inverted) = last_inverted {
+                if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h) {
+                    debug!("Frame channel closed, stopping screencopy capture");
+                    break;
+                }
+                last_sent = Instant::now();
             }
             if !idle {
                 info!("Screencopy: screen static, repeating the last frame each second");
@@ -615,20 +619,26 @@ fn run_capture_loop(
             ready_sent = true;
         }
 
-        if emit {
-            if idle {
-                debug!(
-                    "Screencopy: screen active, resuming {} fps pacing",
-                    config.fps
-                );
-                idle = false;
-            }
+        // A compositor that answers an undamaged copy at once (Hyprland)
+        // reports a still screen as no damage: the frame is repeated once a
+        // STATIC_HEARTBEAT all the same, or the phone ends the session.
+        let heartbeat = last_inverted.is_some() && last_sent.elapsed() >= STATIC_HEARTBEAT;
+        if emit && idle {
+            debug!(
+                "Screencopy: screen active, resuming {} fps pacing",
+                config.fps
+            );
+            idle = false;
+        }
+        if emit || heartbeat {
             last_inverted = Some(inverted);
             if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h) {
                 debug!("Frame channel closed, stopping screencopy capture");
                 break;
             }
-        } else if !idle {
+            last_sent = Instant::now();
+        }
+        if !emit && !idle {
             info!("Screencopy: screen static, dropping to {IDLE_FPS} fps idle pacing");
             idle = true;
         }
