@@ -302,7 +302,7 @@ impl PairView {
                     .to_string();
                 ui.label(RichText::new(spaced).monospace().size(30.0).strong());
                 let remaining = pin::read(state_dir, now_unix)
-                    .and_then(|p| pin::remaining(&p, now_unix))
+                    .map(|p| pin::remaining(&p, now_unix))
                     .map_or(0, |d| d.as_secs());
                 ui.label(
                     RichText::new(format!(
@@ -348,8 +348,7 @@ impl PairView {
                         TextureOptions::NEAREST,
                     ));
                     let expires_unix = pin::read(state_dir, now_unix)
-                        .and_then(|p| p.minted_unix)
-                        .map(|t| t + pin::PIN_TTL.as_secs());
+                        .map(|p| p.minted_unix + pin::PIN_TTL.as_secs());
                     self.shown = Some(Shown {
                         pin: link.pin.clone(),
                         expires_unix,
@@ -433,7 +432,7 @@ mod tests {
     fn file_pin(pin: &str) -> pin::FilePin {
         pin::FilePin {
             pin: pin.to_string(),
-            minted_unix: Some(1_000),
+            minted_unix: 1_000,
             grant_secs: None,
         }
     }

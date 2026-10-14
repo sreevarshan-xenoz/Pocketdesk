@@ -595,17 +595,32 @@ pub async fn spawn_wan_endpoint(
     spawn_endpoint_recorder(endpoint.clone(), dht_publish, dht_check);
 
     let accept = endpoint.clone();
+    // The WAN listener holds no more connections than the LAN one does in
+    // all: each runs a session before the gate has judged it, and any iroh
+    // key may dial. Per address means nothing here (a relay's, or a key's,
+    // which costs nothing to make), so only the total is held (R3 review).
+    let slots = Arc::new(tokio::sync::Semaphore::new(crate::conn_budget::TOTAL));
     tokio::spawn(async move {
+        let mut refused_said: Option<std::time::Instant> = None;
         loop {
             let Some(incoming) = accept.accept().await else {
                 tracing::info!("WAN endpoint closed — accept loop exiting");
                 break;
+            };
+            let Ok(slot) = Arc::clone(&slots).try_acquire_owned() else {
+                if refused_said.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(10)) {
+                    refused_said = Some(std::time::Instant::now());
+                    tracing::warn!("Refused a WAN connection: too many open");
+                }
+                incoming.refuse();
+                continue;
             };
             let config = config.clone();
             let input_tx = input_tx.clone();
             let cert_manager = Arc::clone(&cert_manager);
             let mic_relay_device = mic_relay_device.clone();
             tokio::spawn(async move {
+                let _slot = slot;
                 let conn = match incoming.accept() {
                     Ok(accepting) => match accepting.await {
                         Ok(conn) => conn,

@@ -44,14 +44,51 @@ pub fn config_dir() -> io::Result<PathBuf> {
     ))
 }
 
+/// The state folder this process uses instead of the user's, once set.
+static STATE_DIR_OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Use `dir` as the state folder for the rest of this process, and return
+/// the one in use (the first caller's: it can be set only once). For tests:
+/// the server's gates then read a throwaway folder, never the user's
+/// pairings and keys.
+pub fn use_state_dir(dir: PathBuf) -> &'static std::path::Path {
+    STATE_DIR_OVERRIDE.get_or_init(|| dir)
+}
+
 /// `<state dir>/pocketdesk`, falling back to local data (`%LOCALAPPDATA%` on
-/// Windows, which has no state dir).
+/// Windows, which has no state dir). `POCKETDESK_STATE_DIR` names another
+/// folder (a portable install, or a separate set of pairings).
 pub fn state_dir() -> io::Result<PathBuf> {
+    if let Some(dir) = STATE_DIR_OVERRIDE.get() {
+        return Ok(dir.clone());
+    }
+    if let Some(dir) = state_dir_from_env(std::env::var_os("POCKETDESK_STATE_DIR")) {
+        return dir;
+    }
     Ok(app_dir(
         &dirs::state_dir()
             .or_else(dirs::data_local_dir)
             .ok_or_else(|| missing("state"))?,
     ))
+}
+
+/// The folder `POCKETDESK_STATE_DIR` names, if it is set. It must be
+/// absolute: a relative one would resolve against each process's own working
+/// folder, so the server and the desktop app could each use a different one
+/// without a word.
+fn state_dir_from_env(value: Option<std::ffi::OsString>) -> Option<io::Result<PathBuf>> {
+    let dir = PathBuf::from(value.filter(|d| !d.is_empty())?);
+    Some(if dir.is_absolute() {
+        Ok(dir)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "POCKETDESK_STATE_DIR must be an absolute path, not {}",
+                dir.display()
+            ),
+        ))
+    })
 }
 
 /// The folder name under the config and state directories.
@@ -79,6 +116,28 @@ fn app_dir(base: &std::path::Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_state_dir_variable_must_name_an_absolute_folder() {
+        assert!(state_dir_from_env(None).is_none());
+        assert!(
+            state_dir_from_env(Some("".into())).is_none(),
+            "empty is unset"
+        );
+        let absolute = std::env::temp_dir().join("pd-second");
+        assert_eq!(
+            state_dir_from_env(Some(absolute.clone().into()))
+                .unwrap()
+                .unwrap(),
+            absolute
+        );
+        assert!(
+            state_dir_from_env(Some("pd-second".into()))
+                .unwrap()
+                .is_err(),
+            "relative is refused, not resolved against the working folder"
+        );
+    }
 
     fn base(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-paths-{name}-{}", std::process::id()));

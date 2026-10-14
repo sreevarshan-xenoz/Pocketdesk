@@ -75,25 +75,46 @@ fn write_live_json(json: &str) -> anyhow::Result<()> {
 /// last told to them.
 type Told = (Vec<(u64, String)>, Option<u64>);
 
-/// Kick targets for the live sessions whose phone may no longer stream:
+/// The live sessions given more at their start than their phone is now
+/// allowed (F5: Input, Audio or Mic turned off while they run), by session
+/// id. A session keeps what it started with, so it ends instead.
+pub fn narrowed_sessions(
+    live: &[LiveSession],
+    permissions: impl Fn(&str) -> pocketdesk_core::protocol::permissions::DevicePermissions,
+) -> Vec<u64> {
+    use pocketdesk_core::protocol::permissions::Capability;
+    live.iter()
+        .filter(|s| {
+            let Some(id) = s.device_id.as_deref() else {
+                return false;
+            };
+            let now = permissions(id);
+            (s.streamed.input && !now.allows(Capability::Input))
+                || (s.streamed.audio && !now.allows(Capability::Audio))
+                || (s.streamed.mic && !now.allows(Capability::Mic))
+        })
+        .map(|s| s.id)
+        .collect()
+}
+
+/// The live sessions whose phone may no longer stream, by session id:
 /// with pairing required, a device that is not (or no longer) paired, which
 /// covers an unpair from the CLI or the app, an expired guest grant and a
 /// hand-edited trust store; and a session that never said which device it
-/// is, by its address. Nothing with pairing off.
+/// is. Nothing with pairing off. Session ids, not device ids: a device id
+/// such as `all`, or one another phone's id starts with, would end other
+/// phones' sessions as a kick target.
 pub fn untrusted_sessions(
     live: &[LiveSession],
     pairing_required: bool,
     is_paired: impl Fn(&str) -> bool,
-) -> Vec<String> {
+) -> Vec<u64> {
     if !pairing_required {
         return Vec::new();
     }
     live.iter()
-        .filter_map(|s| match &s.device_id {
-            Some(id) if is_paired(id) => None,
-            Some(id) => Some(id.clone()),
-            None => Some(s.peer.ip().to_string()),
-        })
+        .filter(|s| !s.device_id.as_deref().is_some_and(&is_paired))
+        .map(|s| s.id)
         .collect()
 }
 
@@ -140,9 +161,26 @@ fn notify_session_started(session: &LiveSession) {
     });
 }
 
+/// Ticks in a row the trust store may be unreadable before every session is
+/// judged unpaired. One failed read (a writer replacing the file) must not
+/// end every phone's session; a store that stays unreadable fails closed.
+const UNREADABLE_TICKS: u32 = 3;
+
+/// Whether this tick may judge sessions by pairing, given whether the store
+/// was read, counting the unread ticks in a row.
+fn may_judge_pairing(read: bool, unread_ticks: &mut u32) -> bool {
+    *unread_ticks = if read {
+        0
+    } else {
+        unread_ticks.saturating_add(1)
+    };
+    read || *unread_ticks >= UNREADABLE_TICKS
+}
+
 /// Daemon task: mirror the registry, ring the consent notification, and
 /// consume kick requests. Runs for the process lifetime.
 pub async fn run_watcher() {
+    let mut unread_ticks = 0;
     let mut prev_ids: Vec<u64> = Vec::new();
     let mut prev_json = String::new();
     // What the phones were last told about who drives (roadmap N7).
@@ -178,13 +216,41 @@ pub async fn run_watcher() {
         let live = pocketdesk_core::streaming::sessions::list();
         // A phone that stopped being paired loses its session at once,
         // however that happened.
+        // The privacy grab of a phone no longer paired is given back too,
+        // with or without a stream (the store is read only while one is held).
+        if crate::state::pairing_required() {
+            crate::plugins::privacy::release_if_owner(|id| {
+                !crate::plugins::pair::is_paired_device(id)
+            });
+        }
         if !live.is_empty() {
             let store = crate::state::trust_store_path().ok().and_then(|path| {
                 pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(path).ok()
             });
             let paired = |id: &str| store.as_ref().is_some_and(|s| s.is_trusted(id));
-            for target in untrusted_sessions(&live, crate::state::pairing_required(), paired) {
-                for s in pocketdesk_core::streaming::sessions::kick(&target) {
+            if let Some(store) = &store {
+                for id in narrowed_sessions(&live, |device| store.permissions(device)) {
+                    if let Some(s) = pocketdesk_core::streaming::sessions::end_session(
+                        id,
+                        b"permissions changed",
+                    ) {
+                        tracing::warn!(
+                            device_id = s.device_id.as_deref().unwrap_or(""),
+                            "Ended a streaming session: its permissions were narrowed"
+                        );
+                    }
+                }
+            }
+            let unpaired = if may_judge_pairing(store.is_some(), &mut unread_ticks) {
+                untrusted_sessions(&live, crate::state::pairing_required(), paired)
+            } else {
+                tracing::debug!("The trust store could not be read; sessions judged next tick");
+                Vec::new()
+            };
+            for id in unpaired {
+                if let Some(s) =
+                    pocketdesk_core::streaming::sessions::end_session(id, b"not paired")
+                {
                     tracing::warn!(
                         device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
                         peer = %s.peer,
@@ -283,17 +349,41 @@ mod tests {
 
     #[test]
     fn a_session_whose_phone_is_no_longer_paired_is_ended() {
-        let live = vec![
+        let mut live = vec![
             session(Some("paired-phone"), true),
             session(Some("unpaired-phone"), true),
             session(None, false),
+            // An id that is a kick keyword, or a prefix of another phone's,
+            // still names only its own session.
+            session(Some("all"), true),
+            session(Some("paired"), true),
         ];
+        for (i, s) in live.iter_mut().enumerate() {
+            s.id = i as u64 + 1;
+        }
         let paired = |id: &str| id == "paired-phone";
         let mut ended = untrusted_sessions(&live, true, paired);
         ended.sort();
-        assert_eq!(
-            ended,
-            vec!["10.0.0.5".to_string(), "unpaired-phone".to_string()]
+        assert_eq!(ended, vec![2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn one_unreadable_store_does_not_end_every_session_but_a_lasting_one_does() {
+        let mut unread = 0;
+        assert!(may_judge_pairing(true, &mut unread));
+        assert!(
+            !may_judge_pairing(false, &mut unread),
+            "a writer mid-rename"
+        );
+        assert!(!may_judge_pairing(false, &mut unread));
+        assert!(
+            may_judge_pairing(false, &mut unread),
+            "still unreadable: fail closed"
+        );
+        assert!(may_judge_pairing(true, &mut unread));
+        assert!(
+            !may_judge_pairing(false, &mut unread),
+            "the count starts over"
         );
     }
 
@@ -303,8 +393,40 @@ mod tests {
         assert!(untrusted_sessions(&live, false, |_| false).is_empty());
     }
 
+    #[test]
+    fn a_session_whose_permissions_were_narrowed_is_ended() {
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        use pocketdesk_core::streaming::sessions::Streamed;
+        let all = Streamed {
+            input: true,
+            audio: true,
+            mic: true,
+        };
+        let view_only = Streamed {
+            input: false,
+            ..all
+        };
+        let mut live = vec![
+            session(Some("input-off"), true),
+            session(Some("untouched"), true),
+            session(Some("was-view-only"), true),
+            session(None, false),
+        ];
+        for (i, s) in live.iter_mut().enumerate() {
+            s.id = i as u64 + 1;
+            s.streamed = all;
+        }
+        live[2].streamed = view_only;
+        let permissions = |id: &str| DevicePermissions {
+            input: Some(id == "untouched"),
+            ..DevicePermissions::default()
+        };
+        assert_eq!(narrowed_sessions(&live, permissions), vec![1]);
+    }
+
     fn session(device: Option<&str>, lan: bool) -> LiveSession {
         LiveSession {
+            streamed: Default::default(),
             id: 7,
             device_id: device.map(str::to_string),
             peer: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)), 4433),

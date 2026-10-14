@@ -12,6 +12,14 @@ use pocketdesk_core::protocol::v2::{
 
 use crate::state;
 
+/// A v2 peer's id and name reach logs, the registry and the owner's prompts,
+/// so both are held to the rule the control channel and the stream use:
+/// short and printable (R3 review).
+fn usable_identity(identity: &IdentityPacketV2) -> bool {
+    use pocketdesk_core::protocol::kdeconnect::valid_device_id;
+    valid_device_id(&identity.device_id) && valid_device_id(&identity.device_name)
+}
+
 /// Handles a v2 multiplexed QUIC session.
 ///
 /// With `pairing_required`, the control channel mirrors the TCP gate in
@@ -44,6 +52,9 @@ pub async fn handle_v2_session(
             .context("failed to accept handshake stream")?;
 
         let peer_identity = perform_v2_handshake(&mut send0, &mut recv0, &local_identity).await?;
+        if !usable_identity(&peer_identity) {
+            anyhow::bail!("v2 handshake with an unusable device id or name");
+        }
 
         tracing::Span::current().record("peer_id", &peer_identity.device_id);
         info!(
@@ -86,6 +97,11 @@ pub async fn handle_v2_session(
         let control_pairing_required = pairing_required;
         let control_device_id = peer_identity.device_id.clone();
         let control_task = tokio::spawn(async move {
+            // The first refused packet is said where the owner sees it; the
+            // rest (a phone polling every few seconds) at debug.
+            let mut refusal_said = false;
+            // Packet types already reported as denied on this channel.
+            let mut denied_said = std::collections::HashSet::new();
             loop {
                 match read_framed_json::<NetworkPacket>(&mut recv0).await {
                     Ok(p) => {
@@ -107,20 +123,34 @@ pub async fn handle_v2_session(
                              && !pairing_packet
                              && !crate::plugins::pair::is_paired_device(&control_device_id)
                          {
-                             debug!(
-                                 "Blocking {packet_type} from unpaired {} \
-                                  (set pairing_required = false to disable)",
-                                 control_device_id
-                             );
+                             if refusal_said {
+                                 debug!(
+                                     "Blocking {packet_type} from unpaired {} \
+                                      (set pairing_required = false to disable)",
+                                     control_device_id
+                                 );
+                             } else {
+                                 refusal_said = true;
+                                 tracing::info!(
+                                     "Blocking {packet_type} from unpaired {} \
+                                      (later packets at debug)",
+                                     control_device_id
+                                 );
+                             }
                              continue;
                          }
                          // F5: the owner's per-device permissions (spec P3).
                          if !pairing_packet
                              && !crate::plugins::pair::permits(&control_device_id, &packet_type)
                          {
-                             tracing::info!(
-                                 "Denied {packet_type} from {control_device_id}: not permitted for this device"
-                             );
+                             if denied_said.insert(packet_type.clone()) {
+                                 tracing::info!(
+                                     "Denied {packet_type} from {control_device_id}: not \
+                                      permitted for this device (later ones at debug)"
+                                 );
+                             } else {
+                                 debug!("Denied {packet_type} from {control_device_id}: not permitted");
+                             }
                              continue;
                          }
 
@@ -150,7 +180,14 @@ pub async fn handle_v2_session(
                 uni = conn.accept_uni() => {
                     match uni {
                         Ok(recv) => {
-                            tokio::spawn(handle_unidirectional_stream(recv).instrument(info_span!("uni_stream")));
+                            tokio::spawn(
+                                async move {
+                                    if let Err(e) = handle_unidirectional_stream(recv).await {
+                                        warn!("v2 stream refused: {e}");
+                                    }
+                                }
+                                .instrument(info_span!("uni_stream")),
+                            );
                         }
                         Err(e) => {
                             handle_conn_error(e);
@@ -161,7 +198,14 @@ pub async fn handle_v2_session(
                 bi = conn.accept_bi() => {
                     match bi {
                         Ok((send, recv)) => {
-                            tokio::spawn(handle_bidirectional_stream(send, recv).instrument(info_span!("bi_stream")));
+                            tokio::spawn(
+                                async move {
+                                    if let Err(e) = handle_bidirectional_stream(send, recv).await {
+                                        warn!("v2 stream refused: {e}");
+                                    }
+                                }
+                                .instrument(info_span!("bi_stream")),
+                            );
                         }
                         Err(e) => {
                             handle_conn_error(e);
@@ -309,5 +353,29 @@ impl DeviceSender for QuicDeviceSender {
         let mut guard = self.send.lock().await;
         write_framed_json(&mut guard, packet).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity(id: &str, name: &str) -> IdentityPacketV2 {
+        IdentityPacketV2 {
+            device_id: id.to_string(),
+            device_name: name.to_string(),
+            min_version: 2,
+            max_version: 2,
+            capabilities: vec![],
+        }
+    }
+
+    #[test]
+    fn a_v2_peer_needs_a_short_printable_id_and_name() {
+        assert!(usable_identity(&identity("0d7c3a52", "Galaxy A71")));
+        assert!(!usable_identity(&identity("phone\nWARN forged", "Galaxy")));
+        assert!(!usable_identity(&identity("0d7c3a52", "\u{1b}[31mred")));
+        assert!(!usable_identity(&identity("0d7c3a52", &"x".repeat(4096))));
+        assert!(!usable_identity(&identity("", "Galaxy")));
     }
 }

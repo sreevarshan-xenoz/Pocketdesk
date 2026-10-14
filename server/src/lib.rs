@@ -7,6 +7,7 @@ pub mod audio_control;
 pub mod bench;
 pub mod cli;
 pub mod config;
+pub mod conn_budget;
 pub mod driving;
 pub mod hypr_events;
 pub mod hyprland;

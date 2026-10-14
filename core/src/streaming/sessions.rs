@@ -21,11 +21,25 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::connection::{SharedConnection, TransportFamily};
 
+/// What a streaming session was given when it started (F5). It keeps
+/// these for its life, so the server ends it when the owner takes one away.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Streamed {
+    /// Its input is injected (not view-only by permission).
+    pub input: bool,
+    /// Desktop sound is sent.
+    pub audio: bool,
+    /// The phone's mic is played.
+    pub mic: bool,
+}
+
 /// One currently-live streaming session, safe to render or serialize.
 #[derive(Debug, Clone)]
 pub struct LiveSession {
     /// Registry id — stable for the process lifetime, used for diffing.
     pub id: u64,
+    /// What the session was given when it started.
+    pub streamed: Streamed,
     /// The device id the client announced on its pre-pipeline stream
     /// (`None` for a client too old to announce; pairing gates reject
     /// those when enabled).
@@ -58,10 +72,15 @@ fn registry() -> &'static Mutex<Registry> {
 /// Only reachable from the capture-gated pipeline (`run_pipeline`), so it
 /// is legitimately dead in client-only builds.
 #[cfg_attr(not(feature = "capture"), allow(dead_code))]
-pub(crate) fn register(device_id: Option<String>, connection: &SharedConnection) -> SessionHandle {
+pub(crate) fn register(
+    device_id: Option<String>,
+    connection: &SharedConnection,
+    streamed: Streamed,
+) -> SessionHandle {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let info = LiveSession {
         id,
+        streamed,
         device_id,
         peer: connection.remote_address(),
         lan: matches!(connection.transport_family(), TransportFamily::Quinn),
@@ -131,6 +150,16 @@ pub fn matches(info: &LiveSession, target: &str) -> bool {
         Some(id) => id == target || (target.len() >= 6 && id.starts_with(target)),
         None => info.peer.ip().to_string() == target,
     }
+}
+
+/// End the one session with registry id `id`, closing its connection with
+/// `reason` (the phone shows it). Unlike [`kick`], which takes a target
+/// string where `all` or an id prefix can name other devices' sessions,
+/// this names exactly one.
+pub fn end_session(id: u64, reason: &[u8]) -> Option<LiveSession> {
+    let entry = registry().lock().ok()?.sessions.remove(&id)?;
+    entry.connection.close(0u32, reason);
+    Some(entry.info)
 }
 
 /// Close every session matching `target` and return what was kicked.
@@ -230,7 +259,7 @@ mod tests {
         let _guard = test_lock();
         let before = list().len();
         let (conn, _closed) = dummy(true, 201);
-        let handle = register(Some("devregister1".into()), &conn);
+        let handle = register(Some("devregister1".into()), &conn, Streamed::default());
         let live = list();
         assert!(
             live.iter()
@@ -241,10 +270,30 @@ mod tests {
     }
 
     #[test]
+    fn ending_a_session_by_id_touches_no_other() {
+        let _guard = test_lock();
+        let (short, short_closed) = dummy(true, 203);
+        let (long, long_closed) = dummy(true, 204);
+        let short_handle = register(Some("abcdef".into()), &short, Streamed::default());
+        let _long_handle = register(Some("abcdef123".into()), &long, Streamed::default());
+        let ended = end_session(short_handle.id(), b"not paired");
+        assert_eq!(ended.map(|s| s.device_id), Some(Some("abcdef".to_string())));
+        assert!(short_closed.load(Ordering::Relaxed));
+        assert!(
+            !long_closed.load(Ordering::Relaxed),
+            "a device id another one starts with ends only its own session"
+        );
+        assert!(
+            end_session(short_handle.id(), b"again").is_none(),
+            "ended once"
+        );
+    }
+
+    #[test]
     fn kick_matches_id_prefix_and_closes_connection() {
         let _guard = test_lock();
         let (conn, closed) = dummy(false, 202);
-        let _handle = register(Some("abcdef123456".into()), &conn);
+        let _handle = register(Some("abcdef123456".into()), &conn, Streamed::default());
         // < 6-char prefixes must not match anything (this run registers no
         // other sessions, so a hit on "abc" would be a false positive).
         assert!(kick("abc").is_empty());
@@ -262,6 +311,7 @@ mod tests {
     #[test]
     fn matches_rules() {
         let info = LiveSession {
+            streamed: Streamed::default(),
             id: 1,
             device_id: Some("deadbeefcafe".into()),
             peer: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1),
@@ -275,6 +325,7 @@ mod tests {
         assert!(!matches(&info, "cafe"));
         assert!(!matches(&info, ""));
         let anonymous = LiveSession {
+            streamed: Streamed::default(),
             id: 2,
             device_id: None,
             peer: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 7)), 9),

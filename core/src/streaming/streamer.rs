@@ -394,7 +394,15 @@ impl StreamingServer {
         // desktop can list it (`pocketdesk status`) or end it
         // (`pocketdesk kick`); the handle deregisters when this function
         // exits by any path.
-        let _live_session = super::sessions::register(device_id.clone(), &connection);
+        let _live_session = super::sessions::register(
+            device_id.clone(),
+            &connection,
+            super::sessions::Streamed {
+                input: !force_view_only,
+                audio: allow_audio,
+                mic: allow_mic,
+            },
+        );
         // Input is tagged with this session, so the server can tell which
         // phone drives when several are connected (roadmap N7).
         let live_id = _live_session.id();
@@ -1316,10 +1324,16 @@ async fn read_client_config(
                 break;
             }
             match String::from_utf8(id) {
-                Ok(id) => {
+                Ok(id) if crate::protocol::kdeconnect::valid_device_id(&id) => {
                     info!("Client identity: deviceId={}", id);
                     claim.device_id = Some(id);
                 }
+                // Control characters would reach logs, notifications and the
+                // owner's approval prompt: no id, which the gate refuses.
+                Ok(id) => warn!(
+                    "Ignored an invalid device id: {:?}",
+                    id.chars().take(40).collect::<String>()
+                ),
                 Err(e) => debug!("Malformed device identity stream: {e}"),
             }
         } else if marker == IROH_KEY_MARKER {

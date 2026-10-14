@@ -43,6 +43,23 @@ fn pins() -> &'static Mutex<HashMap<String, PinEntry>> {
     PINS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// PINs (from the CLI or the app) that have paired a phone this run, each
+/// with its minting time: the same six digits minted again are a new PIN.
+fn spent_pins() -> &'static Mutex<std::collections::HashSet<(String, u64)>> {
+    static SPENT: OnceLock<Mutex<std::collections::HashSet<(String, u64)>>> = OnceLock::new();
+    SPENT.get_or_init(Mutex::default)
+}
+
+/// Spend the PIN minted at `minted_unix`: true the first time only, so of two
+/// phones sending it at once just one pairs. One PIN, one phone, even when
+/// its file could not be deleted.
+fn spend_pin(pin: &str, minted_unix: u64) -> bool {
+    spent_pins()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert((pin.to_string(), minted_unix))
+}
+
 /// Is the device a connection goes by paired? On both transports the
 /// connection key is the deviceId itself (phase B), so trust is never
 /// borrowed from another connection's announcement. The TCP control channel
@@ -260,9 +277,7 @@ fn decide_keys_in(
 
 /// A deviceId a connection may go by: short printable text. It keys the
 /// connection's state and appears in logs and notifications.
-pub(crate) fn valid_device_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
-}
+pub(crate) use pocketdesk_core::protocol::kdeconnect::valid_device_id;
 
 /// Where a control connection stands (phase B), re-read for every packet so
 /// a pairing, an unpairing or a key change applies at once.
@@ -505,10 +520,9 @@ fn pin_expired(entry: &PinEntry) -> bool {
 
 /// The live PIN file written by `pocketdesk pair` or the desktop app, as
 /// `(pin, grant_secs)` (format and expiry: `core::local::pin`).
-fn cli_pin() -> Option<(String, Option<u64>)> {
+fn cli_pin() -> Option<local_pin::FilePin> {
     let dir = state::state_dir().ok()?;
-    let file = local_pin::read(&dir, local_pin::now_unix())?;
-    Some((file.pin, file.grant_secs))
+    local_pin::read(&dir, local_pin::now_unix())
 }
 
 fn desktop_id_field() -> String {
@@ -712,9 +726,10 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         .is_some_and(|e| e.pin == pin);
     // R4 D3: only a CLI PIN can carry a scoped grant; the push flow (a PIN
     // this desktop generated itself) keeps trusting permanently.
+    // Matching spends it, in one step.
     let cli_grant: Option<Option<u64>> = cli_pin()
-        .filter(|(cli, _)| cli == pin)
-        .map(|(_, grant)| grant);
+        .filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix))
+        .map(|cli| cli.grant_secs);
     let matches_cli = cli_grant.is_some();
 
     if matches_pending || matches_cli {
@@ -722,8 +737,13 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         guesses().lock().expect("pair state").reset();
         // One PIN, one phone: a CLI/app PIN that has paired is spent, so a
         // code still on screen (or photographed) cannot pair another.
-        if matches_cli && let Ok(dir) = state::state_dir() {
-            let _ = local_pin::remove_if(&dir, pin);
+        if matches_cli {
+            // Spent for this run (above) even if its file cannot be deleted.
+            if let Ok(dir) = state::state_dir()
+                && let Err(e) = local_pin::remove_if(&dir, pin)
+            {
+                tracing::error!("The PIN that paired could not be deleted ({e}); it stays refused");
+            }
         }
         let grant_secs = cli_grant.flatten();
         // A guest grant binds the key that paired before anything is
@@ -782,7 +802,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         }
     } else {
         tracing::warn!("Pairing attempt from {conn} with a wrong/expired PIN");
-        let current = cli_pin().map(|(cli, _)| cli);
+        let current = cli_pin().map(|cli| cli.pin);
         let discard = guesses()
             .lock()
             .expect("pair state")
@@ -885,6 +905,20 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pin_that_paired_stays_spent() {
+        assert!(spend_pin("482913", 1_000), "the first phone pairs");
+        assert!(
+            !spend_pin("482913", 1_000),
+            "a second, even at once, does not"
+        );
+        assert!(spend_pin("482914", 1_000), "only that PIN");
+        assert!(
+            spend_pin("482913", 2_000),
+            "the same digits minted again are new"
+        );
+    }
     use pocketdesk_core::streaming::{PeerKey, SessionClaim};
 
     fn key_dir(name: &str) -> std::path::PathBuf {

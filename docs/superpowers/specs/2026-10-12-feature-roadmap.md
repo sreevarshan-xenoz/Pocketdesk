@@ -63,6 +63,12 @@ Each item gets its own spec section, results written into the checklist, and fix
 | R4 | **What a session costs.** Idle CPU, memory and background traffic of the server, and the phone's battery over an hour, added to Diagnostics and the session record. | Numbers in the checklist. |
 | R5 | **Honest docs.** Normal WAN access needs no port forward; only waking from outside does. First-contact trust and what the DHT exposes are stated up front. A platform-parity table (Linux / Windows / Android) and a release checklist. | README and SECURITY.md changes. |
 
+**Status (2026-10-14):**
+- **R1:** run on the Azure Linux VM; eight bugs found and fixed. Input on a real Linux desktop, files and notifications on Linux, and other compositors are owed (checklist §44).
+- **R3:** done (branch `fix/r3-security`). Every case has a test, and the fresh review's five Important findings are fixed (`2026-10-14-phase-r-reliability.md`).
+- **R4:** the desktop's idle cost is measured on Windows. The phone's battery, idle traffic and Linux are owed (checklist §45). Diagnostics and the session record do not show it yet.
+- **R2, R5:** next.
+
 **Deferred, with reason:**
 - A virtual display sized to the phone: Hyprland's write IPC is broken upstream, and Windows needs an indirect display driver.
 - Session recording.

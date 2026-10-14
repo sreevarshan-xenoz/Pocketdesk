@@ -14,7 +14,7 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest file name kept, in bytes (Linux allows 255).
 const MAX_NAME_BYTES: usize = 200;
 /// Transfers running at once; more are refused, not queued.
-const MAX_TRANSFERS: usize = 2;
+const MAX_TRANSFERS: usize = 4;
 /// The slowest transfer allowed, so a trickle cannot hold a slot forever.
 const MIN_BYTES_PER_SEC: u64 = 32 * 1024;
 /// The receiver's last word on a transfer, one byte after the data: the
@@ -31,11 +31,73 @@ pub const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 /// phone stops waiting at once instead of at its listener's timeout.
 pub const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
 
+/// Transfers running at once from one phone, so one phone cannot hold every
+/// slot and starve the others (R3). Two, not one: a phone sends its next
+/// queued file as soon as it reads the last one's status byte, which can be
+/// before the desktop has given that slot back, and an image sync or a
+/// download should not wait on a long share.
+const MAX_TRANSFERS_PER_PHONE: usize = 2;
+
+/// The transfer slots: so many for the desktop, and fewer for one phone.
+pub(crate) struct TransferSlots {
+    total: std::sync::Arc<tokio::sync::Semaphore>,
+    per_phone: usize,
+    running: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+
+/// One running transfer's place, given back (to the desktop and its phone)
+/// when it is dropped.
+pub(crate) struct TransferSlot {
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    phone: String,
+    running: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+
+impl TransferSlots {
+    fn new(total: usize, per_phone: usize) -> Self {
+        Self {
+            total: std::sync::Arc::new(tokio::sync::Semaphore::new(total)),
+            per_phone,
+            running: Default::default(),
+        }
+    }
+
+    /// A slot for a transfer with `phone`, or why there is none.
+    pub(crate) fn take(&self, phone: &str) -> std::result::Result<TransferSlot, String> {
+        let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        if running.get(phone).copied().unwrap_or(0) >= self.per_phone {
+            return Err("this phone's last transfer is still running".to_string());
+        }
+        let permit = self
+            .total
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| "the desktop is busy with other transfers".to_string())?;
+        *running.entry(phone.to_string()).or_insert(0) += 1;
+        Ok(TransferSlot {
+            _permit: permit,
+            phone: phone.to_string(),
+            running: self.running.clone(),
+        })
+    }
+}
+
+impl Drop for TransferSlot {
+    fn drop(&mut self) {
+        let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = running.get_mut(&self.phone) {
+            *n -= 1;
+            if *n == 0 {
+                running.remove(&self.phone);
+            }
+        }
+    }
+}
+
 /// The transfer slots, shared by every connection.
-pub(crate) fn transfer_slots() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
-    static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
-        std::sync::OnceLock::new();
-    SLOTS.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_TRANSFERS)))
+pub(crate) fn transfer_slots() -> &'static TransferSlots {
+    static SLOTS: std::sync::OnceLock<TransferSlots> = std::sync::OnceLock::new();
+    SLOTS.get_or_init(|| TransferSlots::new(MAX_TRANSFERS, MAX_TRANSFERS_PER_PHONE))
 }
 
 #[derive(Debug)]
@@ -155,14 +217,16 @@ impl Plugin for SharePlugin {
                         return Ok(());
                     }
                 };
-                let Ok(slot) = transfer_slots().clone().try_acquire_owned() else {
-                    tracing::warn!("File share of {name} refused: {MAX_TRANSFERS} already running");
-                    return Ok(());
+                let slot = match transfer_slots().take(sender.device_id()) {
+                    Ok(slot) => slot,
+                    Err(reason) => {
+                        tracing::warn!("File share of {name} refused: {reason}");
+                        return Ok(());
+                    }
                 };
 
                 let from = sender.device_id().to_string();
                 tokio::spawn(async move {
-                    let _slot = slot;
                     match receive_file(
                         SocketAddr::new(phone_ip, port),
                         tls,
@@ -174,6 +238,9 @@ impl Plugin for SharePlugin {
                     .await
                     {
                         Ok(path) => {
+                            // The bytes are in: give the slot back before the
+                            // bookkeeping, for the phone's next file.
+                            drop(slot);
                             tracing::info!("File received: {} ({size} bytes)", path.display());
                             on_received(&path, size, &from);
                         }
@@ -243,7 +310,7 @@ struct Fetch {
     path: PathBuf,
     /// The desktop app's send this download answers, if any.
     offer: Option<String>,
-    slot: tokio::sync::OwnedSemaphorePermit,
+    slot: TransferSlot,
 }
 
 fn plan_fetch(
@@ -265,10 +332,7 @@ fn plan_fetch(
     }
     // Taken before an offer is redeemed, so a busy desktop does not use up
     // the phone's one try.
-    let slot = transfer_slots()
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| format!("{MAX_TRANSFERS} transfers are already running"))?;
+    let slot = transfer_slots().take(sender.device_id())?;
     let (path, size, offer) = if let Some(path) = body.get("path").and_then(|v| v.as_str()) {
         let (path, size) = crate::plugins::file_browse::resolve_file(path)?;
         (path, size, None)
@@ -564,7 +628,7 @@ pub fn safe_file_name(raw: &str) -> String {
         .chars()
         .filter(|c| {
             !c.is_control()
-                && !is_invisible_format(*c)
+                && !pocketdesk_core::protocol::kdeconnect::is_invisible_format(*c)
                 && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
         })
         .collect();
@@ -583,16 +647,6 @@ pub fn safe_file_name(raw: &str) -> String {
 fn trim_name(name: &str) -> &str {
     name.trim_start_matches(['.', ' '])
         .trim_end_matches(['.', ' '])
-}
-
-/// Characters that change how a name reads without being seen: a
-/// right-to-left override makes "invoice<RLO>fdp.exe" read as
-/// "invoiceexe.pdf".
-fn is_invisible_format(c: char) -> bool {
-    matches!(
-        c,
-        '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
-    )
 }
 
 /// At most [`MAX_NAME_BYTES`], keeping a short extension: a long name loses
@@ -891,6 +945,36 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[test]
+    fn a_phones_next_file_is_not_refused_while_its_last_one_finishes() {
+        let slots = TransferSlots::new(MAX_TRANSFERS, MAX_TRANSFERS_PER_PHONE);
+        let finishing = slots.take("phone-a").unwrap();
+        let next = slots.take("phone-a").expect("the next queued file");
+        let other = slots
+            .take("phone-b")
+            .expect("another phone still gets a slot");
+        assert!(slots.take("phone-a").is_err(), "but not a third");
+        drop((finishing, next, other));
+    }
+
+    #[test]
+    fn one_phone_cannot_take_every_transfer_slot() {
+        let slots = TransferSlots::new(2, 1);
+        let a = slots.take("phone-a").unwrap();
+        assert!(
+            slots.take("phone-a").is_err(),
+            "a phone's second transfer waits"
+        );
+        let b = slots.take("phone-b").unwrap();
+        assert!(slots.take("phone-c").is_err(), "the desktop's limit");
+        drop(a);
+        assert!(
+            slots.take("phone-a").is_ok(),
+            "a finished transfer frees both"
+        );
+        drop(b);
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-share-{name}-{}", std::process::id()));

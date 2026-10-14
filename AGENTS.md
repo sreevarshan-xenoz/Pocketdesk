@@ -42,6 +42,22 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **Phase R3, hostile connections, and R4's first number (branch `fix/r3-security`; results in `docs/superpowers/specs/2026-10-14-phase-r-reliability.md`).**
+  - **Fixed, each with a test:**
+    - a phone no longer paired, or with Input, Sound or Mic turned off, loses its session within a second;
+    - only the phone that took privacy mode can refresh or end it;
+    - a 4 MiB cap on a control line and on a v2 frame;
+    - 8 connections per address and 128 in all, counted only once a QUIC address is proven; the WAN listener holds 128;
+    - device ids and v2 names must be short and printable, with no invisible characters;
+    - a PIN file needs its minting time, and a PIN that paired stays spent;
+    - two transfers per phone within four;
+    - a folder listing fits in one packet;
+    - refusals are logged at the default level.
+  - **Test seam:** `POCKETDESK_STATE_DIR` (absolute only) and `use_state_dir`. The new end-to-end test drives an unpaired phone's packets through the real TLS handler.
+  - **Fresh review (0 Critical, 5 Important), all fixed:** stale capability docs, forged QUIC addresses, a multi-file share losing its next file, the v2 handshake's unchecked id, and the WAN listener outside the budget.
+  - **Device-verified (A71 → Windows):** a LAN session through the QUIC Retry, three back-to-back shares with matching MD5s, a 15 000-file folder listed in part with the note.
+  - **R4:** the idle server uses 0.68 % of one core and 33 MB on Windows. Owed: the phone's battery, idle traffic, Linux.
+  - **Accepted limits** are in SECURITY.md (5: shared connection limits; 6: privacy mode and the Power permission).
 - 2026-10-14: **N7 (several phones at once), Phase R1 on Linux, and a change of plan (branch `feat/multi-phone`; spec `docs/superpowers/specs/2026-10-14-multiple-phones-design.md`, with an as-built section).**
   - **Plan.** After an outside review of the repo, the user agreed to stop adding features after N7 and prove what exists first: Phase R (roadmap). N8–N11 are paused.
   - **N7.**

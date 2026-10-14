@@ -126,6 +126,7 @@
     <string name="screen_chip">Pantalla %1$d, %2$d×%3$d</string>
     <string name="files_up">Subir</string>
     <string name="files_empty">Esta carpeta está vacía.</string>
+    <string name="files_truncated">Solo se muestran los primeros elementos de esta carpeta; es demasiado grande para mostrarla entera.</string>
     <string name="files_download_title">¿Descargar %1$s?</string>
     <string name="files_download_text">%1$s, se guarda en Descargas/Pocketdesk.</string>
     <string name="files_download">Descargar</string>

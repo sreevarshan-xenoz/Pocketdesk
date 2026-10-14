@@ -666,6 +666,31 @@ mod tests {
         assert!(InputPacket::decode(&[]).is_err());
     }
 
+    /// Whatever arrives on a phone's input stream, decoding returns an error
+    /// or a packet, and never panics (R3: malformed frames fail closed).
+    #[test]
+    fn decoding_garbage_never_panics() {
+        // A small xorshift: deterministic, so a failure reproduces.
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for round in 0..20_000 {
+            let len = (next() % 160) as usize;
+            let mut bytes: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            // Most rounds start with a real tag, so each decoder sees garbage.
+            if let Some(first) = bytes.first_mut()
+                && round % 4 != 0
+            {
+                *first %= 16;
+            }
+            let _ = InputPacket::decode(&bytes);
+        }
+    }
+
     #[test]
     fn test_unknown_tag() {
         assert!(InputPacket::decode(&[0xFF]).is_err());

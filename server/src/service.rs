@@ -430,11 +430,30 @@ pub async fn run(config: Config) -> Result<()> {
 
     tracing::info!("Press Ctrl+C to stop");
 
+    // At most a few connections per address and so many in all (R3): every
+    // accepted connection costs a task and buffers before it proves anything.
+    let budget = crate::conn_budget::ConnBudget::new(
+        crate::conn_budget::PER_ADDRESS,
+        crate::conn_budget::TOTAL,
+    );
+    let mut refused_said = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(60))
+        .unwrap_or_else(std::time::Instant::now);
+
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, peer_addr)) => {
+                        let Some(slot) = budget.admit(peer_addr.ip()) else {
+                            if refused_said.elapsed() >= Duration::from_secs(10) {
+                                refused_said = std::time::Instant::now();
+                                tracing::warn!(
+                                    "Refused a control connection from {peer_addr}: too many open"
+                                );
+                            }
+                            continue;
+                        };
                         tracing::info!("Incoming v1 TCP connection from {}", peer_addr);
                         if let Err(e) = pocketdesk_core::protocol::connection::keep_alive(&stream) {
                             tracing::debug!("No keepalive on {peer_addr}: {e}");
@@ -446,6 +465,7 @@ pub async fn run(config: Config) -> Result<()> {
                         let pairing_required = config.pairing_required;
                         let tls = control_tls.clone();
                         tokio::spawn(async move {
+                            let _slot = slot;
                             if let Err(error) = handle_connection_with_kde(
                                 stream,
                                 tls,
@@ -466,6 +486,18 @@ pub async fn run(config: Config) -> Result<()> {
             }
             quic_incoming = quic_endpoint.accept() => {
                 if let Some(incoming) = quic_incoming {
+                    let Some(incoming) = crate::conn_budget::proven(incoming) else {
+                        continue;
+                    };
+                    let peer = incoming.remote_address();
+                    let Some(slot) = budget.admit(peer.ip()) else {
+                        if refused_said.elapsed() >= Duration::from_secs(10) {
+                            refused_said = std::time::Instant::now();
+                            tracing::warn!("Refused a QUIC connection from {peer}: too many open");
+                        }
+                        incoming.refuse();
+                        continue;
+                    };
                     let registry_clone = Arc::clone(&registry);
                     let cert_manager_clone = Arc::clone(&cert_manager);
                     let local_v2_identity = local_v2_identity.clone();
@@ -477,6 +509,7 @@ pub async fn run(config: Config) -> Result<()> {
                     let mic_relay_device = config.mic_relay_device.clone();
 
                     tokio::spawn(async move {
+                        let _slot = slot;
                         let conn = match incoming.await {
                             Ok(c) => c,
                             Err(e) => {
@@ -800,20 +833,36 @@ async fn seed_desktop_state(
 /// it has proved anything; an identity packet is a few hundred bytes.
 const MAX_HANDSHAKE_LINE: u64 = 64 * 1024;
 
+/// The longest control packet a connection may send, as one line. The
+/// largest real ones (a clipboard text, a batch of texts) are far smaller;
+/// without a cap, one endless line from any TLS client, paired or not,
+/// would grow the server's memory until it ran out.
+const MAX_PACKET_LINE: u64 = 4 * 1024 * 1024;
+
 /// Read one handshake line of at most [`MAX_HANDSHAKE_LINE`] bytes.
 async fn read_handshake_line<R>(reader: &mut R, line: &mut String) -> std::io::Result<usize>
 where
     R: tokio::io::AsyncBufRead + Unpin,
 {
+    read_line_capped(reader, line, MAX_HANDSHAKE_LINE).await
+}
+
+/// Read one line of at most `limit` bytes; a longer one is an error, and
+/// the connection is dropped.
+async fn read_line_capped<R>(
+    reader: &mut R,
+    line: &mut String,
+    limit: u64,
+) -> std::io::Result<usize>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
     use tokio::io::AsyncReadExt;
-    let read = (&mut *reader)
-        .take(MAX_HANDSHAKE_LINE)
-        .read_line(line)
-        .await?;
-    if read as u64 == MAX_HANDSHAKE_LINE && !line.ends_with('\n') {
+    let read = (&mut *reader).take(limit).read_line(line).await?;
+    if read as u64 == limit && !line.ends_with('\n') {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "handshake line too long",
+            format!("line longer than {limit} bytes"),
         ));
     }
     Ok(read)
@@ -911,10 +960,13 @@ async fn handle_connection_with_kde(
 
         // Step 1: POCKETDESK_HELLO handshake
         let mut line = String::new();
-        let bytes = timeout(Duration::from_secs(8), read_handshake_line(&mut reader, &mut line))
-            .await
-            .context("connection handshake timeout")?
-            .context("failed to read incoming handshake")?;
+        let bytes = timeout(
+            Duration::from_secs(8),
+            read_handshake_line(&mut reader, &mut line),
+        )
+        .await
+        .context("connection handshake timeout")?
+        .context("failed to read incoming handshake")?;
 
         if bytes == 0 {
             tracing::info!("Connection closed by peer before handshake");
@@ -955,10 +1007,13 @@ async fn handle_connection_with_kde(
         // proved (phase B). The connection goes by that id from here on, so
         // nothing about it rests on its IP address.
         let mut line = String::new();
-        let bytes = timeout(Duration::from_secs(5), read_handshake_line(&mut reader, &mut line))
-            .await
-            .context("identity timeout")?
-            .context("failed to read the peer's identity")?;
+        let bytes = timeout(
+            Duration::from_secs(5),
+            read_handshake_line(&mut reader, &mut line),
+        )
+        .await
+        .context("identity timeout")?
+        .context("failed to read the peer's identity")?;
         if bytes == 0 {
             tracing::info!("Connection closed by peer before its identity");
             return Ok(());
@@ -1019,6 +1074,12 @@ async fn handle_connection_with_kde(
         // on this connection is seeded the moment it does (below), rather
         // than waiting for the periodic pushes.
         let mut seeded = false;
+        // The first refused packet on a connection is said where the owner
+        // sees it; the rest (a phone polling every few seconds) at debug.
+        let mut refusal_said = false;
+        // Packet types already reported as denied on this connection: a
+        // phone polling with a permission off would otherwise log each poll.
+        let mut denied_said = std::collections::HashSet::new();
         if state::may_receive_pushes(&*sender) {
             seed_desktop_state(&sender, hypr_ipc, wan_endpoint, local_ip).await;
             seeded = true;
@@ -1027,7 +1088,11 @@ async fn handle_connection_with_kde(
         tracing::info!("Entering main packet loop");
         loop {
             let mut line = String::new();
-            let read_result = timeout(Duration::from_secs(60), reader.read_line(&mut line)).await;
+            let read_result = timeout(
+                Duration::from_secs(60),
+                read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE),
+            )
+            .await;
 
             match read_result {
                 Ok(Ok(0)) => {
@@ -1047,7 +1112,9 @@ async fn handle_connection_with_kde(
                             // handshake; another would re-point it at a
                             // different device.
                             if packet_type == "kdeconnect.identity" {
-                                tracing::warn!("Ignored a second identity on {device_id}'s connection");
+                                tracing::warn!(
+                                    "Ignored a second identity on {device_id}'s connection"
+                                );
                                 continue;
                             }
                             // PIN pairing enforcement (Tier-2 #11b): before a
@@ -1060,28 +1127,42 @@ async fn handle_connection_with_kde(
                             // Re-read per packet: pairing, unpairing or a key
                             // change applies to a connection already open.
                             use crate::plugins::pair::Standing;
-                            let may_act = match crate::plugins::pair::standing(
-                                &device_id,
-                                peer_key.as_ref(),
-                            ) {
-                                Standing::Paired => true,
-                                Standing::Unpaired => !pairing_required,
-                                Standing::WrongKey(_) => false,
-                            };
+                            let may_act =
+                                match crate::plugins::pair::standing(&device_id, peer_key.as_ref())
+                                {
+                                    Standing::Paired => true,
+                                    Standing::Unpaired => !pairing_required,
+                                    Standing::WrongKey(_) => false,
+                                };
                             if !pairing_packet && !may_act {
-                                tracing::debug!(
-                                    "Blocking {packet_type} from {device_id}: not paired, \
-                                     or not with this key"
-                                );
+                                if refusal_said {
+                                    tracing::debug!(
+                                        "Blocking {packet_type} from {device_id}: not paired, \
+                                         or not with this key"
+                                    );
+                                } else {
+                                    refusal_said = true;
+                                    tracing::info!(
+                                        "Blocking {packet_type} from {device_id}: not paired, \
+                                         or not with this key (later packets at debug)"
+                                    );
+                                }
                                 continue;
                             }
                             // F5: the owner's per-device permissions (spec P3).
                             if !pairing_packet
                                 && !crate::plugins::pair::permits(&device_id, &packet_type)
                             {
-                                tracing::info!(
-                                    "Denied {packet_type} from {device_id}: not permitted for this device"
-                                );
+                                if denied_said.insert(packet_type.clone()) {
+                                    tracing::info!(
+                                        "Denied {packet_type} from {device_id}: not permitted \
+                                         for this device (later ones at debug)"
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        "Denied {packet_type} from {device_id}: not permitted"
+                                    );
+                                }
                                 continue;
                             }
                             let packet_span = tracing::debug_span!("packet", type = %packet_type);
@@ -1391,6 +1472,99 @@ mod control_tls_tests {
         addr
     }
 
+    /// Counts the packets the connection handler dispatches to it.
+    struct Counting(Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::protocol::kdeconnect::Plugin for Counting {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+        fn incoming_capabilities(&self) -> &'static [&'static str] {
+            &["kdeconnect.ping"]
+        }
+        fn outgoing_capabilities(&self) -> &'static [&'static str] {
+            &[]
+        }
+        async fn handle_packet(
+            &self,
+            _packet: &NetworkPacket,
+            _sender: &dyn pocketdesk_core::protocol::kdeconnect::DeviceSender,
+        ) -> pocketdesk_core::error::Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// A control port served by the real handler with one counting plugin.
+    async fn counting_port(
+        pairing_required: bool,
+    ) -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+        // The gates read a throwaway state folder, never the user's.
+        pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let desktop = CertManager::new().unwrap();
+        let tls = tokio_rustls::TlsAcceptor::from(desktop.control_server_config().unwrap());
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut registry = pocketdesk_core::protocol::kdeconnect::PluginRegistry::default();
+        registry.register(Counting(count.clone()));
+        let registry = Arc::new(registry);
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let tls = tls.clone();
+                let registry = registry.clone();
+                tokio::spawn(async move {
+                    let _ = handle_connection_with_kde(
+                        stream,
+                        tls,
+                        None,
+                        &registry,
+                        None,
+                        None,
+                        pairing_required,
+                    )
+                    .await;
+                });
+            }
+        });
+        (addr, count)
+    }
+
+    /// Connect as a new phone and send one ping; the dispatch count after.
+    async fn ping(addr: std::net::SocketAddr, count: &std::sync::atomic::AtomicUsize) -> usize {
+        let phone = CertManager::new().unwrap();
+        let identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
+            format!("gate-test-{}", uuid::Uuid::new_v4()),
+            "Gate Test Phone",
+        );
+        let mut stream =
+            ConnectionManager::new(Duration::from_secs(5), phone.control_client_config())
+                .connect(&addr.ip().to_string(), addr.port(), &identity)
+                .await
+                .expect("the control channel over TLS");
+        let mut line = NetworkPacket::new("kdeconnect.ping").to_wire().unwrap();
+        if !line.ends_with(b"\n") {
+            line.push(b'\n');
+        }
+        stream.write_all(&line).await.unwrap();
+        stream.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn an_unpaired_phones_packets_are_never_dispatched() {
+        let (addr, count) = counting_port(true).await;
+        assert_eq!(ping(addr, &count).await, 0, "refused before any plugin");
+        // The same packet with pairing off reaches the plugin: the refusal
+        // above is the gate, not a test that cannot see dispatches.
+        let (open_addr, open_count) = counting_port(false).await;
+        assert_eq!(ping(open_addr, &open_count).await, 1);
+    }
+
     #[tokio::test]
     async fn a_client_without_tls_is_told_and_dropped() {
         let addr = control_port().await;
@@ -1458,6 +1632,32 @@ mod handshake_line_tests {
             19
         );
         assert_eq!(line.trim(), HANDSHAKE_HELLO);
+    }
+
+    #[tokio::test]
+    async fn a_packet_line_has_a_limit_too() {
+        let endless = vec![b'x'; (MAX_PACKET_LINE + 1024) as usize];
+        let mut reader = BufReader::new(&endless[..]);
+        let mut line = String::new();
+        assert!(
+            read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE)
+                .await
+                .is_err(),
+            "one endless line cannot fill the desktop's memory"
+        );
+        let packet = format!(
+            "{{\"type\":\"kdeconnect.ping\",\"body\":\"{}\"}}
+",
+            "y".repeat(100_000)
+        );
+        let mut reader = BufReader::new(packet.as_bytes());
+        let mut line = String::new();
+        assert_eq!(
+            read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE)
+                .await
+                .unwrap(),
+            packet.len()
+        );
     }
 }
 
