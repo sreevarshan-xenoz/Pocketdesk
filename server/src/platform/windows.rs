@@ -94,7 +94,11 @@ fn toast_xml(summary: &str, body: &str) -> String {
     )
 }
 
-fn show_toast(summary: &str, body: &str) -> windows::core::Result<()> {
+/// The toast group a phone's notifications (N5a) are shown in, so a tag can
+/// address one of them for removal (N5c).
+const PHONE_GROUP: &str = "phone";
+
+fn show_toast(summary: &str, body: &str, tag: Option<&str>) -> windows::core::Result<()> {
     // The calling thread may never have touched WinRT; an apartment that is
     // already initialized makes this a no-op error worth ignoring.
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
@@ -102,11 +106,43 @@ fn show_toast(summary: &str, body: &str) -> windows::core::Result<()> {
     let doc = XmlDocument::new()?;
     doc.LoadXml(&HSTRING::from(toast_xml(summary, body)))?;
     let toast = ToastNotification::CreateToastNotification(&doc)?;
+    if let Some(tag) = tag {
+        toast.SetTag(&HSTRING::from(tag))?;
+        toast.SetGroup(&HSTRING::from(PHONE_GROUP))?;
+    }
     ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)
 }
 
+/// Show a phone's notification as a toast that [`remove_tagged`] can take
+/// back by `tag` (at most 64 characters).
+pub(super) fn notify_tagged(summary: &str, body: &str, tag: &str) -> bool {
+    match show_toast(summary, body, Some(tag)) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::debug!("toast notification failed: {e}");
+            false
+        }
+    }
+}
+
+/// Take the phone toast tagged `tag` off the screen and out of the Action
+/// Center. A tag that is not there is no error.
+pub(super) fn remove_tagged(tag: &str) {
+    let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
+    let removed = ToastNotificationManager::History().and_then(|history| {
+        history.RemoveGroupedTagWithId(
+            &HSTRING::from(tag),
+            &HSTRING::from(PHONE_GROUP),
+            &HSTRING::from(AUMID),
+        )
+    });
+    if let Err(e) = removed {
+        tracing::debug!("could not remove the toast {tag}: {e}");
+    }
+}
+
 pub(super) fn notify(summary: &str, body: &str) -> bool {
-    match show_toast(summary, body) {
+    match show_toast(summary, body, None) {
         Ok(()) => true,
         Err(e) => {
             tracing::debug!("toast notification failed: {e}");
@@ -226,6 +262,41 @@ pub(super) fn force_stop(pid: u32) -> std::io::Result<bool> {
 mod tests {
     use super::*;
     use windows::Win32::UI::HiDpi::{AreDpiAwarenessContextsEqual, GetThreadDpiAwarenessContext};
+
+    /// The phone toasts in the Action Center, by tag.
+    fn phone_tags_in_history() -> Vec<String> {
+        let history = ToastNotificationManager::History()
+            .and_then(|h| h.GetHistoryWithId(&HSTRING::from(AUMID)))
+            .expect("toast history");
+        (0..history.Size().unwrap())
+            .filter_map(|i| history.GetAt(i).ok())
+            .filter(|t| t.Group().map(|g| g == PHONE_GROUP).unwrap_or(false))
+            .filter_map(|t| t.Tag().ok().map(|tag| tag.to_string()))
+            .collect()
+    }
+
+    /// Live (N5c): a tagged phone toast is in the Action Center until its tag
+    /// is removed. Flashes one toast.
+    /// `cargo test -p pocketdesk-server --lib a_tagged_toast -- --ignored`.
+    #[test]
+    #[ignore = "shows a real toast on an interactive Windows desktop"]
+    fn a_tagged_toast_can_be_taken_back() {
+        let tag = "0123456789abcdef";
+        assert!(notify_tagged(
+            "Pocketdesk test",
+            "This toast removes itself",
+            tag
+        ));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(phone_tags_in_history().iter().any(|t| t == tag), "shown");
+        remove_tagged(tag);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(
+            !phone_tags_in_history().iter().any(|t| t == tag),
+            "taken back"
+        );
+        remove_tagged("not-there");
+    }
 
     #[test]
     fn the_process_ends_up_per_monitor_v2_aware() {
