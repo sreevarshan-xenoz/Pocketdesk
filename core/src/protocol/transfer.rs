@@ -13,8 +13,8 @@
 //!    the next attempt starts from 0).
 //! 4. The sender: the bytes from `offset` to the end.
 //! 5. The sender: the SHA-256 of the whole file.
-//! 6. The receiver: [`STATUS_SAVED`] when its own hash of the whole file
-//!    matches, else [`STATUS_FAILED`].
+//! 6. The receiver ([`finish`]): [`STATUS_SAVED`] once its own hash of the
+//!    whole file matched and the file is kept, else [`STATUS_FAILED`].
 //!
 //! The receiver is the authority on the offset (as in tus); the prefix hash
 //! proves the sender is sending the same file before anything is appended,
@@ -241,7 +241,8 @@ pub struct Have {
 /// holds when the sender sends the same file. `expected` is the size the
 /// request announced, if it did; `max` the largest accepted.
 /// `on_commit(size, committed)` is called each time more is durable, so the
-/// caller can record it. On success `partial` holds exactly the file.
+/// caller can record it. On success `partial` holds exactly the file, and
+/// the caller ends the transfer with [`finish`] once it has kept it.
 ///
 /// After [`TransferError::SourceChanged`] the partial is empty; after a
 /// connection failure it keeps what was committed, for the next attempt.
@@ -353,22 +354,40 @@ where
         stream.read_exact(&mut trailer),
     )
     .await?;
-    let saved = hasher.finalize().as_slice() == trailer;
-    if !saved {
+    if hasher.finalize().as_slice() != trailer {
         // Nothing of a damaged file is worth continuing.
         partial.truncate(0).await?;
         partial.sync().await?;
         on_commit(size, 0);
+        finish(stream, false, pace).await;
+        return Err(TransferError::Corrupt);
     }
+    // The status waits for the caller, who sends it with [`finish`] once the
+    // file is where it is kept: "saved" must mean saved.
+    Ok(offset)
+}
+
+/// The receiver's last word: the status byte, then a clean close. After a
+/// save, what the sender still has in flight is read and dropped first: a
+/// socket closed with unread data is reset, and the reset can overtake the
+/// status byte. After a failure it closes at once (the sender may still be
+/// sending, and a lost "failed" reads as failed anyway). Best effort.
+pub async fn finish<S>(stream: &mut S, saved: bool, pace: Pace)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let status = if saved { STATUS_SAVED } else { STATUS_FAILED };
-    // Best effort: the outcome here does not depend on the sender hearing it.
-    let _ = within(pace.idle, "sending the status", stream.write_all(&[status])).await;
-    let _ = within(pace.idle, "sending the status", stream.flush()).await;
-    if saved {
-        Ok(offset)
-    } else {
-        Err(TransferError::Corrupt)
-    }
+    let _ = within(pace.idle, "sending the status", async {
+        stream.write_all(&[status]).await?;
+        stream.flush().await?;
+        stream.shutdown().await?;
+        if saved {
+            let mut sink = [0u8; 512];
+            while stream.read(&mut sink).await? > 0 {}
+        }
+        Ok(())
+    })
+    .await;
 }
 
 async fn commit<P: Partial>(
@@ -478,18 +497,31 @@ mod tests {
         let (mut a, mut b) = tokio::io::duplex(256 * 1024);
         let mut reader: &[u8] = source;
         let size = source.len() as u64;
-        let mut furthest = 0;
-        let sending = send(&mut reader, size, &mut a, Pace::DEFAULT, |n| furthest = n);
-        let receiving = receive(
-            &mut b,
-            partial,
-            have,
-            Some(size),
-            MAX,
-            Pace::DEFAULT,
-            |_, _| {},
-        );
-        let (sent, received) = tokio::join!(sending, receiving);
+        let mut furthest = 0u64;
+        // The sender's end closes when it is done, as a real sender's does:
+        // the receiver's clean close waits for that.
+        let sending = async move {
+            let sent = send(&mut reader, size, &mut a, Pace::DEFAULT, |n| furthest = n).await;
+            drop(a);
+            (sent, furthest)
+        };
+        let receiving = async {
+            let received = receive(
+                &mut b,
+                partial,
+                have,
+                Some(size),
+                MAX,
+                Pace::DEFAULT,
+                |_, _| {},
+            )
+            .await;
+            if received.is_ok() {
+                finish(&mut b, true, Pace::DEFAULT).await;
+            }
+            received
+        };
+        let ((sent, furthest), received) = tokio::join!(sending, receiving);
         (sent, received, furthest)
     }
 
