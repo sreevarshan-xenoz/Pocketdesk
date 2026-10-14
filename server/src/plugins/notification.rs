@@ -48,6 +48,29 @@ fn flood_guard() -> &'static Mutex<FloodGuard> {
     GUARD.get_or_init(Default::default)
 }
 
+/// The longest app name, title and text shown, in characters.
+const MAX_APP: usize = 64;
+const MAX_TITLE: usize = 200;
+const MAX_TEXT: usize = 1000;
+
+/// `raw` as a phone may have it shown: control characters (other than line
+/// breaks) dropped, trimmed, and cut to `max` characters with an ellipsis.
+/// The text comes from any app on the phone, and so from anyone who can
+/// send that app a message.
+fn clean(raw: &str, max: usize) -> String {
+    let kept: String = raw
+        .chars()
+        .filter(|c| *c == '\n' || !c.is_control())
+        .collect();
+    let kept = kept.trim();
+    if kept.chars().count() <= max {
+        return kept.to_string();
+    }
+    let mut cut: String = kept.chars().take(max - 1).collect();
+    cut.push('…');
+    cut
+}
+
 /// A notification packet to show: its app, title and text, or `None` for
 /// one that only cancels (`isCancel`, N5c) or says nothing.
 fn to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
@@ -55,11 +78,15 @@ fn to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
         return None;
     }
     let field = |key: &str| {
+        let max = match key {
+            "app" => MAX_APP,
+            "title" => MAX_TITLE,
+            _ => MAX_TEXT,
+        };
         body.get(key)
             .and_then(|v| v.as_str())
-            .map(str::trim)
+            .map(|s| clean(s, max))
             .filter(|s| !s.is_empty())
-            .map(str::to_string)
     };
     let (title, text) = (field("title"), field("text"));
     if title.is_none() && text.is_none() {
@@ -147,6 +174,9 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
         detail: format!("D-Bus proxy failed: {e}"),
     })?;
 
+    // Markup is escaped: the text may be a stranger's (N5a).
+    let summary = crate::platform::markup_escaped(summary);
+    let body = crate::platform::markup_escaped(body);
     proxy
         .call::<_, _, u32>(
             "Notify",
@@ -154,8 +184,8 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
                 "pocketdesk",                                                      // app_name
                 0u32,                                                              // replaces_id
                 "",                                                                // app_icon
-                summary,                                                           // summary
-                body,                                                              // body
+                summary.as_str(),                                                  // summary
+                body.as_str(),                                                     // body
                 Vec::<String>::new(),                                              // actions
                 std::collections::HashMap::<String, zbus::zvariant::Value>::new(), // hints
                 5000i32, // timeout (5 seconds)
@@ -221,6 +251,21 @@ mod tests {
         assert!(
             guard.admit("phone", start + Duration::from_secs(61)),
             "a minute later it may show again"
+        );
+    }
+
+    #[test]
+    fn a_phones_text_is_cut_to_length_and_rid_of_control_characters() {
+        assert_eq!(clean("  a\u{0007}b\nc\u{001b}[31m ", 10), "ab\nc[31m");
+        let long = "x".repeat(MAX_TEXT + 50);
+        let shown = to_show(&json!({"title": "t", "text": long})).unwrap().2;
+        assert_eq!(shown.chars().count(), MAX_TEXT);
+        assert!(shown.ends_with('…'));
+        let (app, title, _) =
+            to_show(&json!({"app": "A".repeat(500), "title": "T".repeat(500)})).unwrap();
+        assert_eq!(
+            (app.chars().count(), title.chars().count()),
+            (MAX_APP, MAX_TITLE)
         );
     }
 
