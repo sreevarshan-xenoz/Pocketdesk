@@ -5,7 +5,9 @@ import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.bridge.RustCore
 import org.json.JSONObject
 import java.net.Inet4Address
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
+import java.net.Socket
 
 /**
  * Wakes a saved computer the way its [WakePlan] says (N6): from the phone
@@ -54,6 +56,13 @@ object Waker {
                     IllegalStateException("the phone is away from its network, and no outside wake port is set up"),
                 )
         }
+
+    /**
+     * Whether the computer's server answers on its control port: it is
+     * awake (whatever address it is saved under, a LAN or tailnet one).
+     */
+    fun answers(address: String, controlPort: Int, timeoutMs: Int = 1_500): Boolean =
+        runCatching { Socket().use { it.connect(InetSocketAddress(address, controlPort), timeoutMs) } }.isSuccess
 
     /** Whether the phone is on the network of the computer at [address]. */
     fun atHome(ctx: Context, address: String): Boolean =

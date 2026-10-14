@@ -313,4 +313,10 @@
     <string name="settings_wake">எழுப்புதல்</string>
     <string name="settings_connect_after_wake">எழுப்பிய பின் இணை</string>
     <string name="settings_connect_after_wake_summary">கணினி பதிலளித்ததும் எழுப்புதல் அமர்வைத் திறக்கும்</string>
+    <string name="wake_offer_title">%1$s பதிலளிக்கவில்லை</string>
+    <string name="wake_offer_message">அது உறங்கிக்கொண்டிருக்கலாம். எழுப்பி, பதிலளித்ததும் இணைக்கவா?</string>
+    <string name="wake_and_connect">எழுப்பி இணை</string>
+    <string name="connect_anyway">இருந்தாலும் இணை</string>
+    <string name="settings_offer_wake">பதிலளிக்காத கணினியை எழுப்ப முன்வை</string>
+    <string name="settings_offer_wake_summary">இணைப்பதற்கு முன் சரிபார்த்து, எழுப்பி இணைக்க முன்வைக்கும்</string>
 </resources>

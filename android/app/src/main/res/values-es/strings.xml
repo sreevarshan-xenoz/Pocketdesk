@@ -318,4 +318,10 @@
     <string name="settings_wake">Encendido</string>
     <string name="settings_connect_after_wake">Conectar tras encender</string>
     <string name="settings_connect_after_wake_summary">Encender abre la sesión cuando el ordenador responde</string>
+    <string name="wake_offer_title">%1$s no responde</string>
+    <string name="wake_offer_message">Puede estar suspendido. ¿Encenderlo y conectar cuando responda?</string>
+    <string name="wake_and_connect">Encender y conectar</string>
+    <string name="connect_anyway">Conectar igualmente</string>
+    <string name="settings_offer_wake">Ofrecer encender un ordenador que no responde</string>
+    <string name="settings_offer_wake_summary">Conectar comprueba antes y ofrece Encender y conectar</string>
 </resources>

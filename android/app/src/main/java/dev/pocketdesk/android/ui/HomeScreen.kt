@@ -26,7 +26,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,16 +82,22 @@ fun HomeScreen(
     var wakeSettingsFor by remember { mutableStateOf<String?>(null) }
     // Bumped when wake settings change, so the cards re-read their plans.
     var wakeVersion by remember { mutableIntStateOf(0) }
-    val online by rememberUpdatedState(network.savedOnline)
+    // A computer that does not answer Connect, offered "Wake and connect".
+    var offeringWake by remember { mutableStateOf<HostStore.Host?>(null) }
 
-    // At home, the computer is awake once it announces itself again; away,
-    // nothing can be seen, so give it a moment and let the connection retry.
+    // The computer is awake once its server answers on the control port
+    // (whatever address it is saved under). Away, a LAN address never
+    // answers, so the wait is shorter and the connection retries by itself.
     LaunchedEffect(waking) {
         val w = waking ?: return@LaunchedEffect
         val limit = if (w.atHome) WAKE_WAIT_HOME_S else WAKE_WAIT_AWAY_S
-        for (left in limit downTo 1) {
-            wakingLeft = left
-            if (w.atHome && w.host.address in online) {
+        val started = System.currentTimeMillis()
+        while (true) {
+            val elapsed = ((System.currentTimeMillis() - started) / 1_000).toInt()
+            if (elapsed >= limit) break
+            wakingLeft = limit - elapsed
+            val awake = withContext(Dispatchers.IO) { Waker.answers(w.host.address, w.host.controlPort) }
+            if (awake) {
                 waking = null
                 if (w.connect) {
                     onConnect(w.host)
@@ -102,7 +107,7 @@ fun HomeScreen(
                 }
                 return@LaunchedEffect
             }
-            delay(1_000)
+            delay(2_000)
         }
         waking = null
         if (w.connect) {
@@ -110,6 +115,23 @@ fun HomeScreen(
         } else {
             wakeStatusRes = if (w.atHome) R.string.wake_no_answer else R.string.wake_sent
             wakeStatusArg = w.host.address
+        }
+    }
+
+    // Send the wake, then watch for the computer to answer.
+    fun startWake(host: HostStore.Host, connect: Boolean) {
+        wakeStatusRes = null
+        scope.launch(Dispatchers.IO) {
+            val result = Waker.wake(context, host.address)
+            val atHome = Waker.atHome(context, host.address)
+            withContext(Dispatchers.Main) {
+                if (result.isSuccess) {
+                    waking = Waking(host, atHome, connect)
+                } else {
+                    wakeStatusRes = R.string.wake_failed
+                    wakeStatusArg = result.exceptionOrNull()?.message
+                }
+            }
         }
     }
 
@@ -193,22 +215,22 @@ fun HomeScreen(
                         isAuto = autoConnect && host == hosts.first(),
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
-                        onConnect = { onConnect(host) },
-                        onWake = {
-                            wakeStatusRes = null
-                            scope.launch(Dispatchers.IO) {
-                                val result = Waker.wake(context, host.address)
-                                val atHome = Waker.atHome(context, host.address)
-                                withContext(Dispatchers.Main) {
-                                    if (result.isSuccess) {
-                                        waking = Waking(host, atHome, Prefs.connectAfterWake(context))
-                                    } else {
-                                        wakeStatusRes = R.string.wake_failed
-                                        wakeStatusArg = result.exceptionOrNull()?.message
+                        onConnect = {
+                            if (!Prefs.offerWake(context)) {
+                                onConnect(host)
+                            } else {
+                                // A computer that can be woken and does not
+                                // answer may be asleep: offer to wake it.
+                                scope.launch {
+                                    val asleep = withContext(Dispatchers.IO) {
+                                        Waker.canWake(Waker.planFor(context, host.address)) &&
+                                            !Waker.answers(host.address, host.controlPort)
                                     }
+                                    if (asleep) offeringWake = host else onConnect(host)
                                 }
                             }
                         },
+                        onWake = { startWake(host, Prefs.connectAfterWake(context)) },
                         onWakeSettings = { wakeSettingsFor = host.address },
                         onRemove = { removing = host },
                     )
@@ -276,6 +298,30 @@ fun HomeScreen(
                         onScan()
                     },
                 ) { Text(stringResource(R.string.scan_pairing_code)) }
+            },
+        )
+    }
+
+    offeringWake?.let { host ->
+        AlertDialog(
+            onDismissRequest = { offeringWake = null },
+            title = { Text(stringResource(R.string.wake_offer_title, host.address)) },
+            text = { Text(stringResource(R.string.wake_offer_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        offeringWake = null
+                        startWake(host, connect = true)
+                    },
+                ) { Text(stringResource(R.string.wake_and_connect)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        offeringWake = null
+                        onConnect(host)
+                    },
+                ) { Text(stringResource(R.string.connect_anyway)) }
             },
         )
     }

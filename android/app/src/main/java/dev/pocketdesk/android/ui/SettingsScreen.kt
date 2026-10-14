@@ -172,6 +172,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 stringResource(R.string.settings_connect_after_wake_summary),
                 Prefs.connectAfterWake(context),
             ) { Prefs.setConnectAfterWake(context, it) }
+            boolRow(
+                LlIcons.Desktop,
+                stringResource(R.string.settings_offer_wake),
+                stringResource(R.string.settings_offer_wake_summary),
+                Prefs.offerWake(context),
+            ) { Prefs.setOfferWake(context, it) }
 
             PhoneNotificationsSection()
             TextsSection()

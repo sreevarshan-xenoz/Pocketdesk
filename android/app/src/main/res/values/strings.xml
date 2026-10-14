@@ -320,4 +320,10 @@
     <string name="settings_wake">Wake</string>
     <string name="settings_connect_after_wake">Connect after waking</string>
     <string name="settings_connect_after_wake_summary">Wake opens the session once the computer answers</string>
+    <string name="wake_offer_title">%1$s does not answer</string>
+    <string name="wake_offer_message">It may be asleep. Wake it, and connect once it answers?</string>
+    <string name="wake_and_connect">Wake and connect</string>
+    <string name="connect_anyway">Connect anyway</string>
+    <string name="settings_offer_wake">Offer to wake a computer that does not answer</string>
+    <string name="settings_offer_wake_summary">Connect checks first, and offers Wake and connect</string>
 </resources>
