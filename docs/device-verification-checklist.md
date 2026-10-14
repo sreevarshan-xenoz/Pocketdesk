@@ -918,6 +918,20 @@ On the A71 against this Windows box (LAN, release build, input off), 2026-10-14.
 - [ ] The same on the Linux host.
 - [ ] A file transfer cut by a drop (today it fails and is sent again whole).
 
+## 47. Check connection (T1)
+
+On the A71 against this Windows box, 2026-10-14:
+- [x] From Home, with the server running, every check passes: Wi-Fi, same network, answers, the security key matches, the video port answers (the UDP probe gets Version Negotiation). Battery optimization is flagged, because auto-reconnect is on.
+- [x] With the server stopped, the computer "doesn't answer" (Windows' firewall turns a stopped server into a timeout, not a refusal), and the key and video port say "not checked".
+- [x] From the session's error card, "Check connection" opens the same check.
+- [ ] A changed security key (pin a wrong one), and Pair again from the finding.
+- [ ] A VPN that captures home traffic, and Tailscale off for a tailnet address.
+- [ ] Guest Wi-Fi with AP isolation, and another subnet.
+- [ ] A UDP-only block (the computer's firewall dropping the stream port).
+- [ ] Android 17's local network permission denied.
+- [ ] Copy report on a device: no address or id in the text.
+- [ ] The Linux host (a stopped server there should be "nothing is listening").
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

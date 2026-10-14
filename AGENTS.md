@@ -42,6 +42,19 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **T1, Check connection on the phone (branch `feat/connection-doctor`; spec `docs/superpowers/specs/2026-10-14-connection-doctor-design.md`, research in `docs/research/2026-10-14-what-users-need.md`).**
+  - **What it checks:**
+    - the phone's network;
+    - a VPN capturing home traffic (a Wi-Fi-bound retry);
+    - Tailscale off for a tailnet address;
+    - another subnet;
+    - TCP with the error code kept;
+    - a compare-only identity check (`CertManager::probe_identity`, which never saves a pin);
+    - the video port, by a reserved-version QUIC packet the desktop answers statelessly;
+    - battery, Data Saver and permissions.
+  - **Where:** each saved computer on Home, and the session's error card. Buttons open settings, Wake or Pair again. Copy report names outcomes only.
+  - **Device-checked (A71 → Windows):** all pass with the server up; "doesn't answer" with it stopped (Windows turns a stopped server into a timeout); the error card's entry.
+  - **Found on the device:** the probe crashed until it installed the TLS crypto provider.
 - 2026-10-14: **Phase R2, long sessions and recovery (branch `fix/r2-control-link`; results in `docs/superpowers/specs/2026-10-14-phase-r-reliability.md`, checklist §46).**
   - **Found on the A71 against Windows:**
     - after a Wi-Fi drop the stream came back by itself, but the control connection did not, so desktop pushes stopped and every query used a throwaway connection;

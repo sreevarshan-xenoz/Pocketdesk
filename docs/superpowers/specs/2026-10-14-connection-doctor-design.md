@@ -1,6 +1,6 @@
 # Connection Doctor on the phone (T1)
 
-Status: design, 2026-10-14. Roadmap item T1 ("After Phase R"). The research is in `docs/research/2026-10-14-what-users-need.md` (why) and in this file's "Evidence" section (how).
+Status: version 1 built and device-checked, 2026-10-14 (as-built notes at the end). Roadmap item T1 ("After Phase R"). The research is in `docs/research/2026-10-14-what-users-need.md` (why) and in this file's "Evidence" section (how).
 
 ## Problem
 
@@ -135,3 +135,15 @@ Status: design, 2026-10-14. Roadmap item T1 ("After Phase R"). The research is i
   - The phone cannot read the ARP table (closed since Android 10), its own MAC, or the computer's firewall profile.
   - ICMP errors still surface as error codes on connected sockets.
   - Sources: developer.android.com (local network permission, ConnectivityManager, PowerManager), dontkillmyapp.com, and LocalSend's and KDE Connect's troubleshooting pages.
+
+## As built (version 1)
+
+- **The checks** are in `android/.../doctor/`:
+  - `ConnectionChecks`, the judgement and its wording, under 14 JVM tests, including one that holds the report to no address, MAC or long hex id;
+  - `ConnectionProbe`, the phone's state and the three probes.
+- **The identity check** is `CertManager::probe_identity` in core, through the bridge's `nativeCheckIdentity`. It never saves a pin; a loopback test covers each outcome.
+- **Entry points:** each saved computer on Home, and the session's error card.
+- **Not built:** the automatic suggestion after two failed connects, and with it the Settings switch. The error card's button covers the same moment.
+- **Found on the device:**
+  - On Windows a stopped server is a timeout, not a refusal (the firewall's program rules and stealth mode), so the timeout's wording says Pocketdesk may not be running.
+  - The identity probe crashed the app until it installed the TLS crypto provider itself, as the other configurations do. The unit test had installed it.
