@@ -230,8 +230,7 @@ const FIREWALL_QUERY: &str = r"$ErrorActionPreference = 'SilentlyContinue'; $pro
 /// `Get-NetAdapterPowerManagement`.
 #[cfg(windows)]
 fn wake_allowed(adapter: &str) -> diagnostics::WakeAllowed {
-    // The name goes in as a single-quoted string, its quotes doubled.
-    let name = adapter.replace('\'', "''");
+    let name = single_quoted(adapter);
     // Some drivers (Realtek here) fail the power-management query; NDIS's
     // standard *WakeOnMagicPacket keyword answers for them.
     let script = format!(
@@ -247,23 +246,32 @@ fn wake_allowed(adapter: &str) -> diagnostics::WakeAllowed {
     .unwrap_or(diagnostics::WakeAllowed::Unknown)
 }
 
+/// The text of a PowerShell single-quoted string: each quote PowerShell
+/// reads as one (the ASCII quote and U+2018-U+201B) is doubled.
+#[cfg(any(windows, test))]
+fn single_quoted(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Whether `adapter` lets a magic packet wake this computer: `ethtool`'s
-/// `Wake-on:` when it is installed, else sysfs.
+/// `Wake-on:` line. Without ethtool it is not known: sysfs' power/wakeup
+/// says only that the device may wake the system, not by magic packet.
 #[cfg(not(windows))]
 fn wake_allowed(adapter: &str) -> diagnostics::WakeAllowed {
-    let ethtool = pocketdesk_core::local::network::output_within(
+    pocketdesk_core::local::network::output_within(
         "ethtool",
         &[adapter],
         std::time::Duration::from_secs(3),
     )
     .map(|out| diagnostics::parse_wake_allowed(&String::from_utf8_lossy(&out)))
-    .unwrap_or(diagnostics::WakeAllowed::Unknown);
-    if ethtool != diagnostics::WakeAllowed::Unknown {
-        return ethtool;
-    }
-    std::fs::read_to_string(format!("/sys/class/net/{adapter}/device/power/wakeup"))
-        .map(|answer| diagnostics::parse_wake_allowed(&answer))
-        .unwrap_or(diagnostics::WakeAllowed::Unknown)
+    .unwrap_or(diagnostics::WakeAllowed::Unknown)
 }
 
 #[cfg(not(windows))]
@@ -280,6 +288,16 @@ fn now_unix() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_quote_powershell_reads_is_doubled() {
+        assert_eq!(super::single_quoted("Ethernet 2"), "Ethernet 2");
+        assert_eq!(super::single_quoted("Bob's"), "Bob''s");
+        assert_eq!(
+            super::single_quoted("a\u{2019}b\u{2018}c"),
+            "a\u{2019}\u{2019}b\u{2018}\u{2018}c"
+        );
+    }
+
     /// The tab's checks against this computer's real state and server.
     /// Ignored: it reads the live state directory and needs the server.
     #[test]
