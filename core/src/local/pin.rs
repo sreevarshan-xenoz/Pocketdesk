@@ -4,8 +4,8 @@
 //! accepts a phone that sends the PIN while the file is fresh. Format, one
 //! value per line: the six digits, the unix second it was minted, and an
 //! optional grant length in seconds (R4 D3: pairing with this PIN trusts the
-//! phone only for that long). A file with no timestamp line never expires,
-//! so PINs written by old CLIs keep working.
+//! phone only for that long). A file with no timestamp line holds no PIN:
+//! it would never expire.
 
 use std::io;
 use std::path::Path;
@@ -24,8 +24,8 @@ const MAX_FUTURE_SECS: u64 = 60;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilePin {
     pub pin: String,
-    /// When it was minted; `None` for a legacy file that never expires.
-    pub minted_unix: Option<u64>,
+    /// When it was minted.
+    pub minted_unix: u64,
     /// How long pairing with it trusts the phone; `None` is permanent.
     pub grant_secs: Option<u64>,
 }
@@ -72,19 +72,19 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
     if !is_valid(&pin) {
         return None;
     }
-    let minted_unix = lines.next().and_then(|s| s.parse::<u64>().ok());
+    // No minting time is no PIN: it would never expire (an old CLI's file,
+    // or one planted in the state folder).
+    let minted = lines.next().and_then(|s| s.parse::<u64>().ok())?;
     let grant_secs = lines.next().and_then(|s| s.parse::<u64>().ok());
-    if let Some(minted) = minted_unix {
-        if minted > now_unix.saturating_add(MAX_FUTURE_SECS) {
-            return None;
-        }
-        if now_unix.saturating_sub(minted) >= PIN_TTL.as_secs() {
-            return None;
-        }
+    if minted > now_unix.saturating_add(MAX_FUTURE_SECS) {
+        return None;
+    }
+    if now_unix.saturating_sub(minted) >= PIN_TTL.as_secs() {
+        return None;
     }
     Some(FilePin {
         pin,
-        minted_unix,
+        minted_unix: minted,
         grant_secs,
     })
 }
@@ -106,11 +106,10 @@ pub fn remove_if(state_dir: &Path, pin: &str) -> io::Result<bool> {
     Ok(held)
 }
 
-/// How much longer `pin` is valid at `now_unix`; `None` when it never expires.
-pub fn remaining(pin: &FilePin, now_unix: u64) -> Option<Duration> {
-    let minted = pin.minted_unix?;
-    let age = now_unix.saturating_sub(minted);
-    Some(Duration::from_secs(PIN_TTL.as_secs().saturating_sub(age)))
+/// How much longer `pin` is valid at `now_unix`.
+pub fn remaining(pin: &FilePin, now_unix: u64) -> Duration {
+    let age = now_unix.saturating_sub(pin.minted_unix);
+    Duration::from_secs(PIN_TTL.as_secs().saturating_sub(age))
 }
 
 /// Seconds since the Unix epoch.
@@ -139,7 +138,7 @@ mod tests {
         write(&dir, "123456", 1_000, None).unwrap();
         let read_back = read(&dir, 1_100).unwrap();
         assert_eq!(read_back.pin, "123456");
-        assert_eq!(remaining(&read_back, 1_100), Some(Duration::from_secs(200)));
+        assert_eq!(remaining(&read_back, 1_100), Duration::from_secs(200));
         assert!(
             read(&dir, 1_000 + 300).is_none(),
             "expired at exactly the TTL"
@@ -147,14 +146,14 @@ mod tests {
     }
 
     #[test]
-    fn the_grant_line_survives_and_legacy_files_without_a_stamp_never_expire() {
+    fn the_grant_line_survives_and_a_pin_without_a_stamp_is_no_pin() {
         let dir = temp_dir("grant");
         write(&dir, "000042", 50, Some(3600)).unwrap();
         assert_eq!(read(&dir, 60).unwrap().grant_secs, Some(3600));
+        // A file with no minting time (an old CLI's, or one planted in the
+        // state folder) would otherwise be a PIN that never expires.
         std::fs::write(dir.join(super::super::paths::PIN_FILE), "654321\n").unwrap();
-        let legacy = read(&dir, u64::MAX / 2).unwrap();
-        assert_eq!(legacy.pin, "654321");
-        assert_eq!(remaining(&legacy, u64::MAX / 2), None);
+        assert!(read(&dir, 60).is_none());
     }
 
     #[test]
