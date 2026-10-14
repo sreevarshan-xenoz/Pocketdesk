@@ -307,11 +307,17 @@ The phone dials the address it learned on the home network. When that goes stale
 
 | Value | The record holds |
 |---|---|
-| `"relay"` (default) | The relay URLs only. |
-| `"addresses"` | The relay URLs and this computer's public IP addresses: with a public IPv6 address or a port the router maps, a phone connects with no relay at all. The record ties your home's public IP to this desktop's id, for anyone who knows the id. |
+| `"relay"` (default) | The relay URLs only: n0's, or the public name of your own relay. |
+| `"addresses"` | The relay URLs and this computer's public IP addresses: with a public IPv6 address or a port the router maps, a phone connects with no relay at all. The record then shows your home's public IP to anyone who knows the id. |
 | `"off"` | Nothing. |
 
-Private, LAN and tailnet addresses are never published, and neither is a relay known only by a private address. Diagnostics' "Found by id" says whether the server read its own record back from the DHT.
+Private, LAN and tailnet addresses are never published, and neither is a relay known only by a private address or a home-network name (`nas`, `pi.lan`). Diagnostics' "Found by id" says whether the server read its own record back from the DHT.
+
+What the DHT sees, in every mode but `"off"`:
+- **The desktop's home IP, tied to its id.** The DHT nodes that store the record (strangers' computers) see the address it was sent from, and the desktop republishes every hour.
+- **The phone's IP, and which id it looks for,** on each connection from away (and each WAN dial at home), since the lookup runs next to the cached address.
+
+The id is in the pairing QR code, on each paired phone and on every relay the desktop uses.
 
 ### CLI Commands
 
