@@ -92,3 +92,26 @@ Owed: a session from outside the home network found only by the DHT, and `addres
 - Publishing from the phone.
 - A desktop that changed its iroh key: the phone holds the id, and a new key means pairing again.
 - Reacting to a DHT lookup during a live session: lookup happens on dial.
+
+## As built
+
+- **Device-verified on this box and the A71** (n0's relays, the default `relay` mode):
+  - the server published within 4 s of joining and read its record back a minute later ("Found by id": read back, relay address only);
+  - a phone whose cached identity was made stale (an n0 relay the desktop is not on, no direct addresses, a closed LAN port) found the record in about 3 s, connected through the relay it named, and went direct a second later;
+  - the same identity with `dht: false` timed out (the control).
+
+  Owed (checklist §37): a session from outside, `addresses` mode with a real public IPv6, a network that blocks UDP, and the Linux host.
+- **Fresh review (0 Critical, 7 Important), fixed one commit each:**
+  - **The DHT's bootstrap.** n0-mainline resolves its bootstrap names with blocking DNS inside its constructor and never retries them, so a server started before the network was up never joined. It also bound 6881, a torrent client's port. `core::streaming::dht` now resolves the names on a blocking thread and builds the node on a port the OS picks. The server joins in the background, each minute until DNS answers, and the phone builds its lookup only when it dials.
+  - **The phone's DHT node lived for the whole session.** The dial now clears it once connected.
+  - **The self-check's verdicts stuck for 15 minutes.** It now checks each minute until found, treats "no relay yet" as checking, and rebuilds the node after three misses in a row. A failed publish otherwise waits an hour.
+  - **Diagnostics over-claimed.** A DHT that had not started read "off"; it is now "unjoined", a warning. "Published" was shown before anything was. "With public addresses" was claimed from a relay match alone, and now needs an IP address read back.
+  - **LAN names in the record.** Relays named `nas` or `pi.lan` (single labels, LAN suffixes) are now left out, and so is `3fff::/20`.
+  - **Telling the phone to look up an empty record.** `dht: true` now needs a publishable address.
+  - **The docs understated what the DHT sees.** In every mode, the storing nodes see the home IP tied to the id, and each phone dial shows its IP and the id it looks for.
+
+  Minor fixes: a test of the real publish path on a testnet; the self-check ends with the endpoint.
+- **Accepted:**
+  - A still-valid record from an earlier run with the same relay counts as read back; it is equally correct.
+  - Mainline switches a node that is reachable from outside to server mode after 15 minutes; a desktop behind NAT stays a client.
+  - A dial that fails drops its iroh endpoint without closing it (an ERROR line in logcat). This predates N3.

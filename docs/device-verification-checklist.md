@@ -758,6 +758,7 @@ Built on `feat/dht-lookup`. On the Windows box (n0's relays, `dht_publish` at it
 - [x] The phone caches the identity with `"dht": true` after a LAN session.
 - [x] Control: with `"dht": false`, the stale identity's WAN dial times out (`DHT lookup: false`).
 - [x] With `"dht": true`, the same dial finds the record on the DHT in about 4 s, connects through the relay it names, and upgrades to a direct path (logcat: `discovered endpoint info`, `WAN session upgraded from relay to direct path`).
+- [x] After the review fixes, again: the server's DHT joined in the background on a random port, published within 4 s and read back a minute later; the stale-identity dial found the record in about 3 s and went direct.
 - [ ] **From outside:** the phone on mobile data after the desktop's home relay or public IP changed. A session connects, found by the DHT.
 - [ ] `dht_publish = "addresses"` on a network with public IPv6: the record holds the IPv6 address, and a phone with relays unreachable connects directly.
 - [ ] A network that blocks outgoing UDP: "Found by id" warns that it was not read back.
