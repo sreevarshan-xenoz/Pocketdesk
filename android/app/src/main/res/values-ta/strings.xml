@@ -271,4 +271,10 @@
     <string name="pair_link_confirm">இணை</string>
     <string name="pair_link_calls_itself">அது தன்னை “%1$s” என்று அழைக்கிறது.</string>
     <string name="pair_link_not_scanned">இந்தக் குறியீட்டை நீங்கள் ஸ்கேன் செய்யவில்லை; வேறு செயலி அல்லது இணையப் பக்கம் திறந்தது.</string>
+    <string name="phone_notifications_service">Pocketdesk: கணினியில் காட்டு</string>
+    <string name="settings_phone_notifications">இந்த தொலைபேசியின் அறிவிப்புகள்</string>
+    <string name="phone_notifications_share">என் கணினியில் காட்டு</string>
+    <string name="phone_notifications_share_summary">இந்த தொலைபேசியின் அறிவிப்புகள் நீங்கள் கடைசியாகப் பயன்படுத்திய கணினியில் தோன்றும். இயல்பாக முடக்கப்பட்டுள்ளது.</string>
+    <string name="phone_notifications_no_access">அறிவிப்பு அணுகலை அனுமதிக்கத் தட்டவும்</string>
+    <string name="phone_notifications_apps_empty">அறிவிப்பு அனுப்பிய பயன்பாடுகள் இங்கே தோன்றும். ஒன்றை முடக்கினால் அது தொலைபேசியிலேயே இருக்கும்.</string>
 </resources>
