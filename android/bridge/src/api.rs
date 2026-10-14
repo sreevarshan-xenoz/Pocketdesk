@@ -1868,6 +1868,10 @@ fn device_wan_key() -> Option<pocketdesk_core::streaming::IrohSecretKey> {
 /// Why a connect that a stop or a newer connect overtook did not install.
 const SUPERSEDED: &str = "the stream was stopped or replaced while it connected";
 
+/// The reason a stream the phone stops is closed with, so the desktop ends
+/// the session at once (R2).
+const STOPPED_BY_PHONE: &[u8] = b"stopped by the phone";
+
 async fn teardown_streaming_handle(handle: StreamingHandle) {
     VIDEO_RX.lock().await.take();
     AUDIO_RX.lock().await.take();
@@ -1875,7 +1879,7 @@ async fn teardown_streaming_handle(handle: StreamingHandle) {
     // for the last handle to drop is not enough: a clone that outlives this
     // one keeps the connection open on keep-alives, and the desktop went on
     // encoding a stream to nobody (R2).
-    handle.connection.close(0, b"stopped by the phone");
+    handle.connection.close(0, STOPPED_BY_PHONE);
     handle.cancel.cancel();
     let _ = handle.task.await;
     let _ = handle.rtt_task.await;
@@ -1902,16 +1906,21 @@ async fn install_streaming(
     // not take over. Checked again under the handle lock below, where it
     // counts; this early check only saves starting tasks for nothing.
     if !crate::CONNECT_GENERATION.is_current(generation) {
+        if let Some(connection) = client.connection() {
+            connection.close(0, STOPPED_BY_PHONE);
+        }
         client.cancel_token().cancel();
         if let Some(dial) = wan_dial {
             dial.close().await;
         }
         return Err(SUPERSEDED.to_string());
     }
-    let connection = client
-        .connection()
-        .ok_or_else(|| "Connection not available after connect".to_string())?
-        .clone();
+    let Some(connection) = client.connection().cloned() else {
+        if let Some(dial) = wan_dial {
+            dial.close().await;
+        }
+        return Err("Connection not available after connect".to_string());
+    };
 
     // Samples the last session's decoder measured must not join this one's
     // record, and nothing is going to report them now that its server is gone.
@@ -2005,6 +2014,7 @@ async fn install_streaming(
     // the stop tears it down.
     if !crate::CONNECT_GENERATION.is_current(generation) {
         drop(handle);
+        connection.close(0, STOPPED_BY_PHONE);
         client_cancel.cancel();
         let _ = task.await;
         let _ = rtt_task.await;
