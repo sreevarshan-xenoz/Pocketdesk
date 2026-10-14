@@ -1023,6 +1023,16 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePen
     to_jstring(&mut env, json)
 }
 
+/// The computer the live control connection is to, as JSON, or "".
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeControlPeer(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = RUNTIME.block_on(api::control_peer()).unwrap_or_default();
+    to_jstring(&mut env, json)
+}
+
 /// The replies the desktop asked this phone to text (N5b), as JSON.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeSmsRequests(

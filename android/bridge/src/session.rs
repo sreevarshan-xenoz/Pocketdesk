@@ -199,8 +199,9 @@ pub(crate) static PENDING_SMS_REQUESTS: LazyLock<std::sync::Mutex<Vec<serde_json
     LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
 
 /// Queue one `kdeconnect.sms.request` body: `{id, address, body}`, all
-/// strings, or it is dropped. One per id.
-pub(crate) fn queue_sms_request(body: &serde_json::Value) {
+/// strings, or it is dropped; with the computer (`host`, `port`) whose
+/// connection carried it. One per id.
+pub(crate) fn queue_sms_request(body: &serde_json::Value, host: &str, port: u16) {
     let field = |key: &str| body.get(key).and_then(|v| v.as_str()).map(str::to_string);
     let (Some(id), Some(address), Some(text)) = (field("id"), field("address"), field("body"))
     else {
@@ -212,7 +213,13 @@ pub(crate) fn queue_sms_request(body: &serde_json::Value) {
     {
         return;
     }
-    q.push(serde_json::json!({ "id": id, "address": address, "body": text }));
+    q.push(serde_json::json!({
+        "id": id,
+        "address": address,
+        "body": text,
+        "fromHost": host,
+        "fromPort": port,
+    }));
     const MAX_QUEUED: usize = 50;
     if q.len() > MAX_QUEUED {
         q.remove(0);
