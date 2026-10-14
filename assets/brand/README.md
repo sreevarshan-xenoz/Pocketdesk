@@ -11,6 +11,7 @@ Drawn from the concept in `src/concept.png`.
 | `pocketdesk-icon-512.png`, `-1024.png` | The app icon, rendered |
 | `pocketdesk-mark-512.png` | The mark, rendered |
 | `pocketdesk-banner.png` | The README header (rendered from `src/banner.html`, font Outfit) |
+| `pocketdesk-launch.mp4`, `.jpg` | The 21-second launch video (1080p, 30 fps) and its poster. Made from `src/launch-video.html` (every frame a function of time, captured in headless Chromium) and `src/launch-music.py` (the soundtrack, synthesised: F major, 112 BPM) |
 
 Colours: navy `#0B1230`, pocket `#5AD1FF` → `#2F7BFF` and `#2E8BFF` → `#5B4BFF`,
 window rim `#8FD8FF` → `#7B6CFF`, window `#0B1222`, dots `#FF5F57` `#FEBC2E` `#28C840`.

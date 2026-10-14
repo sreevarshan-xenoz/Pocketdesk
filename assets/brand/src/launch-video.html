@@ -1,0 +1,409 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=block" rel="stylesheet">
+<style>
+  :root { --navy:#0B1230; --ink:#070B1A; --text:#EEF2FF; --muted:#AEB9DA; --blue:#2F7BFF; --violet:#6D5BFF; }
+  html, body { margin:0; width:1920px; height:1080px; overflow:hidden; background:var(--ink); }
+  body { font-family:'Outfit', sans-serif; color:var(--text); }
+  #stage { position:absolute; inset:0; overflow:hidden;
+    background: radial-gradient(ellipse 70% 80% at 50% 55%, #15215a 0%, #0b1330 45%, #060a18 100%); }
+  #glow { position:absolute; width:1100px; height:700px; border-radius:50%;
+    background: radial-gradient(closest-side, rgba(70,110,255,.30), rgba(70,110,255,0)); left:410px; top:200px; }
+  .abs { position:absolute; }
+  .center { left:50%; top:50%; }
+  .grad { background: linear-gradient(90deg, #3a8dff 0%, #6d5bff 70%, #9b5cff 100%);
+          -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .headline { position:absolute; left:0; right:0; text-align:center; font-weight:800; font-size:76px; letter-spacing:-1px; }
+  .sub { position:absolute; left:0; right:0; text-align:center; font-weight:500; color:var(--muted); font-size:30px; }
+
+  /* Scene 1: the big desktop window */
+  #bigwin { position:absolute; border-radius:28px; background:#0B1222; border:10px solid #86c3ff;
+    box-shadow:0 40px 120px rgba(0,0,0,.55); overflow:hidden; transform-origin:50% 50%; }
+  #bigwin .bar { height:64px; display:flex; gap:18px; align-items:center; padding-left:30px; }
+  #bigwin .dot { width:22px; height:22px; border-radius:50%; }
+  #bigwin .body { position:absolute; inset:64px 0 0 0; padding:30px 40px;
+    background: linear-gradient(135deg, #12204f 0%, #1a1452 100%); }
+  .codeline { height:18px; border-radius:9px; margin:16px 0; }
+  #line1 { font-size:110px; font-weight:800; }
+  #line2 { font-size:92px; font-weight:800; }
+
+  /* Scene 2: wordmark */
+  #word { font-size:150px; font-weight:800; letter-spacing:-3px; line-height:1; white-space:nowrap; }
+  #tag { font-size:30px; font-weight:500; letter-spacing:15px; color:#c9d3ee; white-space:nowrap; }
+  #platforms { font-size:32px; font-weight:500; color:var(--muted); white-space:nowrap; }
+
+  /* Phones and screens */
+  .phone { position:absolute; background:#05070f; border-radius:56px; box-shadow:0 0 0 3px #2a3566, 0 40px 120px rgba(0,0,0,.6); }
+  .screen { position:absolute; inset:18px; border-radius:40px; overflow:hidden; }
+  .wall { position:absolute; inset:0; background:
+     radial-gradient(ellipse 80% 90% at 20% 10%, #2b3f9e 0%, rgba(0,0,0,0) 60%),
+     linear-gradient(140deg, #1b2a6b 0%, #2a1d6b 55%, #0f1640 100%); }
+  .taskbar { position:absolute; left:0; right:0; bottom:0; height:46px; background:rgba(6,10,24,.75);
+     display:flex; align-items:center; justify-content:center; gap:16px; }
+  .tb { width:26px; height:26px; border-radius:7px; background:rgba(255,255,255,.18); }
+  .win { position:absolute; border-radius:14px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.45); }
+  .win .wbar { height:30px; background:#1c2347; display:flex; align-items:center; gap:8px; padding-left:12px;
+     font-size:15px; color:#aab3d6; font-weight:500; }
+  .win .wbar i { width:11px; height:11px; border-radius:50%; display:inline-block; }
+  .editor { background:#141a36; }
+  .term { background:#0a0d1c; font-family:'JetBrains Mono', monospace; font-size:21px; color:#cfe1ff; }
+  .term .tbody { padding:14px 18px; line-height:1.55; white-space:pre; }
+  .chip { display:inline-flex; align-items:center; gap:10px; padding:12px 24px; border-radius:999px;
+     font-size:25px; font-weight:600; background:rgba(255,255,255,.06); color:#c5cdea; border:2px solid rgba(255,255,255,.10); }
+  .chip.on { background:linear-gradient(90deg,#2F7BFF,#6D5BFF); color:#fff; border-color:transparent; }
+  .ripple { position:absolute; border-radius:50%; border:4px solid rgba(255,255,255,.9); }
+  .cursor { position:absolute; width:0; height:0; }
+  .kbbar { position:absolute; left:0; right:0; height:64px; background:rgba(12,16,36,.94);
+     display:flex; align-items:center; justify-content:center; gap:12px; border-top:1px solid rgba(255,255,255,.08); }
+  .key { padding:8px 16px; border-radius:10px; background:rgba(255,255,255,.08); font-size:19px; font-weight:600; color:#d6ddf5; }
+  .key.lit { background:#2F7BFF; color:#fff; }
+
+  /* Scene 4 */
+  .card { position:absolute; border-radius:22px; background:rgba(20,28,64,.92); border:1px solid rgba(140,170,255,.25);
+     box-shadow:0 20px 60px rgba(0,0,0,.45); color:var(--text); }
+  .monitor { position:absolute; border-radius:26px; background:#05070f; box-shadow:0 0 0 3px #2a3566, 0 40px 120px rgba(0,0,0,.6); }
+  .bar-bg { height:14px; border-radius:7px; background:rgba(255,255,255,.12); overflow:hidden; }
+  .bar-fg { height:100%; border-radius:7px; }
+
+  /* Scene 5 */
+  .pathlabel { position:absolute; font-size:30px; font-weight:600; white-space:nowrap; transform:translate(-50%,-50%); }
+  .badge { position:absolute; padding:16px 30px; border-radius:999px; font-size:28px; font-weight:600;
+     border:2px solid rgba(143,216,255,.5); color:#dfe8ff; background:rgba(47,123,255,.12); white-space:nowrap; transform:translateX(-50%); }
+</style></head>
+<body>
+<div id="stage">
+  <div id="glow"></div>
+
+  <!-- Scene 1 -->
+  <div id="bigwin">
+    <div class="bar"><span class="dot" style="background:#FF5F57"></span><span class="dot" style="background:#FEBC2E"></span><span class="dot" style="background:#28C840"></span></div>
+    <div class="body" id="bigbody">
+      <div class="codeline" style="width:38%;background:#5AD1FF55"></div>
+      <div class="codeline" style="width:62%;background:#ffffff22"></div>
+      <div class="codeline" style="width:48%;background:#7B6CFF66"></div>
+      <div class="codeline" style="width:70%;background:#ffffff1c"></div>
+      <div class="codeline" style="width:30%;background:#28C84066"></div>
+      <div class="codeline" style="width:56%;background:#ffffff22"></div>
+    </div>
+  </div>
+  <div id="line1" class="abs" style="left:0;right:0;text-align:center;">Your desktop.</div>
+
+  <svg id="mark" class="abs" viewBox="0 0 512 512" width="512" height="512">
+    <defs>
+      <linearGradient id="pd-left" x1="80" y1="220" x2="256" y2="460" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5AD1FF"/><stop offset="1" stop-color="#2F7BFF"/></linearGradient>
+      <linearGradient id="pd-right" x1="256" y1="230" x2="430" y2="450" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2E8BFF"/><stop offset="1" stop-color="#5B4BFF"/></linearGradient>
+      <linearGradient id="pd-back" x1="96" y1="180" x2="416" y2="260" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2563EB"/><stop offset="1" stop-color="#4338CA"/></linearGradient>
+      <linearGradient id="pd-rim" x1="150" y1="90" x2="380" y2="340" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8FD8FF"/><stop offset="1" stop-color="#7B6CFF"/></linearGradient>
+      <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="30"/></filter>
+    </defs>
+    <ellipse id="m-glow" cx="256" cy="340" rx="190" ry="120" fill="#3B6BFF" opacity="0.4" filter="url(#soft)"/>
+    <path id="m-back" d="M104 236 Q104 204 136 200 L376 200 Q408 204 408 236 L408 262 L104 262 Z" fill="url(#pd-back)"/>
+    <g id="m-win">
+      <g transform="rotate(9 266 216)">
+        <rect x="152" y="86" width="228" height="256" rx="34" fill="#0B1222" stroke="url(#pd-rim)" stroke-width="12"/>
+        <circle cx="204" cy="140" r="14" fill="#FF5F57"/><circle cx="242" cy="140" r="14" fill="#FEBC2E"/><circle cx="280" cy="140" r="14" fill="#28C840"/>
+      </g>
+    </g>
+    <g id="m-front">
+      <path d="M84 238 Q84 214 108 220 L256 266 L256 462 Q240 462 224 456 L124 418 Q84 402 84 360 Z" fill="url(#pd-left)"/>
+      <path d="M256 266 L404 220 Q428 214 428 238 L428 360 Q428 402 388 418 L288 456 Q272 462 256 462 Z" fill="url(#pd-right)"/>
+      <path d="M92 226 L256 276 L420 226" fill="none" stroke="#B9ECFF" stroke-opacity="0.55" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M296 318 L404 284" fill="none" stroke="#C7D2FE" stroke-opacity="0.75" stroke-width="7" stroke-linecap="round" stroke-dasharray="16 14"/>
+    </g>
+  </svg>
+  <div id="line2" class="abs" style="left:0;right:0;text-align:center;">In your <span class="grad">pocket.</span></div>
+
+  <!-- Scene 2 -->
+  <div id="s2" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
+    <div id="word" class="abs">Pocket<span class="grad">desk</span></div>
+    <div id="tag" class="abs">YOUR DESKTOP. ANYWHERE.</div>
+    <div id="platforms" class="abs">Windows &amp; Linux &nbsp;→&nbsp; Android</div>
+  </div>
+
+  <!-- Scene 3 -->
+  <div id="s3" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
+    <div class="headline" style="top:70px">Drive it from your <span class="grad">phone</span></div>
+    <div id="p3" class="phone" style="left:330px;top:215px;width:1260px;height:620px;">
+      <div class="screen">
+        <div class="wall"></div>
+        <div id="ed" class="win editor" style="left:70px;top:50px;width:640px;height:400px;">
+          <div class="wbar"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i>&nbsp; main.rs</div>
+          <div style="padding:18px 22px">
+            <div class="codeline" style="width:46%;height:14px;margin:12px 0;background:#7B6CFF77"></div>
+            <div class="codeline" style="width:72%;height:14px;margin:12px 0;background:#ffffff26"></div>
+            <div class="codeline" style="width:58%;height:14px;margin:12px 0 12px 36px;background:#5AD1FF66"></div>
+            <div class="codeline" style="width:64%;height:14px;margin:12px 0 12px 36px;background:#ffffff22"></div>
+            <div class="codeline" style="width:40%;height:14px;margin:12px 0 12px 36px;background:#28C84066"></div>
+            <div class="codeline" style="width:30%;height:14px;margin:12px 0;background:#ffffff22"></div>
+          </div>
+        </div>
+        <div id="tm" class="win term" style="left:560px;top:150px;width:600px;height:330px;">
+          <div class="wbar"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i>&nbsp; Terminal</div>
+          <div class="tbody" id="termtext"></div>
+        </div>
+        <div class="taskbar"><div class="tb"></div><div class="tb" style="background:#2F7BFF"></div><div class="tb"></div><div class="tb"></div></div>
+        <div id="kb" class="kbbar">
+          <span class="key" id="k-ctrl">Ctrl</span><span class="key">Alt</span><span class="key">Tab</span><span class="key">Esc</span>
+          <span class="key">←</span><span class="key">↑</span><span class="key">↓</span><span class="key">→</span><span class="key">Home</span><span class="key">End</span><span class="key" id="k-enter">Enter</span>
+        </div>
+        <div id="rip" class="ripple"></div>
+        <svg id="cur" class="abs" width="34" height="44" viewBox="0 0 34 44"><path d="M3 3 L3 36 L12 28 L18 41 L24 38 L18 26 L30 26 Z" fill="#fff" stroke="#0b1230" stroke-width="3" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+    <div id="chips3" class="abs" style="left:0;right:0;top:885px;display:flex;justify-content:center;gap:22px;">
+      <span class="chip" id="c-touch">Direct touch</span><span class="chip" id="c-pad">Trackpad</span><span class="chip" id="c-kb">Keyboard</span><span class="chip" id="c-snd">Desktop sound</span>
+    </div>
+  </div>
+
+  <!-- Scene 4 -->
+  <div id="s4" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
+    <div class="headline" style="top:70px">Everything moves <span class="grad">both ways</span></div>
+    <div id="p4" class="phone" style="left:250px;top:235px;width:340px;height:700px;">
+      <div class="screen"><div class="wall" style="opacity:.55"></div>
+        <div class="card" style="left:22px;right:22px;top:330px;padding:22px 22px 24px;border-radius:20px;" id="filecard">
+          <div style="font-size:24px;font-weight:700;">holiday.mp4</div>
+          <div style="font-size:18px;color:#AEB9DA;margin:4px 0 14px;">1.8 GB → Computer</div>
+          <div class="bar-bg"><div class="bar-fg" id="fbar" style="width:0%"></div></div>
+          <div id="fstate" style="font-size:19px;font-weight:600;margin-top:12px;color:#AEB9DA;">Sending…</div>
+        </div>
+      </div>
+    </div>
+    <div id="m4" class="monitor" style="left:820px;top:255px;width:860px;height:520px;">
+      <div class="screen" style="inset:16px;border-radius:14px;"><div class="wall"></div>
+        <div class="taskbar"><div class="tb"></div><div class="tb" style="background:#2F7BFF"></div><div class="tb"></div></div>
+      </div>
+    </div>
+    <div class="abs" style="left:1170px;top:775px;width:160px;height:70px;background:linear-gradient(#1a2148,#0c1130);clip-path:polygon(30% 0,70% 0,85% 100%,15% 100%);"></div>
+    <div id="clip" class="card" style="padding:16px 24px;font-size:24px;font-weight:600;white-space:nowrap;">📋&nbsp; Copied: "Meet at 4 by the station"</div>
+    <div id="img" class="card" style="width:150px;height:110px;padding:8px;">
+      <div style="width:100%;height:100%;border-radius:14px;background:linear-gradient(160deg,#ffb36b 0%,#ff6b8a 45%,#6d5bff 100%);"></div>
+    </div>
+    <div id="notif" class="card" style="width:430px;padding:20px 24px;">
+      <div style="font-size:18px;color:#8FD8FF;font-weight:600;">Phone · Messages</div>
+      <div style="font-size:24px;font-weight:700;margin-top:6px;">On my way, 10 minutes</div>
+    </div>
+    <div id="toast" class="card" style="width:360px;padding:18px 22px;">
+      <div style="font-size:18px;color:#8FD8FF;font-weight:600;">Pocketdesk</div>
+      <div style="font-size:22px;font-weight:600;margin-top:4px;">Clipboard from your phone</div>
+    </div>
+  </div>
+
+  <!-- Scene 5 -->
+  <div id="s5" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
+    <div class="headline" style="top:70px">From <span class="grad">anywhere</span></div>
+    <svg class="abs" style="left:0;top:0" width="1920" height="1080">
+      <defs><linearGradient id="pg" x1="0" x2="1"><stop offset="0" stop-color="#5AD1FF"/><stop offset="1" stop-color="#7B6CFF"/></linearGradient></defs>
+      <path id="pa" d="M520 560 C 760 330, 1160 330, 1400 560" fill="none" stroke="url(#pg)" stroke-width="6" stroke-linecap="round"/>
+      <path id="pb" d="M520 560 L 1400 560" fill="none" stroke="url(#pg)" stroke-width="6" stroke-linecap="round"/>
+      <path id="pc" d="M520 560 C 760 790, 1160 790, 1400 560" fill="none" stroke="url(#pg)" stroke-width="6" stroke-linecap="round"/>
+      <circle id="da" r="11" fill="#fff"/><circle id="db" r="11" fill="#fff"/><circle id="dc" r="11" fill="#fff"/>
+    </svg>
+    <div class="phone" style="left:440px;top:455px;width:120px;height:210px;border-radius:26px;"><div class="screen" style="inset:8px;border-radius:18px;"><div class="wall"></div></div></div>
+    <div class="monitor" style="left:1330px;top:470px;width:220px;height:150px;border-radius:14px;"><div class="screen" style="inset:8px;border-radius:8px;"><div class="wall"></div></div></div>
+    <div id="la" class="pathlabel" style="left:960px;top:360px;">Home Wi-Fi</div>
+    <div id="lb" class="pathlabel" style="left:960px;top:520px;">Tailscale</div>
+    <div id="lc" class="pathlabel" style="left:960px;top:760px;">The internet</div>
+    <div id="nos" class="sub" style="top:860px;font-size:36px;color:#dfe6ff;font-weight:600;">No port forward. No account. No Pocketdesk server.</div>
+    <div id="tls" class="badge" style="left:960px;top:935px;">TLS 1.3 · each end holds the other to its key</div>
+  </div>
+
+  <!-- Scene 6 -->
+  <div id="s6" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
+    <div id="word6" class="abs" style="font-size:132px;font-weight:800;letter-spacing:-3px;white-space:nowrap;left:50%;top:600px;transform:translateX(-50%);">Pocket<span class="grad">desk</span></div>
+    <div id="tag6" class="abs" style="font-size:28px;font-weight:500;letter-spacing:14px;color:#c9d3ee;white-space:nowrap;left:50%;top:770px;transform:translateX(-50%);">YOUR DESKTOP. ANYWHERE.</div>
+    <div id="url6" class="abs" style="font-size:30px;font-weight:600;color:#dfe6ff;white-space:nowrap;left:50%;top:860px;transform:translateX(-50%);">Open source &nbsp;·&nbsp; <span style="color:#8FD8FF">github.com/sreevarshan-xenoz/Pocketdesk</span></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const clamp = (x, a=0, b=1) => Math.min(b, Math.max(a, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eo = x => 1 - Math.pow(1 - x, 3);            // ease out cubic
+const eio = x => x < .5 ? 4*x*x*x : 1 - Math.pow(-2*x + 2, 3) / 2;
+const back = x => { const c = 1.6; return 1 + (c+1)*Math.pow(x-1,3) + c*Math.pow(x-1,2); };
+const lerp = (a, b, x) => a + (b - a) * x;
+// A scene's visibility: in over [a, a+i], out over [b-o, b].
+const env = (t, a, b, i=.35, o=.3) => Math.min(seg(t, a, a + i), 1 - seg(t, b - o, b));
+function show(el, op, extra='') { el.style.opacity = op; el.style.display = op <= 0.001 ? 'none' : 'block'; if (extra !== null) el.style.transform = extra; }
+
+const S = [0, 3.0, 6.2, 10.6, 15.0, 18.2, 21.0];
+const TERM = 'C:\\work> cargo run';
+
+function render(t) {
+  // ----- background glow drifts gently
+  $('glow').style.transform = `translate(${Math.sin(t*.45)*60}px, ${Math.cos(t*.35)*30}px)`;
+
+  // ----- Scene 1: the desktop shrinks into the pocket (0 - 3.0), the mark carries into scene 2
+  const sh = eio(seg(t, 1.0, 1.9));            // shrink
+  const big = $('bigwin');
+  // Mark geometry in scenes 1-2.
+  const toLeft = eio(seg(t, 3.45, 4.1));
+  const markSize = lerp(430, 360, toLeft);
+  const markCx = lerp(960, 560, toLeft), markCy = lerp(500, 470, toLeft);
+  const mk = $('mark');
+  const markOut = 1 - seg(t, 5.9, 6.2);
+  mk.style.left = (markCx - markSize/2) + 'px'; mk.style.top = (markCy - markSize/2) + 'px';
+  mk.style.width = markSize + 'px'; mk.style.height = markSize + 'px';
+  const k = markSize / 512;
+  // Where the mark's window sits on screen (its centre, size and tilt).
+  const wcx = markCx + (266 - 256) * k, wcy = markCy + (214 - 256) * k;
+  const W0 = 1500, H0 = 860, W1 = 240 * k, H1 = 268 * k;
+  const bw = lerp(W0, W1, sh), bh = lerp(H0, H1, sh);
+  const bx = lerp(960, wcx, sh), by = lerp(560, wcy - 70*k, sh);
+  const bigIn = seg(t, 0, 0.25);
+  if (t < 1.92) {
+    show(big, bigIn, `rotate(${9*sh}deg) scale(${lerp(1.04, 1, seg(t,0,.5))})`);
+    big.style.left = (bx - bw/2) + 'px'; big.style.top = (by - bh/2) + 'px';
+    big.style.width = bw + 'px'; big.style.height = bh + 'px';
+    big.style.borderWidth = lerp(10, 12*k, sh) + 'px';
+    big.style.borderRadius = lerp(28, 34*k, sh) + 'px';
+    $('bigbody').style.opacity = 1 - seg(t, 1.0, 1.45);
+    big.querySelector('.bar').style.opacity = 1;
+  } else { show(big, 0); }
+  // "Your desktop." over the window, then gone as it shrinks.
+  const l1 = Math.min(eo(seg(t, 0.15, 0.45)), 1 - seg(t, 0.9, 1.05));
+  show($('line1'), l1, `translateY(${lerp(20, 0, eo(seg(t,.15,.45)))}px)`);
+  $('line1').style.top = '470px';
+  // The SVG mark: its window takes over from the big one and drops in.
+    const settle = back(seg(t, 1.9, 2.5));
+  const front = eo(seg(t, 1.7, 2.2));
+  show(mk, Math.min(seg(t, 1.65, 1.85), markOut), `scale(${lerp(1, 0.92, seg(t, 5.9, 6.2))})`);
+  $('m-win').setAttribute('transform', `translate(0 ${lerp(-70, 0, settle)})`);
+  $('m-win').style.opacity = t < 1.92 ? 0 : 1;
+  $('m-front').setAttribute('transform', `translate(0 ${lerp(140, 0, front)})`);
+  $('m-front').style.opacity = front;
+  $('m-back').style.opacity = front;
+  $('m-glow').style.opacity = 0.4 * front;
+  // "In your pocket."
+  const l2 = Math.min(eo(seg(t, 2.3, 2.6)), 1 - seg(t, 3.3, 3.5));
+  show($('line2'), l2, `translateY(${lerp(24, 0, eo(seg(t,2.3,2.6)))}px)`);
+  $('line2').style.top = '760px';
+
+  // ----- Scene 2: the wordmark (3.0 - 6.2)
+  const s2 = env(t, 3.7, 6.2, .5, .3);
+  show($('s2'), s2, '');
+  const wIn = eo(seg(t, 3.75, 4.3));
+  const word = $('word'); word.style.left = (780 + 40*(1-wIn)) + 'px'; word.style.top = '360px';
+  word.style.opacity = wIn;
+  const tg = eo(seg(t, 4.15, 4.6));
+  $('tag').style.left = '790px'; $('tag').style.top = '540px'; $('tag').style.opacity = tg;
+  $('tag').style.letterSpacing = lerp(24, 15, tg) + 'px';
+  const pf = eo(seg(t, 4.7, 5.05));
+  $('platforms').style.left = '790px'; $('platforms').style.top = (620 + 14*(1-pf)) + 'px'; $('platforms').style.opacity = pf;
+
+  // ----- Scene 3: drive it (6.2 - 10.6)
+  const s3 = env(t, 6.2, 10.6);
+  show($('s3'), s3, `scale(${lerp(0.97, 1, eo(seg(t, 6.2, 6.7)))})`);
+  if (s3 > 0) {
+    const ph = $('p3'); ph.style.transform = `translateY(${lerp(40, 0, eo(seg(t, 6.2, 6.8)))}px)`;
+    // Tap on the terminal brings it forward.
+    const tap = seg(t, 6.85, 7.35);
+    const rip = $('rip');
+    const rx = 860, ry = 300;
+    const rr = lerp(10, 70, eo(tap));
+    rip.style.left = (rx - rr) + 'px'; rip.style.top = (ry - rr) + 'px'; rip.style.width = rip.style.height = (2*rr) + 'px';
+    rip.style.opacity = tap > 0 && tap < 1 ? 1 - tap : 0;
+    const front3 = t > 7.0;
+    $('tm').style.zIndex = front3 ? 3 : 1; $('ed').style.zIndex = 2;
+    $('tm').style.boxShadow = front3 ? '0 0 0 3px #2F7BFF, 0 24px 60px rgba(0,0,0,.55)' : '';
+    // Trackpad: the cursor glides.
+    const cur = $('cur');
+    const g = eio(seg(t, 7.55, 8.35));
+    const cx = lerp(250, 640, g) + Math.sin(g*Math.PI)*30, cy = lerp(380, 250, g) - Math.sin(g*Math.PI)*60;
+    cur.style.left = cx + 'px'; cur.style.top = cy + 'px';
+    cur.style.opacity = Math.min(seg(t, 7.45, 7.6), 1 - seg(t, 10.0, 10.2));
+    // Keyboard bar slides up, then types.
+    const kb = eo(seg(t, 8.45, 8.8));
+    $('kb').style.bottom = lerp(-70, 46, kb) + 'px';
+    const typed = Math.floor(clamp((t - 8.85) / 0.06, 0, 10));
+    const cmd = 'cargo run';
+    let text = 'C:\\work> ' + cmd.slice(0, Math.min(typed, cmd.length));
+    const enter = t > 9.55;
+    if (enter) text += '\n   Compiling app v0.1.0';
+    if (t > 9.8) text += '\n    Finished dev in 2.1s';
+    if (t > 10.0) text += '\n     Running `app`';
+    if (!enter && Math.floor(t * 3) % 2 === 0) text += '▏';
+    $('termtext').textContent = text;
+    $('k-enter').className = 'key' + (t > 9.45 && t < 9.7 ? ' lit' : '');
+    // The chips light up with what is happening.
+    const on = t < 7.45 ? 'c-touch' : t < 8.45 ? 'c-pad' : t < 9.95 ? 'c-kb' : 'c-snd';
+    for (const id of ['c-touch','c-pad','c-kb','c-snd']) $(id).className = 'chip' + (id === on ? ' on' : '');
+    $('chips3').style.opacity = eo(seg(t, 6.5, 6.9));
+  }
+
+  // ----- Scene 4: both ways (10.6 - 15.0)
+  const s4 = env(t, 10.6, 15.0);
+  show($('s4'), s4, `scale(${lerp(0.97, 1, eo(seg(t, 10.6, 11.1)))})`);
+  if (s4 > 0) {
+    // Clipboard: phone -> computer (11.0 - 11.7), then a toast on the computer.
+    const c = eio(seg(t, 11.0, 11.75));
+    const clip = $('clip');
+    clip.style.left = lerp(300, 930, c) + 'px'; clip.style.top = (lerp(420, 560, c) - Math.sin(c*Math.PI)*120) + 'px';
+    clip.style.opacity = Math.min(seg(t, 10.95, 11.15), 1 - seg(t, 11.7, 11.85));
+    const toast = eo(seg(t, 11.75, 12.05));
+    $('toast').style.left = '1290px'; $('toast').style.top = (lerp(640, 600, toast)) + 'px';
+    $('toast').style.opacity = Math.min(toast, 1 - seg(t, 14.4, 14.6));
+    // An image: computer -> phone (11.9 - 12.6).
+    const im = eio(seg(t, 11.95, 12.65));
+    $('img').style.left = lerp(1150, 345, im) + 'px';
+    $('img').style.top = (lerp(380, 270, im) - Math.sin(im*Math.PI)*110) + 'px';
+    $('img').style.opacity = Math.min(seg(t, 11.9, 12.05), 1);
+    $('img').style.transform = `rotate(${lerp(-6, 0, im)}deg) scale(${lerp(1, .95, im)})`;
+    // A phone notification lands on the computer (12.5).
+    const nt = eo(seg(t, 12.55, 12.95));
+    $('notif').style.left = '880px'; $('notif').style.top = (lerp(250, 300, nt)) + 'px';
+    $('notif').style.opacity = nt;
+    // The file: fills, breaks at 61 %, continues.
+    const fc = $('fbar'), fs = $('fstate');
+    let pct = 0, color = 'linear-gradient(90deg,#2F7BFF,#6D5BFF)', state = 'Sending…', scol = '#AEB9DA';
+    if (t < 13.55) { pct = 61 * eo(seg(t, 12.8, 13.5)); }
+    else if (t < 13.95) { pct = 61; color = '#FEBC2E'; state = 'Wi-Fi dropped'; scol = '#FEBC2E'; }
+    else if (t < 14.55) { pct = lerp(61, 100, eio(seg(t, 13.95, 14.5))); state = 'Continued from 61%'; scol = '#8FD8FF'; }
+    else { pct = 100; color = '#28C840'; state = '✓ Saved on the computer'; scol = '#5BE38A'; }
+    fc.style.width = pct + '%'; fc.style.background = color; fs.textContent = state; fs.style.color = scol;
+    $('filecard').style.opacity = eo(seg(t, 12.6, 12.85));
+  }
+
+  // ----- Scene 5: from anywhere (15.0 - 18.2)
+  const s5 = env(t, 15.0, 18.2);
+  show($('s5'), s5, `scale(${lerp(0.97, 1, eo(seg(t, 15.0, 15.5)))})`);
+  if (s5 > 0) {
+    const paths = [['pa','da','la',15.35], ['pb','db','lb',15.7], ['pc','dc','lc',16.05]];
+    for (const [p, d, l, at] of paths) {
+      const path = $(p), len = path.getTotalLength();
+      const draw = eio(seg(t, at, at + 0.45));
+      path.style.strokeDasharray = len; path.style.strokeDashoffset = len * (1 - draw);
+      const dot = $(d);
+      const m = ((t - at - 0.45) / 1.1) % 1;
+      if (t > at + 0.45) { const pt = path.getPointAtLength(len * m); dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y); dot.style.opacity = 1; }
+      else dot.style.opacity = 0;
+      $(l).style.opacity = eo(seg(t, at + 0.15, at + 0.45));
+    }
+    $('nos').style.opacity = eo(seg(t, 16.3, 16.6));
+    $('nos').style.transform = `translateY(${lerp(16, 0, eo(seg(t,16.3,16.6)))}px)`;
+    $('tls').style.opacity = eo(seg(t, 16.9, 17.2));
+  }
+
+  // ----- Scene 6: outro (18.2 - 21.0)
+  const s6 = seg(t, 18.2, 18.6);
+  show($('s6'), s6, '');
+  if (t > 18.15) {
+    // The mark returns, above the wordmark.
+    const m6 = back(seg(t, 18.2, 18.8));
+    const size = 330;
+    mk.style.left = (960 - size/2) + 'px'; mk.style.top = (300 - size/2 - 20*(1-m6)) + 'px';
+    mk.style.width = mk.style.height = size + 'px';
+    show(mk, seg(t, 18.2, 18.45), `scale(${lerp(0.85, 1, m6)})`);
+    $('m-win').setAttribute('transform', 'translate(0 0)'); $('m-win').style.opacity = 1;
+    $('m-front').setAttribute('transform', 'translate(0 0)'); $('m-front').style.opacity = 1; $('m-back').style.opacity = 1;
+    $('m-glow').style.opacity = 0.4;
+    $('word6').style.opacity = eo(seg(t, 18.4, 18.8));
+    $('tag6').style.opacity = eo(seg(t, 18.65, 19.0));
+    $('url6').style.opacity = eo(seg(t, 18.9, 19.25));
+  }
+}
+window.render = render;
+render(0);
+</script>
+</body></html>
