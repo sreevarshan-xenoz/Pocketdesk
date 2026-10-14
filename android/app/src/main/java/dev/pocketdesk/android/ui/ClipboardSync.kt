@@ -1,5 +1,8 @@
 package dev.pocketdesk.android.ui
 
+import android.content.Context
+import android.net.Uri
+import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
@@ -21,6 +24,9 @@ import kotlinx.coroutines.withContext
  * classic echo loop (our push arriving as a "remote change" and bouncing
  * back). Runs only while [enabled]; the control connection is (re)established
  * whenever a send fails.
+ *
+ * An image already on the phone's clipboard when sync starts is not sent: it
+ * may be days old, and would replace whatever the desktop holds.
  */
 @Composable
 fun ClipboardSyncEffect(
@@ -39,15 +45,32 @@ fun ClipboardSyncEffect(
                 if (RustCore.sendClipboard(address, controlPort, it).isSuccess) lastRemote = it
             }
             val images = ImageClipRule()
-            var lastLocalImage: android.net.Uri? = null
+            // The image handled last (sent, skipped, or there at the start).
+            var lastLocalImage: Uri? = ClipboardImages.localImageUri(context)
+            // One that failed to send, and when, so it is retried after a while.
+            var failedLocalImage: Uri? = null
+            var failedAtMs = 0L
             while (isActive) {
                 delay(4000)
+                val now = SystemClock.elapsedRealtime()
 
                 val localImage = ClipboardImages.localImageUri(context)
                 if (localImage != null) {
-                    if (localImage != lastLocalImage) {
-                        lastLocalImage = localImage
-                        sendLocalImage(context, address, controlPort, localImage, images)
+                    val retryDue = localImage != failedLocalImage || now - failedAtMs >= ImageClipRule.RETRY_MS
+                    if (localImage != lastLocalImage && retryDue) {
+                        when (sendLocalImage(context, address, controlPort, localImage, images)) {
+                            Outcome.Sent -> {
+                                lastLocalImage = localImage
+                                // The texts are no longer on either clipboard.
+                                lastLocal = null
+                                lastRemote = null
+                            }
+                            Outcome.Skipped -> lastLocalImage = localImage
+                            Outcome.Failed -> {
+                                failedLocalImage = localImage
+                                failedAtMs = now
+                            }
+                        }
                     }
                 } else {
                     lastLocalImage = null
@@ -57,6 +80,7 @@ fun ClipboardSyncEffect(
                         if (RustCore.sendClipboard(address, controlPort, local).isSuccess) {
                             ClipHistory.add(context, local)
                             lastRemote = local
+                            images.textMoved()
                         } else {
                             RustCore.connectToPeer(address, controlPort)
                         }
@@ -64,11 +88,19 @@ fun ClipboardSyncEffect(
                 }
 
                 when (val remote = RustCore.getClipboardState(address, controlPort).getOrNull()) {
-                    is RemoteClip.Image -> if (images.shouldFetch(remote.id, remote.size)) {
-                        val file = ClipboardImages.receivedFile(context, remote.id)
-                        if (RustCore.fetchClipboardImage(address, controlPort, remote.id, file.path).isSuccess) {
+                    is RemoteClip.Image -> if (images.shouldFetch(remote.id, remote.size, now)) {
+                        val part = ClipboardImages.partFile(context, remote.id)
+                        val fetched = RustCore.fetchClipboardImage(address, controlPort, remote.id, part.path)
+                        val kept = fetched.mapCatching { ClipboardImages.keepReceived(context, part, remote.id) }
+                        kept.onSuccess { file ->
                             images.moved(remote.id)
                             ClipboardImages.writeLocal(context, file)
+                            lastLocalImage = ClipboardImages.localImageUri(context)
+                            lastLocal = null
+                            lastRemote = null
+                        }.onFailure {
+                            part.delete()
+                            images.fetchFailed(remote.id, now)
                         }
                     }
                     is RemoteClip.Text -> {
@@ -79,6 +111,7 @@ fun ClipboardSyncEffect(
                             if (text.isNotBlank() && text != lastLocal) {
                                 writeLocalClipboard(context, text)
                                 lastLocal = text
+                                images.textMoved()
                             }
                         }
                     }
@@ -89,23 +122,32 @@ fun ClipboardSyncEffect(
     }
 }
 
-/** Send the image at [uri] to the desktop's clipboard, unless it just came from there. */
+private enum class Outcome { Sent, Skipped, Failed }
+
+/**
+ * Send the image at [uri] to the desktop's clipboard, unless it is this
+ * app's own, cannot be read, or is the one that just moved.
+ */
 private fun sendLocalImage(
-    context: android.content.Context,
+    context: Context,
     address: String,
     controlPort: Int,
-    uri: android.net.Uri,
+    uri: Uri,
     images: ImageClipRule,
-) {
+): Outcome {
     val ours = ClipboardImages.isOurs(context, uri)
-    if (ours) return
-    val png = ClipboardImages.pngOf(context, uri) ?: return
+    if (ours) return Outcome.Skipped
+    val png = ClipboardImages.pngOf(context, uri) ?: return Outcome.Skipped
     val id = ImageClipRule.idOf(png)
-    if (!images.shouldSend(id, ours)) return
-    val file = ClipboardImages.stage(context, png)
-    if (RustCore.sendClipboardImage(address, controlPort, file.path).isSuccess) {
+    if (!images.shouldSend(id, ours)) return Outcome.Skipped
+    val sent = ClipboardImages.withStaged(context, png) { file ->
+        RustCore.sendClipboardImage(address, controlPort, file.path)
+    }
+    return if (sent.isSuccess) {
         images.moved(id)
+        Outcome.Sent
     } else {
         RustCore.connectToPeer(address, controlPort)
+        Outcome.Failed
     }
 }
