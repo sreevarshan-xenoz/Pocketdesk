@@ -270,6 +270,11 @@ impl IrohDial {
             .await
             .context("iroh dial timed out")?
             .context("iroh dial failed")?;
+        // Connected: the DHT has done its job. Left in place, its node would
+        // keep up a routing table for the whole session.
+        if let Ok(lookup) = endpoint.address_lookup() {
+            lookup.clear();
+        }
 
         Ok(Self {
             endpoint,
@@ -670,6 +675,10 @@ mod tests {
             accepted.remote_id(),
             dial.endpoint.id(),
             "the session is the phone's"
+        );
+        assert!(
+            dial.endpoint.address_lookup().unwrap().is_empty(),
+            "the phone's DHT node stops once connected"
         );
         drop(accepted);
         dial.close().await;
