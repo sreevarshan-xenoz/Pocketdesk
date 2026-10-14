@@ -154,11 +154,15 @@ fn browse_reply(home: &Path, requested: &str) -> serde_json::Value {
     };
     let parent = parent_of(home, &shown);
     match list_directory(&real, &shown) {
-        Ok(files) => json!({
-            "path": shown.display().to_string(),
-            "parent": parent,
-            "files": files,
-        }),
+        Ok(files) => {
+            let (files, truncated) = within_budget(files, LISTING_BUDGET);
+            json!({
+                "path": shown.display().to_string(),
+                "parent": parent,
+                "files": files,
+                "truncated": truncated,
+            })
+        }
         Err(e) => json!({
             "error": e.to_string(),
             "path": shown.display().to_string(),
@@ -166,6 +170,28 @@ fn browse_reply(home: &Path, requested: &str) -> serde_json::Value {
             "files": [],
         }),
     }
+}
+
+/// The most a listing's entries may take, encoded. A control packet is at
+/// most 4 MiB on both ends, and a reply over it would end the phone's
+/// connection, so a huge folder is listed in part (R3 review).
+const LISTING_BUDGET: usize = 2 * 1024 * 1024;
+
+/// The leading entries that fit in `budget` bytes of JSON, and whether any
+/// were left out.
+fn within_budget(entries: Vec<serde_json::Value>, budget: usize) -> (Vec<serde_json::Value>, bool) {
+    let mut used = 0;
+    let mut kept = Vec::new();
+    let total = entries.len();
+    for entry in entries {
+        used += entry.to_string().len() + 1;
+        if used > budget {
+            break;
+        }
+        kept.push(entry);
+    }
+    let truncated = kept.len() < total;
+    (kept, truncated)
 }
 
 /// Entries the system keeps out of sight: a name starting with a dot, and
@@ -271,6 +297,21 @@ impl Plugin for FileBrowsePlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_huge_folder_is_listed_in_part_within_one_packet() {
+        let entries: Vec<_> = (0..1000)
+            .map(|i| json!({ "name": format!("file-{i:04}"), "path": "x".repeat(100) }))
+            .collect();
+        let one = entries[0].to_string().len() + 1;
+        let (kept, truncated) = within_budget(entries.clone(), one * 10);
+        assert_eq!(kept.len(), 10);
+        assert!(truncated);
+        assert_eq!(kept[9]["name"], "file-0009", "the leading ones, in order");
+        let (kept, truncated) = within_budget(entries, LISTING_BUDGET);
+        assert_eq!(kept.len(), 1000);
+        assert!(!truncated);
+    }
 
     fn temp_home(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-browse-{name}-{}", std::process::id()));

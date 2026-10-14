@@ -62,6 +62,7 @@ fun parseRemoteFolder(json: String): RemoteFolder {
         parent = if (o.isNull("parent")) null else o.optString("parent").ifEmpty { null },
         entries = RemoteFiles.sorted(entries),
         error = if (o.isNull("error")) null else o.optString("error").ifEmpty { null },
+        truncated = o.optBoolean("truncated"),
     )
 }
 
@@ -136,6 +137,10 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                 shown.error != null -> Message(stringResource(R.string.files_failed, shown.error), error = true)
                 shown.entries.isEmpty() -> Message(stringResource(R.string.files_empty), error = false)
                 else -> LazyColumn(modifier = Modifier.padding(bottom = 24.dp)) {
+                    // First, where it is seen: the rest of a huge folder is not listed.
+                    if (shown.truncated) {
+                        item { Message(stringResource(R.string.files_truncated), error = false) }
+                    }
                     items(shown.entries, key = { it.path }) { entry ->
                         ListItem(
                             headlineContent = {

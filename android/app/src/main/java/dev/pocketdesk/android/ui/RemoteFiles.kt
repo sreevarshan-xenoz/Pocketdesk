@@ -21,6 +21,8 @@ data class RemoteFolder(
     val parent: String?,
     val entries: List<RemoteEntry>,
     val error: String?,
+    /** The computer listed only the first entries: the folder is too big for one reply. */
+    val truncated: Boolean = false,
 )
 
 /** What the Files sheet shows, kept apart from Android so it is tested. */

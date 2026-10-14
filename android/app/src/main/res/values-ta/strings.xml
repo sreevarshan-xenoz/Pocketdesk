@@ -124,6 +124,7 @@
     <string name="screen_chip">திரை %1$d, %2$d×%3$d</string>
     <string name="files_up">மேலே</string>
     <string name="files_empty">இந்தக் கோப்புறை காலியாக உள்ளது.</string>
+    <string name="files_truncated">இந்தக் கோப்புறையின் முதல் உருப்படிகள் மட்டுமே காட்டப்படுகின்றன; முழுவதும் பட்டியலிட இது மிகப் பெரியது.</string>
     <string name="files_download_title">%1$s ஐப் பதிவிறக்கவா?</string>
     <string name="files_download_text">%1$s, Downloads/Pocketdesk இல் சேமிக்கப்படும்.</string>
     <string name="files_download">பதிவிறக்கு</string>

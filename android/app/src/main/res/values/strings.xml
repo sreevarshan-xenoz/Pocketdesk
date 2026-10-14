@@ -131,6 +131,7 @@
     <string name="screen_chip">Screen %1$d, %2$d×%3$d</string>
     <string name="files_up">Up</string>
     <string name="files_empty">This folder is empty.</string>
+    <string name="files_truncated">Only the first items of this folder are shown; it is too big to list in full.</string>
     <string name="files_download_title">Download %1$s?</string>
     <string name="files_download_text">%1$s, saved to Downloads/Pocketdesk.</string>
     <string name="files_download">Download</string>
