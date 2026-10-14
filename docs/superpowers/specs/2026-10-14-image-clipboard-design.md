@@ -88,3 +88,36 @@ The id is the same SHA-256 on both ends, so neither side sends back what it just
 - Files on the clipboard (copied files in Explorer): that is F7's job.
 - Rich text and HTML.
 - Images over 32 MiB.
+
+## As built
+
+- **Device-verified on this box and the A71 (LAN), desktop to phone:**
+  - a bitmap copied on Windows (no "PNG" format, so the DIB path ran) reached the phone as a PNG whose SHA-256 is its id, once, and never came back;
+  - after the review fixes, the same image copied again after some text in between was fetched again, and the text reached the phone.
+
+  The Windows clipboard's PNG and DIB round trip is a live ignored test.
+- **Owed (checklist §38):**
+  - phone to desktop on a device: the A71 has no app that copies an image;
+  - pasting into a phone app;
+  - the permission switch;
+  - a 4K screenshot;
+  - the Linux host.
+- **Fresh review (0 Critical, 6 Important), fixed:**
+  - **A decode bomb.** A few hundred bytes of PNG claiming 16384 x 16384 made the server commit about 4 GiB. Both readers now refuse more than 40 megapixels from the header.
+  - **The clipboard stayed open while a large bitmap was encoded,** and an unusable image was re-read every poll. It is now copied out first, and failures are remembered by sequence number.
+  - **The phone's sync state went stale across text and image,** and a stale image overwrote the desktop at every session start.
+  - **Real photos were dropped or sideways.** They are now decoded at most 4096 px on the long side, from their EXIF orientation.
+  - **A failed fetch could delete the file the clipboard pointed at,** and retried every 4 s.
+
+  The four phone fixes share one commit, since they interleave in the same two files.
+- **Minors fixed:**
+  - the Windows write allocates before emptying the clipboard;
+  - copying text forgets the cached image;
+  - image transfers leave a file share's progress alone.
+- **A review suggestion not taken:** reading the sequence number while the clipboard is still open. Windows moves the number on close (91 inside, 93 after), so it is read just after, and the race of another app copying in that instant is accepted.
+- **Deferred minors:**
+  - Linux reads the whole PNG on every poll, with no cache and no bound before the size check;
+  - text wins over an image that comes with text, so some browser and Office copies send their text;
+  - no `CF_DIBV5` fallback for 8- and 16-bit bitmaps;
+  - no end-to-end test of the two packets against the permission gate.
+- **Already there, seen on the device:** at session start the phone pushes its own clipboard text, which replaces whatever the desktop held.

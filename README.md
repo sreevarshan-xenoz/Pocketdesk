@@ -43,7 +43,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **Single-window streaming** (Hyprland) — pick any window on the phone and the server crops + re-encodes to just that window
 
 ### KDE Connect Integration
-- **Clipboard sync** — bidirectional clipboard sharing via `wl-clipboard`
+- **Clipboard sync** — text and images, both ways, while a session is open (the Win32 clipboard on Windows, `wl-clipboard` on Linux). An image goes as PNG, up to 32 MB, through the same TLS-pinned transfer as files, and needs only the phone's clipboard permission. A copied screenshot pastes on the phone, and a copied photo pastes into Paint. Text wins when both are on the clipboard.
 - **File transfer** — files both ways over the LAN; each transfer ends with the receiver confirming the save
 - **Remote file browsing** — browse the computer's home folder from a session and download a file to the phone's Downloads/Pocketdesk
 - **Notifications** — receive Android notifications on your Linux desktop
