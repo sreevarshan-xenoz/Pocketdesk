@@ -92,6 +92,12 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// returning *without ever creating the frame object*, so there is no
 /// `failed` event to wait for — silence is the only signal.
 const WINDOW_STAGE_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long a frame copy may wait for the screen to change. wlroots
+/// compositors (Sway) hold a damage-tracked copy until something on screen
+/// changes, so a still desktop would send no frame at all and the phone ends
+/// a session after 10 s without one. After this long the copy is abandoned
+/// and the last frame is sent again.
+const STATIC_HEARTBEAT: Duration = Duration::from_secs(1);
 
 /// Output geometry (wl_output global coordinates) shared per bound output.
 #[derive(Default)]
@@ -435,6 +441,10 @@ fn run_capture_loop(
     // when the client picks again (the watch value changes), so a closed
     // window cannot spin the loop on 2 s timeouts.
     let mut suspended: Option<u64> = None;
+    // How the pixels in the reused buffer were last emitted (their row
+    // order), so a still screen can repeat them; None before the first frame
+    // and after the buffer is reallocated.
+    let mut last_inverted: Option<bool> = None;
 
     loop {
         if cancel.is_cancelled() {
@@ -523,16 +533,39 @@ fn run_capture_loop(
             .is_some_and(|f| f.matches(w, h, stride, format));
         if !reusable {
             shm_buf = Some(ShmBuffer::new(w, h, stride, format)?);
+            // New pixels: nothing in them to repeat yet.
+            last_inverted = None;
         }
         let fb = shm_buf.as_ref().unwrap();
         let (pool, buffer) = fb.attach(&shm, &qh);
         capture.copy(&buffer);
 
-        // Stage 2: wait for ready/failed.
-        pump_until(&conn, &mut queue, &mut state, &cancel, || {
-            let p = slot.lock().unwrap();
-            p.done || p.failed
-        })?;
+        // Stage 2: wait for ready/failed, but not for ever: a compositor that
+        // waits for damage (wlroots) answers a still screen with silence.
+        let finished =
+            pump_until_timeout(&conn, &mut queue, &mut state, &cancel, STATIC_HEARTBEAT, || {
+                let p = slot.lock().unwrap();
+                p.done || p.failed
+            })?;
+        if !finished {
+            buffer.destroy();
+            pool.destroy();
+            capture.destroy();
+            // Once the compositor has handled the destroy it no longer
+            // writes into the buffer, so the last frame in it can be read.
+            queue.roundtrip(&mut state)?;
+            if let Some(inverted) = last_inverted
+                && !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h)
+            {
+                debug!("Frame channel closed, stopping screencopy capture");
+                break;
+            }
+            if !idle {
+                info!("Screencopy: screen static, repeating the last frame each second");
+                idle = true;
+            }
+            continue;
+        }
         let (inverted, damaged, failed) = {
             let p = slot.lock().unwrap();
             (p.y_invert, p.damaged, p.failed)
@@ -584,24 +617,10 @@ fn run_capture_loop(
                 );
                 idle = false;
             }
-            let data = fb.repack(inverted, w, h, stride);
-            let frame = VideoFrame {
-                data,
-                width: w,
-                height: h,
-                stride: w * 4,
-                timestamp: Instant::now(),
-            };
-            match frame_tx.try_send(frame) {
-                Ok(()) => {}
-                Err(tokio_mpsc::error::TrySendError::Full(_)) => {
-                    // Encoder backlog: the next request re-grabs fresh
-                    // pixels, so dropping is the correct newest-only move.
-                }
-                Err(tokio_mpsc::error::TrySendError::Closed(_)) => {
-                    debug!("Frame channel closed, stopping screencopy capture");
-                    break;
-                }
+            last_inverted = Some(inverted);
+            if !send_frame(&frame_tx, fb.repack(inverted, w, h, stride), w, h) {
+                debug!("Frame channel closed, stopping screencopy capture");
+                break;
             }
         } else if !idle {
             info!("Screencopy: screen static, dropping to {IDLE_FPS} fps idle pacing");
@@ -620,6 +639,28 @@ fn run_capture_loop(
     }
 
     Ok(())
+}
+
+/// Hand one frame to the encoder. A full channel drops it (the encoder is
+/// behind; the next capture has newer pixels). Returns false once the
+/// encoder side is gone.
+fn send_frame(
+    frame_tx: &tokio_mpsc::Sender<VideoFrame>,
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+) -> bool {
+    let frame = VideoFrame {
+        data,
+        width,
+        height,
+        stride: width * 4,
+        timestamp: Instant::now(),
+    };
+    !matches!(
+        frame_tx.try_send(frame),
+        Err(tokio_mpsc::error::TrySendError::Closed(_))
+    )
 }
 
 /// Bind every advertised `wl_output` global (registry order, stable across
