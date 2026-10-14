@@ -1,6 +1,8 @@
 package dev.pocketdesk.android.notify
 
 import android.Manifest
+import android.app.Activity
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -89,22 +91,20 @@ class SmsReplies(private val ctx: Context) {
         }
         for (request in RustCore.takeSmsRequests()) {
             val permitted = TextPrefs.granted(ctx, Manifest.permission.SEND_SMS)
-            val result = JSONObject().put("id", request.id)
             when (val decision = SmsReplyRule.decide(request, TextPrefs.reply(ctx), permitted)) {
+                // The result is reported when the radio answers every part
+                // (SmsSentReceiver), not when Android merely accepts the text.
                 SmsReplyRule.Decision.Send ->
-                    runCatching { send(request) }
-                        .onSuccess { result.put("ok", true) }
-                        .onFailure {
-                            Log.w(TAG, "reply ${request.id} not sent", it)
-                            result.put("ok", false).put("error", it.message ?: "the phone could not send it")
-                        }
-                is SmsReplyRule.Decision.Refuse -> result.put("ok", false).put("error", decision.reason)
+                    runCatching { send(request) }.onFailure {
+                        Log.w(TAG, "reply ${request.id} not sent", it)
+                        report(ctx, request.id, it.message ?: "the phone could not send it")
+                    }
+                is SmsReplyRule.Decision.Refuse -> report(ctx, request.id, decision.reason)
             }
-            PhoneLink.sendNow(ctx, "kdeconnect.pocketdesk.sms_sent", result)
         }
     }
 
-    /** Hand the text to Android's SMS service, in parts when long. */
+    /** Hand the text to Android's SMS service, in parts when long, asking to hear how each went. */
     private fun send(request: SmsRequest) {
         val manager =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -114,10 +114,85 @@ class SmsReplies(private val ctx: Context) {
                 SmsManager.getDefault()
             } ?: error("this phone has no SMS service")
         val parts = manager.divideMessage(request.body.trim())
-        manager.sendMultipartTextMessage(request.address.trim(), null, parts, null, null)
+        SmsSentTracker.expect(request.id, parts.size)
+        val sentIntents =
+            ArrayList(
+                parts.indices.map { part ->
+                    val intent =
+                        Intent(ctx, SmsSentReceiver::class.java)
+                            .setAction(SmsSentReceiver.ACTION)
+                            .putExtra(SmsSentReceiver.EXTRA_ID, request.id)
+                    PendingIntent.getBroadcast(
+                        ctx,
+                        (request.id.hashCode() * 31) + part,
+                        intent,
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    )
+                },
+            )
+        manager.sendMultipartTextMessage(request.address.trim(), null, parts, sentIntents, null)
     }
 
-    private companion object {
-        const val TAG = "SmsReplies"
+    companion object {
+        private const val TAG = "SmsReplies"
+
+        /** Tell the computer how reply [id] went: sent, or why not. */
+        fun report(ctx: Context, id: String, error: String?) {
+            val result = JSONObject().put("id", id).put("ok", error == null)
+            if (error != null) result.put("error", error)
+            PhoneLink.worker.execute { PhoneLink.sendNow(ctx, "kdeconnect.pocketdesk.sms_sent", result) }
+        }
+    }
+}
+
+/** The parts of each reply still waiting for the radio's answer, and the first failure. */
+object SmsSentTracker {
+    private val waiting = HashMap<String, Pair<Int, String?>>()
+
+    @Synchronized
+    fun expect(id: String, parts: Int) {
+        waiting[id] = parts.coerceAtLeast(1) to null
+    }
+
+    /**
+     * One part of [id] answered ([error] null: sent). Returns the reply's
+     * outcome once every part has: `null` while some are still out, else
+     * `Result` with the first error, if any.
+     */
+    @Synchronized
+    fun answered(id: String, error: String?): kotlin.Result<String?>? {
+        val (left, firstError) = waiting[id] ?: return null
+        val now = firstError ?: error
+        if (left > 1) {
+            waiting[id] = (left - 1) to now
+            return null
+        }
+        waiting.remove(id)
+        return kotlin.Result.success(now)
+    }
+}
+
+/** The radio's answer for one part of a reply (N5b). */
+class SmsSentReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val id = intent.getStringExtra(EXTRA_ID) ?: return
+        val error = if (resultCode == Activity.RESULT_OK) null else reason(resultCode)
+        val outcome = SmsSentTracker.answered(id, error) ?: return
+        SmsReplies.report(context.applicationContext, id, outcome.getOrNull())
+    }
+
+    companion object {
+        const val ACTION = "dev.pocketdesk.android.SMS_SENT"
+        const val EXTRA_ID = "id"
+
+        /** What the radio's result code means, in words for the computer. */
+        fun reason(code: Int): String =
+            when (code) {
+                SmsManager.RESULT_ERROR_NO_SERVICE -> "the phone has no mobile service"
+                SmsManager.RESULT_ERROR_RADIO_OFF -> "the phone's mobile radio is off"
+                SmsManager.RESULT_ERROR_NULL_PDU -> "the phone could not encode the text"
+                SmsManager.RESULT_ERROR_GENERIC_FAILURE -> "the phone could not send it"
+                else -> "the phone could not send it (error $code)"
+            }
     }
 }

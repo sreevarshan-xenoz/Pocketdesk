@@ -131,6 +131,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- N5b: the radio's answer for each part of a reply. -->
+        <receiver
+            android:name=".notify.SmsSentReceiver"
+            android:exported="false" />
+
         <!-- N5a: the phone's notifications shown on the desktop, once the
              user turns it on in Settings and grants notification access. -->
         <service
