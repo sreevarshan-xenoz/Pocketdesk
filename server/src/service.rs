@@ -346,11 +346,17 @@ pub async fn run(config: Config) -> Result<()> {
     // streaming channel and injects them into the host system.
     tokio::spawn(async move {
         tracing::info!("Input injection task started");
+        // Made at once (a device made late misses the first event), and if
+        // that fails (no access to /dev/uinput yet, no display) tried again
+        // while input arrives, instead of no input until a restart.
+        let mut last_try = Some(std::time::Instant::now());
         let mut injector = match InputInjector::new() {
-            Ok(inj) => inj,
+            Ok(inj) => Some(inj),
             Err(e) => {
-                tracing::error!("Failed to create InputInjector: {e}");
-                return;
+                tracing::error!(
+                    "Failed to create InputInjector: {e}; trying again when input arrives"
+                );
+                None
             }
         };
 
@@ -361,6 +367,20 @@ pub async fn run(config: Config) -> Result<()> {
         loop {
             match input_rx.recv().await {
                 Ok((session, packet)) => {
+                    if injector.is_none() && retry_injector_now(last_try, std::time::Instant::now())
+                    {
+                        last_try = Some(std::time::Instant::now());
+                        match InputInjector::new() {
+                            Ok(inj) => {
+                                tracing::info!("Input injector ready");
+                                injector = Some(inj);
+                            }
+                            Err(e) => tracing::warn!("Input injector still unavailable: {e}"),
+                        }
+                    }
+                    let Some(injector) = injector.as_mut() else {
+                        continue;
+                    };
                     let live: Vec<u64> = pocketdesk_core::streaming::sessions::list()
                         .iter()
                         .map(|s| s.id)
@@ -378,7 +398,7 @@ pub async fn run(config: Config) -> Result<()> {
                     {
                         let saved = injector.swap_gamepad_buttons(*held);
                         let _ = handle_input_packet(
-                            &mut injector,
+                            injector,
                             InputPacket::Gamepad {
                                 axes: [0; 6],
                                 buttons: 0,
@@ -389,7 +409,7 @@ pub async fn run(config: Config) -> Result<()> {
                     last_session = Some(session);
                     let state = gamepads.entry(session).or_insert(0);
                     let saved = injector.swap_gamepad_buttons(*state);
-                    if let Err(e) = handle_input_packet(&mut injector, packet) {
+                    if let Err(e) = handle_input_packet(injector, packet) {
                         tracing::warn!("Input injection error: {e}");
                     }
                     *state = injector.swap_gamepad_buttons(saved);
@@ -1298,6 +1318,14 @@ fn handle_input_packet(injector: &mut InputInjector, packet: InputPacket) -> Res
     Ok(())
 }
 
+/// How often a missing input injector is tried again while input arrives.
+const INJECTOR_RETRY: Duration = Duration::from_secs(10);
+
+/// Whether to try making the input injector again at `now`.
+fn retry_injector_now(last_try: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last_try.is_none_or(|t| now.saturating_duration_since(t) >= INJECTOR_RETRY)
+}
+
 struct PidFileGuard {
     path: PathBuf,
 }
@@ -1430,5 +1458,19 @@ mod unpair_tests {
             unpair_targets(Some("phone-z"), &trusted).is_err(),
             "not a paired device"
         );
+    }
+}
+
+#[cfg(test)]
+mod injector_retry_tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn a_missing_injector_is_tried_again_but_not_on_every_packet() {
+        let t = Instant::now();
+        assert!(retry_injector_now(None, t), "never tried yet");
+        assert!(!retry_injector_now(Some(t), t + Duration::from_secs(3)));
+        assert!(retry_injector_now(Some(t), t + INJECTOR_RETRY));
     }
 }
