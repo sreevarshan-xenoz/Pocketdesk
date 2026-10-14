@@ -87,6 +87,7 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::live_sessions::run_watcher());
     // F7b: files the desktop app sends to a phone in a session.
     tokio::spawn(crate::offers::run_watcher());
+    tokio::spawn(crate::plugins::sms::run_watcher());
 
     // Prepare shared state for v2 multiplexer and v1 streaming.
     // The QUIC identity must be STABLE across restarts: clients pin it with
@@ -128,6 +129,7 @@ pub async fn run(config: Config) -> Result<()> {
         config.phone_notifications,
         config.notifications_per_minute,
     );
+    crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
     let announcement = if config.lan_discovery {
         Some(lan_discovery.register_service(
             &host_name,

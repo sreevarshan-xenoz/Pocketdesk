@@ -19,7 +19,8 @@ use crate::secure_fs;
 pub const SMS_FILE: &str = "sms.json";
 /// Where the desktop app leaves replies for the server.
 pub const SMS_OUTBOX_DIR: &str = "sms_outbox";
-/// How many messages the conversation remembers.
+/// How many messages the conversation remembers, unless config.toml's
+/// `sms_keep` says otherwise.
 pub const KEEP: usize = 1000;
 /// A reply no phone took within this long fails.
 pub const OUTBOX_TTL_SECS: u64 = 24 * 60 * 60;
@@ -113,23 +114,29 @@ pub fn read(state_dir: &Path) -> Vec<Message> {
         .unwrap_or_default()
 }
 
-fn write(state_dir: &Path, mut messages: Vec<Message>) -> io::Result<()> {
-    let excess = messages.len().saturating_sub(KEEP);
+fn write(state_dir: &Path, mut messages: Vec<Message>, keep: usize) -> io::Result<()> {
+    let excess = messages.len().saturating_sub(keep.max(1));
     messages.drain(..excess);
     let json = serde_json::to_vec(&Store { messages }).map_err(io::Error::other)?;
     secure_fs::create_private_dir(state_dir)?;
     secure_fs::write_private(&state_dir.join(SMS_FILE), &json)
 }
 
-/// Add `message` (the server's side). The caller serializes calls.
-pub fn record(state_dir: &Path, message: Message) -> io::Result<()> {
+/// Add `message`, keeping the newest `keep` (the server's side). The caller
+/// serializes calls.
+pub fn record(state_dir: &Path, message: Message, keep: usize) -> io::Result<()> {
     let mut messages = read(state_dir);
     messages.push(message);
-    write(state_dir, messages)
+    write(state_dir, messages, keep)
 }
 
 /// Set reply `id`'s state (the server's side). An unknown id is ignored.
-pub fn set_reply_state(state_dir: &Path, id: &str, state: ReplyState) -> io::Result<()> {
+pub fn set_reply_state(
+    state_dir: &Path,
+    id: &str,
+    state: ReplyState,
+    keep: usize,
+) -> io::Result<()> {
     let mut messages = read(state_dir);
     let Some(reply) = messages
         .iter_mut()
@@ -139,7 +146,7 @@ pub fn set_reply_state(state_dir: &Path, id: &str, state: ReplyState) -> io::Res
         return Ok(());
     };
     reply.state = state;
-    write(state_dir, messages)
+    write(state_dir, messages, keep)
 }
 
 /// Replies handed to a phone longer than [`CONFIRM_TTL_SECS`] ago, still
@@ -276,7 +283,7 @@ mod tests {
         let dir = dir("keep");
         assert!(read(&dir).is_empty(), "missing is empty");
         for i in 0..(KEEP as u64 + 3) {
-            record(&dir, received("p", "+1", &format!("m{i}"), i)).unwrap();
+            record(&dir, received("p", "+1", &format!("m{i}"), i), KEEP).unwrap();
         }
         let messages = read(&dir);
         assert_eq!(messages.len(), KEEP);
@@ -307,6 +314,7 @@ mod tests {
                     state: ReplyState::Sending { since_unix: 20 },
                 }),
             },
+            KEEP,
         )
         .unwrap();
         remove_pending(&dir, &request.id).unwrap();
@@ -317,12 +325,14 @@ mod tests {
             unconfirmed(&read(&dir), 20 + CONFIRM_TTL_SECS),
             vec![request.id.clone()]
         );
-        set_reply_state(&dir, &request.id, ReplyState::Sent).unwrap();
+        set_reply_state(&dir, &request.id, ReplyState::Sent, KEEP).unwrap();
         assert_eq!(
             read(&dir)[0].reply.as_ref().unwrap().state,
             ReplyState::Sent
         );
-        set_reply_state(&dir, "unknown", ReplyState::Sent).unwrap();
+        set_reply_state(&dir, "unknown", ReplyState::Sent, KEEP).unwrap();
+        record(&dir, received("p", "+1", "x", 30), 1).unwrap();
+        assert_eq!(read(&dir).len(), 1, "a smaller sms_keep trims");
     }
 
     #[test]
