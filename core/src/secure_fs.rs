@@ -33,8 +33,11 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 /// Create `path` (and its parents) as a directory only the current user can
-/// open: mode `0700` on Unix, an owner-only DACL on Windows. For folders that
-/// other code fills with secrets, such as the relay's Let's Encrypt keys.
+/// open: mode `0700` on Unix, an owner-only DACL on Windows whose entry the
+/// folder's contents inherit, so what it already holds and what is written
+/// into it later stay readable by the owner (and by no one else). For
+/// folders that other code fills with secrets, such as the relay's Let's
+/// Encrypt keys.
 pub fn create_private_dir(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)?;
     #[cfg(unix)]
@@ -42,9 +45,13 @@ pub fn create_private_dir(path: &Path) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        restrict_to_owner(path)
+        restrict(path, true)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Ok(())
     }
 }
 
@@ -52,6 +59,14 @@ pub fn create_private_dir(path: &Path) -> io::Result<()> {
 /// control, and stop inheriting the parent's entries.
 #[cfg(windows)]
 pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
+    restrict(path, false)
+}
+
+/// [`restrict_to_owner`]; with `inherited`, the entry is passed down to the
+/// folder's files and subfolders. Without it, protecting a folder would leave
+/// every child that had only inherited entries with none at all.
+#[cfg(windows)]
+fn restrict(path: &Path, inherited: bool) -> io::Result<()> {
     use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
     use windows::Win32::Security::Authorization::{
         EXPLICIT_ACCESS_W, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW, SetNamedSecurityInfoW,
@@ -59,7 +74,8 @@ pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
     };
     use windows::Win32::Security::{
         ACL, DACL_SECURITY_INFORMATION, GetTokenInformation, NO_INHERITANCE,
-        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        PROTECTED_DACL_SECURITY_INFORMATION, SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_QUERY,
+        TOKEN_USER, TokenUser,
     };
     use windows::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -91,7 +107,11 @@ pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
     let entry = EXPLICIT_ACCESS_W {
         grfAccessPermissions: FILE_ALL_ACCESS.0,
         grfAccessMode: SET_ACCESS,
-        grfInheritance: NO_INHERITANCE,
+        grfInheritance: if inherited {
+            SUB_CONTAINERS_AND_OBJECTS_INHERIT
+        } else {
+            NO_INHERITANCE
+        },
         Trustee: TRUSTEE_W {
             TrusteeForm: TRUSTEE_IS_SID,
             TrusteeType: TRUSTEE_IS_USER,
@@ -148,6 +168,28 @@ mod tests {
             assert_eq!(mode & 0o777, 0o700);
         }
         std::fs::remove_dir_all(temp("dir")).ok();
+    }
+
+    /// Making a folder private must not lock its owner out of what it
+    /// already holds. On Windows, protecting a folder's DACL recomputes its
+    /// children's inherited entries: with an entry the children do not
+    /// inherit, a file that had only inherited ones was left with none, and
+    /// nobody could read it (it took the server's trust store with it).
+    #[test]
+    fn making_a_folder_private_keeps_what_it_holds_readable() {
+        let dir = temp("existing");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("before.json"), b"kept").unwrap();
+        std::fs::write(dir.join("sub").join("deeper.json"), b"kept too").unwrap();
+        create_private_dir(&dir).unwrap();
+        assert_eq!(std::fs::read(dir.join("before.json")).unwrap(), b"kept");
+        assert_eq!(
+            std::fs::read(dir.join("sub").join("deeper.json")).unwrap(),
+            b"kept too"
+        );
+        std::fs::write(dir.join("after.json"), b"new").unwrap();
+        assert_eq!(std::fs::read(dir.join("after.json")).unwrap(), b"new");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
