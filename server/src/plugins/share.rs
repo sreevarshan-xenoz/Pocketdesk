@@ -628,7 +628,7 @@ pub fn safe_file_name(raw: &str) -> String {
         .chars()
         .filter(|c| {
             !c.is_control()
-                && !is_invisible_format(*c)
+                && !pocketdesk_core::protocol::kdeconnect::is_invisible_format(*c)
                 && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
         })
         .collect();
@@ -647,16 +647,6 @@ pub fn safe_file_name(raw: &str) -> String {
 fn trim_name(name: &str) -> &str {
     name.trim_start_matches(['.', ' '])
         .trim_end_matches(['.', ' '])
-}
-
-/// Characters that change how a name reads without being seen: a
-/// right-to-left override makes "invoice<RLO>fdp.exe" read as
-/// "invoiceexe.pdf".
-fn is_invisible_format(c: char) -> bool {
-    matches!(
-        c,
-        '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
-    )
 }
 
 /// At most [`MAX_NAME_BYTES`], keeping a short extension: a long name loses
