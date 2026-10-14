@@ -86,6 +86,11 @@ pub async fn handle_v2_session(
         let control_pairing_required = pairing_required;
         let control_device_id = peer_identity.device_id.clone();
         let control_task = tokio::spawn(async move {
+            // The first refused packet is said where the owner sees it; the
+            // rest (a phone polling every few seconds) at debug.
+            let mut refusal_said = false;
+            // Packet types already reported as denied on this channel.
+            let mut denied_said = std::collections::HashSet::new();
             loop {
                 match read_framed_json::<NetworkPacket>(&mut recv0).await {
                     Ok(p) => {
@@ -107,20 +112,34 @@ pub async fn handle_v2_session(
                              && !pairing_packet
                              && !crate::plugins::pair::is_paired_device(&control_device_id)
                          {
-                             debug!(
-                                 "Blocking {packet_type} from unpaired {} \
-                                  (set pairing_required = false to disable)",
-                                 control_device_id
-                             );
+                             if refusal_said {
+                                 debug!(
+                                     "Blocking {packet_type} from unpaired {} \
+                                      (set pairing_required = false to disable)",
+                                     control_device_id
+                                 );
+                             } else {
+                                 refusal_said = true;
+                                 tracing::info!(
+                                     "Blocking {packet_type} from unpaired {} \
+                                      (later packets at debug)",
+                                     control_device_id
+                                 );
+                             }
                              continue;
                          }
                          // F5: the owner's per-device permissions (spec P3).
                          if !pairing_packet
                              && !crate::plugins::pair::permits(&control_device_id, &packet_type)
                          {
-                             tracing::info!(
-                                 "Denied {packet_type} from {control_device_id}: not permitted for this device"
-                             );
+                             if denied_said.insert(packet_type.clone()) {
+                                 tracing::info!(
+                                     "Denied {packet_type} from {control_device_id}: not \
+                                      permitted for this device (later ones at debug)"
+                                 );
+                             } else {
+                                 debug!("Denied {packet_type} from {control_device_id}: not permitted");
+                             }
                              continue;
                          }
 
@@ -150,7 +169,14 @@ pub async fn handle_v2_session(
                 uni = conn.accept_uni() => {
                     match uni {
                         Ok(recv) => {
-                            tokio::spawn(handle_unidirectional_stream(recv).instrument(info_span!("uni_stream")));
+                            tokio::spawn(
+                                async move {
+                                    if let Err(e) = handle_unidirectional_stream(recv).await {
+                                        warn!("v2 stream refused: {e}");
+                                    }
+                                }
+                                .instrument(info_span!("uni_stream")),
+                            );
                         }
                         Err(e) => {
                             handle_conn_error(e);
@@ -161,7 +187,14 @@ pub async fn handle_v2_session(
                 bi = conn.accept_bi() => {
                     match bi {
                         Ok((send, recv)) => {
-                            tokio::spawn(handle_bidirectional_stream(send, recv).instrument(info_span!("bi_stream")));
+                            tokio::spawn(
+                                async move {
+                                    if let Err(e) = handle_bidirectional_stream(send, recv).await {
+                                        warn!("v2 stream refused: {e}");
+                                    }
+                                }
+                                .instrument(info_span!("bi_stream")),
+                            );
                         }
                         Err(e) => {
                             handle_conn_error(e);

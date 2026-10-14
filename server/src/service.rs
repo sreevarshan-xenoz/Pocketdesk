@@ -957,10 +957,13 @@ async fn handle_connection_with_kde(
 
         // Step 1: POCKETDESK_HELLO handshake
         let mut line = String::new();
-        let bytes = timeout(Duration::from_secs(8), read_handshake_line(&mut reader, &mut line))
-            .await
-            .context("connection handshake timeout")?
-            .context("failed to read incoming handshake")?;
+        let bytes = timeout(
+            Duration::from_secs(8),
+            read_handshake_line(&mut reader, &mut line),
+        )
+        .await
+        .context("connection handshake timeout")?
+        .context("failed to read incoming handshake")?;
 
         if bytes == 0 {
             tracing::info!("Connection closed by peer before handshake");
@@ -1001,10 +1004,13 @@ async fn handle_connection_with_kde(
         // proved (phase B). The connection goes by that id from here on, so
         // nothing about it rests on its IP address.
         let mut line = String::new();
-        let bytes = timeout(Duration::from_secs(5), read_handshake_line(&mut reader, &mut line))
-            .await
-            .context("identity timeout")?
-            .context("failed to read the peer's identity")?;
+        let bytes = timeout(
+            Duration::from_secs(5),
+            read_handshake_line(&mut reader, &mut line),
+        )
+        .await
+        .context("identity timeout")?
+        .context("failed to read the peer's identity")?;
         if bytes == 0 {
             tracing::info!("Connection closed by peer before its identity");
             return Ok(());
@@ -1065,6 +1071,12 @@ async fn handle_connection_with_kde(
         // on this connection is seeded the moment it does (below), rather
         // than waiting for the periodic pushes.
         let mut seeded = false;
+        // The first refused packet on a connection is said where the owner
+        // sees it; the rest (a phone polling every few seconds) at debug.
+        let mut refusal_said = false;
+        // Packet types already reported as denied on this connection: a
+        // phone polling with a permission off would otherwise log each poll.
+        let mut denied_said = std::collections::HashSet::new();
         if state::may_receive_pushes(&*sender) {
             seed_desktop_state(&sender, hypr_ipc, wan_endpoint, local_ip).await;
             seeded = true;
@@ -1097,7 +1109,9 @@ async fn handle_connection_with_kde(
                             // handshake; another would re-point it at a
                             // different device.
                             if packet_type == "kdeconnect.identity" {
-                                tracing::warn!("Ignored a second identity on {device_id}'s connection");
+                                tracing::warn!(
+                                    "Ignored a second identity on {device_id}'s connection"
+                                );
                                 continue;
                             }
                             // PIN pairing enforcement (Tier-2 #11b): before a
@@ -1110,28 +1124,42 @@ async fn handle_connection_with_kde(
                             // Re-read per packet: pairing, unpairing or a key
                             // change applies to a connection already open.
                             use crate::plugins::pair::Standing;
-                            let may_act = match crate::plugins::pair::standing(
-                                &device_id,
-                                peer_key.as_ref(),
-                            ) {
-                                Standing::Paired => true,
-                                Standing::Unpaired => !pairing_required,
-                                Standing::WrongKey(_) => false,
-                            };
+                            let may_act =
+                                match crate::plugins::pair::standing(&device_id, peer_key.as_ref())
+                                {
+                                    Standing::Paired => true,
+                                    Standing::Unpaired => !pairing_required,
+                                    Standing::WrongKey(_) => false,
+                                };
                             if !pairing_packet && !may_act {
-                                tracing::debug!(
-                                    "Blocking {packet_type} from {device_id}: not paired, \
-                                     or not with this key"
-                                );
+                                if refusal_said {
+                                    tracing::debug!(
+                                        "Blocking {packet_type} from {device_id}: not paired, \
+                                         or not with this key"
+                                    );
+                                } else {
+                                    refusal_said = true;
+                                    tracing::info!(
+                                        "Blocking {packet_type} from {device_id}: not paired, \
+                                         or not with this key (later packets at debug)"
+                                    );
+                                }
                                 continue;
                             }
                             // F5: the owner's per-device permissions (spec P3).
                             if !pairing_packet
                                 && !crate::plugins::pair::permits(&device_id, &packet_type)
                             {
-                                tracing::info!(
-                                    "Denied {packet_type} from {device_id}: not permitted for this device"
-                                );
+                                if denied_said.insert(packet_type.clone()) {
+                                    tracing::info!(
+                                        "Denied {packet_type} from {device_id}: not permitted \
+                                         for this device (later ones at debug)"
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        "Denied {packet_type} from {device_id}: not permitted"
+                                    );
+                                }
                                 continue;
                             }
                             let packet_span = tracing::debug_span!("packet", type = %packet_type);
