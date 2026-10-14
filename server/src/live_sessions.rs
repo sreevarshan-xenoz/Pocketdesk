@@ -75,25 +75,24 @@ fn write_live_json(json: &str) -> anyhow::Result<()> {
 /// last told to them.
 type Told = (Vec<(u64, String)>, Option<u64>);
 
-/// Kick targets for the live sessions whose phone may no longer stream:
+/// The live sessions whose phone may no longer stream, by session id:
 /// with pairing required, a device that is not (or no longer) paired, which
 /// covers an unpair from the CLI or the app, an expired guest grant and a
 /// hand-edited trust store; and a session that never said which device it
-/// is, by its address. Nothing with pairing off.
+/// is. Nothing with pairing off. Session ids, not device ids: a device id
+/// such as `all`, or one another phone's id starts with, would end other
+/// phones' sessions as a kick target.
 pub fn untrusted_sessions(
     live: &[LiveSession],
     pairing_required: bool,
     is_paired: impl Fn(&str) -> bool,
-) -> Vec<String> {
+) -> Vec<u64> {
     if !pairing_required {
         return Vec::new();
     }
     live.iter()
-        .filter_map(|s| match &s.device_id {
-            Some(id) if is_paired(id) => None,
-            Some(id) => Some(id.clone()),
-            None => Some(s.peer.ip().to_string()),
-        })
+        .filter(|s| !s.device_id.as_deref().is_some_and(&is_paired))
+        .map(|s| s.id)
         .collect()
 }
 
@@ -183,8 +182,10 @@ pub async fn run_watcher() {
                 pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(path).ok()
             });
             let paired = |id: &str| store.as_ref().is_some_and(|s| s.is_trusted(id));
-            for target in untrusted_sessions(&live, crate::state::pairing_required(), paired) {
-                for s in pocketdesk_core::streaming::sessions::kick(&target) {
+            for id in untrusted_sessions(&live, crate::state::pairing_required(), paired) {
+                if let Some(s) =
+                    pocketdesk_core::streaming::sessions::end_session(id, b"not paired")
+                {
                     tracing::warn!(
                         device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
                         peer = %s.peer,
@@ -283,18 +284,22 @@ mod tests {
 
     #[test]
     fn a_session_whose_phone_is_no_longer_paired_is_ended() {
-        let live = vec![
+        let mut live = vec![
             session(Some("paired-phone"), true),
             session(Some("unpaired-phone"), true),
             session(None, false),
+            // An id that is a kick keyword, or a prefix of another phone's,
+            // still names only its own session.
+            session(Some("all"), true),
+            session(Some("paired"), true),
         ];
+        for (i, s) in live.iter_mut().enumerate() {
+            s.id = i as u64 + 1;
+        }
         let paired = |id: &str| id == "paired-phone";
         let mut ended = untrusted_sessions(&live, true, paired);
         ended.sort();
-        assert_eq!(
-            ended,
-            vec!["10.0.0.5".to_string(), "unpaired-phone".to_string()]
-        );
+        assert_eq!(ended, vec![2, 3, 4, 5]);
     }
 
     #[test]

@@ -133,6 +133,16 @@ pub fn matches(info: &LiveSession, target: &str) -> bool {
     }
 }
 
+/// End the one session with registry id `id`, closing its connection with
+/// `reason` (the phone shows it). Unlike [`kick`], which takes a target
+/// string where `all` or an id prefix can name other devices' sessions,
+/// this names exactly one.
+pub fn end_session(id: u64, reason: &[u8]) -> Option<LiveSession> {
+    let entry = registry().lock().ok()?.sessions.remove(&id)?;
+    entry.connection.close(0u32, reason);
+    Some(entry.info)
+}
+
 /// Close every session matching `target` and return what was kicked.
 /// `close()` on an already-dying connection is a harmless no-op; the RAII
 /// handles deregister as each pipeline exits.
@@ -238,6 +248,26 @@ mod tests {
         );
         drop(handle);
         assert_eq!(list().len(), before, "handle drop must deregister");
+    }
+
+    #[test]
+    fn ending_a_session_by_id_touches_no_other() {
+        let _guard = test_lock();
+        let (short, short_closed) = dummy(true, 203);
+        let (long, long_closed) = dummy(true, 204);
+        let short_handle = register(Some("abcdef".into()), &short);
+        let _long_handle = register(Some("abcdef123".into()), &long);
+        let ended = end_session(short_handle.id(), b"not paired");
+        assert_eq!(ended.map(|s| s.device_id), Some(Some("abcdef".to_string())));
+        assert!(short_closed.load(Ordering::Relaxed));
+        assert!(
+            !long_closed.load(Ordering::Relaxed),
+            "a device id another one starts with ends only its own session"
+        );
+        assert!(
+            end_session(short_handle.id(), b"again").is_none(),
+            "ended once"
+        );
     }
 
     #[test]
