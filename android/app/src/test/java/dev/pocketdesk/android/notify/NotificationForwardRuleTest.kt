@@ -119,6 +119,16 @@ class NotificationForwardRuleTest {
     }
 
     @Test
+    fun onlyANotificationTheDesktopWasShownIsClosedThere() {
+        val rule = NotificationForwardRule(own)
+        rule.decide(note(key = "sent"), true, chat)
+        rule.decide(note(key = "kept", pkg = "com.bank"), true, chat)
+        assertTrue("sent: the desktop closes it", rule.removed("sent"))
+        assertFalse("never sent: the desktop hears nothing", rule.removed("kept"))
+        assertFalse("closed once", rule.removed("sent"))
+    }
+
+    @Test
     fun theMemoryOfWhatWasSentStaysBounded() {
         val rule = NotificationForwardRule(own)
         repeat(NotificationForwardRule.REMEMBERED + 1) { rule.decide(note(key = "k$it"), true, chat) }

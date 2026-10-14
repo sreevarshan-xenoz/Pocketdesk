@@ -106,7 +106,13 @@ class PhoneNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        worker.execute { rule.removed(sbn.key) }
+        worker.execute {
+            // Closed on the phone: closed on the computer too (N5c), but only
+            // one the computer was shown.
+            if (rule.removed(sbn.key) && PhoneNotificationPrefs.enabled(this)) {
+                send(JSONObject().put("id", sbn.key).put("isCancel", true))
+            }
+        }
     }
 
     private fun handle(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>) {
@@ -116,11 +122,6 @@ class PhoneNotificationListener : NotificationListenerService() {
             PhoneNotificationPrefs.recordSeen(this, note.pkg, note.appLabel)
         }
         val out = rule.decide(note, enabled = true, shared = PhoneNotificationPrefs.shared(this)) ?: return
-        if (SystemClock.elapsedRealtime() < pausedUntilMs) {
-            rule.removed(out.id)
-            return
-        }
-        val host = HostStore.hosts(this).firstOrNull { HostStore.pairedDesktopId(this, it.address) != null } ?: return
         val body =
             JSONObject()
                 .put("id", out.id)
@@ -129,11 +130,21 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("text", out.text)
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
-        RustCore.sendNotification(host.address, host.controlPort, body.toString()).onFailure {
-            Log.d(TAG, "not shown on ${host.address}, pausing a minute: ${it.message}")
-            rule.removed(out.id)
-            pausedUntilMs = SystemClock.elapsedRealtime() + PAUSE_MS
-        }
+        if (!send(body)) rule.removed(out.id)
+    }
+
+    /**
+     * Send [body] to the most recently used paired computer; on failure,
+     * pause sends for a minute. Returns whether it was sent.
+     */
+    private fun send(body: JSONObject): Boolean {
+        if (SystemClock.elapsedRealtime() < pausedUntilMs) return false
+        val host = HostStore.hosts(this).firstOrNull { HostStore.pairedDesktopId(this, it.address) != null } ?: return false
+        return RustCore.sendNotification(host.address, host.controlPort, body.toString())
+            .onFailure {
+                Log.d(TAG, "not sent to ${host.address}, pausing a minute: ${it.message}")
+                pausedUntilMs = SystemClock.elapsedRealtime() + PAUSE_MS
+            }.isSuccess
     }
 
     /** The channel's and the user's lock-screen overrides for [sbn]. */
