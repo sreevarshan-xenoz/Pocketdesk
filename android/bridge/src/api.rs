@@ -1473,8 +1473,10 @@ pub async fn connect_streaming(
 ///
 /// `identity_json` is the cached `kdeconnect.pocketdesk.endpoint` body learned
 /// from the desktop over the trusted control channel (fields: endpointId,
-/// relayUrls, directAddrs). Relays are used for hole punching only — there is
-/// no pkarr discovery, so the identity must come from a prior LAN session.
+/// relayUrls, directAddrs, dht). The identity must come from a prior LAN
+/// session; when it says the desktop publishes on the Mainline DHT (`dht`,
+/// N3), the dial also looks it up there by id, in case the relay or the
+/// addresses changed since.
 pub async fn connect_streaming_wan(
     address: String,
     identity_json: String,
@@ -1498,6 +1500,18 @@ pub async fn connect_streaming_wan(
     };
     let relay_urls = read_list("relayUrls");
     let direct_addrs = read_list("directAddrs");
+    let dht = if identity["dht"].as_bool() == Some(true) {
+        match pocketdesk_core::streaming::dht_resolver() {
+            Ok(lookup) => Some(lookup),
+            Err(e) => {
+                // The cached address may still work.
+                tracing::warn!("WAN: no DHT lookup this time: {e:#}");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // WAN sessions are keyed by the desktop address with a 0 port sentinel
     // (there is no TCP port on the iroh path).
@@ -1523,7 +1537,10 @@ pub async fn connect_streaming_wan(
     };
 
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
-    tracing::info!("Dialing {address} over iroh WAN (endpoint {endpoint_id})");
+    tracing::info!(
+        "Dialing {address} over iroh WAN (endpoint {endpoint_id}, DHT lookup: {})",
+        dht.is_some()
+    );
 
     let dial = pocketdesk_core::streaming::IrohDial::dial(
         endpoint_id,
@@ -1533,6 +1550,7 @@ pub async fn connect_streaming_wan(
         Duration::from_secs(20),
         // Device keys: dial as this phone's own key, the one it named on LAN.
         device_wan_key(),
+        dht,
     )
     .await
     .map_err(|e| {

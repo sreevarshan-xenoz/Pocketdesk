@@ -24,6 +24,7 @@ use iroh::endpoint::{
     RecvStream, SendStream, WriteError,
 };
 use iroh::{Endpoint, EndpointAddr, RelayMode};
+pub use iroh_mainline_address_lookup::DhtAddressLookup;
 
 use super::connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, SharedConnection,
@@ -208,6 +209,16 @@ fn dial_relay_mode(announced: &[iroh::RelayUrl], use_relays: bool) -> RelayMode 
     }
 }
 
+/// A lookup on the public Mainline DHT that only reads (N3): the phone finds
+/// the desktop's signed record by its id, and never publishes its own. Must
+/// be called inside a Tokio runtime (the DHT binds its UDP socket).
+pub fn dht_resolver() -> Result<DhtAddressLookup> {
+    DhtAddressLookup::builder()
+        .no_publish()
+        .build()
+        .context("the Mainline DHT could not start")
+}
+
 impl IrohDial {
     /// Dial a server from its announced identity parts.
     ///
@@ -215,6 +226,9 @@ impl IrohDial {
     /// own relays when it announces only those, n0's otherwise. `false`
     /// restricts the dial to the direct addresses — loopback tests and
     /// air-gapped direct paths.
+    ///
+    /// `dht` looks the desktop up by id alongside the announced addresses
+    /// (N3), for when those went stale; iroh merges what it finds.
     pub async fn dial(
         endpoint_id: &str,
         relay_urls: &[String],
@@ -222,6 +236,7 @@ impl IrohDial {
         use_relays: bool,
         timeout: Duration,
         device_key: Option<iroh::SecretKey>,
+        dht: Option<DhtAddressLookup>,
     ) -> Result<Self> {
         let id: iroh::EndpointId = endpoint_id.parse().context("invalid iroh EndpointId")?;
         let relay_urls = relay_urls
@@ -248,6 +263,9 @@ impl IrohDial {
         // the session to it; without one, iroh makes a throwaway key.
         if let Some(key) = device_key {
             builder = builder.secret_key(key);
+        }
+        if let Some(dht) = dht {
+            builder = builder.address_lookup(dht);
         }
         let endpoint = builder
             .alpns(vec![alpn.clone()])
@@ -532,6 +550,7 @@ mod tests {
                 false,
                 Duration::from_secs(10),
                 None,
+                None,
             )
             .await
             .expect("loopback dial over direct addr");
@@ -575,5 +594,96 @@ mod tests {
         // socket task with an ERROR log — close both explicitly.
         client.close().await;
         server.close().await;
+    }
+
+    /// N3 on a local Mainline DHT: the desktop publishes its record, and a
+    /// phone that knows only the id (no relay, no address) finds it there and
+    /// opens a session. Relays are off on both ends, so the DHT is the only
+    /// way the phone can learn where the desktop is.
+    #[tokio::test]
+    async fn a_phone_with_only_the_id_finds_the_desktop_on_the_dht() {
+        use futures_lite::StreamExt as _;
+        use iroh::address_lookup::{AddrFilter, AddressLookup as _};
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let testnet = n0_mainline::Testnet::new(5).await.expect("testnet");
+        let on_testnet = || {
+            let mut builder = n0_mainline::DhtBuilder::default();
+            builder.bootstrap(&testnet.bootstrap);
+            DhtAddressLookup::builder().dht_builder(builder)
+        };
+
+        let alpn = StreamTransportConfig::default().alpn;
+        let desktop = Endpoint::builder(Minimal)
+            .alpns(vec![alpn.clone()])
+            .relay_mode(RelayMode::Disabled)
+            // Loopback is never published by the server; the test's filter
+            // lets it through, since loopback is all a test has.
+            .address_lookup(on_testnet().addr_filter(AddrFilter::unfiltered()))
+            .bind_addr(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .expect("bind_addr")
+            .bind()
+            .await
+            .expect("desktop bind");
+        let id = desktop.id();
+
+        // Publishing is fire-and-forget: wait until a reader sees the record.
+        let reader = on_testnet().no_publish().build().expect("reader");
+        let published = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let items: Vec<_> = reader.resolve(id).expect("stream").collect().await;
+                if items
+                    .into_iter()
+                    .flatten()
+                    .any(|item| !item.into_endpoint_addr().addrs.is_empty())
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        })
+        .await;
+        assert!(published.is_ok(), "the desktop's record reached the DHT");
+        assert!(
+            IrohDial::dial(
+                &id.to_string(),
+                &[],
+                &[],
+                false,
+                Duration::from_secs(3),
+                None,
+                None
+            )
+            .await
+            .is_err(),
+            "the control: without the DHT, the id alone leads nowhere"
+        );
+
+        let accept = {
+            let desktop = desktop.clone();
+            tokio::spawn(async move {
+                let incoming = desktop.accept().await.expect("incoming");
+                incoming.accept().expect("reject").await.expect("handshake")
+            })
+        };
+        let dial = IrohDial::dial(
+            &id.to_string(),
+            &[],
+            &[],
+            false,
+            Duration::from_secs(20),
+            None,
+            Some(on_testnet().no_publish().build().expect("phone lookup")),
+        )
+        .await
+        .expect("the phone finds the desktop by id alone");
+        let accepted = accept.await.expect("accept task");
+        assert_eq!(
+            accepted.remote_id(),
+            dial.endpoint.id(),
+            "the session is the phone's"
+        );
+        drop(accepted);
+        dial.close().await;
+        desktop.close().await;
     }
 }

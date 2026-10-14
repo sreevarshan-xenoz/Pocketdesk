@@ -299,6 +299,20 @@ Then add `relay_urls = ["http://<public address>:3340"]` (or the `https://` name
 - **Where not to run it:** behind the same NAT as an unreachable desktop, with no forwarded port. A relay nobody outside can reach helps no one.
 - **What Diagnostics shows:** "Internet path: ready through your relay", or that your relay is not reached (is `pocketdesk relay` running?), or that a `relay_urls` entry is not an `http://` or `https://` address, which turns away-from-home off. Your relay does not offer the address discovery n0's relays do, so "From outside" says "not measured" instead of judging the NAT.
 
+### Away From Home: Found by Id
+
+The phone dials the address it learned on the home network. When that goes stale (the desktop's relay or its public IP changed), the phone looks the desktop up by its id on the BitTorrent Mainline DHT, the same public network torrents use; no server of ours or anyone's is involved. The desktop publishes a small record there, signed with its key, and the phone checks the key again when it connects, so a forged record gets nowhere.
+
+`dht_publish` in `config.toml` says what the record holds:
+
+| Value | The record holds |
+|---|---|
+| `"relay"` (default) | The relay URLs only. |
+| `"addresses"` | The relay URLs and this computer's public IP addresses: with a public IPv6 address or a port the router maps, a phone connects with no relay at all. The record ties your home's public IP to this desktop's id, for anyone who knows the id. |
+| `"off"` | Nothing. |
+
+Private, LAN and tailnet addresses are never published, and neither is a relay known only by a private address. Diagnostics' "Found by id" says whether the server read its own record back from the DHT.
+
 ### CLI Commands
 
 | Command | Description |
