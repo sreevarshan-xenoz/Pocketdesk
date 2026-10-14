@@ -208,10 +208,7 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         }
         let to = transfer_target(packet, sender)?;
         let tls = share::transfer_tls(sender)?;
-        let slot = share::transfer_slots()
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| "the desktop is busy with other transfers".to_string())?;
+        let slot = share::transfer_slots().take(sender.device_id())?;
         Ok((to, tls, slot))
     })();
     let (from, tls, slot) = match plan {
@@ -254,10 +251,7 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         };
         let to = transfer_target(packet, sender)?;
         let tls = share::transfer_tls(sender)?;
-        let slot = share::transfer_slots()
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| "the desktop is busy with other transfers".to_string())?;
+        let slot = share::transfer_slots().take(sender.device_id())?;
         Ok((image, to, tls, slot))
     })();
     let (image, to, tls, slot) = match plan {
