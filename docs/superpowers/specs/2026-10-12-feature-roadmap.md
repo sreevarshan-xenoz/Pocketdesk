@@ -74,6 +74,35 @@ Each item gets its own spec section, results written into the checklist, and fix
 - A virtual display sized to the phone: Hyprland's write IPC is broken upstream, and Windows needs an indirect display driver.
 - Session recording.
 
+## After Phase R (planned 2026-10-14)
+
+From the user's outside review and a fresh survey of what people ask for in KDE Connect, RustDesk, Moonlight, LocalSend, Phone Link and others (`docs/research/2026-10-14-what-users-need.md`). In order:
+
+| # | Work | Why |
+|---|---|---|
+| T1 | **Connection Doctor on the phone:** one screen that tests the LAN, Tailscale and internet paths and maps a failure to a cause and a fix (AP isolation, VPN, a Public network profile, battery optimization, a pin mismatch, an unreachable relay, a denied permission) | "Can't see the other device, and no way to tell why" is the top complaint across these tools |
+| T2 | **Staying connected in the background:** a battery-optimization exemption flow with per-manufacturer guidance, and a "connected while locked" state | Phones dropping off is the second |
+| T3 | **F-Droid:** swap the QR scanner's bundled ML Kit (proprietary) for ZXing, make the APK build reproducibly, and use one signing key everywhere | The privacy-minded Linux audience; KDE Connect's Play Protect episode |
+| T4 | **The first release,** through `docs/release-checklist.md`, then winget, AUR and Flathub | Working packages in every store |
+| T5 | **A protocol document:** what mDNS, the DHT and relays expose | Trust, as Syncthing does |
+| T6 | **Resumable transfers and "send folder"** | Failed transfers that start over |
+| T7 | **The local API:** `--json` on every verb, a documented owner-only interface, Android intents for Tasker | Scripts and automation |
+| T8 | **Media controls both ways, phone status on the desktop, contact names in texts, link handoff** | KDE Connect's best-loved small features |
+| T9 | **Mobile input:** pinch-zoom in trackpad mode, portrait sessions, pointer capture | Moonlight's open requests |
+
+Then, larger:
+- a portal-native Linux host (RemoteDesktop portal with libei, ScreenCast restore tokens), which is also what Flathub needs;
+- a virtual display sized to the phone (N11 becomes this);
+- unattended access at the lock and login screens;
+- the phone's camera as a webcam;
+- the phone's screen on the computer without adb.
+
+**Not planned, with reason:**
+- folder sync (Syncthing owns it);
+- a plugin system (a permanent promise and a security surface for a small team);
+- iOS and macOS for now;
+- gaming features (N8, Moonlight's ground).
+
 ## Rules for every item
 
 - **Verification on this box:** the phone (Galaxy A71 over USB, unlocked by waking it) against the Windows host. Linux-only behaviour is unit-tested here, with a Linux CI run; on-device Linux checks stay owed in the checklist.
