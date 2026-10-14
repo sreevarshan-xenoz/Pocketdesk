@@ -72,19 +72,26 @@ pub fn state_dir() -> io::Result<PathBuf> {
     ))
 }
 
-/// Create the state folder `dir` if needed, and on Unix make it `0700`: it
-/// holds the pairings, the identity key, received texts and session records,
-/// and a folder only the owner can open keeps them private whatever mode
-/// each file was written with. On Windows the default folder
+/// Make the state folder `dir` owner-only on Unix (`0700`): it holds the
+/// pairings, the identity key, received texts and session records, and a
+/// folder only the owner can open keeps them private whatever mode each
+/// file was written with. Creates it if needed. Returns whether the mode was
+/// changed, so the caller can say so; a folder that cannot be changed (one
+/// the user does not own, or a filesystem without modes) is an error the
+/// caller may treat as a warning. On Windows the default folder
 /// (`%LOCALAPPDATA%`) is already the user's own, and its DACL is left alone.
-pub fn protect_state_dir(dir: &std::path::Path) -> io::Result<()> {
+pub fn protect_state_dir(dir: &std::path::Path) -> io::Result<bool> {
     std::fs::create_dir_all(dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        let mode = std::fs::metadata(dir)?.permissions().mode() & 0o777;
+        if mode != 0o700 {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+            return Ok(true);
+        }
     }
-    Ok(())
+    Ok(false)
 }
 
 /// The folder `POCKETDESK_STATE_DIR` names, if it is set. It must be
@@ -140,9 +147,10 @@ mod tests {
         let dir = base.join("state");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        protect_state_dir(&dir).unwrap();
+        assert!(protect_state_dir(&dir).unwrap(), "changed");
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
+        assert!(!protect_state_dir(&dir).unwrap(), "already private");
         protect_state_dir(&base.join("fresh")).unwrap();
         let mode = std::fs::metadata(base.join("fresh"))
             .unwrap()
