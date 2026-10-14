@@ -1,6 +1,6 @@
 # Pocketdesk
 
-**Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale or a hole-punched iroh path. No port forwarding required.**
+**Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale, or the internet (iroh: a hole-punched path, or a relay when that fails). A session from outside needs no port forward and no VPN once the phone has met the computer at home.**
 
 > Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). Everything now carries the Pocketdesk name: the `pocketdesk` command (or `pd` for short), the desktop app `pocketdesk-app`, the config and state folders (an existing `linux-link` folder is moved on first start), the wire protocol and the Android app `dev.pocketdesk.android`. A phone with the old app needs the new one installed and paired again once.
 
@@ -10,7 +10,7 @@
 [![Issues](https://img.shields.io/github/issues/sreevarshan-xenoz/Pocketdesk)](https://github.com/sreevarshan-xenoz/Pocketdesk/issues)
 [![Status](https://img.shields.io/badge/status-beta%20-%20feature%20complete%2C%20gates%20green-orange)](#roadmap)
 
-> **Target:** Sub-100ms latency screen streaming + KDE Connect integration + zero-config Tailscale connectivity
+> **Target:** Sub-100ms latency screen streaming + KDE Connect integration + reaching your computer from anywhere without opening ports
 
 ## What is Pocketdesk?
 
@@ -18,19 +18,71 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 
 - **Low-latency screen streaming** — wlroots/PipeWire capture → FFmpeg H.264 encoding → QUIC transport → Android MediaCodec decode
 - **KDE Connect-style features** — clipboard sync, files both ways and a remote file browser (LAN), notifications, input control, battery info
-- **Tailscale-native connectivity** — No manual port forwarding or NAT traversal; just pair and connect
+- **Reaches your computer anywhere** — on the LAN, through Tailscale, or a session over the internet with no VPN and no port forward (see [Before you start](#before-you-start) for what crosses each)
 
 ### Key Differentiators
 
 | Feature | Pocketdesk | RustDesk | Sunshine/Moonlight | KDE Connect |
 |---------|:----------:|:--------:|:-------------------:|:-----------:|
-| Tailscale-native | ✅ | ❌ | ❌ | ❌ |
+| From outside without a port forward or VPN | ✅ (after one session at home) | ✅ | ⚠️ UPnP or a forward | ❌ |
 | Wayland-native | ✅ | ⚠️ Partial | ⚠️ Partial | ✅ |
 | Hyprland optimized | ✅ | ❌ | ⚠️ Limited | ⚠️ Limited |
 | Full KDE Connect | ✅ | ⚠️ Partial | ❌ | ✅ |
 | Screen streaming | ✅ | ✅ | ✅ | ❌ |
 | Pure Rust | ✅ | ✅ | ❌ (C++) | ❌ (C++) |
 | Open Source | ✅ | ✅ | ✅ | ✅ |
+
+## Before you start
+
+Three things worth knowing before you pair a phone. [SECURITY.md](SECURITY.md) has the full picture.
+
+### Reaching your computer
+
+| From | What it needs | Port forward on your router |
+|---|---|---|
+| The same network | nothing | no |
+| Anywhere, through Tailscale | both on one tailnet | no |
+| Anywhere, over the internet | one session at home first (same network or Tailscale), where the phone learns the computer and registers its key. After that, iroh punches a direct path, or falls back to a relay (n0's free ones, or [your own](#away-from-home-your-own-relay)). It is always on | no |
+| Your own relay | a machine the internet can reach | on the relay's machine: one port (plain, 3340), or 80 and 443 (HTTPS) |
+| Waking a sleeping computer from outside | Wake-on-LAN set up on the computer | yes, one UDP port to the computer; or none, waking through another always-on computer the phone can reach ([Wake from the phone](#kde-connect-integration)) |
+
+**Over the internet path, only the session crosses:** the picture, sound, input and the phone's mic. The clipboard, files, the remote file browser, notifications both ways and texts use the control channel, which needs the same network or Tailscale.
+
+Tailscale is not required. It carries everything, adds a second encrypted layer and closes the first-contact gap below, which is why it is the advice for networks you do not trust.
+
+### Trust at first contact
+
+- **Scan the QR code** that the desktop app's Pair tab shows. The phone then checks the desktop's certificate before its first byte, so the PIN and everything after reach only that computer.
+- **Typing an address, or picking a computer under "On this network", trusts whatever answers first** there (trust on first use). Someone who could intercept that very first connection could relay it. On a network you do not trust, scan.
+
+### What the internet path shows
+
+- **Relays** (n0's or yours) carry encrypted traffic. They see both ends' IP addresses, which endpoints talk, when, and how much, never the content.
+- **The Mainline DHT** (on by default, `dht_publish = "relay"`) holds a signed record that lets the phone find the computer again after its relay (or, with `"addresses"`, its address) changes. Its nodes see the home IP it was published from, linked to the computer's WAN id, and, each time the phone connects from away, the phone's IP and the id it looks for. `dht_publish = "off"` turns it off; the phone then uses what it learned at home until that goes stale.
+
+## What works where
+
+The desktop end runs on Linux and Windows; the phone end is the Android app. The last row says what a person has run on real hardware (dates and details in [the checklist](docs/device-verification-checklist.md)); everything else is unit- or integration-tested only.
+
+| | Linux host | Windows host |
+|---|---|---|
+| Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE), X11 | Windows.Graphics.Capture, DXGI duplication |
+| Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
+| Remote input | uinput (Wayland), XTEST (X11) | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
+| Clipboard, text and images (same network or Tailscale) | `wl-clipboard` (Wayland only) | Win32 clipboard |
+| Files both ways, remote browsing (same network or Tailscale) | yes | yes |
+| Desktop sound on the phone | PipeWire | WASAPI loopback |
+| The phone's mic on the desktop | a PipeWire source, "Pocketdesk Mic" | needs a virtual audio cable (VB-CABLE) |
+| The phone's notifications and texts | D-Bus notifications | toasts |
+| The desktop's notifications on the phone | yes | no: needs a package identity the plain exe lacks |
+| Privacy mode | `EVIOCGRAB` and an on-screen ring (wlroots) | low-level hooks and a ring hidden from the stream |
+| Single-window streaming | Hyprland (the window itself, even when covered) | a crop of the window as it shows on screen |
+| Window and workspace HUD | Hyprland | windows (polled) |
+| Start at login | systemd user unit | `pocketdesk install` (a logon task and firewall rules) |
+| Desktop app tray | no (closing quits) | yes |
+| Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard). Not yet: files, notifications and texts, sound on the phone, GNOME/KDE, the desktop app | most rows, with a Galaxy A71 (2026-10). Not yet: start at login, the tray menu, single-window streaming |
+
+The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 (Android 16) and an OPPO Reno8 (ColorOS).
 
 ## Features
 
@@ -196,8 +248,8 @@ fallback), NVENC/AMF/Quick Sync/Media Foundation through `ffmpeg.exe`,
 - privacy mode: local input blocked, plus a ring that does not appear in the stream;
 - battery, power, exec, siren and the window HUD.
 
-Unzip `pocketdesk-<version>-x86_64-pc-windows-gnu.zip` from the releases page
-(one self-contained exe), install FFmpeg (`winget install Gyan.FFmpeg`, which
+Unzip `pocketdesk-<version>-windows-x86_64.zip` from the releases page
+(the server `pocketdesk.exe` and the desktop app `pocketdesk-app.exe`), install FFmpeg (`winget install Gyan.FFmpeg`, which
 puts `ffmpeg.exe` on `PATH`), then:
 
 ```powershell
@@ -428,7 +480,7 @@ Requires JDK 17+ and Android SDK/NDK.
 
 ## Security
 
-Read [SECURITY.md](SECURITY.md) before using Pocketdesk on a network you do not control. In short: the stream, the control channel and file transfers are all encrypted (TLS 1.3), and both ends prove their keys on each, so a paired phone is known by its key, not by an id it announces. On anything but a trusted home network, run it over Tailscale (or another VPN) and keep "Ask before each session" on. Report vulnerabilities privately through GitHub's **Security → Report a vulnerability**.
+Read [SECURITY.md](SECURITY.md) before using Pocketdesk on a network you do not control, and [Before you start](#before-you-start) for first-contact trust and what the internet path shows. In short: the stream, the control channel and file transfers are all encrypted (TLS 1.3), and both ends prove their keys on each, so a paired phone is known by its key, not by an id it announces. On anything but a trusted home network, run it over Tailscale (or another VPN) and keep "Ask before each session" on. Report vulnerabilities privately through GitHub's **Security → Report a vulnerability**.
 
 ## Architecture
 
@@ -511,9 +563,9 @@ Pocketdesk is actively developed and looking for contributors!
 
 ### Prerequisites
 
-- Rust 1.80+ (edition 2024)
+- Rust 1.95+ (the desktop app's egui 0.36; the server and the bridge need 1.91)
 - JDK 17+ and Android SDK/NDK (for the Kotlin client)
-- Tailscale (for testing)
+- Tailscale (optional)
 - FFmpeg (runtime **and** dev libraries — the server encodes in-process via
   `ffmpeg-next`), PipeWire, xdg-desktop-portal (for streaming)
 

@@ -6,10 +6,10 @@ Thank you for your interest in contributing! This document covers the basics.
 
 ### Prerequisites
 
-- Rust 1.80+ (edition 2024)
+- Rust 1.95+ (the desktop app's egui 0.36; the server and the bridge need 1.91)
 - JDK 17+ (for Android client)
 - Android SDK & NDK (for Android builds)
-- Tailscale (for testing connectivity)
+- Tailscale (optional: one of the ways a phone reaches the computer)
 - FFmpeg, PipeWire, xdg-desktop-portal (for streaming)
 
 ### Building
@@ -46,10 +46,11 @@ XDG_CONFIG_HOME=$PWD/devconfig cargo run --bin pocketdesk -- start
 - **Rust:** Follow `cargo fmt` and `cargo clippy -D warnings`. No warnings allowed.
 - **Kotlin:** Follow Android Lint; format with `ktfmt`/`ktlint` defaults.
 - **Commits:** Use conventional commit messages (`feat:`, `fix:`, `docs:`, `chore:`, etc.)
-- **Generated docs:** `docs/capabilities.md` is the output of
-  `pocketdesk capabilities --markdown`. If you change a protocol version constant, an ALPN,
-  a capture backend, or a codec, regenerate it in the same commit —
-  `cargo test -p pocketdesk-server --test capabilities_doc` fails while it is stale.
+- **Generated docs:** `docs/capabilities.md` (Linux) and `docs/capabilities-windows.md` (Windows)
+  are the output of `pocketdesk capabilities --markdown` on each OS. If you change a protocol
+  version constant, an ALPN, a capture backend, or a codec, regenerate both in the same commit
+  (on Windows from Git Bash, so the file stays UTF-8) —
+  `cargo test -p pocketdesk-server --test capabilities_doc` fails while the one for its OS is stale.
   A command's log output goes to stderr, never stdout, because stdout is data.
 
 ## Pull Request Process
@@ -64,6 +65,8 @@ XDG_CONFIG_HOME=$PWD/devconfig cargo run --bin pocketdesk -- start
    Stage files by name rather than `git add -A`.
 6. Push and open a PR with a clear description of changes
 7. Wait for review
+
+Releases follow [docs/release-checklist.md](docs/release-checklist.md): every step there comes before the tag, since the tag publishes.
 
 ## Reporting Issues
 

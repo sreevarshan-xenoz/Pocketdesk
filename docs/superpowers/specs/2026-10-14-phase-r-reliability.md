@@ -54,3 +54,13 @@ An audit listed, for each attack, whether a test existed, whether the code faile
 **The desktop, measured on 2026-10-14** (Windows, the release build, no phone connected, WAN and the DHT on): over 120 s after a 60 s settle, the server used 0.68 % of one core (0.04 % of the 16 logical CPUs). Its working set was 33 MB (private 8.7 MB), with 26 threads and 363 handles. The script is in the checklist, §45.
 
 **Still owed:** the phone's battery over an hour with the app in the background, the network traffic while idle, and the Linux host.
+
+## R5: honest docs
+
+Done on 2026-10-14 (branch `docs/r5-honest-docs`):
+- **Port forwarding.** README's opening line said "no port forwarding required" without the exception, and named Tailscale as how it connects. The new "Before you start" section has a table of each way a phone reaches the computer. A router forward is needed only to wake a sleeping computer from outside, and on your own relay's machine.
+- **First contact and the internet path, up front.** README and the top of SECURITY.md say: scan the QR code (a typed address is trust on first use), and relays and the DHT see who talks, and the home IP.
+- **What works where.** A Linux / Windows table, with where each host was device-checked, and the phone's minimum Android version.
+- **A release checklist,** `docs/release-checklist.md`, linked from CONTRIBUTING: CI, versions, the capability docs on each OS, a dry run with a release-signed APK, the archives on real machines, and what to do if a release is wrong.
+- **Found on the way:** the docs asked for Rust 1.80, but the tree needs 1.95 (egui 0.36; iroh needs 1.91), now declared as `rust-version` in Cargo; and Tailscale was listed as needed for testing.
+- **Fresh review (5 Important, 12 Minor), all fixed:** the internet row hid that the phone must meet the computer at home first and that only the session crosses iroh (clipboard, files, notifications and texts need the same network or Tailscale); what the DHT and relays see of the phone; elevation never reaching the UAC prompt; the device-checked row overstating Linux; and the Rust minimum, really 1.95 (now `rust-version` in Cargo). The internet path stays always on, documented as such; no switch was added.

@@ -2,6 +2,8 @@
 
 Pocketdesk lets a phone see and control a computer, so what it protects, and what it does not yet protect, matters more than its feature list. This page describes the design as it is in this tree, including its limits.
 
+**Two things to know before you pair.** Pair by scanning the desktop app's QR code: typing an address, or picking a computer found on the network, trusts whatever answers there first (limit 1 below). And the internet path is always on: relays see both ends' IP addresses, which endpoints talk and how much, and the Mainline DHT links the computer's WAN id to its home IP, and the phone's IP to the id it looks for (limit 4), unless `dht_publish = "off"`. None of it needs a port forward, except waking a sleeping computer from outside and running your own relay.
+
 ## Reporting a vulnerability
 
 Please report security problems privately. Use GitHub's **Security → Report a vulnerability** on this repository, which opens a private advisory only the maintainer can see. Do not open a public issue. Include what you found, how to reproduce it, and what an attacker gains.
