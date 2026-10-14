@@ -178,6 +178,9 @@ impl Plugin for SmsPlugin {
 /// What to do with a waiting reply.
 #[derive(Debug, PartialEq, Eq)]
 enum Plan {
+    /// It was handed over already (its outbox file could not be removed
+    /// then): only remove the file, never send the text twice.
+    Forget,
     /// Its phone is connected and may send texts: hand it over.
     Deliver,
     /// It waited too long, or its phone may not send texts.
@@ -186,8 +189,10 @@ enum Plan {
     Wait,
 }
 
-fn plan(request: &ReplyRequest, connected: bool, permitted: bool, now: u64) -> Plan {
-    if !permitted {
+fn plan(request: &ReplyRequest, handed: bool, connected: bool, permitted: bool, now: u64) -> Plan {
+    if handed {
+        Plan::Forget
+    } else if !permitted {
         Plan::Fail("this phone may not send texts from here (Devices)")
     } else if now.saturating_sub(request.created_unix) >= sms::OUTBOX_TTL_SECS {
         Plan::Fail("the phone did not connect within a day")
@@ -228,14 +233,18 @@ async fn handle_request(
     });
     let now = now_unix();
     let _held = store_lock().lock().await;
-    match plan(&request, target.is_some(), permitted, now) {
+    let handed = sms::read(dir)
+        .iter()
+        .any(|m| m.reply.as_ref().is_some_and(|r| r.id == request.id));
+    match plan(&request, handed, target.is_some(), permitted, now) {
         Plan::Wait => {}
+        Plan::Forget => forget(dir, &request.id),
         Plan::Fail(reason) => {
             let failed = ReplyState::Failed {
                 reason: reason.to_string(),
             };
             let _ = sms::record(dir, reply_message(&request, failed, now), keep());
-            let _ = sms::remove_pending(dir, &request.id);
+            forget(dir, &request.id);
             tracing::info!("Reply {} not sent: {reason}", request.id);
         }
         Plan::Deliver => {
@@ -249,12 +258,20 @@ async fn handle_request(
                 Ok(()) => {
                     let sending = ReplyState::Sending { since_unix: now };
                     let _ = sms::record(dir, reply_message(&request, sending, now), keep());
-                    let _ = sms::remove_pending(dir, &request.id);
+                    forget(dir, &request.id);
                     tracing::info!("Reply {} handed to the phone", request.id);
                 }
                 Err(e) => tracing::debug!("Reply {} not handed over yet: {e}", request.id),
             }
         }
+    }
+}
+
+/// Take reply `id` out of the outbox; one that stays is never sent twice
+/// (the watcher sees it in the conversation), but says so.
+fn forget(dir: &Path, id: &str) {
+    if let Err(e) = sms::remove_pending(dir, id) {
+        tracing::warn!("Reply {id} stays in the outbox: {e}");
     }
 }
 
@@ -322,12 +339,20 @@ mod tests {
             body: "hi".into(),
             created_unix: 100,
         };
-        assert_eq!(plan(&request, false, true, 200), Plan::Wait);
-        assert_eq!(plan(&request, true, true, 200), Plan::Deliver);
-        assert!(matches!(plan(&request, true, false, 200), Plan::Fail(_)));
+        assert_eq!(plan(&request, false, false, true, 200), Plan::Wait);
+        assert_eq!(plan(&request, false, true, true, 200), Plan::Deliver);
         assert!(matches!(
-            plan(&request, false, true, 100 + sms::OUTBOX_TTL_SECS),
+            plan(&request, false, true, false, 200),
             Plan::Fail(_)
         ));
+        assert!(matches!(
+            plan(&request, false, false, true, 100 + sms::OUTBOX_TTL_SECS),
+            Plan::Fail(_)
+        ));
+        assert_eq!(
+            plan(&request, true, true, true, 200),
+            Plan::Forget,
+            "a reply handed over before is never sent twice"
+        );
     }
 }
