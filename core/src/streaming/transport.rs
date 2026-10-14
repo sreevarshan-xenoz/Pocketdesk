@@ -455,6 +455,127 @@ pub fn peer_label_for_address(address: &str) -> Option<String> {
         .map(|name| peer_label(&name))
 }
 
+/// Who answers at an address, judged against the pin this device holds for
+/// it (the Connection Doctor, T1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityProbe {
+    /// The certificate is the one pinned for this address.
+    Matches,
+    /// A certificate other than the pinned one: a reinstall, another
+    /// computer on that address, or interception. Only pairing again fixes it.
+    Changed,
+    /// Something speaks TLS there, but no pin is held for the address.
+    NotPinned,
+    /// Something answered without a TLS certificate.
+    NotPocketdesk,
+    /// Nothing could be learned: no connection, a bad address, or an
+    /// unreadable pin file.
+    Failed,
+}
+
+impl CertManager {
+    /// Who answers at `address:port`, compared with the pin held for that
+    /// address. Unlike a connection, this never saves a pin, so testing an
+    /// address can never trust it; the handshake stops once the certificate
+    /// is seen.
+    pub async fn probe_identity(
+        &self,
+        address: &str,
+        port: u16,
+        timeout: std::time::Duration,
+    ) -> IdentityProbe {
+        let Some(label) = peer_label_for_address(address) else {
+            return IdentityProbe::Failed;
+        };
+        let pinned = match &self.peers_path {
+            Some(path) => match read_pins(path) {
+                Ok(pins) => pins.get(&label).copied(),
+                Err(_) => return IdentityProbe::Failed,
+            },
+            None => self.known_peers.lock().unwrap().get(&label).copied(),
+        };
+        let seen = Arc::new(Mutex::new(None));
+        // As the other configurations do: the process default is otherwise
+        // unset in the app, and rustls refuses to guess between providers.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(RecordCert { seen: seen.clone() }))
+            .with_no_client_auth();
+        config.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        let Ok(server_name) = ServerName::try_from(address.to_string()) else {
+            return IdentityProbe::Failed;
+        };
+        // Nothing listening (or no route) is the TCP check's to report.
+        let tcp =
+            match tokio::time::timeout(timeout, tokio::net::TcpStream::connect((address, port)))
+                .await
+            {
+                Ok(Ok(tcp)) => tcp,
+                _ => return IdentityProbe::Failed,
+            };
+        let handshake = tokio::time::timeout(
+            timeout,
+            tokio_rustls::TlsConnector::from(Arc::new(config)).connect(server_name, tcp),
+        )
+        .await;
+        let presented = *seen.lock().unwrap();
+        match (presented, pinned) {
+            (Some(cert), Some(pin)) if cert == pin => IdentityProbe::Matches,
+            (Some(_), Some(_)) => IdentityProbe::Changed,
+            (Some(_), None) => IdentityProbe::NotPinned,
+            // Connected, but no certificate came: not a TLS server at all.
+            (None, _) if matches!(handshake, Ok(Err(_))) => IdentityProbe::NotPocketdesk,
+            (None, _) => IdentityProbe::Failed,
+        }
+    }
+}
+
+/// Records the certificate a server presents and ends the handshake there:
+/// the Connection Doctor only needs to know which certificate it is.
+#[derive(Debug)]
+struct RecordCert {
+    seen: Arc<Mutex<Option<[u8; 32]>>>,
+}
+
+impl rustls::client::danger::ServerCertVerifier for RecordCert {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        *self.seen.lock().unwrap() = Some(CertManager::cert_hash(end_entity));
+        Err(rustls::Error::General(
+            "identity probe: certificate seen".into(),
+        ))
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Err(rustls::Error::General("identity probe".into()))
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Err(rustls::Error::General("identity probe".into()))
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        signature_algorithms().supported_schemes()
+    }
+}
+
 /// TOFU (Trust On First Use) certificate verifier.
 ///
 /// - **First connection:** auto-accepts any server certificate and stores its
@@ -1321,6 +1442,97 @@ mod tests {
             rendered.contains("max_idle_timeout: Some(45000)"),
             "idle timeout missing: {rendered}"
         );
+    }
+
+    /// A control-channel TLS server on loopback for one connection; its port.
+    async fn one_control_server(desktop: &CertManager) -> u16 {
+        let config = desktop.control_server_config().expect("server config");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((tcp, _)) = listener.accept().await {
+                let _ = tokio_rustls::TlsAcceptor::from(config).accept(tcp).await;
+            }
+        });
+        port
+    }
+
+    fn pin_file(dir: &Path, pin: Option<[u8; 32]>) {
+        let mut pins = std::collections::HashMap::new();
+        if let Some(pin) = pin {
+            pins.insert(
+                peer_label_for_ip("127.0.0.1".parse().unwrap()),
+                pin.to_vec(),
+            );
+        }
+        std::fs::write(
+            dir.join("known_peers.json"),
+            serde_json::to_string(&pins).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// T1: the Connection Doctor tells the pinned computer from a changed or
+    /// unknown one, and from something that is not TLS, and saves nothing.
+    #[tokio::test]
+    async fn an_identity_probe_compares_with_the_pin_and_never_saves_one() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let desktop = CertManager::new().expect("desktop certs");
+        let dir = std::env::temp_dir().join(format!("pd-identity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let wait = std::time::Duration::from_secs(5);
+
+        pin_file(&dir, None);
+        let phone = CertManager::load_or_create(&dir).unwrap();
+        let port = one_control_server(&desktop).await;
+        assert_eq!(
+            phone.probe_identity("127.0.0.1", port, wait).await,
+            IdentityProbe::NotPinned
+        );
+        assert_eq!(
+            read_pins(&dir.join("known_peers.json")).unwrap().len(),
+            0,
+            "testing an address never pins it"
+        );
+
+        pin_file(&dir, Some(desktop.cert_fingerprint()));
+        let port = one_control_server(&desktop).await;
+        assert_eq!(
+            phone.probe_identity("127.0.0.1", port, wait).await,
+            IdentityProbe::Matches
+        );
+
+        pin_file(&dir, Some([7; 32]));
+        let port = one_control_server(&desktop).await;
+        assert_eq!(
+            phone.probe_identity("127.0.0.1", port, wait).await,
+            IdentityProbe::Changed
+        );
+
+        // A plain TCP service that answers in clear text.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut tcp, _)) = listener.accept().await {
+                use tokio::io::AsyncWriteExt;
+                let _ = tcp.write_all(b"HTTP/1.0 400 Bad Request\r\n\r\n").await;
+            }
+        });
+        assert_eq!(
+            phone.probe_identity("127.0.0.1", port, wait).await,
+            IdentityProbe::NotPocketdesk
+        );
+
+        // Nothing listening is not "not Pocketdesk": the TCP check says why.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        assert_eq!(
+            phone.probe_identity("127.0.0.1", port, wait).await,
+            IdentityProbe::Failed
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A TLS handshake over a loopback TCP socket with the control channel's
