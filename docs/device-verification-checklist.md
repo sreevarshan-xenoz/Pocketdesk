@@ -903,6 +903,20 @@ $p = Get-Process -Id $p.Id; "{0:N2}% of one core, {1:N1} MB" -f (100 * ($p.Total
 - [ ] The phone's battery over an hour with the app in the background, and while a session is open.
 - [ ] Network traffic while idle (both ends).
 
+## 46. Phase R2: long sessions and recovery
+
+On the A71 against this Windows box (LAN, release build, input off), 2026-10-14. The sampler logs, once a minute, the server's CPU, memory, threads and handles, and the phone app's memory, battery and temperature (`dumpsys meminfo`, `dumpsys battery`).
+
+- [x] 35 minutes streaming: server 10–24 % of one core, private memory 84 → 96 MB, handles 674 → 705; the phone flat.
+- [x] Wi-Fi off for 30 s: the stream came back by itself 12 s after the Wi-Fi did. **The control connection did not** (fixed; re-run: one reconnect, then steady).
+- [x] The desktop's server stopped for 20 s: **the phone waited for Retry** (fixed; re-run: back 4 s after the server listened again, with no tap).
+- [x] 30 minutes after the fixes: private memory 85 → 89 MB, handles flat at about 680, CPU 10–13 %.
+- [x] Session start: one control connection that stays, plus two one-off queries.
+- [ ] An hour or more, to see whether the server's memory levels off.
+- [ ] The computer sleeping and waking (the user's to run), and the phone switching between Wi-Fi and mobile data (needs a SIM).
+- [ ] The same on the Linux host.
+- [ ] A file transfer cut by a drop (today it fails and is sent again whole).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -6,6 +6,39 @@ Status: in progress. The plan and its order are in the roadmap (`2026-10-12-feat
 
 Run on 2026-10-14 against a throwaway Azure VM: Ubuntu 24.04, headless Sway, and the release workflow's Linux build. Results, and the eight bugs it found (all fixed and re-verified), are in the device checklist, §44.
 
+## R2: long sessions and recovery
+
+Run on 2026-10-14: the A71 against this Windows box, on the LAN, with the release build and the phone's input off (view-only). Details and the sampler are in the checklist, §46.
+
+**A 35-minute session, then a 30-minute one after the fixes:**
+
+| | First run (35 min) | After the fixes (30 min) |
+|---|---|---|
+| Server CPU while streaming 2560×1080 (NVENC) | 10–24 % of one core | 10–13 % |
+| Server private memory | 84 → 96 MB | 85 → 89 MB |
+| Server handles | 674 → 705 | 677–683, flat |
+| Phone app memory (PSS) | 142–149 MB, flat | 159–163 MB, flat |
+| Phone temperature | 26 °C, flat | 26 °C, flat |
+
+The phone was on USB power, so these runs say nothing about battery (R4).
+
+**Found and fixed:**
+- **The control connection did not come back after a network drop.** The stream recovered by itself 12 s after the Wi-Fi returned, but only the clipboard loop dialed the control connection, and only when a send failed. Its poll silently fell back to throwaway connections (8 a minute), and the desktop's pushes (file offers, the HUD, wake details) stopped for the rest of the session. A session now keeps its control connection (`ControlLinkEffect`, backing off to a minute and resting in the background). Re-run: one reconnect, then steady.
+- **A desktop server restart left the phone on "The video link dropped" until someone tapped Retry.** A link that went away now reconnects by itself, backing off from 2 s to 30 s, for ten minutes (`AutoReconnect`, with a Settings switch). An end the desktop chose waits for the person. Re-run: back 4 s after the server listened again, with no tap.
+- **Two control connections at session start** (fresh review): the keeper and the clipboard loop could both dial. The bridge now dials one at a time and closes a replaced connection.
+
+**Fresh review (0 Critical, 3 Important, 7 Minor), fixed:**
+- the backoff started over at every QUIC connect, so a stream that connected and then failed retried forever (now only after a picture played for 10 s);
+- with no cached internet identity, a timeout was final;
+- the double dial above;
+- plus transport errors read as the desktop's choice, "pin" matching "ping", Retry not restarting the window, overlapping rebuilds, the keeper's backoff and background, and no word when retrying stops.
+
+**Not done in R2:**
+- **The server's memory still rises slowly** without the churn (85 → 89 MB in 30 minutes, with brief 10 MB peaks). An hour-long run will say whether it levels off.
+- **The computer sleeping** is the user's to run (AGENTS.md: no power actions on this box).
+- **A Linux host** for any of this.
+- **Resuming a file transfer** across a drop: a transfer that breaks fails and is sent again whole.
+
 ## R3: adversarial security
 
 An audit listed, for each attack, whether a test existed, whether the code failed closed, and whether it said why. These were fixed, each with a test:

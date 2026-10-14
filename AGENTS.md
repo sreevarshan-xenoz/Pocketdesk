@@ -42,6 +42,17 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **Phase R2, long sessions and recovery (branch `fix/r2-control-link`; results in `docs/superpowers/specs/2026-10-14-phase-r-reliability.md`, checklist §46).**
+  - **Found on the A71 against Windows:**
+    - after a Wi-Fi drop the stream came back by itself, but the control connection did not, so desktop pushes stopped and every query used a throwaway connection;
+    - a desktop server restart left the phone waiting for Retry.
+  - **Fixed:**
+    - `ControlLinkEffect` keeps the session's control connection, backing off and resting in the background;
+    - `AutoReconnect` retries a link that went away, from 2 s up to 30 s, for ten minutes, with a Settings switch; an end the desktop chose waits for the person;
+    - the bridge dials one control connection at a time.
+  - **Re-verified:** one control reconnect after a drop; back 4 s after a server restart with no tap.
+  - **Fresh review (3 Important), fixed:** retries forever after a frameless connect, no retry without a cached internet identity, and the double dial.
+  - **Measured:** 35 and 30 minute sessions, with the server at 10–24 % of one core. Private memory still rises slowly (85 → 89 MB in 30 minutes), so an hour-long run is owed.
 - 2026-10-14: **Phase R5, honest docs (branch `docs/r5-honest-docs`, stacked on `fix/r3-security`).**
   - README's "Before you start": each way a phone reaches the computer, and whether a router forward is needed (only for waking a sleeping computer from outside, or on your own relay's machine); first-contact trust; what relays and the DHT see. SECURITY.md leads with the same.
   - README's "What works where": a Linux / Windows parity table, with where each was device-checked.
