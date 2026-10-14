@@ -117,6 +117,7 @@ object RustCore {
     private external fun nativeCheckSiren(): String
     private external fun nativeSendFindMyDevice(address: String, port: Int): String
     private external fun nativeRequestPairPin(address: String, port: Int): String
+    private external fun nativeCheckIdentity(address: String, port: Int): String
     private external fun nativePairWithPin(address: String, port: Int, pin: String): String
     private external fun nativeCheckPairResult(waitSecs: Long): String
     private external fun nativePairedServers(): String
@@ -630,6 +631,15 @@ object RustCore {
     /** Make the remote desktop ring (find-my-device siren, phone → desktop). */
     fun sendFindMyDevice(address: String, port: Int): Result<Unit> =
         envelope(nativeSendFindMyDevice(address, port)).map { }
+
+    /**
+     * The Connection Doctor's identity check (T1): who answers at the
+     * control port, compared with this phone's pin for the address, as
+     * "matches", "changed", "not_pinned", "not_pocketdesk" or "failed". It
+     * never saves a pin.
+     */
+    fun checkIdentity(address: String, port: Int): Result<String> =
+        envelope(nativeCheckIdentity(address, port))
 
     // ---- PIN pairing (Tier-2 #11b) ----
 

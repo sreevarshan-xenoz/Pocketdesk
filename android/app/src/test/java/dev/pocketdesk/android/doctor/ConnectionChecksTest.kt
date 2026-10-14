@@ -139,3 +139,16 @@ class ConnectionChecksTest {
         assertTrue(report.contains("bad: vpn_captures_lan"))
     }
 }
+
+class VersionProbeTest {
+    @Test
+    fun `the UDP probe is a full-size long-header packet with a reserved version`() {
+        val packet = ConnectionProbe.versionProbe()
+        assertEquals(1200, packet.size)
+        assertEquals(0xC0, packet[0].toInt() and 0xC0)
+        // Reserved versions have 0xa in the low nibble of every byte.
+        for (i in 1..4) assertEquals(0x0A, packet[i].toInt() and 0x0F)
+        assertEquals(8, packet[5].toInt())
+        assertEquals(8, packet[14].toInt())
+    }
+}
