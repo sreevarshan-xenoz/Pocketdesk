@@ -883,6 +883,26 @@ Still owed on Linux:
 - [ ] Hyprland and GNOME/KDE (portal) hosts, and a GPU encoder.
 - [ ] A WAN session's peer shows as `0.0.0.0:0` in the live-session list (cosmetic).
 
+## 45. Phase R3 and R4: hostile connections, and idle cost
+
+R3 is tested in code (the table in `docs/superpowers/specs/2026-10-14-phase-r-reliability.md`). On a device:
+- [x] A LAN session still connects with the stream port's QUIC Retry (A71 → Windows, 2026-10-14; view-only held).
+- [x] Three shares back to back (0.8, 1.6, 2.4 MB): all three saved with matching MD5s, about 0.3 s apart, none refused (A71 → Windows, 2026-10-14). A single SEND_MULTIPLE of three is still owed: `am` cannot build one.
+- [x] A folder of 15 000 files: the sheet says at the top that only the first items are shown, and lists them (A71 → Windows, 2026-10-14).
+- [ ] Turning off a phone's Power permission while it holds privacy mode (limit 6 in SECURITY.md): the grab ends at its 10 minute expiry.
+
+R4, the desktop's idle cost. With the server running and no phone connected, in PowerShell:
+
+```powershell
+$p = Get-Process pocketdesk; $c1 = $p.TotalProcessorTime.TotalSeconds; Start-Sleep 120
+$p = Get-Process -Id $p.Id; "{0:N2}% of one core, {1:N1} MB" -f (100 * ($p.TotalProcessorTime.TotalSeconds - $c1) / 120), ($p.WorkingSet64 / 1MB)
+```
+
+- [x] Windows, release build, WAN and the DHT on (2026-10-14): 0.68 % of one core, 33 MB working set (8.7 MB private), 26 threads.
+- [ ] Linux.
+- [ ] The phone's battery over an hour with the app in the background, and while a session is open.
+- [ ] Network traffic while idle (both ends).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
