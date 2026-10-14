@@ -1,7 +1,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::error::{PocketdeskError, Result};
 
@@ -103,8 +103,10 @@ where
         return Err(err);
     }
 
-    info!(
-        "Handshake completed: {} ({})",
+    // The peer's id and name are its own words, unchecked here: escaped, and
+    // at debug. The caller decides whether they are usable.
+    debug!(
+        "Handshake completed: {:?} ({:?})",
         peer_identity.device_name, peer_identity.device_id
     );
 

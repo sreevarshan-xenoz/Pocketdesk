@@ -12,6 +12,14 @@ use pocketdesk_core::protocol::v2::{
 
 use crate::state;
 
+/// A v2 peer's id and name reach logs, the registry and the owner's prompts,
+/// so both are held to the rule the control channel and the stream use:
+/// short and printable (R3 review).
+fn usable_identity(identity: &IdentityPacketV2) -> bool {
+    use pocketdesk_core::protocol::kdeconnect::valid_device_id;
+    valid_device_id(&identity.device_id) && valid_device_id(&identity.device_name)
+}
+
 /// Handles a v2 multiplexed QUIC session.
 ///
 /// With `pairing_required`, the control channel mirrors the TCP gate in
@@ -44,6 +52,9 @@ pub async fn handle_v2_session(
             .context("failed to accept handshake stream")?;
 
         let peer_identity = perform_v2_handshake(&mut send0, &mut recv0, &local_identity).await?;
+        if !usable_identity(&peer_identity) {
+            anyhow::bail!("v2 handshake with an unusable device id or name");
+        }
 
         tracing::Span::current().record("peer_id", &peer_identity.device_id);
         info!(
@@ -342,5 +353,29 @@ impl DeviceSender for QuicDeviceSender {
         let mut guard = self.send.lock().await;
         write_framed_json(&mut guard, packet).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity(id: &str, name: &str) -> IdentityPacketV2 {
+        IdentityPacketV2 {
+            device_id: id.to_string(),
+            device_name: name.to_string(),
+            min_version: 2,
+            max_version: 2,
+            capabilities: vec![],
+        }
+    }
+
+    #[test]
+    fn a_v2_peer_needs_a_short_printable_id_and_name() {
+        assert!(usable_identity(&identity("0d7c3a52", "Galaxy A71")));
+        assert!(!usable_identity(&identity("phone\nWARN forged", "Galaxy")));
+        assert!(!usable_identity(&identity("0d7c3a52", "\u{1b}[31mred")));
+        assert!(!usable_identity(&identity("0d7c3a52", &"x".repeat(4096))));
+        assert!(!usable_identity(&identity("", "Galaxy")));
     }
 }
