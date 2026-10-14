@@ -360,9 +360,12 @@ pub async fn run(config: Config) -> Result<()> {
             }
         };
 
-        // Each phone's gamepad buttons, so one phone's snapshot never
-        // releases another's (roadmap N7).
+        // What each phone holds down (gamepad buttons, mouse buttons, keys),
+        // so one phone's snapshot never releases another's, and what a phone
+        // held is let go when control moves away or its session ends.
         let mut gamepads: std::collections::HashMap<u64, u16> = std::collections::HashMap::new();
+        let mut held: std::collections::HashMap<u64, crate::driving::Held> =
+            std::collections::HashMap::new();
         let mut last_session: Option<u64> = None;
         loop {
             match input_rx.recv().await {
@@ -381,32 +384,31 @@ pub async fn run(config: Config) -> Result<()> {
                     let Some(injector) = injector.as_mut() else {
                         continue;
                     };
-                    let live: Vec<u64> = pocketdesk_core::streaming::sessions::list()
-                        .iter()
-                        .map(|s| s.id)
+                    let live = crate::driving::live_refs();
+                    // Sessions that ended: let go of anything they held.
+                    let gone: Vec<u64> = gamepads
+                        .keys()
+                        .chain(held.keys())
+                        .copied()
+                        .filter(|id| !live.iter().any(|(live_id, _)| live_id == id))
                         .collect();
-                    gamepads.retain(|id, _| live.contains(id));
-                    if let pocketdesk_core::input::control::Admit::No { driver } =
-                        crate::driving::admit(session, &live)
-                    {
-                        tracing::trace!(session, driver, "Input dropped: another phone drives");
+                    for id in gone {
+                        release_session(injector, &mut gamepads, &mut held, id);
+                    }
+                    if crate::driving::admit(session, &live) == crate::driving::Drive::Drop {
+                        tracing::trace!(session, "Input dropped: another phone drives");
                         continue;
                     }
-                    // Control moved: let go of what the last phone's gamepad held.
+                    // Control moved to this session: the last driver's held
+                    // buttons and keys are let go (its releases would be
+                    // dropped). With every phone driving, nothing moves.
                     if let Some(previous) = last_session.filter(|p| *p != session)
-                        && let Some(held) = gamepads.get_mut(&previous).filter(|h| **h != 0)
+                        && !crate::driving::is_shared()
                     {
-                        let saved = injector.swap_gamepad_buttons(*held);
-                        let _ = handle_input_packet(
-                            injector,
-                            InputPacket::Gamepad {
-                                axes: [0; 6],
-                                buttons: 0,
-                            },
-                        );
-                        *held = injector.swap_gamepad_buttons(saved);
+                        release_session(injector, &mut gamepads, &mut held, previous);
                     }
                     last_session = Some(session);
+                    held.entry(session).or_default().note(&packet);
                     let state = gamepads.entry(session).or_insert(0);
                     let saved = injector.swap_gamepad_buttons(*state);
                     if let Err(e) = handle_input_packet(injector, packet) {
@@ -1316,6 +1318,32 @@ async fn resolve_peer_address(client: &TailscaleClient, peer_hint: &str) -> Resu
 fn handle_input_packet(injector: &mut InputInjector, packet: InputPacket) -> Result<()> {
     injector.handle_input_packet(&packet)?;
     Ok(())
+}
+
+/// Let go of everything `session` holds: its gamepad buttons (through the
+/// injector's per-session state), mouse buttons and keys.
+fn release_session(
+    injector: &mut InputInjector,
+    gamepads: &mut std::collections::HashMap<u64, u16>,
+    held: &mut std::collections::HashMap<u64, crate::driving::Held>,
+    session: u64,
+) {
+    if let Some(buttons) = gamepads.remove(&session).filter(|b| *b != 0) {
+        let saved = injector.swap_gamepad_buttons(buttons);
+        let _ = handle_input_packet(
+            injector,
+            InputPacket::Gamepad {
+                axes: [0; 6],
+                buttons: 0,
+            },
+        );
+        injector.swap_gamepad_buttons(saved);
+    }
+    if let Some(mut keys) = held.remove(&session) {
+        for release in keys.take_releases() {
+            let _ = handle_input_packet(injector, release);
+        }
+    }
 }
 
 /// How often a missing input injector is tried again while input arrives.
