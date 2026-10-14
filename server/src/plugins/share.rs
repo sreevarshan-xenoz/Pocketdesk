@@ -167,38 +167,12 @@ impl Plugin for SharePlugin {
 
             // Check if there's port info for a file transfer
             if let Some(transfer_info) = body.get("payloadTransferInfo") {
-                let Some(port) = transfer_info
-                    .get("port")
-                    .and_then(|v| v.as_u64())
-                    .and_then(|p| u16::try_from(p).ok())
-                    .filter(|p| *p != 0)
-                else {
-                    tracing::warn!("File share refused: no usable port");
-                    return Ok(());
-                };
-                // The phone listens and the desktop connects, as in KDE
-                // Connect: to the address the transport saw, never to one the
-                // peer names (a v2 device id is the peer's own choice).
-                let Some(phone_ip) = sender.peer_addr().map(|a| a.ip()) else {
-                    tracing::warn!(
-                        "File share refused: only the TCP control channel can carry one"
-                    );
-                    return Ok(());
-                };
-                if !dialable(phone_ip) {
-                    tracing::warn!("File share refused: will not connect back to {phone_ip}");
-                    return Ok(());
-                }
-                let Some(dir) = self.download_dir.clone() else {
-                    tracing::warn!("File share refused: no downloads or home folder");
-                    return Ok(());
-                };
                 let name =
                     safe_file_name(body.get("filename").and_then(|v| v.as_str()).unwrap_or(""));
-                let size = packet.payload_size.unwrap_or(0);
                 // The phone hands the bytes only to whoever presents the key
                 // it put in this request, so they reach this desktop and no
-                // one else on the network.
+                // one else on the network. Without one there is nothing to
+                // name in a refusal either.
                 let Some(key) = transfer_info
                     .get("key")
                     .and_then(|v| v.as_str())
@@ -208,21 +182,53 @@ impl Plugin for SharePlugin {
                     tracing::warn!("File share of {name} refused: no transfer key");
                     return Ok(());
                 };
+                // Every refusal is answered, so the phone stops waiting for a
+                // connection that will not come, and can say why.
+                let refused = |reason: String| {
+                    let name = name.clone();
+                    let key = key.clone();
+                    async move {
+                        tracing::warn!("File share of {name} refused: {reason}");
+                        refuse(sender, &key, &reason).await;
+                        Ok(())
+                    }
+                };
+                let Some(port) = transfer_info
+                    .get("port")
+                    .and_then(|v| v.as_u64())
+                    .and_then(|p| u16::try_from(p).ok())
+                    .filter(|p| *p != 0)
+                else {
+                    return refused("no usable port".into()).await;
+                };
+                let size = packet.payload_size.unwrap_or(0);
+                if size == 0 || size > MAX_FILE_BYTES {
+                    return refused(format!(
+                        "a declared size of {size} bytes (empty, or too large)"
+                    ))
+                    .await;
+                }
+                // The phone listens and the desktop connects, as in KDE
+                // Connect: to the address the transport saw, never to one the
+                // peer names (a v2 device id is the peer's own choice).
+                let Some(phone_ip) = sender.peer_addr().map(|a| a.ip()) else {
+                    return refused("only the TCP control channel can carry a file".into()).await;
+                };
+                if !dialable(phone_ip) {
+                    return refused(format!("will not connect back to {phone_ip}")).await;
+                }
+                let Some(dir) = self.download_dir.clone() else {
+                    return refused("no downloads or home folder".into()).await;
+                };
                 // The bytes travel inside TLS with the phone that asked
                 // (phase C): the key its control connection proved.
                 let tls = match transfer_tls(sender) {
                     Ok(tls) => tls,
-                    Err(reason) => {
-                        tracing::warn!("File share of {name} refused: {reason}");
-                        return Ok(());
-                    }
+                    Err(reason) => return refused(reason.to_string()).await,
                 };
                 let slot = match transfer_slots().take(sender.device_id()) {
                     Ok(slot) => slot,
-                    Err(reason) => {
-                        tracing::warn!("File share of {name} refused: {reason}");
-                        return Ok(());
-                    }
+                    Err(reason) => return refused(reason.to_string()).await,
                 };
 
                 let from = sender.device_id().to_string();
@@ -1394,6 +1400,39 @@ mod tests {
         } else {
             "/etc/hosts"
         }
+    }
+
+    fn share(size: u64) -> NetworkPacket {
+        NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "a.bin",
+                "payloadTransferInfo": { "port": 40000, "key": KEY },
+            }))
+            .with_payload_size(size)
+    }
+
+    /// A refused share is answered, so the phone stops waiting for a
+    /// connection that will never come and can say why.
+    #[tokio::test]
+    async fn a_refused_share_is_answered_with_its_key() {
+        let plugin = SharePlugin::new();
+        let loopback = Phone::at("127.0.0.1:51000");
+        plugin.handle_packet(&share(10), &loopback).await.unwrap();
+        let (key, reason) = refusal(&loopback).expect("a refusal");
+        assert_eq!(key, KEY);
+        assert!(!reason.is_empty());
+
+        let phone = Phone::at("192.0.2.7:51000");
+        plugin
+            .handle_packet(&share(MAX_FILE_BYTES + 1), &phone)
+            .await
+            .unwrap();
+        let (key, reason) = refusal(&phone).expect("a refusal for the size");
+        assert_eq!(key, KEY);
+        assert!(
+            reason.contains("size") || reason.contains("large"),
+            "{reason}"
+        );
     }
 
     #[tokio::test]

@@ -1422,21 +1422,33 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
     let replies = crate::download::send_watching_replies(&address, port, &request)
         .await
         .map_err(|e| format!("Failed to send share request: {e}"))?;
-    let _reading = AbortOnDrop(replies.keep_reading());
     // Only the desktop this phone pinned for `address` may take the bytes
     // (phase C). Looked up once the request is out: a connection made for
     // it may have pinned the desktop just now.
     let tls = transfer_acceptor(&address)?;
+    // The replies are read for the whole transfer: a refusal ends the wait
+    // at once with its reason, and an offer the desktop pushes to a
+    // connection of this transfer's own is not lost (F7b).
+    let (refused_tx, refused_rx) = tokio::sync::oneshot::channel();
+    let _reading = AbortOnDrop(tokio::spawn({
+        let key = key.clone();
+        async move {
+            let _ = refused_tx.send(crate::download::refusal_on(replies, key).await);
+        }
+    }));
     // The desktop connects back for the bytes, inside TLS with the pinned
     // desktop's certificate, then presents the key from the request.
     // Anything else that connects is dropped. (Its source address is no
     // test: a desktop with several addresses may connect back from another.)
-    let mut client_stream = tokio::time::timeout(
+    let accept = tokio::time::timeout(
         Duration::from_secs(30),
         accept_transfer(&listener, &key, &tls),
-    )
-    .await
-    .map_err(|_| "Timeout waiting for file receiver".to_string())??;
+    );
+    let mut client_stream = tokio::select! {
+        accepted = accept => accepted
+            .map_err(|_| "Timeout waiting for file receiver".to_string())??,
+        Ok(reason) = refused_rx => return Err(format!("The computer refused the file: {reason}")),
+    };
     let sent = pump(&mut file, &mut client_stream, file_size).await?;
     if sent != file_size {
         return Err(format!(
