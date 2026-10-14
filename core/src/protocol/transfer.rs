@@ -325,7 +325,15 @@ where
     let mut committed = offset;
     while received < size {
         let want = (size - received).min(CHUNK as u64) as usize;
-        let n = within(pace.idle, "receiving", stream.read(&mut buffer[..want])).await?;
+        let n = match within(pace.idle, "receiving", stream.read(&mut buffer[..want])).await {
+            Ok(n) => n,
+            Err(e) => {
+                // A connection that fails (TLS closed without close_notify,
+                // a reset, a stall) keeps what arrived for the next attempt.
+                commit(partial, size, received, &mut committed, &mut on_commit).await?;
+                return Err(e.into());
+            }
+        };
         if n == 0 {
             commit(partial, size, received, &mut committed, &mut on_commit).await?;
             return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into());
@@ -733,6 +741,73 @@ mod tests {
         assert_eq!(sent.unwrap(), cut as u64);
         assert_eq!(received.unwrap(), cut as u64);
         assert_eq!(partial.bytes(), &source[..]);
+    }
+
+    /// A stream that hands over `bytes`, then fails as a TLS connection
+    /// closed without close_notify does.
+    struct Failing {
+        bytes: std::io::Cursor<Vec<u8>>,
+    }
+
+    impl AsyncRead for Failing {
+        fn poll_read(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            if self.bytes.position() as usize == self.bytes.get_ref().len() {
+                return std::task::Poll::Ready(Err(io::Error::from(io::ErrorKind::UnexpectedEof)));
+            }
+            std::pin::Pin::new(&mut self.bytes).poll_read(cx, buf)
+        }
+    }
+
+    impl AsyncWrite for Failing {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<io::Result<usize>> {
+            std::task::Poll::Ready(Ok(buf.len()))
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_fails_rather_than_ends_keeps_what_arrived() {
+        let source = file(200_000);
+        let mut wire = 200_000u64.to_be_bytes().to_vec();
+        wire.push(CONTINUE);
+        wire.extend_from_slice(&source[..70_000]);
+        let mut stream = Failing {
+            bytes: std::io::Cursor::new(wire),
+        };
+        let mut partial = Memory::holding(&[]);
+        let mut last = 0;
+        let received = receive(
+            &mut stream,
+            &mut partial,
+            None,
+            None,
+            MAX,
+            Pace::DEFAULT,
+            |_, c| last = c,
+        )
+        .await;
+        assert!(matches!(received, Err(TransferError::Io(_))));
+        assert_eq!(last, 70_000, "what arrived is committed");
+        assert_eq!(partial.bytes(), &source[..70_000]);
     }
 
     #[tokio::test]
