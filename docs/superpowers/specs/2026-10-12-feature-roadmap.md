@@ -67,7 +67,8 @@ Each item gets its own spec section, results written into the checklist, and fix
 - **R1:** run on the Azure Linux VM; eight bugs found and fixed. Input on a real Linux desktop, files and notifications on Linux, and other compositors are owed (checklist §44).
 - **R3:** done (branch `fix/r3-security`). Every case has a test, and the fresh review's five Important findings are fixed (`2026-10-14-phase-r-reliability.md`).
 - **R4:** the desktop's idle cost is measured on Windows. The phone's battery, idle traffic and Linux are owed (checklist §45). Diagnostics and the session record do not show it yet.
-- **R2, R5:** next.
+- **R5:** done (branch `docs/r5-honest-docs`): "Before you start" and "What works where" in README, first contact up front in SECURITY.md, and `docs/release-checklist.md`.
+- **R2:** next.
 
 **Deferred, with reason:**
 - A virtual display sized to the phone: Hyprland's write IPC is broken upstream, and Windows needs an indirect display driver.
