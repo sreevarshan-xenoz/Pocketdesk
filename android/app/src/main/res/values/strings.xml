@@ -32,6 +32,9 @@
     <string name="settings_session">Session</string>
     <string name="settings_keep_screen_on">Keep screen on</string>
     <string name="settings_keep_screen_on_summary">During a streaming session</string>
+    <string name="settings_auto_reconnect">Reconnect by itself</string>
+    <string name="settings_auto_reconnect_summary">When the link drops (the computer restarts its server, wakes up, or the network returns), try again for 10 minutes</string>
+    <string name="reconnecting_in">Reconnecting in %1$d s…</string>
     <string name="settings_reveal_pin">Show PIN by default</string>
     <string name="settings_reveal_pin_summary">Pairing digits visible without tapping the eye</string>
     <string name="settings_haptics">Haptics</string>

@@ -603,6 +603,37 @@ fun RemoteScreen(
         }
     }
 
+    // R2: a link that went away (the desktop's server restarting, the
+    // computer waking) comes back by itself, with backoff, for ten minutes.
+    // An end the desktop chose waits for the person (AutoReconnect).
+    var reconnectAttempt by remember { mutableIntStateOf(0) }
+    var droppedAtMs by remember { mutableLongStateOf(0L) }
+    var reconnectInS by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(streamStatus) {
+        reconnectInS = null
+        val s = streamStatus
+        if (s is StreamStatus.Up) {
+            reconnectAttempt = 0
+            droppedAtMs = 0L
+        }
+        if (s !is StreamStatus.Down || !Prefs.autoReconnect(context) || !AutoReconnect.retryable(s.reason)) {
+            return@LaunchedEffect
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (droppedAtMs == 0L) droppedAtMs = now
+        val wait = AutoReconnect.delayMs(reconnectAttempt, now - droppedAtMs) ?: return@LaunchedEffect
+        val due = now + wait
+        while (true) {
+            val left = due - SystemClock.elapsedRealtime()
+            if (left <= 0) break
+            reconnectInS = ((left + 999) / 1000).toInt()
+            delay(minOf(left, 1_000L))
+        }
+        reconnectInS = null
+        reconnectAttempt++
+        retryStream()
+    }
+
     // Tier-3 #13 remainder: Wi-Fi↔LTE roaming. quinn's QUIC migration is
     // ready (server accepts a changing source address), but Android pins
     // the endpoint's UDP socket to the network that was default when it
@@ -894,6 +925,13 @@ fun RemoteScreen(
                                         style = MaterialTheme.typography.titleMedium,
                                         textAlign = TextAlign.Center,
                                     )
+                                    reconnectInS?.let { seconds ->
+                                        Text(
+                                            stringResource(R.string.reconnecting_in, seconds),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                     Button(onClick = ::retryStream) {
                                         Text(stringResource(R.string.retry))
                                     }
