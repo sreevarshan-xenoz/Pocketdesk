@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -38,19 +37,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.pair.firstPairingCode
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import zxingcpp.BarcodeReader
 
 /**
- * Scans a Pocketdesk pairing code with the camera (CameraX preview + ML
- * Kit's bundled QR model: no Google Play services needed) and hands the
- * first `pocketdesk://pair` value to [onCode].
+ * Scans a Pocketdesk pairing code with the camera (CameraX preview and
+ * zxing-cpp, all free software, nothing sent anywhere) and hands the first
+ * `pocketdesk://pair` value to [onCode].
  */
 @Composable
 fun QrScanScreen(onCode: (String) -> Unit, onBack: () -> Unit) {
@@ -98,15 +94,21 @@ fun QrScanScreen(onCode: (String) -> Unit, onBack: () -> Unit) {
     }
 }
 
-@androidx.annotation.OptIn(ExperimentalGetImage::class)
 @Composable
 private fun CameraPreview(onCode: (String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
-    val scanner = remember {
-        BarcodeScanning.getClient(
-            BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build(),
+    // A code on a monitor: glare, moiré and a dark theme (inverted) are the
+    // hard cases, hence tryHarder and tryInvert.
+    val reader = remember {
+        BarcodeReader(
+            BarcodeReader.Options(
+                formats = setOf(BarcodeReader.Format.QR_CODE),
+                tryHarder = true,
+                tryInvert = true,
+                tryDownscale = true,
+            ),
         )
     }
     val delivered = remember { AtomicBoolean(false) }
@@ -120,7 +122,6 @@ private fun CameraPreview(onCode: (String) -> Unit) {
             camera.disposed = true
             camera.provider?.unbindAll()
             camera.provider = null
-            scanner.close()
             analysisExecutor.shutdown()
         }
     }
@@ -138,25 +139,16 @@ private fun CameraPreview(onCode: (String) -> Unit) {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                 analysis.setAnalyzer(analysisExecutor) { proxy ->
-                    val media = proxy.image
-                    if (media == null || delivered.get() || camera.disposed) {
-                        proxy.close()
-                        return@setAnalyzer
-                    }
-                    val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
-                    // A frame already in flight when the screen left meets a closed scanner.
-                    val task = runCatching { scanner.process(image) }.getOrElse {
-                        proxy.close()
-                        return@setAnalyzer
-                    }
-                    task
-                        .addOnSuccessListener { codes ->
-                            val code = firstPairingCode(codes.map { it.rawValue })
-                            if (code != null && delivered.compareAndSet(false, true)) {
-                                ContextCompat.getMainExecutor(ctx).execute { onCode(code) }
-                            }
+                    // read() leaves the frame open; it is closed here, always.
+                    proxy.use { frame ->
+                        if (delivered.get() || camera.disposed) return@use
+                        // A QR reads at any rotation, so the frame goes in as it is.
+                        val texts = runCatching { reader.read(frame) }.getOrDefault(emptyList()).map { it.text }
+                        val code = firstPairingCode(texts)
+                        if (code != null && delivered.compareAndSet(false, true)) {
+                            ContextCompat.getMainExecutor(ctx).execute { onCode(code) }
                         }
-                        .addOnCompleteListener { proxy.close() }
+                    }
                 }
                 provider.unbindAll()
                 provider.bindToLifecycle(

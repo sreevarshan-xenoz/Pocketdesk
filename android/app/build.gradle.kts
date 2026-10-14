@@ -15,6 +15,7 @@ android {
         targetSdk = 37
         versionCode = 2
         versionName = "0.2.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -61,7 +62,13 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.6.2")
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // QR decoding: zxing-cpp (Apache-2.0). Not ML Kit, which is proprietary,
+    // pulls in Play services and Firebase components, sends Google usage
+    // data, and keeps the app out of F-Droid (T3).
+    implementation("io.github.zxing-cpp:android:3.1.1")
+    // On-device check that the scanner reads the desktop app's code.
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }
