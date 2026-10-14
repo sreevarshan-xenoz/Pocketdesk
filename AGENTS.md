@@ -46,6 +46,11 @@ The detailed build journal lives in `git log` — one conventional commit per lo
   - **Home card:** when phone notifications or texts are on and Android may stop Pocketdesk (battery optimization, or Restricted), Home shows a card. It opens the page that lifts the limit and links the maker's guide on dontkillmyapp.com.
   - **Settings:** "Background" shows the status and has "Remind me on Home".
   - **Tests:** `BackgroundRunning` is JVM-tested; device-checked on the A71 (checklist §48).
+  - **Fresh review (3 Important), fixed:**
+    - the wording (optimization cuts the network while the phone sleeps; it does not stop the listener);
+    - "Allow" now opens the app's own page on Android 12+;
+    - Settings' status refreshes on resume.
+  - **Open:** queue a notification that failed to send instead of dropping it.
 - 2026-10-14: **T3 begun, getting into F-Droid (branch `feat/fdroid-ready`; plan in `docs/research/2026-10-14-fdroid.md`).**
   - **Done:**
     - The QR scanner decodes with zxing-cpp, not ML Kit. ML Kit was proprietary, sent Google usage data and failed F-Droid's scanner.
