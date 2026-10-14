@@ -15,7 +15,31 @@ android {
         targetSdk = 37
         versionCode = 2
         versionName = "0.2.0"
+        // The Rust bridge is built for arm64 only, so no other ABI can run
+        // the app; libraries' other ABIs would only add size.
+        ndk { abiFilters += "arm64-v8a" }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // F-Droid and IzzyOnDroid refuse the Google-encrypted dependency block,
+    // and it is not needed outside Play.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
+    lint {
+        // x86 ChromeOS devices are left out on purpose: the Rust bridge is
+        // built for arm64 only (see abiFilters), so they could not run it.
+        disable += "ChromeOsAbiSupport"
+    }
+
+    packaging {
+        jniLibs {
+            // cargo-ndk copies iroh's and iroh-relay's cdylibs (their crates
+            // are also cdylib) next to the bridge; nothing loads them.
+            excludes += listOf("**/libiroh-*.so", "**/libiroh_relay-*.so")
+        }
     }
 
     buildTypes {
