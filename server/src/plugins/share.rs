@@ -14,7 +14,7 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest file name kept, in bytes (Linux allows 255).
 const MAX_NAME_BYTES: usize = 200;
 /// Transfers running at once; more are refused, not queued.
-const MAX_TRANSFERS: usize = 2;
+const MAX_TRANSFERS: usize = 4;
 /// The slowest transfer allowed, so a trickle cannot hold a slot forever.
 const MIN_BYTES_PER_SEC: u64 = 32 * 1024;
 /// The receiver's last word on a transfer, one byte after the data: the
@@ -32,8 +32,11 @@ pub const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 pub const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
 
 /// Transfers running at once from one phone, so one phone cannot hold every
-/// slot and starve the others (R3).
-const MAX_TRANSFERS_PER_PHONE: usize = 1;
+/// slot and starve the others (R3). Two, not one: a phone sends its next
+/// queued file as soon as it reads the last one's status byte, which can be
+/// before the desktop has given that slot back, and an image sync or a
+/// download should not wait on a long share.
+const MAX_TRANSFERS_PER_PHONE: usize = 2;
 
 /// The transfer slots: so many for the desktop, and fewer for one phone.
 pub(crate) struct TransferSlots {
@@ -224,7 +227,6 @@ impl Plugin for SharePlugin {
 
                 let from = sender.device_id().to_string();
                 tokio::spawn(async move {
-                    let _slot = slot;
                     match receive_file(
                         SocketAddr::new(phone_ip, port),
                         tls,
@@ -236,6 +238,9 @@ impl Plugin for SharePlugin {
                     .await
                     {
                         Ok(path) => {
+                            // The bytes are in: give the slot back before the
+                            // bookkeeping, for the phone's next file.
+                            drop(slot);
                             tracing::info!("File received: {} ({size} bytes)", path.display());
                             on_received(&path, size, &from);
                         }
@@ -950,6 +955,18 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[test]
+    fn a_phones_next_file_is_not_refused_while_its_last_one_finishes() {
+        let slots = TransferSlots::new(MAX_TRANSFERS, MAX_TRANSFERS_PER_PHONE);
+        let finishing = slots.take("phone-a").unwrap();
+        let next = slots.take("phone-a").expect("the next queued file");
+        let other = slots
+            .take("phone-b")
+            .expect("another phone still gets a slot");
+        assert!(slots.take("phone-a").is_err(), "but not a third");
+        drop((finishing, next, other));
+    }
 
     #[test]
     fn one_phone_cannot_take_every_transfer_slot() {
