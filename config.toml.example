@@ -31,6 +31,20 @@ video_quality = "balanced"
 # after changing it.
 # relay_urls = ["https://relay.example.org"]
 
+# What this desktop publishes on the BitTorrent Mainline DHT under its WAN id,
+# so a phone away from home finds it after its relay or address changed:
+#   "relay"     - the relay URLs only (the default)
+#   "addresses" - the relay URLs and this computer's public IP addresses, so a
+#                 phone can connect with no relay at all when the desktop has
+#                 a public IPv6 address or a mapped port. The record then shows
+#                 your home's public IP to anyone who knows the id.
+#   "off"       - nothing; a phone away from home dials what it learned at home
+# Private, LAN and tailnet addresses and home-network names are never
+# published. In every mode but "off", the DHT nodes storing the record see the
+# home IP it is sent from, tied to this id (see SECURITY.md). Restart the
+# server after changing it.
+# dht_publish = "relay"
+
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a
 # program to provide a microphone; apps then record from its other end.

@@ -75,6 +75,17 @@ pub struct WanStatus {
     pub public_v6: bool,
     /// A sign-in page holds the network.
     pub captive_portal: Option<bool>,
+    /// This computer's record on the Mainline DHT (roadmap N3): what it was
+    /// read back holding ("relay", or "addresses" when an IP was among it),
+    /// else the `dht_publish` setting while checking or "off"; "empty" when
+    /// no address may be published, "unjoined" when the DHT has not started.
+    /// Absent from an older server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dht: Option<String>,
+    /// The server read its own record back from the DHT. Absent until its
+    /// first check, about a minute after it starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dht_found: Option<bool>,
 }
 
 /// Record the server's measurement (temp file, then rename).
@@ -159,6 +170,74 @@ pub fn check_outside(
         finding("IPv6", Status::Info, "no public IPv6 address")
     });
     findings
+}
+
+/// Can a phone away from home find this computer by its id on the Mainline
+/// DHT (roadmap N3), after its relay or address changed?
+pub fn check_dht(status: Option<&WanStatus>, state: ServerState) -> Finding {
+    let check = "Found by id";
+    if state != ServerState::Running {
+        return finding(
+            check,
+            Status::Info,
+            "not checked: the server is not running yet",
+        );
+    }
+    let Some(mode) = status.and_then(|s| s.dht.as_deref()) else {
+        return finding(check, Status::Info, "the server has not reported it yet");
+    };
+    if mode == "off" {
+        return finding(
+            check,
+            Status::Info,
+            "off: a phone away from home dials the address it learned at home",
+        );
+    }
+    if mode == "unjoined" {
+        return with_hint(
+            finding(
+                check,
+                Status::Warn,
+                "not on the Mainline DHT yet: its bootstrap servers do not resolve",
+            ),
+            "The server retries each minute. If this stays, this computer has no working DNS or internet.",
+        );
+    }
+    if mode == "empty" {
+        return with_hint(
+            finding(
+                check,
+                Status::Warn,
+                "nothing to publish: no relay with a public name or address, and public addresses are off",
+            ),
+            "Name your relay by a public name or address in relay_urls, or set dht_publish = \"addresses\" in config.toml.",
+        );
+    }
+    let holds = if mode == "addresses" {
+        "with public addresses"
+    } else {
+        "relay address only"
+    };
+    match status.and_then(|s| s.dht_found) {
+        Some(true) => finding(
+            check,
+            Status::Good,
+            format!("published on the Mainline DHT and read back ({holds})"),
+        ),
+        Some(false) => with_hint(
+            finding(
+                check,
+                Status::Warn,
+                "published, but not read back from the Mainline DHT",
+            ),
+            "The DHT needs outgoing UDP, which this network may block. Phones then dial the address they learned at home.",
+        ),
+        None => finding(
+            check,
+            Status::Info,
+            "checking that the DHT has this computer's record (each minute until it does)",
+        ),
+    }
 }
 
 /// The home relay `endpoint.json` announces, if any.
@@ -742,7 +821,67 @@ mod tests {
             nat_varies,
             public_v6,
             captive_portal: Some(false),
+            dht: None,
+            dht_found: None,
         }
+    }
+
+    fn dht(mode: &str, found: Option<bool>) -> WanStatus {
+        let mut status = wan(true, Some(false), false);
+        status.dht = Some(mode.to_string());
+        status.dht_found = found;
+        status
+    }
+
+    #[test]
+    fn found_by_id_says_whether_the_dht_has_this_computer() {
+        let read_back = check_dht(Some(&dht("relay", Some(true))), UP);
+        assert_eq!(read_back.check, "Found by id");
+        assert_eq!(read_back.status, Status::Good);
+        assert!(read_back.detail.contains("relay address only"));
+        assert!(
+            check_dht(Some(&dht("addresses", Some(true))), UP)
+                .detail
+                .contains("public addresses")
+        );
+        let missing = check_dht(Some(&dht("relay", Some(false))), UP);
+        assert_eq!(missing.status, Status::Warn);
+        assert!(missing.hint.as_deref().unwrap().contains("UDP"));
+        let checking = check_dht(Some(&dht("relay", None)), UP);
+        assert_eq!(checking.status, Status::Info);
+        assert!(checking.detail.contains("checking"));
+        let unjoined = check_dht(Some(&dht("unjoined", None)), UP);
+        assert_eq!(unjoined.status, Status::Warn);
+        assert!(unjoined.detail.contains("not on the Mainline DHT"));
+        let empty = check_dht(Some(&dht("empty", None)), UP);
+        assert_eq!(empty.status, Status::Warn);
+        assert!(empty.hint.as_deref().unwrap().contains("relay_urls"));
+        let off = check_dht(Some(&dht("off", None)), UP);
+        assert_eq!(off.status, Status::Info);
+        assert!(off.detail.starts_with("off"));
+        assert_eq!(
+            check_dht(Some(&wan(true, None, false)), UP).status,
+            Status::Info,
+            "a server that does not report it"
+        );
+        assert_eq!(check_dht(None, UP).status, Status::Info);
+        assert!(
+            check_dht(Some(&dht("relay", Some(true))), ServerState::Starting)
+                .detail
+                .contains("not running")
+        );
+    }
+
+    #[test]
+    fn an_older_wan_status_without_the_dht_still_reads() {
+        let dir = temp_dir("wan-old");
+        std::fs::write(
+            dir.join(WAN_STATUS_FILE),
+            r#"{"unix_secs":1,"udp":true,"nat_varies":false,"public_v6":false,"captive_portal":null}"#,
+        )
+        .unwrap();
+        let status = read_wan_status(&dir).expect("read");
+        assert_eq!((status.dht, status.dht_found), (None, None));
     }
 
     #[test]

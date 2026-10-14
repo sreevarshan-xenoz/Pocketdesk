@@ -42,6 +42,16 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **N3, finding the desktop on the Mainline DHT (branch `feat/dht-lookup`, stacked on `feat/own-relay`; spec `docs/superpowers/specs/2026-10-14-dht-lookup-design.md`, with an as-built section).**
+  - **New:**
+    - The desktop publishes a record signed with its iroh key on the BitTorrent Mainline DHT (`iroh-mainline-address-lookup`). `dht_publish` says what it holds: `relay` (the default), `addresses` (also public IPs), or `off`. LAN, tailnet and documentation addresses, and relays known by a private address or a home-network name, are never published.
+    - The server joins the DHT in the background, so the WAN endpoint never waits on it, and reads its own record back. `wan_status.json` carries `dht`/`dht_found`, and Diagnostics' new "Found by id" row reports them.
+    - The endpoint packet says `dht: true` when there is a record. The phone's WAN dial then adds a resolve-only lookup, merged by iroh with the cached address, and drops it once connected. There is no Kotlin change.
+    - `core::streaming::dht` resolves the DHT's bootstrap names off the runtime (n0-mainline does it with blocking DNS and never retries) and binds a port the OS picks, not 6881.
+  - **Already true, now written down:** IPv6 was bound on both ends all along. Our `bind_addr(0.0.0.0:0)` replaces only iroh's IPv4 default.
+  - **Verified on the A71 and this box:** a cached identity made stale (wrong n0 relay, no addresses, LAN port closed) found the desktop on the DHT in about 3 s and went direct. With `dht: false` it timed out.
+  - **Fresh review (0 Critical, 7 Important), fixed one commit each:** the bootstrap and port, the phone's node living all session, verdicts stuck for 15 minutes, Diagnostics over-claiming, LAN names in the record, `dht: true` for an empty record, and docs understating what the DHT sees.
+  - **Owed (checklist §37):** a session from outside, `addresses` with a real public IPv6, a UDP-blocking network, and the Linux host.
 - 2026-10-13: **N2, your own relay (branch `feat/own-relay`; spec `docs/superpowers/specs/2026-10-13-own-relay-design.md`).**
   - **New:**
     - `pocketdesk relay` runs iroh's relay server: plain on a port (default 3340), or HTTPS on 80/443 with Let's Encrypt (`--hostname`).

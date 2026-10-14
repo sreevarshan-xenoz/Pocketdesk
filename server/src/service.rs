@@ -297,6 +297,7 @@ pub async fn run(config: Config) -> Result<()> {
             capture_backend: config.capture_backend,
             mic_relay_device: config.mic_relay_device.clone(),
             relay_urls: config.relay_urls.clone(),
+            dht_publish: config.dht_publish,
         },
     )
     .await
@@ -322,7 +323,7 @@ pub async fn run(config: Config) -> Result<()> {
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tick.tick().await;
-                let packet = iroh_endpoint::endpoint_packet(&endpoint.addr(), endpoint.id());
+                let packet = iroh_endpoint::current_packet(&endpoint);
                 let clients = state::clone_clients().await;
                 for sender in clients.iter() {
                     let _ = sender.send_packet(&packet).await;

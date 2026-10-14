@@ -299,6 +299,26 @@ Then add `relay_urls = ["http://<public address>:3340"]` (or the `https://` name
 - **Where not to run it:** behind the same NAT as an unreachable desktop, with no forwarded port. A relay nobody outside can reach helps no one.
 - **What Diagnostics shows:** "Internet path: ready through your relay", or that your relay is not reached (is `pocketdesk relay` running?), or that a `relay_urls` entry is not an `http://` or `https://` address, which turns away-from-home off. Your relay does not offer the address discovery n0's relays do, so "From outside" says "not measured" instead of judging the NAT.
 
+### Away From Home: Found by Id
+
+The phone dials the address it learned on the home network. When that goes stale (the desktop's relay or its public IP changed), the phone looks the desktop up by its id on the BitTorrent Mainline DHT, the same public network torrents use; no server of ours or anyone's is involved. The desktop publishes a small record there, signed with its key, and the phone checks the key again when it connects, so a forged record gets nowhere.
+
+`dht_publish` in `config.toml` says what the record holds:
+
+| Value | The record holds |
+|---|---|
+| `"relay"` (default) | The relay URLs only: n0's, or the public name of your own relay. |
+| `"addresses"` | The relay URLs and this computer's public IP addresses: with a public IPv6 address or a port the router maps, a phone connects with no relay at all. The record then shows your home's public IP to anyone who knows the id. |
+| `"off"` | Nothing. |
+
+Private, LAN and tailnet addresses are never published, and neither is a relay known only by a private address or a home-network name (`nas`, `pi.lan`). Diagnostics' "Found by id" says whether the server read its own record back from the DHT.
+
+What the DHT sees, in every mode but `"off"`:
+- **The desktop's home IP, tied to its id.** The DHT nodes that store the record (strangers' computers) see the address it was sent from, and the desktop republishes every hour.
+- **The phone's IP, and which id it looks for,** on each connection from away (and each WAN dial at home), since the lookup runs next to the cached address.
+
+The id is in the pairing QR code, on each paired phone and on every relay the desktop uses.
+
 ### CLI Commands
 
 | Command | Description |

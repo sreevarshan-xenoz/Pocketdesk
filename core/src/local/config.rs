@@ -57,6 +57,36 @@ pub struct Config {
     /// uses n0's public relays. Read at server start.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relay_urls: Vec<String>,
+    /// What this computer publishes on the Mainline DHT under its WAN id, so
+    /// a phone away from home finds it after its relay or address changed
+    /// (roadmap N3). Read at server start.
+    #[serde(default)]
+    pub dht_publish: DhtPublish,
+}
+
+/// What the desktop's signed DHT record holds (roadmap N3). Private, LAN and
+/// tailnet addresses are never in it, whatever the value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DhtPublish {
+    /// The relay URLs only.
+    #[default]
+    Relay,
+    /// The relay URLs and this computer's public IP addresses.
+    Addresses,
+    /// Nothing is published.
+    Off,
+}
+
+impl DhtPublish {
+    /// The config value, as written in config.toml and `wan_status.json`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Relay => "relay",
+            Self::Addresses => "addresses",
+            Self::Off => "off",
+        }
+    }
 }
 
 fn default_lan_discovery() -> bool {
@@ -92,6 +122,7 @@ impl Default for Config {
             mic_relay_device: None,
             lan_discovery: true,
             relay_urls: Vec::new(),
+            dht_publish: DhtPublish::Relay,
         }
     }
 }
@@ -306,6 +337,30 @@ mod tests {
         assert!(
             Config::default().relay_urls.is_empty(),
             "n0's relays unless set"
+        );
+    }
+
+    #[test]
+    fn what_the_dht_record_holds_is_read_from_the_config() {
+        assert_eq!(
+            Config::default().dht_publish,
+            DhtPublish::Relay,
+            "relay addresses only, unless set"
+        );
+        for (text, want) in [
+            ("relay", DhtPublish::Relay),
+            ("addresses", DhtPublish::Addresses),
+            ("off", DhtPublish::Off),
+        ] {
+            let path = temp(&format!("dht-{text}"));
+            std::fs::write(&path, format!("dht_publish = \"{text}\"\n")).unwrap();
+            assert_eq!(Config::load_from(&path).unwrap().dht_publish, want);
+        }
+        let path = temp("dht-bad");
+        std::fs::write(&path, "dht_publish = \"everything\"\n").unwrap();
+        assert!(
+            Config::load_from(&path).is_err(),
+            "an unknown value is refused"
         );
     }
 

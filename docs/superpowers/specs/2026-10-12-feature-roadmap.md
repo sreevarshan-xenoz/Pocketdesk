@@ -37,7 +37,7 @@ Each item is its own branch (`feat/<topic>`), spec, plan and device check on the
 |---|---|---|
 | N1 | **Cross-network without Tailscale, step 1.** A real cellular test of the built-in iroh path (owed: the test phone has no mobile service). Router port mapping (UPnP / NAT-PMP / PCP) is iroh's default and already on. The phone's HUD already shows direct or relayed. Diagnostics now says whether this computer's NAT allows direct connections, and whether IPv6 is public (shipped 2026-10-13). | Both |
 | N2 | **Your own relay.** `pocketdesk relay` runs iroh's relay server: on the desktop itself with one port forwarded, on any always-on box, or on a free cloud VM. It admits only listed endpoints (`--allow-paired` admits this desktop and its phones). The desktop's `relay_urls` setting points at it, and the phone learns it from the desktop, so it has no setting of its own (shipped 2026-10-13). | Both |
-| N3 | **Finding the desktop without anyone's server.** iroh discovery over the Mainline DHT (pkarr), so a changed home IP is found again. IPv6 direct where the ISP gives it. | Both |
+| N3 | **Finding the desktop without anyone's server.** The desktop publishes a record signed with its iroh key on the Mainline DHT (pkarr): its relay, and with `dht_publish = "addresses"` its public IPs. A phone whose cached address went stale looks it up by id. IPv6 direct paths were already bound on both ends. Diagnostics' "Found by id" says whether the record reads back (shipped 2026-10-14). | Both |
 | N4 | **Image clipboard** (F8). | Both |
 | N5 | **Notifications both ways, with actions**, and the phone's notifications and SMS on the desktop. | Both |
 | N6 | **Wake and connect in one tap from anywhere**: the wake packet relayed over the WAN path. | Both |
