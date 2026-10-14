@@ -394,7 +394,15 @@ impl StreamingServer {
         // desktop can list it (`pocketdesk status`) or end it
         // (`pocketdesk kick`); the handle deregisters when this function
         // exits by any path.
-        let _live_session = super::sessions::register(device_id.clone(), &connection);
+        let _live_session = super::sessions::register(
+            device_id.clone(),
+            &connection,
+            super::sessions::Streamed {
+                input: !force_view_only,
+                audio: allow_audio,
+                mic: allow_mic,
+            },
+        );
         // Input is tagged with this session, so the server can tell which
         // phone drives when several are connected (roadmap N7).
         let live_id = _live_session.id();
