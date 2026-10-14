@@ -42,6 +42,22 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **Protocol audit: what Pocketdesk sends, and to whom (branch `fix/protocol-audit`; `docs/protocol.md`).**
+  - **The map.** `docs/protocol.md` lists every listener, key, packet, file on disk and outside party, each row naming its source, with what is unconfirmed in its own section. SECURITY.md links it and gains two limits: the desktop names itself to any client before judging it, and permissions do not gate what the desktop pushes to a paired phone.
+  - **Fixed on the way, one commit each:**
+    - the pairing PIN reaches the log only when no notification can show it, and showing it no longer blocks a runtime worker;
+    - the wake relay sends only onto the desktop's own networks (never loopback), needs Power (the switch now says so), and the phone reports a refusal instead of "Wake sent";
+    - the control channel and transfers are TLS 1.3 only;
+    - a transfer's status byte is followed by a clean close (a reset could overtake it), and a failed transfer closes at once;
+    - the state folder is 0700 on Unix, best effort with a warning;
+    - Android backups and device moves carry none of the app's keys or pairings;
+    - `install` no longer opens UDP 1716 (nothing listens there);
+    - `pocketdesk capabilities` names the real ALPNs;
+    - the mDNS announcement leaves out tailnet addresses;
+    - no `tailscale netcheck` on every discovery poll;
+    - **the phone's relay lookups went to Cloudflare, Google and Quad9**, because iroh never had the Android context to read the network's DNS. The bridge now installs it (device-verified on the A71).
+  - **Fresh review:** 0 Critical, 2 Important (a state folder that could not be chmodded stopped the server; relay refusals were silent), both fixed, plus five minors.
+  - **Owed (checklist §49):** the Linux folder mode, a relay refusal on the device, backup and Smart Switch, a fresh Windows install's mDNS, and many transfer runs.
 - 2026-10-14: **T2, staying connected in the background (branch `feat/background-onboarding`).**
   - **Home card:** when phone notifications or texts are on and Android may stop Pocketdesk (battery optimization, or Restricted), Home shows a card. It opens the page that lifts the limit and links the maker's guide on dontkillmyapp.com.
   - **Settings:** "Background" shows the status and has "Remind me on Home".
