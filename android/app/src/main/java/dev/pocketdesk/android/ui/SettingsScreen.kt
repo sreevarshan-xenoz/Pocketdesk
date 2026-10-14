@@ -163,6 +163,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 trailingContent = { Text("%.2f×".format(speed), style = MaterialTheme.typography.labelLarge) },
             )
 
+            PhoneNotificationsSection()
+
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 Header(stringResource(R.string.settings_system))
                 ListItem(

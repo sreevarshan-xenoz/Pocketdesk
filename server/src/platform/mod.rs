@@ -52,14 +52,19 @@ pub fn notify(summary: &str, body: &str, expire: Duration) -> bool {
     }
     #[cfg(not(windows))]
     {
+        // Notification servers read the body as markup, and the text may be
+        // a stranger's (a phone's notification, N5a): escaped, and after
+        // `--`, so a body like `--wait` is not taken for an option.
+        let (summary, body) = (markup_escaped(summary), markup_escaped(body));
         std::process::Command::new("notify-send")
             .args([
                 "--app-name",
                 "Pocketdesk",
                 "--expire",
                 &expire.as_millis().to_string(),
-                summary,
-                body,
+                "--",
+                &summary,
+                &body,
             ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -67,6 +72,15 @@ pub fn notify(summary: &str, body: &str, expire: Duration) -> bool {
             .map(|s| s.success())
             .unwrap_or(false)
     }
+}
+
+/// `text` with the characters freedesktop notification markup gives meaning
+/// to escaped, so it is shown as written (`<b>`, a link, `&` stay text).
+#[cfg_attr(windows, allow(dead_code))]
+pub fn markup_escaped(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Why the server is shutting down.
@@ -126,5 +140,16 @@ pub async fn request_stop(pid: u32) -> std::io::Result<bool> {
             .status()
             .await?;
         Ok(status.success())
+    }
+}
+
+#[cfg(test)]
+mod markup_tests {
+    #[test]
+    fn markup_in_a_notification_is_shown_as_text() {
+        assert_eq!(
+            super::markup_escaped("<a href=\"x\">pay</a> & <b>now</b>"),
+            "&lt;a href=\"x\"&gt;pay&lt;/a&gt; &amp; &lt;b&gt;now&lt;/b&gt;"
+        );
     }
 }

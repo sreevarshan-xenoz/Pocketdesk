@@ -1,5 +1,103 @@
+//! Notifications from a phone shown on this desktop (roadmap N5a), and the
+//! answer to a phone asking whether this desktop takes them.
+//!
+//! A phone that shares its notifications may send many at once; at most
+//! [`PER_MINUTE`] a minute from one phone are shown, the rest dropped.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use pocketdesk_core::error::Result;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+
+/// The most notifications shown from one phone in a minute.
+const PER_MINUTE: usize = 20;
+
+/// How many notifications each phone had shown in the last minute.
+#[derive(Default)]
+struct FloodGuard {
+    shown: HashMap<String, Vec<Instant>>,
+    /// When a drop was last logged, per phone, so a flood logs once a minute.
+    logged: HashMap<String, Instant>,
+}
+
+impl FloodGuard {
+    /// Whether one more notification from `phone` may be shown at `now`.
+    fn admit(&mut self, phone: &str, now: Instant) -> bool {
+        let recent = self.shown.entry(phone.to_string()).or_default();
+        recent.retain(|at| now.duration_since(*at) < Duration::from_secs(60));
+        if recent.len() < PER_MINUTE {
+            recent.push(now);
+            return true;
+        }
+        let quiet = self
+            .logged
+            .get(phone)
+            .is_none_or(|at| now.duration_since(*at) >= Duration::from_secs(60));
+        if quiet {
+            self.logged.insert(phone.to_string(), now);
+            tracing::info!("Notifications from {phone} dropped: more than {PER_MINUTE} a minute");
+        }
+        false
+    }
+}
+
+fn flood_guard() -> &'static Mutex<FloodGuard> {
+    static GUARD: std::sync::OnceLock<Mutex<FloodGuard>> = std::sync::OnceLock::new();
+    GUARD.get_or_init(Default::default)
+}
+
+/// The longest app name, title and text shown, in characters.
+const MAX_APP: usize = 64;
+const MAX_TITLE: usize = 200;
+const MAX_TEXT: usize = 1000;
+
+/// `raw` as a phone may have it shown: control characters (other than line
+/// breaks) dropped, trimmed, and cut to `max` characters with an ellipsis.
+/// The text comes from any app on the phone, and so from anyone who can
+/// send that app a message.
+fn clean(raw: &str, max: usize) -> String {
+    let kept: String = raw
+        .chars()
+        .filter(|c| *c == '\n' || !c.is_control())
+        .collect();
+    let kept = kept.trim();
+    if kept.chars().count() <= max {
+        return kept.to_string();
+    }
+    let mut cut: String = kept.chars().take(max - 1).collect();
+    cut.push('…');
+    cut
+}
+
+/// A notification packet to show: its app, title and text, or `None` for
+/// one that only cancels (`isCancel`, N5c) or says nothing.
+fn to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
+    if body.get("isCancel").and_then(|v| v.as_bool()) == Some(true) {
+        return None;
+    }
+    let field = |key: &str| {
+        let max = match key {
+            "app" => MAX_APP,
+            "title" => MAX_TITLE,
+            _ => MAX_TEXT,
+        };
+        body.get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| clean(s, max))
+            .filter(|s| !s.is_empty())
+    };
+    let (title, text) = (field("title"), field("text"));
+    if title.is_none() && text.is_none() {
+        return None;
+    }
+    Some((
+        field("app").unwrap_or_else(|| "Phone".to_string()),
+        title.unwrap_or_else(|| "Notification".to_string()),
+        text.unwrap_or_default(),
+    ))
+}
 
 #[derive(Debug)]
 pub struct NotificationPlugin;
@@ -33,15 +131,14 @@ impl Plugin for NotificationPlugin {
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         match packet.packet_type.as_str() {
             "kdeconnect.notification" => {
-                let body = &packet.body;
-                let title = body
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Notification");
-                let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                let app = body.get("app").and_then(|v| v.as_str()).unwrap_or("Remote");
-
-                if let Err(e) = show_desktop_notification(app, title, text).await {
+                let Some((app, title, text)) = to_show(&packet.body) else {
+                    return Ok(());
+                };
+                let admitted = flood_guard()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .admit(sender.device_id(), Instant::now());
+                if admitted && let Err(e) = show_desktop_notification(&app, &title, &text).await {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
             }
@@ -77,6 +174,9 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
         detail: format!("D-Bus proxy failed: {e}"),
     })?;
 
+    // Markup is escaped: the text may be a stranger's (N5a).
+    let summary = crate::platform::markup_escaped(summary);
+    let body = crate::platform::markup_escaped(body);
     proxy
         .call::<_, _, u32>(
             "Notify",
@@ -84,8 +184,8 @@ async fn send_notification_dbus(summary: &str, body: &str) -> Result<()> {
                 "pocketdesk",                                                      // app_name
                 0u32,                                                              // replaces_id
                 "",                                                                // app_icon
-                summary,                                                           // summary
-                body,                                                              // body
+                summary.as_str(),                                                  // summary
+                body.as_str(),                                                     // body
                 Vec::<String>::new(),                                              // actions
                 std::collections::HashMap::<String, zbus::zvariant::Value>::new(), // hints
                 5000i32, // timeout (5 seconds)
@@ -131,4 +231,58 @@ async fn show_desktop_notification(app: &str, title: &str, text: &str) -> Result
     tracing::warn!("Desktop notification could not be shown; dropped: {title}");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn at_most_twenty_a_minute_are_shown_from_one_phone() {
+        let mut guard = FloodGuard::default();
+        let start = Instant::now();
+        let shown = (0..30).filter(|_| guard.admit("phone", start)).count();
+        assert_eq!(shown, PER_MINUTE);
+        assert!(
+            guard.admit("other", start),
+            "another phone has its own count"
+        );
+        assert!(
+            guard.admit("phone", start + Duration::from_secs(61)),
+            "a minute later it may show again"
+        );
+    }
+
+    #[test]
+    fn a_phones_text_is_cut_to_length_and_rid_of_control_characters() {
+        assert_eq!(clean("  a\u{0007}b\nc\u{001b}[31m ", 10), "ab\nc[31m");
+        let long = "x".repeat(MAX_TEXT + 50);
+        let shown = to_show(&json!({"title": "t", "text": long})).unwrap().2;
+        assert_eq!(shown.chars().count(), MAX_TEXT);
+        assert!(shown.ends_with('…'));
+        let (app, title, _) =
+            to_show(&json!({"app": "A".repeat(500), "title": "T".repeat(500)})).unwrap();
+        assert_eq!(
+            (app.chars().count(), title.chars().count()),
+            (MAX_APP, MAX_TITLE)
+        );
+    }
+
+    #[test]
+    fn a_cancel_or_an_empty_notification_is_not_shown() {
+        assert_eq!(
+            to_show(&json!({"app": "Chat", "title": "Ana", "text": "hi"})),
+            Some(("Chat".into(), "Ana".into(), "hi".into()))
+        );
+        assert_eq!(to_show(&json!({"id": "k", "isCancel": true})), None);
+        assert_eq!(
+            to_show(&json!({"app": "Chat", "title": " ", "text": ""})),
+            None
+        );
+        assert_eq!(
+            to_show(&json!({"text": "body only"})),
+            Some(("Phone".into(), "Notification".into(), "body only".into()))
+        );
+    }
 }

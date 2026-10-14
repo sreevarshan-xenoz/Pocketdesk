@@ -23,7 +23,7 @@ const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 7] = [
+const PERMISSIONS: [(Capability, &str, &str); 8] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -58,6 +58,11 @@ const PERMISSIONS: [(Capability, &str, &str); 7] = [
         Capability::Exec,
         "Run commands",
         "Run any command line on this computer. Off unless you turn it on.",
+    ),
+    (
+        Capability::Notifications,
+        "Show its notifications here",
+        "The phone's notifications appear on this computer, when the phone shares them.",
     ),
 ];
 

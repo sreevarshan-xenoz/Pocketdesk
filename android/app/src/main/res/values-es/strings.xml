@@ -276,4 +276,10 @@
     <string name="pair_link_confirm">Emparejar</string>
     <string name="pair_link_calls_itself">Se hace llamar «%1$s».</string>
     <string name="pair_link_not_scanned">Este código lo abrió otra app o una página web, no lo escaneaste tú.</string>
+    <string name="phone_notifications_service">Pocketdesk: mostrar en el ordenador</string>
+    <string name="settings_phone_notifications">Notificaciones de este teléfono</string>
+    <string name="phone_notifications_share">Mostrar en mi ordenador</string>
+    <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste. Desactivado por defecto.</string>
+    <string name="phone_notifications_no_access">Toca para permitir el acceso a las notificaciones</string>
+    <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Ninguna se comparte hasta que la actives.</string>
 </resources>

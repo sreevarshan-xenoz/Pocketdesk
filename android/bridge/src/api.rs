@@ -1040,6 +1040,30 @@ pub async fn get_clipboard(address: String, port: u16) -> Result<String, String>
         .to_string())
 }
 
+/// Show one of this phone's notifications on the desktop (N5a): `body` is
+/// the `kdeconnect.notification` body as JSON (`{id, app, title, text, time,
+/// isClearable}`). Rides the live control connection to that desktop, or a
+/// short one of its own.
+pub async fn send_notification(address: String, port: u16, body: String) -> Result<(), String> {
+    let body = notification_body(&body)?;
+    push_packet(
+        &address,
+        port,
+        &NetworkPacket::new("kdeconnect.notification").with_body(body),
+    )
+    .await
+}
+
+/// The notification body the phone sends: a JSON object with an `id`.
+fn notification_body(json: &str) -> Result<serde_json::Value, String> {
+    let body: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("Invalid notification: {e}"))?;
+    if !body.is_object() || body.get("id").and_then(|v| v.as_str()).is_none() {
+        return Err("A notification needs an id".to_string());
+    }
+    Ok(body)
+}
+
 /// The desktop's clipboard as its reply says (N4), as JSON: `{content}`
 /// for text, or `{image: {id, size}}` for an image the phone may fetch with
 /// [`crate::download::fetch_clipboard_image`].
@@ -3580,5 +3604,18 @@ mod clipboard_state_tests {
             "an image without its size is not fetched"
         );
         assert_eq!(clipboard_state(&json!({})), json!({"content": ""}));
+    }
+}
+
+#[cfg(test)]
+mod notification_body_tests {
+    use super::notification_body;
+
+    #[test]
+    fn a_notification_is_an_object_with_an_id() {
+        assert!(notification_body(r#"{"id":"k","app":"Chat","title":"Ana"}"#).is_ok());
+        assert!(notification_body(r#"{"app":"Chat"}"#).is_err(), "no id");
+        assert!(notification_body("[1]").is_err());
+        assert!(notification_body("not json").is_err());
     }
 }

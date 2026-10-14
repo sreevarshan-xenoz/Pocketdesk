@@ -32,6 +32,7 @@ object RustCore {
     private external fun nativeSendClipboard(address: String, port: Int, content: String): String
     private external fun nativeGetClipboard(address: String, port: Int): String
     private external fun nativeGetClipboardState(address: String, port: Int): String
+    private external fun nativeSendNotification(address: String, port: Int, body: String): String
     private external fun nativeSendClipboardImage(address: String, port: Int, path: String): String
     private external fun nativeFetchClipboardImage(
         address: String,
@@ -225,6 +226,10 @@ object RustCore {
                 RemoteClip.Text(obj.optString("content", ""))
             }
         }
+
+    /** Show one of this phone's notifications on the desktop (N5a); [body] is JSON. */
+    fun sendNotification(address: String, port: Int, body: String): Result<Unit> =
+        envelope(nativeSendNotification(address, port, body)).map { }
 
     /** Put the PNG at [path] on the desktop's clipboard (N4). */
     fun sendClipboardImage(address: String, port: Int, path: String): Result<Unit> =

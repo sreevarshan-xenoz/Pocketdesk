@@ -239,6 +239,21 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchCl
     to_jstring(&mut env, json)
 }
 
+/// Show one of this phone's notifications on the desktop (N5a).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendNotification(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    body: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let body = jstring_to_string(&mut env, &body);
+    let json = envelope_unit(RUNTIME.block_on(api::send_notification(address, port as u16, body)));
+    to_jstring(&mut env, json)
+}
+
 /// Drain pending KDE Connect packets as JSON strings.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePollIncomingPackets(

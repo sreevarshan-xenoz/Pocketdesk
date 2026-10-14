@@ -777,6 +777,21 @@ Built on `feat/image-clipboard`. On the Windows box, a 320x200 image put on the 
 - [ ] A 4K screenshot (over 10 MB): it moves, and the phone's memory holds.
 - [ ] The Linux host (`wl-copy` / `wl-paste` with `image/png`).
 
+## 39. The phone's notifications on the computer (N5a)
+
+Built on `feat/phone-notifications`. On the A71, with no session open: the app's switch opened Android's access page, access was granted, and shell notifications (`cmd notification post`) were posted. Afterwards the switch was turned off and access revoked again.
+
+- [x] Turning the switch on opens Android's notification-access page; after the grant, Settings shows the normal summary.
+- [x] A notification reaches the Windows desktop as a toast. The shell's is private, so it showed only "New notification".
+- [x] 31 within a minute: 20 shown, the drop logged once.
+- [x] An app switched off in Settings sends nothing (no connection is made).
+- [x] After the review fixes, apps are opt-in: Shell, listed but off, sent nothing; switched on, its notification arrived.
+- [x] With the phone's Notifications permission off on the desktop, the server logs "Denied kdeconnect.notification" and shows nothing.
+- [ ] A real app's public notification (a chat message) shows its title and text.
+- [ ] A messaging app that hides its content on the lock screen shows only "New notification".
+- [ ] With no computer reachable, the phone's battery and the queue stay calm over an hour.
+- [ ] The Linux host (`notify-send`).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

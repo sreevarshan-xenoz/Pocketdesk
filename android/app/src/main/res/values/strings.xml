@@ -278,4 +278,10 @@
     <string name="pair_link_confirm">Pair</string>
     <string name="pair_link_calls_itself">It calls itself “%1$s”.</string>
     <string name="pair_link_not_scanned">This code was opened by another app or a web page, not scanned by you.</string>
+    <string name="phone_notifications_service">Pocketdesk: show on computer</string>
+    <string name="settings_phone_notifications">This phone\'s notifications</string>
+    <string name="phone_notifications_share">Show on my computer</string>
+    <string name="phone_notifications_share_summary">Notifications from this phone appear on the computer you used last. Off by default.</string>
+    <string name="phone_notifications_no_access">Tap to allow notification access</string>
+    <string name="phone_notifications_apps_empty">Apps appear here once they notify. None is shared until you switch it on.</string>
 </resources>

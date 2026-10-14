@@ -113,6 +113,18 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_connect_info" />
         </receiver>
+        <!-- N5a: the phone's notifications shown on the desktop, once the
+             user turns it on in Settings and grants notification access. -->
+        <service
+            android:name=".notify.PhoneNotificationListener"
+            android:exported="true"
+            android:label="@string/phone_notifications_service"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- Images received from the desktop's clipboard (N4): the clipboard
              grants each app that reads it access to the URI. -->
         <provider
