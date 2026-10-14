@@ -215,65 +215,97 @@ fn dht_lookup(
         .context("the Mainline DHT could not start")
 }
 
+/// One attempt at a DHT node for this endpoint: `None` while the bootstrap
+/// nodes do not resolve (no DNS yet) or the node cannot start.
+async fn join_dht(endpoint: &Endpoint, mode: DhtPublish) -> Option<DhtAddressLookup> {
+    let nodes =
+        pocketdesk_core::streaming::dht::bootstrap_nodes(std::time::Duration::from_secs(10)).await;
+    if nodes.is_empty() {
+        tracing::debug!("WAN: the DHT's bootstrap nodes do not resolve yet");
+        return None;
+    }
+    let dht = pocketdesk_core::streaming::dht::dht_builder(&nodes);
+    dht_lookup(mode, endpoint.secret_key(), dht)
+        .map_err(|e| tracing::warn!("WAN: {e:#}"))
+        .ok()
+}
+
 /// Join the DHT in the background, so the WAN endpoint never waits on it:
-/// resolve the bootstrap nodes (each minute until DNS answers, as after a
-/// boot before the network is up), add the lookup to the endpoint (iroh
-/// publishes the current addresses to it at once), then keep checking the
-/// record.
+/// each minute until the bootstrap nodes resolve (as after a boot before the
+/// network is up), then add the lookup to the endpoint (iroh publishes the
+/// current addresses to it at once) and keep checking the record.
 fn spawn_dht(endpoint: Endpoint, mode: DhtPublish, state: DhtCheckState) {
     if mode == DhtPublish::Off {
         return;
     }
     tokio::spawn(async move {
         let lookup = loop {
-            let nodes = pocketdesk_core::streaming::dht::bootstrap_nodes(
-                std::time::Duration::from_secs(10),
-            )
-            .await;
-            if nodes.is_empty() {
-                tracing::debug!("WAN: the DHT's bootstrap nodes do not resolve yet");
-            } else {
-                let dht = pocketdesk_core::streaming::dht::dht_builder(&nodes);
-                match dht_lookup(mode, endpoint.secret_key(), dht) {
-                    Ok(lookup) => break lookup,
-                    Err(e) => tracing::warn!("WAN: {e:#}"),
-                }
+            if let Some(lookup) = join_dht(&endpoint, mode).await {
+                break lookup;
             }
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(DHT_RETRY).await;
             if endpoint.is_closed() {
                 return;
             }
         };
-        match endpoint.address_lookup() {
-            Ok(services) => services.add(lookup.clone()),
-            Err(_) => return,
-        }
+        let Ok(services) = endpoint.address_lookup() else {
+            return;
+        };
+        services.add(lookup.clone());
         tracing::info!("WAN: publishing on the Mainline DHT ({})", mode.as_str());
         check_dht_record(lookup, endpoint, mode, state).await;
     });
 }
 
-/// Read this endpoint's record back from the DHT a minute after it joined,
-/// then every 15 minutes: publishing is fire-and-forget, so this is what says
-/// it worked.
+/// How soon to check again while the record is not confirmed.
+const DHT_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+/// How soon to check again once it is.
+const DHT_RECHECK: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// Misses in a row after which the DHT node is rebuilt: a node whose
+/// bootstrap went stale never recovers by itself, and a publish that failed
+/// waits an hour before it tries again.
+const DHT_REBUILD_AFTER: u32 = 3;
+
+/// What the record should hold now, or the verdict when there is nothing to
+/// look for: `None` (checking) while the endpoint has no relay yet, so a
+/// slow start is not reported as nothing to publish.
+fn expected_record(
+    now: &[TransportAddr],
+    with_ips: bool,
+) -> std::result::Result<Vec<TransportAddr>, Option<DhtCheck>> {
+    let expected = publishable(now, with_ips);
+    if !expected.is_empty() {
+        Ok(expected)
+    } else if now.iter().any(TransportAddr::is_relay) {
+        Err(Some(DhtCheck::NothingToPublish))
+    } else {
+        Err(None)
+    }
+}
+
+/// Read this endpoint's record back from the DHT: publishing is
+/// fire-and-forget, so this is what says it worked. A minute after joining,
+/// then each minute until it is found and every 15 minutes after; the node
+/// is rebuilt after a few misses in a row. Ends with the endpoint.
 async fn check_dht_record(
-    lookup: DhtAddressLookup,
+    mut lookup: DhtAddressLookup,
     endpoint: Endpoint,
     mode: DhtPublish,
     state: DhtCheckState,
 ) {
     use futures_lite::StreamExt as _;
     let with_ips = mode == DhtPublish::Addresses;
-    {
-        let mut wait = std::time::Duration::from_secs(60);
-        loop {
-            tokio::time::sleep(wait).await;
-            wait = std::time::Duration::from_secs(15 * 60);
-            let now: Vec<TransportAddr> = endpoint.addr().addrs.into_iter().collect();
-            let expected = publishable(&now, with_ips);
-            let check = if expected.is_empty() {
-                DhtCheck::NothingToPublish
-            } else {
+    let mut wait = DHT_RETRY;
+    let mut misses = 0;
+    loop {
+        tokio::time::sleep(wait).await;
+        if endpoint.is_closed() {
+            return;
+        }
+        let now: Vec<TransportAddr> = endpoint.addr().addrs.into_iter().collect();
+        let check = match expected_record(&now, with_ips) {
+            Err(verdict) => verdict,
+            Ok(expected) => {
                 let read = async {
                     match lookup.resolve(endpoint.id()) {
                         Some(stream) => stream.collect::<Vec<_>>().await,
@@ -289,14 +321,35 @@ async fn check_dht_record(
                         .iter()
                         .any(|addr| expected.contains(addr))
                 });
-                if found {
+                Some(if found {
                     DhtCheck::Found
                 } else {
                     DhtCheck::NotFound
-                }
-            };
-            tracing::debug!(?check, "WAN: DHT record checked");
-            *state.lock().unwrap_or_else(|e| e.into_inner()) = Some(check);
+                })
+            }
+        };
+        tracing::debug!(?check, "WAN: DHT record checked");
+        *state.lock().unwrap_or_else(|e| e.into_inner()) = check;
+        if check == Some(DhtCheck::Found) {
+            misses = 0;
+            wait = DHT_RECHECK;
+            continue;
+        }
+        wait = DHT_RETRY;
+        if check != Some(DhtCheck::NotFound) {
+            continue;
+        }
+        misses += 1;
+        if misses >= DHT_REBUILD_AFTER {
+            misses = 0;
+            if let (Some(fresh), Ok(services)) =
+                (join_dht(&endpoint, mode).await, endpoint.address_lookup())
+            {
+                tracing::info!("WAN: the DHT record was not read back; rejoining the DHT");
+                services.clear();
+                services.add(fresh.clone());
+                lookup = fresh;
+            }
         }
     }
 }
@@ -627,6 +680,24 @@ mod dht_tests {
                 .collect::<Vec<_>>(),
             "relay mode publishes no IP"
         );
+    }
+
+    #[test]
+    fn a_record_is_looked_for_only_once_there_is_something_to_publish() {
+        use super::{DhtCheck, expected_record};
+        let n0 = relay("https://aps1-1.relay.n0.iroh.link/");
+        let lan_relay = relay("http://192.168.0.10:3340/");
+        let lan = ip("192.168.0.10:4501");
+        assert_eq!(
+            expected_record(std::slice::from_ref(&lan), false),
+            Err(None),
+            "no relay yet: still checking, not nothing to publish"
+        );
+        assert_eq!(
+            expected_record(&[lan.clone(), lan_relay], false),
+            Err(Some(DhtCheck::NothingToPublish))
+        );
+        assert_eq!(expected_record(&[lan, n0.clone()], false), Ok(vec![n0]));
     }
 
     #[test]
