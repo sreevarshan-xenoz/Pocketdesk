@@ -845,6 +845,44 @@ Built on `feat/wake`. Sleeping this computer is off limits, so the run checked w
 - [ ] Turn "Wake from the phone" off on the desktop: after the next connection the phone forgets the MAC, and Wake disappears.
 - [ ] The Linux host (ethtool's Wake-on, and the adapter chosen).
 
+## 43. Several phones at once (N7)
+
+Built on `feat/multi-phone`. Only one phone (the A71) is at hand.
+
+- [ ] Two phones in sessions: the first to send input drives, and the other's taps do nothing while its session says "Another phone is driving".
+- [ ] After 10 s without input from the driver (or its session ending), the other phone can take control.
+- [ ] Sessions tab: the driver is marked "Driving"; Give control hands it over within a second.
+- [ ] Settings "Several phones": every phone drives; the hand-back time.
+- [ ] Two quick Ends in the Sessions tab both end their sessions.
+
+## 44. Phase R1: end-to-end on Linux, across networks
+
+The Linux host is a throwaway Azure VM (Ubuntu 24.04, B2ats v2, Southeast Asia) running the release workflow's Linux build under a headless Sway desktop, with PipeWire. The phone (A71, home Wi-Fi in another country) reaches it over the internet, which is also a real cross-network check. Results of 2026-10-14:
+
+| Workflow | Result |
+|---|---|
+| Server start on Linux (screencopy capture, software encoder, PipeWire audio, mDNS, iroh WAN, DHT) | works |
+| Add computer by address, then PIN pairing over the internet (control channel in TLS) | works |
+| First contact: certificate pinned on first use, an unpaired phone refused cleanly ("session refused") | works (one earlier attempt stalled 10 s; not reproduced) |
+| Direct QUIC session over the internet | works: 75–100 ms RTT, 45–55 ms e2e, no drops |
+| iroh WAN with direct QUIC blocked | works: relayed for about a second, then a direct hole-punched path |
+| Clipboard, phone → Linux and Linux → phone | works |
+| A still Linux (wlroots) screen | **was broken**: one frame, then the phone gave up after 10 s. Fixed (a 1 s heartbeat) and re-verified for over a minute |
+| Pairing from the refusal card | **was broken**: the stream did not come back. Fixed (the stream view is rebuilt) and re-verified |
+| Retry after a dropped link | **was broken**: it stayed on "Connecting…". Fixed and re-verified |
+| A dead link | **was kept open** behind the error card, so the desktop held the session. Fixed: closed at once, and the desktop ended it within a second |
+| Input with `/dev/uinput` unavailable at start | **was gone** until a restart. Fixed: "Input injector ready" on the first input after access was given |
+| The computer's name | **was "pocketdesk-host"** for a server started by a script. Fixed: the kernel's hostname |
+| `pocketdesk unpair` during a session | **the session kept streaming**. Fixed (the server ends sessions of unpaired phones each second) and re-verified: ended within a second |
+| Tailscale missing | a warning every few seconds; now one info line (re-verified) |
+| Connect right after the phone wakes from doze | offered "Wake and connect" for a computer that was up; the probe now tries twice |
+
+Still owed on Linux:
+- [ ] Input reaching a real desktop (a headless Sway has no input devices; uinput was created but nothing consumed it).
+- [ ] Files both ways, phone notifications and texts on Linux, desktop audio heard on the phone.
+- [ ] Hyprland and GNOME/KDE (portal) hosts, and a GPU encoder.
+- [ ] A WAN session's peer shows as `0.0.0.0:0` in the live-session list (cosmetic).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

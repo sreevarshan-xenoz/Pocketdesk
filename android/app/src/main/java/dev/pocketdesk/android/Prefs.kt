@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_HAPTICS = "haptics"
     private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
     private const val KEY_OFFER_WAKE = "offer_wake"
+    private const val KEY_SHOW_DRIVING = "show_driving"
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
     private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
 
@@ -94,6 +95,15 @@ object Prefs {
 
     fun setConnectAfterWake(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CONNECT_AFTER_WAKE, enabled) }
+        bump()
+    }
+
+    /** The session says when another phone drives the computer (N7). */
+    fun showDriving(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_SHOW_DRIVING, true)
+
+    fun setShowDriving(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_SHOW_DRIVING, enabled) }
         bump()
     }
 

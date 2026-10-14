@@ -259,6 +259,14 @@ const GAMEPAD_BUTTONS: [(u16, GamepadAction); 7] = [
 /// whether they are now held. A packet replayed while a button is still down
 /// produces nothing, and a button that came up produces its release — which is
 /// the half the old code never emitted.
+impl InputInjector {
+    /// Put `buttons` in as the gamepad's last state and return the one it
+    /// replaces: the server keeps one state per phone (roadmap N7).
+    pub fn swap_gamepad_buttons(&mut self, buttons: u16) -> u16 {
+        std::mem::replace(&mut self.gamepad_buttons, buttons)
+    }
+}
+
 fn gamepad_edges(previous: u16, current: u16) -> Vec<(GamepadAction, bool)> {
     GAMEPAD_BUTTONS
         .iter()

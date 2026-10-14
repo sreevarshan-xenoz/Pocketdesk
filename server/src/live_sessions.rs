@@ -35,10 +35,6 @@ pub fn live_sessions_path() -> anyhow::Result<PathBuf> {
     state_file("live_sessions.json")
 }
 
-pub fn kick_file_path() -> anyhow::Result<PathBuf> {
-    state_file("kick")
-}
-
 /// Parse the CLI-written kick file: `<target>\n<unix-secs>`. Returns the
 /// target only if the request is well-formed and fresh (shared with the
 /// desktop app: `core::local::sessions`).
@@ -48,17 +44,19 @@ pub fn parse_kick_file(raw: &str, now_unix: u64) -> Option<String> {
 
 /// Serialize the registry snapshot in the mirror format the CLI's `status`
 /// and the desktop app read.
-pub fn render_json(live: &[LiveSession], now_unix: u64) -> String {
+pub fn render_json(live: &[LiveSession], driver: Option<u64>, now_unix: u64) -> String {
     let sessions: Vec<MirrorSession> = live
         .iter()
         .map(|s| MirrorSession {
+            id: s.id,
+            driving: driver == Some(s.id),
             device_id: s.device_id.clone(),
             peer: s.peer.to_string(),
             transport: if s.lan { "lan" } else { "wan" }.to_string(),
             started_unix: s.started_unix,
         })
         .collect();
-    shared::render_mirror(&sessions, now_unix)
+    shared::render_mirror(&sessions, crate::driving::is_shared(), now_unix)
 }
 
 /// Atomic mirror write: tmp + rename, so `status` never sees a torn file.
@@ -71,6 +69,54 @@ fn write_live_json(json: &str) -> anyhow::Result<()> {
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, &path)?;
     Ok(())
+}
+
+/// The phones in a session (session id, device id) and the driver, as
+/// last told to them.
+type Told = (Vec<(u64, String)>, Option<u64>);
+
+/// Kick targets for the live sessions whose phone may no longer stream:
+/// with pairing required, a device that is not (or no longer) paired, which
+/// covers an unpair from the CLI or the app, an expired guest grant and a
+/// hand-edited trust store; and a session that never said which device it
+/// is, by its address. Nothing with pairing off.
+pub fn untrusted_sessions(
+    live: &[LiveSession],
+    pairing_required: bool,
+    is_paired: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    if !pairing_required {
+        return Vec::new();
+    }
+    live.iter()
+        .filter_map(|s| match &s.device_id {
+            Some(id) if is_paired(id) => None,
+            Some(id) => Some(id.clone()),
+            None => Some(s.peer.ip().to_string()),
+        })
+        .collect()
+}
+
+/// Phones are told again this often even when nothing changed: a phone
+/// whose control connection reconnected mid-session, or whose last push was
+/// lost, learns who drives within this long.
+const RETELL: Duration = Duration::from_secs(5);
+
+/// Whether to tell the phones who drives: on any change, and every
+/// [`RETELL`] while phones are in sessions.
+fn retell(told: Option<&Told>, current: &Told, since: Duration) -> bool {
+    told != Some(current) || (!current.0.is_empty() && since >= RETELL)
+}
+
+/// Tell each phone in a session who drives now (N7), on its control
+/// connection.
+async fn tell_phones(sessions: &[(u64, String)], driver: Option<u64>) {
+    let clients = crate::state::clone_clients().await;
+    for (device, packet) in crate::driving::control_bodies(sessions, driver) {
+        if let Some(client) = clients.iter().find(|c| c.device_id() == device) {
+            let _ = client.send_packet(&packet).await;
+        }
+    }
 }
 
 /// "phone is watching this desktop" — desktop notification, log fallback
@@ -99,6 +145,9 @@ fn notify_session_started(session: &LiveSession) {
 pub async fn run_watcher() {
     let mut prev_ids: Vec<u64> = Vec::new();
     let mut prev_json = String::new();
+    // What the phones were last told about who drives (roadmap N7).
+    let mut told: Option<Told> = None;
+    let mut told_at = std::time::Instant::now();
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let now = std::time::SystemTime::now()
@@ -106,25 +155,20 @@ pub async fn run_watcher() {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // 1. Kick requests (consume-then-act: a crash can't replay a kick).
-        if let Ok(path) = kick_file_path()
-            && let Ok(raw) = std::fs::read_to_string(&path)
-        {
-            let _ = std::fs::remove_file(&path);
-            match parse_kick_file(&raw, now) {
-                None => tracing::warn!("Ignoring stale/malformed kick request file"),
-                Some(target) => {
-                    let kicked = pocketdesk_core::streaming::sessions::kick(&target);
-                    if kicked.is_empty() {
-                        tracing::warn!(target = %target, "kick: no live session matched");
-                    } else {
-                        for s in &kicked {
-                            tracing::info!(
-                                device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
-                                peer = %s.peer,
-                                "Kicked streaming session (pocketdesk kick)"
-                            );
-                        }
+        // 1. Kick requests (consume-then-act: a crash can't replay a kick),
+        //    every one since the last tick.
+        if let Ok(dir) = crate::state::state_dir() {
+            for target in shared::take_kicks(&dir, now) {
+                let kicked = pocketdesk_core::streaming::sessions::kick(&target);
+                if kicked.is_empty() {
+                    tracing::warn!(target = %target, "kick: no live session matched");
+                } else {
+                    for s in &kicked {
+                        tracing::info!(
+                            device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
+                            peer = %s.peer,
+                            "Kicked streaming session (pocketdesk kick)"
+                        );
                     }
                 }
             }
@@ -132,6 +176,45 @@ pub async fn run_watcher() {
 
         // 2. Consent notification for sessions that appeared since last tick.
         let live = pocketdesk_core::streaming::sessions::list();
+        // A phone that stopped being paired loses its session at once,
+        // however that happened.
+        if !live.is_empty() {
+            let store = crate::state::trust_store_path().ok().and_then(|path| {
+                pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(path).ok()
+            });
+            let paired = |id: &str| store.as_ref().is_some_and(|s| s.is_trusted(id));
+            for target in untrusted_sessions(&live, crate::state::pairing_required(), paired) {
+                for s in pocketdesk_core::streaming::sessions::kick(&target) {
+                    tracing::warn!(
+                        device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
+                        peer = %s.peer,
+                        "Ended a streaming session: its phone is no longer paired"
+                    );
+                }
+            }
+        }
+        let live = pocketdesk_core::streaming::sessions::list();
+        let live_ids: Vec<u64> = live.iter().map(|s| s.id).collect();
+
+        // N7: the desktop app hands control to a session.
+        if let Ok(dir) = crate::state::state_dir() {
+            for session in shared::take_control_requests(&dir, now) {
+                if live_ids.contains(&session) && crate::driving::give(session) {
+                    tracing::info!(session, "Input control handed over by the desktop");
+                }
+            }
+        }
+        let driver = crate::driving::driver(&live_ids);
+        let in_sessions: Vec<(u64, String)> = live
+            .iter()
+            .filter_map(|s| s.device_id.clone().map(|d| (s.id, d)))
+            .collect();
+        let current = (in_sessions.clone(), driver);
+        if retell(told.as_ref(), &current, told_at.elapsed()) {
+            told_at = std::time::Instant::now();
+            tell_phones(&in_sessions, driver).await;
+            told = Some((in_sessions, driver));
+        }
         let ids: Vec<u64> = live.iter().map(|s| s.id).collect();
         for s in &live {
             if !prev_ids.contains(&s.id) {
@@ -141,7 +224,7 @@ pub async fn run_watcher() {
         prev_ids = ids;
 
         // 3. Mirror for `pocketdesk status`, rewritten only on change.
-        let json = render_json(&live, now);
+        let json = render_json(&live, driver, now);
         if json != prev_json {
             if let Err(e) = write_live_json(&json) {
                 tracing::warn!(error = %e, "Failed to mirror live sessions file");
@@ -183,6 +266,43 @@ mod tests {
     use pocketdesk_core::streaming::sessions::LiveSession;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+    #[test]
+    fn phones_are_told_on_a_change_and_again_every_few_seconds() {
+        let phones: Told = (vec![(1, "phone-a".to_string())], Some(1));
+        let none: Told = (Vec::new(), None);
+        assert!(retell(None, &phones, Duration::ZERO), "first time");
+        assert!(!retell(Some(&phones), &phones, Duration::from_secs(1)));
+        assert!(
+            retell(Some(&phones), &phones, RETELL),
+            "again after a while"
+        );
+        let moved: Told = (vec![(1, "phone-a".to_string())], None);
+        assert!(retell(Some(&phones), &moved, Duration::ZERO), "on a change");
+        assert!(!retell(Some(&none), &none, RETELL), "no one to tell");
+    }
+
+    #[test]
+    fn a_session_whose_phone_is_no_longer_paired_is_ended() {
+        let live = vec![
+            session(Some("paired-phone"), true),
+            session(Some("unpaired-phone"), true),
+            session(None, false),
+        ];
+        let paired = |id: &str| id == "paired-phone";
+        let mut ended = untrusted_sessions(&live, true, paired);
+        ended.sort();
+        assert_eq!(
+            ended,
+            vec!["10.0.0.5".to_string(), "unpaired-phone".to_string()]
+        );
+    }
+
+    #[test]
+    fn with_pairing_off_no_session_is_ended_for_it() {
+        let live = vec![session(Some("unpaired-phone"), true), session(None, false)];
+        assert!(untrusted_sessions(&live, false, |_| false).is_empty());
+    }
+
     fn session(device: Option<&str>, lan: bool) -> LiveSession {
         LiveSession {
             id: 7,
@@ -216,7 +336,7 @@ mod tests {
             session(Some("abcdef0123456789"), true),
             session(None, false),
         ];
-        let json = render_json(&live, 1_030);
+        let json = render_json(&live, None, 1_030);
         let lines = format_status_lines(&json, 1_030).expect("parseable");
         assert_eq!(lines.len(), 2);
         assert!(lines[0].starts_with("abcdef012345…"));

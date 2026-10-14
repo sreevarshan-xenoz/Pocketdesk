@@ -102,6 +102,9 @@ impl PointerSpace {
 /// purpose: a punched-direct path restores the configured rate.
 const RELAY_BITRATE_CAP_BPS: u32 = 2_000_000;
 
+/// An input packet with the live session it came from (roadmap N7).
+pub type SessionInput = (u64, InputPacket);
+
 /// Controls the streaming server lifecycle
 pub struct StreamingServer {
     config: StreamingConfig,
@@ -113,7 +116,7 @@ pub struct StreamingServer {
     /// Watch channel for adaptive bitrate updates
     bitrate_tx: watch::Sender<u32>,
     /// Channel for routing input events received from client over this QUIC connection
-    input_tx: Option<tokio::sync::broadcast::Sender<InputPacket>>,
+    input_tx: Option<tokio::sync::broadcast::Sender<SessionInput>>,
     /// R4 E2: routing for client→server mic audio. `InputPacket::Mic` frames
     /// are intercepted by the monitor task (never injected, never dropped by
     /// view-only) and forwarded here; the server crate's mic relay decodes
@@ -201,7 +204,7 @@ impl StreamingServer {
     ///
     /// When set, the server will parse incoming QUIC streams as binary `InputPacket`
     /// values and forward them through this channel for injection on the host system.
-    pub fn set_input_channel(&mut self, tx: tokio::sync::broadcast::Sender<InputPacket>) {
+    pub fn set_input_channel(&mut self, tx: tokio::sync::broadcast::Sender<SessionInput>) {
         self.input_tx = Some(tx);
     }
 
@@ -392,6 +395,9 @@ impl StreamingServer {
         // (`pocketdesk kick`); the handle deregisters when this function
         // exits by any path.
         let _live_session = super::sessions::register(device_id.clone(), &connection);
+        // Input is tagged with this session, so the server can tell which
+        // phone drives when several are connected (roadmap N7).
+        let live_id = _live_session.id();
 
         let cancel = self.cancel.clone();
         let (frame_tx, mut frame_rx) = mpsc::channel::<VideoFrame>(2);
@@ -1045,7 +1051,7 @@ impl StreamingServer {
                                                 if let Some(ref tx) = input_tx {
                                                    // Use send() without await (broadcast is sync).
                                                    // If there are no receivers, it returns an error which we can ignore.
-                                                   let _ = tx.send(packet);
+                                                   let _ = tx.send((live_id, packet));
                                                 }
                                             }
                                             Err(e) => {

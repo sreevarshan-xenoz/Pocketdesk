@@ -224,7 +224,7 @@ fun HomeScreen(
                                 scope.launch {
                                     val asleep = withContext(Dispatchers.IO) {
                                         Waker.canWake(Waker.planFor(context, host.address)) &&
-                                            !Waker.answers(host.address, host.controlPort)
+                                            !Waker.answersSoon(host.address, host.controlPort)
                                     }
                                     if (asleep) offeringWake = host else onConnect(host)
                                 }

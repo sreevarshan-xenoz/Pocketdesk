@@ -64,6 +64,17 @@ object Waker {
     fun answers(address: String, controlPort: Int, timeoutMs: Int = 1_500): Boolean =
         runCatching { Socket().use { it.connect(InetSocketAddress(address, controlPort), timeoutMs) } }.isSuccess
 
+    /**
+     * [answers], given a second chance half a second later: a phone just
+     * woken from doze can fail its first connection while its Wi-Fi comes
+     * back, which is no reason to call the computer asleep.
+     */
+    fun answersSoon(address: String, controlPort: Int): Boolean =
+        answers(address, controlPort) || run {
+            Thread.sleep(500)
+            answers(address, controlPort)
+        }
+
     /** Whether the phone is on the network of the computer at [address]. */
     fun atHome(ctx: Context, address: String): Boolean =
         WakePlan.atHome(HostStore.wakeInfo(ctx, address), phoneBroadcasts())

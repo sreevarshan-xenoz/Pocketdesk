@@ -89,6 +89,14 @@ pub(crate) struct SessionHandle {
     id: u64,
 }
 
+#[cfg_attr(not(feature = "capture"), allow(dead_code))]
+impl SessionHandle {
+    /// The session's registry id.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 impl Drop for SessionHandle {
     fn drop(&mut self) {
         if let Ok(mut reg) = registry().lock() {

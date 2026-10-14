@@ -131,6 +131,7 @@ pub async fn run(config: Config) -> Result<()> {
     );
     crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
     crate::wake_info::configure(config.wake_announce, config.wake_port);
+    crate::driving::configure(config.input_control, config.input_idle_secs);
     let announcement = if config.lan_discovery {
         Some(lan_discovery.register_service(
             &host_name,
@@ -289,7 +290,8 @@ pub async fn run(config: Config) -> Result<()> {
     hypr_events::start_windows_hud();
 
     // Input injection channel shared between v1 and v2
-    let (input_tx, mut input_rx) = tokio::sync::broadcast::channel::<InputPacket>(16);
+    let (input_tx, mut input_rx) =
+        tokio::sync::broadcast::channel::<pocketdesk_core::streaming::SessionInput>(16);
     let streaming_config = config.video_quality.to_streaming_config();
 
     // R1 stage 3: WAN (iroh) endpoint alongside the quinn LAN listener.
@@ -344,20 +346,75 @@ pub async fn run(config: Config) -> Result<()> {
     // streaming channel and injects them into the host system.
     tokio::spawn(async move {
         tracing::info!("Input injection task started");
+        // Made at once (a device made late misses the first event), and if
+        // that fails (no access to /dev/uinput yet, no display) tried again
+        // while input arrives, instead of no input until a restart.
+        let mut last_try = Some(std::time::Instant::now());
         let mut injector = match InputInjector::new() {
-            Ok(inj) => inj,
+            Ok(inj) => Some(inj),
             Err(e) => {
-                tracing::error!("Failed to create InputInjector: {e}");
-                return;
+                tracing::error!(
+                    "Failed to create InputInjector: {e}; trying again when input arrives"
+                );
+                None
             }
         };
 
+        // What each phone holds down (gamepad buttons, mouse buttons, keys),
+        // so one phone's snapshot never releases another's, and what a phone
+        // held is let go when control moves away or its session ends.
+        let mut gamepads: std::collections::HashMap<u64, u16> = std::collections::HashMap::new();
+        let mut held: std::collections::HashMap<u64, crate::driving::Held> =
+            std::collections::HashMap::new();
+        let mut last_session: Option<u64> = None;
         loop {
             match input_rx.recv().await {
-                Ok(packet) => {
-                    if let Err(e) = handle_input_packet(&mut injector, packet) {
+                Ok((session, packet)) => {
+                    if injector.is_none() && retry_injector_now(last_try, std::time::Instant::now())
+                    {
+                        last_try = Some(std::time::Instant::now());
+                        match InputInjector::new() {
+                            Ok(inj) => {
+                                tracing::info!("Input injector ready");
+                                injector = Some(inj);
+                            }
+                            Err(e) => tracing::warn!("Input injector still unavailable: {e}"),
+                        }
+                    }
+                    let Some(injector) = injector.as_mut() else {
+                        continue;
+                    };
+                    let live = crate::driving::live_refs();
+                    // Sessions that ended: let go of anything they held.
+                    let gone: Vec<u64> = gamepads
+                        .keys()
+                        .chain(held.keys())
+                        .copied()
+                        .filter(|id| !live.iter().any(|(live_id, _)| live_id == id))
+                        .collect();
+                    for id in gone {
+                        release_session(injector, &mut gamepads, &mut held, id);
+                    }
+                    if crate::driving::admit(session, &live) == crate::driving::Drive::Drop {
+                        tracing::trace!(session, "Input dropped: another phone drives");
+                        continue;
+                    }
+                    // Control moved to this session: the last driver's held
+                    // buttons and keys are let go (its releases would be
+                    // dropped). With every phone driving, nothing moves.
+                    if let Some(previous) = last_session.filter(|p| *p != session)
+                        && !crate::driving::is_shared()
+                    {
+                        release_session(injector, &mut gamepads, &mut held, previous);
+                    }
+                    last_session = Some(session);
+                    held.entry(session).or_default().note(&packet);
+                    let state = gamepads.entry(session).or_insert(0);
+                    let saved = injector.swap_gamepad_buttons(*state);
+                    if let Err(e) = handle_input_packet(injector, packet) {
                         tracing::warn!("Input injection error: {e}");
                     }
+                    *state = injector.swap_gamepad_buttons(saved);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!("Input injection lagged by {n} messages, dropped oldest");
@@ -1263,6 +1320,40 @@ fn handle_input_packet(injector: &mut InputInjector, packet: InputPacket) -> Res
     Ok(())
 }
 
+/// Let go of everything `session` holds: its gamepad buttons (through the
+/// injector's per-session state), mouse buttons and keys.
+fn release_session(
+    injector: &mut InputInjector,
+    gamepads: &mut std::collections::HashMap<u64, u16>,
+    held: &mut std::collections::HashMap<u64, crate::driving::Held>,
+    session: u64,
+) {
+    if let Some(buttons) = gamepads.remove(&session).filter(|b| *b != 0) {
+        let saved = injector.swap_gamepad_buttons(buttons);
+        let _ = handle_input_packet(
+            injector,
+            InputPacket::Gamepad {
+                axes: [0; 6],
+                buttons: 0,
+            },
+        );
+        injector.swap_gamepad_buttons(saved);
+    }
+    if let Some(mut keys) = held.remove(&session) {
+        for release in keys.take_releases() {
+            let _ = handle_input_packet(injector, release);
+        }
+    }
+}
+
+/// How often a missing input injector is tried again while input arrives.
+const INJECTOR_RETRY: Duration = Duration::from_secs(10);
+
+/// Whether to try making the input injector again at `now`.
+fn retry_injector_now(last_try: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last_try.is_none_or(|t| now.saturating_duration_since(t) >= INJECTOR_RETRY)
+}
+
 struct PidFileGuard {
     path: PathBuf,
 }
@@ -1395,5 +1486,19 @@ mod unpair_tests {
             unpair_targets(Some("phone-z"), &trusted).is_err(),
             "not a paired device"
         );
+    }
+}
+
+#[cfg(test)]
+mod injector_retry_tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn a_missing_injector_is_tried_again_but_not_on_every_packet() {
+        let t = Instant::now();
+        assert!(retry_injector_now(None, t), "never tried yet");
+        assert!(!retry_injector_now(Some(t), t + Duration::from_secs(3)));
+        assert!(retry_injector_now(Some(t), t + INJECTOR_RETRY));
     }
 }

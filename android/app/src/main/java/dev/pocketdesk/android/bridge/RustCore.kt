@@ -164,6 +164,8 @@ object RustCore {
 
     private external fun nativeWakeInfo(address: String, port: Int): String
 
+    private external fun nativeControlState(address: String, port: Int): String
+
     private external fun nativeWakeViaRelay(
         address: String,
         port: Int,
@@ -784,6 +786,15 @@ object RustCore {
      */
     fun wake(mac: String, targets: List<String>): Result<Int> =
         envelope(nativeWake(mac, org.json.JSONArray(targets).toString())).mapCatching { it.toInt() }
+
+    /**
+     * Whether another phone drives the computer at [address]:[port] (N7),
+     * as it last said; false when it has not said.
+     */
+    fun anotherPhoneDrives(address: String, port: Int): Boolean =
+        nativeControlState(address, port).takeIf { it.isNotBlank() }?.let { json ->
+            runCatching { JSONObject(json).optBoolean("other") }.getOrNull()
+        } ?: false
 
     /**
      * How the computer at [address]:[port] said it can be woken

@@ -42,6 +42,27 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **N7 (several phones at once), Phase R1 on Linux, and a change of plan (branch `feat/multi-phone`; spec `docs/superpowers/specs/2026-10-14-multiple-phones-design.md`, with an as-built section).**
+  - **Plan.** After an outside review of the repo, the user agreed to stop adding features after N7 and prove what exists first: Phase R (roadmap). N8–N11 are paused.
+  - **N7.**
+    - One phone drives at a time (`input_control`, `input_idle_secs`); the input task drops the others' input and releases what a phone held when control moves.
+    - The desktop's Sessions tab marks the driver and can hand control over (`<state>/control/`).
+    - The phones are told (`kdeconnect.pocketdesk.control`), and the session shows "Another phone is driving".
+    - Kick requests are one file each (`kicks/`).
+    - Fresh review: 5 Important, fixed. Two phones are owed (checklist §43).
+  - **R1 on Linux.**
+    - **The host:** a throwaway Azure VM (Students subscription: B1s is blocked in its regions, so B2ats v2, also free) running the release workflow's Linux build under a headless Sway, deleted after the run. Rules are in memory `azure-test-vm`.
+    - **Worked over the internet from the A71:** pairing, direct QUIC, iroh WAN going direct after a second, and the clipboard both ways.
+    - **Found and fixed, each re-verified on the VM:**
+      - a still wlroots screen stalled the session;
+      - Retry and pairing never reconnected (this was the old "waits for Retry" item);
+      - a dead link was kept open;
+      - input was lost for the server's life when uinput was unavailable at start;
+      - the computer's name was wrong;
+      - an unpaired phone kept streaming;
+      - Tailscale log spam.
+    - Results are in checklist §44.
+  - **Local safety net:** a `.git/hooks/pre-push` (not committed) refuses pushes containing this box's real identifiers.
 - 2026-10-14: **N6, wake the computer from anywhere without a second device (branch `feat/wake`; spec `docs/superpowers/specs/2026-10-14-wake-anywhere-design.md`, with an as-built section).** Wake had asked the sleeping computer to wake itself.
   - **Desktop:**
     - `core::local::wake` finds the adapter a phone reaches (netdev): its MAC, subnet broadcast, and whether it is wired.
@@ -155,7 +176,7 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - the folders moved with the pairings intact;
     - `pd --version` works;
     - the new app found the computer over mDNS, paired by PIN, and streamed.
-  - **Found on the way:** after pairing from the refusal card, the app waits for Retry instead of reconnecting by itself (to fix).
+  - **Found on the way:** after pairing from the refusal card, the app waited for Retry instead of reconnecting by itself (fixed 2026-10-14, see the N7/R1 bullet).
 - 2026-10-13: **N1, reaching the desktop from outside without Tailscale, step 1 (branch `feat/wan-insight`).**
   - **Already there, now confirmed:**
     - the built-in iroh WAN path (hole punching, n0's free relays as the fallback, both ends held to their keys);

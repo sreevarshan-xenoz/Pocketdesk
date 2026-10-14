@@ -94,7 +94,7 @@ pub use session_telemetry::{
     set_session_telemetry_callback,
 };
 #[cfg(feature = "server")]
-pub use streamer::{SessionClaim, StreamingServer};
+pub use streamer::{SessionClaim, SessionInput, StreamingServer};
 
 use serde::{Deserialize, Serialize};
 

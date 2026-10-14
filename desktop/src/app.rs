@@ -558,8 +558,10 @@ impl PocketdeskApp {
         }
         let now = now_unix();
         let mut end = None;
+        let mut give = None;
+        let count = self.snapshot.sessions.len();
         egui::Grid::new("sessions")
-            .num_columns(4)
+            .num_columns(5)
             .striped(true)
             .spacing([16.0, 8.0])
             .show(ui, |ui| {
@@ -578,6 +580,27 @@ impl PocketdeskApp {
                         "for {}",
                         human_duration(now.saturating_sub(session.started_unix))
                     ));
+                    match model::control_cell(session, count, self.snapshot.shared_control) {
+                        model::ControlCell::Driving => {
+                            ui.label(
+                                RichText::new("Driving").color(Color32::from_rgb(0x4c, 0xaf, 0x50)),
+                            );
+                        }
+                        model::ControlCell::Give(id) => {
+                            if ui
+                                .button("Give control")
+                                .on_hover_text(
+                                    "This phone drives; the others only watch until it goes quiet",
+                                )
+                                .clicked()
+                            {
+                                give = Some(id);
+                            }
+                        }
+                        model::ControlCell::Nothing => {
+                            ui.label("");
+                        }
+                    }
                     if ui.button("End").clicked() {
                         end = Some(session.clone());
                     }
@@ -586,6 +609,14 @@ impl PocketdeskApp {
             });
         if let Some(session) = end {
             self.end_session(&session);
+        }
+        if let Some(id) = give {
+            self.notice = Some(
+                match sessions::request_control(&self.state_dir, id, now_unix()) {
+                    Ok(()) => "Handing control over …".to_string(),
+                    Err(e) => format!("Could not hand control over: {e}"),
+                },
+            );
         }
     }
 

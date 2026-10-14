@@ -53,14 +53,51 @@ fn host_device_id() -> String {
 }
 
 fn host_device_name() -> String {
-    // Linux shells export HOSTNAME; Windows sets COMPUTERNAME for every process.
-    for var in ["HOSTNAME", "COMPUTERNAME"] {
-        if let Ok(name) = std::env::var(var)
-            && !name.is_empty()
-        {
-            return name;
-        }
+    // Windows sets COMPUTERNAME for every process. HOSTNAME is a shell
+    // variable bash does not export, so a server started from a script or a
+    // systemd unit never sees it: on Linux the kernel's name is read too.
+    #[cfg(unix)]
+    let kernel = std::fs::read_to_string("/proc/sys/kernel/hostname").ok();
+    #[cfg(not(unix))]
+    let kernel = None;
+    pick_host_name([
+        std::env::var("COMPUTERNAME").ok(),
+        std::env::var("HOSTNAME").ok(),
+        kernel,
+    ])
+}
+
+/// The first non-blank name, trimmed; a placeholder when there is none.
+fn pick_host_name<const N: usize>(candidates: [Option<String>; N]) -> String {
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|name| name.trim().to_string())
+        .find(|name| !name.is_empty())
+        .unwrap_or_else(|| "pocketdesk-host".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_host_name;
+
+    #[test]
+    fn the_first_name_given_wins_and_blanks_are_skipped() {
+        assert_eq!(
+            pick_host_name([None, Some(" ".into()), Some("pdtest\n".into())]),
+            "pdtest"
+        );
+        assert_eq!(
+            pick_host_name([Some("DESKTOP-1".into()), Some("other".into())]),
+            "DESKTOP-1"
+        );
     }
 
-    "pocketdesk-host".to_string()
+    #[test]
+    fn with_no_name_at_all_a_placeholder_is_used() {
+        assert_eq!(
+            pick_host_name([None, Some(String::new())]),
+            "pocketdesk-host"
+        );
+    }
 }

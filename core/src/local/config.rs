@@ -83,6 +83,27 @@ pub struct Config {
     /// from outside, told to phones; 0 when none is set up.
     #[serde(default)]
     pub wake_port: u16,
+    /// With several phones connected, who drives (roadmap N7).
+    #[serde(default)]
+    pub input_control: InputControlMode,
+    /// Seconds without input after which the driving phone lets go.
+    #[serde(default = "default_input_idle_secs")]
+    pub input_idle_secs: u32,
+}
+
+fn default_input_idle_secs() -> u32 {
+    10
+}
+
+/// Who drives when several phones are connected (roadmap N7).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InputControlMode {
+    /// One phone at a time: the first to send input, until it goes quiet.
+    #[default]
+    One,
+    /// Every phone with the Input permission.
+    Shared,
 }
 
 fn default_true() -> bool {
@@ -162,6 +183,8 @@ impl Default for Config {
             sms_keep: default_sms_keep(),
             wake_announce: true,
             wake_port: 0,
+            input_control: InputControlMode::One,
+            input_idle_secs: default_input_idle_secs(),
         }
     }
 }
@@ -318,6 +341,8 @@ impl Config {
         "sms_keep",
         "wake_announce",
         "wake_port",
+        "input_control",
+        "input_idle_secs",
     ];
 }
 
@@ -408,6 +433,26 @@ mod tests {
         assert!(
             Config::load_from(&path).is_err(),
             "an unknown value is refused"
+        );
+    }
+
+    #[test]
+    fn several_phones_default_to_one_driver_and_save() {
+        let config = Config::default();
+        assert_eq!(config.input_control, InputControlMode::One);
+        assert_eq!(config.input_idle_secs, 10);
+        let path = temp("input-control");
+        let mut config = Config::load_from(&path).unwrap();
+        config.input_control = InputControlMode::Shared;
+        config.input_idle_secs = 30;
+        config.save_to(&path).unwrap();
+        let back = Config::load_from(&path).unwrap();
+        assert_eq!(back.input_control, InputControlMode::Shared);
+        assert_eq!(back.input_idle_secs, 30);
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("input_control = \"shared\"")
         );
     }
 
