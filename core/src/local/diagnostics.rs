@@ -281,6 +281,99 @@ pub struct LastSession {
     pub rtt: Option<Tail>,
 }
 
+/// Whether a network adapter lets a magic packet wake the computer, as the
+/// system says (N6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WakeAllowed {
+    Yes,
+    No,
+    Unknown,
+}
+
+/// Read what the system said: Windows' `WakeOnMagicPacket` (`Enabled`,
+/// `Disabled`, `Unsupported`), `ethtool`'s `Wake-on:` line (`g` is the
+/// magic packet), or sysfs' `power/wakeup` (`enabled`, `disabled`).
+pub fn parse_wake_allowed(answer: &str) -> WakeAllowed {
+    for line in answer.lines() {
+        let line = line.trim();
+        if let Some(modes) = line.strip_prefix("Wake-on:") {
+            return if modes.trim().contains('g') {
+                WakeAllowed::Yes
+            } else {
+                WakeAllowed::No
+            };
+        }
+    }
+    match answer.trim().to_ascii_lowercase().as_str() {
+        "enabled" => WakeAllowed::Yes,
+        "disabled" | "unsupported" => WakeAllowed::No,
+        _ => WakeAllowed::Unknown,
+    }
+}
+
+/// Whether a phone can wake this computer: the adapter it would wake through
+/// (named, never its MAC: findings go into the debug report), whether the
+/// system lets a magic packet wake it, and whether phones are told how.
+pub fn check_wake(
+    facts: Option<&super::wake::WakeFacts>,
+    allowed: WakeAllowed,
+    announce: bool,
+) -> Finding {
+    const CHECK: &str = "Wake";
+    let Some(facts) = facts else {
+        return with_hint(
+            finding(
+                CHECK,
+                Status::Info,
+                "No network adapter with a hardware address was found",
+            ),
+            "Waking from the phone needs a wired or Wi-Fi adapter.",
+        );
+    };
+    if !announce {
+        return with_hint(
+            finding(
+                CHECK,
+                Status::Info,
+                "Phones are not told how to wake this computer",
+            ),
+            "Turn on \"Tell paired phones how to wake this computer\" in Settings.",
+        );
+    }
+    let adapter = &facts.adapter;
+    match (allowed, facts.wired) {
+        (WakeAllowed::No, _) => with_hint(
+            finding(
+                CHECK,
+                Status::Warn,
+                format!("{adapter} does not allow waking by magic packet"),
+            ),
+            "Turn on \"Wake on Magic Packet\" in the adapter's power settings, and Wake-on-LAN in the computer's firmware (BIOS/UEFI).",
+        ),
+        (_, false) => with_hint(
+            finding(
+                CHECK,
+                Status::Warn,
+                format!("{adapter} is Wi-Fi: it can usually wake this computer only from sleep"),
+            ),
+            "A wired connection can wake it from shutdown or hibernation too.",
+        ),
+        (WakeAllowed::Yes, true) => finding(
+            CHECK,
+            Status::Good,
+            format!("{adapter} (wired) allows waking by magic packet"),
+        ),
+        (WakeAllowed::Unknown, true) => with_hint(
+            finding(
+                CHECK,
+                Status::Info,
+                format!("{adapter} is wired; whether it allows waking could not be read"),
+            ),
+            "Check \"Wake on Magic Packet\" in the adapter's power settings, and Wake-on-LAN in the firmware (BIOS/UEFI).",
+        ),
+    }
+}
+
 /// Everything the checks found, and what the report needs besides.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
@@ -664,6 +757,71 @@ mod tests {
     use super::*;
 
     const UP: ServerState = ServerState::Running;
+
+    fn facts(wired: bool) -> super::super::wake::WakeFacts {
+        super::super::wake::WakeFacts {
+            adapter: "Ethernet 2".into(),
+            mac: "02:11:22:33:44:55".into(),
+            broadcast: std::net::Ipv4Addr::new(192, 168, 1, 255),
+            wired,
+        }
+    }
+
+    #[test]
+    fn what_the_system_says_about_waking_is_read() {
+        assert_eq!(parse_wake_allowed("Enabled\r\n"), WakeAllowed::Yes);
+        assert_eq!(parse_wake_allowed("Disabled"), WakeAllowed::No);
+        assert_eq!(parse_wake_allowed("Unsupported"), WakeAllowed::No);
+        assert_eq!(
+            parse_wake_allowed("Settings for eth0:\n\tSupports Wake-on: pumbg\n\tWake-on: g\n"),
+            WakeAllowed::Yes
+        );
+        assert_eq!(
+            parse_wake_allowed("\tSupports Wake-on: pumbg\n\tWake-on: d\n"),
+            WakeAllowed::No
+        );
+        assert_eq!(parse_wake_allowed("enabled\n"), WakeAllowed::Yes);
+        assert_eq!(parse_wake_allowed(""), WakeAllowed::Unknown);
+        assert_eq!(parse_wake_allowed("something else"), WakeAllowed::Unknown);
+    }
+
+    #[test]
+    fn a_wired_adapter_that_allows_wake_is_good_and_names_no_mac() {
+        let good = check_wake(Some(&facts(true)), WakeAllowed::Yes, true);
+        assert_eq!(good.status, Status::Good);
+        assert!(good.detail.contains("Ethernet 2"));
+        assert!(
+            !good.detail.contains("02:11"),
+            "the MAC stays out of reports"
+        );
+        assert!(good.hint.is_none());
+    }
+
+    #[test]
+    fn wake_turned_off_or_wifi_is_a_warning_with_a_next_step() {
+        let off = check_wake(Some(&facts(true)), WakeAllowed::No, true);
+        assert_eq!(off.status, Status::Warn);
+        assert!(off.hint.unwrap().contains("Magic Packet"));
+        let wifi = check_wake(Some(&facts(false)), WakeAllowed::Yes, true);
+        assert_eq!(wifi.status, Status::Warn);
+        assert!(wifi.detail.contains("Wi-Fi"));
+    }
+
+    #[test]
+    fn unknown_unannounced_or_no_adapter_is_only_information() {
+        assert_eq!(
+            check_wake(Some(&facts(true)), WakeAllowed::Unknown, true).status,
+            Status::Info
+        );
+        assert_eq!(
+            check_wake(Some(&facts(true)), WakeAllowed::Yes, false).status,
+            Status::Info
+        );
+        assert_eq!(
+            check_wake(None, WakeAllowed::Unknown, true).status,
+            Status::Info
+        );
+    }
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-diag-{name}-{}", std::process::id()));

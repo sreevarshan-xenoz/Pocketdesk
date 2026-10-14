@@ -176,6 +176,17 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
         !config.relay_urls.is_empty(),
     ));
     findings.push(diagnostics::check_dht(wan_status.as_ref(), state));
+    // N6: the adapter a phone on this network would wake it through.
+    let wake = pocketdesk_core::local::wake::wake_facts(None);
+    let allowed = wake
+        .as_ref()
+        .map(|facts| wake_allowed(&facts.adapter))
+        .unwrap_or(diagnostics::WakeAllowed::Unknown);
+    findings.push(diagnostics::check_wake(
+        wake.as_ref(),
+        allowed,
+        config.wake_announce,
+    ));
     Report {
         findings,
         last_session: diagnostics::last_session(state_dir),
@@ -214,6 +225,46 @@ fn firewall_state(state_dir: &Path) -> Option<Result<diagnostics::FirewallState,
 /// "allow,block,profiles".
 #[cfg(windows)]
 const FIREWALL_QUERY: &str = r"$ErrorActionPreference = 'SilentlyContinue'; $profiles = @(Get-NetConnectionProfile | ForEach-Object { $c = $_.NetworkCategory.ToString(); if ($c -eq 'DomainAuthenticated') { 'Domain' } else { $c } } | Select-Object -Unique); $rules = @(Get-NetFirewallRule -Group 'Pocketdesk' -Enabled True -Direction Inbound); if ($Exe) { $rules += @(Get-NetFirewallApplicationFilter | Where-Object { $_.Program -eq $Exe } | Get-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' }) }; $rules = @($rules | Sort-Object -Property Name -Unique); $applies = @($rules | Where-Object { $p = $_.Profile.ToString(); $p -eq 'Any' -or @($profiles | Where-Object { $p -match $_ }).Count -gt 0 }); '{0},{1},{2}' -f @($applies | Where-Object { $_.Action -eq 'Allow' }).Count, @($applies | Where-Object { $_.Action -eq 'Block' }).Count, ($profiles -join '/')";
+
+/// Whether `adapter` lets a magic packet wake this computer: Windows'
+/// `Get-NetAdapterPowerManagement`.
+#[cfg(windows)]
+fn wake_allowed(adapter: &str) -> diagnostics::WakeAllowed {
+    // The name goes in as a single-quoted string, its quotes doubled.
+    let name = adapter.replace('\'', "''");
+    // Some drivers (Realtek here) fail the power-management query; NDIS's
+    // standard *WakeOnMagicPacket keyword answers for them.
+    let script = format!(
+        "$ErrorActionPreference = 'SilentlyContinue'; $v = (Get-NetAdapterPowerManagement -Name '{name}').WakeOnMagicPacket; if (-not $v) {{ $k = (Get-NetAdapterAdvancedProperty -Name '{name}' -RegistryKeyword '*WakeOnMagicPacket').RegistryValue; if ($k -eq '1') {{ $v = 'Enabled' }} elseif ($k -eq '0') {{ $v = 'Disabled' }} }}; $v"
+    );
+    let powershell = crate::restart::system32("WindowsPowerShell\\v1.0\\powershell.exe");
+    pocketdesk_core::local::network::output_within(
+        &powershell.to_string_lossy(),
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+        std::time::Duration::from_secs(10),
+    )
+    .map(|out| diagnostics::parse_wake_allowed(&String::from_utf8_lossy(&out)))
+    .unwrap_or(diagnostics::WakeAllowed::Unknown)
+}
+
+/// Whether `adapter` lets a magic packet wake this computer: `ethtool`'s
+/// `Wake-on:` when it is installed, else sysfs.
+#[cfg(not(windows))]
+fn wake_allowed(adapter: &str) -> diagnostics::WakeAllowed {
+    let ethtool = pocketdesk_core::local::network::output_within(
+        "ethtool",
+        &[adapter],
+        std::time::Duration::from_secs(3),
+    )
+    .map(|out| diagnostics::parse_wake_allowed(&String::from_utf8_lossy(&out)))
+    .unwrap_or(diagnostics::WakeAllowed::Unknown);
+    if ethtool != diagnostics::WakeAllowed::Unknown {
+        return ethtool;
+    }
+    std::fs::read_to_string(format!("/sys/class/net/{adapter}/device/power/wakeup"))
+        .map(|answer| diagnostics::parse_wake_allowed(&answer))
+        .unwrap_or(diagnostics::WakeAllowed::Unknown)
+}
 
 #[cfg(not(windows))]
 fn firewall_state(_state_dir: &Path) -> Option<Result<diagnostics::FirewallState, String>> {
