@@ -802,6 +802,31 @@ Built on `feat/notification-dismissal`. On the A71 with sharing on for Shell: a 
 - [ ] The Linux host: a notification closed on the phone closes in the notification server (D-Bus `CloseNotification`).
 - [ ] A chat app that clears its notification when read on the phone.
 
+## 41. Texts (SMS) on the computer, and replies (N5b)
+
+Built on `feat/sms`. The A71 has no SIM, so receiving is unverified. The reply path was run end to end:
+- with "Reply from my computer" on, SEND_SMS granted and notification access allowed, the listener connected to the computer by itself;
+- the server handed it a queued reply;
+- the phone tried to send it;
+- the radio answered "no SIM chosen for texts" (error 32), and the desktop recorded the reply as not sent, with that reason.
+
+Afterwards everything was turned off again.
+
+- [x] A reply reaches the phone with no session open, and its real result comes back (failure without a SIM).
+- [x] A reply handed over before is not handed over again (fixed after the run showed duplicates).
+- [x] After the review fixes: a reply is handed over once, and comes back failed with "the phone has no SIM chosen for texts".
+- [x] A reply the phone never confirms is handed over at most 3 times, then fails with "the phone did not confirm it".
+- [ ] A request from a computer that is not the phone's own is ignored.
+- [ ] A sixth reply within a minute fails with "the phone sends at most 5 replies a minute".
+- [ ] **With a SIM:** a text that arrives while the computer is off reaches Messages once it is back.
+- [ ] Take the computer off the network with the phone connected: within about a minute of it coming back, the phone has dialed again (keepalive).
+- [ ] **With a SIM:** an incoming text appears in Messages and as a notification.
+- [ ] **With a SIM:** a reply from Messages arrives on the other phone, and the tab says sent.
+- [ ] A long reply (over 160 characters) arrives whole.
+- [ ] "New text" to a new number.
+- [ ] The phone's Texts permission off on the desktop: texts are not kept, and replies fail with the reason.
+- [ ] The Linux host.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -42,6 +42,29 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **N5b, texts (SMS) on the computer and replies from it (branch `feat/sms`; spec `docs/superpowers/specs/2026-10-14-sms-design.md`, with Settings and as-built sections).** Built on the user's word; its device checks wait for a SIM.
+  - **Phone:**
+    - `SmsReceiver` forwards incoming texts.
+    - The notification listener hosts the reply loop: it keeps the control connection, takes queued requests, sends with `SmsManager`, and reports the radio's real result per part.
+    - Settings switches are off by default.
+  - **Desktop:**
+    - `core::local::sms` holds `sms.json` (owner-only) and the `sms_outbox/` the app writes.
+    - The server's sms plugin and outbox watcher, and a Texts permission.
+    - The desktop app's Messages tab, and new Settings: relays, the DHT, phone notifications and their limit, text notifications and history.
+  - **Found on the device run, fixed:**
+    - **`secure_fs::create_private_dir` on the shared state folder stripped every existing file's access entries on Windows,** so the server was locked out of the trust store. Private folders now pass their owner entry down, and the texts store never touches the state folder; the user's folder was repaired.
+    - Replies were handed over twice.
+  - **Fresh review (0 Critical, 7 Important), fixed in four commits:**
+    - the phone now texts only for its own computer;
+    - only full numbers, and at most 5 replies a minute;
+    - results go to the computer that asked, with the tracking kept across restarts;
+    - texts wait on the phone while the computer is away;
+    - text notifications share the flood guard;
+    - `sms.json` is written atomically, and a bad read never wipes it;
+    - an unconfirmed reply is handed over again, at most 3 times.
+  - **Re-verified on the A71 after the fixes:** handed over once, and failed with "no SIM chosen for texts".
+  - **Found on the re-run:** control links could go half-open (the desktop's side reset, the phone's still open), and the phone never dialed again. TCP keepalive is now on at both ends. Bridge panics and failed reply ticks now reach logcat.
+  - **User preference (2026-10-14):** every feature's knobs go in Settings on the phone and the desktop.
 - 2026-10-14: **N5c part 1, a phone notification closed on the phone closes on the computer (branch `feat/notification-dismissal`; spec `docs/superpowers/specs/2026-10-14-notification-dismissal-design.md`).**
   - **How:**
     - The phone sends `kdeconnect.notification {id, isCancel}` for a notification the computer was shown, and for no other.

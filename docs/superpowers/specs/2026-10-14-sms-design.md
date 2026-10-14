@@ -60,3 +60,35 @@ The phone refuses a request when "Reply from my computer" is off or `SEND_SMS` i
    - the request queue;
    - JVM tests for the phone's request decision (off, no permission, ok) and parsing.
 7. **Docs:** README, the checklist (all device checks owed), AGENTS.
+
+## Settings
+
+Everything here is the user's to set:
+- **On the phone, in Settings "Texts on my computer":** "Show texts on my computer" and "Reply from my computer", both off by default, each asking for its permission when turned on.
+- **On the desktop, in the app's Settings:** "Texts" (a notification for each, `sms_notify`) and "Messages history" (`sms_keep`, 1000 by default).
+- **Per phone:** the Texts permission in Devices.
+
+## As built
+
+- **The reply path was device-verified without a SIM:**
+  - the listener connected to the computer by itself;
+  - the server handed over a queued reply, and the phone tried to send it;
+  - the radio's answer (no SIM chosen for texts) came back as the reply's reason.
+
+  Receiving needs a SIM, and is owed (checklist §41).
+- **A reply's result is the radio's, not Android's acceptance.** Each part carries a sent callback, and the result goes to the computer once all have answered.
+- **Found on the device run, fixed:**
+  - **Locking the state folder.** The texts store made the whole state folder private. On Windows that stripped the access entries of every file already in it (the trust store, the device keys, `endpoint.json`), and the server could no longer read them, so the phone was refused as "not paired". `secure_fs::create_private_dir` now gives an owner entry the folder's contents inherit, and the texts store never touches the state folder's permissions. The user's folder was repaired by re-enabling inheritance; files the server keeps owner-only (the TLS key, `sms.json`) kept their entries.
+  - **Duplicate hand-overs.** While the folder was unreadable, a reply's outbox file could not be removed, and the reply was handed over again on every reconnect. A reply already in the conversation is never handed over twice.
+- **Fresh review (0 Critical, 7 Important), fixed in four commits:**
+  - **The phone texted for any computer.** A request carries the computer whose connection brought it. The phone sends only for its own computer (the one it sends its texts to), and results go back to the computer that asked.
+  - **No limits.** A reply goes only to a full number (7 to 20 digits, never a short code) and holds 1 to 2000 characters. The phone sends at most 5 a minute.
+  - **Results lost.** A result was sent to whichever computer was current, or dropped during the send pause, and the per-part tracking lived in memory. It now goes to the asking computer, is never paused, and the tracking is kept in the phone's preferences.
+  - **Texts lost while the computer was away.** Incoming texts wait in a queue on the phone (200 at most) and are flushed by the reply loop. The receiver no longer holds `goAsync` open.
+  - **No flood guard for texts.** Text notifications share the phone notifications' per-minute limit.
+  - **The history.** `sms.json` is written to a private temp file and renamed. A read that fails is an error, so a bad read never wipes the history.
+  - **A reply handed to a dying connection.** A reply handed over and not confirmed is handed over again after 2 minutes while the phone is connected, at most 3 times. After that it fails with "the phone did not confirm it". The phone never sends one id twice.
+- **Re-verified after the fixes (A71, no SIM):** a reply was handed over once and came back failed, "the phone has no SIM chosen for texts". The 3-hand-over limit was also seen ending a reply the phone never took.
+- **Found on the re-run, fixed:**
+  - **Half-open control links.** Three connections in a row were reset on the desktop's side about 20 s after connecting (the cause was not found; a fourth was not), while the phone's socket stayed open. The phone never noticed, so its reply loop never dialed again. Both ends now turn on TCP keepalive (30 s, then every 10 s), so a dead link ends within about a minute.
+  - **Silent failures.** A failing reply tick was swallowed, and a panic in the bridge's tasks went to stderr, which Android discards. Both now reach logcat.

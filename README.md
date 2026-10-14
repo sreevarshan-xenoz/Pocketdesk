@@ -51,6 +51,11 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
   - **Never sent:** ongoing ones (music, navigation, calls), Pocketdesk's own, ones an app keeps on the device, and a work profile's.
   - **Lock-screen privacy carries over:** anything the phone hides there stays hidden. A private notification arrives as only "New notification", and a one-time code is replaced.
   - **On the computer:** at most 20 a minute are shown from one phone, and each phone's Notifications switch in the Devices tab can turn them off.
+  - **Texts (SMS):** the phone's Settings has "Texts on my computer", two switches, both off by default:
+    - "Show texts on my computer" sends incoming texts to the computer you used last. They appear in the desktop app's Messages tab, with a notification each.
+    - "Reply from my computer" lets you answer from there, or start a new text. The phone sends it and the tab says sent, or not sent and why. Replies need notification access on the phone: its service keeps the connection replies arrive on. The phone sends only for that same computer, only to full phone numbers (never short codes), and at most 5 a minute.
+
+    Each phone has a Texts permission in Devices. Settings sets whether texts make a notification and how many the history keeps.
   - **Closed on the phone, closed here:** read, swipe or clear one on the phone, and it leaves the computer too (the Action Center on Windows; on Linux, any notification server that closes on request).
 - **Notification reply** — answer desktop notifications from the phone; the desktop records the reply, copies it to the clipboard and shows a confirmation
 - **Find my device** — ring the desktop from the phone, or ring the phone from the desktop
