@@ -49,37 +49,70 @@ object WakePlan {
 
         /** "Through another computer" with none chosen. */
         data object NoRelay : Plan
+
+        /** Away from its network, with no outside port to send to. */
+        data object Away : Plan
     }
 
     private val MAC = Regex("^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 
     fun validMac(mac: String): Boolean = MAC.matches(mac.trim())
 
+    /**
+     * An outside address field: empty (its last public address), a name or
+     * IPv4 address without a port, or an IPv6 address.
+     */
+    fun validHost(text: String): Boolean {
+        val host = text.trim()
+        if (host.isEmpty()) return true
+        if (host.any { it.isWhitespace() }) return false
+        if (':' in host) return isIpv6(host)
+        return host.all { it.isLetterOrDigit() || it == '.' || it == '-' }
+    }
+
+    private fun isIpv6(text: String): Boolean =
+        text.count { it == ':' } >= 2 && text.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.' }
+
+    /** An IPv4 address written out (`192.168.1.255`), not a name. */
+    private fun isIpv4(text: String): Boolean {
+        val parts = text.split('.')
+        return parts.size == 4 && parts.all { p -> p.isNotEmpty() && p.length <= 3 && p.all(Char::isDigit) && p.toInt() <= 255 }
+    }
+
     /** An outside port field: empty (the announced one) or 1–65535. */
     fun validPort(text: String): Boolean = text.isBlank() || text.trim().toIntOrNull()?.let { it in 1..65535 } == true
 
     /**
      * The plan for one computer, from the user's [settings], what the
-     * computer said ([learned]) and its last known addresses ([wanAddrs],
-     * the WAN identity's `directAddrs`).
+     * computer said ([learned]), its last known addresses ([wanAddrs], the
+     * WAN identity's `directAddrs`) and whether the phone is on its network
+     * ([atHome]). Away from home its MAC is not broadcast on someone else's
+     * network; with nothing learned (a typed MAC) the phone cannot tell, so
+     * it broadcasts.
      */
-    fun plan(settings: WakeSettings, learned: WakeInfo?, wanAddrs: List<String>): Plan {
+    fun plan(settings: WakeSettings, learned: WakeInfo?, wanAddrs: List<String>, atHome: Boolean): Plan {
         if (settings.method == WakeMethod.OFF) return Plan.Off
         val mac = settings.mac.trim().takeIf { validMac(it) } ?: learned?.mac?.takeIf { validMac(it) }
             ?: return Plan.NoMac
-        val broadcast = learned?.broadcast?.takeIf { it.isNotBlank() }
+        val broadcast = learned?.broadcast?.takeIf { isIpv4(it) }
         if (settings.method == WakeMethod.RELAY) {
             val relay = settings.relay.trim().takeIf { it.isNotEmpty() } ?: return Plan.NoRelay
             return Plan.Relay(relay, mac, broadcast.orEmpty())
         }
         val targets = mutableListOf<String>()
-        broadcast?.let { targets += "$it:$LAN_PORT" }
-        targets += "255.255.255.255:$LAN_PORT"
-        if (settings.method == WakeMethod.AUTO) {
-            val host = settings.outsideHost.trim().ifEmpty { publicIpv4(wanAddrs).orEmpty() }
-            val port = settings.outsidePort.takeIf { it in 1..65535 } ?: learned?.port?.takeIf { it in 1..65535 }
-            if (host.isNotEmpty() && port != null) targets += "$host:$port"
+        if (learned == null || atHome) {
+            broadcast?.let { targets += "$it:$LAN_PORT" }
+            targets += "255.255.255.255:$LAN_PORT"
         }
+        if (settings.method == WakeMethod.AUTO) {
+            val typed = settings.outsideHost.trim().takeIf { it.isNotEmpty() && validHost(it) }
+            val host = typed ?: publicIpv4(wanAddrs).orEmpty()
+            val port = settings.outsidePort.takeIf { it in 1..65535 } ?: learned?.port?.takeIf { it in 1..65535 }
+            if (host.isNotEmpty() && port != null) {
+                targets += if (':' in host) "[$host]:$port" else "$host:$port"
+            }
+        }
+        if (targets.isEmpty()) return Plan.Away
         return Plan.Direct(mac, targets.distinct())
     }
 

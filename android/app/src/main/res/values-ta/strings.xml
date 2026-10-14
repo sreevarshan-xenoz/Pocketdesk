@@ -300,6 +300,7 @@
     <string name="wake_outside_port">வெளி போர்ட் (வெறுமை: அது அறிவித்தது)</string>
     <string name="wake_mac_label">MAC முகவரி (வெறுமை: அது அறிவித்தது)</string>
     <string name="wake_bad_port">போர்ட் 1 முதல் 65535 வரை.</string>
+    <string name="wake_bad_host">போர்ட் இல்லாத பெயர் அல்லது முகவரி.</string>
     <string name="wake_bad_mac">இது MAC முகவரி அல்ல (எ.கா. AA:BB:CC:DD:EE:FF).</string>
     <string name="wake_learned">அது சொன்னது: %1$s, %2$s, வெளி போர்ட் %3$s.</string>
     <string name="wake_wired">கம்பி இணைப்பு</string>

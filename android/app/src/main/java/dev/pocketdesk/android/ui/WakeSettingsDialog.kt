@@ -50,6 +50,7 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
     var outsidePort by remember { mutableStateOf(if (saved.outsidePort > 0) saved.outsidePort.toString() else "") }
     var mac by remember { mutableStateOf(saved.mac) }
     val portOk = WakePlan.validPort(outsidePort)
+    val hostOk = WakePlan.validHost(outsideHost)
     val macOk = mac.isBlank() || WakePlan.validMac(mac)
     val relayOk = method != WakeMethod.RELAY || relay.isNotBlank()
 
@@ -111,6 +112,8 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
                         value = outsideHost,
                         onValueChange = { outsideHost = it },
                         label = { Text(stringResource(R.string.wake_outside_host)) },
+                        isError = !hostOk,
+                        supportingText = { if (!hostOk) Text(stringResource(R.string.wake_bad_host)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -140,7 +143,7 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(
-                enabled = portOk && macOk && relayOk,
+                enabled = portOk && hostOk && macOk && relayOk,
                 onClick = {
                     HostStore.saveWakeSettings(
                         context,

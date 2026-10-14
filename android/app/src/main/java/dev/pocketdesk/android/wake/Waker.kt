@@ -19,10 +19,15 @@ object Waker {
             HostStore.wakeSettings(ctx, address),
             HostStore.wakeInfo(ctx, address),
             wanAddrs(HostStore.wanIdentity(ctx, address)),
+            atHome(ctx, address),
         )
 
-    /** Whether [plan] can send anything: the card shows Wake only then. */
-    fun canWake(plan: WakePlan.Plan): Boolean = plan is WakePlan.Plan.Direct || plan is WakePlan.Plan.Relay
+    /**
+     * Whether [plan] can be tried: the card shows Wake then. Away is shown
+     * too, so pressing it says why nothing can be sent from here.
+     */
+    fun canWake(plan: WakePlan.Plan): Boolean =
+        plan is WakePlan.Plan.Direct || plan is WakePlan.Plan.Relay || plan is WakePlan.Plan.Away
 
     /**
      * Send the wake for the computer at [address]. Returns how many
@@ -44,6 +49,10 @@ object Waker {
                 Result.failure(IllegalStateException("its MAC address is not known yet: connect once while it is awake"))
             WakePlan.Plan.NoRelay ->
                 Result.failure(IllegalStateException("no computer is chosen to send it"))
+            WakePlan.Plan.Away ->
+                Result.failure(
+                    IllegalStateException("the phone is away from its network, and no outside wake port is set up"),
+                )
         }
 
     /** Whether the phone is on the network of the computer at [address]. */

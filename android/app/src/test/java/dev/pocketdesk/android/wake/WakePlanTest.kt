@@ -14,7 +14,8 @@ class WakePlanTest {
         settings: WakeSettings = WakeSettings(),
         learned: WakeInfo? = info,
         wan: List<String> = identity,
-    ) = WakePlan.plan(settings, learned, wan)
+        atHome: Boolean = true,
+    ) = WakePlan.plan(settings, learned, wan, atHome)
 
     @Test
     fun autoWakesOnThisNetworkAndFromOutside() {
@@ -85,6 +86,42 @@ class WakePlanTest {
         assertTrue(WakePlan.atHome(info, setOf("192.168.1.255")))
         assertFalse(WakePlan.atHome(info, setOf("10.0.255.255")))
         assertFalse(WakePlan.atHome(null, setOf("192.168.1.255")))
+    }
+
+    @Test
+    fun awayFromHomeTheMacIsNotBroadcastOnSomeoneElsesNetwork() {
+        assertEquals(
+            WakePlan.Plan.Direct("02:11:22:33:44:55", listOf("203.0.113.7:40009")),
+            plan(atHome = false),
+        )
+        assertEquals(WakePlan.Plan.Away, plan(WakeSettings(method = WakeMethod.LAN), atHome = false))
+        assertEquals(WakePlan.Plan.Away, plan(learned = info.copy(port = 0), atHome = false))
+    }
+
+    @Test
+    fun aTypedMacWithNothingLearnedStillBroadcasts() {
+        val direct =
+            plan(WakeSettings(mac = "AA:BB:CC:DD:EE:FF"), learned = null, wan = emptyList(), atHome = false)
+                as WakePlan.Plan.Direct
+        assertEquals(listOf("255.255.255.255:9"), direct.targets)
+    }
+
+    @Test
+    fun learnedTargetsMustBeAddressesNotNames() {
+        val direct = plan(learned = info.copy(broadcast = "evil.example.com")) as WakePlan.Plan.Direct
+        assertEquals(listOf("255.255.255.255:9", "203.0.113.7:40009"), direct.targets)
+    }
+
+    @Test
+    fun theOutsideAddressIsAHostWithoutAPort() {
+        assertTrue(WakePlan.validHost(""))
+        assertTrue(WakePlan.validHost("home.example.net"))
+        assertTrue(WakePlan.validHost("203.0.113.7"))
+        assertTrue(WakePlan.validHost("2001:db8::1"))
+        assertFalse(WakePlan.validHost("home.example.net:5000"))
+        assertFalse(WakePlan.validHost("two words"))
+        val v6 = plan(WakeSettings(outsideHost = "2001:db8::1")) as WakePlan.Plan.Direct
+        assertEquals("[2001:db8::1]:40009", v6.targets.last())
     }
 
     @Test

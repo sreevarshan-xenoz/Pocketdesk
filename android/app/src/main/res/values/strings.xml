@@ -307,6 +307,7 @@
     <string name="wake_outside_port">Outside port (blank: the one it announced)</string>
     <string name="wake_mac_label">MAC address (blank: the one it announced)</string>
     <string name="wake_bad_port">A port is 1 to 65535.</string>
+    <string name="wake_bad_host">A name or address without a port.</string>
     <string name="wake_bad_mac">Not a MAC address, like AA:BB:CC:DD:EE:FF.</string>
     <string name="wake_learned">It said: %1$s, %2$s, outside port %3$s.</string>
     <string name="wake_wired">wired</string>
