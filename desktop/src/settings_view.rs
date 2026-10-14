@@ -248,6 +248,28 @@ impl SettingsForm {
                     );
                 });
                 ui.end_row();
+                ui.label("Unfinished files");
+                ui.vertical(|ui| {
+                    egui::ComboBox::from_id_salt("transfer-keep")
+                        .selected_text(keep_label(e.transfer_keep_hours))
+                        .show_ui(ui, |ui| {
+                            for hours in [0, 1, 24] {
+                                ui.selectable_value(
+                                    &mut e.transfer_keep_hours,
+                                    hours,
+                                    keep_label(hours),
+                                );
+                            }
+                        });
+                    ui.label(
+                        RichText::new(
+                            "A file from a phone that stops part way is kept this long, so the phone's retry continues it.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                });
+                ui.end_row();
                 ui.label("Several phones");
                 egui::ComboBox::from_id_salt("input-control")
                     .selected_text(input_control_label(e.input_control))
@@ -301,6 +323,15 @@ impl SettingsForm {
 }
 
 /// How the several-phones choice reads in the form.
+/// How the "Unfinished files" choice reads.
+fn keep_label(hours: u32) -> String {
+    match hours {
+        0 => "not kept: a retry starts over".to_string(),
+        1 => "kept 1 hour".to_string(),
+        h => format!("kept {h} hours"),
+    }
+}
+
 fn input_control_label(mode: InputControlMode) -> &'static str {
     match mode {
         InputControlMode::One => "one phone drives at a time",

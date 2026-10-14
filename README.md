@@ -351,6 +351,7 @@ pairing_required = true    # PIN-pair devices before the control channel or stre
 # allow_hevc = false       # let negotiating phones drive an H.265/HEVC stream (R4 C1)
 # lan_discovery = true     # announce this computer so phones on the network list it
 # relay_urls = ["https://relay.example.org"]  # your own relay instead of n0's (see below)
+# transfer_keep_hours = 24 # keep a phone's unfinished file this long so a retry continues it; 0 keeps none
 ```
 
 ### systemd Service
