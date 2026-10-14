@@ -59,12 +59,10 @@ pub async fn run(config: Config) -> Result<()> {
         }
     };
 
-    let mut local_ips = pocketdesk_core::tailscale::lan::get_local_ips().await;
+    // For the LAN announcement only, which leaves the tailnet's addresses out.
+    let local_ips = pocketdesk_core::tailscale::lan::get_local_ips().await;
     if tailscale_ready && let Ok(ip) = tailscale.get_self_ip().await {
         tracing::info!("Tailscale online at {}", ip);
-        if !local_ips.contains(&ip) {
-            local_ips.push(ip);
-        }
     }
 
     let kde_service = kde::build_default_service().context("failed to initialize KDE service")?;
