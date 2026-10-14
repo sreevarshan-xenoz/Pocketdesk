@@ -160,7 +160,9 @@ object RustCore {
         command: String,
     ): String
 
-    private external fun nativeSendWol(macAddress: String, broadcastAddr: String): String
+    private external fun nativeWake(mac: String, targetsJson: String): String
+
+    private external fun nativeWakeInfo(): String
 
     private external fun nativeWakeViaRelay(
         address: String,
@@ -775,8 +777,16 @@ object RustCore {
     fun executeRemoteCommand(address: String, port: Int, command: String): Result<String> =
         envelope(nativeExecuteRemoteCommand(address, port, command))
 
-    fun sendWol(macAddress: String, broadcastAddr: String): Result<Unit> =
-        envelope(nativeSendWol(macAddress, broadcastAddr)).map { }
+    /**
+     * Wake a computer from this phone (N6): the magic packet for [mac] to
+     * each `host:port` in [targets], three times each. Returns how many
+     * addresses took it.
+     */
+    fun wake(mac: String, targets: List<String>): Result<Int> =
+        envelope(nativeWake(mac, org.json.JSONArray(targets).toString())).mapCatching { it.toInt() }
+
+    /** How the connected desktop said it can be woken (`wake_info` JSON), or null. */
+    fun wakeInfo(): String? = nativeWakeInfo().takeIf { it.isNotBlank() }
 
     /**
      * Wake a sleeping desktop through an always-on LAN relay (Tier-2 #12):

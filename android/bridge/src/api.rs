@@ -275,10 +275,36 @@ pub(crate) fn client_identity() -> pocketdesk_core::protocol::kdeconnect::Device
     identity
 }
 
-/// Send Wake-on-LAN magic packet to wake a sleeping peer.
-pub fn send_wol(mac_address: String, broadcast_addr: String) -> Result<(), String> {
-    pocketdesk_core::tailscale::wol::send_wol(&mac_address, &broadcast_addr)
-        .map_err(|e| e.to_string())
+/// Wake a sleeping computer from this phone (N6): send the magic packet for
+/// `mac` to each `host:port` in `targets_json` (broadcasts on this network,
+/// or an outside address whose router forwards it). Names are resolved here;
+/// one that cannot be is skipped. Returns how many addresses took it.
+pub fn wake(mac: String, targets_json: String) -> Result<usize, String> {
+    use std::net::ToSocketAddrs;
+    let targets: Vec<String> =
+        serde_json::from_str(&targets_json).map_err(|e| format!("bad wake targets: {e}"))?;
+    let mut addrs = Vec::new();
+    let mut unresolved = Vec::new();
+    for target in &targets {
+        match target.to_socket_addrs() {
+            Ok(found) => addrs.extend(found),
+            Err(_) => unresolved.push(target.as_str()),
+        }
+    }
+    if addrs.is_empty() {
+        return Err(if unresolved.is_empty() {
+            "nowhere to send the wake to".to_string()
+        } else {
+            format!("could not find {}", unresolved.join(", "))
+        });
+    }
+    pocketdesk_core::tailscale::wol::send_wake(&mac, &addrs).map_err(|e| e.to_string())
+}
+
+/// How the connected desktop said it can be woken (N6
+/// `kdeconnect.pocketdesk.wake_info` body JSON), or `None`.
+pub async fn get_wake_info() -> Option<String> {
+    crate::WAKE_INFO.lock().await.clone()
 }
 
 /// Ask an always-on LAN peer (the relay) to emit the WoL magic packet for a
@@ -456,6 +482,14 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                     let mut id = crate::WAN_IDENTITY.lock().await;
                                     *id = Some(pkt.body.to_string());
                                 }
+                                // How to wake this desktop (N6), kept for the
+                                // app to save with the computer.
+                                if trimmed.contains("pocketdesk.wake_info")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == "kdeconnect.pocketdesk.wake_info"
+                                {
+                                    *crate::WAKE_INFO.lock().await = Some(pkt.body.to_string());
+                                }
                                 // Find-my-device siren: latch so the UI can ring
                                 // even if the poll loop misses the packet.
                                 if trimmed.contains("findmydevice")
@@ -546,6 +580,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                         let mut writer_guard = (*CONTROL_WRITER).lock().await;
                         *writer_guard = None;
                         *crate::WAN_IDENTITY.lock().await = None;
+                        *crate::WAKE_INFO.lock().await = None;
                         crate::SIREN_RINGING.store(false, std::sync::atomic::Ordering::SeqCst);
                         *crate::PAIR_RESULT.lock().await = None;
                         // Offers came from this desktop; another one cannot
@@ -3727,5 +3762,30 @@ mod sms_tests {
             "[1]".into(),
         ));
         assert!(bad.unwrap_err().contains("not an object"));
+    }
+}
+
+#[cfg(test)]
+mod wake_tests {
+    #[test]
+    fn a_wake_goes_to_each_target_the_phone_names() {
+        let receiver = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let targets = serde_json::json!([receiver.local_addr().unwrap().to_string()]);
+
+        let reached = super::wake("AA:BB:CC:DD:EE:FF".into(), targets.to_string()).unwrap();
+        assert_eq!(reached, 1);
+        let mut buf = [0u8; 200];
+        let (n, _) = receiver.recv_from(&mut buf).unwrap();
+        assert_eq!(n, 102);
+    }
+
+    #[test]
+    fn targets_that_name_nothing_are_an_error() {
+        assert!(super::wake("AA:BB:CC:DD:EE:FF".into(), "[]".into()).is_err());
+        assert!(super::wake("AA:BB:CC:DD:EE:FF".into(), "[\"no port\"]".into()).is_err());
+        assert!(super::wake("AA:BB:CC:DD:EE:FF".into(), "not json".into()).is_err());
     }
 }

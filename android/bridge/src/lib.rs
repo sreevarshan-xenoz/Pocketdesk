@@ -1134,17 +1134,27 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeExecute
     to_jstring(&mut env, json)
 }
 
-/// Send a Wake-on-LAN magic packet.
+/// Wake a computer from this phone: the magic packet to each target (N6).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendWol(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWake(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
-    mac_address: JString<'_>,
-    broadcast_addr: JString<'_>,
+    mac: JString<'_>,
+    targets_json: JString<'_>,
 ) -> jstring {
-    let mac_address = jstring_to_string(&mut env, &mac_address);
-    let broadcast_addr = jstring_to_string(&mut env, &broadcast_addr);
-    let json = envelope_unit(api::send_wol(mac_address, broadcast_addr));
+    let mac = jstring_to_string(&mut env, &mac);
+    let targets_json = jstring_to_string(&mut env, &targets_json);
+    let json = envelope(api::wake(mac, targets_json).map(|n| n.to_string()));
+    to_jstring(&mut env, json)
+}
+
+/// How the connected desktop said it can be woken, as JSON, or "" (N6).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeInfo(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = RUNTIME.block_on(api::get_wake_info()).unwrap_or_default();
     to_jstring(&mut env, json)
 }
 
