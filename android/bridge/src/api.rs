@@ -1502,33 +1502,64 @@ where
     R: tokio::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
 {
+    pump_within(reader, writer, total, counted, SEND_IDLE).await
+}
+
+/// How long one read or write of a send may wait, as on the desktop.
+const SEND_IDLE: Duration = Duration::from_secs(30);
+
+/// The slowest a whole send may be, as on the desktop: 32 KiB/s.
+const SEND_MIN_BYTES_PER_SEC: u64 = 32 * 1024;
+
+/// [`pump_counted`] with `idle` as the limit on each write, and the whole
+/// send held to `idle` plus the minimum rate: a receiver that stops
+/// reading fails the send instead of holding it, and the phone's foreground
+/// service, open for ever.
+async fn pump_within<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    total: u64,
+    counted: bool,
+    idle: Duration,
+) -> Result<u64, String>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
     use std::sync::atomic::Ordering;
     if counted {
         TRANSFER_TOTAL.store(total, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
+    let deadline =
+        tokio::time::Instant::now() + idle + Duration::from_secs(total / SEND_MIN_BYTES_PER_SEC);
     let mut buffer = vec![0u8; 64 * 1024];
     let mut sent: u64 = 0;
     loop {
-        let n = reader
-            .read(&mut buffer)
+        if tokio::time::Instant::now() >= deadline {
+            return Err("The computer took the file too slowly".to_string());
+        }
+        // Reads get the whole send's deadline, not the idle limit: a file
+        // from a cloud provider can take a while to arrive.
+        let n = tokio::time::timeout_at(deadline, reader.read(&mut buffer))
             .await
+            .map_err(|_| "Reading the file took too long".to_string())?
             .map_err(|e| format!("Failed to read file: {}", e))?;
         if n == 0 {
             break;
         }
-        writer
-            .write_all(&buffer[..n])
+        tokio::time::timeout(idle, writer.write_all(&buffer[..n]))
             .await
+            .map_err(|_| "The computer stopped taking the file".to_string())?
             .map_err(|e| format!("Failed to write to stream: {}", e))?;
         sent += n as u64;
         if counted {
             TRANSFER_SENT.store(sent, Ordering::Relaxed);
         }
     }
-    writer
-        .flush()
+    tokio::time::timeout(idle, writer.flush())
         .await
+        .map_err(|_| "The computer stopped taking the file".to_string())?
         .map_err(|e: std::io::Error| e.to_string())?;
     Ok(sent)
 }
@@ -3747,8 +3778,32 @@ mod wake_relay_tests {
 
 #[cfg(test)]
 mod send_file_tests {
-    use super::{presents_key, pump, read_status, transfer_progress};
+    use super::{presents_key, pump, pump_within, read_status, transfer_progress};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A receiver that stops reading must not hold the phone's send (and its
+    /// foreground service) open for ever.
+    #[tokio::test]
+    async fn a_send_to_a_receiver_that_stops_reading_fails() {
+        let (mut desktop, mut phone) = tokio::io::duplex(1024);
+        let mut file: &[u8] = &[7u8; 64 * 1024];
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            pump_within(
+                &mut file,
+                &mut phone,
+                64 * 1024,
+                false,
+                std::time::Duration::from_millis(100),
+            ),
+        )
+        .await
+        .expect("the pump gives up by itself");
+        assert!(outcome.is_err(), "{outcome:?}");
+        // The desktop end is still open: it simply stopped reading.
+        let mut some = [0u8; 16];
+        desktop.read_exact(&mut some).await.unwrap();
+    }
 
     #[tokio::test]
     async fn a_file_is_sent_only_once_the_receiver_says_it_saved_it() {
