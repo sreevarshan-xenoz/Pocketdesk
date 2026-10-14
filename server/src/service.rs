@@ -367,8 +367,21 @@ pub async fn run(config: Config) -> Result<()> {
         let mut held: std::collections::HashMap<u64, crate::driving::Held> =
             std::collections::HashMap::new();
         let mut last_session: Option<u64> = None;
+        // Ended sessions are swept each second too, not only when input
+        // arrives: a phone that stopped mid-drag must not leave a button down
+        // until some phone next sends input (R2 review).
+        let mut sweep = tokio::time::interval(Duration::from_secs(1));
         loop {
-            match input_rx.recv().await {
+            let received = tokio::select! {
+                received = input_rx.recv() => received,
+                _ = sweep.tick() => {
+                    if let Some(injector) = injector.as_mut() {
+                        release_ended(injector, &mut gamepads, &mut held);
+                    }
+                    continue;
+                }
+            };
+            match received {
                 Ok((session, packet)) => {
                     if injector.is_none() && retry_injector_now(last_try, std::time::Instant::now())
                     {
@@ -384,17 +397,8 @@ pub async fn run(config: Config) -> Result<()> {
                     let Some(injector) = injector.as_mut() else {
                         continue;
                     };
+                    release_ended(injector, &mut gamepads, &mut held);
                     let live = crate::driving::live_refs();
-                    // Sessions that ended: let go of anything they held.
-                    let gone: Vec<u64> = gamepads
-                        .keys()
-                        .chain(held.keys())
-                        .copied()
-                        .filter(|id| !live.iter().any(|(live_id, _)| live_id == id))
-                        .collect();
-                    for id in gone {
-                        release_session(injector, &mut gamepads, &mut held, id);
-                    }
                     if crate::driving::admit(session, &live) == crate::driving::Drive::Drop {
                         tracing::trace!(session, "Input dropped: another phone drives");
                         continue;
@@ -1403,6 +1407,24 @@ fn handle_input_packet(injector: &mut InputInjector, packet: InputPacket) -> Res
 
 /// Let go of everything `session` holds: its gamepad buttons (through the
 /// injector's per-session state), mouse buttons and keys.
+/// Let go of whatever sessions that have ended still hold down.
+fn release_ended(
+    injector: &mut InputInjector,
+    gamepads: &mut std::collections::HashMap<u64, u16>,
+    held: &mut std::collections::HashMap<u64, crate::driving::Held>,
+) {
+    let live = crate::driving::live_refs();
+    let gone: Vec<u64> = gamepads
+        .keys()
+        .chain(held.keys())
+        .copied()
+        .filter(|id| !live.iter().any(|(live_id, _)| live_id == id))
+        .collect();
+    for id in gone {
+        release_session(injector, gamepads, held, id);
+    }
+}
+
 fn release_session(
     injector: &mut InputInjector,
     gamepads: &mut std::collections::HashMap<u64, u16>,
