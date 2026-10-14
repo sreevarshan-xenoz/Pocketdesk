@@ -794,11 +794,7 @@ async fn receive_file(
         STATUS_FAILED
     };
     // Flushed: inside TLS the byte otherwise waits in the session's buffer.
-    let _ = tokio::time::timeout(CONNECT_TIMEOUT, async {
-        stream.write_all(&[status]).await?;
-        stream.flush().await
-    })
-    .await;
+    let _ = tokio::time::timeout(CONNECT_TIMEOUT, send_status(&mut stream, status)).await;
     saved
 }
 
@@ -858,12 +854,26 @@ where
     } else {
         STATUS_FAILED
     };
-    let _ = tokio::time::timeout(CONNECT_TIMEOUT, async {
-        stream.write_all(&[status]).await?;
-        stream.flush().await
-    })
-    .await;
+    let _ = tokio::time::timeout(CONNECT_TIMEOUT, send_status(&mut stream, status)).await;
     kept
+}
+
+/// Send the transfer's status byte and close cleanly: TLS close_notify,
+/// then what the phone still has in flight (TLS 1.3 sends session tickets
+/// after the handshake) is read and dropped. A socket closed with unread
+/// data is reset, and the reset can reach the phone before the status byte
+/// does, so a saved file would read as failed.
+async fn send_status<S>(stream: &mut S, status: u8) -> std::io::Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    stream.write_all(&[status]).await?;
+    stream.flush().await?;
+    stream.shutdown().await?;
+    let mut sink = [0u8; 512];
+    while stream.read(&mut sink).await? > 0 {}
+    Ok(())
 }
 
 /// Read exactly `size` bytes from `stream` into a new file in `dir` named
