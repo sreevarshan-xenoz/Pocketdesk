@@ -1,6 +1,6 @@
 # Pocketdesk
 
-**Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale, or the internet (iroh: a hole-punched path, or a relay when that fails). Using it from outside needs no port forward; only waking a sleeping computer from outside does.**
+**Your desktop from your phone: low-latency remote desktop for Linux (Wayland-native) and Windows, plus the KDE Connect feature set — over your LAN, Tailscale, or the internet (iroh: a hole-punched path, or a relay when that fails). A session from outside needs no port forward and no VPN once the phone has met the computer at home.**
 
 > Formerly *Linux Link* (this repository was `Linux-Link`; old links redirect). Everything now carries the Pocketdesk name: the `pocketdesk` command (or `pd` for short), the desktop app `pocketdesk-app`, the config and state folders (an existing `linux-link` folder is moved on first start), the wire protocol and the Android app `dev.pocketdesk.android`. A phone with the old app needs the new one installed and paired again once.
 
@@ -18,7 +18,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 
 - **Low-latency screen streaming** — wlroots/PipeWire capture → FFmpeg H.264 encoding → QUIC transport → Android MediaCodec decode
 - **KDE Connect-style features** — clipboard sync, files both ways and a remote file browser (LAN), notifications, input control, battery info
-- **Reaches your computer anywhere** — on the LAN, through Tailscale, or over the internet with no VPN and no port forward (see [Before you start](#before-you-start))
+- **Reaches your computer anywhere** — on the LAN, through Tailscale, or a session over the internet with no VPN and no port forward (see [Before you start](#before-you-start) for what crosses each)
 
 ### Key Differentiators
 
@@ -42,21 +42,23 @@ Three things worth knowing before you pair a phone. [SECURITY.md](SECURITY.md) h
 |---|---|---|
 | The same network | nothing | no |
 | Anywhere, through Tailscale | both on one tailnet | no |
-| Anywhere, over the internet | nothing: on by default. iroh punches a direct path, and falls back to a relay (n0's free ones, or [your own](#away-from-home-your-own-relay)) | no |
-| Your own relay | a machine the internet can reach | one port, on the relay's machine |
-| Waking a sleeping computer from outside | Wake-on-LAN set up on the computer | yes: one UDP port to the computer ([Wake from the phone](#kde-connect-integration)) |
+| Anywhere, over the internet | one session at home first (same network or Tailscale), where the phone learns the computer and registers its key. After that, iroh punches a direct path, or falls back to a relay (n0's free ones, or [your own](#away-from-home-your-own-relay)). It is always on | no |
+| Your own relay | a machine the internet can reach | on the relay's machine: one port (plain, 3340), or 80 and 443 (HTTPS) |
+| Waking a sleeping computer from outside | Wake-on-LAN set up on the computer | yes, one UDP port to the computer; or none, waking through another always-on computer the phone can reach ([Wake from the phone](#kde-connect-integration)) |
 
-Tailscale is not required. It adds a second encrypted layer and closes the first-contact gap below, which is why it is the advice for networks you do not trust.
+**Over the internet path, only the session crosses:** the picture, sound, input and the phone's mic. The clipboard, files, the remote file browser, notifications both ways and texts use the control channel, which needs the same network or Tailscale.
+
+Tailscale is not required. It carries everything, adds a second encrypted layer and closes the first-contact gap below, which is why it is the advice for networks you do not trust.
 
 ### Trust at first contact
 
 - **Scan the QR code** that the desktop app's Pair tab shows. The phone then checks the desktop's certificate before its first byte, so the PIN and everything after reach only that computer.
-- **Typing an address instead trusts whatever answers first** there (trust on first use). Someone who could intercept that very first connection could relay it. On a network you do not trust, scan.
+- **Typing an address, or picking a computer under "On this network", trusts whatever answers first** there (trust on first use). Someone who could intercept that very first connection could relay it. On a network you do not trust, scan.
 
 ### What the internet path shows
 
-- **Relays** (n0's or yours) carry encrypted traffic. They see which endpoints talk, when, and how much, never the content.
-- **The Mainline DHT** (on by default, `dht_publish = "relay"`) holds a signed record that lets the phone find the computer again after its home IP changes. Its nodes see the home IP it was published from, linked to the computer's WAN id. `dht_publish = "off"` turns it off; the phone then finds the computer through the relay alone.
+- **Relays** (n0's or yours) carry encrypted traffic. They see both ends' IP addresses, which endpoints talk, when, and how much, never the content.
+- **The Mainline DHT** (on by default, `dht_publish = "relay"`) holds a signed record that lets the phone find the computer again after its relay (or, with `"addresses"`, its address) changes. Its nodes see the home IP it was published from, linked to the computer's WAN id, and, each time the phone connects from away, the phone's IP and the id it looks for. `dht_publish = "off"` turns it off; the phone then uses what it learned at home until that goes stale.
 
 ## What works where
 
