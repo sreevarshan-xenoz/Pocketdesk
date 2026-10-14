@@ -24,7 +24,7 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 
 | Feature | Pocketdesk | RustDesk | Sunshine/Moonlight | KDE Connect |
 |---------|:----------:|:--------:|:-------------------:|:-----------:|
-| Tailscale-native | ✅ | ❌ | ❌ | ❌ |
+| From outside without a port forward or VPN | ✅ (after one session at home) | ✅ | ⚠️ UPnP or a forward | ❌ |
 | Wayland-native | ✅ | ⚠️ Partial | ⚠️ Partial | ✅ |
 | Hyprland optimized | ✅ | ❌ | ⚠️ Limited | ⚠️ Limited |
 | Full KDE Connect | ✅ | ⚠️ Partial | ❌ | ✅ |
@@ -248,8 +248,8 @@ fallback), NVENC/AMF/Quick Sync/Media Foundation through `ffmpeg.exe`,
 - privacy mode: local input blocked, plus a ring that does not appear in the stream;
 - battery, power, exec, siren and the window HUD.
 
-Unzip `pocketdesk-<version>-x86_64-pc-windows-gnu.zip` from the releases page
-(one self-contained exe), install FFmpeg (`winget install Gyan.FFmpeg`, which
+Unzip `pocketdesk-<version>-windows-x86_64.zip` from the releases page
+(the server `pocketdesk.exe` and the desktop app `pocketdesk-app.exe`), install FFmpeg (`winget install Gyan.FFmpeg`, which
 puts `ffmpeg.exe` on `PATH`), then:
 
 ```powershell
