@@ -161,9 +161,26 @@ fn notify_session_started(session: &LiveSession) {
     });
 }
 
+/// Ticks in a row the trust store may be unreadable before every session is
+/// judged unpaired. One failed read (a writer replacing the file) must not
+/// end every phone's session; a store that stays unreadable fails closed.
+const UNREADABLE_TICKS: u32 = 3;
+
+/// Whether this tick may judge sessions by pairing, given whether the store
+/// was read, counting the unread ticks in a row.
+fn may_judge_pairing(read: bool, unread_ticks: &mut u32) -> bool {
+    *unread_ticks = if read {
+        0
+    } else {
+        unread_ticks.saturating_add(1)
+    };
+    read || *unread_ticks >= UNREADABLE_TICKS
+}
+
 /// Daemon task: mirror the registry, ring the consent notification, and
 /// consume kick requests. Runs for the process lifetime.
 pub async fn run_watcher() {
+    let mut unread_ticks = 0;
     let mut prev_ids: Vec<u64> = Vec::new();
     let mut prev_json = String::new();
     // What the phones were last told about who drives (roadmap N7).
@@ -224,7 +241,13 @@ pub async fn run_watcher() {
                     }
                 }
             }
-            for id in untrusted_sessions(&live, crate::state::pairing_required(), paired) {
+            let unpaired = if may_judge_pairing(store.is_some(), &mut unread_ticks) {
+                untrusted_sessions(&live, crate::state::pairing_required(), paired)
+            } else {
+                tracing::debug!("The trust store could not be read; sessions judged next tick");
+                Vec::new()
+            };
+            for id in unpaired {
                 if let Some(s) =
                     pocketdesk_core::streaming::sessions::end_session(id, b"not paired")
                 {
@@ -342,6 +365,26 @@ mod tests {
         let mut ended = untrusted_sessions(&live, true, paired);
         ended.sort();
         assert_eq!(ended, vec![2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn one_unreadable_store_does_not_end_every_session_but_a_lasting_one_does() {
+        let mut unread = 0;
+        assert!(may_judge_pairing(true, &mut unread));
+        assert!(
+            !may_judge_pairing(false, &mut unread),
+            "a writer mid-rename"
+        );
+        assert!(!may_judge_pairing(false, &mut unread));
+        assert!(
+            may_judge_pairing(false, &mut unread),
+            "still unreadable: fail closed"
+        );
+        assert!(may_judge_pairing(true, &mut unread));
+        assert!(
+            !may_judge_pairing(false, &mut unread),
+            "the count starts over"
+        );
     }
 
     #[test]
