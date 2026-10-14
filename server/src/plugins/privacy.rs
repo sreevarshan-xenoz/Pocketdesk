@@ -3,6 +3,45 @@ use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin}
 use serde_json::json;
 
 use crate::privacy;
+use std::sync::Mutex;
+
+/// The phone whose grab is held: only it may refresh or release it (R3).
+static OWNER: Mutex<Option<String>> = Mutex::new(None);
+
+/// Whether `device` may do `action` while `owner` holds the grab: anyone may
+/// ask for the status or grab when nothing is held, only the holder may
+/// refresh or release it.
+fn may_act(action: &str, owner: Option<&str>, device: &str) -> bool {
+    match (action, owner) {
+        ("grab" | "release", Some(holder)) => holder == device,
+        _ => true,
+    }
+}
+
+/// The phone holding the grab, forgotten once the grab itself has ended
+/// (released or its TTL ran out).
+fn owner() -> Option<String> {
+    let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
+    if owner.is_some() && privacy::privacy_status().0 == 0 {
+        *owner = None;
+    }
+    owner.clone()
+}
+
+/// Give local input back if the phone holding the grab may no longer have
+/// it (no longer paired): run by the live-session watcher each second.
+pub(crate) fn release_if_owner(lost: impl Fn(&str) -> bool) {
+    let Some(holder) = owner() else { return };
+    if lost(&holder) {
+        let count = privacy::release_input();
+        *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        tracing::warn!(
+            device_id = %holder,
+            released = count,
+            "Privacy grab released: the phone holding it is no longer paired"
+        );
+    }
+}
 
 /// Privacy mode (Tier-3 #15): the phone asks the desktop to block *local*
 /// input while the remote session keeps working.
@@ -48,13 +87,28 @@ impl Plugin for PrivacyPlugin {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
+        let device = sender.device_id();
+        let holder = owner();
+        let refused = !may_act(action, holder.as_deref(), device);
         let mut response = match action {
+            _ if refused => {
+                tracing::warn!(
+                    device_id = %device,
+                    holder = holder.as_deref().unwrap_or(""),
+                    "Privacy {action} refused: another phone holds the grab"
+                );
+                json!({ "ok": false, "error": "another phone holds privacy mode" })
+            }
             "grab" => match privacy::grab_input(privacy::GRAB_TTL) {
-                Ok(count) => json!({ "ok": true, "grabbed": count }),
+                Ok(count) => {
+                    *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = Some(device.to_string());
+                    json!({ "ok": true, "grabbed": count })
+                }
                 Err(e) => json!({ "ok": false, "error": e }),
             },
             "release" => {
                 let count = privacy::release_input();
+                *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 json!({ "ok": true, "released": count })
             }
             _ => {
@@ -63,7 +117,8 @@ impl Plugin for PrivacyPlugin {
             }
         };
 
-        if want_lock {
+        // A refused request does nothing, the lock included.
+        if want_lock && !refused {
             // The lock helpers use blocking process spawns.
             let outcome = tokio::task::spawn_blocking(privacy::lock_screen).await;
             match outcome {
@@ -81,6 +136,23 @@ impl Plugin for PrivacyPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_phone_that_grabbed_may_refresh_or_release() {
+        assert!(may_act("grab", None, "phone-a"), "nothing held");
+        assert!(
+            may_act("grab", Some("phone-a"), "phone-a"),
+            "its own refresh"
+        );
+        assert!(!may_act("grab", Some("phone-a"), "phone-b"));
+        assert!(may_act("release", Some("phone-a"), "phone-a"));
+        assert!(!may_act("release", Some("phone-a"), "phone-b"));
+        assert!(may_act("release", None, "phone-b"), "nothing to protect");
+        assert!(
+            may_act("status", Some("phone-a"), "phone-b"),
+            "anyone may ask"
+        );
+    }
 
     #[test]
     fn plugin_declares_privacy_capability() {

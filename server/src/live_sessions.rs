@@ -177,6 +177,13 @@ pub async fn run_watcher() {
         let live = pocketdesk_core::streaming::sessions::list();
         // A phone that stopped being paired loses its session at once,
         // however that happened.
+        // The privacy grab of a phone no longer paired is given back too,
+        // with or without a stream (the store is read only while one is held).
+        if crate::state::pairing_required() {
+            crate::plugins::privacy::release_if_owner(|id| {
+                !crate::plugins::pair::is_paired_device(id)
+            });
+        }
         if !live.is_empty() {
             let store = crate::state::trust_store_path().ok().and_then(|path| {
                 pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(path).ok()
