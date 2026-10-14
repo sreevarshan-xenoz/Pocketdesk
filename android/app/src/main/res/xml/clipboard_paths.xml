@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Images received from the desktop's clipboard (N4), shared through the
+     clipboard as content URIs. -->
+<paths>
+    <cache-path name="clipboard" path="clipboard/" />
+</paths>

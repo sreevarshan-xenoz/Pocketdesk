@@ -18,6 +18,7 @@ use tokio::sync::{Mutex, broadcast};
 
 use crate::api::{TRANSFER_SENT, TRANSFER_TOTAL, accept_transfer, client_identity};
 use crate::{CONTROL_PEER, CONTROL_WRITER};
+use pocketdesk_core::protocol::clipboard::{CLIPBOARD_IMAGE_FETCH, MAX_CLIPBOARD_IMAGE};
 
 /// Ask the desktop for a file (F7b): `{path | offer, port, key}`.
 const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
@@ -32,10 +33,32 @@ const MAX_DOWNLOAD_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// A download that receives nothing for this long is abandoned.
 const DOWNLOAD_IDLE: Duration = Duration::from_secs(30);
 
-/// What to download: a file browsed to, or one the desktop offered.
+/// What to download: a file browsed to, one the desktop offered, or the
+/// image on the desktop's clipboard (N4), by the id its reply gave.
 pub enum FetchTarget {
     Path(String),
     Offer(String),
+    ClipboardImage(String),
+}
+
+impl FetchTarget {
+    /// The request that asks for it, and the most bytes it may be.
+    fn request(&self, body: &mut serde_json::Value) -> (&'static str, u64) {
+        match self {
+            FetchTarget::Path(path) => {
+                body["path"] = serde_json::json!(path);
+                (FETCH, MAX_DOWNLOAD_BYTES)
+            }
+            FetchTarget::Offer(id) => {
+                body["offer"] = serde_json::json!(id);
+                (FETCH, MAX_DOWNLOAD_BYTES)
+            }
+            FetchTarget::ClipboardImage(id) => {
+                body["id"] = serde_json::json!(id);
+                (CLIPBOARD_IMAGE_FETCH, MAX_CLIPBOARD_IMAGE)
+            }
+        }
+    }
 }
 
 /// The offers the desktop has pushed since the last call, as JSON.
@@ -82,7 +105,9 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
     target: FetchTarget,
     out: &mut W,
 ) -> Result<u64, String> {
-    {
+    // A clipboard image (N4) leaves a file transfer's progress alone.
+    let counted = !matches!(target, FetchTarget::ClipboardImage(_));
+    if counted {
         TRANSFER_TOTAL.store(0, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
@@ -92,17 +117,33 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
     let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let key = uuid::Uuid::new_v4().simple().to_string();
     let mut body = serde_json::json!({ "port": transfer_port, "key": key });
-    match &target {
-        FetchTarget::Path(path) => body["path"] = serde_json::json!(path),
-        FetchTarget::Offer(id) => body["offer"] = serde_json::json!(id),
-    }
-    let request = NetworkPacket::new(FETCH).with_body(body);
+    let (packet_type, limit) = target.request(&mut body);
+    let request = NetworkPacket::new(packet_type).with_body(body);
     let lines = send_watching_replies(address, port, &request).await?;
     // Only the desktop this phone pinned for `address` may send (phase C),
     // looked up once the request is out (its connection may have pinned it).
     let tls = crate::api::transfer_acceptor(address)?;
     let refused = refusal_on(lines, key.clone());
-    await_and_receive(listener, &key, &tls, refused, out).await
+    await_and_receive_limited(listener, &key, &tls, refused, out, limit, counted).await
+}
+
+/// Download the image on the desktop's clipboard, named `id` by its reply
+/// (N4), into a new file at `path`; a failed download leaves no file.
+pub async fn fetch_clipboard_image(
+    address: String,
+    port: u16,
+    id: String,
+    path: String,
+) -> Result<u64, String> {
+    let mut out = tokio::fs::File::create(&path)
+        .await
+        .map_err(|e| format!("Could not create {path}: {e}"))?;
+    let got = fetch_into(&address, port, FetchTarget::ClipboardImage(id), &mut out).await;
+    drop(out);
+    if got.is_err() {
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+    got
 }
 
 /// The read half of a connection opened for one request.
@@ -218,7 +259,7 @@ fn decline_packet(id: &str, reason: &str) -> NetworkPacket {
 /// Resolves with the desktop's reason if it refuses the download keyed
 /// `key`; never resolves otherwise. Offers seen on a connection of our own
 /// are latched as the control reader would.
-async fn refusal_on(mut replies: Replies, key: String) -> String {
+pub(crate) async fn refusal_on(mut replies: Replies, key: String) -> String {
     while let Some(line) = replies.next_line().await {
         if let Some(reason) = refusal_for(&line, &key) {
             return reason;
@@ -251,12 +292,31 @@ fn refusal_for(line: &str, key: &str) -> Option<String> {
 /// Wait up to 30 s for the desktop to connect inside TLS with `key`
 /// (dropping anything else that connects), then receive the file into
 /// `out`, unless `refused` resolves first.
+#[cfg(test)]
 async fn await_and_receive<W, F>(
     listener: tokio::net::TcpListener,
     key: &str,
     tls: &tokio_rustls::TlsAcceptor,
     refused: F,
     out: &mut W,
+) -> Result<u64, String>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+    F: std::future::Future<Output = String>,
+{
+    await_and_receive_limited(listener, key, tls, refused, out, MAX_DOWNLOAD_BYTES, true).await
+}
+
+/// [`await_and_receive`], refusing more than `limit` bytes, and counting
+/// into the transfer progress only when `counted`.
+async fn await_and_receive_limited<W, F>(
+    listener: tokio::net::TcpListener,
+    key: &str,
+    tls: &tokio_rustls::TlsAcceptor,
+    refused: F,
+    out: &mut W,
+    limit: u64,
+    counted: bool,
 ) -> Result<u64, String>
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -270,12 +330,17 @@ where
         accepted = accept => accepted.map_err(|_| "The computer did not send the file".to_string())??,
         reason = refused => return Err(reason),
     };
-    receive_into(&mut stream, out).await
+    receive_into(&mut stream, out, limit, counted).await
 }
 
 /// Read the size and exactly that many bytes from `stream` into `out`,
 /// counting progress, then tell the desktop whether it was saved.
-async fn receive_into<S, W>(stream: &mut S, out: &mut W) -> Result<u64, String>
+async fn receive_into<S, W>(
+    stream: &mut S,
+    out: &mut W,
+    limit: u64,
+    counted: bool,
+) -> Result<u64, String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
@@ -285,11 +350,13 @@ where
             .await
             .map_err(|_| "The computer stopped sending".to_string())?
             .map_err(|e| format!("The computer stopped sending: {e}"))?;
-        if size > MAX_DOWNLOAD_BYTES {
-            return Err("The file is larger than 8 GB".to_string());
+        if size > limit {
+            return Err(format!("{size} bytes is more than this phone takes"));
         }
-        TRANSFER_TOTAL.store(size, Ordering::Relaxed);
-        TRANSFER_SENT.store(0, Ordering::Relaxed);
+        if counted {
+            TRANSFER_TOTAL.store(size, Ordering::Relaxed);
+            TRANSFER_SENT.store(0, Ordering::Relaxed);
+        }
         let mut buffer = vec![0u8; 64 * 1024];
         let mut done: u64 = 0;
         while done < size {
@@ -307,7 +374,9 @@ where
                 .await
                 .map_err(|e| format!("Could not save the file: {e}"))?;
             done += n as u64;
-            TRANSFER_SENT.store(done, Ordering::Relaxed);
+            if counted {
+                TRANSFER_SENT.store(done, Ordering::Relaxed);
+            }
         }
         out.flush()
             .await

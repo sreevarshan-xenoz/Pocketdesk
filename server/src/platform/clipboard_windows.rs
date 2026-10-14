@@ -1,4 +1,6 @@
-//! The Windows clipboard as text (`CF_UNICODETEXT`).
+//! The Windows clipboard as text (`CF_UNICODETEXT`) and as an image (the
+//! registered "PNG" format browsers and the Snipping Tool use, and `CF_DIB`
+//! for everyone else; roadmap N4).
 //!
 //! Another process can hold the clipboard open for a moment (a clipboard
 //! manager reading what was just copied), so opening it retries briefly
@@ -11,10 +13,13 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+    CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+    IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
-use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
-use windows::Win32::System::Ole::CF_UNICODETEXT;
+use windows::Win32::System::Memory::{
+    GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
+};
+use windows::Win32::System::Ole::{CF_DIB, CF_UNICODETEXT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE,
 };
@@ -115,6 +120,123 @@ pub(crate) fn set_text(text: &str) -> io::Result<()> {
     }
 }
 
+/// Global memory holding a copy of `bytes`, for `SetClipboardData`.
+fn global_copy(bytes: &[u8]) -> io::Result<HGLOBAL> {
+    let memory = unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes.len()) }.map_err(os_err)?;
+    let target = unsafe { GlobalLock(memory) } as *mut u8;
+    if target.is_null() {
+        let _ = unsafe { GlobalFree(Some(memory)) };
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `memory` holds `bytes.len()` bytes.
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), target, bytes.len());
+        let _ = GlobalUnlock(memory);
+    }
+    Ok(memory)
+}
+
+/// A copy of the clipboard's data in `format`, if it holds that format.
+/// The clipboard must be open.
+fn read_format(format: u32) -> io::Result<Option<Vec<u8>>> {
+    let Ok(handle) = (unsafe { GetClipboardData(format) }) else {
+        return Ok(None);
+    };
+    let memory = HGLOBAL(handle.0);
+    let size = unsafe { GlobalSize(memory) };
+    let source = unsafe { GlobalLock(memory) } as *const u8;
+    if source.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the clipboard's global holds `size` bytes while locked.
+    let bytes = unsafe { std::slice::from_raw_parts(source, size) }.to_vec();
+    let _ = unsafe { GlobalUnlock(memory) };
+    Ok(Some(bytes))
+}
+
+/// The registered "PNG" clipboard format.
+fn png_format() -> io::Result<u32> {
+    match unsafe { RegisterClipboardFormatW(w!("PNG")) } {
+        0 => Err(io::Error::last_os_error()),
+        format => Ok(format),
+    }
+}
+
+/// A number that changes whenever anything puts data on the clipboard, so a
+/// poll can tell an unchanged clipboard without reading it.
+pub(crate) fn sequence() -> u32 {
+    unsafe { GetClipboardSequenceNumber() }
+}
+
+/// Whether the clipboard holds text, which wins over an image.
+pub(crate) fn has_text() -> bool {
+    unsafe { IsClipboardFormatAvailable(u32::from(CF_UNICODETEXT.0)) }.is_ok()
+}
+
+/// The clipboard's image as PNG: the "PNG" format as it is when an app put
+/// one there (so a PNG this wrote reads back byte for byte), else `CF_DIB`
+/// converted. `None` when it holds no image. The bytes are copied out and the
+/// clipboard closed before any conversion, so other apps are not kept
+/// waiting while a large bitmap is encoded.
+pub(crate) fn get_image_png() -> io::Result<Option<Vec<u8>>> {
+    let png = png_format()?;
+    let dib = {
+        let _open = Open::new(None)?;
+        if let Some(bytes) = read_format(png)?
+            && super::clip_image::is_png(&bytes)
+        {
+            return Ok(Some(bytes));
+        }
+        read_format(u32::from(CF_DIB.0))?
+    };
+    match dib {
+        Some(dib) => super::clip_image::png_from_dib(&dib)
+            .map(Some)
+            .map_err(io::Error::other),
+        None => Ok(None),
+    }
+}
+
+/// Global memory not yet handed to the clipboard, freed if it never is.
+struct Pending(Option<HGLOBAL>);
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if let Some(memory) = self.0.take() {
+            let _ = unsafe { GlobalFree(Some(memory)) };
+        }
+    }
+}
+
+/// Replace the clipboard with the image in `png_bytes`, as "PNG" and as
+/// `CF_DIB` (Paint and older apps read only the bitmap), and return the
+/// clipboard sequence number this write left. Windows moves the number when
+/// the clipboard closes, so it is read just after; another app copying in
+/// that instant would be taken for this write, a race accepted here.
+///
+/// Both blocks are allocated before the clipboard is emptied: a failure to
+/// allocate leaves what was there.
+pub(crate) fn set_image_png(png_bytes: &[u8]) -> io::Result<u32> {
+    let dib = super::clip_image::dib_from_png(png_bytes).map_err(io::Error::other)?;
+    let png = png_format()?;
+    let mut blocks = [
+        (png, Pending(Some(global_copy(png_bytes)?))),
+        (u32::from(CF_DIB.0), Pending(Some(global_copy(&dib)?))),
+    ];
+    let owner = Owner::new()?;
+    {
+        let _open = Open::new(Some(owner.0))?;
+        unsafe { EmptyClipboard() }.map_err(os_err)?;
+        for (format, block) in &mut blocks {
+            let memory = block.0.expect("set once, taken below");
+            unsafe { SetClipboardData(*format, Some(HANDLE(memory.0))) }.map_err(os_err)?;
+            // The clipboard owns the memory now.
+            block.0 = None;
+        }
+    }
+    Ok(sequence())
+}
+
 /// The clipboard's text, or an empty string when it holds no text.
 pub(crate) fn get_text() -> io::Result<String> {
     let _open = Open::new(None)?;
@@ -153,5 +275,40 @@ mod tests {
         set_text(sample).unwrap();
         assert_eq!(get_text().unwrap(), sample);
         set_text(&previous).unwrap();
+    }
+
+    /// Live: an image put on the real clipboard reads back as the same PNG,
+    /// and as a DIB other apps can read. Leaves the image there (a test
+    /// cannot put back an image it did not read).
+    /// `cargo test -p pocketdesk-server --lib clipboard_holds_an_image -- --ignored`.
+    #[test]
+    #[ignore = "uses the real clipboard on an interactive Windows desktop"]
+    fn clipboard_holds_an_image() {
+        let mut png_bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png_bytes, 2, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&[255, 0, 0, 255, 0, 0, 255, 128])
+                .unwrap();
+        }
+        let before = sequence();
+        let written = set_image_png(&png_bytes).unwrap();
+        assert_ne!(written, before, "the sequence number moves");
+        assert_eq!(sequence(), written, "and is the one the write returned");
+        assert!(!has_text());
+        assert_eq!(get_image_png().unwrap().unwrap(), png_bytes);
+        let _open = Open::new(None).unwrap();
+        let dib = read_format(u32::from(CF_DIB.0)).unwrap().unwrap();
+        drop(_open);
+        assert_eq!(
+            super::super::clip_image::dib_from_png(
+                &super::super::clip_image::png_from_dib(&dib).unwrap()
+            )
+            .unwrap(),
+            dib
+        );
     }
 }

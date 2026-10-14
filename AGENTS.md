@@ -42,6 +42,15 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **N4, image clipboard both ways (branch `feat/image-clipboard`; spec `docs/superpowers/specs/2026-10-14-image-clipboard-design.md`, with an as-built section).**
+  - **New:**
+    - When the desktop's clipboard holds an image and no text, its reply to the phone's 4 s poll carries `{image: {id, size}}`, the id being the PNG's SHA-256. The phone fetches it with `clipboard_image_fetch`, and sends its own with `clipboard_image`.
+    - Either way the desktop dials back, and the PNG travels inside the pinned transfer TLS, at most 32 MiB and 40 megapixels. Both packet types are under the Clipboard permission, not Files.
+    - Windows reads the registered "PNG" format, else `CF_DIB` converted (`platform::clip_image`, tested on every OS), and writes both. Linux uses `wl-paste` / `wl-copy` with `image/png`.
+    - The phone puts a received image on its clipboard through a FileProvider. `ImageClipRule` (JVM-tested) keeps an image from bouncing back.
+  - **Verified on the A71 and this box:** desktop to phone, once each, including the same image again after text in between.
+  - **Owed (checklist §38):** phone to desktop on a device (the A71 has no app that copies an image), pasting, the permission switch, a 4K screenshot, and Linux.
+  - **Fresh review (0 Critical, 6 Important), all fixed:** a decode bomb, the clipboard held open during encoding, stale phone sync state, an old image sent at session start, real photos dropped or sideways, and failed fetches.
 - 2026-10-14: **N3, finding the desktop on the Mainline DHT (branch `feat/dht-lookup`, stacked on `feat/own-relay`; spec `docs/superpowers/specs/2026-10-14-dht-lookup-design.md`, with an as-built section).**
   - **New:**
     - The desktop publishes a record signed with its iroh key on the BitTorrent Mainline DHT (`iroh-mainline-address-lookup`). `dht_publish` says what it holds: `relay` (the default), `addresses` (also public IPs), or `off`. LAN, tailnet and documentation addresses, and relays known by a private address or a home-network name, are never published.

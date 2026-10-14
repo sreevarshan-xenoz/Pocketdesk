@@ -188,6 +188,57 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetClip
     to_jstring(&mut env, json)
 }
 
+/// The desktop's clipboard as JSON: `{content}` or `{image: {id, size}}` (N4).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetClipboardState(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope(RUNTIME.block_on(api::get_clipboard_state(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
+/// Put the PNG at `path` on the desktop's clipboard (N4).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendClipboardImage(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    path: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let path = jstring_to_string(&mut env, &path);
+    let json =
+        envelope_unit(RUNTIME.block_on(api::send_clipboard_image(address, port as u16, path)));
+    to_jstring(&mut env, json)
+}
+
+/// Download the desktop's clipboard image `id` into `path` (N4).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchClipboardImage(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    id: JString<'_>,
+    path: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let id = jstring_to_string(&mut env, &id);
+    let path = jstring_to_string(&mut env, &path);
+    let json = envelope(RUNTIME.block_on(download::fetch_clipboard_image(
+        address,
+        port as u16,
+        id,
+        path,
+    )));
+    to_jstring(&mut env, json)
+}
+
 /// Drain pending KDE Connect packets as JSON strings.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePollIncomingPackets(

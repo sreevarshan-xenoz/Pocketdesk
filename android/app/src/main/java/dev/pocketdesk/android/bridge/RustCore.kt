@@ -31,6 +31,14 @@ object RustCore {
     private external fun nativeConnectToPeer(address: String, port: Int): String
     private external fun nativeSendClipboard(address: String, port: Int, content: String): String
     private external fun nativeGetClipboard(address: String, port: Int): String
+    private external fun nativeGetClipboardState(address: String, port: Int): String
+    private external fun nativeSendClipboardImage(address: String, port: Int, path: String): String
+    private external fun nativeFetchClipboardImage(
+        address: String,
+        port: Int,
+        id: String,
+        path: String,
+    ): String
     private external fun nativePollIncomingPackets(): String
     private external fun nativeSessionStatus(): String
     private external fun nativeIsStreamingActive(): Boolean
@@ -205,6 +213,26 @@ object RustCore {
 
     fun getClipboard(address: String, port: Int): Result<String> =
         envelope(nativeGetClipboard(address, port))
+
+    /** The desktop's clipboard: its text, or the id and size of its image (N4). */
+    fun getClipboardState(address: String, port: Int): Result<RemoteClip> =
+        envelope(nativeGetClipboardState(address, port)).mapCatching { json ->
+            val obj = JSONObject(json)
+            val image = obj.optJSONObject("image")
+            if (image != null) {
+                RemoteClip.Image(image.getString("id"), image.getLong("size"))
+            } else {
+                RemoteClip.Text(obj.optString("content", ""))
+            }
+        }
+
+    /** Put the PNG at [path] on the desktop's clipboard (N4). */
+    fun sendClipboardImage(address: String, port: Int, path: String): Result<Unit> =
+        envelope(nativeSendClipboardImage(address, port, path)).map { }
+
+    /** Download the desktop's clipboard image [id] into [path] (N4). */
+    fun fetchClipboardImage(address: String, port: Int, id: String, path: String): Result<Long> =
+        envelope(nativeFetchClipboardImage(address, port, id, path)).mapCatching { it.toLong() }
 
     // ---- Trust store ----
 
@@ -770,6 +798,14 @@ object RustCore {
         val arr = org.json.JSONArray(json)
         List(arr.length()) { arr.getString(it) }
     }.getOrDefault(emptyList())
+}
+
+/** What the desktop's clipboard holds, as its reply says (N4). */
+sealed interface RemoteClip {
+    data class Text(val content: String) : RemoteClip
+
+    /** An image the phone may fetch: [id] is the hex SHA-256 of its PNG. */
+    data class Image(val id: String, val size: Long) : RemoteClip
 }
 
 /** One desktop notification pushed over the control channel (Tier-2 #11c). */

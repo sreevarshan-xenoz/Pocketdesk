@@ -8,6 +8,10 @@ use std::time::Duration;
 
 #[cfg(windows)]
 pub(crate) mod audio_windows;
+// Built everywhere so its conversions are tested on every OS; only Windows
+// reads and writes DIBs.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) mod clip_image;
 #[cfg(windows)]
 pub(crate) mod clipboard_windows;
 #[cfg(windows)]

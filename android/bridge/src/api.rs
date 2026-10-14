@@ -1040,6 +1040,87 @@ pub async fn get_clipboard(address: String, port: u16) -> Result<String, String>
         .to_string())
 }
 
+/// The desktop's clipboard as its reply says (N4), as JSON: `{content}`
+/// for text, or `{image: {id, size}}` for an image the phone may fetch with
+/// [`crate::download::fetch_clipboard_image`].
+pub async fn get_clipboard_state(address: String, port: u16) -> Result<String, String> {
+    let request = NetworkPacket::new("kdeconnect.clipboard.connect");
+    let body = query_peer(
+        &address,
+        port,
+        &request,
+        "kdeconnect.clipboard",
+        Duration::from_secs(5),
+    )
+    .await?;
+    Ok(clipboard_state(&body).to_string())
+}
+
+/// The fields of a clipboard reply the phone uses, and nothing else.
+fn clipboard_state(body: &serde_json::Value) -> serde_json::Value {
+    let mut state = serde_json::json!({});
+    if let Some(image) = body.get("image")
+        && let (Some(id), Some(size)) = (
+            image.get("id").and_then(|v| v.as_str()),
+            image.get("size").and_then(|v| v.as_u64()),
+        )
+    {
+        state["image"] = serde_json::json!({ "id": id, "size": size });
+    } else {
+        state["content"] =
+            serde_json::json!(body.get("content").and_then(|v| v.as_str()).unwrap_or(""));
+    }
+    state
+}
+
+/// Put the PNG at `path` on the desktop's clipboard (N4). The desktop dials
+/// back for the bytes, inside TLS with the pinned desktop, and answers
+/// "saved" only once its clipboard holds the image; a refusal ends the wait.
+pub async fn send_clipboard_image(address: String, port: u16, path: String) -> Result<(), String> {
+    use pocketdesk_core::protocol::clipboard::{CLIPBOARD_IMAGE, MAX_CLIPBOARD_IMAGE};
+    let mut file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|e| format!("Failed to open the image: {e}"))?;
+    let size = file
+        .metadata()
+        .await
+        .map_err(|e| format!("Failed to read the image: {e}"))?
+        .len();
+    if size == 0 || size > MAX_CLIPBOARD_IMAGE {
+        return Err(format!("An image of {size} bytes is not sent"));
+    }
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| format!("Failed to bind port: {e}"))?;
+    let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let key = uuid::Uuid::new_v4().simple().to_string();
+    let request = NetworkPacket::new(CLIPBOARD_IMAGE).with_body(serde_json::json!({
+        "size": size,
+        "port": transfer_port,
+        "key": key,
+    }));
+    let replies = crate::download::send_watching_replies(&address, port, &request)
+        .await
+        .map_err(|e| format!("Failed to offer the image: {e}"))?;
+    let tls = transfer_acceptor(&address)?;
+    let refused = crate::download::refusal_on(replies, key.clone());
+    let accept = tokio::time::timeout(
+        Duration::from_secs(30),
+        accept_transfer(&listener, &key, &tls),
+    );
+    let mut stream = tokio::select! {
+        accepted = accept => accepted.map_err(|_| "The computer did not take the image".to_string())??,
+        reason = refused => return Err(reason),
+    };
+    let sent = pump_counted(&mut file, &mut stream, size, false).await?;
+    if sent != size {
+        return Err(format!(
+            "The image changed while it was sent ({sent} of {size} bytes)"
+        ));
+    }
+    read_status(&mut stream).await
+}
+
 /// The running file transfer's bytes sent and total, for the phone's
 /// progress notification (F7). Reset as each transfer starts.
 pub(crate) static TRANSFER_SENT: std::sync::atomic::AtomicU64 =
@@ -1196,9 +1277,26 @@ where
     R: tokio::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
 {
+    pump_counted(reader, writer, total, true).await
+}
+
+/// [`pump`], counting into the transfer progress only when `counted`: a
+/// clipboard image (N4) must not move a file share's progress notification.
+async fn pump_counted<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    total: u64,
+    counted: bool,
+) -> Result<u64, String>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
     use std::sync::atomic::Ordering;
-    TRANSFER_TOTAL.store(total, Ordering::Relaxed);
-    TRANSFER_SENT.store(0, Ordering::Relaxed);
+    if counted {
+        TRANSFER_TOTAL.store(total, Ordering::Relaxed);
+        TRANSFER_SENT.store(0, Ordering::Relaxed);
+    }
     let mut buffer = vec![0u8; 64 * 1024];
     let mut sent: u64 = 0;
     loop {
@@ -1214,7 +1312,9 @@ where
             .await
             .map_err(|e| format!("Failed to write to stream: {}", e))?;
         sent += n as u64;
-        TRANSFER_SENT.store(sent, Ordering::Relaxed);
+        if counted {
+            TRANSFER_SENT.store(sent, Ordering::Relaxed);
+        }
     }
     writer
         .flush()
@@ -3456,5 +3556,29 @@ mod send_file_tests {
             drop(desktop);
             assert_eq!(presents_key(&mut phone, key).await, ok, "{sent:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod clipboard_state_tests {
+    use super::clipboard_state;
+    use serde_json::json;
+
+    #[test]
+    fn a_reply_is_text_or_an_image_the_phone_can_fetch() {
+        assert_eq!(
+            clipboard_state(&json!({"content": "hi", "timestamp": 1})),
+            json!({"content": "hi"})
+        );
+        assert_eq!(
+            clipboard_state(&json!({"image": {"id": "ab", "size": 3}, "timestamp": 1})),
+            json!({"image": {"id": "ab", "size": 3}})
+        );
+        assert_eq!(
+            clipboard_state(&json!({"image": {"id": "ab"}})),
+            json!({"content": ""}),
+            "an image without its size is not fetched"
+        );
+        assert_eq!(clipboard_state(&json!({})), json!({"content": ""}));
     }
 }

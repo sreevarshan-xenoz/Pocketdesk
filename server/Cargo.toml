@@ -45,6 +45,10 @@ iroh-mainline-address-lookup = "0.6"
 futures-lite = "2"
 # Relay hosts in the DHT record (N3).
 url = "2"
+# Clipboard images (N4): PNG on the wire, DIB for Windows apps.
+png = "0.18"
+# The clipboard image id: SHA-256 (already in the graph through rustls).
+ring = "0.17"
 
 # Cancellation tokens and utilities
 tokio-util.workspace = true

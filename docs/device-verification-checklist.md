@@ -764,6 +764,19 @@ Built on `feat/dht-lookup`. On the Windows box (n0's relays, `dht_publish` at it
 - [ ] A network that blocks outgoing UDP: "Found by id" warns that it was not read back.
 - [ ] The Linux host: the same checks.
 
+## 38. Image clipboard (N4)
+
+Built on `feat/image-clipboard`. On the Windows box, a 320x200 image put on the clipboard as a bitmap only (no PNG format, so the DIB path ran) reached the A71 during a LAN session as a 1196-byte PNG whose SHA-256 matched its id. It was sent once and never sent back. Input was off for the phone throughout.
+
+- [x] Desktop → phone: a bitmap copied on Windows lands in the phone's clipboard cache as PNG, once.
+- [x] After the review fixes: the same image copied again after some text in between moves again, and the text reaches the phone; only the newest image stays in the cache.
+- [x] The Windows clipboard holds a PNG as both "PNG" and `CF_DIB`, and reads it back byte for byte (live ignored test).
+- [ ] Desktop → phone: paste it into a chat app on the phone. (The A71 has no app that pastes images.)
+- [ ] Phone → desktop: copy a photo on the phone and paste it into Paint. (The A71 has no app that copies an image: no browser.)
+- [ ] With the phone's Clipboard permission off, neither direction moves.
+- [ ] A 4K screenshot (over 10 MB): it moves, and the phone's memory holds.
+- [ ] The Linux host (`wl-copy` / `wl-paste` with `image/png`).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
