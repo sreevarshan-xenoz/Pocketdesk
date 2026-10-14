@@ -1389,11 +1389,9 @@ fun RemoteScreen(
             controlPort = controlPort,
             canWake = false,
             onWake = {},
-            onPairAgain = {
-                showDoctor = false
-                pairingMessage = null
-                showPairing = true
-            },
+            // A changed key is fixed only by scanning the code again from
+            // Home; the PIN sheet would trust whoever answers.
+            onPairAgain = null,
             onDismiss = { showDoctor = false },
         )
     }

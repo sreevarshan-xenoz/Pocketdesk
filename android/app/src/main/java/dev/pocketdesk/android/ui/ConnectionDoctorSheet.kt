@@ -59,7 +59,8 @@ fun ConnectionDoctorSheet(
     controlPort: Int,
     canWake: Boolean,
     onWake: () -> Unit,
-    onPairAgain: () -> Unit,
+    /** Remove the computer and scan its code again; null where that cannot be done. */
+    onPairAgain: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -103,7 +104,9 @@ fun ConnectionDoctorSheet(
             } else {
                 LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
                     items(shown, key = { it.code }) { finding ->
-                        FindingRow(finding) { act(context, finding.action, onWake, onPairAgain) }
+                        val action = finding.action.takeUnless { it == FixAction.PAIR_AGAIN && onPairAgain == null }
+                            ?: FixAction.NONE
+                        FindingRow(finding, action) { act(context, action, onWake, onPairAgain ?: {}) }
                     }
                 }
                 Row(
@@ -125,7 +128,7 @@ fun ConnectionDoctorSheet(
 }
 
 @Composable
-private fun FindingRow(finding: Finding, onAction: () -> Unit) {
+private fun FindingRow(finding: Finding, action: FixAction, onAction: () -> Unit) {
     val (glyph, tint) = when (finding.status) {
         Status.GOOD -> LlIcons.Check to MaterialTheme.colorScheme.primary
         Status.WARN -> LlIcons.Warning to MaterialTheme.colorScheme.tertiary
@@ -135,12 +138,14 @@ private fun FindingRow(finding: Finding, onAction: () -> Unit) {
     ListItem(
         leadingContent = { LlIcon(glyph, null, tint = tint) },
         headlineContent = { Text(stringResource(finding.message)) },
-        supportingContent = finding.fix?.let { fix ->
+        supportingContent = if (finding.fix == null && action == FixAction.NONE) {
+            null
+        } else {
             {
                 Column {
-                    Text(stringResource(fix))
-                    if (finding.action != FixAction.NONE) {
-                        TextButton(onClick = onAction) { Text(stringResource(actionLabel(finding.action))) }
+                    finding.fix?.let { Text(stringResource(it)) }
+                    if (action != FixAction.NONE) {
+                        TextButton(onClick = onAction) { Text(stringResource(actionLabel(action))) }
                     }
                 }
             }

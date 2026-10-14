@@ -337,7 +337,7 @@
     <string name="doctor_action_settings">அமைப்புகளைத் திற</string>
     <string name="doctor_action_allow">அனுமதி</string>
     <string name="doctor_action_wake">எழுப்பு</string>
-    <string name="doctor_action_pair">மீண்டும் இணை</string>
+    <string name="doctor_action_pair">மீண்டும் ஸ்கேன் செய்</string>
     <string name="doctor_on_wifi">Wi-Fi உடன் இணைக்கப்பட்டுள்ளது.</string>
     <string name="doctor_on_mobile">மொபைல் டேட்டாவுடன் இணைக்கப்பட்டுள்ளது.</string>
     <string name="doctor_on_network">ஒரு பிணையத்துடன் இணைக்கப்பட்டுள்ளது.</string>
@@ -379,7 +379,7 @@
     <string name="doctor_not_checked">சரிபார்க்கவில்லை.</string>
     <string name="doctor_key_matches">இது உங்கள் கணினி: பாதுகாப்பு விசை பொருந்துகிறது.</string>
     <string name="doctor_key_changed">இந்தக் கணினியின் பாதுகாப்பு விசை மாறிவிட்டது.</string>
-    <string name="doctor_key_changed_fix">அங்கே Pocketdesk-ஐ மீண்டும் நிறுவியிருந்தால், QR குறியீட்டுடன் மீண்டும் இணை. இல்லையெனில் இணைக்காதே.</string>
+    <string name="doctor_key_changed_fix">அங்கே Pocketdesk-ஐ மீண்டும் நிறுவியிருந்தால், இந்தக் கணினியை நீக்கி அதன் இணைப்புக் குறியீட்டை மீண்டும் ஸ்கேன் செய். இல்லையெனில் இணைக்காதே: இடையில் யாராவது இருக்கலாம்.</string>
     <string name="doctor_not_paired">இந்தத் தொலைபேசியிலிருந்து இன்னும் இணைக்கப்படவில்லை.</string>
     <string name="doctor_not_pocketdesk">இந்த முகவரியில் வேறொன்று பதிலளிக்கிறது.</string>
     <string name="doctor_not_pocketdesk_fix">கணினியின் முகவரி மாறியிருக்கலாம். இந்தப் பிணையத்தில் அதை மீண்டும் கண்டறி, அல்லது அதன் QR குறியீட்டை ஸ்கேன் செய்.</string>
@@ -400,4 +400,13 @@
     <string name="doctor_notification_access_off">அறிவிப்பு அணுகல் அணைக்கப்பட்டுள்ளது, எனவே இந்தத் தொலைபேசியின் அறிவிப்புகள் கணினியை அடைய முடியாது.</string>
     <string name="doctor_notification_access_fix">Pocketdesk-க்கு அறிவிப்பு அணுகலை இயக்கு.</string>
     <string name="doctor_texts_off">குறுஞ்செய்தி அனுமதி அணைக்கப்பட்டுள்ளது.</string>
+    <string name="doctor_closed_early">கணினி தான் யார் என்று சொல்வதற்கு முன் இணைப்பை மூடியது. அது வேலையாக இருக்கலாம்.</string>
+    <string name="doctor_closed_early_fix">சிறிது நேரம் காத்திருந்து மீண்டும் சரிபார், அல்லது கணினியில் Pocketdesk-ஐ மீண்டும் தொடங்கு.</string>
+    <string name="doctor_vpn_not_tailnet">ஒரு VPN இயக்கத்தில் உள்ளது, ஆனால் அது Tailscale அல்ல, எனவே இந்த Tailscale முகவரியை அடைய முடியாது.</string>
+    <string name="doctor_reached_routed">கணினி வேறு பிணையத்தில் உள்ளது, ஒரு ரவுட்டர் அல்லது VPN வழியாக அடையப்படுகிறது.</string>
+    <string name="doctor_connect_failed">கணினியுடனான இணைப்பு தோல்வியடைந்தது.</string>
+    <string name="doctor_denied_fix">இந்தத் தொலைபேசியிலுள்ள VPN அல்லது ஃபயர்வால் செயலி அதைத் தடுக்கலாம்.</string>
+    <string name="doctor_video_closed_fix">Pocketdesk பதிலளிக்கிறது, ஆனால் அதன் வீடியோ போர்ட்டில் அல்ல. இந்தக் கணினிக்குச் சேமித்த ஸ்ட்ரீம் போர்ட்டைச் சரிபார், அல்லது அங்கே Pocketdesk-ஐ மீண்டும் தொடங்கு.</string>
+    <string name="doctor_scan_again_title">அதன் இணைப்புக் குறியீட்டை மீண்டும் ஸ்கேன் செய்யவா?</string>
+    <string name="doctor_scan_again_text">இது இந்தத் தொலைபேசியிலிருந்து கணினியையும் அதன் சேமித்த பாதுகாப்பு விசையையும் நீக்கி, ஸ்கேனரைத் திறக்கும். அங்கே Pocketdesk-ஐ மீண்டும் நிறுவியிருந்தால் மட்டும் இதைச் செய்.</string>
 </resources>

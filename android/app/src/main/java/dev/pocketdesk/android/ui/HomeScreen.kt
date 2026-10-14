@@ -82,6 +82,8 @@ fun HomeScreen(
     var wakeSettingsFor by remember { mutableStateOf<String?>(null) }
     // T1: the computer the Connection Doctor is checking.
     var checking by remember { mutableStateOf<HostStore.Host?>(null) }
+    // A computer whose key changed, to remove and scan again (T1).
+    var rescanning by remember { mutableStateOf<HostStore.Host?>(null) }
     // Bumped when wake settings change, so the cards re-read their plans.
     var wakeVersion by remember { mutableIntStateOf(0) }
     // A computer that does not answer Connect, offered "Wake and connect".
@@ -341,9 +343,33 @@ fun HomeScreen(
             },
             onPairAgain = {
                 checking = null
-                onScan()
+                rescanning = host
             },
             onDismiss = { checking = null },
+        )
+    }
+
+    rescanning?.let { host ->
+        AlertDialog(
+            onDismissRequest = { rescanning = null },
+            title = { Text(stringResource(R.string.doctor_scan_again_title)) },
+            text = { Text(stringResource(R.string.doctor_scan_again_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    rescanning = null
+                    HostStore.remove(context, host.address)
+                    hosts = HostStore.hosts(context)
+                    // As Remove does: forget the old key, so the code's key
+                    // can be trusted for this address, then scan it.
+                    scope.launch {
+                        withContext(Dispatchers.IO) { RustCore.forgetPeerCertificate(host.address) }
+                        onScan()
+                    }
+                }) { Text(stringResource(R.string.doctor_action_pair)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { rescanning = null }) { Text(stringResource(R.string.cancel)) }
+            },
         )
     }
 

@@ -12,7 +12,6 @@ import android.os.PowerManager
 import android.system.ErrnoException
 import android.system.OsConstants
 import androidx.core.app.NotificationManagerCompat
-import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 import dev.pocketdesk.android.notify.TextPrefs
@@ -25,6 +24,7 @@ import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.NoRouteToHostException
 import java.net.PortUnreachableException
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -73,12 +73,17 @@ object ConnectionProbe {
         val activity = ctx.getSystemService(ActivityManager::class.java)
         val notificationsOn = PhoneNotificationPrefs.enabled(ctx)
         val textsOn = TextPrefs.show(ctx) || TextPrefs.reply(ctx)
+        // The VPN is Tailscale's when it gives this phone a tailnet address.
+        val vpnTailnet = active?.takeIf { caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }
+            ?.let { cm.getLinkProperties(it) }?.linkAddresses.orEmpty()
+            .any { ConnectionChecks.kindOf(it.address.hostAddress ?: "") == AddressKind.TAILNET }
         return PhoneState(
             link = link,
             captivePortal = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true,
             validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
             hasIpv4 = hasIpv4 || caps == null,
             vpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true,
+            vpnTailnet = vpnTailnet,
             localNetworkAllowed = if (Build.VERSION.SDK_INT >= ANDROID_17) {
                 ctx.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) ==
                     PackageManager.PERMISSION_GRANTED
@@ -89,7 +94,7 @@ object ConnectionProbe {
             batteryOptimized = !power.isIgnoringBatteryOptimizations(ctx.packageName),
             backgroundRestricted = Build.VERSION.SDK_INT >= 28 && activity.isBackgroundRestricted,
             dataSaver = cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED,
-            backgroundFeaturesOn = notificationsOn || textsOn || Prefs.autoReconnect(ctx),
+            backgroundFeaturesOn = notificationsOn || textsOn,
             notificationsAllowed = NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
             notificationAccess = if (notificationsOn || TextPrefs.reply(ctx)) {
                 NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
@@ -97,7 +102,11 @@ object ConnectionProbe {
                 null
             },
             smsAllowed = if (textsOn) {
-                ctx.checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                val granted = { permission: String ->
+                    ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+                }
+                (!TextPrefs.show(ctx) || granted(Manifest.permission.RECEIVE_SMS)) &&
+                    (!TextPrefs.reply(ctx) || granted(Manifest.permission.SEND_SMS))
             } else {
                 null
             },
@@ -144,6 +153,8 @@ object ConnectionProbe {
             Tcp.OK
         } catch (_: SocketTimeoutException) {
             Tcp.TIMEOUT
+        } catch (_: NoRouteToHostException) {
+            Tcp.NO_ROUTE
         } catch (e: Exception) {
             when (errnoOf(e)) {
                 OsConstants.ECONNREFUSED -> Tcp.REFUSED
@@ -151,7 +162,7 @@ object ConnectionProbe {
                 OsConstants.ENETUNREACH -> Tcp.NET_UNREACHABLE
                 OsConstants.EPERM, OsConstants.EACCES -> Tcp.DENIED
                 OsConstants.ETIMEDOUT -> Tcp.TIMEOUT
-                else -> if (e is UnknownHostException) Tcp.NO_NAME else Tcp.TIMEOUT
+                else -> if (e is UnknownHostException) Tcp.NO_NAME else Tcp.OTHER
             }
         }
     }
@@ -172,6 +183,7 @@ object ConnectionProbe {
             "changed" -> Identity.CHANGED
             "not_pinned" -> Identity.NOT_PINNED
             "not_pocketdesk" -> Identity.NOT_POCKETDESK
+            "closed" -> Identity.CLOSED
             else -> Identity.FAILED
         }
 
@@ -192,7 +204,7 @@ object ConnectionProbe {
                     socket.send(DatagramPacket(probe, probe.size))
                     try {
                         socket.receive(reply)
-                        return Udp.ANSWERED
+                        if (isVersionNegotiation(reply.data, reply.length)) return Udp.ANSWERED
                     } catch (_: SocketTimeoutException) {
                         // Try again: one datagram may be lost.
                     }
@@ -205,6 +217,10 @@ object ConnectionProbe {
             Udp.SILENT
         }
     }
+
+    /** A QUIC Version Negotiation packet: a long header with version 0. */
+    internal fun isVersionNegotiation(packet: ByteArray, length: Int): Boolean =
+        length >= 7 && packet[0].toInt() and 0x80 != 0 && (1..4).all { packet[it].toInt() == 0 }
 
     /** A 1200-byte QUIC long-header packet with a reserved version (0x?a?a?a?a). */
     internal fun versionProbe(): ByteArray {

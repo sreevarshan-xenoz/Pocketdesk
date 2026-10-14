@@ -342,7 +342,7 @@
     <string name="doctor_action_settings">Abrir ajustes</string>
     <string name="doctor_action_allow">Permitir</string>
     <string name="doctor_action_wake">Despertar</string>
-    <string name="doctor_action_pair">Vincular de nuevo</string>
+    <string name="doctor_action_pair">Escanear de nuevo</string>
     <string name="doctor_on_wifi">Conectado a Wi-Fi.</string>
     <string name="doctor_on_mobile">Conectado a datos móviles.</string>
     <string name="doctor_on_network">Conectado a una red.</string>
@@ -384,7 +384,7 @@
     <string name="doctor_not_checked">Sin comprobar.</string>
     <string name="doctor_key_matches">Es tu equipo: la clave de seguridad coincide.</string>
     <string name="doctor_key_changed">La clave de seguridad de este equipo ha cambiado.</string>
-    <string name="doctor_key_changed_fix">Si reinstalaste Pocketdesk allí, vuelve a vincular con el código QR. Si no, no te conectes.</string>
+    <string name="doctor_key_changed_fix">Si reinstalaste Pocketdesk allí, quita este equipo y escanea de nuevo su código de vinculación. Si no, no te conectes: puede haber alguien en medio.</string>
     <string name="doctor_not_paired">Aún no vinculado desde este teléfono.</string>
     <string name="doctor_not_pocketdesk">Otra cosa responde en esta dirección.</string>
     <string name="doctor_not_pocketdesk_fix">Puede que la dirección del equipo haya cambiado. Búscalo de nuevo en esta red o escanea su código QR.</string>
@@ -405,4 +405,13 @@
     <string name="doctor_notification_access_off">El acceso a notificaciones está desactivado, así que las notificaciones de este teléfono no llegan al equipo.</string>
     <string name="doctor_notification_access_fix">Activa el acceso a notificaciones para Pocketdesk.</string>
     <string name="doctor_texts_off">El permiso de mensajes está desactivado.</string>
+    <string name="doctor_closed_early">El equipo cerró la conexión antes de identificarse. Puede que esté ocupado.</string>
+    <string name="doctor_closed_early_fix">Espera un momento y vuelve a comprobar, o reinicia Pocketdesk en el equipo.</string>
+    <string name="doctor_vpn_not_tailnet">Hay una VPN activada, pero no es Tailscale, así que no se llega a esta dirección de Tailscale.</string>
+    <string name="doctor_reached_routed">El equipo está en otra red y se llega a él a través de un router o una VPN.</string>
+    <string name="doctor_connect_failed">La conexión con el equipo falló.</string>
+    <string name="doctor_denied_fix">Puede que una app de VPN o cortafuegos de este teléfono lo bloquee.</string>
+    <string name="doctor_video_closed_fix">Pocketdesk responde, pero no en su puerto de vídeo. Revisa el puerto de transmisión guardado para este equipo, o reinicia Pocketdesk allí.</string>
+    <string name="doctor_scan_again_title">¿Escanear de nuevo su código de vinculación?</string>
+    <string name="doctor_scan_again_text">Esto quita el equipo y su clave de seguridad guardada de este teléfono y abre el escáner. Hazlo solo si reinstalaste Pocketdesk allí.</string>
 </resources>

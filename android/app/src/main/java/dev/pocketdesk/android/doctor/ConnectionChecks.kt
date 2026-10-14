@@ -42,6 +42,8 @@ data class PhoneState(
     val validated: Boolean = true,
     val hasIpv4: Boolean = true,
     val vpn: Boolean = false,
+    /** The VPN gives this phone a tailnet address (100.64/10 or Tailscale's IPv6 range). */
+    val vpnTailnet: Boolean = false,
     /** Android 17's local network access; null before Android 17. */
     val localNetworkAllowed: Boolean? = null,
     /** The phone's IPv4 prefixes on Wi-Fi or Ethernet, as (address, length). */
@@ -59,10 +61,10 @@ data class PhoneState(
 )
 
 /** A TCP connect to the control port. */
-enum class Tcp { OK, REFUSED, NO_ROUTE, NET_UNREACHABLE, DENIED, TIMEOUT, NO_NAME, NOT_RUN }
+enum class Tcp { OK, REFUSED, NO_ROUTE, NET_UNREACHABLE, DENIED, TIMEOUT, NO_NAME, OTHER, NOT_RUN }
 
 /** The compare-only TLS identity check. */
-enum class Identity { MATCHES, CHANGED, NOT_PINNED, NOT_POCKETDESK, FAILED, NOT_RUN }
+enum class Identity { MATCHES, CHANGED, NOT_PINNED, NOT_POCKETDESK, CLOSED, FAILED, NOT_RUN }
 
 /** The UDP probe of the stream port. */
 enum class Udp { ANSWERED, REFUSED, SILENT, NOT_RUN }
@@ -129,8 +131,8 @@ object ConnectionChecks {
             }
         }
         vpn(state, kind, probes)?.let { out += it }
-        out += sameNetwork(state, address, kind)
-        out += answers(probes, canWake)
+        out += sameNetwork(state, address, kind, probes.tcp)
+        out += answers(state, probes, canWake)
         out += identity(probes.identity)
         out += videoPort(probes)
         out += background(state)
@@ -157,6 +159,10 @@ object ConnectionChecks {
         kind == AddressKind.TAILNET && !state.vpn -> Finding(
             "tailscale_off", Status.BAD, R.string.doctor_tailscale_off, R.string.doctor_tailscale_off_fix,
         )
+        // One VPN runs at a time: another one turns Tailscale off.
+        kind == AddressKind.TAILNET && !state.vpnTailnet -> Finding(
+            "vpn_not_tailnet", Status.BAD, R.string.doctor_vpn_not_tailnet, R.string.doctor_tailscale_off_fix,
+        )
         kind == AddressKind.TAILNET -> Finding("tailscale_on", Status.GOOD, R.string.doctor_tailscale_on)
         !state.vpn -> null
         probes.tcp != Tcp.OK && probes.tcpViaWifi == Tcp.OK -> Finding(
@@ -165,12 +171,14 @@ object ConnectionChecks {
         else -> Finding("vpn_on", Status.INFO, R.string.doctor_vpn_on)
     }
 
-    private fun sameNetwork(state: PhoneState, address: String, kind: AddressKind): Finding = when {
+    private fun sameNetwork(state: PhoneState, address: String, kind: AddressKind, tcp: Tcp): Finding = when {
         kind == AddressKind.TAILNET -> Finding("tailnet_address", Status.INFO, R.string.doctor_tailnet_address)
         kind == AddressKind.HOSTNAME -> Finding("saved_by_name", Status.INFO, R.string.doctor_saved_by_name)
         kind != AddressKind.PRIVATE_V4 -> Finding("not_lan_address", Status.INFO, R.string.doctor_not_lan_address)
-        state.link == Link.CELLULAR -> Finding("on_mobile_home_address", Status.INFO, R.string.doctor_mobile_home_address)
         onSameNetwork(address, state.lanPrefixes) -> Finding("same_network", Status.GOOD, R.string.doctor_same_network)
+        // Reached anyway: a routed subnet, or a VPN home. Nothing to fix.
+        tcp == Tcp.OK -> Finding("reached_through_router", Status.INFO, R.string.doctor_reached_routed)
+        state.link == Link.CELLULAR -> Finding("on_mobile_home_address", Status.INFO, R.string.doctor_mobile_home_address)
         state.lanPrefixes.isEmpty() -> Finding("network_unknown", Status.INFO, R.string.doctor_network_unknown)
         else -> Finding(
             "other_network", Status.WARN, R.string.doctor_other_network, R.string.doctor_other_network_fix,
@@ -178,7 +186,7 @@ object ConnectionChecks {
         )
     }
 
-    private fun answers(probes: Probes, canWake: Boolean): Finding = when (probes.tcp) {
+    private fun answers(state: PhoneState, probes: Probes, canWake: Boolean): Finding = when (probes.tcp) {
         Tcp.OK -> Finding("answers", Status.GOOD, R.string.doctor_answers)
         Tcp.REFUSED -> Finding("refused", Status.BAD, R.string.doctor_refused, R.string.doctor_refused_fix)
         Tcp.NO_ROUTE -> Finding(
@@ -187,12 +195,19 @@ object ConnectionChecks {
             if (canWake) FixAction.WAKE else FixAction.NONE,
         )
         Tcp.NET_UNREACHABLE -> Finding("net_unreachable", Status.BAD, R.string.doctor_net_unreachable)
-        Tcp.DENIED -> Finding(
-            "denied", Status.BAD, R.string.doctor_denied, R.string.doctor_local_network_denied_fix,
-            FixAction.ASK_LOCAL_NETWORK,
-        )
+        // Android 17's permission, when it is the one missing; otherwise a
+        // VPN or firewall app on the phone.
+        Tcp.DENIED -> if (state.localNetworkAllowed == false) {
+            Finding(
+                "denied", Status.BAD, R.string.doctor_denied, R.string.doctor_local_network_denied_fix,
+                FixAction.ASK_LOCAL_NETWORK,
+            )
+        } else {
+            Finding("denied", Status.BAD, R.string.doctor_denied, R.string.doctor_denied_fix)
+        }
         Tcp.TIMEOUT -> Finding("timeout", Status.BAD, R.string.doctor_timeout, R.string.doctor_timeout_fix)
         Tcp.NO_NAME -> Finding("no_name", Status.BAD, R.string.doctor_no_name, R.string.doctor_no_name_fix)
+        Tcp.OTHER -> Finding("connect_failed", Status.BAD, R.string.doctor_connect_failed)
         Tcp.NOT_RUN -> Finding("answers_not_checked", Status.INFO, R.string.doctor_not_checked)
     }
 
@@ -206,12 +221,19 @@ object ConnectionChecks {
         Identity.NOT_POCKETDESK -> Finding(
             "not_pocketdesk", Status.BAD, R.string.doctor_not_pocketdesk, R.string.doctor_not_pocketdesk_fix,
         )
+        Identity.CLOSED -> Finding(
+            "closed_early", Status.WARN, R.string.doctor_closed_early, R.string.doctor_closed_early_fix,
+        )
         Identity.FAILED, Identity.NOT_RUN -> Finding("key_not_checked", Status.INFO, R.string.doctor_key_not_checked)
     }
 
     private fun videoPort(probes: Probes): Finding = when (probes.udp) {
         Udp.ANSWERED -> Finding("video_port_ok", Status.GOOD, R.string.doctor_video_ok)
-        Udp.REFUSED -> Finding("video_port_closed", Status.BAD, R.string.doctor_video_closed, R.string.doctor_refused_fix)
+        Udp.REFUSED -> if (probes.tcp == Tcp.OK) {
+            Finding("video_port_closed", Status.BAD, R.string.doctor_video_closed, R.string.doctor_video_closed_fix)
+        } else {
+            Finding("video_port_closed", Status.BAD, R.string.doctor_video_closed, R.string.doctor_refused_fix)
+        }
         // UDP silence means something only when TCP got through.
         Udp.SILENT -> if (probes.tcp == Tcp.OK) {
             Finding("video_port_blocked", Status.BAD, R.string.doctor_video_blocked, R.string.doctor_video_blocked_fix)
@@ -247,7 +269,7 @@ object ConnectionChecks {
 
     private fun features(state: PhoneState): List<Finding> {
         val out = mutableListOf<Finding>()
-        if (!state.notificationsAllowed) {
+        if (!state.notificationsAllowed && state.backgroundFeaturesOn) {
             out += Finding(
                 "notifications_off", Status.WARN, R.string.doctor_notifications_off, null, FixAction.OPEN_APP_SETTINGS,
             )
