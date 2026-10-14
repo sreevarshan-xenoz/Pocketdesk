@@ -1322,7 +1322,6 @@ forged log line"
             "kdeconnect.pocketdesk.pair",
             "kdeconnect.battery",
             "kdeconnect.battery.request",
-            "kdeconnect.notification",
             "kdeconnect.notification.request",
             "kdeconnect.pocketdesk.monitors",
             "kdeconnect.pocketdesk.windows",
