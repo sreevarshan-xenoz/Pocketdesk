@@ -28,6 +28,13 @@ pub(crate) fn init() {
             Ok(()) => write_logcat(4, "INFO bridge logging to logcat"),
             Err(e) => write_logcat(6, &format!("ERROR bridge logging not installed: {e}")),
         }
+        // Android discards stderr, so a panic in a spawned task (the control
+        // reader, a transfer) would otherwise end it without a word.
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            write_logcat(6, &format!("ERROR panic: {info}"));
+            default(info);
+        }));
     });
 }
 
