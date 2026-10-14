@@ -75,6 +75,14 @@ pub struct Config {
     /// How many texts the Messages history keeps.
     #[serde(default = "default_sms_keep")]
     pub sms_keep: u32,
+    /// Tell paired phones how to wake this computer: its adapter's MAC and
+    /// broadcast address (roadmap N6).
+    #[serde(default = "default_true")]
+    pub wake_announce: bool,
+    /// The UDP port the home router forwards to this computer for a wake
+    /// from outside, told to phones; 0 when none is set up.
+    #[serde(default)]
+    pub wake_port: u16,
 }
 
 fn default_true() -> bool {
@@ -152,6 +160,8 @@ impl Default for Config {
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
             sms_keep: default_sms_keep(),
+            wake_announce: true,
+            wake_port: 0,
         }
     }
 }
@@ -306,6 +316,8 @@ impl Config {
         "notifications_per_minute",
         "sms_notify",
         "sms_keep",
+        "wake_announce",
+        "wake_port",
     ];
 }
 
@@ -397,6 +409,21 @@ mod tests {
             Config::load_from(&path).is_err(),
             "an unknown value is refused"
         );
+    }
+
+    #[test]
+    fn wake_settings_default_to_announcing_with_no_outside_port_and_save() {
+        let config = Config::default();
+        assert!(config.wake_announce);
+        assert_eq!(config.wake_port, 0);
+        let path = temp("wake-settings");
+        let mut config = Config::load_from(&path).unwrap();
+        config.wake_announce = false;
+        config.wake_port = 40009;
+        config.save_to(&path).unwrap();
+        let back = Config::load_from(&path).unwrap();
+        assert!(!back.wake_announce);
+        assert_eq!(back.wake_port, 40009);
     }
 
     #[test]

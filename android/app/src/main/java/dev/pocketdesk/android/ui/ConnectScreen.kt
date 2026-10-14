@@ -34,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
-import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -128,14 +127,14 @@ fun ConnectScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    enabled = address.isNotBlank() && controlPortValue != null && macValue != null,
+                    enabled = address.isNotBlank() && macValue != null,
                     onClick = {
                         val target = macValue ?: return@OutlinedButton
-                        val relayPort = controlPortValue ?: return@OutlinedButton
                         HostStore.saveWolMac(context, address.trim(), target)
                         scope.launch {
+                            // From this phone, as the computer's wake settings say.
                             val result = withContext(Dispatchers.IO) {
-                                RustCore.wakeViaRelay(address.trim(), relayPort, target)
+                                dev.pocketdesk.android.wake.Waker.wake(context, address.trim())
                             }
                             wakeStatusRes =
                                 if (result.isSuccess) R.string.wake_sent else R.string.wake_failed

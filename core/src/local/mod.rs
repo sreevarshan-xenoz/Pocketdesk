@@ -20,3 +20,4 @@ pub mod sent;
 pub mod server;
 pub mod sessions;
 pub mod sms;
+pub mod wake;

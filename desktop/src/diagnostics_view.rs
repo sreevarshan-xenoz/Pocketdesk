@@ -176,6 +176,17 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
         !config.relay_urls.is_empty(),
     ));
     findings.push(diagnostics::check_dht(wan_status.as_ref(), state));
+    // N6: the adapter a phone on this network would wake it through.
+    let wake = pocketdesk_core::local::wake::wake_facts(None);
+    let allowed = wake
+        .as_ref()
+        .map(|facts| wake_allowed(&facts.adapter))
+        .unwrap_or(diagnostics::WakeAllowed::Unknown);
+    findings.push(diagnostics::check_wake(
+        wake.as_ref(),
+        allowed,
+        config.wake_announce,
+    ));
     Report {
         findings,
         last_session: diagnostics::last_session(state_dir),
@@ -215,6 +226,54 @@ fn firewall_state(state_dir: &Path) -> Option<Result<diagnostics::FirewallState,
 #[cfg(windows)]
 const FIREWALL_QUERY: &str = r"$ErrorActionPreference = 'SilentlyContinue'; $profiles = @(Get-NetConnectionProfile | ForEach-Object { $c = $_.NetworkCategory.ToString(); if ($c -eq 'DomainAuthenticated') { 'Domain' } else { $c } } | Select-Object -Unique); $rules = @(Get-NetFirewallRule -Group 'Pocketdesk' -Enabled True -Direction Inbound); if ($Exe) { $rules += @(Get-NetFirewallApplicationFilter | Where-Object { $_.Program -eq $Exe } | Get-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' }) }; $rules = @($rules | Sort-Object -Property Name -Unique); $applies = @($rules | Where-Object { $p = $_.Profile.ToString(); $p -eq 'Any' -or @($profiles | Where-Object { $p -match $_ }).Count -gt 0 }); '{0},{1},{2}' -f @($applies | Where-Object { $_.Action -eq 'Allow' }).Count, @($applies | Where-Object { $_.Action -eq 'Block' }).Count, ($profiles -join '/')";
 
+/// Whether `adapter` lets a magic packet wake this computer: Windows'
+/// `Get-NetAdapterPowerManagement`.
+#[cfg(windows)]
+fn wake_allowed(adapter: &str) -> diagnostics::WakeAllowed {
+    let name = single_quoted(adapter);
+    // Some drivers (Realtek here) fail the power-management query; NDIS's
+    // standard *WakeOnMagicPacket keyword answers for them.
+    let script = format!(
+        "$ErrorActionPreference = 'SilentlyContinue'; $v = (Get-NetAdapterPowerManagement -Name '{name}').WakeOnMagicPacket; if (-not $v) {{ $k = (Get-NetAdapterAdvancedProperty -Name '{name}' -RegistryKeyword '*WakeOnMagicPacket').RegistryValue; if ($k -eq '1') {{ $v = 'Enabled' }} elseif ($k -eq '0') {{ $v = 'Disabled' }} }}; $v"
+    );
+    let powershell = crate::restart::system32("WindowsPowerShell\\v1.0\\powershell.exe");
+    pocketdesk_core::local::network::output_within(
+        &powershell.to_string_lossy(),
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+        std::time::Duration::from_secs(10),
+    )
+    .map(|out| diagnostics::parse_wake_allowed(&String::from_utf8_lossy(&out)))
+    .unwrap_or(diagnostics::WakeAllowed::Unknown)
+}
+
+/// The text of a PowerShell single-quoted string: each quote PowerShell
+/// reads as one (the ASCII quote and U+2018-U+201B) is doubled.
+#[cfg(any(windows, test))]
+fn single_quoted(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Whether `adapter` lets a magic packet wake this computer: `ethtool`'s
+/// `Wake-on:` line. Without ethtool it is not known: sysfs' power/wakeup
+/// says only that the device may wake the system, not by magic packet.
+#[cfg(not(windows))]
+fn wake_allowed(adapter: &str) -> diagnostics::WakeAllowed {
+    pocketdesk_core::local::network::output_within(
+        "ethtool",
+        &[adapter],
+        std::time::Duration::from_secs(3),
+    )
+    .map(|out| diagnostics::parse_wake_allowed(&String::from_utf8_lossy(&out)))
+    .unwrap_or(diagnostics::WakeAllowed::Unknown)
+}
+
 #[cfg(not(windows))]
 fn firewall_state(_state_dir: &Path) -> Option<Result<diagnostics::FirewallState, String>> {
     None
@@ -229,6 +288,16 @@ fn now_unix() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_quote_powershell_reads_is_doubled() {
+        assert_eq!(super::single_quoted("Ethernet 2"), "Ethernet 2");
+        assert_eq!(super::single_quoted("Bob's"), "Bob''s");
+        assert_eq!(
+            super::single_quoted("a\u{2019}b\u{2018}c"),
+            "a\u{2019}\u{2019}b\u{2018}\u{2018}c"
+        );
+    }
+
     /// The tab's checks against this computer's real state and server.
     /// Ignored: it reads the live state directory and needs the server.
     #[test]

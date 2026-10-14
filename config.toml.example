@@ -57,6 +57,13 @@ video_quality = "balanced"
 # sms_notify = true
 # sms_keep = 1000
 
+# Waking this computer from the phone. Paired phones are told this
+# computer's network adapter (MAC and broadcast address) so they can send
+# the magic packet themselves. To wake it from outside, forward a UDP port
+# on the router to this computer and give that port here; 0 means none.
+# wake_announce = true
+# wake_port = 0
+
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a
 # program to provide a microphone; apps then record from its other end.

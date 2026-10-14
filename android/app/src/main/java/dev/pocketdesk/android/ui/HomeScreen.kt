@@ -20,7 +20,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -31,20 +33,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.discovery.FoundComputer
 import dev.pocketdesk.android.discovery.FoundComputers
 import dev.pocketdesk.android.discovery.rememberFoundComputers
+import dev.pocketdesk.android.wake.Waker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
  * Landing screen: the saved-desktop card list. Tapping a card connects;
- * each card carries its own wake (when a WoL MAC is stored) and remove
- * action, and "Add computer" opens the ConnectScreen form. Replaces the
- * old single-host form as the default landing view (UI refresh).
+ * each card carries its own wake (when it can be woken), wake settings and
+ * remove actions, and "Add computer" opens the ConnectScreen form.
  */
 @Composable
 fun HomeScreen(
@@ -72,6 +76,64 @@ fun HomeScreen(
     val found by rememberFoundComputers()
     val network = FoundComputers.merge(found, hosts)
     var confirming by remember { mutableStateOf<FoundComputer?>(null) }
+    // N6: a computer being woken, watched until it answers.
+    var waking by remember { mutableStateOf<Waking?>(null) }
+    var wakingLeft by remember { mutableIntStateOf(0) }
+    var wakeSettingsFor by remember { mutableStateOf<String?>(null) }
+    // Bumped when wake settings change, so the cards re-read their plans.
+    var wakeVersion by remember { mutableIntStateOf(0) }
+    // A computer that does not answer Connect, offered "Wake and connect".
+    var offeringWake by remember { mutableStateOf<HostStore.Host?>(null) }
+
+    // The computer is awake once its server answers on the control port
+    // (whatever address it is saved under). Away, a LAN address never
+    // answers, so the wait is shorter and the connection retries by itself.
+    LaunchedEffect(waking) {
+        val w = waking ?: return@LaunchedEffect
+        val limit = if (w.atHome) WAKE_WAIT_HOME_S else WAKE_WAIT_AWAY_S
+        val started = System.currentTimeMillis()
+        while (true) {
+            val elapsed = ((System.currentTimeMillis() - started) / 1_000).toInt()
+            if (elapsed >= limit) break
+            wakingLeft = limit - elapsed
+            val awake = withContext(Dispatchers.IO) { Waker.answers(w.host.address, w.host.controlPort) }
+            if (awake) {
+                waking = null
+                if (w.connect) {
+                    onConnect(w.host)
+                } else {
+                    wakeStatusRes = R.string.wake_awake
+                    wakeStatusArg = w.host.address
+                }
+                return@LaunchedEffect
+            }
+            delay(2_000)
+        }
+        waking = null
+        if (w.connect) {
+            onConnect(w.host)
+        } else {
+            wakeStatusRes = if (w.atHome) R.string.wake_no_answer else R.string.wake_sent
+            wakeStatusArg = w.host.address
+        }
+    }
+
+    // Send the wake, then watch for the computer to answer.
+    fun startWake(host: HostStore.Host, connect: Boolean) {
+        wakeStatusRes = null
+        scope.launch(Dispatchers.IO) {
+            val result = Waker.wake(context, host.address)
+            val atHome = Waker.atHome(context, host.address)
+            withContext(Dispatchers.Main) {
+                if (result.isSuccess) {
+                    waking = Waking(host, atHome, connect)
+                } else {
+                    wakeStatusRes = R.string.wake_failed
+                    wakeStatusArg = result.exceptionOrNull()?.message
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -152,24 +214,24 @@ fun HomeScreen(
                         online = host.address in network.savedOnline,
                         isAuto = autoConnect && host == hosts.first(),
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
-                        hasWake = HostStore.wolMac(context, host.address).isNotBlank(),
-                        onConnect = { onConnect(host) },
-                        onWake = {
-                            val mac = HostStore.wolMac(context, host.address)
-                            scope.launch(Dispatchers.IO) {
-                                val result =
-                                    RustCore.wakeViaRelay(host.address, host.controlPort, mac)
-                                withContext(Dispatchers.Main) {
-                                    wakeStatusRes =
-                                        if (result.isSuccess) R.string.wake_sent else R.string.wake_failed
-                                    wakeStatusArg = if (result.isSuccess) {
-                                        host.address
-                                    } else {
-                                        result.exceptionOrNull()?.message
+                        hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
+                        onConnect = {
+                            if (!Prefs.offerWake(context)) {
+                                onConnect(host)
+                            } else {
+                                // A computer that can be woken and does not
+                                // answer may be asleep: offer to wake it.
+                                scope.launch {
+                                    val asleep = withContext(Dispatchers.IO) {
+                                        Waker.canWake(Waker.planFor(context, host.address)) &&
+                                            !Waker.answers(host.address, host.controlPort)
                                     }
+                                    if (asleep) offeringWake = host else onConnect(host)
                                 }
                             }
                         },
+                        onWake = { startWake(host, Prefs.connectAfterWake(context)) },
+                        onWakeSettings = { wakeSettingsFor = host.address },
                         onRemove = { removing = host },
                     )
                 }
@@ -182,6 +244,23 @@ fun HomeScreen(
                             Text(stringResource(R.string.add_computer))
                         }
                     }
+                }
+            }
+            waking?.let { w ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.wake_waking, w.host.address, wakingLeft),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { waking = null }) { Text(stringResource(R.string.cancel)) }
                 }
             }
             wakeStatusRes?.let { res ->
@@ -221,6 +300,37 @@ fun HomeScreen(
                 ) { Text(stringResource(R.string.scan_pairing_code)) }
             },
         )
+    }
+
+    offeringWake?.let { host ->
+        AlertDialog(
+            onDismissRequest = { offeringWake = null },
+            title = { Text(stringResource(R.string.wake_offer_title, host.address)) },
+            text = { Text(stringResource(R.string.wake_offer_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        offeringWake = null
+                        startWake(host, connect = true)
+                    },
+                ) { Text(stringResource(R.string.wake_and_connect)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        offeringWake = null
+                        onConnect(host)
+                    },
+                ) { Text(stringResource(R.string.connect_anyway)) }
+            },
+        )
+    }
+
+    wakeSettingsFor?.let { address ->
+        WakeSettingsDialog(address) {
+            wakeSettingsFor = null
+            wakeVersion++
+        }
     }
 
     removing?.let { host ->
@@ -291,6 +401,7 @@ private fun HostCard(
     hasWake: Boolean,
     onConnect: () -> Unit,
     onWake: () -> Unit,
+    onWakeSettings: () -> Unit,
     onRemove: () -> Unit,
 ) {
     Card(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
@@ -343,6 +454,9 @@ private fun HostCard(
                         Text(stringResource(R.string.wake), style = MaterialTheme.typography.labelMedium)
                     }
                 }
+                TextButton(onClick = onWakeSettings) {
+                    Text(stringResource(R.string.wake_settings), style = MaterialTheme.typography.labelMedium)
+                }
                 TextButton(onClick = onRemove) {
                     Text(
                         stringResource(R.string.remove_host),
@@ -354,3 +468,12 @@ private fun HostCard(
         }
     }
 }
+
+/** A computer being woken: whether the phone is on its network, and whether to connect once it answers. */
+private data class Waking(val host: HostStore.Host, val atHome: Boolean, val connect: Boolean)
+
+/** How long the phone watches for a woken computer at home, in seconds. */
+private const val WAKE_WAIT_HOME_S = 90
+
+/** How long it waits before connecting from outside, where nothing can be seen, in seconds. */
+private const val WAKE_WAIT_AWAY_S = 30

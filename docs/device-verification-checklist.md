@@ -393,7 +393,7 @@ Verified on OPPO CPH2359 over the tailnet, 2026-09-22:
       (auto-expanded when editing a known host), auto-connect switch, disabled Connect until address is valid, Cancel back to home.
 - [x] Advanced expander reveals streaming/control port fields (pre-filled defaults) + WoL MAC field with a Send button gated on a valid MAC.
 - [x] Remove shows a confirm dialog naming the address and warning that pairing + cached settings go with it; Cancel dismisses without deleting.
-- [ ] Wake row + wake status appear only for hosts with a saved WoL MAC (not exercised — none saved).
+- [ ] Wake row + wake status appear only for hosts the phone knows how to wake (since N6: what the computer announced, or a typed MAC; see §42).
 - [ ] Multi-host scenarios (second card ordering, remove-then-readd) and es/ta strings for the new keys.
 
 ## 21. UI polish pass C1–C9 (design system, immersive session, error UX, settings)
@@ -716,7 +716,7 @@ Built on `feat/shortcuts`. Checked on 2026-10-13 with the Galaxy A71 against the
 - [x] A request for a computer that is not saved opens nothing.
 - [x] The Quick Settings tile connects to the last computer; with none saved, it is unavailable.
 - [ ] Place the widget on the home screen: it names the last computer and connects on a tap; with none saved it opens the app.
-- [ ] A Wake shortcut appears for a computer with a Wake-on-LAN address, and sends the packet.
+- [ ] A Wake shortcut appears for a computer the phone can wake (§42), and sends the packet.
 - [ ] Pin a shortcut to the home screen; it survives the computer being reconnected, and stops working once the computer is removed.
 - [ ] Android 13 or older: the tile opens the session (the older collapse path).
 
@@ -826,6 +826,24 @@ Afterwards everything was turned off again.
 - [ ] "New text" to a new number.
 - [ ] The phone's Texts permission off on the desktop: texts are not kept, and replies fail with the reason.
 - [ ] The Linux host.
+
+## 42. Wake from the phone (N6)
+
+Built on `feat/wake`. Sleeping this computer is off limits, so the run checked what the phone sends, with a UDP listener on this box. Whether a sleeping computer wakes is the user's to check.
+
+- [x] A session tells the phone how to wake the computer: it saved the computer's MAC, its subnet broadcast (192.168.1.255) and "wired" under that computer's address (the session was forced view-only).
+- [x] Wake on the card sends 9 magic packets for this computer's MAC: three rounds of the subnet broadcast, 255.255.255.255 (port 9), and the outside address at the outside port. Then "192.168.1.101 is awake." (the control port answered).
+- [x] Wake settings shows what the computer said and the saved method, outside address and port.
+- [x] Connect on a computer that can be woken but does not answer offers "Wake and connect" / "Connect anyway". "Wake and connect" sent the wake (a typed MAC, nothing learned: the 255.255.255.255 broadcast only) and counted down 30 s with Cancel.
+- [x] Diagnostics on this box: "Ethernet (wired) allows waking by magic packet" (read through the NDIS keyword; this Realtek driver fails the power-management query).
+- [ ] **Sleep, then wake from the phone at home** (Ethernet): the computer wakes, and the card connects once it answers.
+- [ ] **From outside:** forward a UDP port on the router to the computer, set it as "Outside wake port", sleep the computer, and wake it from a phone on mobile data. Note how long after sleep the router still delivers it.
+- [ ] Hibernate and shutdown (Windows fast startup off), and Wi-Fi only.
+- [ ] "Through another computer": an always-on computer relays the wake.
+- [ ] Away from home (another Wi-Fi): no broadcast is sent, only the outside packet; with no outside port, Wake says the phone is away and nothing is set up.
+- [ ] A computer saved by its tailnet address counts as awake once its server answers.
+- [ ] Turn "Wake from the phone" off on the desktop: after the next connection the phone forgets the MAC, and Wake disappears.
+- [ ] The Linux host (ethtool's Wake-on, and the adapter chosen).
 
 ## Recording results
 

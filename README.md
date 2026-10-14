@@ -68,7 +68,15 @@ Pocketdesk is a **pure Rust** remote desktop solution, built first for Linux (Wa
 - **In-session keyboard** — type into the desktop with the phone's own keyboard (live typing, swipe and autocorrect work), with a bar of latching Ctrl/Alt/Shift/Super, Esc, Tab, arrows, Home/End/PgUp/PgDn, F1–F12 and Ctrl+Alt+Del; a hardware keyboard works too
 - **Laptop-style trackpad** — one-finger tap left-clicks, two- and three-finger taps right- and middle-click, tap-then-drag holds the button, two fingers scroll, and the cursor speed is a slider in Settings
 - **Phone mic share** — one tap turns the phone's microphone into a desktop input device ("Pocketdesk Mic" PipeWire source, Opus over the session stream): take calls on the PC from the phone; stays live in view-only mode and dies with the session
-- **Wake-on-LAN relay** — wake a sleeping desktop from WAN by asking an always-on Linux peer on its LAN to emit the magic packet ("Send Wake-on-LAN" in the app)
+- **Wake from the phone** — Wake on a computer's card sends the magic packet from the phone itself, no second always-on device needed:
+  - **Learning how.** While connected, the computer tells the phone its adapter's MAC and broadcast address (desktop Settings "Wake from the phone"; Diagnostics' "Wake" row says whether the adapter allows it).
+  - **At home,** the phone broadcasts it on the network.
+  - **From outside,** it sends it to the home's public address on the "Outside wake port". That needs a router forward of that UDP port to the computer, and it works while the router still remembers the computer (minutes to hours after it sleeps), or always when the router can forward to the network's broadcast address.
+  - **Through another computer:** an always-on computer can send it instead.
+  - **Then connect:** the card waits for the computer to answer, and connects ("Connect after waking"). Connect on a computer that does not answer offers "Wake and connect".
+  - **Per computer:** "Wake settings" sets the method, the relay, the outside address and port, and the MAC.
+
+  Wi-Fi adapters usually wake a computer only from sleep, not from shutdown.
 - **Input control** — remote mouse/keyboard via trackpad gestures
 - **Battery info** — monitor Android device battery from Linux
 - **Presenter mode** — play/pause/next/previous from Android

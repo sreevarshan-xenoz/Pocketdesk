@@ -23,6 +23,8 @@ object Prefs {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
+    private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
+    private const val KEY_OFFER_WAKE = "offer_wake"
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
     private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
 
@@ -85,6 +87,24 @@ object Prefs {
 
     fun haptics(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_HAPTICS, true)
+
+    /** Wake opens the session once the computer answers (N6). */
+    fun connectAfterWake(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_CONNECT_AFTER_WAKE, true)
+
+    fun setConnectAfterWake(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CONNECT_AFTER_WAKE, enabled) }
+        bump()
+    }
+
+    /** Connect checks first, and offers "Wake and connect" to a computer that does not answer (N6). */
+    fun offerWake(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_OFFER_WAKE, true)
+
+    fun setOfferWake(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_OFFER_WAKE, enabled) }
+        bump()
+    }
 
     fun setHaptics(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_HAPTICS, enabled) }

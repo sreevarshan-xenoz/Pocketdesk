@@ -163,6 +163,22 @@ fun SettingsScreen(onBack: () -> Unit) {
                 trailingContent = { Text("%.2f×".format(speed), style = MaterialTheme.typography.labelLarge) },
             )
 
+            // N6: what Wake does once the packet is out. How each computer
+            // is woken is set on its card ("Wake settings").
+            Header(stringResource(R.string.settings_wake))
+            boolRow(
+                LlIcons.Desktop,
+                stringResource(R.string.settings_connect_after_wake),
+                stringResource(R.string.settings_connect_after_wake_summary),
+                Prefs.connectAfterWake(context),
+            ) { Prefs.setConnectAfterWake(context, it) }
+            boolRow(
+                LlIcons.Desktop,
+                stringResource(R.string.settings_offer_wake),
+                stringResource(R.string.settings_offer_wake_summary),
+                Prefs.offerWake(context),
+            ) { Prefs.setOfferWake(context, it) }
+
             PhoneNotificationsSection()
             TextsSection()
 

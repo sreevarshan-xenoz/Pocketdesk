@@ -698,6 +698,9 @@ fun RemoteScreen(
                 cached = identity
                 HostStore.saveWanIdentity(context, address, identity)
             }
+            // How to wake it later, from this phone (N6).
+            withContext(Dispatchers.IO) { RustCore.wakeInfo(address, controlPort) }
+                ?.let { HostStore.saveWakeInfo(context, address, it) }
             delay(5_000)
         }
     }

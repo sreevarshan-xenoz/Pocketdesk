@@ -1,6 +1,10 @@
 package dev.pocketdesk.android
 
 import android.content.Context
+import androidx.core.content.edit
+import dev.pocketdesk.android.wake.WakeInfo
+import dev.pocketdesk.android.wake.WakeMethod
+import dev.pocketdesk.android.wake.WakeSettings
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -81,6 +85,8 @@ object HostStore {
         writeHosts(ctx, hosts(ctx).filterNot { it.address == address })
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .remove("$KEY_WOL_MAC_PREFIX$address")
+            .remove("$KEY_WAKE_INFO_PREFIX$address")
+            .remove("$KEY_WAKE_SETTINGS_PREFIX$address")
             .remove("$KEY_WAN_IDENTITY_PREFIX$address")
             .remove("$KEY_MONITOR_PREFIX$address")
             .remove("$KEY_PAIRED_PREFIX$address")
@@ -107,13 +113,89 @@ object HostStore {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString("$KEY_WOL_MAC_PREFIX$address", "").orEmpty()
 
+    /** The MAC typed for [address]: it becomes the one its wake settings use. */
     fun saveWolMac(ctx: Context, address: String, mac: String) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("$KEY_WOL_MAC_PREFIX$address", mac)
-            .apply()
+        saveWakeSettings(ctx, address, wakeSettings(ctx, address).copy(mac = mac))
     }
 
     private const val KEY_WOL_MAC_PREFIX = "wol_mac:"
+    private const val KEY_WAKE_INFO_PREFIX = "wake_info:"
+    private const val KEY_WAKE_SETTINGS_PREFIX = "wake_settings:"
+
+    /** How the computer at [address] said it can be woken (N6), or null. */
+    fun wakeInfo(ctx: Context, address: String): WakeInfo? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("$KEY_WAKE_INFO_PREFIX$address", null)
+            ?.let { json ->
+                runCatching {
+                    val o = JSONObject(json)
+                    WakeInfo(
+                        mac = o.getString("mac"),
+                        broadcast = o.optString("broadcast"),
+                        wired = o.optBoolean("wired"),
+                        port = o.optInt("port"),
+                    )
+                }.getOrNull()
+            }
+
+    /** Keep the `wake_info` body the computer sent; returns whether it changed. */
+    fun saveWakeInfo(ctx: Context, address: String, json: String): Boolean {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString("$KEY_WAKE_INFO_PREFIX$address", null) == json) return false
+        prefs.edit { putString("$KEY_WAKE_INFO_PREFIX$address", json) }
+        return true
+    }
+
+    /**
+     * The user's wake settings for [address]. A MAC typed before N6 carries
+     * over with what Wake did then: ask the saved computer itself, an
+     * always-on one, to send it.
+     */
+    fun wakeSettings(ctx: Context, address: String): WakeSettings {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val legacyMac = prefs.getString("$KEY_WOL_MAC_PREFIX$address", "").orEmpty()
+        val json = prefs.getString("$KEY_WAKE_SETTINGS_PREFIX$address", null)
+            ?: return legacyWakeSettings(address, legacyMac, wakeInfo(ctx, address)?.mac)
+        return runCatching {
+            val o = JSONObject(json)
+            WakeSettings(
+                method = runCatching {
+                    WakeMethod.valueOf(o.optString("method"))
+                }.getOrDefault(WakeMethod.AUTO),
+                relay = o.optString("relay"),
+                outsideHost = o.optString("outsideHost"),
+                outsidePort = o.optInt("outsidePort"),
+                mac = o.optString("mac"),
+            )
+        }.getOrDefault(WakeSettings(mac = legacyMac))
+    }
+
+    /**
+     * Settings for a computer saved before N6 with a typed MAC: Wake asked
+     * the saved computer to send it, so it stays a relay, unless the
+     * computer itself announced that same MAC (then it is the one asleep,
+     * and the phone wakes it directly).
+     */
+    private fun legacyWakeSettings(address: String, legacyMac: String, learnedMac: String?): WakeSettings {
+        if (legacyMac.isBlank()) return WakeSettings()
+        fun norm(mac: String) = mac.filter { it.isLetterOrDigit() }.uppercase()
+        if (learnedMac != null && norm(learnedMac) == norm(legacyMac)) return WakeSettings(mac = legacyMac)
+        return WakeSettings(method = WakeMethod.RELAY, relay = address, mac = legacyMac)
+    }
+
+    fun saveWakeSettings(ctx: Context, address: String, settings: WakeSettings) {
+        val json =
+            JSONObject()
+                .put("method", settings.method.name)
+                .put("relay", settings.relay)
+                .put("outsideHost", settings.outsideHost)
+                .put("outsidePort", settings.outsidePort)
+                .put("mac", settings.mac)
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString("$KEY_WAKE_SETTINGS_PREFIX$address", json.toString())
+            putString("$KEY_WOL_MAC_PREFIX$address", settings.mac)
+        }
+    }
 
     fun autoConnect(ctx: Context): Boolean =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO, false)
