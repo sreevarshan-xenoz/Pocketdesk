@@ -42,6 +42,14 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-14: **T3 begun, getting into F-Droid (branch `feat/fdroid-ready`; plan in `docs/research/2026-10-14-fdroid.md`).**
+  - **Done:**
+    - The QR scanner decodes with zxing-cpp, not ML Kit. ML Kit was proprietary, sent Google usage data and failed F-Droid's scanner.
+    - The APK is arm64-only, with no dependency-info block and no stray iroh cdylibs (debug APK 84 → 62 MB).
+  - **The first instrumented test** (`QrDecodeTest`, run on the A71) decodes the desktop app's QR, normal and inverted. Its module grid is held to the desktop's encoder by a desktop test.
+  - **Lesson:** `connectedDebugAndroidTest` uninstalls the app when it ends. The A71 lost its pairings and was paired again; its old id stays in the desktop's trusted devices. Pass `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`.
+  - **IzzyOnDroid** rejects apps built partly with generative AI, so it is unlikely; F-Droid has no such rule yet.
+  - **Next:** a pinned toolchain and one bridge build script, reproducibility, signing without re-aligning, the store listing, a tagged release, then the fdroiddata recipe.
 - 2026-10-14: **T1, Check connection on the phone (branch `feat/connection-doctor`; spec `docs/superpowers/specs/2026-10-14-connection-doctor-design.md`, research in `docs/research/2026-10-14-what-users-need.md`).**
   - **What it checks:**
     - the phone's network;
