@@ -62,15 +62,15 @@ Tailscale is not required. It carries everything, adds a second encrypted layer 
 
 ## What works where
 
-The desktop end runs on Linux and Windows; the phone end is the Android app. "Device-checked" means a person ran it on real hardware (dates and details in [the checklist](docs/device-verification-checklist.md)); everything else is unit- or integration-tested only.
+The desktop end runs on Linux and Windows; the phone end is the Android app. The last row says what a person has run on real hardware (dates and details in [the checklist](docs/device-verification-checklist.md)); everything else is unit- or integration-tested only.
 
 | | Linux host | Windows host |
 |---|---|---|
 | Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE), X11 | Windows.Graphics.Capture, DXGI duplication |
-| Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation |
-| Remote input | uinput (Wayland), XTEST (X11) | `SendInput` (not elevated windows or UAC unless installed elevated) |
-| Clipboard, text and images | `wl-clipboard` | Win32 clipboard |
-| Files both ways, remote browsing | yes | yes |
+| Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
+| Remote input | uinput (Wayland), XTEST (X11) | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
+| Clipboard, text and images (same network or Tailscale) | `wl-clipboard` (Wayland only) | Win32 clipboard |
+| Files both ways, remote browsing (same network or Tailscale) | yes | yes |
 | Desktop sound on the phone | PipeWire | WASAPI loopback |
 | The phone's mic on the desktop | a PipeWire source, "Pocketdesk Mic" | needs a virtual audio cable (VB-CABLE) |
 | The phone's notifications and texts | D-Bus notifications | toasts |
@@ -80,7 +80,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. "De
 | Window and workspace HUD | Hyprland | windows (polled) |
 | Start at login | systemd user unit | `pocketdesk install` (a logon task and firewall rules) |
 | Desktop app tray | no (closing quits) | yes |
-| Device-checked | Hyprland on a laptop (2026-09), a headless Sway VM across the internet (2026-10-14) | most features, with a Galaxy A71 (2026-10) |
+| Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard). Not yet: files, notifications and texts, sound on the phone, GNOME/KDE, the desktop app | most rows, with a Galaxy A71 (2026-10). Not yet: start at login, the tray menu, single-window streaming |
 
 The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 (Android 16) and an OPPO Reno8 (ColorOS).
 
