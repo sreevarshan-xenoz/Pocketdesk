@@ -68,7 +68,8 @@ Each item gets its own spec section, results written into the checklist, and fix
 - **R3:** done (branch `fix/r3-security`). Every case has a test, and the fresh review's five Important findings are fixed (`2026-10-14-phase-r-reliability.md`).
 - **R4:** the desktop's idle cost is measured on Windows. The phone's battery, idle traffic and Linux are owed (checklist §45). Diagnostics and the session record do not show it yet.
 - **R5:** done (branch `docs/r5-honest-docs`): "Before you start" and "What works where" in README, first contact up front in SECURITY.md, and `docs/release-checklist.md`.
-- **T1 (after Phase R):** Check connection, version 1, built and device-checked (branch `feat/connection-doctor`).
+- **T1 (after Phase R):** Check connection, version 1, built and device-checked (merged, PR #44).
+- **T3:** the QR scanner no longer uses ML Kit (zxing-cpp), and the APK is arm64-only with no dependency-info block (branch `feat/fdroid-ready`). The rest of the F-Droid plan, and why IzzyOnDroid is unlikely, is in `docs/research/2026-10-14-fdroid.md`.
 - **R2:** run on the A71 against Windows (branch `fix/r2-control-link`). The control connection now comes back after a network drop, and a dropped link reconnects by itself. Owed: an hour-long run, sleep and wake, mobile data, and Linux.
 
 **Deferred, with reason:**

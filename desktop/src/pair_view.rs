@@ -369,6 +369,38 @@ mod tests {
     use pocketdesk_core::local::paths::CERT_FILE;
     use pocketdesk_core::local::{identity, pin};
 
+    /// The cross-language pairing link (core's `pair_link` fixture).
+    const FIXTURE: &str = "pocketdesk://pair?v=1&name=Desk%20%26%20Co&id=d-1&a=192.168.1.5,100.80.1.2&cp=1716&sp=4716&pin=012345&fp=abababababababababababababababababababababababababababababababab&ep=eyJlbmRwb2ludElkIjoieCIsInJlbGF5VXJscyI6W10sImRpcmVjdEFkZHJzIjpbXX0";
+
+    /// The QR this app draws for that link, one row of 0/1 per line: the
+    /// phone's instrumented test decodes it with its scanner's library, so
+    /// the two ends agree on real codes (T3). Regenerate with
+    /// `POCKETDESK_WRITE_QR_FIXTURE=1 cargo test -p pocketdesk-desktop qr_fixture`.
+    #[test]
+    fn the_phones_qr_fixture_is_this_apps_code() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../android/app/src/androidTest/assets/pair_fixture_qr.txt"
+        );
+        let text: String = qr_modules(FIXTURE)
+            .unwrap()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|d| if *d { '1' } else { '0' })
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect();
+        if std::env::var_os("POCKETDESK_WRITE_QR_FIXTURE").is_some() {
+            std::fs::write(path, &text).unwrap();
+        }
+        let committed = std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
+        assert_eq!(committed, text, "{path} is stale; regenerate it");
+    }
+
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("pd-pair-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
