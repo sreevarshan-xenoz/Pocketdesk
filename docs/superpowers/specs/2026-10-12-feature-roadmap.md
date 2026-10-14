@@ -41,15 +41,30 @@ Each item is its own branch (`feat/<topic>`), spec, plan and device check on the
 | N4 | **Image clipboard** (F8): images both ways as PNG through the TLS transfer path, under the Clipboard permission (shipped 2026-10-14). | Both |
 | N5 | **Notifications both ways, with actions**, and the phone's notifications and SMS on the desktop. Split in three: N5a, the phone's notifications on the desktop (shipped 2026-10-14: opt-in, per-app, lock-screen privacy kept, a desktop permission and a flood guard); N5b, SMS; N5c, actions and dismissal both ways (part 1 shipped 2026-10-14: a notification closed on the phone closes on the computer). N5b SMS shipped 2026-10-14, built on the user's word; its device checks wait for a phone with a SIM. | Both |
 | N6 | **Wake and connect in one tap from anywhere**, without a second always-on device: the computer tells the phone its MAC and broadcast address, the phone sends the magic packet itself at home and to the home's public address (a router forward) from outside, then connects once the computer answers. Each computer's method, relay, outside address and port are the user's to set (shipped 2026-10-14). | Both |
-| N7 | **Multiple phones at once**, with a desktop-side picker. | Desktop |
-| N8 | **Gamepad mode**: an on-screen controller layout. | Phone |
-| N9 | **Session recording and a screenshot button.** | Both |
-| N10 | **Drawing-tablet mode**: stylus pressure into the desktop. | Both |
-| N11 | **The phone as a second monitor**: a virtual display (Windows indirect display driver, Linux virtual output). | Both |
+| N7 | **Multiple phones at once**, with a desktop-side picker: one phone drives at a time (or all, a setting), the desktop hands control over, and the others are told. Two quick Ends both apply. | Desktop |
+
+**Paused 2026-10-14, after an outside review of the repo (the user's call):** stop widening the feature list and prove that what exists works together. N8–N11 wait until Phase R is done:
+- N8 gamepad mode (a Bluetooth controller paired to the phone);
+- N9 session recording and a screenshot button;
+- N10 drawing-tablet mode;
+- N11 the phone as a second monitor.
+
+The rest of N7's per-phone items (mic choice, a reference-counted GPU clock pin, the Files picker reading control connections) wait too, except the privacy grab's owner, which is a security fix and moves into R3.
+
+## Phase R: reliability (next, from 2026-10-14)
+
+Each item gets its own spec section, results written into the checklist, and fixes with regression tests.
+
+| # | Work | Proof |
+|---|---|---|
+| R1 | **End-to-end matrix.** Every workflow on the A71 against Windows (this box) and against Linux (a throwaway Azure VM in another country, which is also a real cross-network path): pairing and certificate checks, LAN and WAN sessions, clipboard and files both ways, notifications, the phone's screen off and the app in the background, a network change mid-session. | A results table per platform in the checklist, with dates. |
+| R2 | **Long sessions and recovery.** 30 to 60 minutes streaming. Reconnect after a network change, a server restart, and the computer sleeping (sleep is the user's to run). Memory and CPU are recorded at the start and end. | Session records and a resource log per run. |
+| R3 | **Adversarial security tests:** a revoked device, a replayed or malformed frame, an expired or reused PIN, a permission narrowed mid-session, path traversal, and another phone releasing the privacy grab. Each fails closed with a logged reason. | Tests in `cargo test`, one per case. |
+| R4 | **What a session costs.** Idle CPU, memory and background traffic of the server, and the phone's battery over an hour, added to Diagnostics and the session record. | Numbers in the checklist. |
+| R5 | **Honest docs.** Normal WAN access needs no port forward; only waking from outside does. First-contact trust and what the DHT exposes are stated up front. A platform-parity table (Linux / Windows / Android) and a release checklist. | README and SECURITY.md changes. |
 
 **Deferred, with reason:**
 - A virtual display sized to the phone: Hyprland's write IPC is broken upstream, and Windows needs an indirect display driver.
-- Multi-session.
 - Session recording.
 
 ## Rules for every item
