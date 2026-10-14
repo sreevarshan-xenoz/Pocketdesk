@@ -213,7 +213,10 @@ class SmsReplies(private val ctx: Context) {
             lastConnectMs = now
             RustCore.connectToPeer(own.address, own.controlPort)
         }
-        for (request in RustCore.takeSmsRequests()) handle(request, own, now)
+        for (request in RustCore.takeSmsRequests()) {
+            Log.i(TAG, "reply ${request.id} asked for by ${request.fromHost}")
+            handle(request, own, now)
+        }
     }
 
     private fun handle(request: SmsRequest, own: HostStore.Host, now: Long) {

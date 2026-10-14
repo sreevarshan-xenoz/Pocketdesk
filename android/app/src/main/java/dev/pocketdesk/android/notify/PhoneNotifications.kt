@@ -8,6 +8,7 @@ import android.os.Process
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import dev.pocketdesk.android.bridge.RustCore
@@ -89,7 +90,12 @@ class PhoneNotificationListener : NotificationListenerService() {
         RustCore.start(filesDir)
         // On a thread of its own: connecting can take seconds while the
         // computer is away, and must not hold up notifications.
-        replyTicker.scheduleWithFixedDelay({ runCatching { replies.tick() } }, 5, 5, TimeUnit.SECONDS)
+        replyTicker.scheduleWithFixedDelay(
+            { runCatching { replies.tick() }.onFailure { Log.w("PhoneNotifications", "reply tick failed", it) } },
+            5,
+            5,
+            TimeUnit.SECONDS,
+        )
     }
 
     override fun onDestroy() {
