@@ -301,10 +301,17 @@ pub fn wake(mac: String, targets_json: String) -> Result<usize, String> {
     pocketdesk_core::tailscale::wol::send_wake(&mac, &addrs).map_err(|e| e.to_string())
 }
 
-/// How the connected desktop said it can be woken (N6
-/// `kdeconnect.pocketdesk.wake_info` body JSON), or `None`.
-pub async fn get_wake_info() -> Option<String> {
-    crate::WAKE_INFO.lock().await.clone()
+/// How the computer at `host`:`port` said it can be woken (N6
+/// `kdeconnect.pocketdesk.wake_info` body JSON), or `None` when the cached
+/// one came from another computer, or none came.
+pub async fn get_wake_info(host: &str, port: u16) -> Option<String> {
+    wake_info_for(crate::WAKE_INFO.lock().await.as_ref(), host, port)
+}
+
+/// The cached body when it came from `host`:`port`.
+fn wake_info_for(slot: Option<&(String, u16, String)>, host: &str, port: u16) -> Option<String> {
+    slot.filter(|(from_host, from_port, _)| from_host == host && *from_port == port)
+        .map(|(_, _, body)| body.clone())
 }
 
 /// Ask an always-on LAN peer (the relay) to emit the WoL magic packet for a
@@ -488,7 +495,11 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
                                     && pkt.packet_type == "kdeconnect.pocketdesk.wake_info"
                                 {
-                                    *crate::WAKE_INFO.lock().await = Some(pkt.body.to_string());
+                                    *crate::WAKE_INFO.lock().await = Some((
+                                        from_peer.0.clone(),
+                                        from_peer.1,
+                                        pkt.body.to_string(),
+                                    ));
                                 }
                                 // Find-my-device siren: latch so the UI can ring
                                 // even if the poll loop misses the packet.
@@ -3780,6 +3791,18 @@ mod wake_tests {
         let mut buf = [0u8; 200];
         let (n, _) = receiver.recv_from(&mut buf).unwrap();
         assert_eq!(n, 102);
+    }
+
+    #[test]
+    fn wake_info_is_handed_out_only_for_the_computer_it_came_from() {
+        let slot = ("192.0.2.1".to_string(), 1716, "{\"mac\":\"x\"}".to_string());
+        assert_eq!(
+            super::wake_info_for(Some(&slot), "192.0.2.1", 1716).as_deref(),
+            Some("{\"mac\":\"x\"}")
+        );
+        assert_eq!(super::wake_info_for(Some(&slot), "192.0.2.2", 1716), None);
+        assert_eq!(super::wake_info_for(Some(&slot), "192.0.2.1", 1717), None);
+        assert_eq!(super::wake_info_for(None, "192.0.2.1", 1716), None);
     }
 
     #[test]

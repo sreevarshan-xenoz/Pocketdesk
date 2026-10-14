@@ -162,7 +162,7 @@ object RustCore {
 
     private external fun nativeWake(mac: String, targetsJson: String): String
 
-    private external fun nativeWakeInfo(): String
+    private external fun nativeWakeInfo(address: String, port: Int): String
 
     private external fun nativeWakeViaRelay(
         address: String,
@@ -785,8 +785,11 @@ object RustCore {
     fun wake(mac: String, targets: List<String>): Result<Int> =
         envelope(nativeWake(mac, org.json.JSONArray(targets).toString())).mapCatching { it.toInt() }
 
-    /** How the connected desktop said it can be woken (`wake_info` JSON), or null. */
-    fun wakeInfo(): String? = nativeWakeInfo().takeIf { it.isNotBlank() }
+    /**
+     * How the computer at [address]:[port] said it can be woken
+     * (`wake_info` JSON), or null: never another computer's.
+     */
+    fun wakeInfo(address: String, port: Int): String? = nativeWakeInfo(address, port).takeIf { it.isNotBlank() }
 
     /**
      * Wake a sleeping desktop through an always-on LAN relay (Tier-2 #12):

@@ -1148,13 +1148,19 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWake(
     to_jstring(&mut env, json)
 }
 
-/// How the connected desktop said it can be woken, as JSON, or "" (N6).
+/// How the computer at `address`:`port` said it can be woken, as JSON, or
+/// "" (N6).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeInfo(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
 ) -> jstring {
-    let json = RUNTIME.block_on(api::get_wake_info()).unwrap_or_default();
+    let address = jstring_to_string(&mut env, &address);
+    let json = RUNTIME
+        .block_on(api::get_wake_info(&address, port as u16))
+        .unwrap_or_default();
     to_jstring(&mut env, json)
 }
 
