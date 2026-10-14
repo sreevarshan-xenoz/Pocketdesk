@@ -48,6 +48,21 @@ It applies to both the server and client endpoints.
 POCKETDESK_CC=bbr cargo run --bin pocketdesk -- start
 ```
 
+`POCKETDESK_STATE_DIR` moves the state folder (pairings, device keys,
+certificates, the PIN, session records) somewhere else, for a portable
+setup or a separate set of pairings. It must be an absolute path, in a
+folder only you can write (not a shared one such as `/tmp`, where another
+user could create it first), and the desktop app needs the same value.
+The config file, and so the ports, stay where they are:
+
+```bash
+POCKETDESK_STATE_DIR="$HOME/.local/state/pocketdesk-test" cargo run --bin pocketdesk -- start
+```
+
+The server's tests point the state folder at a throwaway one
+(`core::local::paths::use_state_dir`), so they never read or change your
+real pairings.
+
 ## 4. Windows server (the Windows host)
 
 The server builds and runs on Windows 10 1903+ / 11 with the **GNU** toolchain
