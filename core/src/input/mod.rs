@@ -4,5 +4,6 @@
 //! backends live in `server`. What belongs here is what neither of them can own
 //! without the other having to depend on it — see [`keys`].
 
+pub mod control;
 pub mod evdev_codes;
 pub mod keys;
