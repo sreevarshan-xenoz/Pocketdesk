@@ -232,29 +232,41 @@ impl LanDiscoveryService {
     }
 }
 
-/// The TXT record of this server's announcement.
 /// The addresses worth announcing on the local network: not the tailnet's
 /// (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). A phone on the LAN reaches the
 /// computer by its LAN address, and the multicast answer would otherwise
 /// tell every device on the network this computer's tailnet address.
-/// Anything that does not parse is dropped too.
+/// Anything that does not parse is dropped too. A network that numbers its
+/// LAN inside `100.64.0.0/10` (some hotspots and carrier routers do) would
+/// leave nothing, so then every parsable address is announced.
 fn announceable(ips: Vec<String>) -> Vec<String> {
     use std::net::IpAddr;
-    ips.into_iter()
-        .filter(|ip| match ip.parse::<IpAddr>() {
-            Ok(IpAddr::V4(v4)) => {
+    let parsed: Vec<(String, IpAddr)> = ips
+        .into_iter()
+        .filter_map(|ip| ip.parse::<IpAddr>().ok().map(|addr| (ip, addr)))
+        .collect();
+    let off_tailnet: Vec<String> = parsed
+        .iter()
+        .filter(|(_, addr)| match addr {
+            IpAddr::V4(v4) => {
                 let [a, b, ..] = v4.octets();
                 !(a == 100 && (b & 0xc0) == 64)
             }
-            Ok(IpAddr::V6(v6)) => {
+            IpAddr::V6(v6) => {
                 let s = v6.segments();
                 !(s[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0)
             }
-            Err(_) => false,
         })
-        .collect()
+        .map(|(ip, _)| ip.clone())
+        .collect();
+    if off_tailnet.is_empty() {
+        debug!("Only 100.64.0.0/10 addresses here, so they are announced");
+        return parsed.into_iter().map(|(ip, _)| ip).collect();
+    }
+    off_tailnet
 }
 
+/// The TXT record of this server's announcement.
 fn announcement_properties(
     name: &str,
     device_id: &str,
@@ -457,6 +469,11 @@ mod tests {
             announceable(ips.iter().map(|s| s.to_string()).collect()),
             ["192.168.1.10", "100.128.0.1", "2001:db8::4"],
             "the tailnet's 100.64.0.0/10 and fd7a:115c:a1e0::/48 stay off the LAN"
+        );
+        assert_eq!(
+            announceable(vec!["100.70.0.5".into(), "junk".into()]),
+            ["100.70.0.5"],
+            "a LAN numbered in 100.64.0.0/10 is still announced"
         );
     }
 
