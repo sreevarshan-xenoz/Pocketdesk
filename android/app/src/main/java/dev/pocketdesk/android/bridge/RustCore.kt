@@ -33,6 +33,8 @@ object RustCore {
     private external fun nativeGetClipboard(address: String, port: Int): String
     private external fun nativeGetClipboardState(address: String, port: Int): String
     private external fun nativeSendNotification(address: String, port: Int, body: String): String
+    private external fun nativeSendPhonePacket(address: String, port: Int, packetType: String, body: String): String
+    private external fun nativeTakeSmsRequests(): String
     private external fun nativeSendClipboardImage(address: String, port: Int, path: String): String
     private external fun nativeFetchClipboardImage(
         address: String,
@@ -230,6 +232,20 @@ object RustCore {
     /** Show one of this phone's notifications on the desktop (N5a); [body] is JSON. */
     fun sendNotification(address: String, port: Int, body: String): Result<Unit> =
         envelope(nativeSendNotification(address, port, body)).map { }
+
+    /** Send the phone's texts or a reply's result to the desktop (N5b). */
+    fun sendPhonePacket(address: String, port: Int, packetType: String, body: String): Result<Unit> =
+        envelope(nativeSendPhonePacket(address, port, packetType, body)).map { }
+
+    /** The replies the desktop asked this phone to text (N5b). */
+    fun takeSmsRequests(): List<dev.pocketdesk.android.notify.SmsRequest> =
+        envelope(nativeTakeSmsRequests()).mapCatching { json ->
+            val array = org.json.JSONArray(json)
+            List(array.length()) { i ->
+                val o = array.getJSONObject(i)
+                dev.pocketdesk.android.notify.SmsRequest(o.getString("id"), o.getString("address"), o.getString("body"))
+            }
+        }.getOrDefault(emptyList())
 
     /** Put the PNG at [path] on the desktop's clipboard (N4). */
     fun sendClipboardImage(address: String, port: Int, path: String): Result<Unit> =
