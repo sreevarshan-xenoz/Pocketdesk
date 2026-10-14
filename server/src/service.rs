@@ -31,6 +31,9 @@ use tokio::time::timeout;
 use uuid;
 
 pub async fn run(config: Config) -> Result<()> {
+    let state_dir = state::state_dir()?;
+    pocketdesk_core::local::paths::protect_state_dir(&state_dir)
+        .with_context(|| format!("failed to protect {}", state_dir.display()))?;
     let pid_file = state::pid_file_path()?;
     state::write_pid_file(&pid_file)?;
     let _pid_guard = PidFileGuard { path: pid_file };

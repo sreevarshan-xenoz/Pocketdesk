@@ -72,6 +72,21 @@ pub fn state_dir() -> io::Result<PathBuf> {
     ))
 }
 
+/// Create the state folder `dir` if needed, and on Unix make it `0700`: it
+/// holds the pairings, the identity key, received texts and session records,
+/// and a folder only the owner can open keeps them private whatever mode
+/// each file was written with. On Windows the default folder
+/// (`%LOCALAPPDATA%`) is already the user's own, and its DACL is left alone.
+pub fn protect_state_dir(dir: &std::path::Path) -> io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
 /// The folder `POCKETDESK_STATE_DIR` names, if it is set. It must be
 /// absolute: a relative one would resolve against each process's own working
 /// folder, so the server and the desktop app could each use a different one
@@ -116,6 +131,27 @@ fn app_dir(base: &std::path::Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_state_dir_is_made_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("pd-protect-{}", std::process::id()));
+        let dir = base.join("state");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        protect_state_dir(&dir).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        protect_state_dir(&base.join("fresh")).unwrap();
+        let mode = std::fs::metadata(base.join("fresh"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "a new folder too");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn the_state_dir_variable_must_name_an_absolute_folder() {
