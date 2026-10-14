@@ -378,6 +378,9 @@ pub async fn run(config: Config) -> Result<()> {
                 match accepted {
                     Ok((stream, peer_addr)) => {
                         tracing::info!("Incoming v1 TCP connection from {}", peer_addr);
+                        if let Err(e) = pocketdesk_core::protocol::connection::keep_alive(&stream) {
+                            tracing::debug!("No keepalive on {peer_addr}: {e}");
+                        }
                         let identity_packet = kde_service.identity_packet().clone();
                         let registry_clone = Arc::clone(&registry);
                         let hypr = hypr_ipc.clone();

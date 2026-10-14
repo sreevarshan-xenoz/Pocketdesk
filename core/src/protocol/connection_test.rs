@@ -321,4 +321,36 @@ mod tests {
         // If we got here, the mock server's assertions all passed
         assert!(crate::protocol::connection::control_peer_addr(&stream).is_ok());
     }
+
+    /// A desktop that vanished (slept, left the network) leaves a socket
+    /// that looks open forever unless the phone probes it: keepalive finds
+    /// the dead link, so the reader ends and the phone dials again.
+    #[tokio::test]
+    async fn control_connections_probe_a_silent_peer() {
+        let port = spawn_mock_server().await;
+        let manager = manager(Duration::from_secs(5));
+        let identity = DeviceIdentity::new("test-client", "Test Client");
+
+        let stream = manager
+            .connect("127.0.0.1", port, &identity)
+            .await
+            .expect("connect should succeed");
+
+        let socket = socket2::SockRef::from(stream.get_ref().0);
+        assert!(socket.keepalive().unwrap(), "keepalive is on");
+    }
+
+    /// The desktop's side does the same for a phone that vanished.
+    #[tokio::test]
+    async fn keep_alive_turns_probing_on() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (client, accepted) =
+            tokio::join!(tokio::net::TcpStream::connect(addr), listener.accept());
+        let (server, _) = accepted.unwrap();
+        let _client = client.unwrap();
+
+        crate::protocol::connection::keep_alive(&server).unwrap();
+        assert!(socket2::SockRef::from(&server).keepalive().unwrap());
+    }
 }
