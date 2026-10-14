@@ -50,6 +50,23 @@ impl Plugin for WakeRelayPlugin {
             .unwrap_or(DEFAULT_BROADCAST);
         let name = packet.body.get("name").and_then(|v| v.as_str());
 
+        // Only onto this computer's own networks: a magic packet goes nowhere
+        // else, and the relay must not send packets wherever a phone names.
+        let allowed = broadcast.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| {
+            pocketdesk_core::local::wake::may_relay_to(
+                ip,
+                &pocketdesk_core::local::wake::adapters(),
+            )
+        });
+        if !allowed {
+            tracing::warn!("Wake-relay: refused a target outside this computer's networks");
+            let response = NetworkPacket::new("kdeconnect.pocketdesk.wol").with_body(insert_name(
+                serde_json::json!({ "ok": false, "mac": mac, "error": "not on this computer's network" }),
+                name,
+            ));
+            return sender.send_packet(&response).await;
+        }
+
         // `send_wol` uses a blocking std::net UDP socket.
         let mac_owned = mac.to_string();
         let broadcast_owned = broadcast.to_string();

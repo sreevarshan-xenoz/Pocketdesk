@@ -76,7 +76,10 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         | "kdeconnect.pocketdesk.file_fetch"
         | "kdeconnect.pocketdesk.file_offer_declined" => Capability::Files,
         "kdeconnect.pocketdesk.audio" => Capability::Audio,
-        "kdeconnect.pocketdesk.power" | "kdeconnect.pocketdesk.privacy" => Capability::Power,
+        // Waking another machine through this one is a power action too.
+        "kdeconnect.pocketdesk.power"
+        | "kdeconnect.pocketdesk.privacy"
+        | "kdeconnect.pocketdesk.wol" => Capability::Power,
         "kdeconnect.pocketdesk.exec" => Capability::Exec,
         "kdeconnect.notification" => Capability::Notifications,
         "kdeconnect.sms.messages" | "kdeconnect.pocketdesk.sms_sent" => Capability::Texts,

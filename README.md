@@ -125,7 +125,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
   - **Learning how.** While connected, the computer tells the phone its adapter's MAC and broadcast address (desktop Settings "Wake from the phone"; Diagnostics' "Wake" row says whether the adapter allows it).
   - **At home,** the phone broadcasts it on the network.
   - **From outside,** it sends it to the home's public address on the "Outside wake port". That needs a router forward of that UDP port to the computer, and it works while the router still remembers the computer (minutes to hours after it sleeps), or always when the router can forward to the network's broadcast address.
-  - **Through another computer:** an always-on computer can send it instead.
+  - **Through another computer:** an always-on computer can send it instead, onto its own network only, if that computer gives the phone the Power permission.
   - **Then connect:** the card waits for the computer to answer, and connects ("Connect after waking"). Connect on a computer that does not answer offers "Wake and connect".
   - **Per computer:** "Wake settings" sets the method, the relay, the outside address and port, and the MAC.
 
