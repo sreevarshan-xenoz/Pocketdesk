@@ -105,7 +105,9 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
     target: FetchTarget,
     out: &mut W,
 ) -> Result<u64, String> {
-    {
+    // A clipboard image (N4) leaves a file transfer's progress alone.
+    let counted = !matches!(target, FetchTarget::ClipboardImage(_));
+    if counted {
         TRANSFER_TOTAL.store(0, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
@@ -122,7 +124,7 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
     // looked up once the request is out (its connection may have pinned it).
     let tls = crate::api::transfer_acceptor(address)?;
     let refused = refusal_on(lines, key.clone());
-    await_and_receive_limited(listener, &key, &tls, refused, out, limit).await
+    await_and_receive_limited(listener, &key, &tls, refused, out, limit, counted).await
 }
 
 /// Download the image on the desktop's clipboard, named `id` by its reply
@@ -302,10 +304,11 @@ where
     W: tokio::io::AsyncWrite + Unpin,
     F: std::future::Future<Output = String>,
 {
-    await_and_receive_limited(listener, key, tls, refused, out, MAX_DOWNLOAD_BYTES).await
+    await_and_receive_limited(listener, key, tls, refused, out, MAX_DOWNLOAD_BYTES, true).await
 }
 
-/// [`await_and_receive`], refusing more than `limit` bytes.
+/// [`await_and_receive`], refusing more than `limit` bytes, and counting
+/// into the transfer progress only when `counted`.
 async fn await_and_receive_limited<W, F>(
     listener: tokio::net::TcpListener,
     key: &str,
@@ -313,6 +316,7 @@ async fn await_and_receive_limited<W, F>(
     refused: F,
     out: &mut W,
     limit: u64,
+    counted: bool,
 ) -> Result<u64, String>
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -326,12 +330,17 @@ where
         accepted = accept => accepted.map_err(|_| "The computer did not send the file".to_string())??,
         reason = refused => return Err(reason),
     };
-    receive_into(&mut stream, out, limit).await
+    receive_into(&mut stream, out, limit, counted).await
 }
 
 /// Read the size and exactly that many bytes from `stream` into `out`,
 /// counting progress, then tell the desktop whether it was saved.
-async fn receive_into<S, W>(stream: &mut S, out: &mut W, limit: u64) -> Result<u64, String>
+async fn receive_into<S, W>(
+    stream: &mut S,
+    out: &mut W,
+    limit: u64,
+    counted: bool,
+) -> Result<u64, String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
@@ -344,8 +353,10 @@ where
         if size > limit {
             return Err(format!("{size} bytes is more than this phone takes"));
         }
-        TRANSFER_TOTAL.store(size, Ordering::Relaxed);
-        TRANSFER_SENT.store(0, Ordering::Relaxed);
+        if counted {
+            TRANSFER_TOTAL.store(size, Ordering::Relaxed);
+            TRANSFER_SENT.store(0, Ordering::Relaxed);
+        }
         let mut buffer = vec![0u8; 64 * 1024];
         let mut done: u64 = 0;
         while done < size {
@@ -363,7 +374,9 @@ where
                 .await
                 .map_err(|e| format!("Could not save the file: {e}"))?;
             done += n as u64;
-            TRANSFER_SENT.store(done, Ordering::Relaxed);
+            if counted {
+                TRANSFER_SENT.store(done, Ordering::Relaxed);
+            }
         }
         out.flush()
             .await

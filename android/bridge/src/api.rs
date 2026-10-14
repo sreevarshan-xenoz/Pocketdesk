@@ -1112,7 +1112,7 @@ pub async fn send_clipboard_image(address: String, port: u16, path: String) -> R
         accepted = accept => accepted.map_err(|_| "The computer did not take the image".to_string())??,
         reason = refused => return Err(reason),
     };
-    let sent = pump(&mut file, &mut stream, size).await?;
+    let sent = pump_counted(&mut file, &mut stream, size, false).await?;
     if sent != size {
         return Err(format!(
             "The image changed while it was sent ({sent} of {size} bytes)"
@@ -1277,9 +1277,26 @@ where
     R: tokio::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
 {
+    pump_counted(reader, writer, total, true).await
+}
+
+/// [`pump`], counting into the transfer progress only when `counted`: a
+/// clipboard image (N4) must not move a file share's progress notification.
+async fn pump_counted<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    total: u64,
+    counted: bool,
+) -> Result<u64, String>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
     use std::sync::atomic::Ordering;
-    TRANSFER_TOTAL.store(total, Ordering::Relaxed);
-    TRANSFER_SENT.store(0, Ordering::Relaxed);
+    if counted {
+        TRANSFER_TOTAL.store(total, Ordering::Relaxed);
+        TRANSFER_SENT.store(0, Ordering::Relaxed);
+    }
     let mut buffer = vec![0u8; 64 * 1024];
     let mut sent: u64 = 0;
     loop {
@@ -1295,7 +1312,9 @@ where
             .await
             .map_err(|e| format!("Failed to write to stream: {}", e))?;
         sent += n as u64;
-        TRANSFER_SENT.store(sent, Ordering::Relaxed);
+        if counted {
+            TRANSFER_SENT.store(sent, Ordering::Relaxed);
+        }
     }
     writer
         .flush()
