@@ -146,12 +146,16 @@ object HostStore {
         return true
     }
 
-    /** The user's wake settings for [address]; a MAC typed before N6 carries over. */
+    /**
+     * The user's wake settings for [address]. A MAC typed before N6 carries
+     * over with what Wake did then: ask the saved computer itself, an
+     * always-on one, to send it.
+     */
     fun wakeSettings(ctx: Context, address: String): WakeSettings {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val legacyMac = prefs.getString("$KEY_WOL_MAC_PREFIX$address", "").orEmpty()
         val json = prefs.getString("$KEY_WAKE_SETTINGS_PREFIX$address", null)
-            ?: return WakeSettings(mac = legacyMac)
+            ?: return legacyWakeSettings(address, legacyMac, wakeInfo(ctx, address)?.mac)
         return runCatching {
             val o = JSONObject(json)
             WakeSettings(
@@ -164,6 +168,19 @@ object HostStore {
                 mac = o.optString("mac"),
             )
         }.getOrDefault(WakeSettings(mac = legacyMac))
+    }
+
+    /**
+     * Settings for a computer saved before N6 with a typed MAC: Wake asked
+     * the saved computer to send it, so it stays a relay, unless the
+     * computer itself announced that same MAC (then it is the one asleep,
+     * and the phone wakes it directly).
+     */
+    private fun legacyWakeSettings(address: String, legacyMac: String, learnedMac: String?): WakeSettings {
+        if (legacyMac.isBlank()) return WakeSettings()
+        fun norm(mac: String) = mac.filter { it.isLetterOrDigit() }.uppercase()
+        if (learnedMac != null && norm(learnedMac) == norm(legacyMac)) return WakeSettings(mac = legacyMac)
+        return WakeSettings(method = WakeMethod.RELAY, relay = address, mac = legacyMac)
     }
 
     fun saveWakeSettings(ctx: Context, address: String, settings: WakeSettings) {

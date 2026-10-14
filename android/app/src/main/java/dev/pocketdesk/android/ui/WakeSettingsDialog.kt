@@ -43,7 +43,9 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val saved = remember { HostStore.wakeSettings(context, address) }
     val learned = remember { HostStore.wakeInfo(context, address) }
-    val others = remember { HostStore.hosts(context).map { it.address }.filter { it != address } }
+    // Any saved computer can relay, this one too (an always-on computer
+    // saved to wake others behind it, as before N6).
+    val others = remember { HostStore.hosts(context).map { it.address } }
     var method by remember { mutableStateOf(saved.method) }
     var relay by remember { mutableStateOf(saved.relay.ifEmpty { others.firstOrNull().orEmpty() }) }
     var outsideHost by remember { mutableStateOf(saved.outsideHost) }
