@@ -495,8 +495,6 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                     let mut id = crate::WAN_IDENTITY.lock().await;
                                     *id = Some(pkt.body.to_string());
                                 }
-                                // How to wake this desktop (N6), kept for the
-                                // app to save with the computer.
                                 // Who drives, when several phones are
                                 // connected (N7).
                                 if trimmed.contains("pocketdesk.control")
@@ -509,6 +507,8 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                         pkt.body.to_string(),
                                     ));
                                 }
+                                // How to wake this desktop (N6), kept for the
+                                // app to save with the computer.
                                 if trimmed.contains("pocketdesk.wake_info")
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
                                     && pkt.packet_type == "kdeconnect.pocketdesk.wake_info"
