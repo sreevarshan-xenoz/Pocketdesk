@@ -5133,6 +5133,7 @@ dependencies = [
  "libspa",
  "mdns-sd",
  "n0-mainline",
+ "netdev 0.46.3",
  "opus",
  "pipewire",
  "quinn",
