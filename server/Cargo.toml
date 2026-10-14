@@ -39,6 +39,12 @@ quinn.workspace = true
 iroh = { version = "~1.2", features = ["unstable-net-report"] }
 # N2: run your own relay (`pocketdesk relay`).
 iroh-relay = { version = "~1.2", features = ["server"] }
+# N3: publish this desktop on the Mainline DHT (pkarr), no server of anyone's.
+iroh-mainline-address-lookup = "0.6"
+# Reading the DHT lookup's answer stream (already in the graph through iroh).
+futures-lite = "2"
+# Relay hosts in the DHT record (N3).
+url = "2"
 
 # Cancellation tokens and utilities
 tokio-util.workspace = true

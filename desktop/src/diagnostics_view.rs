@@ -169,11 +169,13 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
         state,
         &config.relay_urls,
     ));
+    let wan_status = diagnostics::read_wan_status(state_dir);
     findings.extend(diagnostics::check_outside(
-        diagnostics::read_wan_status(state_dir).as_ref(),
+        wan_status.as_ref(),
         state,
         !config.relay_urls.is_empty(),
     ));
+    findings.push(diagnostics::check_dht(wan_status.as_ref(), state));
     Report {
         findings,
         last_session: diagnostics::last_session(state_dir),

@@ -6,21 +6,26 @@
 //! identity (`EndpointId` plus current relay URLs and direct addresses) is
 //! pushed to registered control-channel clients as a
 //! `kdeconnect.pocketdesk.endpoint` packet — the phone caches it and dials the
-//! full `EndpointAddr` later, so neither side needs pkarr or any address
-//! discovery infrastructure (relays are used only for hole punching).
+//! full `EndpointAddr` later. Unless `dht_publish = "off"`, the endpoint also
+//! publishes a record signed with its key on the Mainline DHT (roadmap N3),
+//! so a phone whose cached address went stale can look it up by id.
 
+use std::borrow::Cow;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use iroh::address_lookup::{AddrFilter, AddressLookup as _};
 use iroh::endpoint::QuicTransportConfig;
 use iroh::endpoint::presets::Minimal;
-use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey};
+use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr};
+use iroh_mainline_address_lookup::DhtAddressLookup;
+use pocketdesk_core::local::config::DhtPublish;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
 use pocketdesk_core::streaming::input_packet::InputPacket;
 use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
@@ -96,13 +101,186 @@ pub fn load_or_create_secret_key(path: &Path) -> Result<SecretKey> {
     }
 }
 
-/// WAN identity announcement built from an [`EndpointAddr`].
-pub fn endpoint_packet(addr: &EndpointAddr, id: EndpointId) -> NetworkPacket {
+/// WAN identity announcement built from an [`EndpointAddr`]. `dht` tells
+/// the phone it may look this desktop up on the Mainline DHT (N3); a phone
+/// never looks up a desktop that publishes nothing.
+pub fn endpoint_packet(addr: &EndpointAddr, id: EndpointId, dht: bool) -> NetworkPacket {
     NetworkPacket::new(ENDPOINT_PACKET).with_body(serde_json::json!({
         "endpointId": id.to_string(),
         "relayUrls": addr.relay_urls().map(|u| u.to_string()).collect::<Vec<_>>(),
         "directAddrs": addr.ip_addrs().map(|a| a.to_string()).collect::<Vec<_>>(),
+        "dht": dht,
     }))
+}
+
+/// The endpoint's current announcement.
+pub fn current_packet(endpoint: &Endpoint) -> NetworkPacket {
+    endpoint_packet(&endpoint.addr(), endpoint.id(), on_dht(endpoint))
+}
+
+/// Whether this endpoint publishes on the DHT: its only address lookup is
+/// the DHT's, added when `dht_publish` is not "off".
+fn on_dht(endpoint: &Endpoint) -> bool {
+    endpoint
+        .address_lookup()
+        .is_ok_and(|lookup| !lookup.is_empty())
+}
+
+/// An IP a phone anywhere could reach: not private, loopback, link-local,
+/// carrier NAT (100.64/10, which is also Tailscale's), unique-local IPv6
+/// (fc00::/7, Tailscale's too), multicast, reserved or documentation.
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, c, _] = v4.octets();
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || a == 0
+                || (a == 100 && (b & 0xc0) == 64)
+                || (a == 192 && b == 0 && c == 0)
+                || (a == 198 && (b & 0xfe) == 18)
+                || a >= 240)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(v4));
+            }
+            let s = v6.segments();
+            // Global unicast (2000::/3), less the documentation prefix.
+            (s[0] & 0xe000) == 0x2000 && !(s[0] == 0x2001 && s[1] == 0x0db8)
+        }
+    }
+}
+
+/// A relay a phone anywhere could reach: one with a name, or a public IP.
+fn is_public_relay(url: &iroh::RelayUrl) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            !(name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local"))
+        }
+        Some(url::Host::Ipv4(v4)) => is_public_ip(IpAddr::V4(v4)),
+        Some(url::Host::Ipv6(v6)) => is_public_ip(IpAddr::V6(v6)),
+        None => false,
+    }
+}
+
+/// What the DHT record may hold (N3): relays a phone anywhere could reach,
+/// and, with `with_ips` (`dht_publish = "addresses"`), public IP addresses.
+/// LAN, tailnet and documentation addresses are never published.
+pub fn publishable(addrs: &[TransportAddr], with_ips: bool) -> Vec<TransportAddr> {
+    addrs
+        .iter()
+        .filter(|addr| match addr {
+            TransportAddr::Relay(url) => is_public_relay(url),
+            TransportAddr::Ip(socket) => with_ips && is_public_ip(socket.ip()),
+            _ => false,
+        })
+        .cloned()
+        .collect()
+}
+
+/// The server's own check of its DHT record, for Diagnostics (N3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DhtCheck {
+    /// The record read back holds an address published now.
+    Found,
+    /// Nothing, or only a stale record, came back.
+    NotFound,
+    /// No address may be published (only private relays, and IPs off).
+    NothingToPublish,
+}
+
+type DhtCheckState = Arc<std::sync::Mutex<Option<DhtCheck>>>;
+
+/// The DHT lookup per `dht_publish`, publishing with this endpoint's key.
+/// `None` when off, or when the DHT cannot start (logged; the WAN endpoint
+/// then works as before, by the address learned at home).
+fn dht_lookup(mode: DhtPublish, key: &SecretKey) -> Option<DhtAddressLookup> {
+    if mode == DhtPublish::Off {
+        return None;
+    }
+    let with_ips = mode == DhtPublish::Addresses;
+    let filter = AddrFilter::new(move |addrs| Cow::Owned(publishable(addrs, with_ips)));
+    match DhtAddressLookup::builder()
+        .secret_key(key.clone())
+        .addr_filter(filter)
+        .build()
+    {
+        Ok(lookup) => {
+            tracing::info!("WAN: publishing on the Mainline DHT ({})", mode.as_str());
+            Some(lookup)
+        }
+        Err(e) => {
+            tracing::warn!("WAN: the Mainline DHT could not start, not published: {e}");
+            None
+        }
+    }
+}
+
+/// Read this endpoint's record back from the DHT a minute after start, then
+/// every 15 minutes: publishing is fire-and-forget, so this is what says it
+/// worked.
+fn spawn_dht_check(
+    lookup: DhtAddressLookup,
+    endpoint: Endpoint,
+    mode: DhtPublish,
+    state: DhtCheckState,
+) {
+    use futures_lite::StreamExt as _;
+    let with_ips = mode == DhtPublish::Addresses;
+    tokio::spawn(async move {
+        let mut wait = std::time::Duration::from_secs(60);
+        loop {
+            tokio::time::sleep(wait).await;
+            wait = std::time::Duration::from_secs(15 * 60);
+            let now: Vec<TransportAddr> = endpoint.addr().addrs.into_iter().collect();
+            let expected = publishable(&now, with_ips);
+            let check = if expected.is_empty() {
+                DhtCheck::NothingToPublish
+            } else {
+                let read = async {
+                    match lookup.resolve(endpoint.id()) {
+                        Some(stream) => stream.collect::<Vec<_>>().await,
+                        None => Vec::new(),
+                    }
+                };
+                let items = tokio::time::timeout(std::time::Duration::from_secs(30), read)
+                    .await
+                    .unwrap_or_default();
+                let found = items.into_iter().flatten().any(|item| {
+                    item.into_endpoint_addr()
+                        .addrs
+                        .iter()
+                        .any(|addr| expected.contains(addr))
+                });
+                if found {
+                    DhtCheck::Found
+                } else {
+                    DhtCheck::NotFound
+                }
+            };
+            tracing::debug!(?check, "WAN: DHT record checked");
+            *state.lock().unwrap_or_else(|e| e.into_inner()) = Some(check);
+        }
+    });
+}
+
+/// `wan_status.json`'s DHT fields: what the record holds ("empty" when
+/// nothing may be published), and whether it was read back (absent until the
+/// first check).
+fn dht_fields(mode: DhtPublish, check: Option<DhtCheck>) -> (Option<String>, Option<bool>) {
+    match check {
+        Some(DhtCheck::NothingToPublish) => (Some("empty".to_string()), None),
+        Some(DhtCheck::Found) => (Some(mode.as_str().to_string()), Some(true)),
+        Some(DhtCheck::NotFound) => (Some(mode.as_str().to_string()), Some(false)),
+        None => (Some(mode.as_str().to_string()), None),
+    }
 }
 
 /// Write the endpoint body to `<state_dir>/endpoint.json` if it differs from
@@ -111,9 +289,10 @@ pub fn record_endpoint_in(
     state_dir: &Path,
     addr: &EndpointAddr,
     id: EndpointId,
+    dht: bool,
     last: &mut Option<serde_json::Value>,
 ) -> bool {
-    let body = endpoint_packet(addr, id).body;
+    let body = endpoint_packet(addr, id, dht).body;
     if last.as_ref() == Some(&body) {
         return false;
     }
@@ -163,13 +342,16 @@ pub fn wan_status_from(
         nat_varies: report.mapping_varies_by_dest_ipv4,
         public_v6: report.global_v6.is_some(),
         captive_portal: report.captive_portal,
+        dht: None,
+        dht_found: None,
     }
 }
 
 /// Keep `endpoint.json` current: the relay URL only appears once iroh has
 /// reached its home relay, and direct addresses change with the network.
-/// `wan_status.json` follows iroh's network report the same way.
-fn spawn_endpoint_recorder(endpoint: Endpoint) {
+/// `wan_status.json` follows iroh's network report the same way, with the
+/// DHT check's answer.
+fn spawn_endpoint_recorder(endpoint: Endpoint, dht_mode: DhtPublish, dht_check: DhtCheckState) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
@@ -178,21 +360,30 @@ fn spawn_endpoint_recorder(endpoint: Endpoint) {
         let mut last = None;
         let mut last_status = None;
         loop {
-            record_endpoint_in(&dir, &endpoint.addr(), endpoint.id(), &mut last);
+            let dht = on_dht(&endpoint);
+            record_endpoint_in(&dir, &endpoint.addr(), endpoint.id(), dht, &mut last);
             if let Some(report) = endpoint.net_report().get() {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
-                let status = wan_status_from(&report, now);
+                let mut status = wan_status_from(&report, now);
+                let check = *dht_check.lock().unwrap_or_else(|e| e.into_inner());
+                (status.dht, status.dht_found) = if dht {
+                    dht_fields(dht_mode, check)
+                } else {
+                    (Some(DhtPublish::Off.as_str().to_string()), None)
+                };
                 // Rewritten when a fact changes, not every tick.
                 let facts = (
                     status.udp,
                     status.nat_varies,
                     status.public_v6,
                     status.captive_portal,
+                    status.dht.clone(),
+                    status.dht_found,
                 );
-                if last_status != Some(facts) {
+                if last_status.as_ref() != Some(&facts) {
                     match pocketdesk_core::local::diagnostics::write_wan_status(&dir, &status) {
                         Ok(()) => last_status = Some(facts),
                         Err(e) => tracing::debug!("could not record the WAN status: {e}"),
@@ -206,9 +397,7 @@ fn spawn_endpoint_recorder(endpoint: Endpoint) {
 
 /// Push the current WAN identity to one freshly-registered client.
 pub async fn push_endpoint_to(sender: &Arc<dyn DeviceSender>, endpoint: &Endpoint) {
-    let _ = sender
-        .send_packet(&endpoint_packet(&endpoint.addr(), endpoint.id()))
-        .await;
+    let _ = sender.send_packet(&current_packet(endpoint)).await;
 }
 
 /// The settings the WAN endpoint takes from config.toml.
@@ -220,6 +409,8 @@ pub struct WanSettings {
     pub mic_relay_device: Option<String>,
     /// Your own relays (N2); empty uses n0's.
     pub relay_urls: Vec<String>,
+    /// What the Mainline DHT record holds (N3).
+    pub dht_publish: DhtPublish,
 }
 
 /// Bind the WAN endpoint and spawn its accept loop.
@@ -242,6 +433,7 @@ pub async fn spawn_wan_endpoint(
         capture_backend,
         mic_relay_device,
         relay_urls,
+        dht_publish,
     } = settings;
     // What an earlier run recorded about its internet path is not this
     // run's: dropped before anything can fail, so a run whose endpoint never
@@ -264,11 +456,16 @@ pub async fn spawn_wan_endpoint(
         .max_concurrent_uni_streams(1024u32.into())
         .max_concurrent_bidi_streams(128u32.into())
         .build();
-    let endpoint = Endpoint::builder(Minimal)
+    let dht = dht_lookup(dht_publish, &secret_key);
+    let mut builder = Endpoint::builder(Minimal)
         .alpns(vec![StreamTransportConfig::default().alpn])
         .relay_mode(relay_mode(&relay_urls)?)
         .secret_key(secret_key)
-        .transport_config(transport)
+        .transport_config(transport);
+    if let Some(dht) = &dht {
+        builder = builder.address_lookup(dht.clone());
+    }
+    let endpoint = builder
         .bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)))
         .context("iroh bind_addr rejected wildcard socket addr")?
         .bind()
@@ -276,7 +473,11 @@ pub async fn spawn_wan_endpoint(
         .context("iroh endpoint bind failed")?;
 
     tracing::info!(id = %endpoint.id(), "WAN (iroh) endpoint ready");
-    spawn_endpoint_recorder(endpoint.clone());
+    let dht_check = DhtCheckState::default();
+    if let Some(dht) = dht {
+        spawn_dht_check(dht, endpoint.clone(), dht_publish, Arc::clone(&dht_check));
+    }
+    spawn_endpoint_recorder(endpoint.clone(), dht_publish, dht_check);
 
     let accept = endpoint.clone();
     tokio::spawn(async move {
@@ -349,6 +550,88 @@ mod relay_mode_tests {
         // These parse as URLs, with the host taken for a scheme.
         assert!(relay_mode(&["relay.example.org:3340".to_string()]).is_err());
         assert!(relay_mode(&["localhost:3340".to_string()]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod dht_tests {
+    use super::{endpoint_packet, publishable};
+    use iroh::{EndpointAddr, SecretKey, TransportAddr};
+
+    fn ip(a: &str) -> TransportAddr {
+        TransportAddr::Ip(a.parse().unwrap())
+    }
+
+    fn relay(url: &str) -> TransportAddr {
+        TransportAddr::Relay(url.parse().unwrap())
+    }
+
+    #[test]
+    fn only_public_addresses_and_reachable_relays_are_published() {
+        let public = [
+            ip("1.1.1.1:4501"),
+            ip("[2606:4700::1111]:4501"),
+            relay("https://use1-1.relay.n0.iroh-canary.iroh.link/"),
+            relay("https://relay.example.org/"),
+            relay("http://8.8.8.8:3340/"),
+        ];
+        let private = [
+            ip("192.168.0.10:4501"),
+            ip("10.0.0.2:4501"),
+            ip("172.16.0.9:4501"),
+            ip("127.0.0.1:4501"),
+            ip("169.254.3.3:4501"),
+            ip("100.101.102.103:4501"), // carrier NAT, and Tailscale's IPv4
+            ip("0.0.0.0:4501"),
+            ip("203.0.113.7:4501"), // documentation
+            ip("[::1]:4501"),
+            ip("[fe80::1]:4501"),
+            ip("[fd7a:115c:a1e0::1]:4501"), // unique-local, and Tailscale's IPv6
+            ip("[2001:db8::1]:4501"),       // documentation
+            ip("[ff02::1]:4501"),
+            relay("http://192.168.0.10:3340/"),
+            relay("http://[fd7a:115c:a1e0::1]:3340/"),
+            relay("http://localhost:3340/"),
+        ];
+        let all: Vec<_> = public.iter().chain(private.iter()).cloned().collect();
+        assert_eq!(publishable(&all, true), public.to_vec());
+        assert_eq!(
+            publishable(&all, false),
+            public
+                .iter()
+                .filter(|a| a.is_relay())
+                .cloned()
+                .collect::<Vec<_>>(),
+            "relay mode publishes no IP"
+        );
+    }
+
+    #[test]
+    fn the_wan_status_says_what_the_record_holds_and_if_it_was_read_back() {
+        use super::{DhtCheck, dht_fields};
+        use pocketdesk_core::local::config::DhtPublish;
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(dht_fields(DhtPublish::Relay, None), (s("relay"), None));
+        assert_eq!(
+            dht_fields(DhtPublish::Addresses, Some(DhtCheck::Found)),
+            (s("addresses"), Some(true))
+        );
+        assert_eq!(
+            dht_fields(DhtPublish::Relay, Some(DhtCheck::NotFound)),
+            (s("relay"), Some(false))
+        );
+        assert_eq!(
+            dht_fields(DhtPublish::Relay, Some(DhtCheck::NothingToPublish)),
+            (s("empty"), None)
+        );
+    }
+
+    #[test]
+    fn the_endpoint_packet_says_whether_the_desktop_is_on_the_dht() {
+        let id = SecretKey::from_bytes(&[3u8; 32]).public();
+        let addr = EndpointAddr::new(id);
+        assert_eq!(endpoint_packet(&addr, id, true).body["dht"], true);
+        assert_eq!(endpoint_packet(&addr, id, false).body["dht"], false);
     }
 }
 
@@ -427,7 +710,7 @@ mod tests {
                 "203.0.113.7:4501".parse::<SocketAddr>().unwrap(),
             )],
         );
-        let packet = endpoint_packet(&addr, id);
+        let packet = endpoint_packet(&addr, id, false);
         assert_eq!(packet.packet_type, ENDPOINT_PACKET);
         let body: serde_json::Value =
             serde_json::from_str(&packet.body.to_string()).expect("body json");
@@ -450,13 +733,13 @@ mod tests {
             )],
         );
         let mut last = None;
-        assert!(record_endpoint_in(&dir, &addr, id, &mut last));
+        assert!(record_endpoint_in(&dir, &addr, id, true, &mut last));
         assert_eq!(
             pocketdesk_core::local::identity::read_endpoint(&dir),
-            Some(endpoint_packet(&addr, id).body)
+            Some(endpoint_packet(&addr, id, true).body)
         );
         assert!(
-            !record_endpoint_in(&dir, &addr, id, &mut last),
+            !record_endpoint_in(&dir, &addr, id, true, &mut last),
             "an unchanged address is not rewritten"
         );
     }

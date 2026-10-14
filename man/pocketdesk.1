@@ -134,7 +134,16 @@ flags are listed with each command above.
 .SH FILES
 .TP
 .I ~/.config/pocketdesk/config.toml
-Configuration file
+Configuration file.
+.B dht_publish
+says what the desktop publishes on the Mainline DHT under its WAN id, so a
+phone away from home finds it again:
+.B relay
+(the relay URLs, the default),
+.B addresses
+(also its public IP addresses) or
+.BR off .
+Private, LAN and tailnet addresses are never published
 .TP
 .I ~/.local/state/pocketdesk/streaming_sessions.log
 Session outcome log, tab\-separated \fIkey=value\fR lines, rotated at 1 MiB

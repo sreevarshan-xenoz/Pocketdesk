@@ -51,6 +51,8 @@ These are real gaps in the current design. Plan around them.
 2. **A phone paired before device keys, that has not streamed on the LAN since, holds no key yet.** Until it does, the control channel accepts it by its id alone, and it moves no files. The first LAN stream the desktop allows binds its key, and pairing it again binds it at once.
 3. **Someone who knows an unpaired phone's id can get in the way of its pairing**, by asking for PINs or spending the wrong guesses under that id. They cannot pair as it without the PIN.
 
+4. **The desktop's DHT record is public to anyone who knows its WAN id** (roadmap N3). By default it holds only the relay URLs. With `dht_publish = "addresses"` it also holds your home's public IP addresses, so the id can be followed to them over time. The id is in the pairing QR code, on each paired phone and on every relay the desktop uses. Set `dht_publish = "off"` to publish nothing.
+
 ## Using it safely today
 
 - **Use Tailscale, or another VPN, anywhere you do not trust everyone on the network.** It closes the limits above for traffic between your own devices.
