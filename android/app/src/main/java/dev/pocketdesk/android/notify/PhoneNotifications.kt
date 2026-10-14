@@ -4,6 +4,7 @@ import android.app.Notification
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.SystemClock
 import android.os.Process
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
@@ -80,6 +81,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     private lateinit var rule: NotificationForwardRule
     private val worker get() = PhoneLink.worker
 
+    /** Notifications that could not be sent yet; touched on [worker] only. */
+    private val pending = PendingNotifications<JSONObject>()
+
     /** Replies from the computer (N5b): Android keeps this service bound, so it hosts them. */
     private val replies by lazy { SmsReplies(applicationContext) }
     private val replyTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
@@ -91,7 +95,11 @@ class PhoneNotificationListener : NotificationListenerService() {
         // On a thread of its own: connecting can take seconds while the
         // computer is away, and must not hold up notifications.
         replyTicker.scheduleWithFixedDelay(
-            { runCatching { replies.tick() }.onFailure { Log.w("PhoneNotifications", "reply tick failed", it) } },
+            {
+                runCatching { replies.tick() }.onFailure { Log.w("PhoneNotifications", "reply tick failed", it) }
+                // Notifications that waited (the phone asleep, the computer away) go now.
+                worker.execute { sendPending() }
+            },
             5,
             5,
             TimeUnit.SECONDS,
@@ -113,6 +121,11 @@ class PhoneNotificationListener : NotificationListenerService() {
         worker.execute {
             // Closed on the phone: closed on the computer too (N5c), but only
             // one the computer was shown.
+            // One still waiting never reached the computer: just drop it.
+            if (pending.remove(sbn.key)) {
+                rule.removed(sbn.key)
+                return@execute
+            }
             if (rule.removed(sbn.key) && PhoneNotificationPrefs.enabled(this)) {
                 PhoneLink.sendNow(this, "kdeconnect.notification", JSONObject().put("id", sbn.key).put("isCancel", true))
             }
@@ -134,7 +147,25 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("text", out.text)
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
-        if (!PhoneLink.sendNow(this, "kdeconnect.notification", body)) rule.removed(out.id)
+        // Not sent now: it waits a while, rather than being lost.
+        if (!PhoneLink.sendNow(this, "kdeconnect.notification", body)) {
+            pending.add(out.id, body, SystemClock.elapsedRealtime())?.let { rule.removed(it) }
+        }
+    }
+
+    /** Send what waited, oldest first, until one fails. */
+    private fun sendPending() {
+        if (pending.isEmpty()) return
+        val due = pending.due(SystemClock.elapsedRealtime())
+        due.expired.forEach { rule.removed(it) }
+        if (!PhoneNotificationPrefs.enabled(this)) {
+            due.send.forEach { (id, _) -> pending.remove(id); rule.removed(id) }
+            return
+        }
+        for ((id, body) in due.send) {
+            if (!PhoneLink.sendNow(this, "kdeconnect.notification", body)) return
+            pending.sent(id)
+        }
     }
 
     /** The channel's and the user's lock-screen overrides for [sbn]. */
