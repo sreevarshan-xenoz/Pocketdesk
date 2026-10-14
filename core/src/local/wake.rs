@@ -133,7 +133,8 @@ pub fn may_relay_to(target: Ipv4Addr, adapters: &[Adapter]) -> bool {
         .iter()
         .flat_map(|a| a.ipv4.iter())
         .any(|&(addr, prefix)| {
-            if prefix == 0 || prefix > 32 {
+            // Loopback is no network a computer can be woken on.
+            if prefix == 0 || prefix > 32 || addr.is_loopback() {
                 return false;
             }
             let mask = u32::MAX << (32 - u32::from(prefix));
@@ -156,6 +157,15 @@ mod tests {
             default: true,
         }];
         assert!(may_relay_to(Ipv4Addr::BROADCAST, &adapters));
+        let with_loopback = vec![Adapter {
+            name: "lo".into(),
+            mac: None,
+            ipv4: vec![(Ipv4Addr::LOCALHOST, 8)],
+            wired: false,
+            physical: false,
+            default: false,
+        }];
+        assert!(!may_relay_to(Ipv4Addr::new(127, 0, 0, 5), &with_loopback));
         assert!(may_relay_to(Ipv4Addr::new(192, 168, 1, 255), &adapters));
         assert!(may_relay_to(Ipv4Addr::new(192, 168, 1, 7), &adapters));
         assert!(!may_relay_to(Ipv4Addr::new(192, 168, 2, 255), &adapters));
