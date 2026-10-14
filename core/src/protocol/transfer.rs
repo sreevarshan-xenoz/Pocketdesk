@@ -407,79 +407,90 @@ async fn commit<P: Partial>(
     Ok(())
 }
 
+/// A partial file in memory: for small transfers kept only in memory (a
+/// clipboard image), which never resume.
+pub struct Memory(std::io::Cursor<Vec<u8>>);
+
+impl Memory {
+    pub fn holding(bytes: &[u8]) -> Self {
+        Memory(std::io::Cursor::new(bytes.to_vec()))
+    }
+    pub fn bytes(&self) -> &[u8] {
+        self.0.get_ref()
+    }
+
+    /// The bytes received.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0.into_inner()
+    }
+}
+
+impl AsyncRead for Memory {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        std::pin::Pin::new(&mut self.0).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for Memory {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<io::Result<usize>> {
+        std::pin::Pin::new(&mut self.0).poll_write(cx, buf)
+    }
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        std::pin::Pin::new(&mut self.0).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        std::pin::Pin::new(&mut self.0).poll_shutdown(cx)
+    }
+}
+
+impl AsyncSeek for Memory {
+    fn start_seek(mut self: std::pin::Pin<&mut Self>, position: io::SeekFrom) -> io::Result<()> {
+        std::pin::Pin::new(&mut self.0).start_seek(position)
+    }
+    fn poll_complete(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<u64>> {
+        std::pin::Pin::new(&mut self.0).poll_complete(cx)
+    }
+}
+
+impl Partial for Memory {
+    async fn truncate(&mut self, len: u64) -> io::Result<()> {
+        self.0.get_mut().truncate(len as usize);
+        Ok(())
+    }
+    async fn sync(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Partial for tokio::fs::File {
+    async fn truncate(&mut self, len: u64) -> io::Result<()> {
+        self.set_len(len).await
+    }
+    async fn sync(&mut self) -> io::Result<()> {
+        self.sync_data().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
-
-    /// An in-memory partial file.
-    struct Memory(Cursor<Vec<u8>>);
-
-    impl Memory {
-        fn holding(bytes: &[u8]) -> Self {
-            Memory(Cursor::new(bytes.to_vec()))
-        }
-        fn bytes(&self) -> &[u8] {
-            self.0.get_ref()
-        }
-    }
-
-    impl AsyncRead for Memory {
-        fn poll_read(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: &mut tokio::io::ReadBuf<'_>,
-        ) -> std::task::Poll<io::Result<()>> {
-            std::pin::Pin::new(&mut self.0).poll_read(cx, buf)
-        }
-    }
-
-    impl AsyncWrite for Memory {
-        fn poll_write(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: &[u8],
-        ) -> std::task::Poll<io::Result<usize>> {
-            std::pin::Pin::new(&mut self.0).poll_write(cx, buf)
-        }
-        fn poll_flush(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<io::Result<()>> {
-            std::pin::Pin::new(&mut self.0).poll_flush(cx)
-        }
-        fn poll_shutdown(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<io::Result<()>> {
-            std::pin::Pin::new(&mut self.0).poll_shutdown(cx)
-        }
-    }
-
-    impl AsyncSeek for Memory {
-        fn start_seek(
-            mut self: std::pin::Pin<&mut Self>,
-            position: io::SeekFrom,
-        ) -> io::Result<()> {
-            std::pin::Pin::new(&mut self.0).start_seek(position)
-        }
-        fn poll_complete(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<io::Result<u64>> {
-            std::pin::Pin::new(&mut self.0).poll_complete(cx)
-        }
-    }
-
-    impl Partial for Memory {
-        async fn truncate(&mut self, len: u64) -> io::Result<()> {
-            self.0.get_mut().truncate(len as usize);
-            Ok(())
-        }
-        async fn sync(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
 
     fn file(len: usize) -> Vec<u8> {
         (0..len).map(|i| (i * 31 % 251) as u8).collect()
@@ -523,6 +534,53 @@ mod tests {
         };
         let ((sent, furthest), received) = tokio::join!(sending, receiving);
         (sent, received, furthest)
+    }
+
+    #[tokio::test]
+    async fn a_file_on_disk_is_continued_and_cut_to_the_offset() {
+        let source = file(300_000);
+        let path = std::env::temp_dir().join(format!("pd-transfer-{}.part", std::process::id()));
+        // Committed 100 000, plus 20 000 bytes written after the last commit.
+        let mut on_disk = source[..100_000].to_vec();
+        on_disk.extend_from_slice(&[9u8; 20_000]);
+        std::fs::write(&path, &on_disk).unwrap();
+        let mut partial = tokio::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .await
+            .unwrap();
+        let (mut a, mut b) = tokio::io::duplex(256 * 1024);
+        let mut reader: &[u8] = &source;
+        let sending = async move {
+            let sent = send(&mut reader, 300_000, &mut a, Pace::DEFAULT, |_| {}).await;
+            drop(a);
+            sent
+        };
+        let have = Have {
+            size: 300_000,
+            committed: 100_000,
+        };
+        let receiving = async {
+            let received = receive(
+                &mut b,
+                &mut partial,
+                Some(have),
+                Some(300_000),
+                MAX,
+                Pace::DEFAULT,
+                |_, _| {},
+            )
+            .await;
+            finish(&mut b, received.is_ok(), Pace::DEFAULT).await;
+            received
+        };
+        let (sent, received) = tokio::join!(sending, receiving);
+        assert_eq!(sent.unwrap(), 100_000);
+        assert_eq!(received.unwrap(), 100_000);
+        drop(partial);
+        assert_eq!(std::fs::read(&path).unwrap(), source);
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[tokio::test]

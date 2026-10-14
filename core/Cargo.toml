@@ -49,7 +49,8 @@ toml_edit = { version = "0.22", optional = true }
 # in the graph through iroh.
 netdev = { version = "0.46", optional = true }
 serde.workspace = true
-tokio.workspace = true
+# `fs`: a transfer's partial file is a tokio file (protocol::transfer).
+tokio = { workspace = true, features = ["fs"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tracing.workspace = true
