@@ -542,11 +542,17 @@ fn run_capture_loop(
 
         // Stage 2: wait for ready/failed, but not for ever: a compositor that
         // waits for damage (wlroots) answers a still screen with silence.
-        let finished =
-            pump_until_timeout(&conn, &mut queue, &mut state, &cancel, STATIC_HEARTBEAT, || {
+        let finished = pump_until_timeout(
+            &conn,
+            &mut queue,
+            &mut state,
+            &cancel,
+            STATIC_HEARTBEAT,
+            || {
                 let p = slot.lock().unwrap();
                 p.done || p.failed
-            })?;
+            },
+        )?;
         if !finished {
             buffer.destroy();
             pool.destroy();

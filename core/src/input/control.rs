@@ -163,7 +163,10 @@ mod tests {
         assert_eq!(control.admit(1, t), Admit::Yes { took: false });
         assert_eq!(control.admit(2, t), Admit::Yes { took: false });
         assert_eq!(control.driver(t), None);
-        assert!(!control.give(2, t), "nothing to hand over when everyone drives");
+        assert!(
+            !control.give(2, t),
+            "nothing to hand over when everyone drives"
+        );
         assert_eq!(control.driver(t), None);
     }
 }
