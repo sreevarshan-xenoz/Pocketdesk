@@ -430,11 +430,30 @@ pub async fn run(config: Config) -> Result<()> {
 
     tracing::info!("Press Ctrl+C to stop");
 
+    // At most a few connections per address and so many in all (R3): every
+    // accepted connection costs a task and buffers before it proves anything.
+    let budget = crate::conn_budget::ConnBudget::new(
+        crate::conn_budget::PER_ADDRESS,
+        crate::conn_budget::TOTAL,
+    );
+    let mut refused_said = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(60))
+        .unwrap_or_else(std::time::Instant::now);
+
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, peer_addr)) => {
+                        let Some(slot) = budget.admit(peer_addr.ip()) else {
+                            if refused_said.elapsed() >= Duration::from_secs(10) {
+                                refused_said = std::time::Instant::now();
+                                tracing::warn!(
+                                    "Refused a control connection from {peer_addr}: too many open"
+                                );
+                            }
+                            continue;
+                        };
                         tracing::info!("Incoming v1 TCP connection from {}", peer_addr);
                         if let Err(e) = pocketdesk_core::protocol::connection::keep_alive(&stream) {
                             tracing::debug!("No keepalive on {peer_addr}: {e}");
@@ -446,6 +465,7 @@ pub async fn run(config: Config) -> Result<()> {
                         let pairing_required = config.pairing_required;
                         let tls = control_tls.clone();
                         tokio::spawn(async move {
+                            let _slot = slot;
                             if let Err(error) = handle_connection_with_kde(
                                 stream,
                                 tls,
@@ -466,6 +486,15 @@ pub async fn run(config: Config) -> Result<()> {
             }
             quic_incoming = quic_endpoint.accept() => {
                 if let Some(incoming) = quic_incoming {
+                    let peer = incoming.remote_address();
+                    let Some(slot) = budget.admit(peer.ip()) else {
+                        if refused_said.elapsed() >= Duration::from_secs(10) {
+                            refused_said = std::time::Instant::now();
+                            tracing::warn!("Refused a QUIC connection from {peer}: too many open");
+                        }
+                        incoming.refuse();
+                        continue;
+                    };
                     let registry_clone = Arc::clone(&registry);
                     let cert_manager_clone = Arc::clone(&cert_manager);
                     let local_v2_identity = local_v2_identity.clone();
@@ -477,6 +506,7 @@ pub async fn run(config: Config) -> Result<()> {
                     let mic_relay_device = config.mic_relay_device.clone();
 
                     tokio::spawn(async move {
+                        let _slot = slot;
                         let conn = match incoming.await {
                             Ok(c) => c,
                             Err(e) => {
