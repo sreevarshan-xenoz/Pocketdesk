@@ -7,6 +7,7 @@
 mod app;
 mod diagnostics_view;
 mod icon;
+mod messages_view;
 mod model;
 mod pair_view;
 mod pick_file;

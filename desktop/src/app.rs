@@ -78,6 +78,7 @@ pub enum Tab {
     Devices,
     Sessions,
     Files,
+    Messages,
     Settings,
     Diagnostics,
     Logs,
@@ -114,6 +115,8 @@ pub struct PocketdeskApp {
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
     /// The Diagnostics tab (F10).
     diagnostics: crate::diagnostics_view::DiagnosticsView,
+    /// The Messages tab (N5b).
+    messages: crate::messages_view::MessagesView,
 }
 
 impl PocketdeskApp {
@@ -138,6 +141,7 @@ impl PocketdeskApp {
             send_path: String::new(),
             picking: None,
             diagnostics: Default::default(),
+            messages: Default::default(),
         }
     }
 
@@ -877,6 +881,7 @@ impl eframe::App for PocketdeskApp {
                     (Tab::Devices, "Devices"),
                     (Tab::Sessions, "Sessions"),
                     (Tab::Files, "Files"),
+                    (Tab::Messages, "Messages"),
                     (Tab::Settings, "Settings"),
                     (Tab::Diagnostics, "Diagnostics"),
                     (Tab::Logs, "Logs"),
@@ -903,6 +908,10 @@ impl eframe::App for PocketdeskApp {
             Tab::Devices => self.devices_tab(ui),
             Tab::Sessions => self.sessions_tab(ui),
             Tab::Files => self.files_tab(ui),
+            Tab::Messages => {
+                self.messages
+                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
+            }
             Tab::Settings => self.settings_tab(ui),
             Tab::Diagnostics => self
                 .diagnostics
