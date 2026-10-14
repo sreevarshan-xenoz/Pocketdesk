@@ -49,7 +49,8 @@ impl Capability {
 
 /// The capability a control packet uses (spec P3), or `None` for packets a
 /// paired device may always send: identity, pairing, and status queries
-/// (battery, monitors, windows, notifications, find-my-device, WoL relay).
+/// (battery, monitors, windows, the notification request, find-my-device,
+/// WoL relay). A phone's own notifications need [`Capability::Notifications`].
 ///
 /// One table for every plugin: a plugin that adds a packet type adds a row
 /// here, or it is always allowed. The privacy grab takes the desk's own

@@ -9,40 +9,48 @@ data class PostedNote(
     val groupSummary: Boolean,
     val title: String?,
     val text: String?,
-    /** `Notification.visibility`: [NotificationForwardRule.VISIBILITY_SECRET] and so on. */
+    /** The strictest lock-screen visibility: [NotificationForwardRule.effectiveVisibility]. */
     val visibility: Int,
     val publicTitle: String?,
     val publicText: String?,
+    /** `FLAG_LOCAL_ONLY`: the app asked that it stay on this device. */
+    val localOnly: Boolean,
+    /** Posted in another profile (a work profile) or user. */
+    val otherProfile: Boolean,
+    val clearable: Boolean,
 )
 
 /** What the desktop is sent for one notification. */
-data class Outgoing(val id: String, val app: String, val title: String, val text: String)
+data class Outgoing(val id: String, val app: String, val title: String, val text: String, val clearable: Boolean)
 
 /**
  * Which of the phone's notifications go to the desktop, and as what (N5a).
  *
- * Never this app's own, ongoing ones (music, navigation, calls, services),
- * group summaries, ones with nothing to show, or an excluded app's. The
- * lock screen's rule is the desktop's too: a secret one is not sent, and a
- * private one is sent as its public version, or as only that there is one.
- * An update that changes nothing shown (a progress bar) is not sent again.
+ * Only apps the user switched on. Never this app's own, ongoing ones
+ * (music, navigation, calls, services), group summaries, ones with nothing
+ * to show, ones the app keeps on this device (`FLAG_LOCAL_ONLY`), or another
+ * profile's. The lock screen's rule is the desktop's too: a secret one is not
+ * sent, and a private one is sent as its public version, or as only that
+ * there is one. A one-time code is replaced. An update that changes nothing
+ * shown (a progress bar) is not sent again.
  */
 class NotificationForwardRule(private val ownPackage: String) {
     // Insertion-ordered, so the oldest is dropped first.
     private val sent = LinkedHashMap<String, Pair<String, String>>()
 
-    fun decide(note: PostedNote, enabled: Boolean, excluded: Set<String>): Outgoing? {
-        if (!enabled || note.pkg == ownPackage || note.ongoing || note.groupSummary) return null
-        if (note.pkg in excluded || note.visibility == VISIBILITY_SECRET) return null
+    fun decide(note: PostedNote, enabled: Boolean, shared: Set<String>): Outgoing? {
+        if (!enabled || note.pkg == ownPackage || note.pkg !in shared) return null
+        if (note.ongoing || note.groupSummary || note.localOnly || note.otherProfile) return null
+        if (note.visibility == VISIBILITY_SECRET) return null
         val (title, text) = shown(note) ?: return null
         if (sent[note.key] == title to text) return null
         sent.remove(note.key)
         sent[note.key] = title to text
         while (sent.size > REMEMBERED) sent.remove(sent.keys.first())
-        return Outgoing(note.key, note.appLabel, title, text)
+        return Outgoing(note.key, note.appLabel, title, text, note.clearable)
     }
 
-    /** The notification is gone: the same key posted again is sent again. */
+    /** The notification is gone, or its send failed: the same key posted again is sent again. */
     fun removed(key: String) {
         sent.remove(key)
     }
@@ -56,7 +64,7 @@ class NotificationForwardRule(private val ownPackage: String) {
         val title = note.title?.trim().orEmpty()
         val text = note.text?.trim().orEmpty()
         if (title.isEmpty() && text.isEmpty()) return null
-        return title.ifEmpty { note.appLabel } to text
+        return title.ifEmpty { note.appLabel } to if (looksLikeCode("$title $text")) CODE_HIDDEN else text
     }
 
     companion object {
@@ -65,10 +73,36 @@ class NotificationForwardRule(private val ownPackage: String) {
         const val VISIBILITY_PRIVATE = 0
         const val VISIBILITY_PUBLIC = 1
 
+        /** NotificationManager.VISIBILITY_NO_OVERRIDE. */
+        const val NO_OVERRIDE = -1000
+
         /** The title of a private notification that has no public version. */
         const val HIDDEN_TITLE = "New notification"
 
+        /** The text sent in place of a one-time code. */
+        const val CODE_HIDDEN = "A code (kept on the phone)"
+
         /** How many notifications' last sent text is remembered. */
         const val REMEMBERED = 200
+
+        private val CODE_WORDS = Regex("""\b(code|otp|passcode|password|pin|verification|verify|2fa|one[- ]time)\b""", RegexOption.IGNORE_CASE)
+        private val CODE_DIGITS = Regex("""(?<![\d:.,])(?:[A-Z]-)?\d{4,8}(?![\d:.,]\d)""")
+
+        /** Whether [text] carries a one-time code: 4 to 8 digits next to a word that names one. */
+        fun looksLikeCode(text: String): Boolean = CODE_WORDS.containsMatchIn(text) && CODE_DIGITS.containsMatchIn(text)
+
+        /**
+         * The strictest of the notification's own visibility, its channel's
+         * lock-screen setting, the user's override from the ranking, and the
+         * system's "hide sensitive content" (which makes everything private
+         * at most). Lower is stricter.
+         */
+        fun effectiveVisibility(own: Int, channel: Int, ranking: Int, systemHidesSensitive: Boolean): Int {
+            var v = own
+            if (channel != NO_OVERRIDE) v = minOf(v, channel)
+            if (ranking != NO_OVERRIDE) v = minOf(v, ranking)
+            if (systemHidesSensitive) v = minOf(v, VISIBILITY_PRIVATE)
+            return v
+        }
     }
 }

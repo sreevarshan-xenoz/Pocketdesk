@@ -24,8 +24,10 @@ import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 
 /**
  * Settings: whether this phone's notifications appear on the computer (N5a),
- * off by default, and which apps are left out. Read again on resume, so a
- * grant made in Android's settings shows when the user comes back.
+ * off by default, and which apps share theirs: each app that has notified is
+ * listed, off until switched on, so no app's notification reaches the
+ * computer before the user chose it. Read again on resume, so a grant made in
+ * Android's settings shows when the user comes back.
  */
 @Composable
 fun PhoneNotificationsSection() {
@@ -40,7 +42,7 @@ fun PhoneNotificationsSection() {
     // Read under `version`, so each change and each resume recomposes.
     val enabled = version.let { PhoneNotificationPrefs.enabled(context) }
     val granted = version.let { PhoneNotificationPrefs.accessGranted(context) }
-    val excluded = version.let { PhoneNotificationPrefs.excluded(context) }
+    val shared = version.let { PhoneNotificationPrefs.shared(context) }
     val seen = version.let { PhoneNotificationPrefs.seen(context) }
 
     fun setEnabled(on: Boolean) {
@@ -89,22 +91,22 @@ fun PhoneNotificationsSection() {
         )
     }
     seen.forEach { (pkg, label) ->
-        val shared = pkg !in excluded
+        val on = pkg in shared
         ListItem(
             headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
             supportingContent = { Text(pkg, style = MaterialTheme.typography.bodySmall) },
             trailingContent = {
                 Switch(
-                    checked = shared,
+                    checked = on,
                     onCheckedChange = {
-                        PhoneNotificationPrefs.setExcluded(context, pkg, !it)
+                        PhoneNotificationPrefs.setShared(context, pkg, it)
                         version++
                     },
                 )
             },
             modifier =
                 Modifier.clickable {
-                    PhoneNotificationPrefs.setExcluded(context, pkg, shared)
+                    PhoneNotificationPrefs.setShared(context, pkg, !on)
                     version++
                 },
         )

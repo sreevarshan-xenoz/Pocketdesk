@@ -281,5 +281,5 @@
     <string name="phone_notifications_share">Mostrar en mi ordenador</string>
     <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste. Desactivado por defecto.</string>
     <string name="phone_notifications_no_access">Toca para permitir el acceso a las notificaciones</string>
-    <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Desactiva una para que se quede en el teléfono.</string>
+    <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Ninguna se comparte hasta que la actives.</string>
 </resources>
