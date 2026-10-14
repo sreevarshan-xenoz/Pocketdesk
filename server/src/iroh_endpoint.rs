@@ -188,8 +188,11 @@ pub fn publishable(addrs: &[TransportAddr], with_ips: bool) -> Vec<TransportAddr
 /// The server's own check of its DHT record, for Diagnostics (N3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DhtCheck {
-    /// The record read back holds an address published now.
-    Found,
+    /// The DHT node has not started: its bootstrap nodes do not resolve.
+    NotJoined,
+    /// The record read back holds an address published now; `ips` when one
+    /// of them is an IP address, not only a relay.
+    Found { ips: bool },
     /// Nothing, or only a stale record, came back.
     NotFound,
     /// No address may be published (only private relays, and IPs off).
@@ -243,6 +246,7 @@ fn spawn_dht(endpoint: Endpoint, mode: DhtPublish, state: DhtCheckState) {
             if let Some(lookup) = join_dht(&endpoint, mode).await {
                 break lookup;
             }
+            *state.lock().unwrap_or_else(|e| e.into_inner()) = Some(DhtCheck::NotJoined);
             tokio::time::sleep(DHT_RETRY).await;
             if endpoint.is_closed() {
                 return;
@@ -315,22 +319,24 @@ async fn check_dht_record(
                 let items = tokio::time::timeout(std::time::Duration::from_secs(30), read)
                     .await
                     .unwrap_or_default();
-                let found = items.into_iter().flatten().any(|item| {
-                    item.into_endpoint_addr()
-                        .addrs
-                        .iter()
-                        .any(|addr| expected.contains(addr))
-                });
-                Some(if found {
-                    DhtCheck::Found
-                } else {
+                let read_back: Vec<TransportAddr> = items
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|item| item.into_endpoint_addr().addrs)
+                    .filter(|addr| expected.contains(addr))
+                    .collect();
+                Some(if read_back.is_empty() {
                     DhtCheck::NotFound
+                } else {
+                    DhtCheck::Found {
+                        ips: read_back.iter().any(TransportAddr::is_ip),
+                    }
                 })
             }
         };
         tracing::debug!(?check, "WAN: DHT record checked");
         *state.lock().unwrap_or_else(|e| e.into_inner()) = check;
-        if check == Some(DhtCheck::Found) {
+        if matches!(check, Some(DhtCheck::Found { .. })) {
             misses = 0;
             wait = DHT_RECHECK;
             continue;
@@ -354,15 +360,23 @@ async fn check_dht_record(
     }
 }
 
-/// `wan_status.json`'s DHT fields: what the record holds ("empty" when
-/// nothing may be published), and whether it was read back (absent until the
-/// first check).
+/// `wan_status.json`'s DHT fields: what the record holds as read back
+/// ("relay", "addresses"), or the setting while it is not ("off", or the
+/// `dht_publish` value while checking); "empty" when nothing may be
+/// published and "unjoined" when the DHT has not started. Then whether it was
+/// read back (absent until known).
 fn dht_fields(mode: DhtPublish, check: Option<DhtCheck>) -> (Option<String>, Option<bool>) {
+    let text = |s: &str| Some(s.to_string());
+    if mode == DhtPublish::Off {
+        return (text("off"), None);
+    }
     match check {
-        Some(DhtCheck::NothingToPublish) => (Some("empty".to_string()), None),
-        Some(DhtCheck::Found) => (Some(mode.as_str().to_string()), Some(true)),
-        Some(DhtCheck::NotFound) => (Some(mode.as_str().to_string()), Some(false)),
-        None => (Some(mode.as_str().to_string()), None),
+        Some(DhtCheck::NotJoined) => (text("unjoined"), None),
+        Some(DhtCheck::NothingToPublish) => (text("empty"), None),
+        Some(DhtCheck::Found { ips: true }) => (text("addresses"), Some(true)),
+        Some(DhtCheck::Found { ips: false }) => (text("relay"), Some(true)),
+        Some(DhtCheck::NotFound) => (text(mode.as_str()), Some(false)),
+        None => (text(mode.as_str()), None),
     }
 }
 
@@ -452,11 +466,7 @@ fn spawn_endpoint_recorder(endpoint: Endpoint, dht_mode: DhtPublish, dht_check: 
                     .unwrap_or(0);
                 let mut status = wan_status_from(&report, now);
                 let check = *dht_check.lock().unwrap_or_else(|e| e.into_inner());
-                (status.dht, status.dht_found) = if dht {
-                    dht_fields(dht_mode, check)
-                } else {
-                    (Some(DhtPublish::Off.as_str().to_string()), None)
-                };
+                (status.dht, status.dht_found) = dht_fields(dht_mode, check);
                 // Rewritten when a fact changes, not every tick.
                 let facts = (
                     status.udp,
@@ -707,8 +717,21 @@ mod dht_tests {
         let s = |v: &str| Some(v.to_string());
         assert_eq!(dht_fields(DhtPublish::Relay, None), (s("relay"), None));
         assert_eq!(
-            dht_fields(DhtPublish::Addresses, Some(DhtCheck::Found)),
+            dht_fields(DhtPublish::Addresses, Some(DhtCheck::Found { ips: true })),
             (s("addresses"), Some(true))
+        );
+        assert_eq!(
+            dht_fields(DhtPublish::Addresses, Some(DhtCheck::Found { ips: false })),
+            (s("relay"), Some(true)),
+            "public addresses are claimed only when one was read back"
+        );
+        assert_eq!(
+            dht_fields(DhtPublish::Relay, Some(DhtCheck::NotJoined)),
+            (s("unjoined"), None)
+        );
+        assert_eq!(
+            dht_fields(DhtPublish::Off, Some(DhtCheck::NotJoined)),
+            (s("off"), None)
         );
         assert_eq!(
             dht_fields(DhtPublish::Relay, Some(DhtCheck::NotFound)),

@@ -75,9 +75,11 @@ pub struct WanStatus {
     pub public_v6: bool,
     /// A sign-in page holds the network.
     pub captive_portal: Option<bool>,
-    /// What the server publishes on the Mainline DHT (roadmap N3): its
-    /// `dht_publish` ("relay", "addresses" or "off"), or "empty" when no
-    /// address may be published. Absent from an older server.
+    /// This computer's record on the Mainline DHT (roadmap N3): what it was
+    /// read back holding ("relay", or "addresses" when an IP was among it),
+    /// else the `dht_publish` setting while checking or "off"; "empty" when
+    /// no address may be published, "unjoined" when the DHT has not started.
+    /// Absent from an older server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dht: Option<String>,
     /// The server read its own record back from the DHT. Absent until its
@@ -191,6 +193,16 @@ pub fn check_dht(status: Option<&WanStatus>, state: ServerState) -> Finding {
             "off: a phone away from home dials the address it learned at home",
         );
     }
+    if mode == "unjoined" {
+        return with_hint(
+            finding(
+                check,
+                Status::Warn,
+                "not on the Mainline DHT yet: its bootstrap servers do not resolve",
+            ),
+            "The server retries each minute. If this stays, this computer has no working DNS or internet.",
+        );
+    }
     if mode == "empty" {
         return with_hint(
             finding(
@@ -223,7 +235,7 @@ pub fn check_dht(status: Option<&WanStatus>, state: ServerState) -> Finding {
         None => finding(
             check,
             Status::Info,
-            "published; checking that the DHT has it (about a minute after the server starts)",
+            "checking that the DHT has this computer's record (each minute until it does)",
         ),
     }
 }
@@ -838,6 +850,9 @@ mod tests {
         let checking = check_dht(Some(&dht("relay", None)), UP);
         assert_eq!(checking.status, Status::Info);
         assert!(checking.detail.contains("checking"));
+        let unjoined = check_dht(Some(&dht("unjoined", None)), UP);
+        assert_eq!(unjoined.status, Status::Warn);
+        assert!(unjoined.detail.contains("not on the Mainline DHT"));
         let empty = check_dht(Some(&dht("empty", None)), UP);
         assert_eq!(empty.status, Status::Warn);
         assert!(empty.hint.as_deref().unwrap().contains("relay_urls"));
