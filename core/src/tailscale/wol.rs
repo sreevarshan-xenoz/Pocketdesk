@@ -1,19 +1,22 @@
 use anyhow::{Context, Result};
 use std::net::UdpSocket;
 
-/// Send a Wake-on-LAN magic packet to the specified MAC address.
-///
-/// The magic packet consists of 6 bytes of 0xFF followed by the MAC address
-/// repeated 16 times, sent as a UDP broadcast on port 9.
-pub fn send_wol(mac_address: &str, broadcast_addr: &str) -> Result<()> {
+/// The Wake-on-LAN magic packet for `mac_address`: 6 bytes of 0xFF, then
+/// the MAC 16 times (102 bytes).
+pub fn magic_packet(mac_address: &str) -> Result<Vec<u8>> {
     let mac = parse_mac(mac_address).context("Failed to parse MAC address")?;
-
-    // Build magic packet: 6 bytes of 0xFF + MAC repeated 16 times
     let mut packet = Vec::with_capacity(6 + 16 * 6);
     packet.extend_from_slice(&[0xFF; 6]);
     for _ in 0..16 {
         packet.extend_from_slice(&mac);
     }
+    Ok(packet)
+}
+
+/// Send a Wake-on-LAN magic packet to the specified MAC address, as a UDP
+/// broadcast to `broadcast_addr` on port 9.
+pub fn send_wol(mac_address: &str, broadcast_addr: &str) -> Result<()> {
+    let packet = magic_packet(mac_address)?;
 
     let socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind UDP socket for WOL")?;
     socket
@@ -25,8 +28,52 @@ pub fn send_wol(mac_address: &str, broadcast_addr: &str) -> Result<()> {
         .send_to(&packet, &addr)
         .context("Failed to send WOL magic packet")?;
 
-    tracing::info!("Sent WOL magic packet to {addr} ({sent} bytes, MAC: {mac_address})");
+    // The MAC identifies the computer: it stays out of the log.
+    tracing::info!("Sent WOL magic packet to {addr} ({sent} bytes)");
     Ok(())
+}
+
+/// How many times [`send_wake`] sends to each target: a lost UDP packet
+/// should not cost a wake.
+pub const WAKE_REPEATS: usize = 3;
+
+/// Send the magic packet for `mac_address` to each target (broadcasts on
+/// this network, or an address outside whose router forwards it),
+/// [`WAKE_REPEATS`] times, 100 ms apart, from one socket with broadcast on.
+/// Returns how many targets took at least one packet; an error only when
+/// none did.
+pub fn send_wake(mac_address: &str, targets: &[std::net::SocketAddr]) -> Result<usize> {
+    if targets.is_empty() {
+        anyhow::bail!("nowhere to send the wake to");
+    }
+    let packet = magic_packet(mac_address)?;
+    let socket = UdpSocket::bind("0.0.0.0:0").context("Failed to bind UDP socket for WOL")?;
+    socket
+        .set_broadcast(true)
+        .context("Failed to enable broadcast on WOL socket")?;
+
+    let mut reached = vec![false; targets.len()];
+    let mut last_error = None;
+    for round in 0..WAKE_REPEATS {
+        if round > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        for (i, target) in targets.iter().enumerate() {
+            match socket.send_to(&packet, target) {
+                Ok(_) => reached[i] = true,
+                Err(e) => last_error = Some(format!("{target}: {e}")),
+            }
+        }
+    }
+    let count = reached.iter().filter(|r| **r).count();
+    if count == 0 {
+        anyhow::bail!(
+            "the wake could not be sent ({})",
+            last_error.unwrap_or_default()
+        );
+    }
+    tracing::info!("Sent the wake to {count} of {} targets", targets.len());
+    Ok(count)
 }
 
 /// Send WOL to the broadcast address with automatic retries.
@@ -108,19 +155,47 @@ mod tests {
     }
 
     #[test]
-    fn test_magic_packet_size() {
-        let mac = parse_mac("00:11:22:33:44:55").unwrap();
-        let mut packet = Vec::with_capacity(6 + 16 * 6);
-        packet.extend_from_slice(&[0xFF; 6]);
-        for _ in 0..16 {
-            packet.extend_from_slice(&mac);
-        }
+    fn a_magic_packet_is_six_ff_then_the_mac_sixteen_times() {
+        let packet = magic_packet("00:11:22:33:44:55").unwrap();
         assert_eq!(packet.len(), 102);
         assert_eq!(packet[0..6], [0xFF; 6]);
-        // Each of the 16 repetitions should match the MAC
         for i in 0..16 {
             let start = 6 + i * 6;
-            assert_eq!(packet[start..start + 6], mac, "Repetition {i} mismatch");
+            assert_eq!(
+                packet[start..start + 6],
+                [0x00, 0x11, 0x22, 0x33, 0x44, 0x55],
+                "repetition {i}"
+            );
         }
+        assert!(magic_packet("not a mac").is_err());
+    }
+
+    #[test]
+    fn a_wake_reaches_every_target_three_times() {
+        let first = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let second = UdpSocket::bind("127.0.0.1:0").unwrap();
+        for socket in [&first, &second] {
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .unwrap();
+        }
+        let targets = [first.local_addr().unwrap(), second.local_addr().unwrap()];
+
+        let sent = send_wake("AA:BB:CC:DD:EE:FF", &targets).unwrap();
+        assert_eq!(sent, 2, "both targets were sent to");
+
+        let expected = magic_packet("AA:BB:CC:DD:EE:FF").unwrap();
+        for socket in [&first, &second] {
+            let mut buf = [0u8; 256];
+            for _ in 0..WAKE_REPEATS {
+                let (n, _) = socket.recv_from(&mut buf).unwrap();
+                assert_eq!(&buf[..n], expected.as_slice());
+            }
+        }
+    }
+
+    #[test]
+    fn a_wake_with_no_targets_is_an_error() {
+        assert!(send_wake("AA:BB:CC:DD:EE:FF", &[]).is_err());
     }
 }
