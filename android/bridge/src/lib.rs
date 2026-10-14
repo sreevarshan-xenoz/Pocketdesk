@@ -841,9 +841,12 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTransfe
 }
 
 /// Download a file from the desktop into `fd`, which the bridge takes over
-/// (F7b): a browsed `value` path, or an offer id when `is_offer`.
-/// `{"ok": bytes}` or `{"error": "..."}`.
+/// (F7b): a browsed `value` path, or an offer id when `is_offer`. With a
+/// `source`, a broken download keeps its part at `location` (the place `fd`
+/// opens) for a retry to continue (T6a). `{"ok": bytes}` or
+/// `{"error": "..."}`.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchFile(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -852,16 +855,62 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchFi
     is_offer: jni::sys::jboolean,
     value: JString<'_>,
     fd: jint,
+    source: JString<'_>,
+    name: JString<'_>,
+    location: JString<'_>,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let value = jstring_to_string(&mut env, &value);
+    let source = jstring_to_string(&mut env, &source);
+    let name = jstring_to_string(&mut env, &name);
+    let location = jstring_to_string(&mut env, &location);
     let target = if is_offer != 0 {
         download::FetchTarget::Offer(value)
     } else {
         download::FetchTarget::Path(value)
     };
-    let json =
-        envelope(RUNTIME.block_on(download::fetch_file_fd(address, port as u16, target, fd)));
+    let resume = (pocketdesk_core::protocol::partials::valid_source(&source)
+        && !location.is_empty())
+    .then_some(download::Resume {
+        source,
+        name,
+        location,
+    });
+    let json = envelope(RUNTIME.block_on(download::fetch_file_fd(
+        address,
+        port as u16,
+        target,
+        fd,
+        resume,
+    )));
+    to_jstring(&mut env, json)
+}
+
+/// Where the part of `address`'s file `source` an earlier download kept is
+/// (T6a), or "" when there is none.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePartialLocation(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    source: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let source = jstring_to_string(&mut env, &source);
+    let location = download::partial_location(&address, &source).unwrap_or_default();
+    to_jstring(&mut env, location)
+}
+
+/// Forget unfinished downloads older than `max_age_hours`, and return where
+/// their bytes are as a JSON array, for the app to delete (T6a).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSweepPartials(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    max_age_hours: jint,
+) -> jstring {
+    let dropped = download::sweep_partials(u32::try_from(max_age_hours).unwrap_or(0));
+    let json = serde_json::to_string(&dropped).unwrap_or_else(|_| "[]".to_string());
     to_jstring(&mut env, json)
 }
 

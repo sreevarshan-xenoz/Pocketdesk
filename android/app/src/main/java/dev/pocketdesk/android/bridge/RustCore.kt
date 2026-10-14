@@ -116,7 +116,12 @@ object RustCore {
         isOffer: Boolean,
         value: String,
         fd: Int,
+        source: String,
+        name: String,
+        location: String,
     ): String
+    private external fun nativePartialLocation(address: String, source: String): String
+    private external fun nativeSweepPartials(maxAgeHours: Int): String
     private external fun nativeTakeFileOffers(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
@@ -581,8 +586,34 @@ object RustCore {
      * closes (F7b): the browsed path [value], or the offer id [value] when
      * [isOffer]. The bytes saved.
      */
-    fun fetchFile(address: String, port: Int, isOffer: Boolean, value: String, fd: Int): Result<Long> =
-        envelope(nativeFetchFile(address, port, isOffer, value, fd)).mapCatching { it.toLong() }
+    /**
+     * Download into [fd] (opened read-write). With a [source], a broken
+     * download keeps its part at [location], the place [fd] opens, and a
+     * retry continues it (T6a).
+     */
+    fun fetchFile(
+        address: String,
+        port: Int,
+        isOffer: Boolean,
+        value: String,
+        fd: Int,
+        source: String,
+        name: String,
+        location: String,
+    ): Result<Long> =
+        envelope(nativeFetchFile(address, port, isOffer, value, fd, source, name, location))
+            .mapCatching { it.toLong() }
+
+    /** Where an earlier download of [address]'s file [source] kept its part, if it did. */
+    fun partialLocation(address: String, source: String): String? =
+        nativePartialLocation(address, source).ifEmpty { null }
+
+    /** Forget unfinished downloads older than [maxAgeHours]; where their bytes are, to delete. */
+    fun sweepPartials(maxAgeHours: Int): List<String> =
+        runCatching {
+            val list = org.json.JSONArray(nativeSweepPartials(maxAgeHours))
+            (0 until list.length()).map { list.getString(it) }
+        }.getOrDefault(emptyList())
 
     /** Tell the desktop this phone will not fetch offer [id], and why (F7b). */
     fun declineOffer(address: String, port: Int, id: String, reason: String): Result<Unit> =
