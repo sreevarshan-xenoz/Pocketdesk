@@ -22,6 +22,7 @@ object Prefs {
     private const val KEY_DYNAMIC_COLOR = "dynamic_color"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
+    private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
     private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
@@ -75,6 +76,15 @@ object Prefs {
 
     fun setKeepScreenOn(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_KEEP_SCREEN_ON, enabled) }
+        bump()
+    }
+
+    /** T2: Home reminds when Android may stop a background feature. */
+    fun backgroundReminder(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_BACKGROUND_REMINDER, true)
+
+    fun setBackgroundReminder(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_BACKGROUND_REMINDER, enabled) }
         bump()
     }
 

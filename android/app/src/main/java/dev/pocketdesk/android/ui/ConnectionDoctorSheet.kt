@@ -169,7 +169,10 @@ private fun act(context: Context, action: FixAction, onWake: () -> Unit, onPairA
         FixAction.ASK_LOCAL_NETWORK, FixAction.OPEN_APP_SETTINGS ->
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, appUri)
         FixAction.OPEN_WIFI_SETTINGS -> Intent(Settings.ACTION_WIFI_SETTINGS)
-        FixAction.OPEN_BATTERY_SETTINGS -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        FixAction.OPEN_BATTERY_SETTINGS -> return dev.pocketdesk.android.doctor.BackgroundRunning.openSettings(
+            context,
+            dev.pocketdesk.android.doctor.BackgroundLimit.OPTIMIZED,
+        )
         FixAction.OPEN_DATA_SAVER -> Intent(Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS, appUri)
         FixAction.OPEN_NOTIFICATION_ACCESS -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
     }

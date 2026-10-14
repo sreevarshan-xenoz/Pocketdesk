@@ -414,4 +414,17 @@
     <string name="doctor_video_closed_fix">Pocketdesk responde, pero no en su puerto de vídeo. Revisa el puerto de transmisión guardado para este equipo, o reinicia Pocketdesk allí.</string>
     <string name="doctor_scan_again_title">¿Escanear de nuevo su código de vinculación?</string>
     <string name="doctor_scan_again_text">Esto quita el equipo y su clave de seguridad guardada de este teléfono y abre el escáner. Hazlo solo si reinstalaste Pocketdesk allí.</string>
+    <!-- Staying connected in the background (T2) -->
+    <string name="bg_optimized">Android puede frenar Pocketdesk mientras el teléfono duerme</string>
+    <string name="bg_restricted">El uso de batería de Pocketdesk está en Restringido</string>
+    <string name="bg_allowed">Android deja que Pocketdesk funcione en segundo plano</string>
+    <string name="bg_why">Mientras el teléfono duerme, las notificaciones que van al ordenador pueden perderse y los mensajes llegar tarde.</string>
+    <string name="bg_allow">Permitir</string>
+    <string name="bg_dont_remind">No volver a recordar</string>
+    <string name="bg_maker_guide">Ajuste propio de este teléfono</string>
+    <string name="settings_background">Segundo plano</string>
+    <string name="settings_background_status">Funcionamiento en segundo plano</string>
+    <string name="settings_background_remind">Recordármelo en Inicio</string>
+    <string name="settings_background_remind_summary">Cuando las notificaciones o los mensajes están activados y Android puede frenarlos</string>
+    <string name="bg_maker_guide_summary">Muchos teléfonos añaden su propio ahorro de batería además del de Android</string>
 </resources>

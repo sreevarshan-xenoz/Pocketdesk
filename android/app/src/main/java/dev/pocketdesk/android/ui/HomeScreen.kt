@@ -12,14 +12,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,8 +31,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
@@ -39,6 +43,8 @@ import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.discovery.FoundComputer
 import dev.pocketdesk.android.discovery.FoundComputers
 import dev.pocketdesk.android.discovery.rememberFoundComputers
+import dev.pocketdesk.android.doctor.BackgroundLimit
+import dev.pocketdesk.android.doctor.BackgroundRunning
 import dev.pocketdesk.android.wake.Waker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -82,6 +88,22 @@ fun HomeScreen(
     var wakeSettingsFor by remember { mutableStateOf<String?>(null) }
     // T1: the computer the Connection Doctor is checking.
     var checking by remember { mutableStateOf<HostStore.Host?>(null) }
+    // T2: re-read when Home comes back, e.g. from the battery settings.
+    Prefs.observedVersion()
+    var resumes by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) resumes++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // Read once per resume (system services), not on every recomposition.
+    val backgroundLimit = remember(resumes) { BackgroundRunning.limit(context) }
+    val backgroundFeatures = remember(resumes) { BackgroundRunning.featuresOn(context) }
+    val remindBackground =
+        BackgroundRunning.shouldRemind(backgroundFeatures, backgroundLimit, Prefs.backgroundReminder(context))
     // A computer whose key changed, to remove and scan again (T1).
     var rescanning by remember { mutableStateOf<HostStore.Host?>(null) }
     // Bumped when wake settings change, so the cards re-read their plans.
@@ -203,6 +225,17 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // Only here, not on the empty Home: the background features
+                // need a paired computer to send to.
+                if (remindBackground) {
+                    item(key = "#background") {
+                        BackgroundCard(
+                            limit = backgroundLimit,
+                            onAllow = { BackgroundRunning.openSettings(context, backgroundLimit) },
+                            onDismiss = { Prefs.setBackgroundReminder(context, false) },
+                        )
+                    }
+                }
                 if (network.unsaved.isNotEmpty()) {
                     item { SectionLabel(stringResource(R.string.found_on_network)) }
                     items(network.unsaved, key = { "found:${it.address}" }) { computer ->
@@ -528,3 +561,36 @@ private const val WAKE_WAIT_HOME_S = 90
 
 /** How long it waits before connecting from outside, where nothing can be seen, in seconds. */
 private const val WAKE_WAIT_AWAY_S = 30
+
+/** T2: Android may stop the features that work in the background. */
+@Composable
+private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val guide = remember { BackgroundRunning.makerGuide(android.os.Build.MANUFACTURER) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                stringResource(
+                    if (limit == BackgroundLimit.RESTRICTED) R.string.bg_restricted else R.string.bg_optimized,
+                ),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                stringResource(R.string.bg_why),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (guide != null) {
+                    TextButton(onClick = {
+                        if (!BackgroundRunning.openGuide(context, guide)) {
+                            android.widget.Toast.makeText(context, guide, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }) { Text(stringResource(R.string.bg_maker_guide)) }
+                }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.bg_dont_remind)) }
+                TextButton(onClick = onAllow) { Text(stringResource(R.string.bg_allow)) }
+            }
+        }
+    }
+}
