@@ -74,15 +74,24 @@ object PhoneNotificationPrefs {
  * Reads the phone's notifications, once the user grants access, and sends
  * those [NotificationForwardRule] lets through to the most recently used
  * computer this phone is paired with. All work runs on one thread, with at
- * most 20 waiting (oldest dropped). After a send fails, sends pause for a
- * minute, so a computer out of reach costs no battery.
+ * most 20 tasks waiting (oldest dropped). After a send fails, sends pause
+ * for a minute, so a computer out of reach costs no battery; meanwhile the
+ * notifications wait in [NotificationOutbox] (in memory only) and go once
+ * the computer answers.
  */
 class PhoneNotificationListener : NotificationListenerService() {
     private lateinit var rule: NotificationForwardRule
     private val worker get() = PhoneLink.worker
 
-    /** Notifications that could not be sent yet; touched on [worker] only. */
-    private val pending = PendingNotifications<JSONObject>()
+    /** Notifications that could not be sent yet, and what the computer was shown; [worker] only. */
+    private val outbox = NotificationOutbox<JSONObject>()
+
+    /**
+     * Notifications closed on the phone, noted on the listener's own thread
+     * at once: a worker task can be dropped when many arrive together, and
+     * one closed meanwhile must not be sent later.
+     */
+    private val closedKeys: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /** Replies from the computer (N5b): Android keeps this service bound, so it hosts them. */
     private val replies by lazy { SmsReplies(applicationContext) }
@@ -98,7 +107,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             {
                 runCatching { replies.tick() }.onFailure { Log.w("PhoneNotifications", "reply tick failed", it) }
                 // Notifications that waited (the phone asleep, the computer away) go now.
-                worker.execute { sendPending() }
+                worker.execute { sendWaiting() }
             },
             5,
             5,
@@ -112,25 +121,29 @@ class PhoneNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        closedKeys.remove(sbn.key)
         // Read the ranking now: it describes the state at this moment.
         val rankingVisibility = rankingVisibility(sbn)
         worker.execute { handle(sbn, rankingVisibility) }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        closedKeys.add(sbn.key)
         worker.execute {
             // Closed on the phone: closed on the computer too (N5c), but only
-            // one the computer was shown.
-            // One still waiting never reached the computer: just drop it.
-            if (pending.remove(sbn.key)) {
-                rule.removed(sbn.key)
-                return@execute
-            }
-            if (rule.removed(sbn.key) && PhoneNotificationPrefs.enabled(this)) {
+            // one the computer was shown. What of it still waits is dropped.
+            rule.removed(sbn.key)
+            if (outbox.closed(sbn.key) && PhoneNotificationPrefs.enabled(this)) {
                 PhoneLink.sendNow(this, "kdeconnect.notification", JSONObject().put("id", sbn.key).put("isCancel", true))
             }
         }
     }
+
+    /** Whether a waiting notification may still go: not closed, forwarding and its app still on. */
+    private fun sendable(id: String, pkg: String): Boolean =
+        id !in closedKeys && PhoneNotificationPrefs.enabled(this) && pkg in PhoneNotificationPrefs.shared(this)
+
+    private fun sendBody(body: JSONObject): Boolean = PhoneLink.sendNow(this, "kdeconnect.notification", body)
 
     private fun handle(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>) {
         if (!PhoneNotificationPrefs.enabled(this)) return
@@ -147,25 +160,16 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("text", out.text)
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
-        // Not sent now: it waits a while, rather than being lost.
-        if (!PhoneLink.sendNow(this, "kdeconnect.notification", body)) {
-            pending.add(out.id, body, SystemClock.elapsedRealtime())?.let { rule.removed(it) }
-        }
+        if (out.id in closedKeys) return
+        // Sent now, or behind what waits; one given up on is forgotten.
+        outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
+            .forEach { rule.removed(it) }
     }
 
     /** Send what waited, oldest first, until one fails. */
-    private fun sendPending() {
-        if (pending.isEmpty()) return
-        val due = pending.due(SystemClock.elapsedRealtime())
-        due.expired.forEach { rule.removed(it) }
-        if (!PhoneNotificationPrefs.enabled(this)) {
-            due.send.forEach { (id, _) -> pending.remove(id); rule.removed(id) }
-            return
-        }
-        for ((id, body) in due.send) {
-            if (!PhoneLink.sendNow(this, "kdeconnect.notification", body)) return
-            pending.sent(id)
-        }
+    private fun sendWaiting() {
+        if (outbox.isEmpty()) return
+        outbox.flush(SystemClock.elapsedRealtime(), ::sendable, ::sendBody).forEach { rule.removed(it) }
     }
 
     /** The channel's and the user's lock-screen overrides for [sbn]. */
