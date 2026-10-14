@@ -308,6 +308,12 @@ pub async fn get_wake_info(host: &str, port: u16) -> Option<String> {
     wake_info_for(crate::WAKE_INFO.lock().await.as_ref(), host, port)
 }
 
+/// Who drives, as the computer at `host`:`port` last said (N7
+/// `kdeconnect.pocketdesk.control` body JSON), or `None`.
+pub async fn get_control_state(host: &str, port: u16) -> Option<String> {
+    wake_info_for(crate::CONTROL_STATE.lock().await.as_ref(), host, port)
+}
+
 /// The cached body when it came from `host`:`port`.
 fn wake_info_for(slot: Option<&(String, u16, String)>, host: &str, port: u16) -> Option<String> {
     slot.filter(|(from_host, from_port, _)| from_host == host && *from_port == port)
@@ -491,6 +497,18 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                 }
                                 // How to wake this desktop (N6), kept for the
                                 // app to save with the computer.
+                                // Who drives, when several phones are
+                                // connected (N7).
+                                if trimmed.contains("pocketdesk.control")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == "kdeconnect.pocketdesk.control"
+                                {
+                                    *crate::CONTROL_STATE.lock().await = Some((
+                                        from_peer.0.clone(),
+                                        from_peer.1,
+                                        pkt.body.to_string(),
+                                    ));
+                                }
                                 if trimmed.contains("pocketdesk.wake_info")
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
                                     && pkt.packet_type == "kdeconnect.pocketdesk.wake_info"
@@ -592,6 +610,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                         *writer_guard = None;
                         *crate::WAN_IDENTITY.lock().await = None;
                         *crate::WAKE_INFO.lock().await = None;
+                        *crate::CONTROL_STATE.lock().await = None;
                         crate::SIREN_RINGING.store(false, std::sync::atomic::Ordering::SeqCst);
                         *crate::PAIR_RESULT.lock().await = None;
                         // Offers came from this desktop; another one cannot

@@ -326,4 +326,8 @@
     <string name="connect_anyway">Connect anyway</string>
     <string name="settings_offer_wake">Offer to wake a computer that does not answer</string>
     <string name="settings_offer_wake_summary">Connect checks first, and offers Wake and connect</string>
+    <!-- N7: several phones -->
+    <string name="driving_other">Another phone is driving: this one watches</string>
+    <string name="settings_show_driving">Say when another phone drives</string>
+    <string name="settings_show_driving_summary">With several phones on one computer, only one controls it at a time</string>
 </resources>

@@ -1164,6 +1164,22 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeInf
     to_jstring(&mut env, json)
 }
 
+/// Who drives, as the computer at `address`:`port` last said, as JSON, or
+/// "" (N7).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeControlState(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = RUNTIME
+        .block_on(api::get_control_state(&address, port as u16))
+        .unwrap_or_default();
+    to_jstring(&mut env, json)
+}
+
 /// Ask an always-on LAN relay to send the WoL magic packet (Tier-2 #12).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeWakeViaRelay(

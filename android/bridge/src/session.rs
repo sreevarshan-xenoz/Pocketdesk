@@ -160,6 +160,11 @@ pub(crate) static WAN_IDENTITY: LazyLock<TokioMutex<Option<String>>> =
 pub(crate) static WAKE_INFO: LazyLock<TokioMutex<Option<(String, u16, String)>>> =
     LazyLock::new(|| TokioMutex::new(None));
 
+/// Who drives, as the desktop last said (`kdeconnect.pocketdesk.control`
+/// body JSON, N7), with the computer whose connection carried it.
+pub(crate) static CONTROL_STATE: LazyLock<TokioMutex<Option<(String, u16, String)>>> =
+    LazyLock::new(|| TokioMutex::new(None));
+
 /// Latch set when the desktop pushes `kdeconnect.findmydevice` `{ring:true}`
 /// (R3 Tier-2 #11 siren). Kotlin consumes-and-clears it via `checkSiren`.
 pub(crate) static SIREN_RINGING: AtomicBool = AtomicBool::new(false);

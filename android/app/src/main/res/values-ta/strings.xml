@@ -319,4 +319,8 @@
     <string name="connect_anyway">இருந்தாலும் இணை</string>
     <string name="settings_offer_wake">பதிலளிக்காத கணினியை எழுப்ப முன்வை</string>
     <string name="settings_offer_wake_summary">இணைப்பதற்கு முன் சரிபார்த்து, எழுப்பி இணைக்க முன்வைக்கும்</string>
+    <!-- N7: several phones -->
+    <string name="driving_other">வேறொரு ஃபோன் கட்டுப்படுத்துகிறது: இது பார்க்க மட்டும்</string>
+    <string name="settings_show_driving">வேறொரு ஃபோன் கட்டுப்படுத்தும்போது சொல்</string>
+    <string name="settings_show_driving_summary">ஒரு கணினியில் பல ஃபோன்கள் இருந்தால், ஒரே நேரத்தில் ஒன்றுதான் கட்டுப்படுத்தும்</string>
 </resources>

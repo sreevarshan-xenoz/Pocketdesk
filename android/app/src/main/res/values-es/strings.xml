@@ -324,4 +324,8 @@
     <string name="connect_anyway">Conectar igualmente</string>
     <string name="settings_offer_wake">Ofrecer encender un ordenador que no responde</string>
     <string name="settings_offer_wake_summary">Conectar comprueba antes y ofrece Encender y conectar</string>
+    <!-- N7: several phones -->
+    <string name="driving_other">Otro teléfono controla: este solo mira</string>
+    <string name="settings_show_driving">Avisar cuando controla otro teléfono</string>
+    <string name="settings_show_driving_summary">Con varios teléfonos en un ordenador, solo uno lo controla a la vez</string>
 </resources>

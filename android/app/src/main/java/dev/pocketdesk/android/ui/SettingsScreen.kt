@@ -136,6 +136,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 stringResource(R.string.settings_haptics_summary),
                 Prefs.haptics(context),
             ) { Prefs.setHaptics(context, it) }
+            boolRow(
+                LlIcons.Touch,
+                stringResource(R.string.settings_show_driving),
+                stringResource(R.string.settings_show_driving_summary),
+                Prefs.showDriving(context),
+            ) { Prefs.setShowDriving(context, it) }
             // F3: trackpad speed, saved when the thumb is let go.
             var speed by remember { mutableFloatStateOf(Prefs.trackpadSensitivity(context)) }
             ListItem(

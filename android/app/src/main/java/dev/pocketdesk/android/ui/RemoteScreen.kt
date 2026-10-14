@@ -278,6 +278,15 @@ fun RemoteScreen(
             stillTrying = true
         }
     }
+    // N7: another phone drives this computer, so this phone's input is
+    // dropped until it lets go; said on screen so a dead tap is no mystery.
+    var otherDrives by remember { mutableStateOf(false) }
+    LaunchedEffect(address, controlPort) {
+        while (isActive) {
+            otherDrives = withContext(Dispatchers.IO) { RustCore.anotherPhoneDrives(address, controlPort) }
+            delay(1_000)
+        }
+    }
     // R4 A1: live link path of the video session ("lan" | "wan_direct" |
     // "wan_relayed" | "wan" | "none"), polled from the bridge while up.
     var linkState by remember { mutableStateOf("none") }
@@ -933,6 +942,25 @@ fun RemoteScreen(
                 }
             }
 
+            // Stays while chrome fades: it explains taps that do nothing.
+            if (otherDrives && Prefs.showDriving(context)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.systemBars),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    Text(
+                        stringResource(R.string.driving_other),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+            }
             // Top chrome: HUDs + WAN badge + Exit, as one fading slide-down
             // group. AnimatedVisibility removes the subtree when hidden, so
             // invisible chrome never eats a desktop tap.
