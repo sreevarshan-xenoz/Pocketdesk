@@ -118,7 +118,9 @@ fn write(state_dir: &Path, mut messages: Vec<Message>, keep: usize) -> io::Resul
     let excess = messages.len().saturating_sub(keep.max(1));
     messages.drain(..excess);
     let json = serde_json::to_vec(&Store { messages }).map_err(io::Error::other)?;
-    secure_fs::create_private_dir(state_dir)?;
+    // The state folder is shared (the trust store, the keys…): only this
+    // file is made private, never the folder's own permissions.
+    std::fs::create_dir_all(state_dir)?;
     secure_fs::write_private(&state_dir.join(SMS_FILE), &json)
 }
 
@@ -368,6 +370,25 @@ mod tests {
         assert_eq!(list[0].last_body, "c");
         assert_eq!(list[1].address, "+2");
         assert_eq!(list[2].device_id, "q");
+    }
+
+    /// Keeping texts must never touch the shared state folder's permissions:
+    /// it once made the folder private, which locked the server out of the
+    /// trust store and the device keys sitting next to it.
+    #[test]
+    fn keeping_texts_leaves_the_files_beside_them_readable() {
+        let dir = dir("neighbours");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("trusted_devices.json"), b"{}").unwrap();
+        record(&dir, received("p", "+1", "hi", 1), KEEP).unwrap();
+        queue_reply(&dir, "p", "+1", "hello", 2).unwrap();
+        assert_eq!(
+            std::fs::read(dir.join("trusted_devices.json")).unwrap(),
+            b"{}"
+        );
+        std::fs::write(dir.join("endpoint.json"), b"[]").unwrap();
+        assert_eq!(std::fs::read(dir.join("endpoint.json")).unwrap(), b"[]");
+        assert_eq!(read(&dir).len(), 1);
     }
 
     #[test]
