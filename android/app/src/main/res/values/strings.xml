@@ -193,6 +193,10 @@
     <string name="transfer_folder_empty">Nothing in %1$s could be sent: it is empty, or its files could not be read</string>
     <string name="transfer_folder_stopped">Stopped sending %1$s: the computer stopped answering. Not sent: %2$d</string>
     <string name="transfer_folder_partial">Not all of %1$s was sent. Left out: %2$d (a name the computer does not take, or past its limits)</string>
+    <string name="files_download_folder">Download this folder</string>
+    <string name="files_download_folder_summary">Into a new folder in Download/Pocketdesk, with its folders</string>
+    <string name="files_download_folder_text">Every file in it and in its folders goes to a new folder in Download/Pocketdesk. Hidden files are left out.</string>
+    <string name="files_download_folder_asked">Asked the computer for %1$s</string>
     <string name="files_send_folder">Send a folder to this computer</string>
     <string name="files_send_folder_summary">Goes into a new folder in its Downloads</string>
     <string name="transfer_sending">Sending %1$d of %2$d</string>

@@ -27,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -40,6 +41,7 @@ import dev.pocketdesk.android.service.TransferService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -85,6 +87,9 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
     var lastGood by remember { mutableStateOf<RemoteFolder?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<RemoteEntry?>(null) }
+    // T6b: a whole folder from the computer, asked for after a confirm.
+    var confirmFolder by remember { mutableStateOf<RemoteFolder?>(null) }
+    val scope = rememberCoroutineScope()
     // T6b: a folder from the phone, picked with the system's folder picker.
     val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
         if (tree != null) TransferService.sendFolder(context, address, controlPort, tree)
@@ -135,6 +140,14 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                     headlineContent = { Text(stringResource(R.string.files_up)) },
                     leadingContent = { LlIcon(LlIcons.ArrowBack, null) },
                     modifier = Modifier.clickable { path = parent },
+                )
+            }
+            folder?.takeIf(RemoteFiles::canDownloadWhole)?.let { here ->
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.files_download_folder)) },
+                    supportingContent = { Text(stringResource(R.string.files_download_folder_summary)) },
+                    leadingContent = { LlIcon(LlIcons.Folder, null) },
+                    modifier = Modifier.clickable { confirmFolder = here },
                 )
             }
             HorizontalDivider()
@@ -190,6 +203,34 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { confirm = null }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
+    confirmFolder?.let { asked ->
+        val name = RemoteFiles.title(asked.path)
+        val askedText = stringResource(R.string.files_download_folder_asked, name)
+        AlertDialog(
+            onDismissRequest = { confirmFolder = null },
+            title = { Text(stringResource(R.string.files_download_title, name)) },
+            text = { Text(stringResource(R.string.files_download_folder_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmFolder = null
+                    scope.launch {
+                        val asked = withContext(Dispatchers.IO) {
+                            RustCore.fetchFolder(address, controlPort, asked.path)
+                        }
+                        val message = asked.fold(
+                            { askedText },
+                            { it.message ?: it.toString() },
+                        )
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                }) { Text(stringResource(R.string.files_download)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFolder = null }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
