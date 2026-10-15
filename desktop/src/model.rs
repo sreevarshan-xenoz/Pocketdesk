@@ -122,8 +122,6 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
     }
 }
 
-/// The phones a file can be sent to: those in a session now, since only
-/// then does a phone hold the connection an offer reaches (F7b).
 /// What the Sessions tab shows about who drives (roadmap N7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlCell {
@@ -149,6 +147,8 @@ pub fn control_cell(
     }
 }
 
+/// The phones a file can be sent to: in a session, or holding a control
+/// link the server can dial back (T10d).
 pub fn send_targets(snapshot: &Snapshot) -> Vec<&Device> {
     snapshot.devices.iter().filter(|d| d.takes_files).collect()
 }

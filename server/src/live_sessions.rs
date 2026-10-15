@@ -308,26 +308,19 @@ pub async fn run_watcher() {
     }
 }
 
-/// Each phone with a control link once, and whether files can reach it:
-/// one of its links has an address to dial back (T10d).
+/// Each phone with a control link, and whether files can reach it: its link
+/// has an address to dial back (T10d).
 pub fn linked_phones(
     clients: &[std::sync::Arc<dyn pocketdesk_core::protocol::kdeconnect::DeviceSender>],
 ) -> Vec<shared::LinkedPhone> {
-    let mut linked: Vec<shared::LinkedPhone> = Vec::new();
-    for client in clients {
-        let files = client.peer_addr().is_some();
-        match linked
-            .iter_mut()
-            .find(|p| p.device_id == client.device_id())
-        {
-            Some(phone) => phone.files |= files,
-            None => linked.push(shared::LinkedPhone {
-                device_id: client.device_id().to_string(),
-                files,
-            }),
-        }
-    }
-    linked
+    // One connection per device: the one pushes go to.
+    clients
+        .iter()
+        .map(|client| shared::LinkedPhone {
+            device_id: client.device_id().to_string(),
+            files: client.peer_addr().is_some(),
+        })
+        .collect()
 }
 
 /// CLI-side rendering of the mirrored file: one line per live session.
