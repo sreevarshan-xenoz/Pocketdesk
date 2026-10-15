@@ -178,7 +178,7 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 | Pairing | `kdeconnect.pair` | both | The PIN; reply `{pair, serverId}` | Always, also before pairing | same |
 | Input (KDE style) | `kdeconnect.mousepad.request`, `kdeconnect.presenter` | phone → desktop | Pointer and keys | Input | `server/src/plugins/input.rs` |
 | Input (KDE style) | `kdeconnect.mousepad.echo` | desktop → phone | Acknowledgement | — | same |
-| Clipboard text | `kdeconnect.clipboard`, `kdeconnect.clipboard.connect` | both (the phone polls; the desktop replies with its clipboard text, or `{image:{id,size}}`) | Clipboard contents | Clipboard | `server/src/plugins/clipboard.rs` |
+| Clipboard text | `kdeconnect.clipboard`, `kdeconnect.clipboard.connect` | both (the phone polls in a session; the desktop replies with its clipboard text, or `{image:{id,size}}`; and with `clipboard_push` on, the desktop pushes new text, up to 256 KiB, to every live connection whose phone has Clipboard on, never back to the phone that set it, T10b) | Clipboard contents | Clipboard | `server/src/plugins/clipboard.rs`, `server/src/clipboard_push.rs` |
 | Clipboard image | `kdeconnect.pocketdesk.clipboard_image` | phone → desktop | `{size, port, key}` (the desktop then dials back, §1.4) | Clipboard | `core/src/protocol/clipboard.rs` |
 | Clipboard image | `kdeconnect.pocketdesk.clipboard_image_fetch` | phone → desktop | `{id, port, key}` | Clipboard | same |
 | Notification reply | `kdeconnect.pocketdesk.notification_reply` | phone → desktop | Reply text for a desktop notification. Put on the desktop clipboard and appended to `replies.log` | Clipboard | `server/src/plugins/notification_reply.rs` |

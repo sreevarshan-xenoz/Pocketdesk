@@ -1153,6 +1153,19 @@ Owed:
 - [ ] The phone's battery over an hour with the link up in the background (iroh's 5 s heartbeat).
 - [ ] A session riding a relay (no direct path) with the control link up at the same time: both use the phone's one iroh key from two endpoints, and a relay may route to only one of them.
 
+## 65. The clipboard outside a session (T10b)
+
+On the A71 against this box, 2026-10-16:
+- [x] With "Computer's clipboard in the background" on and notification access, and the app in the background, text copied on the computer reached the phone's clipboard within one tick.
+- [x] The "Send clipboard" tile sent the phone's clipboard text to the computer's clipboard.
+
+Owed:
+- [ ] Away from home (the internet link): both directions.
+- [ ] Desktop "Clipboard to phones" off: nothing pushed; a session still gets the clipboard on request.
+- [ ] A phone with Clipboard off on the desktop gets no pushes.
+- [ ] Linux: `wl-paste --type text` every 2 s, with text and with an image on the clipboard.
+- [ ] Android 10–12: the tile's window reads the clipboard.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

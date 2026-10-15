@@ -45,3 +45,11 @@ Android 10+ lets only the focused app, or the default keyboard, read the clipboa
 - **Device:**
   - the tile sends the phone's clipboard to Windows with the app in the background;
   - copy on Windows, then paste on the phone without opening the app, with the notification listener on and the background switch on.
+
+## As built
+
+- **Linux reads text only:** `wl-paste --no-newline --type text`, so an image on the clipboard is never read every 2 s.
+- **The applier takes text only from the phone's computer** (`PhoneLink.target`), the one its notifications go to.
+- **No launcher shortcut:** the four dynamic shortcuts are the saved computers'. The tile and the share sheet are the ways in.
+- **Device-checked (A71 → Windows), checklist §65:** the background push and the tile.
+- **Found on the device run:** a force-stopped app's notification listener is not bound again until the app is opened once. This matters to anyone testing with `am force-stop`, not to users.
