@@ -32,4 +32,13 @@ object ShortcutPlan {
      */
     fun savedHost(address: String?, hosts: List<HostStore.Host>): HostStore.Host? =
         address?.let { wanted -> hosts.firstOrNull { it.address == wanted } }
+
+    /**
+     * The computer a share goes to (T7b): the saved one [address] names, as
+     * for [savedHost], or the last one used when none is named. A named
+     * computer that is not saved gets nothing, never another computer:
+     * the share might be meant for that one only.
+     */
+    fun shareHost(address: String?, hosts: List<HostStore.Host>): HostStore.Host? =
+        if (address == null) hosts.firstOrNull() else savedHost(address, hosts)
 }

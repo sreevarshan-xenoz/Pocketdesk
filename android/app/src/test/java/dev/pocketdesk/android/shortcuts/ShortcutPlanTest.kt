@@ -49,4 +49,16 @@ class ShortcutPlanTest {
         assertNull("another app cannot add a computer this way", ShortcutPlan.savedHost("10.9.9.9", hosts))
         assertNull(ShortcutPlan.savedHost(null, hosts))
     }
+
+    @Test
+    fun aShareGoesToTheComputerAskedForOrTheLastOneUsed() {
+        val hosts = listOf(host("10.0.0.1"), host("mypc.local"))
+        assertEquals(hosts[1], ShortcutPlan.shareHost("mypc.local", hosts))
+        assertEquals("none asked for: the last one used", hosts[0], ShortcutPlan.shareHost(null, hosts))
+        assertNull(
+            "an address that is not saved never falls back to another computer",
+            ShortcutPlan.shareHost("10.9.9.9", hosts),
+        )
+        assertNull(ShortcutPlan.shareHost(null, emptyList()))
+    }
 }

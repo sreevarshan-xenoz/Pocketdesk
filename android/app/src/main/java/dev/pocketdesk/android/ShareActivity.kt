@@ -7,6 +7,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.service.TransferService
+import dev.pocketdesk.android.shortcuts.ShortcutPlan
+import dev.pocketdesk.android.shortcuts.Shortcuts
 
 /**
  * Share target (Tier 1 #4, F7): text goes to the desktop clipboard; one or
@@ -14,7 +16,9 @@ import dev.pocketdesk.android.service.TransferService
  * so the transfer outlives this screen, which closes at once.
  *
  * Requires a saved host ([HostStore]) — the shared item never picks a
- * destination itself.
+ * destination itself. Another app (an automation app, T7b) may name one of
+ * the saved computers with the extra [Shortcuts.EXTRA_ADDRESS]; without it,
+ * the last computer used.
  */
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,9 +35,10 @@ class ShareActivity : ComponentActivity() {
     }
 
     private fun handle(intent: Intent) {
-        val host = HostStore.lastHost(this)
+        val asked = intent.getStringExtra(Shortcuts.EXTRA_ADDRESS)
+        val host = ShortcutPlan.shareHost(asked, HostStore.hosts(this))
         if (host == null) {
-            done(getString(R.string.share_no_host))
+            done(getString(if (asked == null) R.string.share_no_host else R.string.shortcut_not_saved))
             return
         }
 
