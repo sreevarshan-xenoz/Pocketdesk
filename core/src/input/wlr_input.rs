@@ -143,6 +143,12 @@ impl WlrInput {
     }
 }
 
+impl std::fmt::Debug for WlrInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WlrInput").finish_non_exhaustive()
+    }
+}
+
 impl Drop for WlrInput {
     fn drop(&mut self) {
         self.pointer.destroy();
