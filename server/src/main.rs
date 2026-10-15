@@ -10,10 +10,30 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[tokio::main]
 async fn main() -> Result<()> {
     platform::init_process();
-    let cli = cli::Cli::parse();
+    // With --json, even a usage error is JSON (exit 2, like clap's own).
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    let cli = match cli::Cli::try_parse_from(&args) {
+        Ok(cli) => cli,
+        Err(e) => match local_api::usage_error(&args, &e) {
+            Some(out) => {
+                local_api::print(&out);
+                std::process::exit(local_api::exit::BAD_ARGUMENTS);
+            }
+            None => e.exit(),
+        },
+    };
+    let wants_json = cli.command.as_ref().is_some_and(|c| c.wants_json());
 
-    // Load configuration first
-    let config = config::Config::load()?;
+    // Load configuration first. A config.toml that does not parse fails a
+    // `--json` command as JSON too.
+    let config = match config::Config::load() {
+        Ok(config) => config,
+        Err(e) if wants_json => {
+            local_api::print(&local_api::error(format!("{e:#}")));
+            std::process::exit(local_api::exit::FAILED);
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     let background = matches!(cli.command, Some(cli::Commands::Start { background: true }));
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -57,7 +77,6 @@ async fn main() -> Result<()> {
     let command = cli
         .command
         .unwrap_or(cli::Commands::Start { background: false });
-    let wants_json = command.wants_json();
     let result = run(command, config).await;
     // A script reading `--json` reads its failures there too.
     if wants_json && let Err(e) = &result {

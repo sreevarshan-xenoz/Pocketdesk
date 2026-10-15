@@ -451,6 +451,36 @@ pub fn error(reason: impl std::fmt::Display) -> Value {
     versioned(json!({ "error": reason.to_string() }))
 }
 
+/// A usage error (a missing argument, a bad number) as the local API's
+/// JSON, when `--json` was asked for; `None` for clap's own text (no
+/// `--json`, or help and version).
+pub fn usage_error(args: &[std::ffi::OsString], parsed: &clap::Error) -> Option<Value> {
+    use clap::error::ErrorKind;
+    if !args.iter().any(|a| a == "--json") {
+        return None;
+    }
+    if matches!(
+        parsed.kind(),
+        ErrorKind::DisplayHelp
+            | ErrorKind::DisplayVersion
+            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    ) {
+        return None;
+    }
+    let text = parsed.render().to_string();
+    // The error's first paragraph (clap names missing arguments on the
+    // lines under its first), as one line.
+    let first: Vec<&str> = text
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .take_while(|l| !l.trim().is_empty())
+        .map(str::trim)
+        .collect();
+    let first = first.join(" ");
+    let first = first.trim_start_matches("error: ");
+    Some(error(first))
+}
+
 /// Ask the running server in `state_dir` to end the sessions `target`
 /// names (a device id, a prefix, a peer address, or "all"). What to print,
 /// and the exit code.
@@ -856,6 +886,23 @@ mod tests {
     #[test]
     fn a_huge_wait_does_not_overflow() {
         assert!(wait_deadline(std::time::Duration::MAX) > std::time::Instant::now());
+    }
+
+    #[test]
+    fn a_usage_error_with_json_asked_for_is_json() {
+        use clap::Parser;
+        let args = ["pocketdesk", "send", "--json"];
+        let err = crate::cli::Cli::try_parse_from(args).unwrap_err();
+        let out = usage_error(&args.map(std::ffi::OsString::from), &err).expect("JSON");
+        assert_eq!(out["api"], API);
+        assert!(!out["error"].as_str().unwrap().is_empty());
+        // Without --json, and for help, clap's own text stays.
+        let plain = ["pocketdesk", "send"];
+        let err = crate::cli::Cli::try_parse_from(plain).unwrap_err();
+        assert!(usage_error(&plain.map(std::ffi::OsString::from), &err).is_none());
+        let help = ["pocketdesk", "send", "--help", "--json"];
+        let err = crate::cli::Cli::try_parse_from(help).unwrap_err();
+        assert!(usage_error(&help.map(std::ffi::OsString::from), &err).is_none());
     }
 
     #[test]
