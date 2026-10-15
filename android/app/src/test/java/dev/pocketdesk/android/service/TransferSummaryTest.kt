@@ -6,6 +6,15 @@ import org.junit.Test
 
 class TransferSummaryTest {
     @Test
+    fun aFolderThatLeftNamesOutSaysSoEvenWhenTheRestWent() {
+        val left = "Not all of Trip was sent. Left out: 2"
+        assertEquals(left, TransferSummary.detail(failed = false, lastError = null, notice = left))
+        assertEquals(null, TransferSummary.detail(failed = false, lastError = "old", notice = null))
+        assertEquals("reset", TransferSummary.detail(failed = true, lastError = "reset", notice = left))
+        assertEquals(left, TransferSummary.detail(failed = true, lastError = null, notice = left))
+    }
+
+    @Test
     fun aBatchThatOnlySentSaysSo() {
         assertEquals(Outcome.Sent(3), TransferSummary.of(sent = 3, sends = 3, saved = 0, receives = 0))
     }

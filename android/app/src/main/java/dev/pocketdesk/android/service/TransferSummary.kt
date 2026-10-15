@@ -23,6 +23,13 @@ object TransferSummary {
         data class Failed(val failed: Int, val count: Int) : Outcome
     }
 
+    /**
+     * The line under the title: the last error when something failed, else
+     * a [notice] the person should still see (what a folder left out).
+     */
+    fun detail(failed: Boolean, lastError: String?, notice: String?): String? =
+        if (failed) lastError ?: notice else notice
+
     fun of(sent: Int, sends: Int, saved: Int, receives: Int): Outcome {
         val failed = (sends - sent) + (receives - saved)
         return when {

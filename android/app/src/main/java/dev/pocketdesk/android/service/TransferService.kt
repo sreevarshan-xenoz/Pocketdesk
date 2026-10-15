@@ -75,6 +75,7 @@ class TransferService : Service() {
     private var lastSaved: Uri? = null
     private var lastAddress = ""
     private var lastError: String? = null
+    private var notice: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -194,7 +195,7 @@ class TransferService : Service() {
             }
         }
         if (plan.skipped > 0 || plan.truncated) {
-            lastError = getString(R.string.transfer_folder_partial, folder, plan.skipped)
+            notice = getString(R.string.transfer_folder_partial, folder, plan.skipped)
             Log.w(TAG, "folder $folder: ${plan.skipped} names skipped, cut short: ${plan.truncated}")
         }
     }
@@ -307,6 +308,7 @@ class TransferService : Service() {
             receiveCount = 0
             lastSaved = null
             lastError = null
+            notice = null
             current = null
             runCatching { stopForeground(STOP_FOREGROUND_DETACH) }
             runCatching { manager().notify(NOTIFICATION_ID, done) }
@@ -538,11 +540,14 @@ class TransferService : Service() {
                 getString(R.string.transfer_some_failed, outcome.failed, outcome.count)
         }
         val failed = outcome is TransferSummary.Outcome.NotSent || outcome is TransferSummary.Outcome.Failed
+        val detail = TransferSummary.detail(failed, lastError, notice)
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
             .setContentTitle(title)
-            .setContentText(if (failed) lastError else null)
+            .setContentText(detail)
             .setAutoCancel(true)
+        // A detail is often longer than one line.
+        detail?.let { builder.setStyle(Notification.BigTextStyle().bigText(it)) }
         // Tapping a finished download opens it.
         val saved = lastSaved
         if (!failed && saved != null) {
