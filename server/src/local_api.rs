@@ -452,6 +452,123 @@ pub fn run_link(query: &str, url: &str, as_json: bool) -> i32 {
     code
 }
 
+/// The phone "Send to phone" sends to: of the paired phones files reach
+/// now, one in a session first, else the first linked (T10e).
+pub fn default_phone(state_dir: &Path, now_unix: u64, running: bool) -> Option<String> {
+    let mirror = live_mirror(state_dir, now_unix, running)?;
+    let paired = trust_store(state_dir).ok()?.trusted_devices();
+    let in_session = mirror
+        .sessions
+        .iter()
+        .filter_map(|s| s.device_id.clone())
+        .find(|id| paired.contains(id));
+    in_session.or_else(|| {
+        mirror
+            .linked
+            .iter()
+            .find(|p| p.files && paired.contains(&p.device_id))
+            .map(|p| p.device_id.clone())
+    })
+}
+
+/// `pocketdesk send-to-phone`: queue each path for the default phone, and
+/// say how it went on stdout and in a desktop notification (a file
+/// manager shows no console). The exit code.
+pub fn run_send_to_phone(paths: &[std::path::PathBuf]) -> i32 {
+    let (summary, body, code) = match crate::state::state_dir() {
+        Ok(dir) => {
+            let running = || pocketdesk_core::local::server::is_running(&dir);
+            send_to_phone_in(&dir, paths, &running)
+        }
+        Err(e) => (
+            "Not sent".to_string(),
+            format!("No state folder: {e:#}"),
+            exit::FAILED,
+        ),
+    };
+    if code == exit::DONE {
+        println!("{summary}: {body}");
+    } else {
+        eprintln!("{summary}: {body}");
+    }
+    crate::platform::notify(&summary, &body, std::time::Duration::from_secs(5));
+    code
+}
+
+/// [`run_send_to_phone`] over `state_dir`: the notification's summary and
+/// body, and the exit code.
+pub fn send_to_phone_in(
+    state_dir: &Path,
+    paths: &[std::path::PathBuf],
+    running: &dyn Fn() -> bool,
+) -> (String, String, i32) {
+    let not_sent = |body: String, code: i32| ("Not sent to your phone".to_string(), body, code);
+    if paths.is_empty() {
+        return not_sent("Nothing was chosen.".to_string(), exit::BAD_ARGUMENTS);
+    }
+    if !running() {
+        return not_sent(
+            "Pocketdesk is not running on this computer.".to_string(),
+            exit::NO_SERVER,
+        );
+    }
+    let now = pocketdesk_core::local::pin::now_unix();
+    let Some(phone) = default_phone(state_dir, now, true) else {
+        return not_sent(
+            "No phone is connected on this network: open Pocketdesk on your phone.".to_string(),
+            exit::FAILED,
+        );
+    };
+    let mut queued = Vec::new();
+    let mut failed = Vec::new();
+    for path in paths {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let (out, code) = send_in(state_dir, &phone, path, running, None);
+        if code == exit::DONE {
+            queued.push(name);
+        } else {
+            let reason = out["error"].as_str().unwrap_or("not sent").to_string();
+            failed.push(format!("{name}: {reason}"));
+        }
+    }
+    match (queued.is_empty(), failed.is_empty()) {
+        (false, true) => (
+            "Sending to your phone".to_string(),
+            queued.join(", "),
+            exit::DONE,
+        ),
+        (true, _) => not_sent(failed.join("; "), exit::FAILED),
+        (false, false) => (
+            "Some not sent to your phone".to_string(),
+            format!(
+                "Sending {}; not sent {}",
+                queued.join(", "),
+                failed.join("; ")
+            ),
+            exit::FAILED,
+        ),
+    }
+}
+
+/// `pocketdesk send-menu`: add or remove "Send to phone" in the file
+/// managers, for this program.
+pub fn run_send_menu(remove: bool) -> anyhow::Result<()> {
+    use pocketdesk_core::local::send_menu;
+    let data = send_menu::data_dir()?;
+    if remove {
+        send_menu::remove_in(&data)?;
+        println!("Removed \"{}\" from the file manager", send_menu::LABEL);
+    } else {
+        let exe = std::env::current_exe()?;
+        send_menu::install_in(&data, &exe)?;
+        println!("Added \"{}\" to the file manager", send_menu::LABEL);
+    }
+    Ok(())
+}
+
 /// `pocketdesk send`: prints the outcome and returns the exit code.
 pub fn run_send(query: &str, path: &Path, wait_secs: Option<u64>, as_json: bool) -> i32 {
     let dir = match crate::state::state_dir() {
@@ -881,6 +998,78 @@ mod tests {
         linked(false);
         let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
         assert_eq!(code, exit::FAILED, "linked over the internet only: {out}");
+    }
+
+    #[test]
+    fn the_default_phone_is_a_paired_one_in_a_session_then_one_linked_at_home() {
+        let (dir, _) = send_setup("default-phone");
+        TrustStore::load_or_create(dir.join(TRUST_FILE))
+            .unwrap()
+            .trust_device("a71e00aa-0002")
+            .unwrap();
+        let mirror = |sessions: &[&str], linked: Value| {
+            let sessions: Vec<Value> = sessions
+                .iter()
+                .map(|p| json!({ "device_id": p, "peer": "192.0.2.7:1", "transport": "lan", "started_unix": 1 }))
+                .collect();
+            std::fs::write(
+                dir.join(LIVE_FILE),
+                json!({ "updated_unix": pocketdesk_core::local::pin::now_unix(), "sessions": sessions, "linked": linked }).to_string(),
+            )
+            .unwrap();
+        };
+        let now = pocketdesk_core::local::pin::now_unix();
+        let linked = json!([{ "device_id": "a71e00aa-0002", "files": true }]);
+        mirror(&["5f1c9b3d-6e70"], linked.clone());
+        assert_eq!(
+            default_phone(&dir, now, true).as_deref(),
+            Some("5f1c9b3d-6e70"),
+            "a session first"
+        );
+        mirror(&["stranger"], linked.clone());
+        assert_eq!(
+            default_phone(&dir, now, true).as_deref(),
+            Some("a71e00aa-0002"),
+            "not an unpaired session"
+        );
+        mirror(
+            &[],
+            json!([{ "device_id": "a71e00aa-0002", "files": false }]),
+        );
+        assert_eq!(
+            default_phone(&dir, now, true),
+            None,
+            "linked only over the internet"
+        );
+        mirror(&[], linked);
+        assert_eq!(default_phone(&dir, now, false), None, "no server");
+    }
+
+    #[test]
+    fn send_to_phone_goes_to_the_connected_phone_and_says_why_not() {
+        let (dir, file) = send_setup("send-to-phone");
+        let (summary, body, code) = send_to_phone_in(&dir, std::slice::from_ref(&file), &|| true);
+        assert_eq!(code, exit::DONE, "{summary}: {body}");
+        assert_eq!(body, "report.pdf");
+        assert_eq!(
+            pocketdesk_core::local::outbox::take_all(&dir, pocketdesk_core::local::pin::now_unix())
+                .len(),
+            1
+        );
+        let (_, _, code) = send_to_phone_in(&dir, &[], &|| true);
+        assert_eq!(code, exit::BAD_ARGUMENTS);
+        let (_, _, code) = send_to_phone_in(&dir, std::slice::from_ref(&file), &|| false);
+        assert_eq!(code, exit::NO_SERVER);
+        in_session(&dir, &[]);
+        let (_, body, code) = send_to_phone_in(&dir, std::slice::from_ref(&file), &|| true);
+        assert_eq!(code, exit::FAILED);
+        assert!(body.contains("No phone is connected"), "{body}");
+        let missing = dir.join("gone.pdf");
+        in_session(&dir, &["5f1c9b3d-6e70"]);
+        let (summary, body, code) = send_to_phone_in(&dir, &[file, missing], &|| true);
+        assert_eq!(code, exit::FAILED, "one of two failed");
+        assert!(summary.starts_with("Some not sent"), "{summary}");
+        assert!(body.contains("gone.pdf"), "{body}");
     }
 
     #[test]

@@ -1204,6 +1204,18 @@ Owed:
 - [ ] GNOME or KDE (no virtual keyboard): capitals and `!@#` arrive through uinput with Shift.
 - [ ] The in-session keyboard (IME text) as well as "Type phone clipboard".
 
+## 69. "Send to phone" in the file manager (T10e)
+
+On this box with the A71, 2026-10-16:
+- [x] `send-menu` made the Send To shortcut (the server, `send-to-phone`, minimized), and `send-menu --remove` removed it.
+- [x] `send-to-phone` with two files, with the phone linked in the background: both were saved, MD5s matching, and the desktop notification said what was sent.
+
+Owed:
+- [ ] Send To in Explorer itself, with several files and a folder.
+- [ ] Nautilus, Nemo and Dolphin on Linux.
+- [ ] The desktop app's Settings switch, and `install` / `uninstall` adding and removing the entry.
+- [ ] No phone connected: the notification says so.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
