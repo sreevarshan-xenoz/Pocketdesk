@@ -43,20 +43,30 @@ impl Plugin for PhoneFilesPlugin {
             tracing::info!("A phone's file listing was dropped: out of bounds");
             return Ok(());
         };
+        // Only a paired phone's listing is kept (an unpaired one passes the
+        // gate when pairing is not required).
+        if !crate::plugins::pair::is_paired_device(sender.device_id()) {
+            tracing::info!("A file listing from a phone that is not paired was dropped");
+            return Ok(());
+        }
         let device = sender.device_id().to_string();
         let dir = crate::state::state_dir().map_err(|e| {
             pocketdesk_core::error::PocketdeskError::Other {
                 detail: e.to_string(),
             }
         })?;
-        tokio::task::spawn_blocking(move || store::keep(&dir, &device, listing, unix_now()))
-            .await
-            .ok()
-            .and_then(|r| r.err())
-            .map_or(Ok(()), |e| {
-                tracing::warn!("A phone's file listing was not kept: {e}");
-                Ok(())
+        tokio::task::spawn_blocking(move || {
+            store::keep(&dir, &device, listing, unix_now(), &|id| {
+                crate::plugins::pair::is_paired_device(id)
             })
+        })
+        .await
+        .ok()
+        .and_then(|r| r.err())
+        .map_or(Ok(()), |e| {
+            tracing::warn!("A phone's file listing was not kept: {e}");
+            Ok(())
+        })
     }
 }
 

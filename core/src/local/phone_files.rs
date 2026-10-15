@@ -40,10 +40,18 @@ pub fn read(state_dir: &Path) -> BTreeMap<String, Kept> {
 
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Keep `listing` as `device_id`'s last.
-pub fn keep(state_dir: &Path, device_id: &str, listing: Listing, now_unix: u64) -> io::Result<()> {
+/// Keep `listing` as `device_id`'s last, dropping the listings of phones
+/// `paired` no longer names (unpaired or removed since).
+pub fn keep(
+    state_dir: &Path,
+    device_id: &str,
+    listing: Listing,
+    now_unix: u64,
+    paired: &dyn Fn(&str) -> bool,
+) -> io::Result<()> {
     let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let mut phones = read(state_dir);
+    phones.retain(|id, _| paired(id));
     phones.insert(
         device_id.to_string(),
         Kept {
@@ -185,11 +193,14 @@ mod tests {
             root: Some(0),
             ..Default::default()
         };
-        keep(&dir, "phone", listing.clone(), 5).unwrap();
-        keep(&dir, "other", Listing::default(), 6).unwrap();
+        keep(&dir, "phone", listing.clone(), 5, &|_| true).unwrap();
+        keep(&dir, "other", Listing::default(), 6, &|_| true).unwrap();
         let kept = read(&dir);
         assert_eq!(kept["phone"].listing, listing);
         assert_eq!(kept.len(), 2);
+        // A phone unpaired since loses its listing at the next keep.
+        keep(&dir, "phone", listing.clone(), 7, &|id| id == "phone").unwrap();
+        assert_eq!(read(&dir).keys().collect::<Vec<_>>(), ["phone"]);
         clear(&dir).unwrap();
         assert!(read(&dir).is_empty());
     }
