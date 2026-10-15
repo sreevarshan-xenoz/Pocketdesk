@@ -209,10 +209,14 @@ jobs:
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             ./gradlew assembleRelease --no-daemon
             BT=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)
-            "$BT/zipalign" -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+            # AGP's output is already aligned (the native library to 16 KB
+            # pages); a zipalign -f 4 here could undo that and make the APK
+            # differ from F-Droid's build of the same source. apksigner signs
+            # it as it is, and the check proves the alignment survived.
             "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-pass env:KEYSTORE_PASSWORD \
               --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD \
-              --out "../release/$base.apk" "$RUNNER_TEMP/aligned.apk"
+              --out "../release/$base.apk" app/build/outputs/apk/release/app-release-unsigned.apk
+            "$BT/zipalign" -c -P 16 -v 4 "../release/$base.apk" > /dev/null
           else
             ./gradlew assembleDebug --no-daemon
             cp app/build/outputs/apk/debug/app-debug.apk "../release/$base-debug-signed.apk"
