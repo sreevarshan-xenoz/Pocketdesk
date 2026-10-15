@@ -23,7 +23,7 @@ const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 9] = [
+const PERMISSIONS: [(Capability, &str, &str); 10] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -68,6 +68,11 @@ const PERMISSIONS: [(Capability, &str, &str); 9] = [
         Capability::Texts,
         "Show its texts and send replies",
         "Texts the phone receives appear in Messages here, and replies go out through the phone.",
+    ),
+    (
+        Capability::Links,
+        "Open its links here",
+        "A link shared from the phone opens in this computer's browser (http and https only).",
     ),
 ];
 
@@ -1012,6 +1017,16 @@ pub fn human_duration(secs: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_permission_has_a_switch() {
+        for capability in Capability::ALL {
+            assert!(
+                PERMISSIONS.iter().any(|(c, _, _)| *c == capability),
+                "{capability:?} has no switch in the Devices tab"
+            );
+        }
+    }
+
     use super::*;
 
     #[test]
