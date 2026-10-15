@@ -532,7 +532,18 @@ pub struct WanSettings {
     pub relay_urls: Vec<String>,
     /// What the Mainline DHT record holds (N3).
     pub dht_publish: DhtPublish,
+    /// Where control connections over the internet go (T10a), with the
+    /// listener slot each holds while it lives. `None` offers no control
+    /// road.
+    pub control: Option<tokio::sync::mpsc::Sender<ControlHandoff>>,
 }
+
+/// A control connection over iroh, handed from the WAN listener to the
+/// service's control loop, and the listener slot it holds.
+pub type ControlHandoff = (
+    iroh::endpoint::Connection,
+    tokio::sync::OwnedSemaphorePermit,
+);
 
 /// Bind the WAN endpoint and spawn its accept loop.
 ///
@@ -555,6 +566,7 @@ pub async fn spawn_wan_endpoint(
         mic_relay_device,
         relay_urls,
         dht_publish,
+        control,
     } = settings;
     // What an earlier run recorded about its internet path is not this
     // run's: dropped before anything can fail, so a run whose endpoint never
@@ -578,7 +590,7 @@ pub async fn spawn_wan_endpoint(
         .max_concurrent_bidi_streams(128u32.into())
         .build();
     let endpoint = Endpoint::builder(Minimal)
-        .alpns(vec![StreamTransportConfig::default().alpn])
+        .alpns(alpns(control.is_some()))
         .relay_mode(relay_mode(&relay_urls)?)
         .secret_key(secret_key)
         .transport_config(transport)
@@ -619,8 +631,8 @@ pub async fn spawn_wan_endpoint(
             let input_tx = input_tx.clone();
             let cert_manager = Arc::clone(&cert_manager);
             let mic_relay_device = mic_relay_device.clone();
+            let control = control.clone();
             tokio::spawn(async move {
-                let _slot = slot;
                 let conn = match incoming.accept() {
                     Ok(accepting) => match accepting.await {
                         Ok(conn) => conn,
@@ -634,6 +646,13 @@ pub async fn spawn_wan_endpoint(
                         return;
                     }
                 };
+                if conn.alpn() == pocketdesk_core::protocol::ALPN_CONTROL {
+                    if let Some(control) = control {
+                        let _ = control.send((conn, slot)).await;
+                    }
+                    return;
+                }
+                let _slot = slot;
                 let mut streaming_server =
                     StreamingServer::new(config, StreamTransportConfig::default(), cert_manager);
                 streaming_server.set_input_channel(input_tx);
@@ -662,6 +681,16 @@ pub async fn spawn_wan_endpoint(
     });
 
     Ok(endpoint)
+}
+
+/// The ALPNs the WAN endpoint offers: the stream's, and the control
+/// channel's when there is a control loop to take it (T10a).
+fn alpns(control: bool) -> Vec<Vec<u8>> {
+    let mut alpns = vec![StreamTransportConfig::default().alpn];
+    if control {
+        alpns.push(pocketdesk_core::protocol::ALPN_CONTROL.to_vec());
+    }
+    alpns
 }
 
 #[cfg(test)]
