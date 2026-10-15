@@ -52,38 +52,44 @@ pub fn live_sessions(state_dir: &Path, now_unix: u64, running: bool) -> Vec<Mirr
 
 /// The paired phones: what each may do, whether a key is bound to it, and
 /// whether it is in a session now.
-pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Value {
+pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, String> {
     let live = live_sessions(state_dir, now_unix, running);
     let keys = device_keys::read(state_dir).unwrap_or_default();
-    let devices: Vec<Value> = match TrustStore::load_or_create(state_dir.join(TRUST_FILE)) {
-        Ok(store) => store
-            .trusted_devices()
-            .into_iter()
-            .map(|id| {
-                let permissions = store.permissions(&id);
-                let allowed: serde_json::Map<String, Value> = Capability::ALL
-                    .iter()
-                    .map(|c| {
-                        (
-                            capability_name(*c).to_string(),
-                            json!(permissions.allows(*c)),
-                        )
-                    })
-                    .collect();
-                let bound = keys.get(&id);
-                json!({
-                    "id": id,
-                    "grant_remaining_secs": store.grant_remaining(&id),
-                    "in_session": live.iter().any(|s| s.device_id.as_deref() == Some(id.as_str())),
-                    "key_bound": bound.is_some_and(|k| k.tls.is_some()),
-                    "internet_key_bound": bound.is_some_and(|k| k.iroh.is_some()),
-                    "permissions": allowed,
+    let store = trust_store(state_dir)?;
+    let devices: Vec<Value> = store
+        .trusted_devices()
+        .into_iter()
+        .map(|id| {
+            let permissions = store.permissions(&id);
+            let allowed: serde_json::Map<String, Value> = Capability::ALL
+                .iter()
+                .map(|c| {
+                    (
+                        capability_name(*c).to_string(),
+                        json!(permissions.allows(*c)),
+                    )
                 })
+                .collect();
+            let bound = keys.get(&id);
+            json!({
+                "id": id,
+                "grant_remaining_secs": store.grant_remaining(&id),
+                "in_session": live.iter().any(|s| s.device_id.as_deref() == Some(id.as_str())),
+                "key_bound": bound.is_some_and(|k| k.tls.is_some()),
+                "internet_key_bound": bound.is_some_and(|k| k.iroh.is_some()),
+                "permissions": allowed,
             })
-            .collect(),
-        Err(_) => Vec::new(),
-    };
-    versioned(json!({ "server_running": running, "devices": devices }))
+        })
+        .collect();
+    Ok(versioned(
+        json!({ "server_running": running, "devices": devices }),
+    ))
+}
+
+/// The paired phones' store, read without writing it.
+fn trust_store(state_dir: &Path) -> Result<TrustStore, String> {
+    TrustStore::read(state_dir.join(TRUST_FILE))
+        .map_err(|e| format!("the paired phones could not be read: {e:#}"))
 }
 
 /// Whether the server runs, the phones in a session now, and how phones
@@ -255,9 +261,10 @@ pub fn send_in(
             "no Pocketdesk server is running to send it".to_string(),
         );
     }
-    let ids = TrustStore::load_or_create(state_dir.join(TRUST_FILE))
-        .map(|s| s.trusted_devices())
-        .unwrap_or_default();
+    let ids = match trust_store(state_dir) {
+        Ok(store) => store.trusted_devices(),
+        Err(reason) => return refused(exit::FAILED, reason),
+    };
     let device_id = match resolve_phone(&ids, query) {
         Ok(id) => id,
         Err(reason) => return refused(exit::BAD_ARGUMENTS, reason),
@@ -383,7 +390,8 @@ pub fn resolve_phone(ids: &[String], query: &str) -> Result<String, String> {
 pub fn print_devices(as_json: bool) -> anyhow::Result<()> {
     let dir = crate::state::state_dir()?;
     let running = pocketdesk_core::local::server::is_running(&dir);
-    let listed = devices(&dir, pocketdesk_core::local::pin::now_unix(), running);
+    let listed = devices(&dir, pocketdesk_core::local::pin::now_unix(), running)
+        .map_err(anyhow::Error::msg)?;
     if as_json {
         print(&listed);
         return Ok(());
@@ -512,7 +520,7 @@ mod tests {
             r#"{"updated_unix":100,"sessions":[{"device_id":"phone-a","peer":"192.0.2.7:1","transport":"lan","started_unix":90}]}"#,
         )
         .unwrap();
-        let listed = devices(&dir, 101, true);
+        let listed = devices(&dir, 101, true).unwrap();
         assert_eq!(listed["api"], API);
         assert_eq!(listed["server_running"], true);
         let all = listed["devices"].as_array().unwrap();
@@ -526,7 +534,7 @@ mod tests {
         assert_eq!(b["in_session"], false);
         assert!(b["grant_remaining_secs"].as_u64().is_some_and(|s| s <= 60));
         // A server that is not running has no sessions, whatever its file says.
-        let stopped = devices(&dir, 101, false);
+        let stopped = devices(&dir, 101, false).unwrap();
         assert!(
             stopped["devices"]
                 .as_array()
@@ -750,6 +758,19 @@ mod tests {
         let (out, code) = kick_in(&dir, "all", true);
         assert_eq!(code, exit::DONE, "{out}");
         assert_eq!(out["kick_requested"], "all");
+    }
+
+    #[test]
+    fn an_unreadable_trust_store_is_an_error_and_a_missing_one_is_not_made() {
+        let dir = temp_dir("trust-unreadable");
+        assert_eq!(devices(&dir, 1, false).unwrap()["devices"], json!([]));
+        assert!(!dir.join(TRUST_FILE).exists(), "reading wrote nothing");
+        std::fs::write(dir.join(TRUST_FILE), "{not json").unwrap();
+        assert!(devices(&dir, 1, false).is_err(), "not 'no paired phones'");
+        let file = dir.join("a.txt");
+        std::fs::write(&file, b"a").unwrap();
+        let (out, code) = send_in(&dir, "abcdef", &file, true, None);
+        assert_eq!(code, exit::FAILED, "{out}");
     }
 
     #[test]
