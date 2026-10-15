@@ -28,7 +28,8 @@ pub const OFFER: &str = "kdeconnect.pocketdesk.file_offer";
 /// too large, nowhere to save it).
 pub const DECLINE: &str = "kdeconnect.pocketdesk.file_offer_declined";
 /// How long the phone has to fetch an offered file. Long enough for a phone
-/// that fetches a dropped batch one file after another.
+/// that fetches a dropped batch one file after another; a folder's files
+/// have this long from the phone's last fetch of any of them.
 pub const OFFER_TTL: Duration = Duration::from_secs(10 * 60);
 /// What the sent list says of an offer whose time ran out.
 const EXPIRED: &str = "the phone did not take it in time";
@@ -40,12 +41,17 @@ const POLL: Duration = Duration::from_millis(250);
 /// attempt leaves it for the phone's retry, which continues the file.
 pub const MAX_ATTEMPTS: u8 = 4;
 
+/// When an offer's time is up. A folder send's files share one (T6b), which
+/// every fetch of them moves on, so a long folder taken one file after
+/// another never runs out while the phone is still taking it.
+type Deadline = Arc<Mutex<Instant>>;
+
 /// A file offered to one phone.
 #[derive(Debug, Clone)]
 struct Offer {
     path: PathBuf,
     device_id: String,
-    expires: Instant,
+    expires: Deadline,
     /// Fetches begun. One runs at a time: a retry replaces an attempt
     /// still running (`share::running`).
     attempts: u8,
@@ -66,16 +72,52 @@ pub(crate) fn offer_at(id: &str, path: PathBuf, device_id: &str, now: Instant) {
 }
 
 fn offer_in(table: &Table, id: &str, path: PathBuf, device_id: &str, now: Instant) {
+    offer_with(
+        table,
+        id,
+        path,
+        device_id,
+        Arc::new(Mutex::new(now + OFFER_TTL)),
+    );
+}
+
+/// Offer each of a folder send's `files` `(id, path)` to `device_id`, under
+/// one deadline.
+fn offer_folder_at(files: &[(String, PathBuf)], device_id: &str, now: Instant) {
+    offer_folder_in(offers(), files, device_id, now);
+}
+
+fn offer_folder_in(table: &Table, files: &[(String, PathBuf)], device_id: &str, now: Instant) {
+    let deadline: Deadline = Arc::new(Mutex::new(now + OFFER_TTL));
+    for (id, path) in files {
+        offer_with(table, id, path.clone(), device_id, deadline.clone());
+    }
+}
+
+fn offer_with(table: &Table, id: &str, path: PathBuf, device_id: &str, expires: Deadline) {
     let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
     offers.insert(
         id.to_string(),
         Offer {
             path,
             device_id: device_id.to_string(),
-            expires: now + OFFER_TTL,
+            expires,
             attempts: 0,
         },
     );
+}
+
+impl Offer {
+    fn expired(&self, now: Instant) -> bool {
+        *self.expires.lock().unwrap_or_else(|e| e.into_inner()) <= now
+    }
+
+    /// The phone is at work on this offer: it (and its folder) has a whole
+    /// TTL from `now`.
+    fn touch(&self, now: Instant) {
+        let mut until = self.expires.lock().unwrap_or_else(|e| e.into_inner());
+        *until = (*until).max(now + OFFER_TTL);
+    }
 }
 
 /// The file offered as `id`, for a fetch by `device_id`. The offer stays
@@ -112,7 +154,7 @@ fn redeem_in(
     if offer.device_id != device_id {
         return Err("the file was offered to another phone");
     }
-    if offer.expires <= now {
+    if offer.expired(now) {
         offers.remove(id);
         return Err(OFFER_EXPIRED);
     }
@@ -121,6 +163,7 @@ fn redeem_in(
         return Err(TOO_MANY);
     }
     offer.attempts += 1;
+    offer.touch(now);
     Ok(offer.path.clone())
 }
 
@@ -135,11 +178,13 @@ enum Settled {
     GaveUp,
 }
 
-fn settle_in(table: &Table, id: &str, sent: bool) -> Settled {
+fn settle_in(table: &Table, id: &str, sent: bool, now: Instant) -> Settled {
     let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
     let Some(offer) = offers.get_mut(id) else {
         return if sent { Settled::Done } else { Settled::GaveUp };
     };
+    // A fetch just ended: the rest of its folder, or its retry, is next.
+    offer.touch(now);
     if sent {
         offers.remove(id);
         Settled::Done
@@ -170,7 +215,7 @@ fn sweep_in(table: &Table, now: Instant) -> Vec<String> {
     let mut offers = table.lock().unwrap_or_else(|e| e.into_inner());
     let expired: Vec<String> = offers
         .iter()
-        .filter(|(_, o)| o.expires <= now)
+        .filter(|(_, o)| o.expired(now))
         .map(|(id, _)| id.clone())
         .collect();
     for id in &expired {
@@ -289,7 +334,7 @@ pub fn finish(id: &str, outcome: Result<(), String>) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
-    match settle_in(offers(), id, outcome.is_ok()) {
+    match settle_in(offers(), id, outcome.is_ok(), Instant::now()) {
         Settled::Done | Settled::GaveUp => end_offer(&dir, id, outcome),
         Settled::Retry => {
             if let Err(reason) = outcome {
@@ -587,10 +632,12 @@ async fn deliver_folder(
         .collect();
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     start_group(&request.id, &id_refs);
-    let now = Instant::now();
-    for (file, id) in found.files.iter().zip(&ids) {
-        offer_at(id, file.full.clone(), &request.device_id, now);
-    }
+    let offered: Vec<(String, PathBuf)> = ids
+        .iter()
+        .cloned()
+        .zip(found.files.iter().map(|f| f.full.clone()))
+        .collect();
+    offer_folder_at(&offered, &request.device_id, Instant::now());
     for (file, id) in found.files.iter().zip(&ids) {
         let packet = NetworkPacket::new(OFFER).with_body(serde_json::json!({
             "id": id,
@@ -715,12 +762,12 @@ mod tests {
             Ok(PathBuf::from("/a.pdf")),
             "another phone's attempt does not use it up"
         );
-        assert_eq!(settle_in(&table, "o-1", false), Settled::Retry);
+        assert_eq!(settle_in(&table, "o-1", false, now), Settled::Retry);
         assert!(
             redeem_in(&table, "o-1", "phone-a", now).is_ok(),
             "a failed attempt leaves it"
         );
-        assert_eq!(settle_in(&table, "o-1", true), Settled::Done);
+        assert_eq!(settle_in(&table, "o-1", true, now), Settled::Done);
         assert_eq!(
             redeem_in(&table, "o-1", "phone-a", now),
             Err("the offer was used or is unknown"),
@@ -805,7 +852,7 @@ mod tests {
                 redeem_in(&table, "o-4", "phone-a", now).is_ok(),
                 "{attempt}"
             );
-            let settled = settle_in(&table, "o-4", false);
+            let settled = settle_in(&table, "o-4", false, now);
             if attempt < MAX_ATTEMPTS {
                 assert_eq!(settled, Settled::Retry);
             } else {
@@ -823,6 +870,29 @@ mod tests {
             redeem_at("o-2", "phone-a", now + OFFER_TTL + Duration::from_secs(1)),
             Err("the offer expired")
         );
+    }
+
+    #[test]
+    fn a_folders_offers_last_while_the_phone_keeps_fetching_them() {
+        let table = Table::default();
+        let now = Instant::now();
+        let files = [
+            ("f-1".to_string(), PathBuf::from("/t/a")),
+            ("f-2".to_string(), PathBuf::from("/t/b")),
+        ];
+        offer_folder_in(&table, &files, "phone-a", now);
+        // The first file is fetched late, and takes a long time.
+        let begun = now + OFFER_TTL - Duration::from_secs(60);
+        assert!(redeem_in(&table, "f-1", "phone-a", begun).is_ok());
+        let saved = begun + OFFER_TTL + Duration::from_secs(60);
+        assert_eq!(settle_in(&table, "f-1", true, saved), Settled::Done);
+        // The second is still there for the phone, long past its own TTL...
+        let next = saved + OFFER_TTL - Duration::from_secs(1);
+        assert!(sweep_in(&table, next).is_empty());
+        assert!(redeem_in(&table, "f-2", "phone-a", next).is_ok());
+        // ...and ends once the phone stops for a whole TTL.
+        let idle = next + OFFER_TTL + Duration::from_secs(1);
+        assert_eq!(sweep_in(&table, idle), ["f-2"]);
     }
 
     #[test]
