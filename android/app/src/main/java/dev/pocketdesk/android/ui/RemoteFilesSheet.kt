@@ -264,7 +264,7 @@ private fun download(context: Context, address: String, controlPort: Int, entry:
 }
 
 /** The place in a folder send an offer names (T6b), if it names one. */
-private fun folderPartOf(offer: org.json.JSONObject): RustCore.FolderPart? {
+fun folderPartOf(offer: org.json.JSONObject): RustCore.FolderPart? {
     val id = offer.optString("folderId").ifEmpty { return null }
     val folder = offer.optString("folder").ifEmpty { return null }
     val path = offer.optJSONArray("path") ?: return null

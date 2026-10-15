@@ -476,4 +476,9 @@
     <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>
     <string name="phone_notifications_answer_summary">La pestaña Notificaciones del equipo puede pulsar los botones de una notificación y responder chats, en tu nombre. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
+    <string name="channel_offers">Archivos del equipo</string>
+    <string name="offer_waiting_title">El equipo envía un archivo</string>
+    <string name="offer_save">Guardar</string>
+    <string name="settings_files_background">Archivos del equipo en segundo plano</string>
+    <string name="settings_files_background_summary">Lo que envía el equipo llega a Descargas sin una sesión, en esta red. Necesita acceso a las notificaciones, que mantiene la conexión</string>
 </resources>
