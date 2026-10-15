@@ -1221,12 +1221,13 @@ Owed:
 On the Azure VM (headless Sway, `/dev/uinput` root-only) from the A71 over the internet, 2026-10-16:
 - [x] The server log: "Input injector: using the compositor's virtual pointer and keyboard".
 - [x] Trackpad motion and a tap reached `wev` as pointer motion and a left press and release.
-- [x] "Hi PD!" typed (capitals and `!`), Enter, and Esc from the shortcut bar.
+- [x] "Hi PD!" typed (capitals and `!`, through F4's per-character keyboard), and Enter and Esc from the shortcut bar (through the new keys keyboard).
 
 Owed:
 - [ ] Hyprland, river, labwc and Wayfire.
 - [ ] Direct touch (absolute moves), scrolling, right and middle clicks, and a two-output layout.
-- [ ] A shortcut with modifiers (Super+N, Ctrl+Alt+Del).
+- [ ] A shortcut with modifiers (Ctrl+C in a terminal, Shift+arrow, Super+N), the text fallback typed as keys, and the compositor restarted mid-session.
+- [ ] Privacy mode where `/dev/input` is root-only too: the local keyboard is likely not blocked.
 
 ## Recording results
 

@@ -6,20 +6,13 @@ Found on the Azure VM during F4: when the server's user cannot write `/dev/uinpu
 
 ## The change
 
-A third Linux backend, `Wlr`, tried when uinput cannot be opened, before enigo (which only reaches XWayland windows). It has two parts.
+A third Linux backend, `Wlr`, tried when uinput cannot be opened, before enigo (which only reaches XWayland windows). It is one module, **`core::input::wlr_input`**, holding one connection's:
+- `zwlr_virtual_pointer_v1`: relative motion; absolute motion over the output layout, in the extent the server already maps taps onto; buttons (left, right, middle, back, forward); vertical and horizontal wheel notches as discrete steps; a frame after each event;
+- `zwp_virtual_keyboard_v1` with a "keys" keymap, the compositor's own compile of `evdev` keycodes with a `pc+us` layout, so evdev codes go straight through, as they do on uinput.
 
-**`core::input::wlr_pointer`**, a `zwlr_virtual_pointer_v1` with:
-- relative motion;
-- absolute motion over the output layout, in the extent the server already maps taps onto;
-- buttons (left, right, middle, back, forward);
-- vertical and horizontal axis, with discrete steps for wheel notches;
-- a frame after each event.
+Text keeps F4's own virtual keyboard (`vkeyboard`, one key per character) on a connection of its own, so the keys keymap is never swapped out.
 
-**`core::input::vkeyboard`**, for keys as well as text:
-- a "keys" keymap, the compositor's own compile of `evdev` keycodes with a `pc+us` layout. evdev codes go straight through, as they do on uinput;
-- text keeps its one-key-per-character keymaps, switched back to the keys keymap afterwards.
-
-Every request waits for the compositor within its deadline, as F4's text does.
+Pointer and key requests are sent without waiting for the compositor (waiting would add a roundtrip to every motion); connecting and text wait within their deadlines. A connection that breaks is opened again.
 
 ## What is not covered
 
