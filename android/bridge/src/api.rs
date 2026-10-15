@@ -988,7 +988,7 @@ impl From<NoReply> for String {
 /// `Ok(None)` means there is no live control connection: the caller should use
 /// [`oneshot_request`]. `Err(NoReply)` means the connection is live but the
 /// server never answered.
-async fn control_request(
+pub(crate) async fn control_request(
     address: &str,
     port: u16,
     request: &NetworkPacket,

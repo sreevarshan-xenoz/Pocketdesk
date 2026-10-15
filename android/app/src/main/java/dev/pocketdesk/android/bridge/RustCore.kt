@@ -127,6 +127,7 @@ object RustCore {
     private external fun nativeSweepPartials(maxAgeHours: Int): String
     private external fun nativeTakeFileOffers(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
+    private external fun nativeFetchFolder(address: String, port: Int, path: String): String
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
     private external fun nativeGetMonitors(address: String, port: Int): String
     private external fun nativeGetBattery(address: String, port: Int): String
@@ -648,6 +649,14 @@ object RustCore {
     /** Tell the desktop this phone will not fetch offer [id], and why (F7b). */
     fun declineOffer(address: String, port: Int, id: String, reason: String): Result<Unit> =
         envelope(nativeDeclineOffer(address, port, id, reason)).map { }
+
+    /**
+     * Ask the desktop for the whole folder at [path] (as the remote browser
+     * names it); its files then arrive as offers in this session (T6b).
+     * Fails with the desktop's reason when it will not send it.
+     */
+    fun fetchFolder(address: String, port: Int, path: String): Result<Unit> =
+        envelope(nativeFetchFolder(address, port, path)).map { }
 
     /** Files the desktop offered since the last call, as a JSON array of `{id, name, size}`. */
     fun takeFileOffers(): String = envelope(nativeTakeFileOffers()).getOrDefault("[]")

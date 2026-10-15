@@ -27,6 +27,8 @@ use pocketdesk_core::protocol::clipboard::{CLIPBOARD_IMAGE_FETCH, MAX_CLIPBOARD_
 const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 /// The desktop will not send it: `{key, reason}`.
 const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
+const FOLDER_FETCH: &str = "kdeconnect.pocketdesk.folder_fetch";
+const FOLDER_FETCH_REPLY: &str = "kdeconnect.pocketdesk.folder_fetch_reply";
 /// The desktop's owner sent this phone a file: `{id, name, size}`.
 pub(crate) const FILE_OFFER: &str = "kdeconnect.pocketdesk.file_offer";
 /// The phone will not fetch an offer: `{id, reason}`.
@@ -298,6 +300,39 @@ pub(crate) async fn send_watching_replies(
 
 /// Tell the desktop the phone will not fetch offer `id`, and why (F7b), so
 /// its sent list does not wait on it.
+/// Ask the desktop for the whole folder at `path` from the remote browser
+/// (`folder_fetch`). Its files then arrive as offers on this session's
+/// control connection, which must be the one that asks: a one-off
+/// connection would close and lose them.
+pub async fn fetch_folder(address: String, port: u16, path: String) -> Result<(), String> {
+    let answer = crate::api::control_request(
+        &address,
+        port,
+        &folder_fetch_packet(&path),
+        FOLDER_FETCH_REPLY,
+        std::time::Duration::from_secs(30),
+    )
+    .await?
+    .ok_or("Not connected to this computer: open a session first")?;
+    folder_answer(&answer)
+}
+
+fn folder_fetch_packet(path: &str) -> NetworkPacket {
+    NetworkPacket::new(FOLDER_FETCH).with_body(serde_json::json!({ "path": path }))
+}
+
+/// The desktop's answer to a folder request: queued, or why not.
+fn folder_answer(body: &serde_json::Value) -> Result<(), String> {
+    if body.get("queued").and_then(|v| v.as_bool()) == Some(true) {
+        return Ok(());
+    }
+    let reason = body
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("no reason given");
+    Err(format!("The computer refused the folder: {reason}"))
+}
+
 pub async fn decline_offer(
     address: String,
     port: u16,
@@ -500,7 +535,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{FETCH_REFUSED, Kept, Resume, await_and_receive, receive_into, refusal_for};
+    use super::{
+        FETCH_REFUSED, FOLDER_FETCH, Kept, Resume, await_and_receive, folder_answer,
+        folder_fetch_packet, receive_into, refusal_for,
+    };
     use crate::api::transfer_progress;
     use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
     use pocketdesk_core::protocol::partials::Store;
@@ -942,6 +980,25 @@ mod tests {
         }
         reading.abort();
         assert!(kept.contains("own-conn"), "{kept}");
+    }
+
+    #[test]
+    fn a_folder_request_is_queued_or_refused_with_the_desktops_reason() {
+        let packet = folder_fetch_packet("C:\\Users\\me\\Docs");
+        assert_eq!(packet.packet_type, FOLDER_FETCH);
+        assert_eq!(packet.body["path"], "C:\\Users\\me\\Docs");
+        assert_eq!(
+            folder_answer(&serde_json::json!({ "path": "x", "queued": true, "reason": null })),
+            Ok(())
+        );
+        assert_eq!(
+            folder_answer(&serde_json::json!({ "queued": false, "reason": "busy: two folders" })),
+            Err("The computer refused the folder: busy: two folders".to_string())
+        );
+        assert!(
+            folder_answer(&serde_json::json!({})).is_err(),
+            "no answer is no folder"
+        );
     }
 
     #[test]

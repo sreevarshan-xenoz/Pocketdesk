@@ -948,6 +948,22 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeDecline
     to_jstring(&mut env, json)
 }
 
+/// Ask the desktop for a whole folder from the remote browser:
+/// `{"ok": null}` once it is queued, else `{"error": reason}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchFolder(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    path: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let path = jstring_to_string(&mut env, &path);
+    let json = envelope_unit(RUNTIME.block_on(download::fetch_folder(address, port as u16, path)));
+    to_jstring(&mut env, json)
+}
+
 /// Files the desktop offered since the last call: `{"ok": "[{id,name,size}]"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeFileOffers(
