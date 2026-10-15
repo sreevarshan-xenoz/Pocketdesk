@@ -843,7 +843,14 @@ async fn offer_folder(
         .unwrap_or_else(|| "Folder".to_string());
     // The phone takes a send's id as 32 hex digits; the outbox's has hyphens.
     let folder_id = request.id.replace('-', "");
-    let found = folder_files(root);
+    // A walk of thousands of entries is disk work: off the runtime thread,
+    // which also serves the asking phone's control connection.
+    let found = {
+        let root = root.to_path_buf();
+        tokio::task::spawn_blocking(move || folder_files(&root))
+            .await
+            .unwrap_or_else(|e| Err(format!("the folder could not be read: {e}")))
+    };
     // A folder whose own name the phone cannot make is refused, not sent
     // flat or renamed.
     let name_problem = pocketdesk_core::protocol::relpath::component_problem(&folder);
