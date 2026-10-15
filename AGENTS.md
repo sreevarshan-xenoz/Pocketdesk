@@ -44,7 +44,8 @@ The detailed build journal lives in `git log` — one conventional commit per lo
 
 - 2026-10-16: **T10g, the phone's folders on the computer (branch `feat/phone-files`; spec `docs/superpowers/specs/2026-10-16-phone-files-design.md`).**
   - **How:** the phone shares folders picked with Android's folder picker (Settings "Folders the computer may open"); the desktop app's Phone tab asks (`phone_files_out/`) and the server sends `phone_files.list` / `.fetch` to a connected phone with Files on. The phone answers its own computer from the notification listener: a listing (kept owner-only in `phone_files.json`) or the file shared as the share sheet does.
-  - **Device-checked (A71 → Windows):** picker grant, folder and sub-folder listed, a file fetched with its MD5 matching. Owed: checklist §70.
+  - **Fresh review (0 Critical, 4 Important), fixed one commit each:** unpaired phones' listings kept, stale listings and unanswered failures, one badly named folder hiding the listing, and big folders cut before filtering; plus hidden files fetched by name, reused folder ids and dead grants.
+  - **Device-checked (A71 → Windows), again after the fixes:** picker grant, folder and sub-folder listed, a file fetched with its MD5 matching, a hidden file refused, a deleted one answered with why. Owed: checklist §70.
 - 2026-10-16: **F4, typing any character on Linux (branch `feat/linux-typing`).**
   - **How:** on wlroots compositors the server types text through `zwp_virtual_keyboard_v1`, uploading a keymap with one key per character as wtype does (`core::input::{xkb_keymap, vkeyboard}`), so accents, other scripts and emoji arrive on any layout. Elsewhere uinput now holds Shift for capitals and shifted symbols (roadmap 2666).
   - **Fresh review (0 Critical, 2 Important), fixed:** a failure mid-text retyped what had gone out, and the Wayland waits had no deadline on the input task; plus a cached failed connect, CRLF, keymap re-uploads and key times.
