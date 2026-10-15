@@ -1167,6 +1167,32 @@ Owed:
 - [ ] Linux with an image on the clipboard, and a copy offering `x-kde-passwordManagerHint` (KeePassXC).
 - [ ] Android 10–12: the tile's window reads the clipboard.
 
+## 66. Answering the phone's notifications from the computer (T10c)
+
+On the A71 against this box, 2026-10-16, with a throwaway chat app that posts a notification with Reply and "Mark as read" (not committed):
+- [x] The computer showed it in full and kept it with its button and its reply.
+- [x] A reply written as the desktop app writes it reached the app through its `RemoteInput`; "Mark as read" ran; a button it did not offer was refused by the server.
+- [x] Found and fixed on the way: nearly every notification arrived as "New notification" (an app's default private was always hidden), and answers were dropped while the phone had no live link.
+- [x] After the review fixes: a button that requires unlocking (`Approve`) was not offered, and a press of it was refused; reply and "Mark as read" ran again.
+- [ ] "Hide sensitive content" on the lock screen turned on: the probe's notification arrives as "New notification" and offers nothing.
+
+Owed:
+- [ ] The desktop app's Notifications tab itself (its buttons and reply box), and a real chat app (WhatsApp, Signal, Messages).
+- [ ] The switch off: nothing offered, an answer not run.
+- [ ] From away from home (the internet link).
+- [ ] An action that opens an activity on Android 14+ (background launches may be blocked).
+
+## 67. Files from the computer without a session (T10d)
+
+On the A71 against this box, 2026-10-16:
+- [x] With "Files from the computer in the background" on and notification access, the app in the background and no session, the mirror listed the phone as linked with files, and `pocketdesk send … --wait` ended "saved on the phone", MD5s matching. Android 16 let the listener start the download at once.
+
+Owed:
+- [ ] A phone that refuses background starts: the "The computer sends a file" notification, and Save downloading it.
+- [ ] A folder sent this way.
+- [ ] The desktop app's Files tab listing a linked phone with no session.
+- [ ] Away from home: `pocketdesk send` refused at once as not reachable.
+
 ## 68. Typing any character on Linux (F4)
 
 On the Azure VM (headless Sway, this branch's release build) from the A71, 2026-10-16:
