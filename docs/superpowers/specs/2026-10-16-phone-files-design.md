@@ -38,7 +38,14 @@ The notification listener's tick takes the requests, as answers and background f
 - **Server:** listings kept per phone; a request needs a connected phone with Files on.
 - **Kotlin (JVM):** `PhoneFilesRule`. It covers name checks, the own-computer check, roots by id, and hidden names.
 - **Device (A71 → Windows):**
-  - grant `Download`;
+  - grant a folder under `Download`;
   - list it from the desktop;
   - open a sub-folder;
   - download a file, with the MD5s matching.
+
+## As built
+
+- **`Download` itself cannot be shared:** Android's picker refuses its root ("Can't use this folder"), as it does the storage root. Its sub-folders are fine.
+- **The listener keeps a link while any folder is shared,** as for answers and background files. With no folder shared, a list request is answered with no roots, so the Phone tab says so.
+- **A fetch is the phone's share** (F7a/T6a): it is resumable, saved in Downloads, and noted in the received list.
+- **Device-checked (A71 → Windows):** the folder added through the picker, a folder and a sub-folder listed, a file fetched with its MD5 matching, then Remove. Checklist §70.
