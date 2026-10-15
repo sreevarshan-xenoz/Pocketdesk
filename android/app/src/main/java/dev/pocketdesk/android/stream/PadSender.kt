@@ -37,6 +37,11 @@ val padOrdered: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Disp
 /** Outlives any composition: teardown must still be able to release a button. */
 private val padScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + padOrdered)
 
+/** Run [block] on the ordered pad dispatcher, from anywhere (T9c's captured mouse). */
+fun launchPadSend(block: () -> Unit) {
+    padScope.launch { block() }
+}
+
 /** Release whatever [pad] holds, from a view that is going away (cancelled coroutines cannot send). */
 fun cancelPad(address: String, port: Int, pad: TrackpadGesture) {
     sendPadOutputs(address, port, pad.cancel()) { block -> padScope.launch { block() } }

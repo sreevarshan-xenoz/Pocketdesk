@@ -195,6 +195,24 @@ class MainActivity : ComponentActivity() {
         inPictureInPicture.value = isInPictureInPictureMode
     }
 
+    /**
+     * T9c: while a session holds the pointer, a mouse's Back and Forward
+     * buttons belong to the desktop; Android also turns them into this
+     * phone's Back (fired on the key's release), which would end the session.
+     */
+    private fun mouseKeySwallowed(keyCode: Int, event: android.view.KeyEvent): Boolean =
+        dev.pocketdesk.android.stream.CapturedMouse.swallowsKey(
+            keyCode,
+            fromMouse = event.isFromSource(android.view.InputDevice.SOURCE_MOUSE),
+            captured = dev.pocketdesk.android.stream.CapturedMouse.captured,
+        )
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean =
+        mouseKeySwallowed(keyCode, event) || super.onKeyDown(keyCode, event)
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean =
+        mouseKeySwallowed(keyCode, event) || super.onKeyUp(keyCode, event)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
