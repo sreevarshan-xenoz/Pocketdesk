@@ -1024,9 +1024,18 @@ Owed:
 - [ ] A share naming one of two saved computers goes to that one (the A71 has one saved).
 - [ ] From the background, with and without "Display over other apps".
 
-Seen on the way, to look into:
-- With this computer's display asleep, a session ends every ~10 s: the capture sends no frames, and the phone's 10 s frame-gap watchdog takes that for a dead link. A desktop left with its screen off cannot hold a session.
-- During that churn, a 654 KB download to the phone ran at ~26 KB/s (1.2 MB took a second with a steady session), and once the phone published a downloaded file ~16 s after the desktop said it was saved. Not reproduced with a steady session.
+Seen on the way: sessions ending every ~10 s, and slow transfers. First taken for this computer's display being asleep; it was the link (§55).
+
+## 55. A slow or lossy link (fix/slow-link-watchdog)
+
+On the A71 against Windows, 2026-10-15, over Wi-Fi that lost about a third of its packets (strong signal, but large packets dropping; ~36 KB/s on the wire, pings 40-60 ms):
+- [x] Before: every session ended after 10-15 s ("video feed silent"). The desktop wrote ~2.5 MB of frames per session into the connection while ~0.5 MB reached the wire; the phone waited on one starved frame stream. Downloads during that churn ran at ~26 KB/s, and one file was published ~16 s after the desktop said it was saved (the same starved link).
+- [x] After (the phone counts video bytes, and the desktop keeps at most 8 frames on the wire): one session held 135 s until ended by hand, at 36 % loss.
+
+Owed:
+- [ ] A healthy LAN: frame rate and e2e unchanged (the in-flight bound must not throttle it).
+- [ ] WAN, direct and relayed: frame rate at a 150-300 ms round trip.
+- [ ] The picture's delay on the lossy link (how stale it runs), and a keyframe after a long stall.
 
 ## Recording results
 
