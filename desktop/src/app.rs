@@ -723,18 +723,25 @@ impl PocketdeskApp {
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.send_path)
-                    .hint_text("Path to a file")
+                    .hint_text("Path to a file or folder")
                     .desired_width(360.0),
             );
             if ui.button("Send").clicked() && !self.send_path.trim().is_empty() {
                 send = Some(PathBuf::from(self.send_path.trim()));
             }
-            if crate::pick_file::AVAILABLE
-                && ui
+            if crate::pick_file::AVAILABLE {
+                if ui
                     .add_enabled(self.picking.is_none(), egui::Button::new("Choose file…"))
                     .clicked()
-            {
-                self.picking = Some(crate::pick_file::spawn());
+                {
+                    self.picking = Some(crate::pick_file::spawn(false));
+                }
+                if ui
+                    .add_enabled(self.picking.is_none(), egui::Button::new("Choose folder…"))
+                    .clicked()
+                {
+                    self.picking = Some(crate::pick_file::spawn(true));
+                }
             }
         });
         if let Some(path) = send {
@@ -745,7 +752,7 @@ impl PocketdeskApp {
         let hint = if hovering {
             RichText::new("Drop to send.").strong()
         } else {
-            RichText::new("Or drop files on this window.").color(MUTED)
+            RichText::new("Or drop files or folders on this window.").color(MUTED)
         };
         ui.label(hint);
     }

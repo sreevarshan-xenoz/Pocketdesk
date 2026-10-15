@@ -174,7 +174,7 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 | Files | `kdeconnect.filebrowse.request` / `.response` | phone → desktop / back | A folder listing under home | Files | `server/src/plugins/file_browse.rs` |
 | Files | `kdeconnect.pocketdesk.file_fetch` | phone → desktop | `{path or offer, port, key}` | Files | `server/src/plugins/share.rs` |
 | Files | `kdeconnect.pocketdesk.file_fetch_refused` | desktop → phone | `{key, reason}` | — | same |
-| Files | `kdeconnect.pocketdesk.file_offer` | desktop → phone | `{id, name, size, source}`; `source` names the file so a retry continues it. The phone may fetch an offer up to 4 times within its 10 minutes, one attempt at a time | — | `server/src/offers.rs` |
+| Files | `kdeconnect.pocketdesk.file_offer` | desktop → phone | `{id, name, size, source}`; `source` names the file so a retry continues it. A file of a folder send also carries `folderId`, `folder` and `path` (its names under the folder): a folder is offered file by file, hidden entries and links left out, at most 10 000 files, 32 deep and 32 GiB. The phone may fetch an offer up to 4 times within its 10 minutes, one attempt at a time | — | `server/src/offers.rs` |
 | Files | `kdeconnect.pocketdesk.file_offer_declined` | phone → desktop | Offer id, reason | Files | same |
 | Desktop sound control | `kdeconnect.pocketdesk.audio` | both | Volume, mute, output device | Audio | `server/src/plugins/audio_control.rs` |
 | Power | `kdeconnect.pocketdesk.power` | phone → desktop | Lock, sleep, shut down | Power | `server/src/plugins/power.rs` |

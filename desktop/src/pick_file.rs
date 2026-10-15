@@ -1,6 +1,6 @@
-//! "Choose file…" for sending a file to a phone (F7b). Windows has the
-//! common file dialog; elsewhere the app offers drag and drop and a path
-//! field instead, so no GTK comes into the Linux build.
+//! "Choose file…" and "Choose folder…" for sending to a phone (F7b, T6b).
+//! Windows has the common file dialog; elsewhere the app offers drag and
+//! drop and a path field instead, so no GTK comes into the Linux build.
 
 use std::path::PathBuf;
 use std::thread::JoinHandle;
@@ -9,19 +9,21 @@ use std::thread::JoinHandle;
 pub const AVAILABLE: bool = cfg!(windows);
 
 /// Open the dialog on a thread of its own, so the window keeps painting;
-/// the handle yields the chosen file, or `None` when it was cancelled.
-pub fn spawn() -> JoinHandle<Option<PathBuf>> {
-    std::thread::spawn(pick)
+/// the handle yields the chosen file (or folder, with `folder`), or `None`
+/// when it was cancelled.
+pub fn spawn(folder: bool) -> JoinHandle<Option<PathBuf>> {
+    std::thread::spawn(move || pick(folder))
 }
 
 #[cfg(windows)]
-fn pick() -> Option<PathBuf> {
+fn pick(folder: bool) -> Option<PathBuf> {
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
         CoTaskMemFree, CoUninitialize,
     };
     use windows::Win32::UI::Shell::{
-        FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH,
+        FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog,
+        SIGDN_FILESYSPATH,
     };
     // SAFETY: COM is initialised for this thread for the dialog's lifetime
     // and released after; the display name is freed with CoTaskMemFree as
@@ -31,7 +33,11 @@ fn pick() -> Option<PathBuf> {
         let picked = (|| -> windows::core::Result<Option<PathBuf>> {
             let dialog: IFileOpenDialog =
                 CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
-            dialog.SetOptions(dialog.GetOptions()? | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM)?;
+            let mut options = dialog.GetOptions()? | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM;
+            if folder {
+                options |= FOS_PICKFOLDERS;
+            }
+            dialog.SetOptions(options)?;
             if dialog.Show(None).is_err() {
                 return Ok(None); // cancelled
             }
@@ -48,6 +54,6 @@ fn pick() -> Option<PathBuf> {
 }
 
 #[cfg(not(windows))]
-fn pick() -> Option<PathBuf> {
+fn pick(_folder: bool) -> Option<PathBuf> {
     None
 }

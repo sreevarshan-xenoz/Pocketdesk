@@ -179,6 +179,82 @@ fn sweep_in(table: &Table, now: Instant) -> Vec<String> {
     expired
 }
 
+/// A folder send in progress (T6b): its files' offers, and how they ended.
+#[derive(Debug, Default)]
+struct Group {
+    total: usize,
+    ended: usize,
+    failed: usize,
+    last_reason: Option<String>,
+}
+
+/// Folder sends by their sent-list id, and each file offer's folder send.
+#[derive(Default)]
+struct Groups {
+    groups: HashMap<String, Group>,
+    member_of: HashMap<String, String>,
+}
+
+fn groups() -> &'static Mutex<Groups> {
+    static GROUPS: OnceLock<Mutex<Groups>> = OnceLock::new();
+    GROUPS.get_or_init(Default::default)
+}
+
+/// Make `offer_ids` the files of the folder send `group`.
+fn start_group(group: &str, offer_ids: &[&str]) {
+    let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());
+    g.groups.insert(
+        group.to_string(),
+        Group {
+            total: offer_ids.len(),
+            ..Group::default()
+        },
+    );
+    for id in offer_ids {
+        g.member_of.insert(id.to_string(), group.to_string());
+    }
+}
+
+/// Record that offer `id` ended with `outcome`: its own row, or, for a
+/// file of a folder send, its folder's row once every file has ended.
+fn end_offer(dir: &Path, id: &str, outcome: Result<(), String>) {
+    let folder_done = {
+        let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());
+        match g.member_of.remove(id) {
+            None => None,
+            Some(group_id) => {
+                let group = g.groups.entry(group_id.clone()).or_default();
+                group.ended += 1;
+                if let Err(reason) = &outcome {
+                    group.failed += 1;
+                    group.last_reason = Some(reason.clone());
+                }
+                if group.ended < group.total {
+                    return;
+                }
+                let group = g.groups.remove(&group_id).unwrap_or_default();
+                Some((group_id, group))
+            }
+        }
+    };
+    match folder_done {
+        None => finish_in(dir, id, outcome),
+        Some((group_id, group)) => {
+            let outcome = if group.failed == 0 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{} of {} files not sent: {}",
+                    group.failed,
+                    group.total,
+                    group.last_reason.unwrap_or_default()
+                ))
+            };
+            finish_in(dir, &group_id, outcome);
+        }
+    }
+}
+
 /// The phone `device_id` will not fetch offer `id`, and says why. Only the
 /// phone it was offered to can decline it.
 pub fn decline(id: &str, device_id: &str, reason: &str) {
@@ -204,7 +280,7 @@ fn decline_in(dir: &Path, id: &str, device_id: &str, reason: &str, _now: Instant
         format!("the phone declined it: {}", reason.trim())
     };
     tracing::info!("Offer {id} declined by {device_id}: {reason}");
-    update_sent(dir, id, SentState::Failed(reason));
+    end_offer(dir, id, Err(reason));
 }
 
 /// Record how a fetch of offer `id` ended. A failure leaves the offer for
@@ -214,7 +290,7 @@ pub fn finish(id: &str, outcome: Result<(), String>) {
         return;
     };
     match settle_in(offers(), id, outcome.is_ok()) {
-        Settled::Done | Settled::GaveUp => finish_in(&dir, id, outcome),
+        Settled::Done | Settled::GaveUp => end_offer(&dir, id, outcome),
         Settled::Retry => {
             if let Err(reason) = outcome {
                 tracing::info!("Offer {id} failed this time ({reason}); the phone may try again");
@@ -231,7 +307,7 @@ pub fn fail(id: &str, reason: String) {
         .unwrap_or_else(|e| e.into_inner())
         .remove(id);
     if let Ok(dir) = crate::state::state_dir() {
-        finish_in(&dir, id, Err(reason));
+        end_offer(&dir, id, Err(reason));
     }
 }
 
@@ -264,7 +340,7 @@ pub async fn run_watcher() {
         tokio::time::sleep(POLL).await;
         for id in sweep_at(Instant::now()) {
             tracing::info!("Offer {id} expired before the phone took it");
-            finish_in(&dir, &id, Err(EXPIRED.to_string()));
+            end_offer(&dir, &id, Err(EXPIRED.to_string()));
         }
         for request in outbox::take_all(&dir, now_unix()) {
             let clients = crate::state::clone_clients().await;
@@ -286,6 +362,9 @@ async fn deliver(
     store: Option<&TrustStore>,
 ) {
     let path = PathBuf::from(&request.path);
+    if path.is_dir() {
+        return deliver_folder(dir, request, path, clients, store).await;
+    }
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -351,6 +430,191 @@ async fn deliver(
     tracing::info!("Offered {} to {}", path.display(), request.device_id);
 }
 
+/// The most files one folder send offers.
+const MAX_FOLDER_FILES: usize = 10_000;
+/// The most bytes one folder send offers.
+const MAX_FOLDER_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+
+/// One file of a folder to offer.
+#[derive(Debug, Clone)]
+struct FolderFile {
+    full: PathBuf,
+    /// Its names under the folder, its own name last.
+    path: Vec<String>,
+    size: u64,
+}
+
+#[derive(Debug, Default)]
+struct FolderFiles {
+    files: Vec<FolderFile>,
+    /// Names left out because the phone could not take them.
+    skipped: usize,
+    /// Cut short at a limit.
+    truncated: bool,
+}
+
+/// The files under `root` to offer (T6b): hidden entries and links left
+/// out, names `relpath` refuses counted and left out, at most
+/// [`MAX_FOLDER_FILES`], 32 folders deep and [`MAX_FOLDER_BYTES`] in all,
+/// and no single file over 8 GB. In name order, so the phone sees a send
+/// the same way twice.
+fn folder_files(root: &Path) -> Result<FolderFiles, String> {
+    use pocketdesk_core::protocol::relpath;
+    fn walk(dir: &Path, under: &[String], found: &mut FolderFiles, bytes: &mut u64) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            if found.truncated {
+                return;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if relpath::component_problem(&name).is_some() {
+                found.skipped += 1;
+                continue;
+            }
+            let mut path = under.to_vec();
+            path.push(name);
+            if meta.is_dir() {
+                if path.len() >= relpath::MAX_DEPTH {
+                    found.truncated = true;
+                    return;
+                }
+                walk(&entry.path(), &path, found, bytes);
+            } else if meta.is_file() {
+                if meta.len() > MAX_FILE_BYTES {
+                    found.skipped += 1;
+                    continue;
+                }
+                if found.files.len() >= MAX_FOLDER_FILES || *bytes + meta.len() > MAX_FOLDER_BYTES {
+                    found.truncated = true;
+                    return;
+                }
+                *bytes += meta.len();
+                found.files.push(FolderFile {
+                    full: entry.path(),
+                    path,
+                    size: meta.len(),
+                });
+            }
+        }
+    }
+    if !root.is_dir() {
+        return Err("not a folder".to_string());
+    }
+    let mut found = FolderFiles::default();
+    let mut bytes = 0;
+    walk(root, &[], &mut found, &mut bytes);
+    Ok(found)
+}
+
+/// Offer every file under the folder `root` to the request's phone (T6b),
+/// each as its own offer that names the send, the folder and the file's
+/// place in it. The sent list has one row for the folder, which ends when
+/// every file has.
+async fn deliver_folder(
+    dir: &Path,
+    request: SendRequest,
+    root: PathBuf,
+    clients: &[Arc<dyn DeviceSender>],
+    store: Option<&TrustStore>,
+) {
+    let folder = root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Folder".to_string());
+    let found = folder_files(&root);
+    let checked = match &found {
+        Ok(found) if found.files.is_empty() => Err("the folder has nothing to send".to_string()),
+        Ok(_) => phone_for(&request, clients, store).map_err(str::to_string),
+        Err(reason) => Err(reason.clone()),
+    };
+    let total: u64 = found
+        .as_ref()
+        .map_or(0, |f| f.files.iter().map(|f| f.size).sum());
+    {
+        let _guard = sent_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let row = SentFile {
+            id: request.id.clone(),
+            name: format!("{folder}/"),
+            path: request.path.clone(),
+            size: total,
+            device_id: request.device_id.clone(),
+            sent_unix: now_unix(),
+            state: match &checked {
+                Ok(_) => SentState::Offered,
+                Err(reason) => SentState::Failed(reason.clone()),
+            },
+        };
+        if let Err(e) = sent::record(dir, row) {
+            tracing::warn!("Could not record the sent folder: {e}");
+        }
+    }
+    let (Ok(found), Ok(target)) = (found, checked) else {
+        return;
+    };
+    if found.skipped > 0 || found.truncated {
+        tracing::warn!(
+            "Folder {folder}: {} names left out, cut short: {}",
+            found.skipped,
+            found.truncated
+        );
+    }
+    let ids: Vec<String> = found
+        .files
+        .iter()
+        .map(|_| uuid::Uuid::new_v4().simple().to_string())
+        .collect();
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    start_group(&request.id, &id_refs);
+    let now = Instant::now();
+    for (file, id) in found.files.iter().zip(&ids) {
+        offer_at(id, file.full.clone(), &request.device_id, now);
+    }
+    for (file, id) in found.files.iter().zip(&ids) {
+        let packet = NetworkPacket::new(OFFER).with_body(serde_json::json!({
+            "id": id,
+            "name": file.path.last(),
+            "size": file.size,
+            "source": source_of(&file.full, file.size),
+            "folderId": request.id,
+            "folder": folder,
+            "path": file.path,
+        }));
+        if target.send_packet(&packet).await.is_err() {
+            // The phone left: every file not yet offered ends here.
+            for id in &ids {
+                if offers()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(id)
+                    .is_some()
+                {
+                    end_offer(dir, id, Err("phone not connected".to_string()));
+                }
+            }
+            return;
+        }
+    }
+    tracing::info!(
+        "Offered folder {} ({} files) to {}",
+        root.display(),
+        found.files.len(),
+        request.device_id
+    );
+}
+
 /// The file's source id (T6a): 32 hex digits naming this file at this
 /// size and modified time, so the phone continues a download it began of
 /// the same file and never one of another.
@@ -383,6 +647,15 @@ fn check(
     if size > MAX_FILE_BYTES {
         return Err("the file is larger than 8 GB");
     }
+    Ok((phone_for(request, clients, store)?, size))
+}
+
+/// The request's phone, if it may take files and is connected.
+fn phone_for(
+    request: &SendRequest,
+    clients: &[Arc<dyn DeviceSender>],
+    store: Option<&TrustStore>,
+) -> Result<Arc<dyn DeviceSender>, &'static str> {
     // An unreadable store could be hiding a denial: refuse.
     let allowed = store.is_some_and(|s| {
         s.is_trusted(&request.device_id)
@@ -391,8 +664,7 @@ fn check(
     if !allowed {
         return Err("files are off for this phone");
     }
-    let target = target_for(&request.device_id, clients).ok_or("phone not connected")?;
-    Ok((target, size))
+    target_for(&request.device_id, clients).ok_or("phone not connected")
 }
 
 /// `sent.json` is read, changed and replaced; one writer at a time.
@@ -457,6 +729,61 @@ mod tests {
         assert_eq!(id, source_of(&path, 3));
         assert_ne!(id, source_of(&path, 4), "another size");
         assert_ne!(id, source_of(&dir.join("b.bin"), 3), "another file");
+    }
+
+    #[test]
+    fn a_folder_offers_its_files_with_their_paths_and_no_hidden_ones() {
+        let root = temp_dir("folder-walk").join("Holiday");
+        std::fs::create_dir_all(root.join("day 1").join("raw")).unwrap();
+        std::fs::write(root.join("notes.txt"), b"n").unwrap();
+        std::fs::write(root.join(".DS_Store"), b"h").unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git").join("x"), b"h").unwrap();
+        std::fs::write(root.join("day 1").join("a.jpg"), b"aa").unwrap();
+        std::fs::write(root.join("day 1").join("raw").join("b.raw"), b"bbb").unwrap();
+        let found = folder_files(&root).unwrap();
+        let paths: Vec<Vec<String>> = found.files.iter().map(|f| f.path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                vec!["day 1".to_string(), "a.jpg".to_string()],
+                vec!["day 1".to_string(), "raw".to_string(), "b.raw".to_string()],
+                vec!["notes.txt".to_string()],
+            ]
+        );
+        assert_eq!(found.files.iter().map(|f| f.size).sum::<u64>(), 6);
+        assert!(!found.truncated);
+    }
+
+    #[test]
+    fn a_folder_send_ends_when_every_file_has() {
+        let dir = temp_dir("folder-group");
+        sent::record(
+            &dir,
+            SentFile {
+                id: "folder-1".to_string(),
+                name: "Holiday".to_string(),
+                path: "/Holiday".to_string(),
+                size: 3,
+                device_id: "phone-a".to_string(),
+                sent_unix: 1,
+                state: SentState::Offered,
+            },
+        )
+        .unwrap();
+        start_group("folder-1", &["f-1", "f-2", "f-3"]);
+        end_offer(&dir, "f-1", Ok(()));
+        end_offer(&dir, "f-2", Err("no room".to_string()));
+        assert_eq!(
+            sent::read(&dir)[0].state,
+            SentState::Offered,
+            "one file still to go"
+        );
+        end_offer(&dir, "f-3", Ok(()));
+        assert_eq!(
+            sent::read(&dir)[0].state,
+            SentState::Failed("1 of 3 files not sent: no room".to_string())
+        );
     }
 
     #[test]
@@ -607,6 +934,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_folder_is_offered_file_by_file_with_each_files_place() {
+        let dir = temp_dir("deliver-folder");
+        let root = dir.join("Trip");
+        std::fs::create_dir_all(root.join("day 2")).unwrap();
+        std::fs::write(root.join("map.png"), b"m").unwrap();
+        std::fs::write(root.join("day 2").join("a.jpg"), b"aa").unwrap();
+        let store = trusting(&dir, "phone-a", true);
+        let tcp = Conn::new("phone-a", true);
+        let clients: [Arc<dyn DeviceSender>; 1] = [tcp.clone()];
+        let sent_request = request(&dir, &root);
+        deliver(&dir, sent_request.clone(), &clients, Some(&store)).await;
+
+        let pushed = tcp.sent.lock().unwrap().clone();
+        assert_eq!(pushed.len(), 2);
+        assert_eq!(pushed[0].body["folderId"], sent_request.id);
+        assert_eq!(pushed[0].body["folder"], "Trip");
+        assert_eq!(
+            pushed[0].body["path"],
+            serde_json::json!(["day 2", "a.jpg"])
+        );
+        assert_eq!(pushed[0].body["name"], "a.jpg");
+        assert_eq!(pushed[1].body["path"], serde_json::json!(["map.png"]));
+        assert_ne!(
+            pushed[0].body["id"], pushed[1].body["id"],
+            "each file its own offer"
+        );
+        let listed = sent::read(&dir);
+        assert_eq!(listed.len(), 1, "one row for the folder");
+        assert_eq!(listed[0].name, "Trip/");
+        assert_eq!(listed[0].size, 3);
+        let first = pushed[0].body["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            redeem(&first, "phone-a"),
+            Ok(root.join("day 2").join("a.jpg"))
+        );
+    }
+
+    #[tokio::test]
     async fn a_file_is_offered_to_a_phone_in_a_session() {
         let dir = temp_dir("deliver");
         let file = dir.join("report.pdf");
@@ -648,9 +1013,17 @@ mod tests {
         let tcp = Conn::new("phone-a", true);
         let connected: [Arc<dyn DeviceSender>; 1] = [tcp.clone()];
         let allowed = trusting(&dir, "phone-a", true);
+        // A folder is sent file by file (T6b); one with nothing in it is not.
+        let empty = dir.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
         for (path, clients, store, why) in [
             (file.clone(), &[][..], Some(&allowed), "phone not connected"),
-            (dir.clone(), &connected[..], Some(&allowed), "not a file"),
+            (
+                empty.clone(),
+                &connected[..],
+                Some(&allowed),
+                "the folder has nothing to send",
+            ),
             (
                 dir.join("gone"),
                 &connected[..],

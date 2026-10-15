@@ -160,8 +160,9 @@ pub fn queue_send(
     path: &Path,
     now_unix: u64,
 ) -> Result<String, String> {
-    if !path.is_file() {
-        return Err(format!("{} is not a file.", path.display()));
+    // A file, or a folder the server sends file by file (T6b).
+    if !path.is_file() && !path.is_dir() {
+        return Err(format!("{} is not a file or a folder.", path.display()));
     }
     // The server resolves the path, from its own working folder: name the
     // file as this app sees it.
@@ -447,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn a_send_queues_a_request_for_the_server_and_refuses_what_is_no_file() {
+    fn a_send_queues_a_request_for_the_server_and_refuses_what_is_not_there() {
         let dir = temp_dir("send");
         let file = dir.join("report.pdf");
         std::fs::write(&file, b"x").unwrap();
@@ -459,9 +460,13 @@ mod tests {
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].device_id, "a");
         assert_eq!(queued[0].path, file.display().to_string());
-        assert!(queue_send(&dir, "a", &dir, 100).is_err(), "a folder");
         assert!(queue_send(&dir, "a", &dir.join("gone"), 100).is_err());
         assert!(pocketdesk_core::local::outbox::take_all(&dir, 101).is_empty());
+        // A folder goes too (T6b): the server offers it file by file.
+        let folder = dir.join("Trip");
+        std::fs::create_dir_all(&folder).unwrap();
+        assert_eq!(queue_send(&dir, "a", &folder, 100), Ok("Trip".to_string()));
+        assert_eq!(pocketdesk_core::local::outbox::take_all(&dir, 101).len(), 1);
     }
 
     #[test]
