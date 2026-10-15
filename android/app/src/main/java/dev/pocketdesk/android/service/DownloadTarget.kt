@@ -9,6 +9,7 @@ import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
+import androidx.core.net.toUri
 import java.io.File
 
 /**
@@ -31,6 +32,14 @@ object DownloadTarget {
     ) {
         /** What a viewer can open once published, if anything. */
         val viewUri: Uri? get() = mediaUri
+
+        /** Where the bytes are, to find this file again for a retry (T6a). */
+        val location: String get() = mediaUri?.toString() ?: legacyFile?.absolutePath ?: ""
+
+        /** Let go of the descriptor and keep the file, unpublished, for a retry. */
+        fun keepForRetry() {
+            runCatching { descriptor.close() }
+        }
 
         fun publish() {
             val uri = mediaUri ?: return
@@ -56,6 +65,31 @@ object DownloadTarget {
             createLegacy(context, safe)
         }
     }.getOrNull()
+
+    /**
+     * The unfinished file an earlier attempt kept at [location], opened to
+     * continue it, or `null` when it is gone.
+     */
+    fun reopen(context: Context, location: String): Target? = runCatching {
+        if (location.startsWith("content://")) {
+            val uri = location.toUri()
+            context.contentResolver.openFileDescriptor(uri, "rw")?.let { Target(it, context, uri, null) }
+        } else {
+            val file = File(location).takeIf { it.isFile } ?: return@runCatching null
+            Target(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE), context, null, file)
+        }
+    }.getOrNull()
+
+    /** Delete an unfinished file at [location] that is no longer wanted. */
+    fun delete(context: Context, location: String) {
+        runCatching {
+            if (location.startsWith("content://")) {
+                context.contentResolver.delete(location.toUri(), null, null)
+            } else {
+                File(location).delete()
+            }
+        }
+    }
 
     /** Whether there is room for [size] bytes, with a margin for the system. */
     fun hasRoomFor(context: Context, size: Long): Boolean {
@@ -84,7 +118,8 @@ object DownloadTarget {
         }
         val resolver = context.contentResolver
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-        val descriptor = resolver.openFileDescriptor(uri, "w")
+        // Read-write: a retry reads back what it has to prove it is the same file.
+        val descriptor = resolver.openFileDescriptor(uri, "rw")
         if (descriptor == null) {
             resolver.delete(uri, null, null)
             return null
@@ -102,7 +137,7 @@ object DownloadTarget {
             .firstOrNull { it.createNewFile() } ?: return null
         val descriptor = ParcelFileDescriptor.open(
             file,
-            ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE,
+            ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_TRUNCATE,
         )
         return Target(descriptor, context, null, file)
     }

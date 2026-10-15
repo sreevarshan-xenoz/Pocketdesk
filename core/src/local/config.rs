@@ -89,6 +89,14 @@ pub struct Config {
     /// Seconds without input after which the driving phone lets go.
     #[serde(default = "default_input_idle_secs")]
     pub input_idle_secs: u32,
+    /// Hours an unfinished file from a phone is kept so a retry continues
+    /// it (roadmap T6); 0 keeps none, and a retry starts over.
+    #[serde(default = "default_transfer_keep_hours")]
+    pub transfer_keep_hours: u32,
+}
+
+fn default_transfer_keep_hours() -> u32 {
+    24
 }
 
 fn default_input_idle_secs() -> u32 {
@@ -185,6 +193,7 @@ impl Default for Config {
             wake_port: 0,
             input_control: InputControlMode::One,
             input_idle_secs: default_input_idle_secs(),
+            transfer_keep_hours: default_transfer_keep_hours(),
         }
     }
 }
@@ -343,6 +352,7 @@ impl Config {
         "wake_port",
         "input_control",
         "input_idle_secs",
+        "transfer_keep_hours",
     ];
 }
 
@@ -454,6 +464,16 @@ mod tests {
                 .unwrap()
                 .contains("input_control = \"shared\"")
         );
+    }
+
+    #[test]
+    fn unfinished_transfers_are_kept_a_day_by_default_and_the_choice_saves() {
+        assert_eq!(Config::default().transfer_keep_hours, 24);
+        let path = temp("transfer-keep");
+        let mut config = Config::load_from(&path).unwrap();
+        config.transfer_keep_hours = 0;
+        config.save_to(&path).unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().transfer_keep_hours, 0);
     }
 
     #[test]

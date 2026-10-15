@@ -263,7 +263,15 @@ pub(crate) fn queue_file_offer(body: &serde_json::Value) {
     ) else {
         return;
     };
-    let entry = serde_json::json!({ "id": id, "name": name, "size": size });
+    let mut entry = serde_json::json!({ "id": id, "name": name, "size": size });
+    // The file's id, so a retry continues a broken download of it (T6a).
+    if let Some(source) = body
+        .get("source")
+        .and_then(|v| v.as_str())
+        .filter(|s| pocketdesk_core::protocol::partials::valid_source(s))
+    {
+        entry["source"] = serde_json::json!(source);
+    }
     let mut q = PENDING_OFFERS.lock().unwrap_or_else(|e| e.into_inner());
     if q.iter().any(|o| o.get("id") == entry.get("id")) {
         return;

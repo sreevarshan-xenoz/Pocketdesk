@@ -11,8 +11,11 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import java.io.File
@@ -44,6 +47,8 @@ class TransferService : Service() {
             val value: String,
             val name: String,
             val size: Long,
+            /** The file's id at its source, so a retry continues it (T6a); "" for none. */
+            val source: String,
         ) : Job
     }
 
@@ -67,6 +72,16 @@ class TransferService : Service() {
     private var lastError: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        // Unfinished downloads are kept a day for a retry, or not at all
+        // when retries are off; what is dropped is deleted here.
+        worker.execute {
+            val hours = if (Prefs.retryTransfers(this)) KEEP_PARTIAL_HOURS else 0
+            RustCore.sweepPartials(hours).forEach { DownloadTarget.delete(this, it) }
+        }
+    }
 
     override fun onDestroy() {
         worker.shutdownNow()
@@ -109,6 +124,7 @@ class TransferService : Service() {
                 value,
                 intent.getStringExtra(EXTRA_NAME) ?: "download",
                 intent.getLongExtra(EXTRA_SIZE, 0L),
+                intent.getStringExtra(EXTRA_SOURCE) ?: "",
             )
         }
         val uris = intent.clipData
@@ -142,8 +158,22 @@ class TransferService : Service() {
             }
             val title = getString(R.string.transfer_sending, index + 1, job.uris.size)
             show(progressNotification(title, name, 0))
-            val result = sendOne(job.address, job.port, uri, name) { percent ->
+            var result = sendOne(job.address, job.port, uri, name) { percent ->
                 show(progressNotification(title, name, percent))
+            }
+            // A failed file goes again a few times: the computer kept what
+            // arrived, so each retry continues where the last one stopped.
+            var attempt = 1
+            while (result.isFailure) {
+                val error = result.exceptionOrNull()?.message
+                val wait = TransferRetry.delayBefore(attempt, error, Prefs.retryTransfers(this)) ?: break
+                Log.i(TAG, "sending $name failed ($error); trying again in $wait s")
+                show(progressNotification(getString(R.string.transfer_retrying, attempt), name, 0))
+                Thread.sleep(wait * 1000)
+                attempt++
+                result = sendOne(job.address, job.port, uri, name) { percent ->
+                    show(progressNotification(title, name, percent))
+                }
             }
             sendCount++
             if (result.isSuccess) {
@@ -159,7 +189,18 @@ class TransferService : Service() {
         val title = getString(R.string.transfer_receiving)
         show(progressNotification(title, job.name, 0))
         receiveCount++
-        val result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
+        var result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
+        // A broken download goes again a few times, continuing what it kept.
+        var attempt = 1
+        while (result.isFailure) {
+            val error = result.exceptionOrNull()?.message
+            val wait = TransferRetry.delayBefore(attempt, error, Prefs.retryTransfers(this)) ?: break
+            Log.i(TAG, "receiving ${job.name} failed ($error); trying again in $wait s")
+            show(progressNotification(getString(R.string.transfer_retrying, attempt), job.name, 0))
+            Thread.sleep(wait * 1000)
+            attempt++
+            result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
+        }
         result.onSuccess { uri ->
             savedTotal++
             lastSaved = uri
@@ -228,8 +269,11 @@ class TransferService : Service() {
                 descriptor.close()
                 Result.failure(IllegalStateException("$name is empty"))
             }
-            size > 0L -> withProgress({ size }, onProgress) {
-                RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size)
+            size > 0L -> {
+                val source = SourceId.of(uri.toString(), size, lastModified(uri))
+                withProgress({ size }, onProgress) {
+                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source)
+                }
             }
             else -> {
                 // A provider that cannot say how big the file is (a
@@ -247,17 +291,35 @@ class TransferService : Service() {
         if (job.size > MAX_RECEIVE_BYTES || !DownloadTarget.hasRoomFor(this, job.size)) {
             return refuse(job, getString(R.string.transfer_no_space, job.name))
         }
-        val target = DownloadTarget.create(this, job.name)
+        // A part an earlier attempt kept is continued in place (T6a).
+        // With retries off nothing is kept for one: no source, no record.
+        val source = if (Prefs.retryTransfers(this)) job.source else ""
+        val kept = source.takeIf { it.isNotEmpty() }
+            ?.let { RustCore.partialLocation(job.address, it) }
+            ?.let { DownloadTarget.reopen(this, it) }
+        val target = kept ?: DownloadTarget.create(this, job.name)
             ?: return refuse(job, "cannot create ${job.name}")
         return try {
             val saved = withProgress({ job.size }, onProgress) {
-                RustCore.fetchFile(job.address, job.port, job.isOffer, job.value, target.descriptor.detachFd())
+                RustCore.fetchFile(
+                    job.address,
+                    job.port,
+                    job.isOffer,
+                    job.value,
+                    target.descriptor.detachFd(),
+                    source,
+                    job.name,
+                    target.location,
+                )
             }
             if (saved.isSuccess) {
                 target.publish()
                 Result.success(target.viewUri)
             } else {
-                target.discard()
+                // Kept for a retry only when the bridge recorded this place.
+                val resumable = source.isNotEmpty() &&
+                    RustCore.partialLocation(job.address, source) == target.location
+                if (resumable) target.keepForRetry() else target.discard()
                 Result.failure(saved.exceptionOrNull() ?: IllegalStateException("not saved"))
             }
         } catch (t: Throwable) {
@@ -299,6 +361,22 @@ class TransferService : Service() {
             copy.delete()
         }
     }
+
+    /** When the provider says [uri] last changed, if it says. */
+    private fun lastModified(uri: Uri): Long? =
+        runCatching {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                listOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED, MediaStore.MediaColumns.DATE_MODIFIED)
+                    .map { cursor.getColumnIndex(it) }
+                    .firstOrNull { it >= 0 && !cursor.isNull(it) }
+                    ?.let { column ->
+                        val value = cursor.getLong(column)
+                        // MediaStore counts seconds, DocumentsContract milliseconds.
+                        if (cursor.getColumnName(column) == MediaStore.MediaColumns.DATE_MODIFIED) value * 1000 else value
+                    }
+            }
+        }.getOrNull()
 
     private fun displayName(uri: Uri): String =
         runCatching {
@@ -394,6 +472,8 @@ class TransferService : Service() {
         private const val EXTRA_VALUE = "value"
         private const val EXTRA_NAME = "name"
         private const val EXTRA_SIZE = "size"
+        private const val EXTRA_SOURCE = "source"
+        private const val KEEP_PARTIAL_HOURS = 24
 
         /** Send [uris] to the desktop at [address]; the caller's read grant passes on. */
         fun start(context: Context, address: String, port: Int, uris: List<Uri>) {
@@ -410,7 +490,8 @@ class TransferService : Service() {
         /**
          * Save a file from the desktop at [address] to Downloads: the browsed
          * path [value], or the offer id [value] when [isOffer]. [size] is
-         * what the desktop said it holds.
+         * what the desktop said it holds, and [source] the file's id, so a
+         * retry continues a broken download ("" for none).
          */
         fun receive(
             context: Context,
@@ -420,6 +501,7 @@ class TransferService : Service() {
             value: String,
             name: String,
             size: Long,
+            source: String,
         ) {
             val intent = Intent(context, TransferService::class.java)
                 .putExtra(EXTRA_ADDRESS, address)
@@ -429,6 +511,7 @@ class TransferService : Service() {
                 .putExtra(EXTRA_VALUE, value)
                 .putExtra(EXTRA_NAME, name)
                 .putExtra(EXTRA_SIZE, size)
+                .putExtra(EXTRA_SOURCE, source)
             context.startForegroundService(intent)
         }
     }

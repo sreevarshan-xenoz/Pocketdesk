@@ -72,6 +72,7 @@ Each item gets its own spec section, results written into the checklist, and fix
 - **T2:** Home and Settings say when Android may stop the background features, and open the page that allows them (branch `feat/background-onboarding`).
 - **T3:** the QR scanner no longer uses ML Kit (zxing-cpp), and the APK is arm64-only with no dependency-info block (branch `feat/fdroid-ready`). The rest of the F-Droid plan, and why IzzyOnDroid is unlikely, is in `docs/research/2026-10-14-fdroid.md`.
 - **T5:** `docs/protocol.md` (branch `fix/protocol-audit`). Writing it found eleven fixes, among them the phone's relay lookups going to public DNS resolvers, the wake relay sending wherever a phone named, and TLS 1.2 still accepted on TCP.
+- **T6a:** resumable, hash-checked transfers both ways (branch `feat/resumable-transfers`; spec `2026-10-14-resumable-transfers-design.md`). T6b, folders, is next.
 - **R2:** run on the A71 against Windows (branch `fix/r2-control-link`). The control connection now comes back after a network drop, and a dropped link reconnects by itself. Owed: an hour-long run, sleep and wake, mobile data, and Linux.
 
 **Deferred, with reason:**

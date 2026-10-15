@@ -1,27 +1,121 @@
 use pocketdesk_core::error::{PocketdeskError, Result};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::protocol::partials::{Record, Store};
+use pocketdesk_core::protocol::transfer::{self, Have, Pace, TransferError};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 /// The largest file a phone may send: a bound on disk use, not a policy.
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// How long to wait for the phone to take the data connection.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// A transfer that sends nothing for this long is abandoned.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longest file name kept, in bytes (Linux allows 255).
 const MAX_NAME_BYTES: usize = 200;
 /// Transfers running at once; more are refused, not queued.
 const MAX_TRANSFERS: usize = 4;
-/// The slowest transfer allowed, so a trickle cannot hold a slot forever.
-const MIN_BYTES_PER_SEC: u64 = 32 * 1024;
-/// The receiver's last word on a transfer, one byte after the data: the
-/// file is saved under its real name, or it is not (F7b). Without it, the
-/// sender could only say every byte was taken.
-const STATUS_SAVED: u8 = 1;
-const STATUS_FAILED: u8 = 0;
+/// Unfinished files kept per phone, and in all (T6a). The age limit is the
+/// `transfer_keep_hours` setting.
+const PARTIALS_PER_PHONE: usize = 4;
+const PARTIALS_TOTAL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+
+/// Hours an unfinished file is kept (`transfer_keep_hours`); 0 keeps none.
+static KEEP_HOURS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(24);
+
+/// Set how long unfinished files are kept, from the config at start.
+pub fn configure(keep_hours: u32) {
+    KEEP_HOURS.store(keep_hours, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn partial_limits() -> pocketdesk_core::protocol::partials::Limits {
+    let hours = KEEP_HOURS.load(std::sync::atomic::Ordering::Relaxed);
+    pocketdesk_core::protocol::partials::Limits {
+        max_age_secs: u64::from(hours) * 3600,
+        per_device: PARTIALS_PER_PHONE,
+        total_bytes: PARTIALS_TOTAL_BYTES,
+    }
+}
+
+/// Where unfinished files from phones wait for a retry: in the state
+/// folder (owner-only), never in Downloads, so no half file sits where the
+/// person looks.
+pub(crate) fn partials() -> Option<Store> {
+    crate::state::state_dir()
+        .ok()
+        .map(|dir| Store::new(dir.join("partials")))
+}
+
+/// The partial files a receive is writing now, by file name. The sweep
+/// leaves these alone: a transfer without a record yet (its first commit
+/// not reached, or nothing kept) is still using its file.
+fn active_parts() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static ACTIVE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    ACTIVE.get_or_init(Default::default)
+}
+
+/// Marks a partial file in use for as long as it lives.
+struct InUse(String);
+
+impl InUse {
+    fn new(location: &str) -> Self {
+        active_parts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(location.to_string());
+        InUse(location.to_string())
+    }
+}
+
+impl Drop for InUse {
+    fn drop(&mut self) {
+        active_parts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+fn in_use(location: &str) -> bool {
+    active_parts()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(location)
+}
+
+/// Drop unfinished files past `limits`, with their bytes, and any bytes
+/// whose record is gone; never one a receive is using now.
+pub(crate) fn sweep_partials(store: &Store, limits: pocketdesk_core::protocol::partials::Limits) {
+    let now = pocketdesk_core::local::pin::now_unix();
+    for record in store.sweep(now, limits, |r| in_use(&r.location)) {
+        let _ = std::fs::remove_file(store.dir().join(&record.location));
+    }
+    let kept: std::collections::HashSet<String> =
+        store.all().into_iter().map(|r| r.location).collect();
+    if let Ok(entries) = std::fs::read_dir(store.dir()) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.ends_with(".part") && !kept.contains(&name) && !in_use(&name) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
+/// Sweep the unfinished files now and every hour.
+pub fn spawn_partials_sweep() {
+    tokio::spawn(async {
+        loop {
+            if let Some(store) = partials() {
+                let _ =
+                    tokio::task::spawn_blocking(move || sweep_partials(&store, partial_limits()))
+                        .await;
+            }
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+        }
+    });
+}
 
 /// The phone asks for a file (F7b): `{path | offer, port, key}`. It listens
 /// on `port`, and the desktop dials it, as for a share, so the bytes go to
@@ -100,6 +194,68 @@ pub(crate) fn transfer_slots() -> &'static TransferSlots {
     SLOTS.get_or_init(|| TransferSlots::new(MAX_TRANSFERS, MAX_TRANSFERS_PER_PHONE))
 }
 
+/// The transfer running for each file, by a key naming it (T6a). A phone
+/// whose Wi-Fi dropped retries before this side notices the old connection
+/// is dead (no reset arrives, so it waits out its idle limit); its retry
+/// replaces the old attempt, which would otherwise hold a transfer slot and
+/// work on the same partial file.
+#[derive(Default)]
+pub(crate) struct Running {
+    tasks: tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>,
+}
+
+impl Running {
+    /// End the attempt running under `key`, if any, and wait until it is
+    /// gone (its slot and files released).
+    pub(crate) async fn supersede(&self, key: &str) {
+        let old = self.tasks.lock().await.remove(key);
+        if let Some(old) = old {
+            tracing::info!("A retry replaces the transfer still running for {key}");
+            old.abort();
+            let _ = old.await;
+        }
+    }
+
+    /// Run `work` under `key`; it forgets itself when done.
+    pub(crate) async fn spawn(
+        &'static self,
+        key: String,
+        work: impl std::future::Future<Output = ()> + Send + 'static,
+    ) {
+        let mut tasks = self.tasks.lock().await;
+        let handle = tokio::spawn({
+            let key = key.clone();
+            async move {
+                work.await;
+                let mut tasks = self.tasks.lock().await;
+                if tasks
+                    .get(&key)
+                    .is_some_and(|t| Some(t.id()) == tokio::task::try_id())
+                {
+                    tasks.remove(&key);
+                }
+            }
+        });
+        // Two requests for one file that both passed `supersede` (a
+        // reconnect racing a retry): the newer one wins, and the older is
+        // stopped, not left running unseen.
+        if let Some(older) = tasks.insert(key, handle) {
+            older.abort();
+        }
+    }
+
+    #[cfg(test)]
+    async fn is_running(&self, key: &str) -> bool {
+        self.tasks.lock().await.contains_key(key)
+    }
+}
+
+/// The running transfers, shared by every connection.
+pub(crate) fn running() -> &'static Running {
+    static RUNNING: std::sync::OnceLock<Running> = std::sync::OnceLock::new();
+    RUNNING.get_or_init(Running::default)
+}
+
 #[derive(Debug)]
 pub struct SharePlugin {
     /// Where received files go; `None` when this system has neither a
@@ -167,38 +323,12 @@ impl Plugin for SharePlugin {
 
             // Check if there's port info for a file transfer
             if let Some(transfer_info) = body.get("payloadTransferInfo") {
-                let Some(port) = transfer_info
-                    .get("port")
-                    .and_then(|v| v.as_u64())
-                    .and_then(|p| u16::try_from(p).ok())
-                    .filter(|p| *p != 0)
-                else {
-                    tracing::warn!("File share refused: no usable port");
-                    return Ok(());
-                };
-                // The phone listens and the desktop connects, as in KDE
-                // Connect: to the address the transport saw, never to one the
-                // peer names (a v2 device id is the peer's own choice).
-                let Some(phone_ip) = sender.peer_addr().map(|a| a.ip()) else {
-                    tracing::warn!(
-                        "File share refused: only the TCP control channel can carry one"
-                    );
-                    return Ok(());
-                };
-                if !dialable(phone_ip) {
-                    tracing::warn!("File share refused: will not connect back to {phone_ip}");
-                    return Ok(());
-                }
-                let Some(dir) = self.download_dir.clone() else {
-                    tracing::warn!("File share refused: no downloads or home folder");
-                    return Ok(());
-                };
                 let name =
                     safe_file_name(body.get("filename").and_then(|v| v.as_str()).unwrap_or(""));
-                let size = packet.payload_size.unwrap_or(0);
                 // The phone hands the bytes only to whoever presents the key
                 // it put in this request, so they reach this desktop and no
-                // one else on the network.
+                // one else on the network. Without one there is nothing to
+                // name in a refusal either.
                 let Some(key) = transfer_info
                     .get("key")
                     .and_then(|v| v.as_str())
@@ -208,45 +338,103 @@ impl Plugin for SharePlugin {
                     tracing::warn!("File share of {name} refused: no transfer key");
                     return Ok(());
                 };
+                // Every refusal is answered, so the phone stops waiting for a
+                // connection that will not come, and can say why.
+                let refused = |reason: String| {
+                    let name = name.clone();
+                    let key = key.clone();
+                    async move {
+                        tracing::warn!("File share of {name} refused: {reason}");
+                        refuse(sender, &key, &reason).await;
+                        Ok(())
+                    }
+                };
+                let Some(port) = transfer_info
+                    .get("port")
+                    .and_then(|v| v.as_u64())
+                    .and_then(|p| u16::try_from(p).ok())
+                    .filter(|p| *p != 0)
+                else {
+                    return refused("no usable port".into()).await;
+                };
+                let size = packet.payload_size.unwrap_or(0);
+                if size == 0 || size > MAX_FILE_BYTES {
+                    return refused(format!(
+                        "a declared size of {size} bytes (empty, or too large)"
+                    ))
+                    .await;
+                }
+                // The phone listens and the desktop connects, as in KDE
+                // Connect: to the address the transport saw, never to one the
+                // peer names (a v2 device id is the peer's own choice).
+                let Some(phone_ip) = sender.peer_addr().map(|a| a.ip()) else {
+                    return refused("only the TCP control channel can carry a file".into()).await;
+                };
+                if !dialable(phone_ip) {
+                    return refused(format!("will not connect back to {phone_ip}")).await;
+                }
+                let Some(dir) = self.download_dir.clone() else {
+                    return refused("no downloads or home folder".into()).await;
+                };
                 // The bytes travel inside TLS with the phone that asked
                 // (phase C): the key its control connection proved.
                 let tls = match transfer_tls(sender) {
                     Ok(tls) => tls,
-                    Err(reason) => {
-                        tracing::warn!("File share of {name} refused: {reason}");
-                        return Ok(());
-                    }
+                    Err(reason) => return refused(reason.to_string()).await,
                 };
+                let Some(store) = partials() else {
+                    return refused("no state folder for the transfer".into()).await;
+                };
+                // The phone's id for the file, the same on every attempt: a
+                // retry continues what an earlier attempt left (T6a).
+                let source = body
+                    .get("sourceId")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| pocketdesk_core::protocol::partials::valid_source(s))
+                    .map(str::to_string);
+                let from = sender.device_id().to_string();
+                // A retry of this file replaces an attempt still running for
+                // it, before the slot is taken.
+                let running_key = source
+                    .as_ref()
+                    .map(|s| format!("share:{from}:{s}"))
+                    .unwrap_or_else(|| format!("share:{}", uuid::Uuid::new_v4().simple()));
+                running().supersede(&running_key).await;
                 let slot = match transfer_slots().take(sender.device_id()) {
                     Ok(slot) => slot,
-                    Err(reason) => {
-                        tracing::warn!("File share of {name} refused: {reason}");
-                        return Ok(());
-                    }
+                    Err(reason) => return refused(reason.to_string()).await,
                 };
-
-                let from = sender.device_id().to_string();
-                tokio::spawn(async move {
-                    match receive_file(
-                        SocketAddr::new(phone_ip, port),
-                        tls,
-                        &key,
-                        &dir,
-                        &name,
-                        size,
-                    )
-                    .await
-                    {
-                        Ok(path) => {
-                            // The bytes are in: give the slot back before the
-                            // bookkeeping, for the phone's next file.
-                            drop(slot);
-                            tracing::info!("File received: {} ({size} bytes)", path.display());
-                            on_received(&path, size, &from);
+                running()
+                    .spawn(running_key, async move {
+                        match receive_file(
+                            SocketAddr::new(phone_ip, port),
+                            tls,
+                            &key,
+                            Incoming {
+                                dir: &dir,
+                                name: &name,
+                                size,
+                                device: &from,
+                                source: source.as_deref(),
+                                store: &store,
+                                limits: partial_limits(),
+                                on_saved: {
+                                    let from = from.clone();
+                                    Box::new(move |path: &Path| on_received(path, size, &from))
+                                },
+                            },
+                        )
+                        .await
+                        {
+                            Ok(_) => {
+                                // Placed and recorded (receive_file does it,
+                                // so a superseded attempt still finishes).
+                                drop(slot);
+                            }
+                            Err(e) => tracing::warn!("File transfer of {name} failed: {e}"),
                         }
-                        Err(e) => tracing::warn!("File transfer of {name} failed: {e}"),
-                    }
-                });
+                    })
+                    .await;
             } else if let Some(url) = body.get("url").and_then(|v| v.as_str()) {
                 // URL share - just log it (could be enhanced to auto-download)
                 tracing::info!("URL shared: {}", url);
@@ -278,22 +466,36 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         tracing::warn!("Download refused: no transfer key");
         return;
     };
+    // A retry of this download replaces an attempt still running for it,
+    // before plan_fetch takes a slot (T6a).
+    let body = &packet.body;
+    let running_key = match (
+        body.get("offer").and_then(|v| v.as_str()),
+        body.get("path").and_then(|v| v.as_str()),
+    ) {
+        (Some(offer), _) => format!("offer:{offer}"),
+        (None, Some(path)) => format!("path:{}:{path}", sender.device_id()),
+        (None, None) => format!("fetch:{}", uuid::Uuid::new_v4().simple()),
+    };
+    running().supersede(&running_key).await;
     match plan_fetch(&packet.body, sender) {
         Ok(fetch) => {
             tracing::info!("Sending {} to {}", fetch.path.display(), fetch.to);
-            tokio::spawn(async move {
-                let _slot = fetch.slot;
-                let sent = send_file_to(fetch.to, fetch.tls, &key, &fetch.path).await;
-                match &sent {
-                    Ok(size) => {
-                        tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
+            running()
+                .spawn(running_key, async move {
+                    let _slot = fetch.slot;
+                    let sent = send_file_to(fetch.to, fetch.tls, &key, &fetch.path).await;
+                    match &sent {
+                        Ok(size) => {
+                            tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
+                        }
+                        Err(e) => tracing::warn!("Sending {} failed: {e}", fetch.path.display()),
                     }
-                    Err(e) => tracing::warn!("Sending {} failed: {e}", fetch.path.display()),
-                }
-                if let Some(id) = fetch.offer {
-                    crate::offers::finish(&id, sent.map(|_| ()).map_err(|e| e.to_string()));
-                }
-            });
+                    if let Some(id) = fetch.offer {
+                        crate::offers::finish(&id, sent.map(|_| ()).map_err(|e| e.to_string()));
+                    }
+                })
+                .await;
         }
         Err(reason) => {
             tracing::warn!("Download refused: {reason}");
@@ -330,8 +532,8 @@ fn plan_fetch(
     if !dialable(ip) {
         return Err(format!("will not connect back to {ip}"));
     }
-    // Taken before an offer is redeemed, so a busy desktop does not use up
-    // the phone's one try.
+    // Taken before an offer is redeemed, so a busy desktop does not spend
+    // one of the phone's tries.
     let slot = transfer_slots().take(sender.device_id())?;
     let (path, size, offer) = if let Some(path) = body.get("path").and_then(|v| v.as_str()) {
         let (path, size) = crate::plugins::file_browse::resolve_file(path)?;
@@ -344,7 +546,7 @@ fn plan_fetch(
             .map(|m| m.len())
         else {
             let reason = "the file is no longer there";
-            crate::offers::finish(id, Err(reason.to_string()));
+            crate::offers::fail(id, reason.to_string());
             return Err(reason.to_string());
         };
         (path, size, Some(id.to_string()))
@@ -354,7 +556,7 @@ fn plan_fetch(
     if size > MAX_FILE_BYTES {
         let reason = "the file is larger than 8 GB";
         if let Some(id) = &offer {
-            crate::offers::finish(id, Err(reason.to_string()));
+            crate::offers::fail(id, reason.to_string());
         }
         return Err(reason.to_string());
     }
@@ -364,7 +566,7 @@ fn plan_fetch(
         Ok(tls) => tls,
         Err(reason) => {
             if let Some(id) = &offer {
-                crate::offers::finish(id, Err(reason.clone()));
+                crate::offers::fail(id, reason.clone());
             }
             return Err(reason);
         }
@@ -475,9 +677,11 @@ pub(crate) async fn send_file_to(
     send_reader(to, tls, key, &mut file, size).await
 }
 
-/// Dial `to`, present `key`, write `size` (u64, big-endian) and exactly
-/// that many bytes from `reader`, then wait for the phone's status byte.
-/// A reader that ends early (the file shrank) fails the send.
+/// Dial `to`, present `key`, and send `size` bytes of `reader` with the
+/// resumable transfer (T6a): from where the phone's partial copy ends, if it
+/// has one of this file, then the whole file's hash; the result is the
+/// phone's status byte. A reader that ends early (the file shrank) fails the
+/// send.
 pub(crate) async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
     to: SocketAddr,
     tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
@@ -485,52 +689,23 @@ pub(crate) async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut R,
     size: u64,
 ) -> Result<u64> {
-    let send = async {
-        let mut stream = dial_transfer(to, tls).await?;
-        stream
-            .write_all(format!("{key}\n").as_bytes())
-            .await
-            .map_err(|e| io_error("write", e))?;
-        stream
-            .write_u64(size)
-            .await
-            .map_err(|e| io_error("write", e))?;
-        let mut buffer = vec![0u8; 64 * 1024];
-        let mut sent: u64 = 0;
-        while sent < size {
-            let want = buffer
-                .len()
-                .min(usize::try_from(size - sent).unwrap_or(usize::MAX));
-            let n = reader
-                .read(&mut buffer[..want])
-                .await
-                .map_err(|e| io_error("read", e))?;
-            if n == 0 {
-                return Err(io_error(
-                    "read",
-                    format!("the file changed while it was sent ({sent} of {size} bytes)"),
-                ));
-            }
-            tokio::time::timeout(IDLE_TIMEOUT, stream.write_all(&buffer[..n]))
-                .await
-                .map_err(|_| io_error("write", "stalled"))?
-                .map_err(|e| io_error("write", e))?;
-            sent += n as u64;
-        }
-        stream.flush().await.map_err(|e| io_error("write", e))?;
-        let mut status = [0u8; 1];
-        tokio::time::timeout(IDLE_TIMEOUT, stream.read_exact(&mut status))
-            .await
-            .map_err(|_| io_error("read", "the phone did not confirm the file"))?
-            .map_err(|_| io_error("read", "the phone did not confirm the file"))?;
-        if status[0] != STATUS_SAVED {
-            return Err(io_error("send", "the phone could not save the file"));
-        }
-        Ok(size)
-    };
-    tokio::time::timeout(transfer_deadline(size), send)
+    let mut stream = dial_transfer(to, tls).await?;
+    present_key(&mut stream, key).await?;
+    let from = transfer::send(reader, size, &mut stream, Pace::DEFAULT, |_| {})
         .await
-        .map_err(|_| io_error("write", "too slow"))?
+        .map_err(|e| io_error("send", e))?;
+    if from > 0 {
+        tracing::info!("The phone had {from} of {size} bytes; sent the rest");
+    }
+    Ok(size)
+}
+
+async fn present_key<S: tokio::io::AsyncWrite + Unpin>(stream: &mut S, key: &str) -> Result<()> {
+    stream
+        .write_all(format!("{key}\n").as_bytes())
+        .await
+        .map_err(|e| io_error("write", e))?;
+    stream.flush().await.map_err(|e| io_error("write", e))
 }
 
 /// Tell the owner a file arrived: a desktop notification, and a row in the
@@ -725,30 +900,6 @@ async fn create_unique(dir: &Path, name: &str) -> Result<(PathBuf, tokio::fs::Fi
     })
 }
 
-/// A transfer in progress: its reserved final name and the `.part` file the
-/// bytes go to. Unless committed, both go when this is dropped, also when
-/// the task is cancelled, so no half file is ever left under a real name.
-struct Incoming {
-    final_path: PathBuf,
-    part_path: PathBuf,
-    committed: bool,
-}
-
-impl Drop for Incoming {
-    fn drop(&mut self) {
-        if !self.committed {
-            let _ = std::fs::remove_file(&self.part_path);
-            let _ = std::fs::remove_file(&self.final_path);
-        }
-    }
-}
-
-/// The whole transfer must finish within this, so a peer cannot hold a
-/// slot open by sending a byte now and then.
-fn transfer_deadline(size: u64) -> Duration {
-    Duration::from_secs(30 + size / MIN_BYTES_PER_SEC)
-}
-
 /// Mark a received file as coming from another computer, so Windows warns
 /// before running it, as it does for a browser download.
 #[cfg(windows)]
@@ -763,45 +914,196 @@ fn mark_of_the_web(path: &Path) {
 #[cfg(not(windows))]
 fn mark_of_the_web(_path: &Path) {}
 
-/// Connect to the phone at `from`, read exactly `size` bytes into a new file
-/// in `dir`, and return its path. A transfer that ends short, stalls, runs
-/// too slow, or declares no size or too large a size leaves no file behind.
+/// A file a phone is sending: where it goes, and what names its partial
+/// copy between attempts.
+struct Incoming<'a> {
+    /// The folder the finished file goes to (Downloads).
+    dir: &'a Path,
+    name: &'a str,
+    /// The size the request announced.
+    size: u64,
+    /// The phone sending it.
+    device: &'a str,
+    /// The phone's id for the file; without one the transfer cannot resume.
+    source: Option<&'a str>,
+    store: &'a Store,
+    /// How much unfinished work is kept; an age of 0 keeps none.
+    limits: pocketdesk_core::protocol::partials::Limits,
+    /// Told where the file went once it is in place (the notification and
+    /// the received list), before the phone hears "saved".
+    on_saved: Box<dyn FnOnce(&Path) + Send>,
+}
+
+/// Connect to the phone at `from` and receive one file with the resumable
+/// transfer (T6a), continuing a partial copy an earlier attempt left. The
+/// file goes into `dir` under a name no file has yet, and the phone hears
+/// "saved" only once it is there. A connection that breaks keeps what
+/// arrived for the next attempt (when the file has a source id and
+/// unfinished files are kept); anything else leaves nothing behind.
 async fn receive_file(
     from: SocketAddr,
     tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
     key: &str,
-    dir: &Path,
-    name: &str,
-    size: u64,
+    incoming: Incoming<'_>,
 ) -> Result<PathBuf> {
+    let Incoming {
+        dir,
+        name,
+        size,
+        device,
+        source,
+        store,
+        limits,
+        on_saved,
+    } = incoming;
     if size == 0 || size > MAX_FILE_BYTES {
-        return Err(PocketdeskError::Io {
-            operation: "receive",
-            detail: format!("refused a file of declared size {size}"),
-        });
+        return Err(io_error(
+            "receive",
+            format!("refused a file of declared size {size}"),
+        ));
     }
-    let mut stream = dial_transfer(from, tls).await?;
-    stream
-        .write_all(format!("{key}\n").as_bytes())
+    let resumable = limits.max_age_secs > 0 && source.is_some();
+    // Without a source id the partial is this attempt's alone.
+    let source = source
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+    std::fs::create_dir_all(store.dir()).map_err(|e| io_error("create_dir", e))?;
+    let location = format!("{}.part", Store::id(device, &source));
+    // In use before the sweep, so the sweep keeps this transfer's own part.
+    let in_use_guard = InUse::new(&location);
+    sweep_partials(store, limits);
+    let part_path = store.dir().join(&location);
+    let record = store
+        .get(device, &source)
+        .filter(|_| resumable && part_path.exists());
+    let have = record.as_ref().map(|r| Have {
+        size: r.size,
+        committed: r.committed,
+    });
+    let created_unix = record
+        .as_ref()
+        .map_or_else(pocketdesk_core::local::pin::now_unix, |r| r.created_unix);
+    let mut file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&part_path)
         .await
-        .map_err(|e| io_error("write", e))?;
-    stream.flush().await.map_err(|e| io_error("write", e))?;
-    let saved = save_stream(&mut stream, from, dir, name, size).await;
-    // Best effort: a phone that is already gone has nothing to hear.
-    let status = if saved.is_ok() {
-        STATUS_SAVED
-    } else {
-        STATUS_FAILED
+        .map_err(|e| io_error("create_file", e))?;
+    let forget = || {
+        store.remove(device, &source);
+        let _ = std::fs::remove_file(&part_path);
     };
-    // Flushed: inside TLS the byte otherwise waits in the session's buffer.
-    let _ = tokio::time::timeout(CONNECT_TIMEOUT, send_status(&mut stream, status)).await;
-    saved
+
+    let mut stream = match dial_transfer(from, tls).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            drop(file);
+            if !resumable {
+                forget();
+            }
+            return Err(e);
+        }
+    };
+    present_key(&mut stream, key).await?;
+    tracing::info!("Receiving {name} from {from} ({size} bytes)");
+    let outcome = transfer::receive(
+        &mut stream,
+        &mut file,
+        have,
+        Some(size),
+        MAX_FILE_BYTES,
+        Pace::DEFAULT,
+        |size, committed| {
+            if resumable {
+                let record = Record {
+                    device: device.to_string(),
+                    source: source.clone(),
+                    name: name.to_string(),
+                    size,
+                    committed,
+                    created_unix,
+                    location: location.clone(),
+                };
+                if let Err(e) = store.put(&record) {
+                    tracing::warn!("Could not record the unfinished file: {e}");
+                }
+            }
+        },
+    )
+    .await;
+    drop(file);
+    match outcome {
+        Ok(offset) => {
+            if offset > 0 {
+                tracing::info!("Continued {name} from {offset} of {size} bytes");
+            }
+            // Its own task: a retry that supersedes this attempt (the phone
+            // gave up waiting while a large copy ran) must not stop the move
+            // half way, nor leave the record of a file already in Downloads.
+            let completion = tokio::spawn({
+                let part_path = part_path.clone();
+                let dir = dir.to_path_buf();
+                let name = name.to_string();
+                let records = Store::new(store.dir().to_path_buf());
+                let device = device.to_string();
+                let source = source.clone();
+                async move {
+                    let _in_use = in_use_guard;
+                    let placed = place(&part_path, &dir, &name).await;
+                    records.remove(&device, &source);
+                    let _ = std::fs::remove_file(&part_path);
+                    if let Ok(path) = &placed {
+                        tracing::info!("File received: {} ({size} bytes)", path.display());
+                        on_saved(path);
+                    }
+                    transfer::finish(&mut stream, placed.is_ok(), Pace::DEFAULT).await;
+                    placed
+                }
+            });
+            completion.await.map_err(|e| io_error("place", e))?
+        }
+        Err(e) => {
+            // Only a broken connection is worth continuing; a changed or
+            // damaged file, or a refused size, starts over next time.
+            if !(resumable && matches!(e, TransferError::Io(_))) {
+                forget();
+            }
+            Err(io_error("receive", e))
+        }
+    }
 }
 
-/// Connect to the phone at `from`, read exactly `size` bytes (at most `max`)
-/// into memory and hand them to `keep`. The phone hears "saved" only when
+/// Move the finished `part` into `dir` under a name like `name` that no
+/// file has yet, and return where it went. A rename when the state folder
+/// and `dir` share a volume, else a copy.
+async fn place(part: &Path, dir: &Path, name: &str) -> Result<PathBuf> {
+    tokio::fs::create_dir_all(dir)
+        .await
+        .map_err(|e| io_error("create_dir", e))?;
+    let (final_path, placeholder) = create_unique(dir, name).await?;
+    drop(placeholder);
+    let moved = match tokio::fs::rename(part, &final_path).await {
+        Ok(()) => Ok(()),
+        Err(_) => tokio::fs::copy(part, &final_path)
+            .await
+            .map(|_| ())
+            .map_err(|e| io_error("copy", e)),
+    };
+    if let Err(e) = moved {
+        let _ = tokio::fs::remove_file(&final_path).await;
+        return Err(e);
+    }
+    mark_of_the_web(&final_path);
+    Ok(final_path)
+}
+
+/// Connect to the phone at `from`, receive `size` bytes (at most `max`)
+/// into memory, and hand them to `keep`. The phone hears "saved" only when
 /// `keep` succeeds, so its status byte means the bytes were used, not only
-/// received (the clipboard image, roadmap N4).
+/// received (the clipboard image, roadmap N4). Small and replaced by the
+/// next copy, so it never resumes; the whole-file hash is still checked.
 pub(crate) async fn receive_bytes<F, Fut>(
     from: SocketAddr,
     tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
@@ -821,132 +1123,24 @@ where
         ));
     }
     let mut stream = dial_transfer(from, tls).await?;
-    stream
-        .write_all(format!("{key}\n").as_bytes())
-        .await
-        .map_err(|e| io_error("write", e))?;
-    stream.flush().await.map_err(|e| io_error("write", e))?;
-    let read = async {
-        let mut bytes = vec![0u8; usize::try_from(size).map_err(|e| io_error("read", e))?];
-        let mut received = 0;
-        while received < bytes.len() {
-            let n = tokio::time::timeout(IDLE_TIMEOUT, stream.read(&mut bytes[received..]))
-                .await
-                .map_err(|_| io_error("read", "stalled"))?
-                .map_err(|e| io_error("read", e))?;
-            if n == 0 {
-                return Err(io_error(
-                    "read",
-                    format!("ended after {received} of {size} bytes"),
-                ));
-            }
-            received += n;
-        }
-        Ok(bytes)
+    present_key(&mut stream, key).await?;
+    let mut memory = transfer::Memory::holding(&[]);
+    let received = transfer::receive(
+        &mut stream,
+        &mut memory,
+        None,
+        Some(size),
+        max,
+        Pace::DEFAULT,
+        |_, _| {},
+    )
+    .await;
+    let kept = match received {
+        Ok(_) => keep(memory.into_bytes()).await,
+        Err(e) => return Err(io_error("receive", e)),
     };
-    let kept = match tokio::time::timeout(transfer_deadline(size), read).await {
-        Ok(Ok(bytes)) => keep(bytes).await,
-        Ok(Err(e)) => Err(e),
-        Err(_) => Err(io_error("read", "too slow")),
-    };
-    let status = if kept.is_ok() {
-        STATUS_SAVED
-    } else {
-        STATUS_FAILED
-    };
-    let _ = tokio::time::timeout(CONNECT_TIMEOUT, send_status(&mut stream, status)).await;
+    transfer::finish(&mut stream, kept.is_ok(), Pace::DEFAULT).await;
     kept
-}
-
-/// Send the transfer's status byte and close cleanly: TLS close_notify,
-/// then what the phone still has in flight (TLS 1.3 sends session tickets
-/// after the handshake) is read and dropped. A socket closed with unread
-/// data is reset, and the reset can reach the phone before the status byte
-/// does, so a saved file would read as failed.
-async fn send_status<S>(stream: &mut S, status: u8) -> std::io::Result<()>
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-{
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    stream.write_all(&[status]).await?;
-    stream.flush().await?;
-    stream.shutdown().await?;
-    // Only after a save: a failed transfer can stop with the sender's bytes
-    // still coming, and reading them would hold the slot until the deadline.
-    // A lost "failed" byte reads as failed anyway.
-    if status == STATUS_SAVED {
-        let mut sink = [0u8; 512];
-        while stream.read(&mut sink).await? > 0 {}
-    }
-    Ok(())
-}
-
-/// Read exactly `size` bytes from `stream` into a new file in `dir` named
-/// like `name`, and return its path; on any failure no file is left.
-async fn save_stream<S: tokio::io::AsyncRead + Unpin>(
-    stream: &mut S,
-    from: SocketAddr,
-    dir: &Path,
-    name: &str,
-    size: u64,
-) -> Result<PathBuf> {
-    tokio::fs::create_dir_all(dir)
-        .await
-        .map_err(|e| io_error("create_dir", e))?;
-    let (final_path, placeholder) = create_unique(dir, name).await?;
-    drop(placeholder);
-    let mut part_path = final_path.as_os_str().to_owned();
-    part_path.push(".part");
-    let mut incoming = Incoming {
-        final_path,
-        part_path: PathBuf::from(part_path),
-        committed: false,
-    };
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&incoming.part_path)
-        .await
-        .map_err(|e| io_error("create_file", e))?;
-    tracing::info!(
-        "Receiving {} from {from} ({size} bytes)",
-        incoming.final_path.display()
-    );
-
-    let copy = async {
-        let mut buffer = vec![0u8; 64 * 1024];
-        let mut received: u64 = 0;
-        while received < size {
-            let want = buffer
-                .len()
-                .min(usize::try_from(size - received).unwrap_or(usize::MAX));
-            let n = tokio::time::timeout(IDLE_TIMEOUT, stream.read(&mut buffer[..want]))
-                .await
-                .map_err(|_| io_error("read", "stalled"))?
-                .map_err(|e| io_error("read", e))?;
-            if n == 0 {
-                return Err(io_error(
-                    "read",
-                    format!("ended after {received} of {size} bytes"),
-                ));
-            }
-            file.write_all(&buffer[..n])
-                .await
-                .map_err(|e| io_error("write", e))?;
-            received += n as u64;
-        }
-        file.flush().await.map_err(|e| io_error("write", e))
-    };
-    tokio::time::timeout(transfer_deadline(size), copy)
-        .await
-        .map_err(|_| io_error("read", "too slow"))??;
-    drop(file);
-    tokio::fs::rename(&incoming.part_path, &incoming.final_path)
-        .await
-        .map_err(|e| io_error("rename", e))?;
-    incoming.committed = true;
-    mark_of_the_web(&incoming.final_path);
-    Ok(incoming.final_path.clone())
 }
 
 pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) -> PocketdeskError {
@@ -959,7 +1153,59 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
+
+    #[test]
+    fn the_sweep_leaves_a_part_a_receive_is_writing() {
+        let store = Store::new(temp_dir("sweep-in-use"));
+        let part = store.dir().join("busy.part");
+        std::fs::write(&part, b"half").unwrap();
+        let nothing_kept = pocketdesk_core::protocol::partials::Limits {
+            max_age_secs: 0,
+            per_device: 0,
+            total_bytes: 0,
+        };
+        let writing = InUse::new("busy.part");
+        sweep_partials(&store, nothing_kept);
+        assert!(part.exists(), "another transfer's sweep must not take it");
+        drop(writing);
+        sweep_partials(&store, nothing_kept);
+        assert!(!part.exists(), "once unused, an orphan part goes");
+    }
+
+    #[tokio::test]
+    async fn a_retry_replaces_the_attempt_still_running_for_its_file() {
+        static RUNNING: std::sync::OnceLock<Running> = std::sync::OnceLock::new();
+        let running = RUNNING.get_or_init(Running::default);
+        let slots = std::sync::Arc::new(TransferSlots::new(2, 1));
+        // A stale attempt: holds the phone's one slot and never ends.
+        let slot = slots.take("phone").unwrap();
+        running
+            .spawn("file-a".into(), async move {
+                let _slot = slot;
+                std::future::pending::<()>().await;
+            })
+            .await;
+        assert!(
+            slots.take("phone").is_err(),
+            "the stale attempt holds the slot"
+        );
+        running.supersede("file-a").await;
+        assert!(!running.is_running("file-a").await);
+        let slot = slots.take("phone").expect("the slot came back");
+        // A finished attempt forgets itself.
+        running
+            .spawn("file-b".into(), async move { drop(slot) })
+            .await;
+        for _ in 0..50 {
+            if !running.is_running("file-b").await {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(!running.is_running("file-b").await);
+    }
 
     #[test]
     fn a_phones_next_file_is_not_refused_while_its_last_one_finishes() {
@@ -1103,24 +1349,67 @@ mod tests {
         .await
     }
 
-    /// A phone-side listener that sends `data` to whoever presents [`KEY`],
-    /// then reads the desktop's status byte (`None`: it sent none).
-    async fn phone_sending(data: Vec<u8>) -> (SocketAddr, tokio::task::JoinHandle<Option<u8>>) {
+    /// A phone-side listener that sends the first `holding` bytes of a
+    /// `size`-byte file to whoever presents [`KEY`], with the resumable
+    /// transfer, then closes. Yields the send's outcome: the offset the
+    /// desktop continued from, or why it did not end saved.
+    async fn phone_sending_part(
+        data: Vec<u8>,
+        size: u64,
+    ) -> (
+        SocketAddr,
+        tokio::task::JoinHandle<std::result::Result<u64, TransferError>>,
+    ) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let status = tokio::spawn(async move {
+        let outcome = tokio::spawn(async move {
             let mut socket = accept_as(&certs().1, &listener).await.unwrap();
             let mut presented = [0u8; 33];
             socket.read_exact(&mut presented).await.unwrap();
             assert_eq!(&presented, format!("{KEY}\n").as_bytes());
-            socket.write_all(&data).await.unwrap();
-            // TLS's close_notify, then the socket's write side; the status
-            // still comes back.
-            socket.shutdown().await.unwrap();
-            let mut status = [0u8; 1];
-            socket.read_exact(&mut status).await.ok().map(|_| status[0])
+            let mut reader: &[u8] = &data;
+            transfer::send(&mut reader, size, &mut socket, Pace::DEFAULT, |_| {}).await
         });
-        (addr, status)
+        (addr, outcome)
+    }
+
+    /// [`phone_sending_part`] with the whole file.
+    async fn phone_sending(
+        data: Vec<u8>,
+    ) -> (
+        SocketAddr,
+        tokio::task::JoinHandle<std::result::Result<u64, TransferError>>,
+    ) {
+        let size = data.len() as u64;
+        phone_sending_part(data, size).await
+    }
+
+    const SOURCE: &str = "00112233445566778899aabbccddeeff";
+
+    const LIMITS: pocketdesk_core::protocol::partials::Limits =
+        pocketdesk_core::protocol::partials::Limits {
+            max_age_secs: 3600,
+            per_device: 4,
+            total_bytes: 1 << 40,
+        };
+
+    fn incoming<'a>(
+        dir: &'a Path,
+        name: &'a str,
+        size: u64,
+        source: Option<&'a str>,
+        store: &'a Store,
+    ) -> Incoming<'a> {
+        Incoming {
+            dir,
+            name,
+            size,
+            device: "phone",
+            source,
+            store,
+            limits: LIMITS,
+            on_saved: Box::new(|_| {}),
+        }
     }
 
     #[test]
@@ -1164,7 +1453,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(status.await.unwrap(), Some(STATUS_SAVED));
+        assert!(status.await.unwrap().is_ok(), "told it was saved");
         assert_eq!(*got.lock().unwrap(), data);
 
         let (from, status) = phone_sending(vec![1, 2, 3]).await;
@@ -1173,9 +1462,8 @@ mod tests {
         })
         .await;
         assert!(refused.is_err());
-        assert_eq!(
-            status.await.unwrap(),
-            Some(STATUS_FAILED),
+        assert!(
+            matches!(status.await.unwrap(), Err(TransferError::NotSaved)),
             "received but not used is not saved"
         );
     }
@@ -1199,67 +1487,157 @@ mod tests {
     #[tokio::test]
     async fn the_desktop_dials_the_phone_and_saves_exactly_the_declared_bytes() {
         let dir = temp_dir("receive");
+        let store = Store::new(temp_dir("receive-partials"));
         let data: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
         let (from, status) = phone_sending(data.clone()).await;
-        let path = receive_file(from, desktop_tls(), KEY, &dir, "big.bin", data.len() as u64)
-            .await
-            .unwrap();
+        let size = data.len() as u64;
+        let path = receive_file(
+            from,
+            desktop_tls(),
+            KEY,
+            incoming(&dir, "big.bin", size, Some(SOURCE), &store),
+        )
+        .await
+        .unwrap();
         assert_eq!(path, dir.join("big.bin"));
-        assert_eq!(
-            status.await.unwrap(),
-            Some(STATUS_SAVED),
-            "told it was saved"
-        );
+        assert_eq!(status.await.unwrap().unwrap(), 0, "told it was saved");
         assert_eq!(std::fs::read(path).unwrap(), data);
         let names: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert_eq!(names, ["big.bin"], "no .part left behind");
+        assert_eq!(names, ["big.bin"], "nothing else in Downloads");
+        assert_eq!(
+            std::fs::read_dir(store.dir()).unwrap().count(),
+            0,
+            "no partial kept"
+        );
     }
 
     #[tokio::test]
-    async fn a_short_transfer_leaves_no_file() {
-        let dir = temp_dir("short");
-        let (from, status) = phone_sending(vec![1; 10]).await;
+    async fn a_broken_share_is_continued_by_the_phones_retry() {
+        let dir = temp_dir("resume");
+        let store = Store::new(temp_dir("resume-partials"));
+        let data: Vec<u8> = (0..300_000u32).map(|i| (i * 13) as u8).collect();
+        let size = data.len() as u64;
+
+        // The first attempt stops at 120 000 bytes.
+        let (from, first) = phone_sending_part(data[..120_000].to_vec(), size).await;
+        let broken = receive_file(
+            from,
+            desktop_tls(),
+            KEY,
+            incoming(&dir, "video.mp4", size, Some(SOURCE), &store),
+        )
+        .await;
+        assert!(broken.is_err());
+        assert!(first.await.unwrap().is_err());
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "no half file in Downloads"
+        );
+        assert_eq!(store.get("phone", SOURCE).unwrap().committed, 120_000);
+
+        // The retry sends only the rest.
+        let (from, second) = phone_sending(data.clone()).await;
+        let path = receive_file(
+            from,
+            desktop_tls(),
+            KEY,
+            incoming(&dir, "video.mp4", size, Some(SOURCE), &store),
+        )
+        .await
+        .unwrap();
+        assert_eq!(second.await.unwrap().unwrap(), 120_000, "continued");
+        assert_eq!(std::fs::read(path).unwrap(), data);
+        assert!(store.get("phone", SOURCE).is_none(), "the record is gone");
+    }
+
+    #[tokio::test]
+    async fn a_partial_is_continued_only_for_its_own_phone_and_only_while_kept() {
+        let dir = temp_dir("resume-other");
+        let store = Store::new(temp_dir("resume-other-partials"));
+        let data: Vec<u8> = (0..200_000u32).map(|i| (i * 3) as u8).collect();
+        let size = data.len() as u64;
+        let (from, _) = phone_sending_part(data[..90_000].to_vec(), size).await;
+        let _ = receive_file(
+            from,
+            desktop_tls(),
+            KEY,
+            incoming(&dir, "a.bin", size, Some(SOURCE), &store),
+        )
+        .await;
+        // Another phone sending a file with the same source id starts over.
+        let (from, other) = phone_sending(data.clone()).await;
+        let mut theirs = incoming(&dir, "a.bin", size, Some(SOURCE), &store);
+        theirs.device = "another-phone";
+        receive_file(from, desktop_tls(), KEY, theirs)
+            .await
+            .unwrap();
+        assert_eq!(other.await.unwrap().unwrap(), 0);
         assert!(
-            receive_file(from, desktop_tls(), KEY, &dir, "x.bin", 20)
+            store.get("phone", SOURCE).is_some(),
+            "the first phone's stays"
+        );
+
+        // With nothing kept, a broken share leaves nothing.
+        let none = Store::new(temp_dir("resume-none-partials"));
+        let (from, _) = phone_sending_part(data[..90_000].to_vec(), size).await;
+        let mut not_kept = incoming(&dir, "b.bin", size, Some(SOURCE), &none);
+        not_kept.limits.max_age_secs = 0;
+        assert!(
+            receive_file(from, desktop_tls(), KEY, not_kept)
                 .await
                 .is_err()
         );
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
-        assert_eq!(status.await.unwrap(), Some(STATUS_FAILED), "told it failed");
+        assert_eq!(std::fs::read_dir(none.dir()).unwrap().count(), 0);
     }
 
-    #[test]
-    fn a_slow_trickle_has_a_deadline() {
-        assert_eq!(transfer_deadline(1), Duration::from_secs(30));
-        assert_eq!(
-            transfer_deadline(MIN_BYTES_PER_SEC * 100),
-            Duration::from_secs(130)
+    #[tokio::test]
+    async fn a_short_transfer_without_a_source_id_leaves_no_file() {
+        let dir = temp_dir("short");
+        let store = Store::new(temp_dir("short-partials"));
+        let (from, status) = phone_sending_part(vec![1; 10], 20).await;
+        assert!(
+            receive_file(
+                from,
+                desktop_tls(),
+                KEY,
+                incoming(&dir, "x.bin", 20, None, &store)
+            )
+            .await
+            .is_err()
         );
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        assert_eq!(std::fs::read_dir(store.dir()).unwrap().count(), 0);
+        assert!(status.await.unwrap().is_err(), "not saved");
     }
 
     #[tokio::test]
     async fn an_undeclared_or_huge_size_is_refused_before_connecting() {
         let dir = temp_dir("size");
+        let store = Store::new(temp_dir("size-partials"));
         let unused: SocketAddr = "127.0.0.1:9".parse().unwrap();
-        assert!(
-            receive_file(unused, desktop_tls(), KEY, &dir, "x", 0)
+        for size in [0, MAX_FILE_BYTES + 1] {
+            assert!(
+                receive_file(
+                    unused,
+                    desktop_tls(),
+                    KEY,
+                    incoming(&dir, "x", size, Some(SOURCE), &store)
+                )
                 .await
                 .is_err()
-        );
-        assert!(
-            receive_file(unused, desktop_tls(), KEY, &dir, "x", MAX_FILE_BYTES + 1)
-                .await
-                .is_err()
-        );
+            );
+        }
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
     }
 
-    /// A phone-side listener for a download: checks the key, reads the
-    /// size and the bytes, and answers `status`. Yields what it received.
-    async fn phone_fetching(status: u8) -> (SocketAddr, tokio::task::JoinHandle<Vec<u8>>) {
+    /// A phone-side listener for a download: checks the key, receives the
+    /// file with the resumable transfer, and answers saved or not. Yields
+    /// what it received.
+    async fn phone_fetching(saved: bool) -> (SocketAddr, tokio::task::JoinHandle<Vec<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let got = tokio::spawn(async move {
@@ -1267,12 +1645,19 @@ mod tests {
             let mut presented = [0u8; 33];
             socket.read_exact(&mut presented).await.unwrap();
             assert_eq!(&presented, format!("{KEY}\n").as_bytes());
-            let size = socket.read_u64().await.unwrap();
-            let mut data = vec![0u8; size as usize];
-            socket.read_exact(&mut data).await.unwrap();
-            socket.write_all(&[status]).await.unwrap();
-            socket.flush().await.unwrap();
-            data
+            let mut memory = transfer::Memory::holding(&[]);
+            let received = transfer::receive(
+                &mut socket,
+                &mut memory,
+                None,
+                None,
+                MAX_FILE_BYTES,
+                Pace::DEFAULT,
+                |_, _| {},
+            )
+            .await;
+            transfer::finish(&mut socket, saved && received.is_ok(), Pace::DEFAULT).await;
+            memory.into_bytes()
         });
         (addr, got)
     }
@@ -1283,7 +1668,7 @@ mod tests {
         let data: Vec<u8> = (0..150_000u32).map(|i| (i * 7) as u8).collect();
         let path = dir.join("a.bin");
         std::fs::write(&path, &data).unwrap();
-        let (to, got) = phone_fetching(STATUS_SAVED).await;
+        let (to, got) = phone_fetching(true).await;
         assert_eq!(
             send_file_to(to, desktop_tls(), KEY, &path).await.unwrap(),
             data.len() as u64
@@ -1296,22 +1681,17 @@ mod tests {
         let dir = temp_dir("fetch-fail");
         let path = dir.join("a.bin");
         std::fs::write(&path, b"abc").unwrap();
-        let (to, _) = phone_fetching(STATUS_FAILED).await;
+        let (to, _) = phone_fetching(false).await;
         assert!(send_file_to(to, desktop_tls(), KEY, &path).await.is_err());
     }
 
     #[tokio::test]
     async fn a_file_that_shrinks_fails_the_send() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let to = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let mut socket = accept_as(&certs().1, &listener).await.unwrap();
-            let mut sink = Vec::new();
-            let _ = socket.read_to_end(&mut sink).await;
-        });
+        let (to, got) = phone_fetching(true).await;
         // Listed at 10 bytes, holding 4 by the time it is read.
         let sent = send_reader(to, desktop_tls(), KEY, &mut &b"abcd"[..], 10).await;
         assert!(sent.is_err(), "{sent:?}");
+        assert!(got.await.unwrap().len() <= 4, "nothing past what there was");
     }
 
     #[tokio::test]
@@ -1394,6 +1774,39 @@ mod tests {
         } else {
             "/etc/hosts"
         }
+    }
+
+    fn share(size: u64) -> NetworkPacket {
+        NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "a.bin",
+                "payloadTransferInfo": { "port": 40000, "key": KEY },
+            }))
+            .with_payload_size(size)
+    }
+
+    /// A refused share is answered, so the phone stops waiting for a
+    /// connection that will never come and can say why.
+    #[tokio::test]
+    async fn a_refused_share_is_answered_with_its_key() {
+        let plugin = SharePlugin::new();
+        let loopback = Phone::at("127.0.0.1:51000");
+        plugin.handle_packet(&share(10), &loopback).await.unwrap();
+        let (key, reason) = refusal(&loopback).expect("a refusal");
+        assert_eq!(key, KEY);
+        assert!(!reason.is_empty());
+
+        let phone = Phone::at("192.0.2.7:51000");
+        plugin
+            .handle_packet(&share(MAX_FILE_BYTES + 1), &phone)
+            .await
+            .unwrap();
+        let (key, reason) = refusal(&phone).expect("a refusal for the size");
+        assert_eq!(key, KEY);
+        assert!(
+            reason.contains("size") || reason.contains("large"),
+            "{reason}"
+        );
     }
 
     #[tokio::test]

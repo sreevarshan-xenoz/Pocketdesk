@@ -27,6 +27,8 @@
     <string name="settings_keep_screen_on_summary">Durante una sesión de transmisión</string>
     <string name="settings_auto_reconnect">Reconectar automáticamente</string>
     <string name="settings_auto_reconnect_summary">Si el enlace se corta (el equipo reinicia su servidor, despierta o vuelve la red), reintentar durante 10 minutos</string>
+    <string name="settings_retry_transfers">Reintentar archivos fallidos</string>
+    <string name="settings_retry_transfers_summary">Un archivo que se corta a mitad se vuelve a enviar hasta 3 veces, desde donde se detuvo</string>
     <string name="reconnecting_in">Reconectando en %1$d s…</string>
     <string name="reconnect_gave_up">Se dejó de intentar tras 10 minutos.</string>
     <string name="settings_reveal_pin">Mostrar PIN por defecto</string>
@@ -181,6 +183,7 @@
     <string name="shortcut_no_wake">Pocketdesk aún no sabe cómo encender %1$s.</string>
     <string name="channel_transfers">Transferencias de archivos</string>
     <string name="channel_transfers_desc">Progreso de los archivos enviados a tu ordenador y desde él</string>
+    <string name="transfer_retrying">Reintentando (%1$d de 3)</string>
     <string name="transfer_sending">Enviando %1$d de %2$d</string>
     <string name="transfer_failed">Sin enviar: %1$d de %2$d</string>
     <string name="transfer_receiving">Recibiendo de tu ordenador</string>

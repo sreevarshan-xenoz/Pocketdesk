@@ -34,6 +34,8 @@
     <string name="settings_keep_screen_on_summary">During a streaming session</string>
     <string name="settings_auto_reconnect">Reconnect by itself</string>
     <string name="settings_auto_reconnect_summary">When the link drops (the computer restarts its server, wakes up, or the network returns), try again for 10 minutes</string>
+    <string name="settings_retry_transfers">Retry failed files</string>
+    <string name="settings_retry_transfers_summary">A file that stops part way is sent again up to 3 times, continuing where it stopped</string>
     <string name="reconnecting_in">Reconnecting in %1$d s…</string>
     <string name="reconnect_gave_up">Stopped trying after 10 minutes.</string>
     <string name="settings_reveal_pin">Show PIN by default</string>
@@ -186,6 +188,7 @@
     <string name="shortcut_no_wake">Pocketdesk does not know how to wake %1$s yet.</string>
     <string name="channel_transfers">File transfers</string>
     <string name="channel_transfers_desc">Progress of files sent to and from your computer</string>
+    <string name="transfer_retrying">Trying again (%1$d of 3)</string>
     <string name="transfer_sending">Sending %1$d of %2$d</string>
     <string name="transfer_failed">Not sent: %1$d of %2$d</string>
     <string name="transfer_receiving">Receiving from your computer</string>

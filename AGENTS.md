@@ -42,6 +42,14 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T6a, transfers that resume (branch `feat/resumable-transfers`; spec `docs/superpowers/specs/2026-10-14-resumable-transfers-design.md`, with an as-built section).**
+  - **How:** the receiver says how much of a file it has and the SHA-256 of those bytes; the sender continues only if its own bytes hash the same, and the whole file is checked against the sender's SHA-256 before it is kept (`core::protocol::transfer`, ALPN `pocketdesk-transfer/2`). Records of unfinished files: `core::protocol::partials`.
+  - **Desktop:** a share's part waits in `<state>/partials/` (Settings "Unfinished files", default 24 h); offers carry a source id and allow 4 attempts; a retry replaces the attempt still running for its file.
+  - **Phone:** shares and downloads retry 3 times (5, 15, 45 s) and continue (Settings "Retry failed files"); a download's part is its hidden MediaStore row.
+  - **Also fixed:** a refused share is answered (the phone waited 30 s), the phone's send has deadlines, and the desktop says "saved" only once the file is in Downloads.
+  - **Fresh review (0 Critical, 4 Important), fixed:** the sweep taking a running transfer's file, large partials that could never resume, a slow final copy cut short by the retry, and refusals retried while busy computers were not.
+  - **Device-verified (A71 ↔ Windows):** a 150 MB offer and a 120 MB share each broken by Wi-Fi off and continued, MD5s matching. Owed: checklist §50.
+- 2026-10-15: **The Pocketdesk mark and a launch video (PR #49, merged).** `assets/brand/` (mark, icon, banner, a 21 s video made from HTML and a synthesised score); the Android launcher icon (with a themed layer) and the desktop app's icon are the mark; README opens with them.
 - 2026-10-14: **Protocol audit: what Pocketdesk sends, and to whom (branch `fix/protocol-audit`; `docs/protocol.md`).**
   - **The map.** `docs/protocol.md` lists every listener, key, packet, file on disk and outside party, each row naming its source, with what is unconfirmed in its own section. SECURITY.md links it and gains two limits: the desktop names itself to any client before judging it, and permissions do not gate what the desktop pushes to a paired phone.
   - **Fixed on the way, one commit each:**

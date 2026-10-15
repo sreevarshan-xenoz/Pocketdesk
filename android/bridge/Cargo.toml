@@ -26,6 +26,8 @@ tokio-util.workspace = true
 # File transfers run inside TLS (phase C).
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 uuid.workspace = true
+# Source ids for resumable transfers (T6a).
+sha2 = "0.10"
 
 [dev-dependencies]
 async-trait.workspace = true

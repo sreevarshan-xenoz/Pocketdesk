@@ -1,8 +1,9 @@
 //! Downloading a file from the desktop (roadmap F7b): a file the phone
 //! browsed to, or one the desktop's owner offered it. The phone listens on
 //! a fresh port with a fresh key, asks over the control channel, and the
-//! desktop dials back, presents the key, and sends the size and the bytes;
-//! the phone answers with one status byte once the file is saved.
+//! desktop dials back, presents the key, and runs the resumable exchange
+//! (`core::protocol::transfer`): a download that broke continues from the
+//! part this phone kept (T6a).
 
 // The descriptor entry point exists on Android only; on a desktop host the
 // rest is reached from the tests alone.
@@ -13,7 +14,9 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDeviceSender};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use pocketdesk_core::protocol::partials::{Limits, Record, Store};
+use pocketdesk_core::protocol::transfer::{self, Have, Pace, Partial, TransferError};
+use tokio::io::AsyncBufReadExt;
 use tokio::sync::{Mutex, broadcast};
 
 use crate::api::{TRANSFER_SENT, TRANSFER_TOTAL, accept_transfer, client_identity};
@@ -32,6 +35,49 @@ const DECLINE: &str = "kdeconnect.pocketdesk.file_offer_declined";
 const MAX_DOWNLOAD_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// A download that receives nothing for this long is abandoned.
 const DOWNLOAD_IDLE: Duration = Duration::from_secs(30);
+
+/// The unfinished downloads this phone keeps, for a retry to continue
+/// (T6a): beside the certificates, in the app's own storage.
+fn partials() -> Option<Store> {
+    let certs = crate::CERT_DIR.lock().ok()?.clone()?;
+    Some(Store::new(certs.parent()?.join("partials")))
+}
+
+/// Which partial a download continues and records into: the computer, the
+/// file's source id, its name, and where its bytes are (the URI of the
+/// pending MediaStore row, or a file path), which must be the same place.
+pub struct Resume {
+    pub source: String,
+    pub name: String,
+    pub location: String,
+}
+
+/// Where the bytes of `address`'s file `source` were kept, if a partial of
+/// it is: the caller opens that place again to continue it.
+pub fn partial_location(address: &str, source: &str) -> Option<String> {
+    partials()?.get(address, source).map(|r| r.location)
+}
+
+/// Drop unfinished downloads older than `max_age_hours` (or beyond 4, or
+/// 4 GiB in all) and return where their bytes are, for the caller to delete.
+pub fn sweep_partials(max_age_hours: u32) -> Vec<String> {
+    let Some(store) = partials() else {
+        return Vec::new();
+    };
+    let limits = Limits {
+        max_age_secs: u64::from(max_age_hours) * 3600,
+        per_device: 4,
+        total_bytes: 4 * 1024 * 1024 * 1024,
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    store
+        .sweep(now, limits, |_| false)
+        .into_iter()
+        .map(|r| r.location)
+        .collect()
+}
 
 /// What to download: a file browsed to, one the desktop offered, or the
 /// image on the desktop's clipboard (N4), by the id its reply gave.
@@ -66,14 +112,17 @@ pub fn take_file_offers() -> String {
     crate::take_file_offers_json()
 }
 
-/// Download `target` from the desktop into `fd`, which this takes over and
-/// closes, and return the bytes saved.
+/// Download `target` from the desktop into `fd` (opened for reading and
+/// writing), which this takes over and closes, and return the file's size.
+/// With `resume`, it continues the part an earlier attempt kept there, and
+/// keeps what arrives if this attempt breaks too.
 #[cfg(unix)]
 pub async fn fetch_file_fd(
     address: String,
     port: u16,
     target: FetchTarget,
     fd: i32,
+    resume: Option<Resume>,
 ) -> Result<u64, String> {
     use std::os::fd::FromRawFd;
     if fd < 0 {
@@ -83,7 +132,7 @@ pub async fn fetch_file_fd(
     // this File is its only owner and closes it.
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
     let mut out = tokio::fs::File::from_std(file);
-    fetch_into(&address, port, target, &mut out).await
+    fetch_into(&address, port, target, &mut out, resume).await
 }
 
 #[cfg(not(unix))]
@@ -92,6 +141,7 @@ pub async fn fetch_file_fd(
     _port: u16,
     _target: FetchTarget,
     _fd: i32,
+    _resume: Option<Resume>,
 ) -> Result<u64, String> {
     Err("file descriptors are only passed on Android".to_string())
 }
@@ -99,11 +149,12 @@ pub async fn fetch_file_fd(
 /// Listen with a fresh key, ask the desktop for `target`, and take the
 /// file from the connection that presents the key. A refusal from the
 /// desktop ends the wait at once.
-async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
+async fn fetch_into<P: Partial>(
     address: &str,
     port: u16,
     target: FetchTarget,
-    out: &mut W,
+    out: &mut P,
+    resume: Option<Resume>,
 ) -> Result<u64, String> {
     // A clipboard image (N4) leaves a file transfer's progress alone.
     let counted = !matches!(target, FetchTarget::ClipboardImage(_));
@@ -124,7 +175,16 @@ async fn fetch_into<W: tokio::io::AsyncWrite + Unpin>(
     // looked up once the request is out (its connection may have pinned it).
     let tls = crate::api::transfer_acceptor(address)?;
     let refused = refusal_on(lines, key.clone());
-    await_and_receive_limited(listener, &key, &tls, refused, out, limit, counted).await
+    let store = partials();
+    let kept = match (&resume, &store) {
+        (Some(resume), Some(store)) => Some(Kept {
+            store,
+            device: address,
+            resume,
+        }),
+        _ => None,
+    };
+    await_and_receive_limited(listener, &key, &tls, refused, out, limit, counted, kept).await
 }
 
 /// Download the image on the desktop's clipboard, named `id` by its reply
@@ -135,10 +195,22 @@ pub async fn fetch_clipboard_image(
     id: String,
     path: String,
 ) -> Result<u64, String> {
-    let mut out = tokio::fs::File::create(&path)
+    let mut out = tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
         .await
         .map_err(|e| format!("Could not create {path}: {e}"))?;
-    let got = fetch_into(&address, port, FetchTarget::ClipboardImage(id), &mut out).await;
+    let got = fetch_into(
+        &address,
+        port,
+        FetchTarget::ClipboardImage(id),
+        &mut out,
+        None,
+    )
+    .await;
     drop(out);
     if got.is_err() {
         let _ = tokio::fs::remove_file(&path).await;
@@ -162,23 +234,6 @@ pub(crate) enum Replies {
 }
 
 impl Replies {
-    /// Read this connection's lines until the task is aborted, keeping any
-    /// offer that arrives on it. The desktop pushes to a phone's newest
-    /// connection, which may be one a transfer opened for itself; an offer
-    /// sent there must not be lost unread.
-    pub(crate) fn keep_reading(mut self) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            while let Some(line) = self.next_line().await {
-                if let (Replies::Own { .. }, Ok(packet)) =
-                    (&self, NetworkPacket::from_wire(line.trim()))
-                    && packet.packet_type == FILE_OFFER
-                {
-                    crate::queue_file_offer(&packet.body);
-                }
-            }
-        })
-    }
-
     async fn next_line(&mut self) -> Option<String> {
         match self {
             Replies::Shared(rx) => loop {
@@ -289,37 +344,57 @@ fn refusal_for(line: &str, key: &str) -> Option<String> {
     )
 }
 
+/// A partial a download continues and records into.
+struct Kept<'a> {
+    store: &'a Store,
+    /// The computer it comes from.
+    device: &'a str,
+    resume: &'a Resume,
+}
+
 /// Wait up to 30 s for the desktop to connect inside TLS with `key`
 /// (dropping anything else that connects), then receive the file into
 /// `out`, unless `refused` resolves first.
 #[cfg(test)]
-async fn await_and_receive<W, F>(
+async fn await_and_receive<P, F>(
     listener: tokio::net::TcpListener,
     key: &str,
     tls: &tokio_rustls::TlsAcceptor,
     refused: F,
-    out: &mut W,
+    out: &mut P,
 ) -> Result<u64, String>
 where
-    W: tokio::io::AsyncWrite + Unpin,
+    P: Partial,
     F: std::future::Future<Output = String>,
 {
-    await_and_receive_limited(listener, key, tls, refused, out, MAX_DOWNLOAD_BYTES, true).await
+    await_and_receive_limited(
+        listener,
+        key,
+        tls,
+        refused,
+        out,
+        MAX_DOWNLOAD_BYTES,
+        true,
+        None,
+    )
+    .await
 }
 
-/// [`await_and_receive`], refusing more than `limit` bytes, and counting
-/// into the transfer progress only when `counted`.
-async fn await_and_receive_limited<W, F>(
+/// [`await_and_receive`], refusing more than `limit` bytes, counting into
+/// the transfer progress only when `counted`, and continuing `kept`.
+#[allow(clippy::too_many_arguments)]
+async fn await_and_receive_limited<P, F>(
     listener: tokio::net::TcpListener,
     key: &str,
     tls: &tokio_rustls::TlsAcceptor,
     refused: F,
-    out: &mut W,
+    out: &mut P,
     limit: u64,
     counted: bool,
+    kept: Option<Kept<'_>>,
 ) -> Result<u64, String>
 where
-    W: tokio::io::AsyncWrite + Unpin,
+    P: Partial,
     F: std::future::Future<Output = String>,
 {
     let accept = tokio::time::timeout(
@@ -328,88 +403,108 @@ where
     );
     let mut stream = tokio::select! {
         accepted = accept => accepted.map_err(|_| "The computer did not send the file".to_string())??,
-        reason = refused => return Err(reason),
+        reason = refused => return Err(format!("The computer refused the download: {reason}")),
     };
-    receive_into(&mut stream, out, limit, counted).await
+    receive_into(&mut stream, out, limit, counted, kept).await
 }
 
-/// Read the size and exactly that many bytes from `stream` into `out`,
-/// counting progress, then tell the desktop whether it was saved.
-async fn receive_into<S, W>(
+/// Receive one file from `stream` into `out` with the resumable exchange,
+/// continuing what `kept` recorded, then tell the desktop it was saved.
+/// Returns the file's size.
+async fn receive_into<S, P>(
     stream: &mut S,
-    out: &mut W,
+    out: &mut P,
     limit: u64,
     counted: bool,
+    kept: Option<Kept<'_>>,
 ) -> Result<u64, String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
+    P: Partial,
 {
-    let received = async {
-        let size = tokio::time::timeout(DOWNLOAD_IDLE, stream.read_u64())
-            .await
-            .map_err(|_| "The computer stopped sending".to_string())?
-            .map_err(|e| format!("The computer stopped sending: {e}"))?;
-        if size > limit {
-            return Err(format!("{size} bytes is more than this phone takes"));
-        }
+    let record = kept.as_ref().and_then(|k| {
+        k.store
+            .get(k.device, &k.resume.source)
+            .filter(|r| r.location == k.resume.location)
+    });
+    let have = record.as_ref().map(|r| Have {
+        size: r.size,
+        committed: r.committed,
+    });
+    let created_unix = record.as_ref().map_or_else(
+        || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs())
+        },
+        |r| r.created_unix,
+    );
+    if counted {
+        TRANSFER_TOTAL.store(0, Ordering::Relaxed);
+        TRANSFER_SENT.store(0, Ordering::Relaxed);
+    }
+    let mut total = 0;
+    let pace = Pace {
+        idle: DOWNLOAD_IDLE,
+        ..Pace::DEFAULT
+    };
+    let outcome = transfer::receive(stream, out, have, None, limit, pace, |size, committed| {
+        total = size;
         if counted {
             TRANSFER_TOTAL.store(size, Ordering::Relaxed);
-            TRANSFER_SENT.store(0, Ordering::Relaxed);
+            TRANSFER_SENT.store(committed, Ordering::Relaxed);
         }
-        let mut buffer = vec![0u8; 64 * 1024];
-        let mut done: u64 = 0;
-        while done < size {
-            let want = buffer
-                .len()
-                .min(usize::try_from(size - done).unwrap_or(usize::MAX));
-            let n = tokio::time::timeout(DOWNLOAD_IDLE, stream.read(&mut buffer[..want]))
-                .await
-                .map_err(|_| "The computer stopped sending".to_string())?
-                .map_err(|e| format!("The connection failed: {e}"))?;
-            if n == 0 {
-                return Err(format!("The file ended after {done} of {size} bytes"));
-            }
-            out.write_all(&buffer[..n])
-                .await
-                .map_err(|e| format!("Could not save the file: {e}"))?;
-            done += n as u64;
-            if counted {
-                TRANSFER_SENT.store(done, Ordering::Relaxed);
+        if let Some(k) = &kept {
+            let record = Record {
+                device: k.device.to_string(),
+                source: k.resume.source.clone(),
+                name: k.resume.name.clone(),
+                size,
+                committed,
+                created_unix,
+                location: k.resume.location.clone(),
+            };
+            if let Err(e) = k.store.put(&record) {
+                tracing::warn!("Could not record the unfinished download: {e}");
             }
         }
-        out.flush()
-            .await
-            .map_err(|e| format!("Could not save the file: {e}"))?;
-        Ok(size)
-    }
-    .await;
-    let status = if received.is_ok() { 1 } else { 0 };
-    // Flushed: inside TLS the byte otherwise waits in the session's buffer.
-    // Then close_notify, and after a save what the desktop still has in
-    // flight is read and dropped: a socket closed with unread data is reset,
-    // and the reset can reach the desktop before the status byte does. Not
-    // after a failure, which can stop with the desktop's bytes still coming;
-    // a lost "failed" byte reads as failed anyway.
-    let _ = tokio::time::timeout(Duration::from_secs(5), async {
-        stream.write_all(&[status]).await?;
-        stream.flush().await?;
-        stream.shutdown().await?;
-        if status == 1 {
-            let mut sink = [0u8; 512];
-            while stream.read(&mut sink).await? > 0 {}
-        }
-        Ok::<_, std::io::Error>(())
     })
     .await;
-    received
+    match outcome {
+        Ok(offset) => {
+            if let Some(k) = &kept {
+                k.store.remove(k.device, &k.resume.source);
+            }
+            if offset > 0 {
+                tracing::info!("Download continued from {offset} of {total} bytes");
+            }
+            transfer::finish(stream, true, pace).await;
+            Ok(total)
+        }
+        Err(e) => {
+            // Only a broken connection is worth continuing.
+            if let Some(k) = &kept
+                && !matches!(e, TransferError::Io(_))
+            {
+                k.store.remove(k.device, &k.resume.source);
+            }
+            Err(match e {
+                TransferError::Size(0) => "the computer sent an empty file".to_string(),
+                TransferError::Size(size) => format!("a size of {size} bytes was not accepted"),
+                TransferError::Io(e) => format!("The connection failed: {e}"),
+                other => format!("The download failed: {other}"),
+            })
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FETCH_REFUSED, await_and_receive, refusal_for};
+    use super::{FETCH_REFUSED, Kept, Resume, await_and_receive, receive_into, refusal_for};
     use crate::api::transfer_progress;
     use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
+    use pocketdesk_core::protocol::partials::Store;
+    use pocketdesk_core::protocol::transfer::{self, Memory, Pace, Partial};
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -457,8 +552,10 @@ mod tests {
             .await
     }
 
-    /// The desktop's side of a download: dial, present `key`, send the
-    /// size and `data` (all of it unless `short`), and read the status.
+    /// The desktop's side of a download: dial, present `key`, and send the
+    /// first `data.len()` bytes of a `size`-byte file with the resumable
+    /// exchange. Some(1) when the phone said it saved it, Some(0) when it
+    /// said it did not, None when it said nothing.
     async fn desktop_sending(
         to: std::net::SocketAddr,
         key: &str,
@@ -470,13 +567,12 @@ mod tests {
             .write_all(format!("{key}\n").as_bytes())
             .await
             .unwrap();
-        stream.write_u64(size).await.unwrap();
-        stream.write_all(&data).await.unwrap();
-        // TLS's close_notify, then the socket's write side; the status still
-        // comes back.
-        stream.shutdown().await.unwrap();
-        let mut status = [0u8; 1];
-        stream.read_exact(&mut status).await.ok().map(|_| status[0])
+        let mut reader: &[u8] = &data;
+        match transfer::send(&mut reader, size, &mut stream, Pace::DEFAULT, |_| {}).await {
+            Ok(_) => Some(1),
+            Err(transfer::TransferError::NotSaved) => Some(0),
+            Err(_) => None,
+        }
     }
 
     async fn listener() -> (TcpListener, std::net::SocketAddr) {
@@ -491,7 +587,7 @@ mod tests {
         let (listener, addr) = listener().await;
         let data: Vec<u8> = (0..200_000u32).map(|i| (i * 3) as u8).collect();
         let desktop = tokio::spawn(desktop_sending(addr, KEY, data.len() as u64, data.clone()));
-        let mut out = Vec::new();
+        let mut out = Memory::holding(&[]);
         let got = await_and_receive(
             listener,
             KEY,
@@ -501,7 +597,7 @@ mod tests {
         )
         .await;
         assert_eq!(got, Ok(data.len() as u64));
-        assert_eq!(out, data);
+        assert_eq!(out.bytes(), &data[..]);
         assert_eq!(desktop.await.unwrap(), Some(1));
         let (done, total) = transfer_progress();
         assert!(done <= total, "progress stays within its total");
@@ -523,7 +619,7 @@ mod tests {
             rest
         });
         let receiving = tokio::spawn(async move {
-            let mut out = Vec::new();
+            let mut out = Memory::holding(&[]);
             let got = await_and_receive(
                 listener,
                 KEY,
@@ -532,7 +628,7 @@ mod tests {
                 &mut out,
             )
             .await;
-            (got, out)
+            (got, out.into_bytes())
         });
         assert!(
             wrong.await.unwrap().is_empty(),
@@ -548,7 +644,7 @@ mod tests {
         let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let receiving = tokio::spawn(async move {
-            let mut out = Vec::new();
+            let mut out = Memory::holding(&[]);
             let got = await_and_receive(
                 listener,
                 KEY,
@@ -557,7 +653,7 @@ mod tests {
                 &mut out,
             )
             .await;
-            (got, out)
+            (got, out.into_bytes())
         });
         // Another computer, even one that knows the key, is turned away in
         // the handshake.
@@ -586,7 +682,7 @@ mod tests {
             silent.push(TcpStream::connect(addr).await.unwrap());
         }
         let receiving = tokio::spawn(async move {
-            let mut out = Vec::new();
+            let mut out = Memory::holding(&[]);
             let got = await_and_receive(
                 listener,
                 KEY,
@@ -595,7 +691,7 @@ mod tests {
                 &mut out,
             )
             .await;
-            (got, out)
+            (got, out.into_bytes())
         });
         let sent = tokio::time::timeout(
             std::time::Duration::from_secs(3),
@@ -612,7 +708,7 @@ mod tests {
         let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let desktop = tokio::spawn(desktop_sending(addr, KEY, 10, b"abcd".to_vec()));
-        let mut out = Vec::new();
+        let mut out = Memory::holding(&[]);
         assert!(
             await_and_receive(
                 listener,
@@ -624,7 +720,7 @@ mod tests {
             .await
             .is_err()
         );
-        assert_eq!(desktop.await.unwrap(), Some(0));
+        assert_ne!(desktop.await.unwrap(), Some(1), "not saved");
     }
 
     #[tokio::test]
@@ -632,7 +728,7 @@ mod tests {
         let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
         let (listener, addr) = listener().await;
         let desktop = tokio::spawn(desktop_sending(addr, KEY, 9 << 30, Vec::new()));
-        let mut out = Vec::new();
+        let mut out = Memory::holding(&[]);
         assert!(
             await_and_receive(
                 listener,
@@ -644,12 +740,22 @@ mod tests {
             .await
             .is_err()
         );
-        assert_eq!(desktop.await.unwrap(), Some(0));
-        assert!(out.is_empty());
+        assert_ne!(desktop.await.unwrap(), Some(1), "not saved");
+        assert!(out.bytes().is_empty());
     }
 
     /// Storage that fails, as a full phone does.
     struct Full;
+
+    impl tokio::io::AsyncRead for Full {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &mut tokio::io::ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
 
     impl tokio::io::AsyncWrite for Full {
         fn poll_write(
@@ -667,6 +773,24 @@ mod tests {
         }
     }
 
+    impl tokio::io::AsyncSeek for Full {
+        fn start_seek(self: Pin<&mut Self>, _: std::io::SeekFrom) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn poll_complete(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+            Poll::Ready(Ok(0))
+        }
+    }
+
+    impl Partial for Full {
+        async fn truncate(&mut self, _: u64) -> std::io::Result<()> {
+            Ok(())
+        }
+        async fn sync(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn a_failed_write_answers_zero() {
         let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
@@ -681,21 +805,94 @@ mod tests {
         )
         .await;
         assert!(got.is_err());
-        assert_eq!(desktop.await.unwrap(), Some(0));
+        assert_ne!(desktop.await.unwrap(), Some(1), "not saved");
+    }
+
+    /// A download that broke continues from what this phone kept, and only
+    /// in the place it was kept.
+    #[tokio::test]
+    async fn a_broken_download_is_continued_by_the_retry() {
+        let _counters = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        let dir = std::env::temp_dir().join(format!("pd-dl-partials-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = Store::new(&dir);
+        let resume = Resume {
+            source: "00112233445566778899aabbccddeeff".into(),
+            name: "a.bin".into(),
+            location: "content://media/1".into(),
+        };
+        let data: Vec<u8> = (0..300_000u32).map(|i| (i * 11) as u8).collect();
+        let mut out = Memory::holding(&[]);
+
+        // The first attempt stops part way.
+        let (mut desktop, mut phone) = tokio::io::duplex(1 << 20);
+        let cut = data[..140_000].to_vec();
+        let sender = tokio::spawn(async move {
+            let mut reader: &[u8] = &cut;
+            let sent =
+                transfer::send(&mut reader, 300_000, &mut desktop, Pace::DEFAULT, |_| {}).await;
+            drop(desktop);
+            sent
+        });
+        let kept = Kept {
+            store: &store,
+            device: "192.0.2.4",
+            resume: &resume,
+        };
+        assert!(
+            receive_into(&mut phone, &mut out, 1 << 30, false, Some(kept))
+                .await
+                .is_err()
+        );
+        assert!(sender.await.unwrap().is_err());
+        assert_eq!(
+            store.get("192.0.2.4", &resume.source).unwrap().committed,
+            140_000
+        );
+
+        // The retry sends only the rest.
+        let (mut desktop, mut phone) = tokio::io::duplex(1 << 20);
+        let all = data.clone();
+        let sender = tokio::spawn(async move {
+            let mut reader: &[u8] = &all;
+            let sent =
+                transfer::send(&mut reader, 300_000, &mut desktop, Pace::DEFAULT, |_| {}).await;
+            drop(desktop);
+            sent
+        });
+        let kept = Kept {
+            store: &store,
+            device: "192.0.2.4",
+            resume: &resume,
+        };
+        assert_eq!(
+            receive_into(&mut phone, &mut out, 1 << 30, false, Some(kept)).await,
+            Ok(300_000)
+        );
+        assert_eq!(sender.await.unwrap().unwrap(), 140_000, "continued");
+        assert_eq!(out.bytes(), &data[..]);
+        assert!(
+            store.get("192.0.2.4", &resume.source).is_none(),
+            "the record is gone"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn a_refusal_ends_the_wait_with_its_reason() {
         let (listener, _) = listener().await;
         let refused = async { "the offer expired".to_string() };
-        let mut out = Vec::new();
+        let mut out = Memory::holding(&[]);
         let got = tokio::time::timeout(
             std::time::Duration::from_secs(2),
             await_and_receive(listener, KEY, &phone_tls(), refused, &mut out),
         )
         .await
         .expect("no wait for the listener's timeout");
-        assert_eq!(got, Err("the offer expired".to_string()));
+        assert_eq!(
+            got,
+            Err("The computer refused the download: the offer expired".to_string())
+        );
     }
 
     #[test]
@@ -732,7 +929,8 @@ mod tests {
             )),
             _writer: Box::new(writer),
         };
-        let reading = replies.keep_reading();
+        // Waiting for a refusal also keeps any offer that arrives meanwhile.
+        let reading = tokio::spawn(super::refusal_on(replies, KEY.to_string()));
         let _socket = desktop.await.unwrap();
         let mut kept = String::new();
         for _ in 0..50 {

@@ -135,6 +135,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.autoReconnect(context),
             ) { Prefs.setAutoReconnect(context, it) }
             boolRow(
+                LlIcons.Wifi,
+                stringResource(R.string.settings_retry_transfers),
+                stringResource(R.string.settings_retry_transfers_summary),
+                Prefs.retryTransfers(context),
+            ) { Prefs.setRetryTransfers(context, it) }
+            boolRow(
                 LlIcons.Pin,
                 stringResource(R.string.settings_reveal_pin),
                 stringResource(R.string.settings_reveal_pin_summary),

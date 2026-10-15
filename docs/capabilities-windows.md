@@ -21,7 +21,7 @@
 | Id | What it carries | Address | ALPN | In this build | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `tcp-v1` | KDE Connect-style control channel, inside TLS 1.3 | `tcp://0.0.0.0:1716` | `pocketdesk-control/1` | yes | pairing and plugin traffic (clipboard, battery, notifications, texts, file requests); both ends present certificates |
-| `tcp-transfer` | File transfer, inside TLS 1.3 | `tcp://<phone>:<port the phone names>` | `pocketdesk-transfer/1` | yes | the phone listens and the desktop dials it, both ways; one-time key, size, bytes, status byte |
+| `tcp-transfer` | File transfer, inside TLS 1.3 | `tcp://<phone>:<port the phone names>` | `pocketdesk-transfer/2` | yes | the phone listens and the desktop dials it, both ways; one-time key, then the resumable exchange: size, resume point, the rest, SHA-256, status byte |
 | `quic-v2` | QUIC multiplexer: media + control | `udp://0.0.0.0:4716` | `pocketdesk-v2` | yes | negotiated over LAN addresses and tailnet IPs alike |
 | `quic-v1-stream` | QUIC streaming (pre-v2 handshake) | `udp://0.0.0.0:4716` | `pocketdesk-stream` | yes | offered on the same port; the server dispatches on the ALPN the peer picks |
 | `iroh-noq` | iroh hole-punched WAN endpoint | `address-free (endpoint id over any link)` | `pocketdesk-stream` | yes | behind the `wan` feature; the Android bridge builds with it |

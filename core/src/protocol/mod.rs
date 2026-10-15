@@ -2,7 +2,9 @@ pub mod backoff;
 pub mod clipboard;
 pub mod connection;
 pub mod kdeconnect;
+pub mod partials;
 pub mod permissions;
+pub mod transfer;
 pub mod v2;
 
 #[cfg(test)]
@@ -23,8 +25,10 @@ pub const ALPN_V1_STREAM: &[u8] = b"pocketdesk-stream";
 /// it runs the same handshake and packets the control channel always had.
 pub const ALPN_CONTROL: &[u8] = b"pocketdesk-control/1";
 
-/// ALPN for a file transfer's own TLS connection (phase C).
-pub const ALPN_TRANSFER: &[u8] = b"pocketdesk-transfer/1";
+/// ALPN for a file transfer's own TLS connection (phase C). Version 2 is
+/// the resumable, hash-checked exchange in [`transfer`] (T6a); a peer that
+/// speaks only version 1 fails the handshake instead of misreading it.
+pub const ALPN_TRANSFER: &[u8] = b"pocketdesk-transfer/2";
 
 /// The first byte of a TLS handshake record. The control port refuses a
 /// connection that starts with anything else.
