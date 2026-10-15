@@ -5,6 +5,7 @@ pub mod kdeconnect;
 pub mod link;
 pub mod partials;
 pub mod permissions;
+pub mod phone_media;
 pub mod relpath;
 pub mod transfer;
 pub mod v2;
