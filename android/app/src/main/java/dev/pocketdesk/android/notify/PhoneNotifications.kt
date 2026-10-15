@@ -97,8 +97,13 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val replies by lazy { SmsReplies(applicationContext) }
     private val replyTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
-    /** The computer's clipboard without a session (T10b), on the same tick. */
+    /**
+     * The computer's clipboard without a session (T10b), on a 5 s tick of its
+     * own: its connect can take seconds while the computer is away, and must
+     * not hold up text replies.
+     */
     private val clipboard by lazy { dev.pocketdesk.android.clip.BackgroundClipboard(applicationContext) }
+    private val clipboardTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
     override fun onCreate() {
         super.onCreate()
@@ -109,7 +114,6 @@ class PhoneNotificationListener : NotificationListenerService() {
         replyTicker.scheduleWithFixedDelay(
             {
                 runCatching { replies.tick() }.onFailure { Log.w("PhoneNotifications", "reply tick failed", it) }
-                runCatching { clipboard.tick() }.onFailure { Log.w("PhoneNotifications", "clipboard tick failed", it) }
                 // Notifications that waited (the phone asleep, the computer away) go now.
                 worker.execute { sendWaiting() }
             },
@@ -117,9 +121,16 @@ class PhoneNotificationListener : NotificationListenerService() {
             5,
             TimeUnit.SECONDS,
         )
+        clipboardTicker.scheduleWithFixedDelay(
+            { runCatching { clipboard.tick() }.onFailure { Log.w("PhoneNotifications", "clipboard tick failed", it) } },
+            5,
+            5,
+            TimeUnit.SECONDS,
+        )
     }
 
     override fun onDestroy() {
+        clipboardTicker.shutdownNow()
         replyTicker.shutdownNow()
         super.onDestroy()
     }

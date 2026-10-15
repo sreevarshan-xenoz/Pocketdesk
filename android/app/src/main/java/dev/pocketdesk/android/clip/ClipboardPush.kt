@@ -19,6 +19,9 @@ import dev.pocketdesk.android.ui.writeLocalClipboard
 object ClipboardShared {
     @Volatile
     var lastExchanged: String? = null
+
+    /** Session clipboard syncs running: while one runs, it alone applies the computer's text. */
+    val sessionSyncs = java.util.concurrent.atomic.AtomicInteger(0)
 }
 
 /** The choices of the background applier (T10b). */
@@ -43,7 +46,12 @@ class BackgroundClipboard(private val ctx: Context) {
     private val main = Handler(Looper.getMainLooper())
 
     fun tick() {
-        if (!Prefs.clipboardInBackground(ctx)) return
+        if (!Prefs.clipboardInBackground(ctx) || ClipboardShared.sessionSyncs.get() > 0) {
+            // Not this applier's to apply: dropped, so it is not applied
+            // later, when it is old.
+            RustCore.takeClipboardPush()
+            return
+        }
         val own = PhoneLink.target(ctx) ?: return
         val now = SystemClock.elapsedRealtime()
         if (RustCore.controlPeer() == null && now - lastConnectMs >= RECONNECT_MS) {
