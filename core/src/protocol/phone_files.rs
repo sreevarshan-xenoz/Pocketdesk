@@ -77,6 +77,9 @@ pub struct Listing {
     pub entries: Vec<Entry>,
     #[serde(default)]
     pub error: Option<String>,
+    /// Whether the folder holds more than the listing carries.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 impl Listing {
@@ -92,7 +95,10 @@ impl Listing {
         listing.roots.retain(|r| valid_name(&r.name));
         listing.roots.truncate(MAX_ROOTS);
         listing.entries.retain(|e| valid_name(&e.name));
-        listing.entries.truncate(MAX_ENTRIES);
+        if listing.entries.len() > MAX_ENTRIES {
+            listing.entries.truncate(MAX_ENTRIES);
+            listing.truncated = true;
+        }
         listing.error = listing
             .error
             .map(|e| e.chars().filter(|c| !c.is_control()).take(200).collect());
@@ -144,6 +150,13 @@ mod tests {
         let listing = Listing::from_body(&body).unwrap();
         assert_eq!(listing.entries.len(), 2);
         assert!(listing.entries[1].dir);
+        assert!(!listing.truncated);
+        let many: Vec<_> = (0..MAX_ENTRIES + 1)
+            .map(|i| serde_json::json!({ "name": format!("f{i}") }))
+            .collect();
+        let cut = Listing::from_body(&serde_json::json!({ "entries": many })).unwrap();
+        assert_eq!(cut.entries.len(), MAX_ENTRIES);
+        assert!(cut.truncated, "more than a listing carries is said");
         let bad = serde_json::json!({ "roots": [], "path": [".."] });
         assert!(Listing::from_body(&bad).is_none());
     }

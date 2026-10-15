@@ -168,6 +168,15 @@ impl PhoneFilesView {
                 self.ask(state_dir, &phone, Kind::List, root, up, now_unix);
             }
         });
+        if listing.truncated {
+            ui.label(
+                RichText::new(format!(
+                    "Showing the first {} entries: the folder holds more.",
+                    listing.entries.len()
+                ))
+                .color(Color32::GRAY),
+            );
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
             if listing.entries.is_empty() {
                 ui.label(RichText::new("Empty").color(Color32::GRAY));

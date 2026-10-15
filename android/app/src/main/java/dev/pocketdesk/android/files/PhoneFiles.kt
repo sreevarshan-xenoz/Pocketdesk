@@ -59,21 +59,27 @@ class PhoneFiles(private val ctx: Context) {
             }
         }.getOrDefault(emptyList())
 
-    /** The document `path` names under the shared folder, child by child. */
+    /** The document `path` names under the shared folder, child by child, looking through every child. */
     private fun resolve(tree: Uri, path: List<String>): Pair<String, Boolean>? {
         var docId = DocumentsContract.getTreeDocumentId(tree)
         var dir = true
         for (name in path) {
-            val child = children(tree, docId).firstOrNull { it.name == name } ?: return null
-            docId = child.docId
-            dir = child.dir
+            var child: Child? = null
+            eachChild(tree, docId) {
+                if (it.name == name) child = it
+                child == null
+            }
+            val found = child ?: return null
+            docId = found.docId
+            dir = found.dir
         }
         return docId to dir
     }
 
     private data class Child(val docId: String, val name: String, val dir: Boolean, val size: Long, val modified: Long)
 
-    private fun children(tree: Uri, docId: String): List<Child> {
+    /** Each child of [docId], to [take] until it answers false, at most [MAX_SCANNED]; false if any were left. */
+    private fun eachChild(tree: Uri, docId: String, take: (Child) -> Boolean): Boolean {
         val uri = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
         val columns =
             arrayOf(
@@ -83,11 +89,12 @@ class PhoneFiles(private val ctx: Context) {
                 DocumentsContract.Document.COLUMN_SIZE,
                 DocumentsContract.Document.COLUMN_LAST_MODIFIED,
             )
-        val found = mutableListOf<Child>()
         ctx.contentResolver.query(uri, columns, null, null, null)?.use { c ->
-            while (c.moveToNext() && found.size < PhoneFilesRule.MAX_ENTRIES * 2) {
+            var scanned = 0
+            while (c.moveToNext()) {
+                if (++scanned > MAX_SCANNED) return false
                 val name = c.getString(1) ?: continue
-                found +=
+                val child =
                     Child(
                         c.getString(0),
                         name,
@@ -95,9 +102,10 @@ class PhoneFiles(private val ctx: Context) {
                         if (c.isNull(3)) 0 else c.getLong(3),
                         if (c.isNull(4)) 0 else c.getLong(4),
                     )
+                if (!take(child)) return true
             }
         }
-        return found
+        return true
     }
 
     private fun list(request: Request, folders: List<PhoneFolders.Folder>) {
@@ -116,9 +124,13 @@ class PhoneFiles(private val ctx: Context) {
                 found == null -> body.put("error", "Not on the phone any more")
                 !found.second -> body.put("error", "Not a folder")
                 else -> {
+                    val listed = mutableListOf<Child>()
+                    val whole = eachChild(tree, found.first) {
+                        if (PhoneFilesRule.listed(it.name)) listed += it
+                        true
+                    }
                     val entries = JSONArray()
-                    children(tree, found.first)
-                        .filter { PhoneFilesRule.listed(it.name) }
+                    listed
                         .sortedWith(compareBy({ !it.dir }, { it.name.lowercase() }))
                         .take(PhoneFilesRule.MAX_ENTRIES)
                         .forEach {
@@ -127,6 +139,7 @@ class PhoneFiles(private val ctx: Context) {
                             )
                         }
                     body.put("entries", entries)
+                    body.put("truncated", !whole || listed.size > PhoneFilesRule.MAX_ENTRIES)
                 }
             }
         }
@@ -146,5 +159,8 @@ class PhoneFiles(private val ctx: Context) {
         const val TAG = "PhoneFiles"
         const val LISTING = "kdeconnect.pocketdesk.phone_files.listing"
         const val RECONNECT_MS = 60_000L
+
+        /** Children of one folder looked at, at most. */
+        const val MAX_SCANNED = 100_000
     }
 }
