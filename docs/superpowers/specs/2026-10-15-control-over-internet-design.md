@@ -67,6 +67,15 @@ A phone at home must keep the LAN road: it carries transfers, and it is the one 
 - **Bridge:**
   - a TCP failure with an identity dials iroh;
   - with no identity, it reports the TCP error as before.
-- **Device:** the A71 on Wi-Fi with TCP 1716 blocked by a firewall rule scoped to my debug server's port:
+- **Device:** the A71 on Wi-Fi with TCP 1716 unreachable:
   - the control link comes up over iroh;
   - clipboard and notifications cross.
+
+## As built
+
+- **The background sender opens the link.** `PhoneLink.sendNow` (notifications and texts; battery and media go only on the live link) opens the control link when a one-off send fails and nothing is connected, then sends on it once. A one-off connection is TCP only, so without this nothing sent in the background would reach the computer from away.
+- **The device check** pointed the saved computer's control port at a closed port, because no firewall rule can be added on this box without the owner. That is the same failure TCP meets away from home. Checklist §64.
+- **Found, not changed:** a computer that does not answer TCP is offered "Wake and connect" before a session. This was already so for sessions over the internet, and "Connect anyway" proceeds. An awake check over iroh is a follow-up.
+- **Accepted:**
+  - iroh keeps a link alive with a heartbeat every 5 s, both ends, and the desktop's endpoint is shared with sessions, which need it for hole punching. A link held in the background costs radio wake-ups; it is measured in checklist §64.
+  - The desktop's identity goes to any iroh key that dials before the phone is judged, as on the LAN (SECURITY.md limit 7).

@@ -1138,6 +1138,19 @@ Owed (a SIM):
 - [ ] A text queued while the computer is away, then names turned off: it goes without a name.
 - [ ] Desktop "keep the contact names" off: new texts carry none, and after a server restart the kept names are gone.
 
+## 64. The control channel over the internet (T10a)
+
+On the A71 against this box, 2026-10-16: the saved computer's control port was pointed at a closed port, so TCP failed as it does away from home:
+- [x] The phone logged "No control link at home; trying the internet road", then connected; the desktop logged a control connection over the internet and admitted it (the phone's iroh key was registered).
+- [x] Clipboard both ways, the battery and the 4 s clipboard polls ran on it.
+
+Owed:
+- [ ] From outside the home network (mobile data, or another Wi-Fi), with Tailscale off: notifications, texts, battery and the phone's media reach the computer with the app in the background, and Send link reaches the phone.
+- [ ] A phone with no iroh key registered (paired, never streamed on the LAN) is refused, with one log line, and works again after one session at home.
+- [ ] Unpairing on the desktop ends the internet link's packets at once.
+- [ ] A file offer to a phone on the internet link fails as "not reachable", not stuck.
+- [ ] The phone's battery over an hour with the link up in the background (iroh's 5 s heartbeat).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
