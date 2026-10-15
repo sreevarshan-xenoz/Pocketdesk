@@ -1209,6 +1209,7 @@ Owed:
 On the A71 against this box, 2026-10-16:
 - [x] Settings "Folders the computer may open" → Add folder → Android's picker (Download/Pocketdesk) → Allow: listed with Remove; Remove emptied it.
 - [x] With the app in the background, a list request (written as the Phone tab writes it) showed the folder and a sub-folder; a fetch saved the file in Downloads, MD5s matching.
+- [x] Again after the review fixes: a hidden file neither listed nor sent when named; a fetch of a file deleted on the phone answered "gone.bin is not on the phone any more" with its folder; a list of a removed root answered "That folder is no longer shared"; a fetch with MD5s matching.
 
 Owed:
 - [ ] The desktop app's Phone tab itself (roots, folders, Up, Download).
