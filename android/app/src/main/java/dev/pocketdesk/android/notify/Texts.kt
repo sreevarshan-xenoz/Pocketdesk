@@ -30,6 +30,7 @@ object TextPrefs {
     private const val PREFS = "pocketdesk-texts"
     private const val KEY_SHOW = "show"
     private const val KEY_REPLY = "reply"
+    private const val KEY_NAMES = "names"
     private const val KEY_QUEUE = "queue"
     private const val KEY_PARTS = "parts"
     private const val KEY_HANDLED = "handled"
@@ -52,6 +53,11 @@ object TextPrefs {
     fun reply(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_REPLY, false)
 
     fun setReply(ctx: Context, on: Boolean) = prefs(ctx).edit { putBoolean(KEY_REPLY, on) }
+
+    /** Whether texts carry the sender's name from this phone's contacts (T8e). Off by default. */
+    fun names(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_NAMES, false)
+
+    fun setNames(ctx: Context, on: Boolean) = prefs(ctx).edit { putBoolean(KEY_NAMES, on) }
 
     fun granted(ctx: Context, permission: String): Boolean =
         ContextCompat.checkSelfPermission(ctx, permission) == PackageManager.PERMISSION_GRANTED
@@ -170,7 +176,17 @@ object Texts {
         if (!TextPrefs.show(ctx)) return
         val batch = TextPrefs.queued(ctx)
         if (batch.isEmpty()) return
-        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(batch)))
+        // The sender's name is looked up as the text leaves (T8e), here on the
+        // worker, not where it arrived on the main thread, and only if the
+        // switch is still on now: a text queued with names on goes without
+        // one once they are turned off.
+        val named = batch.map { text ->
+            JSONObject(text.toString()).apply {
+                remove("name")
+                contactName(ctx, optString("address"))?.let { put("name", it) }
+            }
+        }
+        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(named)))
         if (sent) TextPrefs.dequeue(ctx, batch.size)
     }
 

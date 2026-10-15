@@ -76,6 +76,8 @@ These are real gaps in the current design. Plan around them.
 
 10. **A phone with "My media on the computer" on tells the computer what it plays** (roadmap T8d): the title, artist and app, kept owner-only in the state folder while it is connected. The computer, with that phone's Media permission on, can pause and skip it. Both sides must agree: the phone's setting (off by default) and the desktop's Media switch.
 
+11. **With "Names from my contacts" on, the phone tells its computer who texts it** (roadmap T8e): the sender's name from the phone's contacts goes with each forwarded text and is kept owner-only in `sms.json` (turning `sms_names` off forgets the kept names at the next start). A name says what the phone's contacts call that number; a text's sender number can be spoofed, so a name is not proof of who sent it.
+
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
 ## Using it safely today

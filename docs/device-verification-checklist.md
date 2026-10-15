@@ -1124,6 +1124,16 @@ No mouse was at hand; with none connected, a session on the A71 started and Back
 - [ ] The mouse's Back button goes to the desktop and does not end the session.
 - [ ] Settings off: the phone's own pointer, no capture.
 
+## 63. Contact names in texts (T8e)
+
+On the A71, 2026-10-15 (no SIM, so no text could arrive):
+- [x] Settings' Texts section shows "Names from my contacts", off; turning it on asked for contacts access, and denying left it off.
+
+Owed (a SIM):
+- [ ] A text from a contact shows "Ann (number)" in the notification and in Messages; a stranger shows the number only; a sender ID with letters gets no name.
+- [ ] A text queued while the computer is away, then names turned off: it goes without a name.
+- [ ] Desktop "keep the contact names" off: new texts carry none, and after a server restart the kept names are gone.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

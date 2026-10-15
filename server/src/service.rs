@@ -143,7 +143,14 @@ pub async fn run(config: Config) -> Result<()> {
         config.phone_notifications,
         config.notifications_per_minute,
     );
-    crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
+    crate::plugins::sms::configure(config.sms_notify, config.sms_keep, config.sms_names);
+    // Names turned off: forget the ones already kept, not only new ones.
+    if !config.sms_names
+        && let Ok(dir) = crate::state::state_dir()
+        && let Err(e) = pocketdesk_core::local::sms::forget_names(&dir, config.sms_keep as usize)
+    {
+        tracing::warn!("Could not forget the contact names kept with texts: {e}");
+    }
     crate::plugins::links::configure(config.open_links);
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
     crate::wake_info::configure(config.wake_announce, config.wake_port);

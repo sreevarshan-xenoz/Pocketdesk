@@ -68,6 +68,10 @@ pub struct Message {
     /// A reply's id and state; `None` for a received text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply: Option<Reply>,
+    /// The sender's name in the phone's contacts (T8e), when the phone
+    /// shares names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +99,8 @@ pub struct Conversation {
     pub last_at_unix: u64,
     pub last_body: String,
     pub count: usize,
+    /// The newest contact name the conversation's texts carry (T8e).
+    pub name: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -158,6 +164,20 @@ pub fn record_all(state_dir: &Path, messages: Vec<Message>, keep: usize) -> io::
     let mut all = read_checked(state_dir)?;
     all.extend(messages);
     write(state_dir, all, keep)
+}
+
+/// Forget every contact name kept (T8e: names turned off), keeping the
+/// texts. Whether any was forgotten; nothing is written when none was.
+pub fn forget_names(state_dir: &Path, keep: usize) -> io::Result<bool> {
+    let mut all = read_checked(state_dir)?;
+    let mut forgot = false;
+    for message in &mut all {
+        forgot |= message.name.take().is_some();
+    }
+    if forgot {
+        write(state_dir, all, keep)?;
+    }
+    Ok(forgot)
 }
 
 /// Set reply `id`'s state (the server's side). An unknown id is ignored.
@@ -272,6 +292,11 @@ pub fn conversations(messages: &[Message]) -> Vec<Conversation> {
                 if m.at_unix >= c.last_at_unix {
                     c.last_at_unix = m.at_unix;
                     c.last_body = m.body.clone();
+                    // An unnamed text (a reply, or names turned off) keeps
+                    // the name the conversation had.
+                    if m.name.is_some() {
+                        c.name = m.name.clone();
+                    }
                 }
             }
             None => by_key.push(Conversation {
@@ -280,6 +305,7 @@ pub fn conversations(messages: &[Message]) -> Vec<Conversation> {
                 last_at_unix: m.at_unix,
                 last_body: m.body.clone(),
                 count: 1,
+                name: m.name.clone(),
             }),
         }
     }
@@ -305,6 +331,7 @@ mod tests {
             at_unix: at,
             direction: Direction::Received,
             reply: None,
+            name: None,
         }
     }
 
@@ -358,6 +385,7 @@ mod tests {
                         attempts: 1,
                     },
                 }),
+                name: None,
             },
             KEEP,
         )
@@ -397,6 +425,51 @@ mod tests {
             "the copy's id does not match its name"
         );
         assert!(remove_pending(&dir, "../sms").is_err());
+    }
+
+    /// Turning names off forgets the ones already kept (T8e).
+    #[test]
+    fn names_already_kept_are_forgotten_when_names_are_turned_off() {
+        let dir = dir("forget-names");
+        let mut named = received("phone-a", "+1555", "hi", 1);
+        named.name = Some("Ann".to_string());
+        record_all(
+            &dir,
+            vec![named, received("phone-a", "+1556", "yo", 2)],
+            KEEP,
+        )
+        .unwrap();
+        assert!(forget_names(&dir, KEEP).unwrap(), "something forgotten");
+        assert!(read(&dir).iter().all(|m| m.name.is_none()));
+        assert_eq!(read(&dir).len(), 2, "the texts themselves stay");
+        assert!(
+            !forget_names(&dir, KEEP).unwrap(),
+            "nothing left to forget, nothing written"
+        );
+    }
+
+    /// A conversation is named by the newest name its texts carry (T8e),
+    /// and a text kept before names existed still reads back.
+    #[test]
+    fn a_conversation_takes_its_newest_contact_name() {
+        let mut first = received("phone-a", "+1555", "hi", 1);
+        first.name = Some("Old Name".to_string());
+        let unnamed = received("phone-a", "+1555", "again", 2);
+        let mut renamed = received("phone-a", "+1555", "later", 3);
+        renamed.name = Some("Ann".to_string());
+        let list = conversations(&[first.clone(), unnamed.clone()]);
+        assert_eq!(
+            list[0].name.as_deref(),
+            Some("Old Name"),
+            "an unnamed text keeps the name"
+        );
+        let list = conversations(&[first, unnamed, renamed]);
+        assert_eq!(list[0].name.as_deref(), Some("Ann"));
+        let old: Message = serde_json::from_str(
+            r#"{"device_id":"p","address":"+1","body":"b","at_unix":1,"direction":"received"}"#,
+        )
+        .unwrap();
+        assert_eq!(old.name, None);
     }
 
     #[test]

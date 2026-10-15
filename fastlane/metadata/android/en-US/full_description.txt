@@ -9,7 +9,7 @@ It needs the Pocketdesk program running on the computer (free software too, from
 <li>Files and whole folders both ways; transfers that stop part way continue</li>
 <li>Browse the computer's files and download them, or a whole folder</li>
 <li>Clipboard both ways, text and images</li>
-<li>The phone's notifications on the computer, and texts (SMS) with replies, if you turn them on</li>
+<li>The phone's notifications on the computer, and texts (SMS) with replies and, if you allow contacts, the sender's name, all only if you turn them on</li>
 <li>Wake the computer from the phone, at home, or from outside through a router port forward or another computer left on at home</li>
 <li>Several phones, per-phone permissions, and asking before each session</li>
 <li>Shortcuts, a Quick Settings tile and a widget, and intents for automation apps</li>

@@ -56,6 +56,9 @@ video_quality = "balanced"
 # each, and how many the history keeps.
 # sms_notify = true
 # sms_keep = 1000
+# Keep the contact names a phone sends with its texts (when the phone shares
+# them: its Settings, "Names from my contacts").
+# sms_names = true
 
 # A link a phone hands over ("Open on computer"): opened in the default
 # browser, or, false, shown as a notification. Each phone's Links
