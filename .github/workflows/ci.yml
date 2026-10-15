@@ -142,6 +142,12 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -154,25 +160,27 @@ jobs:
           # Platform 37 has its own licence prompt. `(yes || true)` because the
           # step runs under pipefail and `yes` dies of SIGPIPE when sdkmanager ends.
           (yes || true) | sdkmanager --install "platforms;android-37.0" "build-tools;36.1.0" >/dev/null
-          # NDK package names carry the full revision, so discover the r29 one
-          # instead of pinning a string that silently rots.
-          NDK=$(sdkmanager --list 2>/dev/null | awk '/ndk;29\./ { print $1; exit }')
-          test -n "$NDK" || { echo "no NDK r29 in sdkmanager --list" >&2; exit 1; }
-          (yes || true) | sdkmanager --install "$NDK" >/dev/null
-          echo "installed $NDK"
+          # The NDK the bridge is built with, pinned beside it, the same as
+          # F-Droid's recipe uses.
+          NDK=$(cat android/bridge/ndk-version)
+          (yes || true) | sdkmanager --install "ndk;$NDK" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK" >> "$GITHUB_ENV"
+          echo "installed ndk;$NDK"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
+      - name: Install cargo-ndk and the bridge's pinned Rust
+        run: |
+          cargo install cargo-ndk --version 4.1.2 --locked
+          rustup toolchain install "$(cat android/bridge/rust-toolchain-version)" \
+            --profile minimal --target aarch64-linux-android
 
       - name: Bridge clippy (host target)
         run: cargo clippy -p pocketdesk-android-bridge --all-targets -- -D warnings
 
       - name: Build the arm64 bridge
-        working-directory: android/bridge
-        run: cargo ndk -t arm64-v8a -o ../app/src/main/jniLibs build --release
+        run: sh android/bridge/build-android.sh
 
       - name: Assemble debug APK
         working-directory: android

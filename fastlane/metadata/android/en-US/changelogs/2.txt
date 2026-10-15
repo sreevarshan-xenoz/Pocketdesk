@@ -1,0 +1,4 @@
+First release.
+- The computer's screen, sound and input on the phone; files and folders both ways, resumable; clipboard both ways.
+- Pairing by QR code; per-phone permissions; several phones at once.
+- Works on your network, over Tailscale, or from anywhere through relays.
