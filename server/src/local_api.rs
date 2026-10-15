@@ -272,6 +272,18 @@ pub fn send_in(
         Ok(id) => id,
         Err(reason) => return refused(exit::BAD_ARGUMENTS, reason),
     };
+    // An offer reaches only a phone in a session: say so now, not after
+    // queueing a send the server can only fail.
+    let now = pocketdesk_core::local::pin::now_unix();
+    if !live_sessions(state_dir, now, true)
+        .iter()
+        .any(|s| s.device_id.as_deref() == Some(device_id.as_str()))
+    {
+        return refused(
+            exit::FAILED,
+            format!("{device_id} is not in a session: open one on the phone first"),
+        );
+    }
     let Ok(full) = std::path::absolute(path) else {
         return refused(
             exit::BAD_ARGUMENTS,
@@ -284,7 +296,6 @@ pub fn send_in(
             format!("{} is not there", full.display()),
         );
     }
-    let now = pocketdesk_core::local::pin::now_unix();
     let request = match pocketdesk_core::local::outbox::request(
         state_dir,
         &device_id,
@@ -682,7 +693,34 @@ mod tests {
             .unwrap();
         let file = dir.join("report.pdf");
         std::fs::write(&file, b"r").unwrap();
+        in_session(&dir, &["5f1c9b3d-6e70"]);
         (dir, file)
+    }
+
+    /// The running server's report: `phones` in a session now.
+    fn in_session(dir: &Path, phones: &[&str]) {
+        let sessions: Vec<Value> = phones
+            .iter()
+            .map(|p| json!({ "device_id": p, "peer": "192.0.2.7:1", "transport": "lan", "started_unix": 1 }))
+            .collect();
+        std::fs::write(
+            dir.join(LIVE_FILE),
+            json!({ "updated_unix": pocketdesk_core::local::pin::now_unix(), "sessions": sessions }).to_string(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_send_to_a_phone_not_in_a_session_is_refused_at_once() {
+        let (dir, file) = send_setup("send-away");
+        in_session(&dir, &[]);
+        let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
+        assert_eq!(code, exit::FAILED, "{out}");
+        assert!(out["error"].as_str().unwrap().contains("session"));
+        assert!(
+            pocketdesk_core::local::outbox::take_all(&dir, pocketdesk_core::local::pin::now_unix())
+                .is_empty()
+        );
     }
 
     #[test]
