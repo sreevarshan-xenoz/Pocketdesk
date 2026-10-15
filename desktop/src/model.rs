@@ -39,6 +39,9 @@ pub struct Snapshot {
     pub received: Vec<ReceivedRow>,
     /// Files sent to phones and how each went, newest first (F7b).
     pub sent: Vec<SentFile>,
+    /// What each phone in a session plays, as it last said (T8d).
+    pub phone_media:
+        std::collections::BTreeMap<String, pocketdesk_core::local::phone_media::PhoneMediaState>,
 }
 
 /// A received file, and whether it is still where it was saved (checked
@@ -104,6 +107,13 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         approvals,
         received,
         sent,
+        // Only a running server's: what played in an earlier run is not
+        // playing now.
+        phone_media: if running {
+            pocketdesk_core::local::phone_media::read(state_dir)
+        } else {
+            Default::default()
+        },
     }
 }
 
@@ -179,6 +189,25 @@ pub fn queue_link(
 
 /// Ask the server to send the file at `path` to `device_id`; the file's
 /// name, or why not.
+/// Ask the server to send `command` to `device_id`'s player (T8d), or why
+/// not.
+pub fn press_phone_media(
+    state_dir: &Path,
+    device_id: &str,
+    command: &str,
+    now_unix: u64,
+) -> Result<(), String> {
+    let allowed = TrustStore::read(state_dir.join(TRUST_FILE))
+        .map(|store| store.permissions(device_id).allows(Capability::Media))
+        .unwrap_or(true);
+    if !allowed {
+        return Err("Not sent: Media is off for this phone (Devices tab).".to_string());
+    }
+    pocketdesk_core::local::phone_media::press(state_dir, device_id, command, now_unix)
+        .map(|_| ())
+        .map_err(|e| format!("Not sent: {e}."))
+}
+
 pub fn queue_send(
     state_dir: &Path,
     device_id: &str,
@@ -470,6 +499,25 @@ mod tests {
         let snap = snapshot_with(&dir, 101, true);
         let ids: Vec<_> = send_targets(&snap).iter().map(|d| d.id.clone()).collect();
         assert_eq!(ids, ["a"]);
+    }
+
+    #[test]
+    fn a_press_is_queued_for_the_server_unless_media_is_off() {
+        let dir = temp_dir("press");
+        assert!(press_phone_media(&dir, "a", "next", 100).is_ok());
+        let queued = pocketdesk_core::local::phone_media::take_presses(&dir, 101);
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].command, "next");
+        assert!(press_phone_media(&dir, "a", "stop", 100).is_err());
+
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("a").unwrap();
+        let mut permissions = store.permissions("a");
+        permissions.media = Some(false);
+        store.set_permissions("a", permissions).unwrap();
+        let refused = press_phone_media(&dir, "a", "next", 100).unwrap_err();
+        assert!(refused.contains("Media"), "{refused}");
+        assert!(pocketdesk_core::local::phone_media::take_presses(&dir, 101).is_empty());
     }
 
     #[test]

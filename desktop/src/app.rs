@@ -623,6 +623,45 @@ impl PocketdeskApp {
                     ui.end_row();
                 }
             });
+        let mut pressed = None;
+        for session in &self.snapshot.sessions {
+            let Some(id) = session.device_id.as_deref() else {
+                continue;
+            };
+            let Some(playing) = self.snapshot.phone_media.get(id) else {
+                continue;
+            };
+            let media = &playing.media;
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(format!("Playing on {}:", short(id)));
+                ui.label(RichText::new(media_line(media)).strong());
+            });
+            ui.horizontal(|ui| {
+                let buttons = [
+                    ("Previous", "previous", media.can_previous),
+                    (
+                        if media.is_playing { "Pause" } else { "Play" },
+                        "playPause",
+                        media.can_play_pause,
+                    ),
+                    ("Next", "next", media.can_next),
+                ];
+                for (label, command, enabled) in buttons {
+                    if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                        pressed = Some((id.to_string(), command));
+                    }
+                }
+            });
+        }
+        if let Some((id, command)) = pressed {
+            self.notice = Some(
+                match model::press_phone_media(&self.state_dir, &id, command, now_unix()) {
+                    Ok(()) => format!("Sent {command} to the phone."),
+                    Err(e) => e,
+                },
+            );
+        }
         if let Some(session) = end {
             self.end_session(&session);
         }
@@ -1038,6 +1077,22 @@ pub fn human_size(bytes: u64) -> String {
     format!("{value:.1} {}", UNITS[unit])
 }
 
+/// What a phone plays, for the Sessions tab (T8d): "Song · Artist (App)",
+/// with what is missing left out.
+pub fn media_line(media: &pocketdesk_core::protocol::phone_media::PhoneMedia) -> String {
+    let what = [media.title.as_str(), media.artist.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    match (what.is_empty(), media.app.is_empty()) {
+        (false, false) => format!("{what} ({})", media.app),
+        (false, true) => what,
+        (true, false) => media.app.clone(),
+        (true, true) => "something".to_string(),
+    }
+}
+
 /// A phone's last battery report for the Devices tab (T8b): its charge,
 /// whether it is charging, and its age once it is over a minute old.
 pub fn battery_text(
@@ -1070,6 +1125,39 @@ pub fn human_duration(secs: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn what_a_phone_plays_reads_as_one_line() {
+        use pocketdesk_core::protocol::phone_media::PhoneMedia;
+        let song = PhoneMedia {
+            title: "Song".to_string(),
+            artist: "Artist".to_string(),
+            app: "Spotify".to_string(),
+            is_playing: true,
+            can_play_pause: true,
+            can_next: true,
+            can_previous: true,
+        };
+        assert_eq!(media_line(&song), "Song · Artist (Spotify)");
+        let video = PhoneMedia {
+            artist: String::new(),
+            ..song.clone()
+        };
+        assert_eq!(media_line(&video), "Song (Spotify)");
+        let untitled = PhoneMedia {
+            title: String::new(),
+            artist: String::new(),
+            ..song.clone()
+        };
+        assert_eq!(media_line(&untitled), "Spotify");
+        let bare = PhoneMedia {
+            title: String::new(),
+            artist: String::new(),
+            app: String::new(),
+            ..song
+        };
+        assert_eq!(media_line(&bare), "something");
+    }
+
     #[test]
     fn a_phones_battery_reads_with_its_age() {
         use pocketdesk_core::local::phone_status::PhoneBattery;
