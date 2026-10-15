@@ -12,7 +12,12 @@ fn every_command_with_json_is_in_the_local_api_doc() {
         .get_subcommands()
         .filter(|sub| sub.get_arguments().any(|arg| arg.get_id() == "json"))
         .map(|sub| sub.get_name().to_string())
-        .filter(|name| !doc.contains(&format!("`pocketdesk {name}")))
+        // The whole name, so `list` is not found inside `listen`.
+        .filter(|name| {
+            ![" ", "`", " --"]
+                .iter()
+                .any(|end| doc.contains(&format!("`pocketdesk {name}{end}")))
+        })
         .collect();
     assert!(
         missing.is_empty(),
