@@ -7,3 +7,7 @@
 pub mod control;
 pub mod evdev_codes;
 pub mod keys;
+/// Typing any character through a Wayland virtual keyboard (roadmap F4).
+#[cfg(all(target_os = "linux", feature = "injection"))]
+pub mod vkeyboard;
+pub mod xkb_keymap;

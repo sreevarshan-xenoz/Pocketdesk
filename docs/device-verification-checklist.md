@@ -1193,6 +1193,17 @@ Owed:
 - [ ] The desktop app's Files tab listing a linked phone with no session.
 - [ ] Away from home: `pocketdesk send` refused at once as not reachable.
 
+## 68. Typing any character on Linux (F4)
+
+On the Azure VM (headless Sway, this branch's release build) from the A71, 2026-10-16:
+- [x] "Type phone clipboard" with `Héllo Wörld € 😀 தமிழ் ABC!` reached `wev` character by character through the virtual keyboard (the server logged "Text is typed through the compositor's virtual keyboard").
+- [x] Found: with `/dev/uinput` not writable by the server's user, there is no injector at all, so not even text is typed, though the virtual keyboard needs no uinput.
+
+Owed:
+- [ ] Hyprland; a desktop with a non-US layout (`fr`), where text must still arrive as sent.
+- [ ] GNOME or KDE (no virtual keyboard): capitals and `!@#` arrive through uinput with Shift.
+- [ ] The in-session keyboard (IME text) as well as "Type phone clipboard".
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
