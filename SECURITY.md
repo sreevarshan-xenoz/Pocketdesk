@@ -83,7 +83,7 @@ These are real gaps in the current design. Plan around them.
 
 13. **The folders a phone shares (roadmap T10g) can be read by its computer.** In the desktop app's Phone tab, or by anything running as you that writes its requests, the computer lists them and copies any file in them, hidden ones (a leading dot) left out. Only folders the phone's owner picked in Settings, "Folders the computer may open", and only from that phone's own computer, with its Files permission on. Removing a folder there gives its grant back.
 
-14. **With "New screenshots to the computer" on (roadmap T10h), every screenshot taken on the phone goes to its computer**, whatever it shows: onto the computer's clipboard and into its Downloads. Only to the phone's own computer, only screenshots (images in a `Screenshots` folder), at most 10 minutes old; the computer's Clipboard and Files permissions gate each half. It is off by default.
+14. **With "New screenshots to the computer" on (roadmap T10h), every screenshot taken on the phone goes to its computer**, whatever it shows: onto the computer's clipboard and into its Downloads. On the computer it is then in the clipboard's history (Windows' Win+V, and its cloud clipboard if that is on) and in Downloads. Only to the phone's own computer, only images in a folder named `Screenshots` (an app that drops other images there sends them too), at most 10 minutes old; the computer's Clipboard and Files permissions gate each half. It is off by default.
 
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
