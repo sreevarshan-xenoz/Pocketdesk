@@ -588,8 +588,16 @@ class TransferService : Service() {
         private const val EXTRA_FOLDER = "folder"
         private const val EXTRA_PATH = "path"
 
-        /** The top folder each folder send from the computer was saved in (T6b). */
-        private val folderTops = mutableMapOf<String, String>()
+        /**
+         * The top folder each folder send from the computer was saved in
+         * (T6b), for the sends still arriving: the least recently used go
+         * past [MAX_FOLDER_SENDS].
+         */
+        private val folderTops = object : LinkedHashMap<String, String>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) =
+                size > MAX_FOLDER_SENDS
+        }
+        private const val MAX_FOLDER_SENDS = 32
 
         private fun folderOf(intent: Intent): RustCore.FolderPart? {
             val id = intent.getStringExtra(EXTRA_FOLDER_ID)?.takeIf { it.isNotEmpty() } ?: return null
