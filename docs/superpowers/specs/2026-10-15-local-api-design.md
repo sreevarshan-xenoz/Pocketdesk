@@ -36,3 +36,14 @@ Tasker and other automation apps start `MainActivity` with the intents that alre
 - `send` writes an outbox request the server's own reader takes; `--wait` ends on each sent state and on its deadline.
 - Prefix and name matching: unique, ambiguous, unknown.
 - The docs: `docs/local-api.md` lists every command with `--json`, held by a test like `capabilities_doc`.
+
+## As built (2026-10-15)
+
+- **Commands:** `devices`, `sent`, `received` and `send` are new; `status`, `list`, `pair`, `unpair`, `kick` and `relay-ids` gained `--json`. `sessions`, `capabilities` and `bench` keep their own formats, and the contract says so.
+- **Not as designed:** a phone is named by its id or a unique prefix only (no phone name is stored anywhere); `status --json` carries no Tailscale state (`list --json` has the tailnet's peers); the version is `pocketdesk_version`, this program's, not the server's.
+- **`send`** refuses at once a phone not in a session (exit 1), the server's own files, and anything when no server runs (exit 3); with `--wait` it reports the sent row's state from the moment there is one, and ends with exit 3 if the server stops.
+- **Failures** with `--json` are `{"api":1,"error":…}` for usage errors (exit 2), a config.toml that does not parse (exit 1) and the command's own; `--json` on the command line decides it, so a new command cannot miss it.
+- **The trust store** is read without being written (`TrustStore::read`), and an unreadable one is an error, never "no paired phones".
+- **Fresh review (0 Critical, 4 Important), fixed one commit each:** JSON failures before the command ran, `send --wait` reporting `queued` for an offered file and waiting on a stopped server (and a huge `--wait` panicking), an unreadable store read as empty and created by a read, and a contract that overstated what each command prints. Minors fixed: the version field, `wants_json` by hand, refused sends on stdout, a send to a phone not in a session, a closed pipe panicking, the server's own files sent singly, and the doc test's substring match.
+- **Left:** `kick` says it asked, not whether a session matched (the server only logs that).
+- **Verified on this box with the A71:** `status --json` showing the LAN session, `devices --json` marking the phone in session, `send <prefix> <file> --wait 120` ending "sent" with exit 0 and the phone's MD5 matching; with no phone connected, `send` refused at once; with no server, exit 3.
