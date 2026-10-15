@@ -33,6 +33,32 @@ pub const FOLDER_FETCH_REPLY: &str = "kdeconnect.pocketdesk.folder_fetch_reply";
 /// How many folder sends one phone may have on the way when it asks for
 /// another.
 const MAX_ASKED_FOLDERS: usize = 2;
+/// How many folders one phone may ask for in a minute, accepted or not:
+/// each costs the desktop a walk, and a phone can end a send at once by
+/// declining its offers.
+const MAX_ASKED_PER_MINUTE: usize = 10;
+
+/// Whether `device` may ask for another folder at `now`; counts the ask.
+fn may_ask_again(device: &str, now: Instant) -> bool {
+    static ASKED: OnceLock<Mutex<HashMap<String, std::collections::VecDeque<Instant>>>> =
+        OnceLock::new();
+    let mut asked = ASKED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let times = asked.entry(device.to_string()).or_default();
+    while times
+        .front()
+        .is_some_and(|t| now.saturating_duration_since(*t) >= Duration::from_secs(60))
+    {
+        times.pop_front();
+    }
+    if times.len() >= MAX_ASKED_PER_MINUTE {
+        return false;
+    }
+    times.push_back(now);
+    true
+}
 /// How long the phone has to fetch an offered file. Long enough for a phone
 /// that fetches a dropped batch one file after another; a folder's files
 /// have this long from the phone's last fetch of any of them.
@@ -758,6 +784,13 @@ async fn send_folder(
     target: Result<&dyn DeviceSender, &String>,
     reply: Option<Reply<'_>>,
 ) -> Result<(), String> {
+    if let Some(reply) = reply
+        && !may_ask_again(&request.device_id, Instant::now())
+    {
+        let wait = Err("asked for too many folders: wait a minute".to_string());
+        reply.send(&wait).await;
+        return wait;
+    }
     let limit = reply.map(|_| MAX_ASKED_FOLDERS);
     let Some(_reserved) = Reservation::take(&request.id, &request.device_id, limit) else {
         let busy = Err("busy: two folders are already on the way to this phone".to_string());
@@ -799,7 +832,9 @@ async fn offer_folder(
     let total: u64 = found
         .as_ref()
         .map_or(0, |f| f.files.iter().map(|f| f.size).sum());
-    {
+    // The owner's sends are listed either way; a phone's own request only
+    // once it is going, so refused ones cannot push out the owner's history.
+    if reply.is_none() || checked.is_ok() {
         let _guard = sent_lock().lock().unwrap_or_else(|e| e.into_inner());
         let row = SentFile {
             id: request.id.clone(),
@@ -1174,6 +1209,26 @@ mod tests {
                 .unwrap()
                 .contains("nothing")
         );
+        assert!(
+            sent::read(&dir).is_empty(),
+            "a refused request leaves the owner's sent list alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_phone_asking_again_and_again_is_told_to_wait() {
+        let dir = temp_dir("asked-often");
+        let root = dir.join("Empty");
+        std::fs::create_dir_all(&root).unwrap();
+        let phone = Conn::new("phone-often", true);
+        for _ in 0..MAX_ASKED_PER_MINUTE {
+            let refused = offer_folder_to(&dir, "phone-often", &root, "Empty", &*phone).await;
+            assert!(refused.unwrap_err().contains("nothing"));
+        }
+        let refused = offer_folder_to(&dir, "phone-often", &root, "Empty", &*phone).await;
+        assert!(refused.unwrap_err().contains("wait"));
+        let last = phone.sent.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(last.body["queued"], false);
     }
 
     #[test]
