@@ -41,6 +41,15 @@ pub struct MirrorSession {
     pub driving: bool,
 }
 
+/// A phone with a control link to the server, in a session or not (T10d).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedPhone {
+    pub device_id: String,
+    /// Files can reach it: its link has an address the server can dial
+    /// back (not one over the internet).
+    pub files: bool,
+}
+
 /// `live_sessions.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveMirror {
@@ -50,6 +59,31 @@ pub struct LiveMirror {
     #[serde(default)]
     pub shared_control: bool,
     pub sessions: Vec<MirrorSession>,
+    /// The phones with a control link, in a session or not (T10d).
+    #[serde(default)]
+    pub linked: Vec<LinkedPhone>,
+}
+
+impl LiveMirror {
+    /// Whether a file can be offered to `device_id` now: it is in a
+    /// session, or linked with an address the server can dial back.
+    pub fn files_reach(&self, device_id: &str) -> bool {
+        self.sessions
+            .iter()
+            .any(|s| s.device_id.as_deref() == Some(device_id))
+            || self
+                .linked
+                .iter()
+                .any(|p| p.device_id == device_id && p.files)
+    }
+
+    /// Whether anything the server pushes reaches `device_id` now.
+    pub fn reaches(&self, device_id: &str) -> bool {
+        self.sessions
+            .iter()
+            .any(|s| s.device_id.as_deref() == Some(device_id))
+            || self.linked.iter().any(|p| p.device_id == device_id)
+    }
 }
 
 impl LiveMirror {
@@ -61,11 +95,17 @@ impl LiveMirror {
 }
 
 /// The mirror's JSON, as the server writes it.
-pub fn render_mirror(sessions: &[MirrorSession], shared_control: bool, now_unix: u64) -> String {
+pub fn render_mirror(
+    sessions: &[MirrorSession],
+    shared_control: bool,
+    linked: &[LinkedPhone],
+    now_unix: u64,
+) -> String {
     serde_json::to_string(&LiveMirror {
         updated_unix: now_unix,
         shared_control,
         sessions: sessions.to_vec(),
+        linked: linked.to_vec(),
     })
     .unwrap_or_default()
 }
@@ -207,6 +247,39 @@ mod tests {
     }
 
     #[test]
+    fn a_linked_phone_takes_files_only_with_an_address_to_dial() {
+        let mirror = parse_mirror(&render_mirror(
+            &[MirrorSession {
+                id: 1,
+                device_id: Some("in-session".into()),
+                peer: "192.0.2.7:9".into(),
+                transport: "lan".into(),
+                started_unix: 1,
+                driving: false,
+            }],
+            false,
+            &[
+                LinkedPhone {
+                    device_id: "at-home".into(),
+                    files: true,
+                },
+                LinkedPhone {
+                    device_id: "away".into(),
+                    files: false,
+                },
+            ],
+            2,
+        ))
+        .unwrap();
+        assert!(mirror.files_reach("in-session") && mirror.files_reach("at-home"));
+        assert!(!mirror.files_reach("away") && mirror.reaches("away"));
+        assert!(!mirror.reaches("stranger"));
+        // A mirror from before T10d has no `linked`.
+        let old = parse_mirror(r#"{"updated_unix":1,"sessions":[]}"#).unwrap();
+        assert!(old.linked.is_empty());
+    }
+
+    #[test]
     fn the_server_render_parses_back() {
         let rendered = render_mirror(
             &[MirrorSession {
@@ -218,6 +291,7 @@ mod tests {
                 driving: true,
             }],
             true,
+            &[],
             8,
         );
         let mirror = parse_mirror(&rendered).unwrap();
