@@ -202,6 +202,12 @@ impl SettingsForm {
                     "keep the contact names phones send with texts (off forgets those kept, when the server restarts)",
                 );
                 ui.end_row();
+                ui.label("Clipboard to phones");
+                ui.checkbox(
+                    &mut e.clipboard_push,
+                    "send what I copy to connected phones (those with Clipboard on)",
+                );
+                ui.end_row();
                 ui.label("Links from phones");
                 ui.checkbox(
                     &mut e.open_links,

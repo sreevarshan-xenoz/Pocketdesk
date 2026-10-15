@@ -132,10 +132,12 @@ impl Plugin for ClipboardPlugin {
         match packet.packet_type.as_str() {
             "kdeconnect.clipboard" => {
                 // Remote clipboard update - set local clipboard
-                if let Some(content) = packet.body.get("content").and_then(|v| v.as_str())
-                    && let Err(e) = set_clipboard(content).await
-                {
-                    tracing::warn!("Failed to set clipboard: {}", e);
+                if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
+                    // Not pushed back to the phone it came from (T10b).
+                    crate::clipboard_push::note_from_phone(sender.device_id(), content);
+                    if let Err(e) = set_clipboard(content).await {
+                        tracing::warn!("Failed to set clipboard: {}", e);
+                    }
                 }
             }
             "kdeconnect.clipboard.connect" => {
@@ -276,6 +278,24 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
 #[cfg(windows)]
 fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
     share::io_error("clipboard", e)
+}
+
+/// The clipboard's text, if it holds any (T10b's watcher): never an image.
+#[cfg(windows)]
+pub(crate) async fn read_text() -> Option<String> {
+    use crate::platform::clipboard_windows as win;
+    tokio::task::spawn_blocking(|| win::has_text().then(win::get_text).and_then(|t| t.ok()))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// The clipboard's text, if it holds any (T10b's watcher): `wl-paste`
+/// asked for a text type only, so an image is never read.
+#[cfg(not(windows))]
+pub(crate) async fn read_text() -> Option<String> {
+    let bytes = wl_paste(&["--no-newline", "--type", "text"]).await.ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 /// Set the system clipboard: the Win32 clipboard on Windows.
