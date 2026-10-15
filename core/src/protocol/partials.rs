@@ -112,8 +112,10 @@ impl Store {
     }
 
     /// Drop what `limits` no longer allow at `now`, oldest first, and return
-    /// the dropped records so the caller can delete their bytes.
-    pub fn sweep(&self, now: u64, limits: Limits) -> Vec<Record> {
+    /// the dropped records so the caller can delete their bytes. A record
+    /// `in_use` (a transfer is writing it now) is never dropped, though it
+    /// still counts against the limits.
+    pub fn sweep(&self, now: u64, limits: Limits, in_use: impl Fn(&Record) -> bool) -> Vec<Record> {
         let mut kept = self.all();
         kept.sort_by_key(|r| std::cmp::Reverse(r.created_unix));
         let mut dropped = Vec::new();
@@ -122,9 +124,10 @@ impl Store {
         for record in kept {
             let count = per_device.entry(record.device.clone()).or_default();
             let too_old = now.saturating_sub(record.created_unix) >= limits.max_age_secs;
-            let keep = !too_old
-                && *count < limits.per_device
-                && bytes.saturating_add(record.committed) <= limits.total_bytes;
+            let keep = in_use(&record)
+                || (!too_old
+                    && *count < limits.per_device
+                    && bytes.saturating_add(record.committed) <= limits.total_bytes);
             if keep {
                 *count += 1;
                 bytes += record.committed;
@@ -195,7 +198,7 @@ mod tests {
         store.put(&record("a", &sources[3], 10, 1700)).unwrap();
         store.put(&record("b", &sources[4], 300, 1800)).unwrap(); // over the bytes
         let mut dropped: Vec<String> = store
-            .sweep(1900, limits)
+            .sweep(1900, limits, |_| false)
             .into_iter()
             .map(|r| r.source)
             .collect();
@@ -211,7 +214,31 @@ mod tests {
             max_age_secs: 0,
             ..limits
         };
-        assert_eq!(store.sweep(1900, nothing).len(), 2, "zero keeps nothing");
+        assert_eq!(
+            store.sweep(1900, nothing, |_| false).len(),
+            2,
+            "zero keeps nothing"
+        );
+        let _ = std::fs::remove_dir_all(store.dir());
+    }
+
+    #[test]
+    fn a_record_in_use_is_never_swept() {
+        let store = store("in-use");
+        let limits = Limits {
+            max_age_secs: 0,
+            per_device: 0,
+            total_bytes: 0,
+        };
+        store.put(&record("a", SOURCE, 10, 0)).unwrap();
+        store.put(&record("a", OTHER, 10, 0)).unwrap();
+        let dropped = store.sweep(100, limits, |r| r.source == SOURCE);
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].source, OTHER);
+        assert!(
+            store.get("a", SOURCE).is_some(),
+            "the transfer using it keeps it"
+        );
         let _ = std::fs::remove_dir_all(store.dir());
     }
 

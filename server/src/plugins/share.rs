@@ -46,10 +46,49 @@ pub(crate) fn partials() -> Option<Store> {
         .map(|dir| Store::new(dir.join("partials")))
 }
 
+/// The partial files a receive is writing now, by file name. The sweep
+/// leaves these alone: a transfer without a record yet (its first commit
+/// not reached, or nothing kept) is still using its file.
+fn active_parts() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static ACTIVE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    ACTIVE.get_or_init(Default::default)
+}
+
+/// Marks a partial file in use for as long as it lives.
+struct InUse(String);
+
+impl InUse {
+    fn new(location: &str) -> Self {
+        active_parts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(location.to_string());
+        InUse(location.to_string())
+    }
+}
+
+impl Drop for InUse {
+    fn drop(&mut self) {
+        active_parts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+fn in_use(location: &str) -> bool {
+    active_parts()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(location)
+}
+
 /// Drop unfinished files past `limits`, with their bytes, and any bytes
-/// whose record is gone.
+/// whose record is gone; never one a receive is using now.
 pub(crate) fn sweep_partials(store: &Store, limits: pocketdesk_core::protocol::partials::Limits) {
-    for record in store.sweep(pocketdesk_core::local::pin::now_unix(), limits) {
+    let now = pocketdesk_core::local::pin::now_unix();
+    for record in store.sweep(now, limits, |r| in_use(&r.location)) {
         let _ = std::fs::remove_file(store.dir().join(&record.location));
     }
     let kept: std::collections::HashSet<String> =
@@ -57,7 +96,7 @@ pub(crate) fn sweep_partials(store: &Store, limits: pocketdesk_core::protocol::p
     if let Ok(entries) = std::fs::read_dir(store.dir()) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.ends_with(".part") && !kept.contains(&name) {
+            if name.ends_with(".part") && !kept.contains(&name) && !in_use(&name) {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
@@ -918,8 +957,10 @@ async fn receive_file(
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     std::fs::create_dir_all(store.dir()).map_err(|e| io_error("create_dir", e))?;
-    sweep_partials(store, limits);
     let location = format!("{}.part", Store::id(device, &source));
+    // In use before the sweep, so the sweep keeps this transfer's own part.
+    let _in_use = InUse::new(&location);
+    sweep_partials(store, limits);
     let part_path = store.dir().join(&location);
     let record = store
         .get(device, &source)
@@ -1083,6 +1124,24 @@ mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
+
+    #[test]
+    fn the_sweep_leaves_a_part_a_receive_is_writing() {
+        let store = Store::new(temp_dir("sweep-in-use"));
+        let part = store.dir().join("busy.part");
+        std::fs::write(&part, b"half").unwrap();
+        let nothing_kept = pocketdesk_core::protocol::partials::Limits {
+            max_age_secs: 0,
+            per_device: 0,
+            total_bytes: 0,
+        };
+        let writing = InUse::new("busy.part");
+        sweep_partials(&store, nothing_kept);
+        assert!(part.exists(), "another transfer's sweep must not take it");
+        drop(writing);
+        sweep_partials(&store, nothing_kept);
+        assert!(!part.exists(), "once unused, an orphan part goes");
+    }
 
     #[tokio::test]
     async fn a_retry_replaces_the_attempt_still_running_for_its_file() {

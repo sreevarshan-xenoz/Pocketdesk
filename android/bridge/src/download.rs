@@ -73,7 +73,7 @@ pub fn sweep_partials(max_age_hours: u32) -> Vec<String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     store
-        .sweep(now, limits)
+        .sweep(now, limits, |_| false)
         .into_iter()
         .map(|r| r.location)
         .collect()
