@@ -263,6 +263,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             ) { Prefs.setOfferWake(context, it) }
 
             PhoneNotificationsSection()
+            PhoneFoldersSection()
             TextsSection()
 
             // T2: whether Android holds those back while the phone sleeps.
