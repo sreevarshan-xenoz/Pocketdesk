@@ -462,4 +462,6 @@
     <string name="media_next">Siguiente</string>
     <string name="settings_phone_media">Mi multimedia en el equipo</string>
     <string name="settings_phone_media_summary">Durante una sesión, el equipo muestra lo que reproduce este teléfono y puede pausarlo y saltarlo. Requiere acceso a las notificaciones</string>
+    <string name="settings_capture_mouse">Usar un ratón conectado en el equipo</string>
+    <string name="settings_capture_mouse_summary">Durante una sesión, un ratón conectado a este teléfono (USB o Bluetooth) mueve el cursor del equipo y hace clic allí</string>
 </resources>

@@ -464,4 +464,6 @@
     <string name="media_next">Next</string>
     <string name="settings_phone_media">My media on the computer</string>
     <string name="settings_phone_media_summary">During a session the computer shows what this phone plays, and can pause and skip it. Needs notification access</string>
+    <string name="settings_capture_mouse">Use a connected mouse on the computer</string>
+    <string name="settings_capture_mouse_summary">During a session, a mouse plugged into this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
 </resources>

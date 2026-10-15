@@ -42,6 +42,10 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T9c, a mouse on the phone (branch `feat/pointer-capture`; spec as T9a's).**
+  - **How:** a USB/Bluetooth mouse connected to the phone is captured by the session (`requestPointerCapture`), its relative motion, buttons and wheel sent as the trackpad's outputs (`CapturedMouse`, JVM-tested); the handler follows focus; Settings "Use a connected mouse on the computer".
+  - **Fresh review (0 Critical, 4 Important), fixed:** dead after the keyboard took focus, batched samples dropped, a capture left over Home, the mouse's Back ending the session.
+  - **Device:** no mouse here; a session with none connected behaved as before. Owed: checklist §62.
 - 2026-10-15: **T9b, portrait sessions (branch `feat/portrait-sessions`; spec as T9a's).**
   - **How:** "Pane: auto" now stacks an upright phone's session: the stream on top, sized to the desktop's shape (a quarter to 60 %), the trackpad dock and shortcut bar below. Tablets, foldables and wide windows are unchanged. `PaneRule` (JVM-tested) holds the table.
   - **Fresh review (0 Critical, 3 Important), fixed:** chrome that never faded over the small pane, a layout the keyboard could flip, and the keyboard bar padding a stream above it.

@@ -145,6 +145,8 @@ fun RemoteDesktopView(
     modifier: Modifier = Modifier,
 ) {
     val decoderHost = remember { DecoderHost() }
+    // T9c: undoes the mouse capture attached to the video view.
+    val captureRelease = remember { arrayOfNulls<() -> Unit>(1) }
     val zoom = remember { ViewportZoom() }
     // Real encoded frame size, reported by the decoder (the initial width/
     // height are only a guess until the first SPS).
@@ -227,6 +229,9 @@ fun RemoteDesktopView(
                                 }
                             },
                         )
+                        captureRelease[0] = attachMouseCapture(this, address, port) {
+                            Prefs.captureMouse(context)
+                        }
                     }
                 },
                 update = { view -> (view as SurfaceView).setSecure(secure) },
@@ -253,7 +258,10 @@ fun RemoteDesktopView(
     }
 
     DisposableEffect(Unit) {
-        onDispose { decoderHost.stop() }
+        onDispose {
+            captureRelease[0]?.invoke()
+            decoderHost.stop()
+        }
     }
 }
 

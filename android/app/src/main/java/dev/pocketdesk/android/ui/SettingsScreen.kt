@@ -160,6 +160,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.shareBattery(context),
             ) { Prefs.setShareBattery(context, it) }
             boolRow(
+                LlIcons.Mouse,
+                stringResource(R.string.settings_capture_mouse),
+                stringResource(R.string.settings_capture_mouse_summary),
+                Prefs.captureMouse(context),
+            ) { Prefs.setCaptureMouse(context, it) }
+            boolRow(
                 LlIcons.Volume,
                 stringResource(R.string.settings_phone_media),
                 stringResource(R.string.settings_phone_media_summary),
