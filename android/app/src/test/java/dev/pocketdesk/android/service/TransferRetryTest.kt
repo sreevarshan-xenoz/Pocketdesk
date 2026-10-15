@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.service
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -49,6 +50,26 @@ class TransferRetryTest {
             "No connection could be made because the target machine actively refused it. (os error 10061)",
         )) {
             assertEquals(error, 5L, TransferRetry.delayBefore(1, error, enabled = true))
+        }
+    }
+
+    @Test
+    fun aFolderSendStopsOnceThreeFilesInARowCouldNotReachTheComputer() {
+        val streak = TransferRetry.FolderStreak()
+        val gone = "The transfer failed: connection refused by the network"
+        assertTrue(streak.record(sent = false, error = gone))
+        assertTrue("one that went through starts the count again", streak.record(sent = true, error = null))
+        assertTrue(streak.record(sent = false, error = gone))
+        assertTrue(streak.record(sent = false, error = gone))
+        assertFalse("the third in a row stops the send", streak.record(sent = false, error = gone))
+    }
+
+    @Test
+    fun filesTheComputerRefusesOneByOneDoNotStopAFolder() {
+        val streak = TransferRetry.FolderStreak()
+        repeat(10) {
+            assertTrue(streak.record(sent = false, error = "big.iso is larger than 8 GB"))
+            assertTrue(streak.record(sent = false, error = "cannot open locked.db"))
         }
     }
 

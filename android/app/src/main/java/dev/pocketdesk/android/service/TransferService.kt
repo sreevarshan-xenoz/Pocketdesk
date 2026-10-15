@@ -178,11 +178,20 @@ class TransferService : Service() {
         val folder = documentName(job.tree, rootId) ?: "Folder"
         val plan = FolderWalk.plan(rootId) { children(job.tree, it) }
         val folderId = java.util.UUID.randomUUID().toString().replace("-", "")
-        plan.files.forEachIndexed { index, file ->
+        val streak = TransferRetry.FolderStreak()
+        for ((index, file) in plan.files.withIndex()) {
             val uri = DocumentsContract.buildDocumentUriUsingTree(job.tree, file.id)
             val part = RustCore.FolderPart(folderId, folder, file.path)
             val title = getString(R.string.transfer_sending_folder, folder, index + 1, plan.files.size)
-            sendCounted(job.address, job.port, uri, file.path.last(), part, title)
+            val result = sendCounted(job.address, job.port, uri, file.path.last(), part, title)
+            if (!streak.record(result.isSuccess, result.exceptionOrNull()?.message)) {
+                // The computer stopped answering: the rest are not sent.
+                val left = plan.files.size - index - 1
+                sendCount += left
+                lastError = getString(R.string.transfer_folder_stopped, folder, left)
+                Log.w(TAG, "folder $folder: stopped with $left files left (${result.exceptionOrNull()?.message})")
+                return
+            }
         }
         if (plan.skipped > 0 || plan.truncated) {
             lastError = getString(R.string.transfer_folder_partial, folder, plan.skipped)
@@ -190,7 +199,7 @@ class TransferService : Service() {
         }
     }
 
-    /** One file sent, retried as the settings say, and counted. */
+    /** One file sent, retried as the settings say, and counted; how it went. */
     private fun sendCounted(
         address: String,
         port: Int,
@@ -198,7 +207,7 @@ class TransferService : Service() {
         name: String,
         part: RustCore.FolderPart?,
         title: String,
-    ) {
+    ): Result<Unit> {
         show(progressNotification(title, name, 0))
         var result = sendOne(address, port, uri, name, part) { percent ->
             show(progressNotification(title, name, percent))
@@ -224,6 +233,7 @@ class TransferService : Service() {
             lastError = result.exceptionOrNull()?.message
             Log.w(TAG, "sending $name failed: $lastError")
         }
+        return result
     }
 
     /** The children of folder [id] in the picked [tree]. */

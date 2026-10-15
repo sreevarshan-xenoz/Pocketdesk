@@ -183,6 +183,7 @@
     <string name="channel_transfers_desc">உங்கள் கணினிக்கும் அதிலிருந்தும் அனுப்பிய கோப்புகளின் முன்னேற்றம்</string>
     <string name="transfer_retrying">மீண்டும் முயல்கிறது (3 இல் %1$d)</string>
     <string name="transfer_sending_folder">%1$s கோப்புறை அனுப்பப்படுகிறது: %3$d இல் %2$d</string>
+    <string name="transfer_folder_stopped">%1$s அனுப்புவது நிறுத்தப்பட்டது: கணினி பதிலளிப்பதை நிறுத்தியது. அனுப்பப்படாதவை: %2$d</string>
     <string name="transfer_folder_partial">%1$s முழுவதும் அனுப்பப்படவில்லை. விடுபட்டவை: %2$d (கணினி ஏற்காத பெயர், அல்லது வரம்பைத் தாண்டியவை)</string>
     <string name="files_send_folder">இந்தக் கணினிக்கு ஒரு கோப்புறையை அனுப்பு</string>
     <string name="files_send_folder_summary">அதன் பதிவிறக்கங்களில் புதிய கோப்புறைக்குச் செல்லும்</string>
