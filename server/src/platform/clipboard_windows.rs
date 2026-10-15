@@ -168,6 +168,46 @@ pub(crate) fn sequence() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
 }
 
+/// The marks that say a copy is private (T10b): its presence for the two
+/// flag formats, the DWORD of the two `Can...` formats.
+pub(crate) fn privacy_marks() -> crate::clipboard_push::WindowsMarks {
+    let format = |name: windows::core::PCWSTR| unsafe { RegisterClipboardFormatW(name) };
+    let present = |id: u32| id != 0 && unsafe { IsClipboardFormatAvailable(id) }.is_ok();
+    let exclude = format(w!("ExcludeClipboardContentFromMonitorProcessing"));
+    let viewer = format(w!("Clipboard Viewer Ignore"));
+    let history = format(w!("CanIncludeInClipboardHistory"));
+    let cloud = format(w!("CanUploadToCloudClipboard"));
+    let mut marks = crate::clipboard_push::WindowsMarks {
+        exclude_from_monitors: present(exclude),
+        viewer_ignore: present(viewer),
+        ..Default::default()
+    };
+    if (present(history) || present(cloud))
+        && let Ok(_open) = Open::new(None)
+    {
+        marks.history = present(history).then(|| dword(history)).flatten();
+        marks.cloud = present(cloud).then(|| dword(cloud)).flatten();
+    }
+    marks
+}
+
+/// The DWORD in clipboard format `id`; the clipboard must be open.
+fn dword(id: u32) -> Option<u32> {
+    let handle = unsafe { GetClipboardData(id) }.ok()?;
+    let memory = HGLOBAL(handle.0);
+    if unsafe { GlobalSize(memory) } < 4 {
+        return None;
+    }
+    let source = unsafe { GlobalLock(memory) } as *const u32;
+    if source.is_null() {
+        return None;
+    }
+    // SAFETY: at least 4 bytes, checked above; unaligned reads are allowed.
+    let value = unsafe { source.read_unaligned() };
+    let _ = unsafe { GlobalUnlock(memory) };
+    Some(value)
+}
+
 /// Whether the clipboard holds text, which wins over an image.
 pub(crate) fn has_text() -> bool {
     unsafe { IsClipboardFormatAvailable(u32::from(CF_UNICODETEXT.0)) }.is_ok()

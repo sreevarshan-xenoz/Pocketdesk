@@ -49,6 +49,41 @@ impl Watch {
     }
 }
 
+/// The marks a copy carries on Windows that say it is private: password
+/// managers set them so clipboard history, cloud sync and monitors skip it.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WindowsMarks {
+    /// `ExcludeClipboardContentFromMonitorProcessing` is on the clipboard.
+    pub exclude_from_monitors: bool,
+    /// `Clipboard Viewer Ignore` is on the clipboard.
+    pub viewer_ignore: bool,
+    /// The DWORD in `CanIncludeInClipboardHistory`, when present.
+    pub history: Option<u32>,
+    /// The DWORD in `CanUploadToCloudClipboard`, when present.
+    pub cloud: Option<u32>,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl WindowsMarks {
+    /// Is the copy private? Then it never leaves this computer.
+    pub(crate) fn private(self) -> bool {
+        self.exclude_from_monitors
+            || self.viewer_ignore
+            || self.history == Some(0)
+            || self.cloud == Some(0)
+    }
+}
+
+/// Is a Wayland copy private? KDE's password managers (KeePassXC among
+/// them) offer `x-kde-passwordManagerHint` with it.
+#[cfg_attr(windows, allow(dead_code))]
+pub(crate) fn private_types(types: &str) -> bool {
+    types
+        .lines()
+        .any(|t| t.trim() == "x-kde-passwordManagerHint")
+}
+
 /// Which phone last set the computer's clipboard, and to what: that phone
 /// is not sent its own text back.
 static FROM_PHONE: Mutex<Option<(String, String)>> = Mutex::new(None);
@@ -124,6 +159,42 @@ pub(crate) async fn run() {
 mod tests {
     use super::*;
     use pocketdesk_core::protocol::kdeconnect::TcpDeviceSender;
+
+    #[test]
+    fn a_copy_a_password_manager_marks_stays_on_the_computer() {
+        assert!(!WindowsMarks::default().private());
+        for marks in [
+            WindowsMarks {
+                exclude_from_monitors: true,
+                ..Default::default()
+            },
+            WindowsMarks {
+                viewer_ignore: true,
+                ..Default::default()
+            },
+            WindowsMarks {
+                history: Some(0),
+                ..Default::default()
+            },
+            WindowsMarks {
+                cloud: Some(0),
+                ..Default::default()
+            },
+        ] {
+            assert!(marks.private(), "{marks:?}");
+        }
+        assert!(
+            !WindowsMarks {
+                history: Some(1),
+                cloud: Some(1),
+                ..Default::default()
+            }
+            .private(),
+            "allowed explicitly"
+        );
+        assert!(private_types("text/plain\nx-kde-passwordManagerHint\n"));
+        assert!(!private_types("text/plain;charset=utf-8\nTEXT\n"));
+    }
 
     #[test]
     fn only_a_change_after_the_first_read_is_pushed() {
