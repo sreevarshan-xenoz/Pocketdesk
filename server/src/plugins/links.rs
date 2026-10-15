@@ -35,7 +35,7 @@ pub struct LinksPlugin {
 
 impl Default for LinksPlugin {
     fn default() -> Self {
-        Self::with(Arc::new(open_in_browser), Arc::new(show_link))
+        Self::with(Arc::new(open_detached), Arc::new(show_link))
     }
 }
 
@@ -77,7 +77,7 @@ impl LinksPlugin {
         if OPEN_LINKS.load(Ordering::Relaxed) {
             match (self.open)(url) {
                 Ok(()) => {
-                    tracing::info!("Opened a link from {device}");
+                    tracing::info!("Opening a link from {device}");
                     return;
                 }
                 Err(e) => tracing::warn!("Could not open a link from {device}: {e}"),
@@ -152,14 +152,40 @@ async fn push(
         .map_err(|e| format!("could not send: {e}"))
 }
 
+/// Open `url` on a thread of its own, never the phone's packet loop: a
+/// browser that is slow to start, or Windows asking which app to use, would
+/// hold it. A link that cannot be opened is shown instead.
+fn open_detached(url: &str) -> std::result::Result<(), String> {
+    let url = url.to_string();
+    std::thread::Builder::new()
+        .name("open-link".to_string())
+        .spawn(move || {
+            if let Err(e) = open_in_browser(&url) {
+                tracing::warn!("Could not open a link: {e}");
+                show_link("Pocketdesk: a link from your phone", &url);
+            }
+        })
+        .map(|_| ())
+        .map_err(|e| format!("no thread to open it on: {e}"))
+}
+
 /// Open `url` (already checked) with the system's handler for web links:
-/// `ShellExecuteW` on Windows, `xdg-open` on Linux. Never a shell.
+/// `ShellExecuteW` on Windows, `xdg-open` on Linux (waited for, so it
+/// leaves no zombie). Never a shell. Blocks.
 fn open_in_browser(url: &str) -> std::result::Result<(), String> {
     #[cfg(windows)]
     {
+        use windows::Win32::System::Com::{
+            COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+        };
         use windows::Win32::UI::Shell::ShellExecuteW;
         use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
         use windows::core::{HSTRING, w};
+        // ShellExecute may hand the link to a COM handler, so the thread
+        // needs COM, as its documentation asks.
+        // SAFETY: called on this thread before any COM use, paired below.
+        let com =
+            unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
         // SAFETY: valid, NUL-terminated wide strings for the call's duration.
         let result = unsafe {
             ShellExecuteW(
@@ -171,6 +197,10 @@ fn open_in_browser(url: &str) -> std::result::Result<(), String> {
                 SW_SHOWNORMAL,
             )
         };
+        if com.is_ok() {
+            // SAFETY: pairs the successful CoInitializeEx above.
+            unsafe { CoUninitialize() };
+        }
         // Above 32 is success (the old HINSTANCE convention).
         if result.0 as usize > 32 {
             Ok(())
@@ -185,9 +215,15 @@ fn open_in_browser(url: &str) -> std::result::Result<(), String> {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn()
-            .map(|_| ())
+            .status()
             .map_err(|e| format!("xdg-open: {e}"))
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("xdg-open: {status}"))
+                }
+            })
     }
 }
 
