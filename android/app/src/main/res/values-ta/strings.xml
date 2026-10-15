@@ -482,4 +482,5 @@
     <string name="phone_folders_add">கோப்புறையைச் சேர்</string>
     <string name="phone_folders_remove">நீக்கு</string>
     <string name="phone_folders_storage">சேமிப்பகம்</string>
+    <string name="phone_folders_not_kept">அந்தக் கோப்புறைக்கான அணுகலை Pocketdesk வைத்திருக்க Android அனுமதிக்கவில்லை</string>
 </resources>

@@ -487,4 +487,5 @@
     <string name="phone_folders_add">Añadir carpeta</string>
     <string name="phone_folders_remove">Quitar</string>
     <string name="phone_folders_storage">Almacenamiento</string>
+    <string name="phone_folders_not_kept">Android no dejó que Pocketdesk conservara el acceso a esa carpeta</string>
 </resources>

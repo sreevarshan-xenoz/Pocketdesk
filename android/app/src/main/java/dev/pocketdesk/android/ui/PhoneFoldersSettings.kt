@@ -2,6 +2,7 @@ package dev.pocketdesk.android.ui
 
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
@@ -32,6 +33,7 @@ fun PhoneFoldersSection() {
     var version by remember { mutableIntStateOf(0) }
     val folders = version.let { PhoneFolders.all(context) }
     val storageName = stringResource(R.string.phone_folders_storage)
+    val notKept = stringResource(R.string.phone_folders_not_kept)
     val pick =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree: Uri? ->
             if (tree != null) {
@@ -40,7 +42,9 @@ fun PhoneFoldersSection() {
                         .getOrNull()
                         ?.ifEmpty { null }
                         ?: storageName
-                PhoneFolders.add(context, tree, name)
+                if (!PhoneFolders.add(context, tree, name)) {
+                    Toast.makeText(context, notKept, Toast.LENGTH_LONG).show()
+                }
                 version++
             }
         }

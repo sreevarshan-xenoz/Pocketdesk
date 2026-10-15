@@ -489,4 +489,5 @@
     <string name="phone_folders_add">Add folder</string>
     <string name="phone_folders_remove">Remove</string>
     <string name="phone_folders_storage">Storage</string>
+    <string name="phone_folders_not_kept">Android did not let Pocketdesk keep access to that folder</string>
 </resources>

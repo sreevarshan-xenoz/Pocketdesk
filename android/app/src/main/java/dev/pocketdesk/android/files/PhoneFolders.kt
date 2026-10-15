@@ -21,7 +21,22 @@ object PhoneFolders {
     /** A shared folder: its id on the wire, its tree URI and its name. */
     data class Folder(val id: Int, val uri: String, val name: String)
 
-    fun all(ctx: Context): List<Folder> =
+    /**
+     * The shared folders the phone can still read: one whose grant is gone
+     * (taken back in Android's settings, or its storage removed) is dropped.
+     */
+    fun all(ctx: Context): List<Folder> {
+        val saved = stored(ctx)
+        val granted =
+            runCatching {
+                ctx.contentResolver.persistedUriPermissions.filter { it.isReadPermission }.map { it.uri.toString() }.toSet()
+            }.getOrNull() ?: return saved
+        val readable = saved.filter { it.uri in granted }
+        if (readable.size != saved.size) save(ctx, readable)
+        return readable
+    }
+
+    private fun stored(ctx: Context): List<Folder> =
         runCatching {
             val array = JSONArray(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "[]"))
             (0 until array.length()).map { i ->
@@ -36,15 +51,17 @@ object PhoneFolders {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putString(KEY, array.toString()) }
     }
 
-    /** Share the folder the picker returned, keeping its read grant. */
-    fun add(ctx: Context, tree: Uri, name: String) {
+    /** Share the folder the picker returned, keeping its read grant; false when Android keeps none. */
+    fun add(ctx: Context, tree: Uri, name: String): Boolean {
         runCatching { ctx.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            .onFailure { return false }
         val folders = all(ctx)
-        if (folders.any { it.uri == tree.toString() }) return
+        if (folders.any { it.uri == tree.toString() }) return true
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val id = PhoneFilesRule.nextId(folders, prefs.getInt(NEXT_ID, 0))
         prefs.edit { putInt(NEXT_ID, id + 1) }
         save(ctx, folders + Folder(id, tree.toString(), name))
+        return true
     }
 
     /** Stop sharing a folder, and give its grant back. */
