@@ -17,7 +17,7 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboar
 use wayland_protocols_wlr::virtual_pointer::v1::client::zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1;
 use wayland_protocols_wlr::virtual_pointer::v1::client::zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1;
 
-use super::vkeyboard::{ConnectError, State, keymap_fd, monotonic_ms, wait};
+use super::vkeyboard::{ConnectError, State, keymap_fd, monotonic_ms, wait, within};
 
 /// `wl_keyboard.keymap_format.xkb_v1`.
 const XKB_V1: u32 = 1;
@@ -144,7 +144,7 @@ impl WlrInput {
     /// say why not ([`ConnectError::Unsupported`] where it offers neither).
     pub fn connect() -> Result<Self, ConnectError> {
         Ok(Self {
-            link: Some(Link::open()?),
+            link: Some(within(Link::open)?),
             retry_at: Instant::now(),
         })
     }
@@ -182,7 +182,7 @@ impl WlrInput {
     }
 
     fn reopen(&mut self) -> std::io::Result<()> {
-        match Link::open() {
+        match within(Link::open) {
             Ok(link) => {
                 tracing::info!("The compositor's virtual pointer and keyboard are back");
                 self.link = Some(link);

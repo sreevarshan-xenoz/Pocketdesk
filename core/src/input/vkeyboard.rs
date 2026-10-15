@@ -29,6 +29,27 @@ const XKB_V1: u32 = 1;
 /// input task, which also carries the pointer and keys.
 const DEADLINE: Duration = Duration::from_millis(500);
 
+/// How long connecting to the compositor may take.
+pub const CONNECT_DEADLINE: Duration = Duration::from_secs(2);
+
+/// Run `open` on a thread of its own and wait at most
+/// [`CONNECT_DEADLINE`] for it: the registry's first roundtrip has no
+/// deadline, and a frozen compositor must not hold the caller (the
+/// server's input task). One that finishes late is dropped.
+pub(super) fn within<T: Send + 'static>(
+    open: impl FnOnce() -> Result<T, ConnectError> + Send + 'static,
+) -> Result<T, ConnectError> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("wayland-connect".into())
+        .spawn(move || {
+            let _ = tx.send(open());
+        })
+        .map_err(|e| ConnectError::Failed(e.to_string()))?;
+    rx.recv_timeout(CONNECT_DEADLINE)
+        .unwrap_or_else(|_| Err(ConnectError::Failed("the compositor did not answer".into())))
+}
+
 /// Keys sent between two waits for the compositor, so a long text never
 /// fills the socket.
 const KEYS_PER_WAIT: usize = 200;
@@ -58,8 +79,12 @@ pub struct VirtualKeyboard {
 
 impl VirtualKeyboard {
     /// Connect to the compositor `WAYLAND_DISPLAY` names and make a virtual
-    /// keyboard.
+    /// keyboard, waiting at most [`CONNECT_DEADLINE`].
     pub fn connect() -> Result<Self, ConnectError> {
+        within(Self::open)
+    }
+
+    fn open() -> Result<Self, ConnectError> {
         let failed = |e: &dyn std::fmt::Display| ConnectError::Failed(e.to_string());
         let conn = Connection::connect_to_env().map_err(|e| failed(&e))?;
         let (globals, queue) = registry_queue_init::<State>(&conn).map_err(|e| failed(&e))?;
