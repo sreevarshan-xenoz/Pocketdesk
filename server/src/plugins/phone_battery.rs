@@ -13,6 +13,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::error::Result;
+use pocketdesk_core::local::paths::TRUST_FILE;
 use pocketdesk_core::local::phone_status::{BatteryReport, PhoneBattery};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 
@@ -91,6 +92,29 @@ struct Reports {
 }
 
 impl Reports {
+    /// Drop `device`'s report and its warning state.
+    fn forget(&mut self, device: &str) {
+        if self.batteries.remove(device).is_some() {
+            self.dirty = true;
+        }
+        self.watch.phones.remove(device);
+    }
+
+    /// Forget every phone not in `paired`: one removed or unpaired leaves
+    /// no report behind, on disk or in the Devices tab.
+    fn keep_only(&mut self, paired: &std::collections::HashSet<String>) {
+        let gone: Vec<String> = self
+            .batteries
+            .keys()
+            .chain(self.watch.phones.keys())
+            .filter(|id| !paired.contains(*id))
+            .cloned()
+            .collect();
+        for id in gone {
+            self.forget(&id);
+        }
+    }
+
     /// Keep `report` from `device`; the warning to show, if any.
     fn take(
         &mut self,
@@ -100,17 +124,27 @@ impl Reports {
         now_unix: u64,
         now: Instant,
     ) -> Option<String> {
-        if self.batteries.contains_key(device) || self.batteries.len() < MAX_PHONES {
-            self.batteries.insert(
-                device.to_string(),
-                PhoneBattery {
-                    charge: report.charge,
-                    charging: report.charging,
-                    updated_unix: now_unix,
-                },
-            );
-            self.dirty = true;
+        if !self.batteries.contains_key(device) && self.batteries.len() >= MAX_PHONES {
+            // Full: the oldest report makes room, so a new phone is never
+            // left out.
+            let oldest = self
+                .batteries
+                .iter()
+                .min_by_key(|(_, b)| b.updated_unix)
+                .map(|(id, _)| id.clone());
+            if let Some(oldest) = oldest {
+                self.forget(&oldest);
+            }
         }
+        self.batteries.insert(
+            device.to_string(),
+            PhoneBattery {
+                charge: report.charge,
+                charging: report.charging,
+                updated_unix: now_unix,
+            },
+        );
+        self.dirty = true;
         let warn = self.watch.report(device, report, now);
         (alerts && warn).then(|| {
             let short: String = device.chars().take(8).collect();
@@ -175,7 +209,8 @@ impl Plugin for PhoneBatteryPlugin {
 
 /// Daemon task: keep `<state>/phone_status.json` up to date with the
 /// reports, at most every [`WRITE_EVERY`]. Reports from an earlier run are
-/// kept until their phone reports again.
+/// kept until their phone reports again; a phone no longer paired is
+/// forgotten.
 pub async fn run_writer() {
     let Ok(dir) = crate::state::state_dir() else {
         tracing::warn!("No state directory: phones' batteries are not kept");
@@ -189,8 +224,16 @@ pub async fn run_writer() {
     }
     loop {
         tokio::time::sleep(WRITE_EVERY).await;
+        // An unreadable store forgets no one.
+        let paired: Option<std::collections::HashSet<String>> =
+            pocketdesk_core::protocol::kdeconnect::TrustStore::read(dir.join(TRUST_FILE))
+                .ok()
+                .map(|store| store.trusted_devices().into_iter().collect());
         let batteries = {
             let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(paired) = &paired {
+                reports.keep_only(paired);
+            }
             if !reports.dirty {
                 continue;
             }
@@ -292,17 +335,60 @@ mod tests {
     }
 
     #[test]
-    fn at_most_so_many_phones_are_kept() {
+    fn at_most_so_many_phones_are_kept_and_the_oldest_report_makes_room() {
         let mut reports = Reports::default();
         let now = Instant::now();
-        for n in 0..MAX_PHONES + 5 {
-            reports.take(&format!("phone-{n}"), &report(50, false), true, 1, now);
+        for n in 0..MAX_PHONES {
+            reports.take(
+                &format!("phone-{n}"),
+                &report(50, false),
+                true,
+                n as u64,
+                now,
+            );
         }
+        reports.take("phone-new", &report(50, false), true, 1000, now);
         assert_eq!(reports.batteries.len(), MAX_PHONES);
-        reports.take("phone-0", &report(49, false), true, 2, now);
-        assert_eq!(
-            reports.batteries["phone-0"].charge, 49,
-            "a kept phone still updates"
+        assert!(
+            reports.batteries.contains_key("phone-new"),
+            "a new phone is kept"
+        );
+        assert!(
+            !reports.batteries.contains_key("phone-0"),
+            "the oldest went"
+        );
+        // The new phone is warned about too.
+        assert!(
+            reports
+                .take("phone-new", &report(5, false), true, 1001, now)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_phone_no_longer_paired_is_forgotten() {
+        let mut reports = Reports::default();
+        let now = Instant::now();
+        assert!(
+            reports
+                .take("phone-a", &report(5, false), true, 1, now)
+                .is_some()
+        );
+        reports.take("phone-b", &report(50, false), true, 1, now);
+        reports.dirty = false;
+        let paired: std::collections::HashSet<String> = ["phone-b".to_string()].into();
+        reports.keep_only(&paired);
+        assert!(!reports.batteries.contains_key("phone-a"));
+        assert!(reports.batteries.contains_key("phone-b"));
+        assert!(reports.dirty, "the file must lose it too");
+        reports.dirty = false;
+        reports.keep_only(&paired);
+        assert!(!reports.dirty, "nothing to forget, nothing to write");
+        // Paired again, it starts afresh, so a low battery is warned about.
+        assert!(
+            reports
+                .take("phone-a", &report(5, false), true, 2, now)
+                .is_some()
         );
     }
 
