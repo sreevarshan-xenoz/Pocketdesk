@@ -468,4 +468,12 @@
     <string name="texts_names_summary">A text shows on the computer with the sender\'s name from this phone\'s contacts, not only the number</string>
     <string name="settings_capture_mouse">Use a connected mouse on the computer</string>
     <string name="settings_capture_mouse_summary">During a session, a mouse plugged into this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
+    <string name="send_clipboard_label">Send clipboard</string>
+    <string name="send_clipboard_no_computer">Pair with a computer first</string>
+    <string name="send_clipboard_empty">The clipboard has no text to send</string>
+    <string name="send_clipboard_too_long">The clipboard text is too long to send</string>
+    <string name="send_clipboard_sent">Clipboard sent to %1$s</string>
+    <string name="send_clipboard_failed">Could not reach %1$s</string>
+    <string name="settings_clipboard_background">Computer\'s clipboard in the background</string>
+    <string name="settings_clipboard_background_summary">What you copy on the computer reaches this phone without a session, also away from home. It needs notification access, which keeps the connection</string>
 </resources>

@@ -152,6 +152,10 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::warn!("Could not forget the contact names kept with texts: {e}");
     }
     crate::plugins::links::configure(config.open_links);
+    // The clipboard to connected phones as it changes (T10b).
+    if config.clipboard_push {
+        tokio::spawn(crate::clipboard_push::run());
+    }
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
     crate::wake_info::configure(config.wake_announce, config.wake_port);
     crate::driving::configure(config.input_control, config.input_idle_secs);

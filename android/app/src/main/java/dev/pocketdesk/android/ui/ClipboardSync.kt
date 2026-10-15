@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.clip.ClipboardShared
 import dev.pocketdesk.android.bridge.RemoteClip
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
@@ -38,87 +39,97 @@ fun ClipboardSyncEffect(
     val context = LocalContext.current
     LaunchedEffect(enabled, address, controlPort) {
         if (!enabled) return@LaunchedEffect
-        withContext(Dispatchers.IO) {
-            RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
-            var lastLocal = localClipboardText(context)
-            var lastRemote: String? = null
-            lastLocal?.let {
-                if (RustCore.sendClipboard(address, controlPort, it).isSuccess) lastRemote = it
-            }
-            val images = ImageClipRule()
-            // The image handled last (sent, skipped, or there at the start).
-            var lastLocalImage: Uri? = ClipboardImages.localImageUri(context)
-            // One that failed to send, and when, so it is retried after a while.
-            var failedLocalImage: Uri? = null
-            var failedAtMs = 0L
-            while (isActive) {
-                delay(4000)
-                val now = SystemClock.elapsedRealtime()
+        ClipboardShared.sessionSyncs.incrementAndGet()
+        try {
+            withContext(Dispatchers.IO) {
+                RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
+                var lastLocal = localClipboardText(context)
+                var lastRemote: String? = null
+                lastLocal?.let {
+                    if (RustCore.sendClipboard(address, controlPort, it).isSuccess) {
+                        lastRemote = it
+                        ClipboardShared.lastExchanged = it
+                    }
+                }
+                val images = ImageClipRule()
+                // The image handled last (sent, skipped, or there at the start).
+                var lastLocalImage: Uri? = ClipboardImages.localImageUri(context)
+                // One that failed to send, and when, so it is retried after a while.
+                var failedLocalImage: Uri? = null
+                var failedAtMs = 0L
+                while (isActive) {
+                    delay(4000)
+                    val now = SystemClock.elapsedRealtime()
 
-                val localImage = ClipboardImages.localImageUri(context)
-                if (localImage != null) {
-                    val retryDue = localImage != failedLocalImage || now - failedAtMs >= ImageClipRule.RETRY_MS
-                    if (localImage != lastLocalImage && retryDue) {
-                        when (sendLocalImage(context, address, controlPort, localImage, images)) {
-                            Outcome.Sent -> {
-                                lastLocalImage = localImage
-                                // The texts are no longer on either clipboard.
+                    val localImage = ClipboardImages.localImageUri(context)
+                    if (localImage != null) {
+                        val retryDue = localImage != failedLocalImage || now - failedAtMs >= ImageClipRule.RETRY_MS
+                        if (localImage != lastLocalImage && retryDue) {
+                            when (sendLocalImage(context, address, controlPort, localImage, images)) {
+                                Outcome.Sent -> {
+                                    lastLocalImage = localImage
+                                    // The texts are no longer on either clipboard.
+                                    lastLocal = null
+                                    lastRemote = null
+                                }
+                                Outcome.Skipped -> lastLocalImage = localImage
+                                Outcome.Failed -> {
+                                    failedLocalImage = localImage
+                                    failedAtMs = now
+                                }
+                            }
+                        }
+                    } else {
+                        lastLocalImage = null
+                        val local = localClipboardText(context)
+                        if (local != null && local != lastLocal) {
+                            lastLocal = local
+                            if (RustCore.sendClipboard(address, controlPort, local).isSuccess) {
+                                ClipboardShared.lastExchanged = local
+                                ClipHistory.add(context, local)
+                                lastRemote = local
+                                images.textMoved()
+                            } else {
+                                RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
+                            }
+                        }
+                    }
+
+                    when (val remote = RustCore.getClipboardState(address, controlPort).getOrNull()) {
+                        is RemoteClip.Image -> if (images.shouldFetch(remote.id, remote.size, now)) {
+                            val part = ClipboardImages.partFile(context, remote.id)
+                            val fetched = RustCore.fetchClipboardImage(address, controlPort, remote.id, part.path)
+                            val kept = fetched.mapCatching { ClipboardImages.keepReceived(context, part, remote.id) }
+                            kept.onSuccess { file ->
+                                images.moved(remote.id)
+                                ClipboardImages.writeLocal(context, file)
+                                lastLocalImage = ClipboardImages.localImageUri(context)
                                 lastLocal = null
                                 lastRemote = null
-                            }
-                            Outcome.Skipped -> lastLocalImage = localImage
-                            Outcome.Failed -> {
-                                failedLocalImage = localImage
-                                failedAtMs = now
+                            }.onFailure {
+                                part.delete()
+                                images.fetchFailed(remote.id, now)
                             }
                         }
-                    }
-                } else {
-                    lastLocalImage = null
-                    val local = localClipboardText(context)
-                    if (local != null && local != lastLocal) {
-                        lastLocal = local
-                        if (RustCore.sendClipboard(address, controlPort, local).isSuccess) {
-                            ClipHistory.add(context, local)
-                            lastRemote = local
-                            images.textMoved()
-                        } else {
-                            RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
-                        }
-                    }
-                }
-
-                when (val remote = RustCore.getClipboardState(address, controlPort).getOrNull()) {
-                    is RemoteClip.Image -> if (images.shouldFetch(remote.id, remote.size, now)) {
-                        val part = ClipboardImages.partFile(context, remote.id)
-                        val fetched = RustCore.fetchClipboardImage(address, controlPort, remote.id, part.path)
-                        val kept = fetched.mapCatching { ClipboardImages.keepReceived(context, part, remote.id) }
-                        kept.onSuccess { file ->
-                            images.moved(remote.id)
-                            ClipboardImages.writeLocal(context, file)
-                            lastLocalImage = ClipboardImages.localImageUri(context)
-                            lastLocal = null
-                            lastRemote = null
-                        }.onFailure {
-                            part.delete()
-                            images.fetchFailed(remote.id, now)
-                        }
-                    }
-                    is RemoteClip.Text -> {
-                        val text = remote.content
-                        if (text != lastRemote) {
-                            lastRemote = text
-                            ClipHistory.add(context, text)
-                            if (text.isNotBlank() && text != lastLocal) {
-                                writeLocalClipboard(context, text)
-                                lastLocal = text
-                                images.textMoved()
+                        is RemoteClip.Text -> {
+                            val text = remote.content
+                            if (text != lastRemote) {
+                                lastRemote = text
+                                ClipboardShared.lastExchanged = text
+                                ClipHistory.add(context, text)
+                                if (text.isNotBlank() && text != lastLocal) {
+                                    writeLocalClipboard(context, text)
+                                    lastLocal = text
+                                    images.textMoved()
+                                }
                             }
                         }
+                        null -> {}
                     }
-                    null -> {}
                 }
             }
+        } finally {
+            ClipboardShared.sessionSyncs.decrementAndGet()
         }
     }
 }

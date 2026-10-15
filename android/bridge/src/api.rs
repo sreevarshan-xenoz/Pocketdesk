@@ -677,6 +677,19 @@ pub async fn connect_to_peer(
                                 {
                                     crate::links::receive(&pkt.body);
                                 }
+                                // The computer's clipboard (T10b), kept
+                                // for the app; still passed on, since it is
+                                // also the answer to the phone's request.
+                                if trimmed.contains("kdeconnect.clipboard")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == "kdeconnect.clipboard"
+                                {
+                                    crate::clipboard_push::receive(
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    );
+                                }
                                 // A press for the phone's player (T8d),
                                 // kept for the app to act on.
                                 if trimmed.contains("phone_media_control")
@@ -745,6 +758,7 @@ pub async fn connect_to_peer(
                         // the session that takes them.
                         crate::links::forget();
                         crate::media_presses::forget();
+                        crate::clipboard_push::forget();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );

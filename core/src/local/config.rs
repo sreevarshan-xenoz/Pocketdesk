@@ -82,6 +82,10 @@ pub struct Config {
     /// off, it is shown as a notification instead.
     #[serde(default = "default_true")]
     pub open_links: bool,
+    /// Send what is copied on this computer to connected phones with the
+    /// Clipboard permission, as it changes (T10b).
+    #[serde(default = "default_true")]
+    pub clipboard_push: bool,
     /// A notification when a phone in a session reports a low battery
     /// (roadmap T8b).
     #[serde(default = "default_true")]
@@ -202,6 +206,7 @@ impl Default for Config {
             sms_keep: default_sms_keep(),
             sms_names: true,
             open_links: true,
+            clipboard_push: true,
             phone_battery_alerts: true,
             wake_announce: true,
             wake_port: 0,
@@ -362,6 +367,7 @@ impl Config {
         "notifications_per_minute",
         "sms_notify",
         "open_links",
+        "clipboard_push",
         "phone_battery_alerts",
         "sms_keep",
         "sms_names",
@@ -526,6 +532,16 @@ mod tests {
         config.phone_battery_alerts = false;
         config.save_to(&path).unwrap();
         assert!(!Config::load_from(&path).unwrap().phone_battery_alerts);
+    }
+
+    #[test]
+    fn the_clipboard_goes_to_phones_by_default_and_the_choice_saves() {
+        assert!(Config::default().clipboard_push);
+        let path = temp("clipboard-push");
+        let mut config = Config::load_from(&path).unwrap();
+        config.clipboard_push = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().clipboard_push);
     }
 
     #[test]

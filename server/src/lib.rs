@@ -6,6 +6,7 @@ pub mod approvals;
 pub mod audio_control;
 pub mod bench;
 pub mod cli;
+pub(crate) mod clipboard_push;
 pub mod config;
 pub mod conn_budget;
 pub mod driving;

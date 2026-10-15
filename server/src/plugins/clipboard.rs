@@ -132,10 +132,12 @@ impl Plugin for ClipboardPlugin {
         match packet.packet_type.as_str() {
             "kdeconnect.clipboard" => {
                 // Remote clipboard update - set local clipboard
-                if let Some(content) = packet.body.get("content").and_then(|v| v.as_str())
-                    && let Err(e) = set_clipboard(content).await
-                {
-                    tracing::warn!("Failed to set clipboard: {}", e);
+                if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
+                    // Not pushed back to the phone it came from (T10b).
+                    crate::clipboard_push::note_from_phone(sender.device_id(), content);
+                    if let Err(e) = set_clipboard(content).await {
+                        tracing::warn!("Failed to set clipboard: {}", e);
+                    }
                 }
             }
             "kdeconnect.clipboard.connect" => {
@@ -276,6 +278,40 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
 #[cfg(windows)]
 fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
     share::io_error("clipboard", e)
+}
+
+/// The clipboard's text, if it holds any (T10b's watcher): never an image,
+/// and never a copy a password manager marked private.
+/// An error says the clipboard could not be read (another app held it).
+#[cfg(windows)]
+pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
+    use crate::platform::clipboard_windows as win;
+    tokio::task::spawn_blocking(|| {
+        if !win::has_text() || win::privacy_marks().private() {
+            return Ok(None);
+        }
+        win::get_text().map(Some)
+    })
+    .await
+    .map_err(|e| std::io::Error::other(e.to_string()))?
+}
+
+/// The clipboard's text, if it holds any (T10b's watcher): `wl-paste`
+/// asked for a text type only, so an image is never read, and nothing a
+/// password manager marked private.
+/// `wl-paste` fails on an empty clipboard, so a failure reads as no text.
+#[cfg(not(windows))]
+pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
+    let Ok(types) = wl_paste(&["--list-types"]).await else {
+        return Ok(None);
+    };
+    if crate::clipboard_push::private_types(&String::from_utf8_lossy(&types)) {
+        return Ok(None);
+    }
+    let Ok(bytes) = wl_paste(&["--no-newline", "--type", "text"]).await else {
+        return Ok(None);
+    };
+    Ok(String::from_utf8(bytes).ok())
 }
 
 /// Set the system clipboard: the Win32 clipboard on Windows.

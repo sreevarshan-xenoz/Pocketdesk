@@ -466,4 +466,12 @@
     <string name="texts_names_summary">Un mensaje aparece en el equipo con el nombre del remitente según los contactos de este teléfono, no solo el número</string>
     <string name="settings_capture_mouse">Usar un ratón conectado en el equipo</string>
     <string name="settings_capture_mouse_summary">Durante una sesión, un ratón conectado a este teléfono (USB o Bluetooth) mueve el cursor del equipo y hace clic allí</string>
+    <string name="send_clipboard_label">Enviar portapapeles</string>
+    <string name="send_clipboard_no_computer">Primero vincula un equipo</string>
+    <string name="send_clipboard_empty">El portapapeles no tiene texto para enviar</string>
+    <string name="send_clipboard_too_long">El texto del portapapeles es demasiado largo para enviarlo</string>
+    <string name="send_clipboard_sent">Portapapeles enviado a %1$s</string>
+    <string name="send_clipboard_failed">No se pudo llegar a %1$s</string>
+    <string name="settings_clipboard_background">Portapapeles del equipo en segundo plano</string>
+    <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
 </resources>

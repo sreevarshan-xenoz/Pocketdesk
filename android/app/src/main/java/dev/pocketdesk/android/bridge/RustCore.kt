@@ -129,6 +129,7 @@ object RustCore {
     private external fun nativeSendLink(address: String, port: Int, url: String): String
     private external fun nativeTakeLinks(): String
     private external fun nativeTakeMediaPresses(): String
+    private external fun nativeTakeClipboardPush(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
     private external fun nativeVideoBytes(): Long
@@ -679,6 +680,17 @@ object RustCore {
     /** The computer's presses for the phone's player since the last call, oldest first (T8d). */
     fun takeMediaPresses(): List<String> =
         parseStringArray(envelope(nativeTakeMediaPresses()).getOrDefault("[]"))
+
+    /** The computer's clipboard text as it last arrived (T10b), taken; null when nothing came. */
+    fun takeClipboardPush(): ClipboardPushed? =
+        envelope(nativeTakeClipboardPush()).getOrNull()?.takeIf { it.isNotBlank() }?.let { json ->
+            runCatching {
+                JSONObject(json).let { ClipboardPushed(it.getString("host"), it.getInt("port"), it.getString("content")) }
+            }.getOrNull()
+        }
+
+    /** One `kdeconnect.clipboard` text from the computer at [host]:[port]. */
+    data class ClipboardPushed(val host: String, val port: Int, val content: String)
 
     /** The links the computer handed over since the last call, oldest first (T8a). */
     fun takeLinks(): List<String> = parseStringArray(envelope(nativeTakeLinks()).getOrDefault("[]"))
