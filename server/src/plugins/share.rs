@@ -614,17 +614,6 @@ impl Plugin for SharePlugin {
                         }
                     })
                     .await;
-            } else if let Some(url) = body.get("url").and_then(|v| v.as_str()) {
-                // URL share - just log it (could be enhanced to auto-download)
-                tracing::info!("URL shared: {}", url);
-                // Send a notification about the URL
-                let notification =
-                    NetworkPacket::new("kdeconnect.notification").with_body(serde_json::json!({
-                        "title": "URL Received",
-                        "text": url,
-                        "app": "Pocketdesk",
-                    }));
-                sender.send_packet(&notification).await?;
             }
         }
         Ok(())
