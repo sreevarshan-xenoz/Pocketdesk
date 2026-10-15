@@ -1070,6 +1070,19 @@ Owed:
 - [ ] The phone's "Share battery with the computer" off: no report; the desktop's "Phones' batteries" off: no notification.
 - [ ] A real discharge to 15 %, Android's own low flag, and Linux's notification.
 
+## 58. The computer's media from the phone (T8c)
+
+On the A71 against Windows, 2026-10-15, LAN, input off for the phone. A silent track played through WinRT's `MediaPlayer` from a PowerShell process stood in for a player (it reports to the system media controls with no title):
+- [x] The Sound sheet's "Now playing on the computer" showed "powershell" with Pause, and the volume and output list beside it read correctly (no reply taken by another call).
+- [x] Pause on the phone paused it (the computer's session read `is_playing: false`) and the card offered Play; Play resumed it.
+- [x] With the phone's Audio permission off, the card said "Audio is turned off for this phone on the computer".
+
+Owed:
+- [ ] A real player with a title: a browser video, Spotify; Next and Previous.
+- [ ] Nothing playing: "Nothing is playing".
+- [ ] The card cleared to the error alone with Audio off (fixed after the run).
+- [ ] Linux: `playerctl` present and missing.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

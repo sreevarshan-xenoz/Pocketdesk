@@ -1,6 +1,6 @@
 # The computer's media from the phone (T8c)
 
-Date: 2026-10-15. Status: design, on autopilot (the user asked for the roadmap to keep going; the decisions are mine).
+Date: 2026-10-15. Status: built (see As built), on autopilot (the user asked for the roadmap to keep going; the decisions are mine).
 
 ## Why
 
@@ -32,3 +32,16 @@ The per-phone **Audio** permission in the desktop's Devices tab turns it off. Th
 - server: the request's parsing (actions, commands, refusals) and the answer's cleaning (control characters, length), with the platform faked; the Windows reading against the real API is an `#[ignore]`d live test.
 - Kotlin: the card's text from an answer (nothing playing, disabled buttons, a refusal), JVM-tested.
 - Device: something playing on this computer (a browser video) shown on the A71, then paused and skipped from it.
+
+## As built
+
+- **Where it lives.** `server/src/media/` (`mod.rs`: the answer, the cleaning, the `playerctl` parser; `windows.rs`; `playerctl.rs`), two arms in `server/src/plugins/audio_control.rs`, and the phone's `NowPlaying` and `NowPlayingCard` in the Sound sheet.
+- **Changed from the design.**
+  - Every audio reply names its `action`. The bridge matches a reply by packet type alone, and every audio action answers with the same type, so the bridge now takes a reply that names an action only for the request that named it.
+  - A denied audio request is answered with why (`plugins::answer_denied`), as a folder download already was.
+  - A player is waited for at most 3 s (`windows-future`'s `Status`, then `Cancel`; `playerctl` killed).
+- **Fresh review (1 Critical, 4 Important, minors), fixed one commit each:**
+  - Critical: the card's poll and the sheet's volume, mute and output calls took each other's replies (a volume of 0, a card saying nothing plays), and a reply late for its request went to the next one.
+  - Important: a hung player held the phone's control connection; the poll ran in the background; with Audio off the card waited 8 s and said the computer did not answer (and a missing `playerctl` warned every 2 s); the desktop's Audio switch did not say it covers what is playing.
+  - Minors fixed: titles on one line without invisible format characters; Play/Pause offered to a player that enables only Play or Pause; the card shows only the error when it cannot read.
+  - Ruled: `GetCurrentSession` errors read as nothing playing; without `playerctld`, `playerctl`'s default player may not be the one playing; TalkBack does not announce track changes.
