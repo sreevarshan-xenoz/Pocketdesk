@@ -89,6 +89,7 @@ pub enum Tab {
     Sessions,
     Files,
     Messages,
+    Notifications,
     Settings,
     Diagnostics,
     Logs,
@@ -129,6 +130,8 @@ pub struct PocketdeskApp {
     diagnostics: crate::diagnostics_view::DiagnosticsView,
     /// The Messages tab (N5b).
     messages: crate::messages_view::MessagesView,
+    /// The Notifications tab (T10c).
+    notes: crate::notes_view::NotesView,
 }
 
 impl PocketdeskApp {
@@ -155,6 +158,7 @@ impl PocketdeskApp {
             picking: None,
             diagnostics: Default::default(),
             messages: Default::default(),
+            notes: Default::default(),
         }
     }
 
@@ -1012,6 +1016,7 @@ impl eframe::App for PocketdeskApp {
                     (Tab::Sessions, "Sessions"),
                     (Tab::Files, "Files"),
                     (Tab::Messages, "Messages"),
+                    (Tab::Notifications, "Notifications"),
                     (Tab::Settings, "Settings"),
                     (Tab::Diagnostics, "Diagnostics"),
                     (Tab::Logs, "Logs"),
@@ -1042,6 +1047,7 @@ impl eframe::App for PocketdeskApp {
                 self.messages
                     .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
             }
+            Tab::Notifications => self.notes.show(ui, &self.state_dir, now_unix()),
             Tab::Settings => self.settings_tab(ui),
             Tab::Diagnostics => self
                 .diagnostics
