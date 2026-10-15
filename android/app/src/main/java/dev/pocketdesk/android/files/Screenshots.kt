@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.edit
@@ -18,6 +19,7 @@ import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.service.TransferService
 import dev.pocketdesk.android.ui.ClipboardImages
 import dev.pocketdesk.android.ui.ImageClipRule
+import dev.pocketdesk.android.wake.Waker
 import java.io.File
 
 /** Settings "New screenshots to the computer" (T10h). */
@@ -78,6 +80,9 @@ object ScreenshotPrefs {
  */
 class Screenshots(private val ctx: Context) {
     @Volatile private var dirty = true
+
+    /** Until when a computer that did not answer is left alone. */
+    private var restUntilMs = 0L
     private var observer: ContentObserver? = null
 
     fun tick() {
@@ -86,9 +91,9 @@ class Screenshots(private val ctx: Context) {
             return
         }
         startWatching()
-        if (!dirty) return
-        dirty = false
+        if (!dirty || SystemClock.elapsedRealtime() < restUntilMs) return
         val own = PhoneLink.target(ctx) ?: return
+        dirty = false
         val now = System.currentTimeMillis() / 1000
         val since = ScreenshotPrefs.since(ctx)
         var sent = 0
@@ -105,13 +110,21 @@ class Screenshots(private val ctx: Context) {
                 dirty = true
                 break
             }
-            ScreenshotPrefs.setLastId(ctx, image.id)
             if (!ScreenshotRule.inScreenshots(image.folder) ||
                 !ScreenshotRule.due(image.addedSecs, since, now) ||
                 !ScreenshotRule.sendable(image.size)
             ) {
+                ScreenshotPrefs.setLastId(ctx, image.id)
                 continue
             }
+            // Both halves need the computer to dial back, so it must answer
+            // here: otherwise the screenshot waits, while it is recent enough.
+            if (!Waker.answers(own.address, own.controlPort)) {
+                restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+                dirty = true
+                break
+            }
+            ScreenshotPrefs.setLastId(ctx, image.id)
             sent++
             send(own.address, own.controlPort, image.uri)
         }
@@ -197,6 +210,9 @@ class Screenshots(private val ctx: Context) {
 
     companion object {
         private const val TAG = "Screenshots"
+
+        /** How long a computer that did not answer is left before a waiting screenshot is tried again. */
+        private const val REST_MS = 30_000L
 
         /** New images one look reads, at most (one more says that more wait). */
         private const val LOOK = ScreenshotRule.MAX_PER_TICK * 4
