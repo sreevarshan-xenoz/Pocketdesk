@@ -178,6 +178,13 @@ class TransferService : Service() {
         val rootId = DocumentsContract.getTreeDocumentId(job.tree)
         val folder = documentName(job.tree, rootId) ?: "Folder"
         val plan = FolderWalk.plan(rootId) { children(job.tree, it) }
+        if (plan.files.isEmpty()) {
+            // Nothing could be read or sent: a failure, not "0 sent".
+            sendCount++
+            lastError = getString(R.string.transfer_folder_empty, folder)
+            Log.w(TAG, "folder $folder: nothing to send (${plan.skipped} left out)")
+            return
+        }
         val folderId = java.util.UUID.randomUUID().toString().replace("-", "")
         val streak = TransferRetry.FolderStreak()
         for ((index, file) in plan.files.withIndex()) {
@@ -237,8 +244,8 @@ class TransferService : Service() {
         return result
     }
 
-    /** The children of folder [id] in the picked [tree]. */
-    private fun children(tree: Uri, id: String): List<FolderWalk.Entry> {
+    /** The children of folder [id] in the picked [tree]; null when the provider could not list it. */
+    private fun children(tree: Uri, id: String): List<FolderWalk.Entry>? {
         val projection = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
             DocumentsContract.Document.COLUMN_DISPLAY_NAME,
@@ -261,7 +268,7 @@ class TransferService : Service() {
                     }
                 }
             }
-        }.getOrNull().orEmpty()
+        }.onFailure { Log.w(TAG, "could not list a folder: ${it.message}") }.getOrNull()
     }
 
     /** The display name of document [id] in [tree]. */

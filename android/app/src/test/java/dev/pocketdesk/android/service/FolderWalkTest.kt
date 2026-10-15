@@ -36,6 +36,18 @@ class FolderWalkTest {
     }
 
     @Test
+    fun aFolderThatCannotBeListedIsCountedNotTakenForEmpty() {
+        // The provider fails to list "2026": its files are left out, and said so.
+        val plan = FolderWalk.plan("root") { if (it == "d1") null else tree[it].orEmpty() }
+        assertEquals(listOf(listOf("top.jpg")), plan.files.map { it.path })
+        assertEquals(1, plan.skipped)
+        // A root that cannot be listed leaves nothing, counted.
+        val none = FolderWalk.plan("root") { null }
+        assertTrue(none.files.isEmpty())
+        assertEquals(1, none.skipped)
+    }
+
+    @Test
     fun aFolderTooBigIsCutShortAndSaysSo() {
         val many = (1..FolderWalk.MAX_FILES + 5).map { file("f$it", "f$it.bin") }
         val plan = FolderWalk.plan("root") { if (it == "root") many else emptyList() }

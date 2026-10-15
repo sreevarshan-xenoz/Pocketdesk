@@ -6,7 +6,8 @@ package dev.pocketdesk.android.service
  *
  * Hidden files and folders (a leading dot) are left out, as are names the
  * computer would refuse (the same rules as `core::protocol::relpath`):
- * they are counted, so the person is told. A folder deeper than
+ * they are counted, so the person is told, as is a folder the provider
+ * could not list (never taken for an empty one). A folder deeper than
  * [MAX_DEPTH], or past [MAX_FILES] files or [MAX_BYTES], is cut short.
  */
 object FolderWalk {
@@ -24,15 +25,19 @@ object FolderWalk {
         val totalBytes: Long get() = files.sumOf { it.size }
     }
 
-    /** Walk the folder [root], listing each folder with [children]. */
-    fun plan(root: String, children: (String) -> List<Entry>): Plan {
+    /** Walk the folder [root], listing each folder with [children] (null: it could not be listed). */
+    fun plan(root: String, children: (String) -> List<Entry>?): Plan {
         val files = mutableListOf<File>()
         var skipped = 0
         var truncated = false
         var bytes = 0L
 
         fun walk(id: String, under: List<String>) {
-            val listed = children(id).sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+            val listed = children(id)?.sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+            if (listed == null) {
+                skipped++
+                return
+            }
             for (entry in listed) {
                 if (truncated) return
                 if (entry.name.startsWith(".")) continue
