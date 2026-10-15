@@ -1083,6 +1083,15 @@ Owed:
 - [ ] The card cleared to the error alone with Audio off (fixed after the run).
 - [ ] Linux: `playerctl` present and missing.
 
+## 60. Pinch-zoom in trackpad mode (T9a)
+
+adb cannot make multi-finger gestures; the engine has 21 JVM tests. Owed, by hand on the A71:
+- [ ] In trackpad mode, two fingers spreading zoom the view, pinching zooms out, back to 1x.
+- [ ] Two fingers moving together still scroll the desktop, and a scroll that drifts apart does not start a zoom.
+- [ ] While pinching, moving the fingers pans the view; one finger lifting and landing again does not jump the zoom.
+- [ ] A two-finger tap is still a right click, a three-finger tap a middle click.
+- [ ] Zoomed in, the cursor's travel matches the finger's on-screen distance, and scrolling is not slowed by the zoom.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
