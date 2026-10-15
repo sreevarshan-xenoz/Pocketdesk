@@ -1,0 +1,209 @@
+package dev.pocketdesk.android.files
+
+import android.Manifest
+import android.content.ContentUris
+import android.content.Context
+import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.net.Uri
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
+import android.util.Log
+import androidx.core.content.edit
+import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.notify.PhoneLink
+import dev.pocketdesk.android.service.TransferService
+import dev.pocketdesk.android.ui.ClipboardImages
+import java.io.File
+
+/** Settings "New screenshots to the computer" (T10h). */
+object ScreenshotPrefs {
+    private const val PREFS = "pocketdesk-screenshots"
+    private const val KEY_ON = "on"
+    private const val KEY_CLIPBOARD = "clipboard"
+    private const val KEY_SAVE = "save"
+    private const val KEY_SINCE = "since"
+    private const val KEY_LAST_ID = "last_id"
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    fun on(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_ON, false)
+
+    fun clipboard(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_CLIPBOARD, true)
+
+    fun save(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_SAVE, true)
+
+    fun setClipboard(ctx: Context, value: Boolean) = prefs(ctx).edit { putBoolean(KEY_CLIPBOARD, value) }
+
+    fun setSave(ctx: Context, value: Boolean) = prefs(ctx).edit { putBoolean(KEY_SAVE, value) }
+
+    /**
+     * Turn the switch on or off. On, only screenshots taken from now are
+     * sent: the newest image id now is where the next look starts.
+     */
+    fun setOn(ctx: Context, value: Boolean) {
+        prefs(ctx).edit {
+            putBoolean(KEY_ON, value)
+            if (value) {
+                putLong(KEY_SINCE, System.currentTimeMillis() / 1000)
+                putLong(KEY_LAST_ID, Screenshots.newestId(ctx))
+            }
+        }
+    }
+
+    fun since(ctx: Context): Long = prefs(ctx).getLong(KEY_SINCE, Long.MAX_VALUE)
+
+    fun lastId(ctx: Context): Long = prefs(ctx).getLong(KEY_LAST_ID, Long.MAX_VALUE)
+
+    fun setLastId(ctx: Context, id: Long) = prefs(ctx).edit { putLong(KEY_LAST_ID, id) }
+
+    /** The permission that lets the app see new images. */
+    val permission: String =
+        if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+
+    /** Whether the app sees every new image (Android 14's "selected photos only" does not). */
+    fun granted(ctx: Context): Boolean = ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+}
+
+/**
+ * New screenshots to the phone's own computer (T10h), run on the
+ * notification listener's tick: a MediaStore observer marks new images, and
+ * the tick sends each new screenshot to the computer's clipboard and to its
+ * Downloads, as the switches under Settings "New screenshots to the
+ * computer" say.
+ */
+class Screenshots(private val ctx: Context) {
+    @Volatile private var dirty = true
+    private var observer: ContentObserver? = null
+
+    fun tick() {
+        if (!ScreenshotPrefs.on(ctx) || !ScreenshotPrefs.granted(ctx)) {
+            stopWatching()
+            return
+        }
+        startWatching()
+        if (!dirty) return
+        dirty = false
+        val own = PhoneLink.target(ctx) ?: return
+        val now = System.currentTimeMillis() / 1000
+        val since = ScreenshotPrefs.since(ctx)
+        var sent = 0
+        for (image in newImages(ScreenshotPrefs.lastId(ctx))) {
+            // One still being written is looked at again later, with what comes after it.
+            if (image.pending) {
+                dirty = true
+                break
+            }
+            if (sent == ScreenshotRule.MAX_PER_TICK) {
+                dirty = true
+                break
+            }
+            ScreenshotPrefs.setLastId(ctx, image.id)
+            if (!ScreenshotRule.inScreenshots(image.folder) ||
+                !ScreenshotRule.due(image.addedSecs, since, now) ||
+                !ScreenshotRule.sendable(image.size)
+            ) {
+                continue
+            }
+            sent++
+            send(own.address, own.controlPort, image.uri)
+        }
+    }
+
+    private fun send(address: String, port: Int, uri: Uri) {
+        if (ScreenshotPrefs.clipboard(ctx)) {
+            val png = ClipboardImages.pngOf(ctx, uri)
+            val result =
+                png?.let { ClipboardImages.withStaged(ctx, it) { file -> RustCore.sendClipboardImage(address, port, file.absolutePath) } }
+            if (result == null || result.isFailure) Log.w(TAG, "a screenshot did not reach the computer's clipboard: ${result?.exceptionOrNull()}")
+        }
+        if (ScreenshotPrefs.save(ctx)) {
+            runCatching { TransferService.start(ctx, address, port, listOf(uri)) }
+                .onFailure { Log.w(TAG, "a screenshot was not sent to the computer's Downloads", it) }
+        }
+    }
+
+    private data class Image(val id: Long, val uri: Uri, val folder: String?, val addedSecs: Long, val size: Long, val pending: Boolean)
+
+    /** The images added after [afterId], oldest first. */
+    private fun newImages(afterId: Long): List<Image> {
+        val folderColumn = if (Build.VERSION.SDK_INT >= 29) MediaStore.Images.Media.RELATIVE_PATH else DATA
+        val columns =
+            buildList {
+                add(MediaStore.Images.Media._ID)
+                add(folderColumn)
+                add(MediaStore.Images.Media.DATE_ADDED)
+                add(MediaStore.Images.Media.SIZE)
+                if (Build.VERSION.SDK_INT >= 29) add(MediaStore.Images.Media.IS_PENDING)
+            }.toTypedArray()
+        val found = mutableListOf<Image>()
+        runCatching {
+            ctx.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                columns,
+                "${MediaStore.Images.Media._ID} > ?",
+                arrayOf(afterId.toString()),
+                "${MediaStore.Images.Media._ID} ASC",
+            )?.use { c ->
+                while (c.moveToNext() && found.size <= ScreenshotRule.MAX_PER_TICK * 4) {
+                    val id = c.getLong(0)
+                    val folder = c.getString(1)?.let { if (Build.VERSION.SDK_INT >= 29) it else File(it).parent }
+                    found +=
+                        Image(
+                            id,
+                            ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id),
+                            folder,
+                            c.getLong(2),
+                            c.getLong(3),
+                            Build.VERSION.SDK_INT >= 29 && c.getInt(4) != 0,
+                        )
+                }
+            }
+        }.onFailure { Log.w(TAG, "could not look for new screenshots", it) }
+        return found
+    }
+
+    private fun startWatching() {
+        if (observer != null) return
+        val watch =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    dirty = true
+                }
+            }
+        runCatching {
+            ctx.contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, watch)
+            observer = watch
+            dirty = true
+        }.onFailure { Log.w(TAG, "could not watch for new screenshots", it) }
+    }
+
+    private fun stopWatching() {
+        observer?.let { runCatching { ctx.contentResolver.unregisterContentObserver(it) } }
+        observer = null
+    }
+
+    /** Stop watching, when the listener goes. */
+    fun close() = stopWatching()
+
+    companion object {
+        private const val TAG = "Screenshots"
+
+        @Suppress("DEPRECATION")
+        private const val DATA = MediaStore.Images.Media.DATA
+
+        /** The newest image's id now, 0 when none can be read. */
+        fun newestId(ctx: Context): Long =
+            runCatching {
+                ctx.contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Images.Media._ID),
+                    null,
+                    null,
+                    "${MediaStore.Images.Media._ID} DESC",
+                )?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+            }.getOrNull() ?: 0L
+    }
+}

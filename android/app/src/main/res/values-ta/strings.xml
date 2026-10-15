@@ -483,4 +483,11 @@
     <string name="phone_folders_remove">நீக்கு</string>
     <string name="phone_folders_storage">சேமிப்பகம்</string>
     <string name="phone_folders_not_kept">அந்தக் கோப்புறைக்கான அணுகலை Pocketdesk வைத்திருக்க Android அனுமதிக்கவில்லை</string>
+    <string name="settings_screenshots">புதிய திரைப்பிடிப்புகள் கணினிக்கு</string>
+    <string name="screenshots_on">புதிய திரைப்பிடிப்புகளை அனுப்பு</string>
+    <string name="screenshots_on_summary">இந்த ஃபோனில் எடுக்கும் திரைப்பிடிப்பு சிறிது நேரத்தில் அதன் கணினிக்குச் செல்லும். படங்களுக்கான அணுகலைக் கேட்கும், பின்னணியில் இயங்க அறிவிப்பு அணுகலைப் பயன்படுத்தும்</string>
+    <string name="screenshots_needs_access">பின்னணியில் இயங்க அறிவிப்பு அணுகல் தேவை: அனுமதிக்கத் தட்டவும்</string>
+    <string name="screenshots_needs_photos">எல்லாப் படங்களுக்குமான அணுகல் தேவை: Android அமைப்புகளில் Pocketdesk-க்கு அனுமதிக்கவும்</string>
+    <string name="screenshots_clipboard">கணினியின் கிளிப்போர்டில் வை</string>
+    <string name="screenshots_save">கணினியின் Downloads-இல் சேமி</string>
 </resources>
