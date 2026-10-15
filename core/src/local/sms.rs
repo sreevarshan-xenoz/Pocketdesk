@@ -166,6 +166,20 @@ pub fn record_all(state_dir: &Path, messages: Vec<Message>, keep: usize) -> io::
     write(state_dir, all, keep)
 }
 
+/// Forget every contact name kept (T8e: names turned off), keeping the
+/// texts. Whether any was forgotten; nothing is written when none was.
+pub fn forget_names(state_dir: &Path, keep: usize) -> io::Result<bool> {
+    let mut all = read_checked(state_dir)?;
+    let mut forgot = false;
+    for message in &mut all {
+        forgot |= message.name.take().is_some();
+    }
+    if forgot {
+        write(state_dir, all, keep)?;
+    }
+    Ok(forgot)
+}
+
 /// Set reply `id`'s state (the server's side). An unknown id is ignored.
 pub fn set_reply_state(
     state_dir: &Path,
@@ -411,6 +425,27 @@ mod tests {
             "the copy's id does not match its name"
         );
         assert!(remove_pending(&dir, "../sms").is_err());
+    }
+
+    /// Turning names off forgets the ones already kept (T8e).
+    #[test]
+    fn names_already_kept_are_forgotten_when_names_are_turned_off() {
+        let dir = dir("forget-names");
+        let mut named = received("phone-a", "+1555", "hi", 1);
+        named.name = Some("Ann".to_string());
+        record_all(
+            &dir,
+            vec![named, received("phone-a", "+1556", "yo", 2)],
+            KEEP,
+        )
+        .unwrap();
+        assert!(forget_names(&dir, KEEP).unwrap(), "something forgotten");
+        assert!(read(&dir).iter().all(|m| m.name.is_none()));
+        assert_eq!(read(&dir).len(), 2, "the texts themselves stay");
+        assert!(
+            !forget_names(&dir, KEEP).unwrap(),
+            "nothing left to forget, nothing written"
+        );
     }
 
     /// A conversation is named by the newest name its texts carry (T8e),

@@ -199,7 +199,7 @@ impl SettingsForm {
                 ui.label("");
                 ui.checkbox(
                     &mut e.sms_names,
-                    "keep the contact names phones send with texts",
+                    "keep the contact names phones send with texts (off forgets those kept, when the server restarts)",
                 );
                 ui.end_row();
                 ui.label("Links from phones");
