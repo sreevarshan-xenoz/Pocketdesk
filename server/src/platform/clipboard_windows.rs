@@ -304,6 +304,19 @@ pub(crate) fn get_text() -> io::Result<String> {
 mod tests {
     use super::*;
 
+    /// Live (T10b): a copy marked the way password managers mark it reads
+    /// as private, and a plain one does not. Put the marked copy there first
+    /// (PowerShell, `System.Windows.Forms.DataObject` with text and
+    /// `ExcludeClipboardContentFromMonitorProcessing`), then run with
+    /// `POCKETDESK_EXPECT_PRIVATE=1 cargo test -p pocketdesk-server --lib
+    /// privacy_marks_read_the_live_clipboard -- --ignored`.
+    #[test]
+    #[ignore = "reads the real clipboard on an interactive Windows desktop"]
+    fn privacy_marks_read_the_live_clipboard() {
+        let expect = std::env::var("POCKETDESK_EXPECT_PRIVATE").is_ok_and(|v| v == "1");
+        assert_eq!(privacy_marks().private(), expect, "{:?}", privacy_marks());
+    }
+
     /// Live: round-trips text through the real clipboard, then puts back what
     /// was there. Run on a desktop:
     /// `cargo test -p pocketdesk-server --lib clipboard_round_trips -- --ignored`.
