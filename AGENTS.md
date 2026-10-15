@@ -42,6 +42,10 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T8d, the phone's media from the computer (branch `feat/phone-media`; spec `docs/superpowers/specs/2026-10-15-phone-media-design.md`, with an as-built section).**
+  - **How:** with the phone's "My media on the computer" on (notification access), a session reports the playing media session (`phone_media`); the desktop app's Sessions tab shows it with Previous, Play/Pause and Next, whose presses (`phone_media_out/`) the server sends to that phone. A new per-phone Media permission gates both.
+  - **Device-verified (A71 → Windows):** with a probe session (the A71 has no music player), the report reached the computer and next and pause presses reached the session.
+  - **Fresh review (0 Critical, 3 Important), fixed:** stale reports shown, no report after a reconnect, ageless presses on the phone. Owed: checklist §59, a real player, the Sessions tab.
 - 2026-10-15: **T8c, the computer's media from the phone (branch `feat/media-controls`; spec `docs/superpowers/specs/2026-10-15-media-controls-design.md`, with an as-built section).**
   - **How:** two actions on the audio request (Audio permission): `media` answers what is playing (Windows' Global System Media Transport Controls, Linux `playerctl`), `mediaControl` plays/pauses or skips; the Sound sheet's "Now playing on the computer" card polls every 2 s while open and in front.
   - **Found on the way:** the bridge matched replies by packet type alone, so concurrent audio requests could take each other's replies; replies now name their action and the bridge checks it.

@@ -637,6 +637,15 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                 {
                                     crate::links::receive(&pkt.body);
                                 }
+                                // A press for the phone's player (T8d),
+                                // kept for the app to act on.
+                                if trimmed.contains("phone_media_control")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type
+                                        == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
+                                {
+                                    crate::media_presses::receive(&pkt.body);
+                                }
                                 // The answer to a folder request (T6b),
                                 // kept by the path asked.
                                 if trimmed.contains("folder_fetch_reply")
@@ -694,6 +703,7 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                         // And links (T8a), shown as from the computer of
                         // the session that takes them.
                         crate::links::forget();
+                        crate::media_presses::forget();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );
@@ -937,11 +947,13 @@ pub fn take_sms_requests() -> String {
 }
 
 /// The packets the app may send through [`send_phone_packet`]: its texts
-/// and the results of the replies it sent (N5b), and its battery (T8b).
-const PHONE_PACKETS: [&str; 3] = [
+/// and the results of the replies it sent (N5b), its battery (T8b), and
+/// what it plays (T8d).
+const PHONE_PACKETS: [&str; 4] = [
     "kdeconnect.sms.messages",
     "kdeconnect.pocketdesk.sms_sent",
     "kdeconnect.battery",
+    pocketdesk_core::protocol::phone_media::PHONE_MEDIA,
 ];
 
 /// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
@@ -4079,6 +4091,13 @@ mod sms_tests {
             "[1]".into(),
         ));
         assert!(battery.unwrap_err().contains("not an object"));
+        let media = runtime.block_on(super::send_phone_packet(
+            "127.0.0.1".into(),
+            9,
+            "kdeconnect.pocketdesk.phone_media".into(),
+            "[1]".into(),
+        ));
+        assert!(media.unwrap_err().contains("not an object"));
     }
 }
 

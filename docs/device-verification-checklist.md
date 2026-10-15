@@ -1083,6 +1083,18 @@ Owed:
 - [ ] The card cleared to the error alone with Audio off (fixed after the run).
 - [ ] Linux: `playerctl` present and missing.
 
+## 59. The phone's media from the computer (T8d)
+
+On the A71 against Windows, 2026-10-15, LAN, input off for the phone. The A71 (LineageOS) has no music player, so a throwaway instrumented test held a "playing" media session in Pocketdesk's own process; notification access was granted for the run and revoked after, and "My media on the computer" set and restored:
+- [x] The phone's report reached the computer: `phone_media.json` held "Probe Song" by "Probe Artist", playing, all three buttons.
+- [x] A next press and a play/pause press, written as the desktop app writes them, reached the session ("press: next", "press: pause"), and the report followed to paused.
+
+Owed:
+- [ ] The Sessions tab itself, and its buttons.
+- [ ] A real player (Spotify, a podcast app): its title, and the app's name (Android 11+ package visibility may give the package name).
+- [ ] After the review fixes: the song gone from the computer when the session ends, when Media is turned off, and when the phone's setting is turned off; reported again after a server restart; a press sent while the app was in the background not acting later.
+- [ ] Turning the setting on opening the notification access page.
+
 ## 60. Pinch-zoom in trackpad mode (T9a)
 
 adb cannot make multi-finger gestures; the engine has 21 JVM tests. Owed, by hand on the A71:

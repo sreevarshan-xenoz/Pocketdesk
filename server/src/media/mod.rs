@@ -7,6 +7,7 @@
 //! Global System Media Transport Controls (`windows.rs`); elsewhere MPRIS
 //! through `playerctl` (`playerctl.rs`).
 
+use pocketdesk_core::protocol::phone_media::clean_line as clean;
 use serde_json::{Value, json};
 
 #[cfg(not(windows))]
@@ -22,9 +23,6 @@ pub use windows::{command, now_playing};
 /// The longest a player is waited for: the phone's control connection waits
 /// on the answer, so a player that hangs must not hold it.
 pub const DEADLINE: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// The longest title, artist or app name sent, in characters.
-const MAX_TEXT: usize = 200;
 
 /// The media session the system names as current.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,24 +55,6 @@ impl Command {
             _ => None,
         }
     }
-}
-
-/// `text` on one line: control characters (line breaks among them) become
-/// spaces, runs of spaces one, invisible format characters (a right-to-left
-/// override, zero-width ones) go; at most [`MAX_TEXT`] characters.
-pub fn clean(text: &str) -> String {
-    let spaced: String = text
-        .chars()
-        .filter(|c| !pocketdesk_core::protocol::kdeconnect::is_invisible_format(*c))
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    spaced
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(MAX_TEXT)
-        .collect()
 }
 
 /// The answer to `{action: "media"}`: `{ok, playing}`, `playing` null when
@@ -119,6 +99,7 @@ pub const PLAYERCTL_FORMAT: &str = "{{status}}\u{1f}{{title}}\u{1f}{{artist}}\u{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pocketdesk_core::protocol::phone_media::MAX_TEXT;
 
     #[test]
     fn only_the_three_commands_are_taken() {

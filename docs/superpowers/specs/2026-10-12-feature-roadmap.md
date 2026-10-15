@@ -94,7 +94,7 @@ From the user's outside review and a fresh survey of what people ask for in KDE 
 | T5 | **A protocol document:** what mDNS, the DHT and relays expose | Trust, as Syncthing does |
 | T6 | **Resumable transfers and "send folder"** | Failed transfers that start over |
 | T7 | **The local API:** `--json` on every verb, a documented owner-only interface, Android intents for Tasker | Scripts and automation |
-| T8 | **Media controls both ways, phone status on the desktop, contact names in texts, link handoff** (T8a, link handoff: done, `docs/superpowers/specs/2026-10-15-link-handoff-design.md`; T8b, the phone's battery on the computer: done, `docs/superpowers/specs/2026-10-15-phone-battery-design.md`; T8c, the computer's media from the phone: done, `docs/superpowers/specs/2026-10-15-media-controls-design.md`; still to come: the phone's media from the computer, and contact names in texts) | KDE Connect's best-loved small features |
+| T8 | **Media controls both ways, phone status on the desktop, contact names in texts, link handoff** (T8a, link handoff: done, `docs/superpowers/specs/2026-10-15-link-handoff-design.md`; T8b, the phone's battery on the computer: done, `docs/superpowers/specs/2026-10-15-phone-battery-design.md`; T8c, the computer's media from the phone: done, `docs/superpowers/specs/2026-10-15-media-controls-design.md`; T8d, the phone's media from the computer: done, `docs/superpowers/specs/2026-10-15-phone-media-design.md`; still to come: contact names in texts) | KDE Connect's best-loved small features |
 | T9 | **Mobile input:** pinch-zoom in trackpad mode (T9a: done), portrait sessions, pointer capture; spec `docs/superpowers/specs/2026-10-15-mobile-input-design.md` | Moonlight's open requests |
 
 Then, larger:
