@@ -28,9 +28,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
@@ -185,10 +188,15 @@ fun AudioControlSheet(
         clearError()
         refreshAll()
     }
-    LaunchedEffect(address, controlPort) {
-        while (isActive) {
-            refreshMedia()
-            delay(MEDIA_REFRESH_MS)
+    // Only while the app is in front: an open sheet left behind Home would
+    // otherwise keep asking the computer every 2 s.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(address, controlPort, lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                refreshMedia()
+                delay(MEDIA_REFRESH_MS)
+            }
         }
     }
 
