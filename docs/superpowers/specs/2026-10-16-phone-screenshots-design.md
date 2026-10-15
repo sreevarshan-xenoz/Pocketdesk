@@ -27,3 +27,9 @@ Research item 5 (`docs/research/2026-10-15-what-makes-it-worth-using.md`): Windo
 
 - **JVM:** `ScreenshotRule`.
 - **Device (A71 → Windows):** a screenshot taken with the side keys (or `input keyevent 120`) lands on the computer's clipboard and in Downloads, MD5 of the file matching; a camera photo does not; the switch off sends nothing.
+
+## As built
+
+- **No standing link:** each send uses the link that exists, or a one-off connection as the other background sends do.
+- **Android 14's "selected photos only"** is declared (`READ_MEDIA_VISUAL_USER_SELECTED`), so the app is not given a temporary full grant; Settings says all photos are needed.
+- **Device-checked (A71 → Windows):** a screenshot on the clipboard and in Downloads (MD5s matching), a camera image not sent, nothing with the switch off. Checklist §72.

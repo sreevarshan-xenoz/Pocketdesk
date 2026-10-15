@@ -42,6 +42,9 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-16: **T10h, new phone screenshots on the computer (branch `feat/phone-screenshots`; spec `docs/superpowers/specs/2026-10-16-phone-screenshots-design.md`).**
+  - **How:** the phone's "New screenshots to the computer" (off; asks for photo access) watches MediaStore from the notification listener and sends each new screenshot (a `Screenshots` folder, at most 10 minutes old) to its own computer: as its clipboard image (N4) and as a share into Downloads, each with its own switch. No computer change.
+  - **Device-checked (A71 → Windows):** clipboard and Downloads with MD5s matching, a camera image not sent, nothing when off. Owed: checklist §72.
 - 2026-10-16: **T10g, the phone's folders on the computer (branch `feat/phone-files`; spec `docs/superpowers/specs/2026-10-16-phone-files-design.md`).**
   - **How:** the phone shares folders picked with Android's folder picker (Settings "Folders the computer may open"); the desktop app's Phone tab asks (`phone_files_out/`) and the server sends `phone_files.list` / `.fetch` to a connected phone with Files on. The phone answers its own computer from the notification listener: a listing (kept owner-only in `phone_files.json`) or the file shared as the share sheet does.
   - **Fresh review (0 Critical, 4 Important), fixed one commit each:** unpaired phones' listings kept, stale listings and unanswered failures, one badly named folder hiding the listing, and big folders cut before filtering; plus hidden files fetched by name, reused folder ids and dead grants.

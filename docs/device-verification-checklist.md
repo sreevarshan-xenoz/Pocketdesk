@@ -1228,6 +1228,18 @@ Owed:
 - [ ] A folder of more than 2000 entries; a file renamed between list and fetch.
 - [ ] A second computer asking: nothing answered.
 
+## 72. New phone screenshots on the computer (T10h)
+
+On the A71 against this box, 2026-10-16:
+- [x] Settings "Send new screenshots" asked for photo access and turned on.
+- [x] A screenshot (`input keyevent 120`, the app in the background) landed on the computer's clipboard (1080x2400) and in Downloads, MD5s matching.
+- [x] An image added under `DCIM/Camera` was not sent; with the switch off, a new screenshot was not sent.
+
+Owed:
+- [ ] A screenshot with the side keys, and a JPEG screenshot (One UI's other format).
+- [ ] Android 14+'s "selected photos only" answer, and Android 12 and older.
+- [ ] Away from home (the internet road), and the Linux host.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
