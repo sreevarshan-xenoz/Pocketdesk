@@ -132,3 +132,14 @@ Minors left, with reason:
 - A paired phone that knows another phone's offer id (a random UUID) could abort that phone's running fetch: the supersede runs before the offer's owner is checked.
 - The phone keys its records by the computer's address, not its identity; the prefix hash still decides whether to continue.
 - A disk-full failure keeps its part until the sweep.
+
+## As built: T6b (2026-10-15)
+
+- **Paths:** `core::protocol::relpath` checks every name of a file's place in a folder (and the folder's own name); a bad one is refused, never repaired. The phone's `FolderWalk.sendable` applies the same rules before sending.
+- **Phone to computer:** the session's Files sheet has "Send a folder to this computer" (Android's folder picker). `FolderWalk` walks the tree (folders first, hidden entries left out, names the computer would refuse counted) and each file goes as a share with `folderId`, `folder` and `path`. The server puts every file of one send under one new `Downloads/<folder>` and checks the folder on disk stays inside it.
+- **Computer to phone:** a send request that names a folder is offered file by file, each offer carrying the same fields; the sent list has one row for the folder, ending when every file has. The phone saves each file under one new `Download/Pocketdesk/<folder>` at its path (checked again on the phone).
+- **Differences from the design:**
+  - "Download folder" from the remote browser is not built: the browser still downloads files one at a time;
+  - one progress notification per file, with the folder named, not one for the whole folder;
+  - on the phone, a folder already there is found among this app's own downloads only (Android shows an app only its own entries).
+- **Device-verified (A71 ↔ Windows, LAN):** a folder of three files in three levels each way, MD5s matching, the hidden file left out; the desktop's row "sent"; a second send landing in "Name (1)".

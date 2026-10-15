@@ -42,7 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
-- 2026-10-15: **T6a, transfers that resume (branch `feat/resumable-transfers`; spec `docs/superpowers/specs/2026-10-14-resumable-transfers-design.md`, with an as-built section).**
+- 2026-10-15: **T6b, folders both ways (branch `feat/send-folders`; spec as above, T6b as-built section).**
+  - **Paths:** `core::protocol::relpath` checks every name of a file's place in a folder; bad ones are refused, not repaired, and both ends check.
+  - **Phone → computer:** "Send a folder to this computer" (Android's folder picker; `FolderWalk`, JVM-tested); each file is a share with `folderId`/`folder`/`path`, landing under one new `Downloads/<folder>`.
+  - **Computer → phone:** the desktop app's "Choose folder…", a path or a drop; the server offers a folder file by file, with one sent-list row for it; the phone saves under one new `Download/Pocketdesk/<folder>`.
+  - **Device-verified (A71 ↔ Windows):** a three-level folder each way, MD5s matching, hidden files left out, a second send in "Name (1)". Owed: checklist §51.
+- 2026-10-15: **T6a, transfers that resume (PR #50, merged; spec `docs/superpowers/specs/2026-10-14-resumable-transfers-design.md`, with an as-built section).**
   - **How:** the receiver says how much of a file it has and the SHA-256 of those bytes; the sender continues only if its own bytes hash the same, and the whole file is checked against the sender's SHA-256 before it is kept (`core::protocol::transfer`, ALPN `pocketdesk-transfer/2`). Records of unfinished files: `core::protocol::partials`.
   - **Desktop:** a share's part waits in `<state>/partials/` (Settings "Unfinished files", default 24 h); offers carry a source id and allow 4 attempts; a retry replaces the attempt still running for its file.
   - **Phone:** shares and downloads retry 3 times (5, 15, 45 s) and continue (Settings "Retry failed files"); a download's part is its hidden MediaStore row.

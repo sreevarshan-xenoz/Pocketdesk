@@ -971,6 +971,20 @@ Owed:
 - [ ] The app killed mid-download, then the offer fetched again within its 10 minutes.
 - [ ] Android 8–9 (the legacy download file), and the Linux host.
 
+## 51. Folders (T6b)
+
+On the A71 against Windows, 2026-10-15:
+- [x] Phone → computer: "Send a folder to this computer", a folder of three files in three levels: the same tree in Downloads, MD5s matching, `.hidden` left out.
+- [x] Computer → phone: a folder queued for the phone during a session: the same tree in Download/Pocketdesk, MD5s matching, the hidden file left out, the Files tab's row "sent".
+- [x] Sending the same folder again lands in "Name (1)".
+
+Owed:
+- [ ] A folder broken by Wi-Fi mid-way, continued.
+- [ ] A folder over the limits (10 000 files, 32 levels) says what was left out.
+- [ ] The desktop app's "Choose folder…" and dropping a folder on the window.
+- [ ] Names Windows refuses on the phone (`a:b`) left out and counted.
+- [ ] Android 8–9, and the Linux host.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
