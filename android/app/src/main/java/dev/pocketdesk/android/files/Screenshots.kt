@@ -101,6 +101,12 @@ class Screenshots(private val ctx: Context) {
         val since = ScreenshotPrefs.since(ctx)
         var sent = 0
         val images = newImages(ScreenshotPrefs.lastId(ctx))
+        // A rebuilt media store numbers its images from low again: start from
+        // its newest, so new screenshots are seen (old ones stay too old).
+        if (images.isEmpty()) {
+            val newest = newestId(ctx)
+            if (newest < ScreenshotPrefs.lastId(ctx)) ScreenshotPrefs.setLastId(ctx, newest)
+        }
         // More waited than one look reads: the next tick goes on from here.
         if (images.size > LOOK) dirty = true
         for (image in images) {
