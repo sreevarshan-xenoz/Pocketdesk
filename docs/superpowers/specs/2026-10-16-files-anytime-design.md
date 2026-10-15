@@ -32,3 +32,12 @@ Sending a document to the phone meant opening a remote-desktop session first.
 
 - **The background start was allowed on the A71 (Android 16).** The listener's bound service gives the process the state that may start a foreground service (`uidState: BFGS`), so the notification fallback did not run there. It is kept for devices that refuse.
 - **Device-checked (A71 → Windows):** a 300 KB file sent with no session, saved, MD5s matching. Checklist §67.
+- **Fresh review (0 Critical, 2 Important), fixed one commit each:**
+  - The background tick shared the offer queue with a session's screen and fetched every offer from the phone's own computer. A file another computer sent in a session could go astray. It now stands down while a session runs and while the link is to another computer.
+  - `pocketdesk link` had been widened to phones without a session, but only the session screen shows a link. It needs a session again.
+  - Minors fixed:
+    - offers carry their age and are dropped past ten minutes;
+    - waiting-file notifications have unique ids;
+    - a dead merge and a stale comment are gone.
+  - Accepted: a large folder sent to a phone that refuses background starts shows one notification per file.
+- **Re-checked on the A71 after the fixes:** saved, MD5s matching.
