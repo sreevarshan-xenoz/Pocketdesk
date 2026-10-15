@@ -202,6 +202,12 @@ impl SettingsForm {
                     "open in the browser (off: show as a notification)",
                 );
                 ui.end_row();
+                ui.label("Phones' batteries");
+                ui.checkbox(
+                    &mut e.phone_battery_alerts,
+                    "a notification when a phone runs low",
+                );
+                ui.end_row();
                 ui.label("Messages history");
                 ui.add(
                     egui::DragValue::new(&mut e.sms_keep)

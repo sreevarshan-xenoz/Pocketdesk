@@ -42,6 +42,10 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T8b, the phone's battery on the computer (branch `feat/phone-status`; spec `docs/superpowers/specs/2026-10-15-phone-battery-design.md`, with an as-built section).**
+  - **How:** during a session the phone sends KDE Connect's `kdeconnect.battery` on its control link (at the start, on a change, every 5 minutes; Settings "Share battery with the computer"); the server keeps each paired phone's last report in `phone_status.json` and warns once when one runs low (15 %, not charging; "Phones' batteries", `phone_battery_alerts`); the Devices tab and `pocketdesk devices --json` show it.
+  - **Device-verified (A71 → Windows):** the report matching `dumpsys battery`, one warning at a faked 12 %, none again at 10 %.
+  - **Fresh review (0 Critical, 3 Important), fixed:** throwaway connections every 15 s without a link, reports never pruned, and unpaired phones' reports. Owed: checklist §57.
 - 2026-10-15: **T8a, links both ways (branch `feat/link-handoff`; spec `docs/superpowers/specs/2026-10-15-link-handoff-design.md`, with an as-built section).**
   - **Wire:** `kdeconnect.pocketdesk.link {url}` both ways, under a new per-phone Links permission; only `http(s)` links of at most 2048 bytes with a host that is not the receiver's own loopback and no credentials (`core::protocol::link`, the phone's `LinkRule`).
   - **Phone → computer:** the share sheet's "Open on computer" sends the first link; the server opens it in the default browser on a thread of its own, or shows it (desktop Settings "Links from phones", `open_links`), 5 a minute per phone.

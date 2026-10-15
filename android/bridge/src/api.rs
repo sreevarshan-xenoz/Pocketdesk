@@ -937,8 +937,12 @@ pub fn take_sms_requests() -> String {
 }
 
 /// The packets the app may send through [`send_phone_packet`]: its texts
-/// and the results of the replies it sent (N5b).
-const PHONE_PACKETS: [&str; 2] = ["kdeconnect.sms.messages", "kdeconnect.pocketdesk.sms_sent"];
+/// and the results of the replies it sent (N5b), and its battery (T8b).
+const PHONE_PACKETS: [&str; 3] = [
+    "kdeconnect.sms.messages",
+    "kdeconnect.pocketdesk.sms_sent",
+    "kdeconnect.battery",
+];
 
 /// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
 pub async fn send_phone_packet(
@@ -4024,6 +4028,15 @@ mod sms_tests {
             "[1]".into(),
         ));
         assert!(bad.unwrap_err().contains("not an object"));
+        // The phone's battery (T8b) goes this way: past the list, to the
+        // body's check.
+        let battery = runtime.block_on(super::send_phone_packet(
+            "127.0.0.1".into(),
+            9,
+            "kdeconnect.battery".into(),
+            "[1]".into(),
+        ));
+        assert!(battery.unwrap_err().contains("not an object"));
     }
 }
 

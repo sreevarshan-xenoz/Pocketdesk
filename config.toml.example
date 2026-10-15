@@ -62,6 +62,10 @@ video_quality = "balanced"
 # permission (desktop app, Devices) still applies.
 # open_links = true
 
+# A notification when a phone in a session reports a low battery (15 % or
+# less, not charging).
+# phone_battery_alerts = true
+
 # Waking this computer from the phone. Paired phones are told this
 # computer's network adapter (MAC and broadcast address) so they can send
 # the magic packet themselves. To wake it from outside, forward a UDP port

@@ -153,6 +153,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.linksFromComputer(context),
             ) { Prefs.setLinksFromComputer(context, it) }
             boolRow(
+                LlIcons.Wifi,
+                stringResource(R.string.settings_share_battery),
+                stringResource(R.string.settings_share_battery_summary),
+                Prefs.shareBattery(context),
+            ) { Prefs.setShareBattery(context, it) }
+            boolRow(
                 LlIcons.Pin,
                 stringResource(R.string.settings_reveal_pin),
                 stringResource(R.string.settings_reveal_pin_summary),

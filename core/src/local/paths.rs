@@ -25,6 +25,8 @@ pub const OUTBOX_DIR: &str = "outbox";
 /// Links the desktop app or the local API asks the server to hand to a phone (T8a).
 pub const LINKS_DIR: &str = "links_out";
 pub const SENT_FILE: &str = "sent.json";
+/// Each phone's last battery report (T8b), written by the server.
+pub const PHONE_STATUS_FILE: &str = "phone_status.json";
 pub const DEVICE_KEYS_FILE: &str = "device_keys.json";
 /// What the server measured about its internet path (N1): yes/no facts,
 /// never an address.

@@ -21,6 +21,8 @@ pub struct Device {
     pub connected: bool,
     /// What the owner lets it do (roadmap F5).
     pub permissions: DevicePermissions,
+    /// Its last battery report (T8b), if it ever sent one.
+    pub battery: Option<pocketdesk_core::local::phone_status::PhoneBattery>,
 }
 
 /// Everything the window shows, read once per refresh.
@@ -63,6 +65,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         .filter(|m| running && m.is_fresh(now_unix));
     let shared_control = mirror.as_ref().is_some_and(|m| m.shared_control);
     let sessions = mirror.map(|m| m.sessions).unwrap_or_default();
+    let batteries = pocketdesk_core::local::phone_status::read(state_dir);
     let devices = match TrustStore::load_or_create(state_dir.join(TRUST_FILE)) {
         Ok(store) => store
             .trusted_devices()
@@ -71,6 +74,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                 grant_remaining: store.grant_remaining(&id),
                 connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
                 permissions: store.permissions(&id),
+                battery: batteries.get(&id).copied(),
                 id,
             })
             .collect(),

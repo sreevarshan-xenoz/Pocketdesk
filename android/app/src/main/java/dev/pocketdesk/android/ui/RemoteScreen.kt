@@ -85,6 +85,7 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.service.SessionForegroundService
+import dev.pocketdesk.android.status.BatteryEffect
 import dev.pocketdesk.android.stream.DesktopAudio
 import dev.pocketdesk.android.stream.InputMode
 import dev.pocketdesk.android.stream.MicCapture
@@ -760,6 +761,7 @@ fun RemoteScreen(
     DesktopNotificationRelay(address = address, controlPort = controlPort)
     FileOffersEffect(address = address, controlPort = controlPort)
     LinksEffect(address = address)
+    BatteryEffect(address = address, controlPort = controlPort)
 
     // R1 stage 3: cache the desktop's iroh WAN identity while the control
     // channel is up (the server pushes it on register and re-announces every

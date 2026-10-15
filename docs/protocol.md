@@ -190,6 +190,7 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 | Texts (SMS) | `kdeconnect.sms.request` | desktop → phone | A reply to send: number and body | — | same |
 | Texts (SMS) | `kdeconnect.pocketdesk.sms_sent` | phone → desktop | `{id, ok, error}` | Texts | same |
 | Battery | `kdeconnect.battery.request` / `kdeconnect.battery` | phone → desktop / back | The desktop's charge, whether it is charging, `noBattery` | Always | `server/src/plugins/battery.rs` |
+| Phone battery | `kdeconnect.battery` | phone → desktop | The phone's own `{currentCharge, isCharging, thresholdEvent}`, sent during a session on its control link: at the start, on a change, and every 5 minutes (phone Settings "Share battery with the computer"). Taken only from a paired phone; kept in `phone_status.json`; a phone not charging at 15 % or less gets one low battery notification (`phone_battery_alerts`), again only after it was above 20 % and never twice in 10 minutes | Always | `server/src/plugins/phone_battery.rs`, `android/app/.../status/BatteryEffect.kt` |
 | Monitors | `kdeconnect.pocketdesk.monitors` | both | Monitor list | Always | `server/src/plugins/monitors.rs` |
 | Windows | `kdeconnect.pocketdesk.windows` | both | Window list: address, **title**, class, pid, geometry | Always | `server/src/plugins/windows.rs`, `server/src/hyprland.rs` |
 | Workspace HUD | `kdeconnect.pocketdesk.hyprland.state`, `.hyprland.event` | desktop → phone | Workspaces, windows (with titles) and geometry. Pushed at registration and every 4 s, and on events | — | `server/src/hypr_events.rs`, `server/src/service.rs` |
@@ -380,6 +381,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/pending_approvals.json`, `approvals/` | Held sessions (device id, peer address) and the owner's answers | Default | `core/src/local/approval.rs` |
 | `<state>/received.json` | The last 50 received files: name, path, size, time, sending device | Default | `core/src/local/received.rs` |
 | `<state>/outbox/`, `sent.json` | Files the app sends to a phone, and their state | Default | `core/src/local/outbox.rs`, `sent.rs` |
+| `<state>/phone_status.json` | Each paired phone's last battery report: charge, charging, when it came. Written by the server at most every 5 s; a phone no longer paired is dropped | Default | `core/src/local/phone_status.rs`, `server/src/plugins/phone_battery.rs` |
 | `<state>/links_out/` | Links the app or `pocketdesk link` hands to a phone, one file each, taken within 60 s | Default | `core/src/local/links.rs` |
 | `<state>/sms.json`, `sms_outbox/` | Texts and replies (newest 1000 by default) | Owner-only | `core/src/local/sms.rs` |
 | `<state>/replies.log` | `<time>\t<notification id>\t<reply text>` for each notification reply | Default | `server/src/plugins/notification_reply.rs` |
@@ -436,7 +438,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 Resolved on 2026-10-14 and folded into the sections above: the capabilities report's ALPNs, TLS 1.2 on TCP, the UDP 1716 firewall rule, the PIN in the log, state-file permissions on Unix, Android backup, tailnet addresses in mDNS, `tailscale netcheck`, the wake relay's targets, and the phone's DNS: the bridge hands iroh the application context, so relay names go to the network's DNS servers (`LinkProperties.getDnsServers`), not public resolvers (`android/bridge/src/lib.rs`, `install_android_context`).
 
 1. **The Tailscale LocalAPI fallback to `100.100.100.100:1053`.** Off a tailnet, that address (CGNAT space) goes to the default route. Confirm whether this is acceptable.
-2. **Desktop-to-phone data needs no permission.** Desktop notifications, window titles (monitors, windows, HUD), battery, wake info (MAC) and the WAN endpoint go to every phone that may receive pushes. No per-device permission gates them; the permission table covers only packets from the phone.
+2. **Desktop-to-phone data needs no permission.** Desktop notifications, window titles (monitors, windows, HUD), battery, wake info (MAC) and the WAN endpoint go to every phone that may receive pushes. No per-device permission gates them; the permission table covers only packets from the phone. The other way, a paired phone with every permission off may still report its own battery, which can raise a low battery notification on the desktop naming the phone by the first 8 characters of its id.
 3. **v2 checks the device key once, at session start.** It also does not use `standing` per packet, as TCP does (`v2_multiplexer.rs`). The Android UI does not use v2. Confirm whether v2 is still meant to be reachable on UDP 4716.
 4. **DHT node mode.** Not checked: whether the desktop's n0-mainline node runs in server mode, which would store and route other people's records, or client mode.
 5. **The `--hostname` relay.** Not traced: which ACME challenge type it uses (port 80 vs 443), and what iroh-relay logs about client IPs by default.

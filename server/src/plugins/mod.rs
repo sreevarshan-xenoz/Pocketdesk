@@ -9,6 +9,7 @@ pub mod monitors;
 pub mod notification;
 pub mod notification_reply;
 pub mod pair;
+pub mod phone_battery;
 pub mod power;
 pub mod privacy;
 pub mod share;
@@ -19,13 +20,14 @@ pub mod windows;
 
 use pocketdesk_core::protocol::kdeconnect::PluginRegistry;
 
-/// Shorthand for the full plugin registry type with all 16 plugins registered.
+/// Shorthand for the full plugin registry type with every plugin registered.
 pub type PluginSet = PluginRegistry;
 
 /// Register all 16 KDE Connect plugins and return the registry.
 pub fn register_all() -> PluginSet {
     let mut registry = PluginRegistry::new();
     registry.register(battery::BatteryPlugin::new());
+    registry.register(phone_battery::PhoneBatteryPlugin);
     registry.register(clipboard::ClipboardPlugin::new());
     registry.register(notification::NotificationPlugin::new());
     registry.register(share::SharePlugin::new());

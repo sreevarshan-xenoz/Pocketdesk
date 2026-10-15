@@ -473,8 +473,9 @@ impl PocketdeskApp {
         }
         let mut revoke = None;
         let mut confirmed = None;
+        let now = now_unix();
         egui::Grid::new("devices")
-            .num_columns(4)
+            .num_columns(5)
             .striped(true)
             .spacing([16.0, 8.0])
             .show(ui, |ui| {
@@ -489,6 +490,8 @@ impl PocketdeskApp {
                     } else {
                         ui.label(RichText::new("—").color(MUTED));
                     }
+                    ui.label(battery_text(device.battery.as_ref(), now))
+                        .on_hover_text("The phone's battery, as it last reported it in a session");
                     if self.confirm_revoke.as_deref() == Some(&device.id) {
                         ui.horizontal(|ui| {
                             if ui.button("Remove").clicked() {
@@ -1030,6 +1033,26 @@ pub fn human_size(bytes: u64) -> String {
     format!("{value:.1} {}", UNITS[unit])
 }
 
+/// A phone's last battery report for the Devices tab (T8b): its charge,
+/// whether it is charging, and its age once it is over a minute old.
+pub fn battery_text(
+    battery: Option<&pocketdesk_core::local::phone_status::PhoneBattery>,
+    now_unix: u64,
+) -> String {
+    let Some(battery) = battery else {
+        return "—".to_string();
+    };
+    let mut text = format!("{} %", battery.charge);
+    if battery.charging {
+        text.push_str(", charging");
+    }
+    let age = now_unix.saturating_sub(battery.updated_unix);
+    if age >= 60 {
+        text.push_str(&format!(" · {} ago", human_duration(age)));
+    }
+    text
+}
+
 /// `75` → "1m 15s", `7200` → "2h 0m".
 pub fn human_duration(secs: u64) -> String {
     match secs {
@@ -1042,6 +1065,27 @@ pub fn human_duration(secs: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_phones_battery_reads_with_its_age() {
+        use pocketdesk_core::local::phone_status::PhoneBattery;
+        let battery = |charge, charging| PhoneBattery {
+            charge,
+            charging,
+            updated_unix: 1000,
+        };
+        assert_eq!(battery_text(None, 1000), "—");
+        assert_eq!(
+            battery_text(Some(&battery(54, true)), 1030),
+            "54 %, charging"
+        );
+        assert_eq!(
+            battery_text(Some(&battery(54, false)), 1000 + 180),
+            "54 % · 3m 0s ago"
+        );
+        // A clock that went back is not "in the future".
+        assert_eq!(battery_text(Some(&battery(9, false)), 900), "9 %");
+    }
+
     #[test]
     fn every_permission_has_a_switch() {
         for capability in Capability::ALL {

@@ -94,7 +94,7 @@ From the user's outside review and a fresh survey of what people ask for in KDE 
 | T5 | **A protocol document:** what mDNS, the DHT and relays expose | Trust, as Syncthing does |
 | T6 | **Resumable transfers and "send folder"** | Failed transfers that start over |
 | T7 | **The local API:** `--json` on every verb, a documented owner-only interface, Android intents for Tasker | Scripts and automation |
-| T8 | **Media controls both ways, phone status on the desktop, contact names in texts, link handoff** (T8a, link handoff: done, `docs/superpowers/specs/2026-10-15-link-handoff-design.md`) | KDE Connect's best-loved small features |
+| T8 | **Media controls both ways, phone status on the desktop, contact names in texts, link handoff** (T8a, link handoff: done, `docs/superpowers/specs/2026-10-15-link-handoff-design.md`; T8b, the phone's battery on the computer: done, `docs/superpowers/specs/2026-10-15-phone-battery-design.md`) | KDE Connect's best-loved small features |
 | T9 | **Mobile input:** pinch-zoom in trackpad mode, portrait sessions, pointer capture | Moonlight's open requests |
 
 Then, larger:
