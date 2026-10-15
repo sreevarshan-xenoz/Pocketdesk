@@ -619,13 +619,16 @@ class TransferService : Service() {
             context.startForegroundService(intent)
         }
 
-        /** Send every file under the folder [tree] the person picked (T6b). */
+        /**
+         * Send every file under the folder [tree] the person picked (T6b).
+         * The app's own picker granted this app the tree, so the service
+         * reads it with no grant passed on (one would not cover an extra).
+         */
         fun sendFolder(context: Context, address: String, port: Int, tree: Uri) {
             val intent = Intent(context, TransferService::class.java)
                 .putExtra(EXTRA_ADDRESS, address)
                 .putExtra(EXTRA_PORT, port)
                 .putExtra(EXTRA_TREE, tree)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             context.startForegroundService(intent)
         }
 
