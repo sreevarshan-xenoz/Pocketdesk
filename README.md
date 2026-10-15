@@ -421,7 +421,10 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 |---------|-------------|
 | `pocketdesk start` | Start the server daemon |
 | `pocketdesk stop` | Stop the running daemon |
-| `pocketdesk status` | Show connection status |
+| `pocketdesk status [--json]` | Show connection status; `--json` gives the server, the phones in a session and the internet endpoint |
+| `pocketdesk devices [--json]` | List the paired phones, what each may do, and whether each is in a session |
+| `pocketdesk send <phone> <path> [--wait SECONDS]` | Send a file or folder to a phone, as the desktop app's Files tab does; the exit code says how it went |
+| `pocketdesk sent` / `received [--count N] [--json]` | The Files tab's two lists |
 | `pocketdesk list` | List available peers on tailnet |
 | `pocketdesk watch` | Watch for peer discovery events |
 | `pocketdesk connect <peer>` | Connect to a specific peer |
@@ -436,6 +439,8 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 | `pocketdesk start --background` | Run detached, logging to daily files under the state directory (what the Windows logon task runs) |
 | `pocketdesk install [--elevated]` | *Windows:* register the logon task, start it, and open the firewall ports |
 | `pocketdesk uninstall` | *Windows:* remove the logon task, firewall rules and notification identity |
+
+Every command that reports or acts takes `--json`, for scripts: one object per run carrying `"api": 1`, failures included, with documented exit codes. `docs/local-api.md` is the contract. There is no listener behind it: it is this program, run as you, over your own state folder.
 
 ### Capabilities Are Generated, Not Written
 

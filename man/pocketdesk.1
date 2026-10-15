@@ -17,8 +17,31 @@ Start the server daemon
 Stop a running daemon started with
 .B "pocketdesk start"
 .TP
-.B status
-Print local tailscale status
+.B status [\-\-json]
+Print local tailscale status; with
+.BR \-\-json ,
+the server, the phones in a session and the internet endpoint, as the local
+API's JSON (see
+.IR docs/local-api.md ).
+.TP
+.B devices [\-\-json]
+List the paired phones: what each may do, whether a key is bound, and whether
+it is in a session now
+.TP
+.B sent [\-\-count \fIN\fR] [\-\-json]
+List the files sent to phones, newest first, and how each went
+.TP
+.B received [\-\-count \fIN\fR] [\-\-json]
+List the files received from phones, newest first
+.TP
+.B send \fIPHONE\fR \fIPATH\fR [\-\-wait \fISECONDS\fR] [\-\-json]
+Send a file or a folder to a paired phone in a session, as the desktop app's
+Files tab does.
+.I PHONE
+is a device id or 6 or more of its first characters. Exit codes: 0 done,
+1 failed, 2 bad arguments, 3 no server running, 4 still waiting when
+.B \-\-wait
+ran out.
 .TP
 .B sessions [\-\-count \fIN\fR] [\-\-json]
 Show recorded streaming\-session outcomes (default: last 10); with
@@ -60,7 +83,7 @@ directory. See
 .I bench/README.md
 in the source tree.
 .TP
-.B list
+.B list [\-\-json]
 List peers currently visible on the tailnet
 .TP
 .B watch [\-\-interval \fISECONDS\fR]
@@ -80,16 +103,16 @@ both are mutually exclusive.
 .B connect \fIPEER\fR [\-\-port \fIPORT\fR]
 Connect to a peer and perform a basic control\-channel handshake
 .TP
-.B pair [\fIPIN\fR] [\-\-grant \fIDURATION\fR]
+.B pair [\fIPIN\fR] [\-\-grant \fIDURATION\fR] [\-\-json]
 Set or generate a temporary 6\-digit pairing PIN;
 .B \-\-grant
 (s/m/h/d, e.g. 15m, 1h30m) puts a time limit on the trust the PIN grants, for
 one\-off support sessions
 .TP
-.B unpair [\fIDEVICE\-ID\fR]
+.B unpair [\fIDEVICE\-ID\fR] [\-\-json]
 Remove a paired device from the trust store (all devices if omitted)
 .TP
-.B kick \fITARGET\fR
+.B kick \fITARGET\fR [\-\-json]
 Drop a live streaming session: device id, a unique id prefix of >=6 chars,
 the peer IP, or
 .B all
