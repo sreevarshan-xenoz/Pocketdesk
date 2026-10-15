@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.links.LinkRule
 import dev.pocketdesk.android.service.TransferService
 import dev.pocketdesk.android.shortcuts.ShortcutPlan
 import dev.pocketdesk.android.shortcuts.Shortcuts
@@ -19,6 +20,9 @@ import dev.pocketdesk.android.shortcuts.Shortcuts
  * destination itself. Another app (an automation app, T7b) may name one of
  * the saved computers with the extra [Shortcuts.EXTRA_ADDRESS]; without it,
  * the last computer used.
+ *
+ * Shared through its "Open on computer" entry (T8a), text is not copied: its
+ * first web link opens in the computer's browser.
  */
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,6 +56,11 @@ class ShareActivity : ComponentActivity() {
         val uris = sharedUris(intent)
         val text =
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
+        if (intent.component?.className == OPEN_ON_COMPUTER) {
+            val url = text?.let { LinkRule.find(it) }
+                ?: return done(getString(R.string.link_not_web))
+            return sendLink(host, url)
+        }
         when {
             uris.isNotEmpty() && !ShortcutPlan.shareable(uris.map { it.scheme }) ->
                 done(getString(R.string.share_not_content))
@@ -97,9 +106,29 @@ class ShareActivity : ComponentActivity() {
         }.start()
     }
 
+    private fun sendLink(host: HostStore.Host, url: String) {
+        Thread {
+            val result = RustCore.sendLink(host.address, host.controlPort, url)
+            runOnUiThread {
+                done(
+                    if (result.isSuccess) {
+                        getString(R.string.link_sent)
+                    } else {
+                        getString(R.string.share_failed, result.exceptionOrNull()?.message)
+                    },
+                )
+            }
+        }.start()
+    }
+
     /** Say [message] where it outlives this screen, and close it. */
     private fun done(message: String) {
         Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
         finish()
+    }
+
+    private companion object {
+        /** The manifest's "Open on computer" alias of this screen. */
+        const val OPEN_ON_COMPUTER = "dev.pocketdesk.android.OpenOnComputer"
     }
 }

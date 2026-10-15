@@ -24,6 +24,7 @@ object Prefs {
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
+    private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
@@ -106,6 +107,14 @@ object Prefs {
 
     fun setOthersChooseComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_OTHERS_CHOOSE_COMPUTER, enabled) }
+    }
+
+    /** Whether a link the computer hands over is shown as a notification (T8a). On by default. */
+    fun linksFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_LINKS_FROM_COMPUTER, true)
+
+    fun setLinksFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_LINKS_FROM_COMPUTER, enabled) }
     }
 
     fun retryTransfers(ctx: Context): Boolean =

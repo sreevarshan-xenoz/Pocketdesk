@@ -759,6 +759,7 @@ fun RemoteScreen(
     SirenWatcher(context)
     DesktopNotificationRelay(address = address, controlPort = controlPort)
     FileOffersEffect(address = address, controlPort = controlPort)
+    LinksEffect(address = address)
 
     // R1 stage 3: cache the desktop's iroh WAN identity while the control
     // channel is up (the server pushes it on register and re-announces every

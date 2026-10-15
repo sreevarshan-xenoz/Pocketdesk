@@ -440,4 +440,11 @@
     <string name="settings_background_remind">முகப்பில் நினைவூட்டு</string>
     <string name="settings_background_remind_summary">தொலைபேசி அறிவிப்புகள் அல்லது குறுஞ்செய்திகள் இயக்கத்தில் இருந்து Android அவற்றைத் தடுத்து வைக்கக்கூடும்போது</string>
     <string name="bg_maker_guide_summary">பல தொலைபேசிகள் Android-இன் மேல் தங்கள் சொந்த பேட்டரி சேமிப்பைச் சேர்க்கின்றன</string>
+    <string name="open_on_computer_label">கணினியில் திற</string>
+    <string name="link_sent">கணினியில் திறக்கிறது.</string>
+    <string name="link_not_web">திறக்க இணைய இணைப்பு இல்லை (http, https இணைப்புகள் மட்டும்).</string>
+    <string name="link_from_computer">%1$s இலிருந்து ஓர் இணைப்பு</string>
+    <string name="channel_links">கணினியிலிருந்து இணைப்புகள்</string>
+    <string name="settings_links_from_computer">கணினியிலிருந்து இணைப்புகள்</string>
+    <string name="settings_links_from_computer_summary">கணினி அனுப்பும் இணைப்பு, அதைத் திறக்கும் அறிவிப்பாகக் காட்டப்படும். அணைத்தால்: அத்தகைய இணைப்புகள் கைவிடப்படும்</string>
 </resources>
