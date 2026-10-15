@@ -55,6 +55,10 @@ object PhoneFilesRule {
 
     fun root(folders: List<PhoneFolders.Folder>, id: Int): PhoneFolders.Folder? = folders.firstOrNull { it.id == id }
 
-    /** The id a newly shared folder takes: never one used before in the list. */
-    fun nextId(folders: List<PhoneFolders.Folder>): Int = (folders.maxOfOrNull { it.id } ?: -1) + 1
+    /**
+     * The id a newly shared folder takes: past every id in the list and every
+     * one handed out before ([issued], the next unused), so a computer's old
+     * listing never names a different folder.
+     */
+    fun nextId(folders: List<PhoneFolders.Folder>, issued: Int): Int = maxOf((folders.maxOfOrNull { it.id } ?: -1) + 1, issued)
 }

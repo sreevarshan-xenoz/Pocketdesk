@@ -16,6 +16,7 @@ import org.json.JSONObject
 object PhoneFolders {
     private const val PREFS = "pocketdesk-phone-folders"
     private const val KEY = "folders"
+    private const val NEXT_ID = "next_id"
 
     /** A shared folder: its id on the wire, its tree URI and its name. */
     data class Folder(val id: Int, val uri: String, val name: String)
@@ -40,7 +41,10 @@ object PhoneFolders {
         runCatching { ctx.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         val folders = all(ctx)
         if (folders.any { it.uri == tree.toString() }) return
-        save(ctx, folders + Folder(PhoneFilesRule.nextId(folders), tree.toString(), name))
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val id = PhoneFilesRule.nextId(folders, prefs.getInt(NEXT_ID, 0))
+        prefs.edit { putInt(NEXT_ID, id + 1) }
+        save(ctx, folders + Folder(id, tree.toString(), name))
     }
 
     /** Stop sharing a folder, and give its grant back. */

@@ -48,7 +48,9 @@ class PhoneFilesRuleTest {
         val folders = listOf(PhoneFolders.Folder(0, "content://a", "Download"), PhoneFolders.Folder(3, "content://b", "DCIM"))
         assertEquals("DCIM", PhoneFilesRule.root(folders, 3)?.name)
         assertNull(PhoneFilesRule.root(folders, 1))
-        assertEquals(4, PhoneFilesRule.nextId(folders))
-        assertEquals(0, PhoneFilesRule.nextId(emptyList()))
+        assertEquals(4, PhoneFilesRule.nextId(folders, 0))
+        assertEquals(0, PhoneFilesRule.nextId(emptyList(), 0))
+        // The last folder removed: its id is not handed out again.
+        assertEquals(4, PhoneFilesRule.nextId(listOf(folders[0]), 4))
     }
 }
