@@ -35,6 +35,10 @@ pub const STATUS_SAVED: u8 = 1;
 /// The receiver did not keep the file.
 pub const STATUS_FAILED: u8 = 0;
 
+/// A slow disk's pace, for the waits on work the other end does on disk:
+/// a flat idle limit would fail a large partial on every retry.
+const SLOW_DISK_BYTES_PER_SEC: u64 = 20 * 1024 * 1024;
+
 /// How often the receiver makes what it has durable, so a break loses at
 /// most this much.
 pub const COMMIT_EVERY: u64 = 4 * 1024 * 1024;
@@ -56,6 +60,14 @@ impl Pace {
         idle: Duration::from_secs(30),
         min_bytes_per_sec: 32 * 1024,
     };
+
+    /// How long a step that works through `bytes` on the other end may take
+    /// to answer: reading back a partial to hash it, or moving a finished
+    /// file into place (a copy, across volumes). The idle limit, plus time
+    /// at a slow disk's pace.
+    pub fn slow_step(&self, bytes: u64) -> Duration {
+        self.idle + Duration::from_secs(bytes / SLOW_DISK_BYTES_PER_SEC)
+    }
 
     fn deadline(&self, bytes: u64) -> tokio::time::Instant {
         tokio::time::Instant::now()
@@ -146,8 +158,9 @@ where
     .await?;
     within(pace.idle, "sending the size", stream.flush()).await?;
     let mut point = [0u8; 40];
+    // The receiver reads back and hashes what it has first.
     within(
-        pace.idle,
+        pace.slow_step(size),
         "waiting for the resume point",
         stream.read_exact(&mut point),
     )
@@ -206,8 +219,9 @@ where
     .await?;
     within(pace.idle, "sending the hash", stream.flush()).await?;
     let mut status = [0u8; 1];
+    // The receiver may copy the file into place before it answers.
     within(
-        pace.idle,
+        pace.slow_step(size),
         "waiting for the save",
         stream.read_exact(&mut status),
     )
@@ -304,8 +318,9 @@ where
     within(pace.idle, "sending the resume point", stream.flush()).await?;
 
     let mut answer = [0u8; 1];
+    // The sender reads and hashes its own first `offset` bytes first.
     within(
-        pace.idle,
+        pace.slow_step(offset),
         "waiting for the answer",
         stream.read_exact(&mut answer),
     )
@@ -589,6 +604,17 @@ mod tests {
         drop(partial);
         assert_eq!(std::fs::read(&path).unwrap(), source);
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_step_on_a_large_file_gets_time_to_read_it() {
+        let pace = Pace::DEFAULT;
+        assert_eq!(pace.slow_step(0), pace.idle);
+        let eight_gib = 8u64 << 30;
+        assert!(
+            pace.slow_step(eight_gib) >= pace.idle + Duration::from_secs(400),
+            "8 GiB at 20 MiB/s is about 410 s"
+        );
     }
 
     #[tokio::test]
