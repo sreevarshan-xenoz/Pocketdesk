@@ -53,7 +53,11 @@ pub fn now_playing() -> Result<Option<NowPlaying>, String> {
             artist: properties.Artist()?.to_string(),
             app: session.SourceAppUserModelId()?.to_string(),
             is_playing: info.PlaybackStatus()? == Status::Playing,
-            can_play_pause: controls.IsPlayPauseToggleEnabled()?,
+            // Some players enable only Play, or only Pause, not the toggle;
+            // the toggle request plays or pauses them all the same.
+            can_play_pause: controls.IsPlayPauseToggleEnabled()?
+                || controls.IsPlayEnabled()?
+                || controls.IsPauseEnabled()?,
             can_next: controls.IsNextEnabled()?,
             can_previous: controls.IsPreviousEnabled()?,
         })
