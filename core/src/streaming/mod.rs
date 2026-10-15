@@ -69,6 +69,7 @@ pub use capture_backend::CaptureBackend;
 #[cfg(feature = "capture")]
 pub use capture_x11::{check_x11_availability, start_x11_capture};
 pub use client::DEFAULT_STREAMING_PORT;
+pub use client::RemoteFlags;
 pub use client::StreamingClient;
 /// Entry point for a client-side measurement source that is not the
 /// [`StreamingClient`] itself (the Android decoder): see

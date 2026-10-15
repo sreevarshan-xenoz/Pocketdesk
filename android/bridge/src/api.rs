@@ -1890,11 +1890,13 @@ pub async fn list_remote_files(
 /// Pass `None` to use the default monitor.
 /// `codec_caps` advertises the decodable video codecs to the server
 /// (R4 C1: bit 0 = HEVC; H.264 is assumed). 0 keeps a plain H.264 session.
+/// `input_only` makes it the phone as a remote (T10i): no picture or sound.
 pub async fn connect_streaming(
     address: String,
     port: u16,
     monitor_index: Option<u32>,
     codec_caps: u8,
+    input_only: bool,
 ) -> Result<(), String> {
     // If the control port (1716) is passed, automatically switch to the default streaming port (4716).
     // In a real KDE Connect implementation, this would be negotiated or discovery-based.
@@ -1914,6 +1916,7 @@ pub async fn connect_streaming(
             if handle.address == address
                 && handle.port == streaming_port
                 && handle.monitor_index == monitor_index
+                && handle.input_only == input_only
             {
                 tracing::info!("Session already active for {addr}, skipping connect");
                 return Ok(());
@@ -1976,7 +1979,7 @@ pub async fn connect_streaming(
         Some(&client_identity().device_id),
         iroh_id.as_deref(),
         Some(codec_caps),
-        false,
+        input_only,
     )
     .await
     .map_err(|e| {
@@ -2119,6 +2122,7 @@ pub async fn connect_streaming_wan(
     identity_json: String,
     monitor_index: Option<u32>,
     codec_caps: u8,
+    input_only: bool,
 ) -> Result<(), String> {
     let WanTarget {
         endpoint_id,
@@ -2135,6 +2139,7 @@ pub async fn connect_streaming_wan(
             if handle.address == address
                 && handle.port == 0
                 && handle.monitor_index == monitor_index
+                && handle.input_only == input_only
             {
                 tracing::info!("WAN session already active for {address}, skipping connect");
                 return Ok(());
@@ -2197,7 +2202,7 @@ pub async fn connect_streaming_wan(
         Some(&client_identity().device_id),
         None,
         Some(codec_caps),
-        false,
+        input_only,
     )
     .await;
 
@@ -2243,6 +2248,7 @@ const SUPERSEDED: &str = "the stream was stopped or replaced while it connected"
 const STOPPED_BY_PHONE: &[u8] = b"stopped by the phone";
 
 async fn teardown_streaming_handle(handle: StreamingHandle) {
+    crate::session::REMOTE.lock().unwrap().take();
     VIDEO_RX.lock().await.take();
     AUDIO_RX.lock().await.take();
     // Closed on the wire, so the desktop ends the session at once. Waiting
@@ -2306,6 +2312,8 @@ async fn install_streaming(
     let client_cancel = cancel.clone();
     // Taken before the client moves into its task.
     let video_bytes = client.video_bytes();
+    let remote = client.remote();
+    let input_only = remote.input_only;
     let task = tokio::spawn(async move {
         client.start().await;
         tracing::info!("Streaming client start loop exited");
@@ -2398,10 +2406,12 @@ async fn install_streaming(
     *VIDEO_RX.lock().await = Some(packet_rx);
     *AUDIO_RX.lock().await = Some(audio_rx);
     *crate::VIDEO_BYTES.lock().unwrap_or_else(|e| e.into_inner()) = Some(video_bytes);
+    *crate::session::REMOTE.lock().unwrap() = input_only.then_some(remote);
     *handle = Some(StreamingHandle {
         address: address.clone(),
         port,
         monitor_index,
+        input_only,
         cancel: client_cancel,
         task,
         rtt_task,
@@ -2594,7 +2604,21 @@ pub async fn reconnect_streaming(
     tokio::time::sleep(next_retry).await;
 
     // Delegate to idempotent connect_streaming
-    connect_streaming(address, port, monitor_index, codec_caps).await
+    connect_streaming(address, port, monitor_index, codec_caps, false).await
+}
+
+/// The phone-as-a-remote session's state (T10i), as JSON: `{"ready"}` once
+/// the computer admitted it, `{"tooOld"}` when it streamed to it anyway,
+/// `{"none"}` with no input-only session.
+pub fn remote_state() -> String {
+    use std::sync::atomic::Ordering;
+    let state = match &*crate::session::REMOTE.lock().unwrap() {
+        None => "none",
+        Some(r) if r.too_old.load(Ordering::Acquire) => "tooOld",
+        Some(r) if r.ready.load(Ordering::Acquire) => "ready",
+        Some(_) => "waiting",
+    };
+    format!("{{\"state\":\"{state}\"}}")
 }
 
 /// Stop the v2 multiplexed connection and clear its handle.
@@ -4384,6 +4408,7 @@ mod teardown_tests {
             address: "192.0.2.10".into(),
             port: 4716,
             monitor_index: None,
+            input_only: false,
             cancel: tokio_util::sync::CancellationToken::new(),
             task: tokio::spawn(async {}),
             rtt_task: tokio::spawn(async {}),
