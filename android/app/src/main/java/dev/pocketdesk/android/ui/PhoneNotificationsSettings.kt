@@ -19,6 +19,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 
@@ -53,6 +54,8 @@ fun PhoneNotificationsSection() {
         version++
     }
 
+    val answer = version.let { Prefs.answerNotifications(context) }
+
     Text(
         stringResource(R.string.settings_phone_notifications),
         style = MaterialTheme.typography.labelLarge,
@@ -80,6 +83,28 @@ fun PhoneNotificationsSection() {
                     setEnabled(!enabled)
                 }
             },
+    )
+    // T10c: the computer may press buttons and reply, as this phone's owner.
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.phone_notifications_answer), style = MaterialTheme.typography.bodyLarge) },
+        supportingContent = {
+            Text(
+                stringResource(R.string.phone_notifications_answer_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        leadingContent = { LlIcon(LlIcons.Notifications, null) },
+        trailingContent = {
+            Switch(
+                checked = answer,
+                enabled = enabled,
+                onCheckedChange = {
+                    Prefs.setAnswerNotifications(context, it)
+                    version++
+                },
+            )
+        },
     )
     if (!enabled) return
     if (seen.isEmpty()) {

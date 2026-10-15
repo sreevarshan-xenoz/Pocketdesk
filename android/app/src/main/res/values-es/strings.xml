@@ -474,4 +474,6 @@
     <string name="send_clipboard_failed">No se pudo llegar a %1$s</string>
     <string name="settings_clipboard_background">Portapapeles del equipo en segundo plano</string>
     <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
+    <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>
+    <string name="phone_notifications_answer_summary">La pestaña Notificaciones del equipo puede pulsar los botones de una notificación y responder chats, en tu nombre. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
 </resources>

@@ -476,4 +476,6 @@
     <string name="send_clipboard_failed">Could not reach %1$s</string>
     <string name="settings_clipboard_background">Computer\'s clipboard in the background</string>
     <string name="settings_clipboard_background_summary">What you copy on the computer reaches this phone without a session, also away from home. It needs notification access, which keeps the connection</string>
+    <string name="phone_notifications_answer">Let the computer answer notifications</string>
+    <string name="phone_notifications_answer_summary">The computer\'s Notifications tab can press a notification\'s buttons and reply to chats, as you. Only notifications sent in full, and only from your own computer</string>
 </resources>

@@ -152,6 +152,8 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::warn!("Could not forget the contact names kept with texts: {e}");
     }
     crate::plugins::links::configure(config.open_links);
+    // The desktop app's answers to the phones' notifications (T10c).
+    tokio::spawn(crate::plugins::notification::run_answers());
     // The clipboard to connected phones as it changes (T10b).
     if config.clipboard_push {
         tokio::spawn(crate::clipboard_push::run());

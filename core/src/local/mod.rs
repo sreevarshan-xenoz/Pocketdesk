@@ -16,6 +16,7 @@ pub mod outbox;
 pub mod pair_link;
 pub mod paths;
 pub mod phone_media;
+pub mod phone_notes;
 pub mod phone_status;
 pub mod pin;
 pub mod received;

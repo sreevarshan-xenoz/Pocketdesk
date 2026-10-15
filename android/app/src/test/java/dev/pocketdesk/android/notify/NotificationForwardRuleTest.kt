@@ -37,6 +37,23 @@ class NotificationForwardRuleTest {
     }
 
     @Test
+    fun anUpdateThatChangesOnlyWhatItOffersIsSentAgain() {
+        val rule = NotificationForwardRule(own)
+        assertTrue(rule.decide(note(), true, chat, offer = "Reply") != null)
+        assertNull(rule.decide(note(), true, chat, offer = "Reply"))
+        assertTrue(rule.decide(note(), true, chat, offer = "Archive") != null)
+    }
+
+    @Test
+    fun aNotificationWithACodeReplacedIsNotSentInFull() {
+        val rule = NotificationForwardRule(own)
+        val out = rule.decide(note(text = "Your verification code is 482913"), enabled = true, shared = chat)!!
+        assertEquals(NotificationForwardRule.CODE_HIDDEN, out.text)
+        assertFalse(out.full)
+        assertTrue(rule.decide(note(key = "k2"), enabled = true, shared = chat)!!.full)
+    }
+
+    @Test
     fun nothingIsSentWhileSharingIsOffOrForAnAppNotSwitchedOn() {
         val rule = NotificationForwardRule(own)
         assertNull(rule.decide(note(), enabled = false, shared = chat))
@@ -64,7 +81,7 @@ class NotificationForwardRuleTest {
         )
         assertEquals(
             "private, with a public version: that version",
-            Outgoing("b", "Chat", "Chat", "1 new message", clearable = true),
+            Outgoing("b", "Chat", "Chat", "1 new message", clearable = true, full = false),
             rule.decide(
                 note(
                     key = "b",
@@ -78,7 +95,7 @@ class NotificationForwardRuleTest {
         )
         assertEquals(
             "private, without one: only that there is one",
-            Outgoing("c", "Chat", NotificationForwardRule.HIDDEN_TITLE, "", clearable = true),
+            Outgoing("c", "Chat", NotificationForwardRule.HIDDEN_TITLE, "", clearable = true, full = false),
             rule.decide(note(key = "c", visibility = NotificationForwardRule.VISIBILITY_PRIVATE), true, chat),
         )
     }
@@ -95,6 +112,11 @@ class NotificationForwardRuleTest {
         assertEquals("the user's override", secret, eff(public, none, secret, false))
         assertEquals("the system hides sensitive content", private, eff(public, none, none, true))
         assertEquals("never looser than the app asked", secret, eff(secret, public, public, false))
+        // Android hides a private notification's content only when the user
+        // hides sensitive content (most apps post private, the default).
+        assertEquals("an app's private follows the lock screen", public, eff(private, none, none, false))
+        assertEquals(private, eff(private, none, none, true))
+        assertEquals("the user's private for this app", private, eff(private, none, private, false))
     }
 
     @Test

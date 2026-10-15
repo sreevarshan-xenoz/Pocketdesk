@@ -75,7 +75,7 @@ A phone at home must keep the LAN road: it carries transfers, and it is the one 
 
 - **The background sender opens the link.** `PhoneLink.sendNow` (notifications and texts; battery and media go only on the live link) opens the control link when a one-off send fails and nothing is connected, then sends on it once. A one-off connection is TCP only, so without this nothing sent in the background would reach the computer from away.
 - **The device check** pointed the saved computer's control port at a closed port, because no firewall rule can be added on this box without the owner. That is the same failure TCP meets away from home. Checklist §64.
-- **Found, not changed:** a computer that does not answer TCP is offered "Wake and connect" before a session. This was already so for sessions over the internet, and "Connect anyway" proceeds. An awake check over iroh is a follow-up.
+- **Found, then fixed:** a computer that did not answer TCP was offered "Wake and connect" before a session, so away from home every Connect asked about waking. Home now tries the control link over the internet, when the computer's WAN identity is known, before taking it for asleep.
 - **Accepted:**
   - iroh keeps a link alive with a heartbeat every 5 s, both ends, and the desktop's endpoint is shared with sessions, which need it for hole punching. A link held in the background costs radio wake-ups; it is measured in checklist §64.
 - **Fresh review (0 Critical, 2 Important), fixed one commit each:**

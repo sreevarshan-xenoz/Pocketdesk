@@ -261,7 +261,8 @@ fun HomeScreen(
                                 scope.launch {
                                     val asleep = withContext(Dispatchers.IO) {
                                         Waker.canWake(Waker.planFor(context, host.address)) &&
-                                            !Waker.answersSoon(host.address, host.controlPort)
+                                            !Waker.answersSoon(host.address, host.controlPort) &&
+                                            !answersOverInternet(context, host)
                                     }
                                     if (asleep) offeringWake = host else onConnect(host)
                                 }
@@ -593,4 +594,16 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
             }
         }
     }
+}
+
+/**
+ * Away from home a computer's control port does not answer, though it is
+ * awake: with its WAN identity known, try the control link over the
+ * internet (T10a) before taking it for asleep. A link that comes up is the
+ * session's.
+ */
+private fun answersOverInternet(context: android.content.Context, host: HostStore.Host): Boolean {
+    val wan = HostStore.wanIdentity(context, host.address) ?: return false
+    RustCore.connectToPeer(host.address, host.controlPort, wan)
+    return RustCore.controlPeer()?.first == host.address
 }
