@@ -236,7 +236,12 @@ impl Running {
                 }
             }
         });
-        tasks.insert(key, handle);
+        // Two requests for one file that both passed `supersede` (a
+        // reconnect racing a retry): the newer one wins, and the older is
+        // stopped, not left running unseen.
+        if let Some(older) = tasks.insert(key, handle) {
+            older.abort();
+        }
     }
 
     #[cfg(test)]
