@@ -246,7 +246,7 @@ pub fn send_in(
     state_dir: &Path,
     query: &str,
     path: &Path,
-    running: bool,
+    running: &dyn Fn() -> bool,
     wait: Option<std::time::Duration>,
 ) -> (Value, i32) {
     let refused = |code: i32, reason: String| {
@@ -255,7 +255,7 @@ pub fn send_in(
             code,
         )
     };
-    if !running {
+    if !running() {
         return refused(
             exit::NO_SERVER,
             "no Pocketdesk server is running to send it".to_string(),
@@ -302,29 +302,42 @@ pub fn send_in(
     let Some(wait) = wait else {
         return (versioned(out), exit::DONE);
     };
-    let deadline = std::time::Instant::now() + wait;
+    let deadline = wait_deadline(wait);
     loop {
         let row = sent_list(state_dir, usize::MAX)["sent"]
             .as_array()
             .and_then(|rows| rows.iter().find(|r| r["id"] == out["id"]).cloned());
-        if let Some(row) = row
-            && row["state"] != "offered"
-        {
+        // Once the server has it, its row says where it is.
+        if let Some(row) = &row {
             for key in ["state", "reason", "note"] {
                 out[key] = row[key].clone();
             }
-            let code = if row["state"] == "sent" {
-                exit::DONE
-            } else {
-                exit::FAILED
-            };
-            return (versioned(out), code);
+            if row["state"] != "offered" {
+                let code = if row["state"] == "sent" {
+                    exit::DONE
+                } else {
+                    exit::FAILED
+                };
+                return (versioned(out), code);
+            }
+        }
+        if !running() {
+            out["reason"] = json!("the Pocketdesk server stopped while waiting");
+            return (versioned(out), exit::NO_SERVER);
         }
         if std::time::Instant::now() >= deadline {
             return (versioned(out), exit::STILL_WAITING);
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
+}
+
+/// When a wait of `wait` from now ends; a wait too long to count ends in a
+/// year, which no phone outlasts.
+fn wait_deadline(wait: std::time::Duration) -> std::time::Instant {
+    let now = std::time::Instant::now();
+    now.checked_add(wait)
+        .unwrap_or_else(|| now + std::time::Duration::from_secs(365 * 24 * 3600))
 }
 
 /// `pocketdesk send`: prints the outcome and returns the exit code.
@@ -336,12 +349,12 @@ pub fn run_send(query: &str, path: &Path, wait_secs: Option<u64>, as_json: bool)
             return exit::FAILED;
         }
     };
-    let running = pocketdesk_core::local::server::is_running(&dir);
+    let running = || pocketdesk_core::local::server::is_running(&dir);
     let (out, code) = send_in(
         &dir,
         query,
         path,
-        running,
+        &running,
         wait_secs.map(std::time::Duration::from_secs),
     );
     if as_json {
@@ -632,11 +645,11 @@ mod tests {
     #[test]
     fn a_send_is_refused_before_it_is_queued_when_it_cannot_go() {
         let (dir, file) = send_setup("send-refused");
-        let (out, code) = send_in(&dir, "5f1c9b", &file, false, None);
+        let (out, code) = send_in(&dir, "5f1c9b", &file, &|| false, None);
         assert_eq!(code, exit::NO_SERVER, "{out}");
-        let (out, code) = send_in(&dir, "ffffff", &file, true, None);
+        let (out, code) = send_in(&dir, "ffffff", &file, &|| true, None);
         assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
-        let (out, code) = send_in(&dir, "5f1c9b", &dir.join("missing.pdf"), true, None);
+        let (out, code) = send_in(&dir, "5f1c9b", &dir.join("missing.pdf"), &|| true, None);
         assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
         assert!(
             pocketdesk_core::local::outbox::take_all(&dir, pocketdesk_core::local::pin::now_unix())
@@ -648,7 +661,7 @@ mod tests {
     #[test]
     fn a_send_is_queued_as_the_desktop_app_queues_one() {
         let (dir, file) = send_setup("send-queued");
-        let (out, code) = send_in(&dir, "5f1c9b", &file, true, None);
+        let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
         assert_eq!(code, exit::DONE);
         assert_eq!(out["api"], API);
         assert_eq!(out["state"], "queued");
@@ -698,7 +711,7 @@ mod tests {
             &dir,
             "5f1c9b",
             &file,
-            true,
+            &|| true,
             Some(std::time::Duration::from_secs(10)),
         );
         server.join().unwrap();
@@ -711,7 +724,7 @@ mod tests {
             &dir,
             "5f1c9b",
             &file,
-            true,
+            &|| true,
             Some(std::time::Duration::from_millis(300)),
         );
         assert_eq!(code, exit::STILL_WAITING, "{out}");
@@ -769,8 +782,80 @@ mod tests {
         assert!(devices(&dir, 1, false).is_err(), "not 'no paired phones'");
         let file = dir.join("a.txt");
         std::fs::write(&file, b"a").unwrap();
-        let (out, code) = send_in(&dir, "abcdef", &file, true, None);
+        let (out, code) = send_in(&dir, "abcdef", &file, &|| true, None);
         assert_eq!(code, exit::FAILED, "{out}");
+    }
+
+    /// Play the server: take the next request and record it as `state`.
+    fn serve_one(dir: std::path::PathBuf, state: pocketdesk_core::local::sent::SentState) {
+        use pocketdesk_core::local::sent::{self, SentFile};
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let taken = pocketdesk_core::local::outbox::take_all(
+                    &dir,
+                    pocketdesk_core::local::pin::now_unix(),
+                );
+                if let Some(request) = taken.into_iter().next() {
+                    sent::record(
+                        &dir,
+                        SentFile {
+                            id: request.id,
+                            name: "report.pdf".to_string(),
+                            path: request.path,
+                            size: 1,
+                            device_id: request.device_id,
+                            sent_unix: 1,
+                            state,
+                            note: None,
+                        },
+                    )
+                    .unwrap();
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        });
+    }
+
+    #[test]
+    fn a_wait_that_runs_out_says_the_phone_was_offered_it() {
+        let (dir, file) = send_setup("send-offered");
+        serve_one(
+            dir.clone(),
+            pocketdesk_core::local::sent::SentState::Offered,
+        );
+        let (out, code) = send_in(
+            &dir,
+            "5f1c9b",
+            &file,
+            &|| true,
+            Some(std::time::Duration::from_millis(1500)),
+        );
+        assert_eq!(code, exit::STILL_WAITING, "{out}");
+        assert_eq!(out["state"], "offered", "not 'queued': the server took it");
+    }
+
+    #[test]
+    fn a_wait_ends_when_the_server_stops() {
+        let (dir, file) = send_setup("send-stopped");
+        let checks = std::sync::atomic::AtomicUsize::new(0);
+        let running = || checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2;
+        let (out, code) = send_in(
+            &dir,
+            "5f1c9b",
+            &file,
+            &running,
+            Some(std::time::Duration::from_secs(30)),
+        );
+        assert_eq!(code, exit::NO_SERVER, "{out}");
+        assert!(out["reason"].as_str().unwrap().contains("stopped"));
+    }
+
+    #[test]
+    fn a_huge_wait_does_not_overflow() {
+        assert!(wait_deadline(std::time::Duration::MAX) > std::time::Instant::now());
     }
 
     #[test]

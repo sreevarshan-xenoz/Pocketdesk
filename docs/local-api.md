@@ -87,7 +87,7 @@ Sends a file or a folder to a phone in a session, exactly as the desktop app's F
  "state": "queued", "reason": null, "note": null}
 ```
 
-Without `--wait` it ends once the server has the request (`queued`). With `--wait`, it waits up to that many seconds for the outcome; then `state`, `reason` and `note` are the sent list's, and the exit code is 0 when the phone saved it, 1 when it failed, and 4 when time ran out. A send refused before it was queued has `"state": "refused"` and a `reason`.
+Without `--wait` it ends once the request is written for the server to take (`queued`); a server that stops before taking it drops it after a minute. With `--wait`, it waits up to that many seconds. Once the server has taken the request, `state`, `reason` and `note` are the sent list's (`offered` while the phone has not saved it yet), and the exit code is 0 when the phone saved it, 1 when it failed, 4 when time ran out, and 3 when the server stopped while waiting. A send refused before it was queued has `"state": "refused"` and a `reason`.
 
 ```sh
 pocketdesk send 0d7c3a backup.tar --wait 600 --json || notify-send "backup did not reach the phone"
