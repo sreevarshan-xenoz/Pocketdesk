@@ -9,6 +9,7 @@ pub mod monitors;
 pub mod notification;
 pub mod notification_reply;
 pub mod pair;
+pub mod phone_battery;
 pub mod power;
 pub mod privacy;
 pub mod share;
@@ -26,6 +27,7 @@ pub type PluginSet = PluginRegistry;
 pub fn register_all() -> PluginSet {
     let mut registry = PluginRegistry::new();
     registry.register(battery::BatteryPlugin::new());
+    registry.register(phone_battery::PhoneBatteryPlugin);
     registry.register(clipboard::ClipboardPlugin::new());
     registry.register(notification::NotificationPlugin::new());
     registry.register(share::SharePlugin::new());

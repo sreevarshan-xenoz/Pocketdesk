@@ -99,6 +99,7 @@ pub async fn run(config: Config) -> Result<()> {
     // F7b: files the desktop app sends to a phone in a session.
     tokio::spawn(crate::offers::run_watcher());
     tokio::spawn(crate::plugins::links::run_watcher());
+    tokio::spawn(crate::plugins::phone_battery::run_writer());
     tokio::spawn(crate::plugins::sms::run_watcher());
 
     // Prepare shared state for v2 multiplexer and v1 streaming.
@@ -143,6 +144,7 @@ pub async fn run(config: Config) -> Result<()> {
     );
     crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
     crate::plugins::links::configure(config.open_links);
+    crate::plugins::phone_battery::configure(config.phone_battery_alerts);
     crate::wake_info::configure(config.wake_announce, config.wake_port);
     crate::driving::configure(config.input_control, config.input_idle_secs);
     crate::plugins::share::configure(config.transfer_keep_hours);
