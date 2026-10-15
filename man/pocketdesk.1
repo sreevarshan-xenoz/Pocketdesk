@@ -43,6 +43,16 @@ is a device id or 6 or more of its first characters. Exit codes: 0 done,
 .B \-\-wait
 ran out.
 .TP
+.B send\-to\-phone \fIPATH\fR...
+Send files or folders to the phone connected on this network (one in a
+session first), and say how it went in a desktop notification too: what the
+file manager's "Send to phone" runs. Exit codes: 0 queued, 1 failed, 2
+nothing chosen, 3 no server running.
+.TP
+.B send\-menu [\-\-remove]
+Add "Send to phone" to the file manager (Explorer's Send To on Windows; the
+Nautilus, Nemo and Dolphin menus on Linux), or remove it.
+.TP
 .B link \fIPHONE\fR \fIURL\fR [\-\-json]
 Hand a web link to a paired phone in a session, where it waits as a
 notification that opens it. Only

@@ -83,6 +83,21 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Send files or folders to your phone, the one connected on this
+    /// network (in a session first): what the file manager's "Send to
+    /// phone" runs. Says how it went in a desktop notification too.
+    /// Exit codes: 0 queued, 1 failed, 2 nothing to send, 3 no server running
+    SendToPhone {
+        /// The files and folders
+        paths: Vec<std::path::PathBuf>,
+    },
+    /// Add "Send to phone" to the file manager (Explorer's Send To; the
+    /// Nautilus, Nemo and Dolphin menus), or remove it with --remove
+    SendMenu {
+        /// Remove it
+        #[arg(long)]
+        remove: bool,
+    },
     /// List the files sent to phones, newest first, and how each went
     Sent {
         /// How many to list

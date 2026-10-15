@@ -135,6 +135,8 @@ pub struct PocketdeskApp {
     notes: crate::notes_view::NotesView,
     /// The Phone tab (T10g).
     phone_files: crate::phone_files_view::PhoneFilesView,
+    /// Whether "Send to phone" is in the file manager, as last read (T10e).
+    send_menu_installed: Option<bool>,
 }
 
 impl PocketdeskApp {
@@ -163,6 +165,7 @@ impl PocketdeskApp {
             messages: Default::default(),
             notes: Default::default(),
             phone_files: Default::default(),
+            send_menu_installed: None,
         }
     }
 
@@ -234,6 +237,10 @@ impl PocketdeskApp {
     fn switch_to(&mut self, tab: Tab) {
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
+        }
+        if tab == Tab::Settings {
+            // Read again on each visit: it may have changed outside the app.
+            self.send_menu_installed = None;
         }
         if tab == Tab::Settings && self.settings.is_none() {
             self.settings = Some(
@@ -721,6 +728,47 @@ impl PocketdeskApp {
                 self.restart_button(ui);
             }
         }
+        self.send_menu_setting(ui);
+    }
+
+    /// "Send to phone" in the file manager (T10e): Explorer's Send To, or the
+    /// Nautilus, Nemo and Dolphin menus.
+    fn send_menu_setting(&mut self, ui: &mut egui::Ui) {
+        use pocketdesk_core::local::send_menu;
+        ui.add_space(12.0);
+        ui.separator();
+        let Ok(data) = send_menu::data_dir() else {
+            return;
+        };
+        // Read once, not every frame; again after a change.
+        let installed = *self
+            .send_menu_installed
+            .get_or_insert_with(|| send_menu::installed_in(&data));
+        let mut on = installed;
+        ui.checkbox(
+            &mut on,
+            "\"Send to phone\" in the file manager (sends to the phone connected on this network)",
+        );
+        if on == installed {
+            return;
+        }
+        let done = if on {
+            match crate::restart::server_exe_beside_app() {
+                Some(exe) => {
+                    send_menu::install_in(&data, &exe).map(|()| "Added to the file manager.")
+                }
+                None => Err(std::io::Error::other(
+                    "the server program is not beside this app",
+                )),
+            }
+        } else {
+            send_menu::remove_in(&data).map(|()| "Removed from the file manager.")
+        };
+        self.send_menu_installed = None;
+        self.notice = Some(match done {
+            Ok(said) => said.to_string(),
+            Err(e) => format!("Not changed: {e}"),
+        });
     }
 
     fn files_tab(&mut self, ui: &mut egui::Ui) {
