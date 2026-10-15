@@ -264,6 +264,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 
             PhoneNotificationsSection()
             PhoneFoldersSection()
+            ScreenshotsSection()
             TextsSection()
 
             // T2: whether Android holds those back while the phone sleeps.

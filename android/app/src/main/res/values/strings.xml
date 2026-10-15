@@ -490,4 +490,11 @@
     <string name="phone_folders_remove">Remove</string>
     <string name="phone_folders_storage">Storage</string>
     <string name="phone_folders_not_kept">Android did not let Pocketdesk keep access to that folder</string>
+    <string name="settings_screenshots">New screenshots to the computer</string>
+    <string name="screenshots_on">Send new screenshots</string>
+    <string name="screenshots_on_summary">A screenshot taken on this phone goes to its computer a moment later. Asks for access to photos, and uses notification access to run in the background</string>
+    <string name="screenshots_needs_access">Needs notification access to run in the background: tap to allow</string>
+    <string name="screenshots_needs_photos">Needs access to all photos: allow it in Android\'s settings for Pocketdesk</string>
+    <string name="screenshots_clipboard">Put on the computer\'s clipboard</string>
+    <string name="screenshots_save">Save in the computer\'s Downloads</string>
 </resources>
