@@ -1238,7 +1238,9 @@ On the Azure VM (headless Sway, `/dev/uinput` root-only) from the A71 over the i
 Owed:
 - [ ] Hyprland, river, labwc and Wayfire.
 - [ ] Direct touch (absolute moves), scrolling, right and middle clicks, and a two-output layout.
-- [ ] A shortcut with modifiers (Ctrl+C in a terminal, Shift+arrow, Super+N), the text fallback typed as keys, and the compositor restarted mid-session.
+- [x] After the review fixes: Ctrl+C and Shift+Left arrived with their modifiers (`wev`: depressed Control, then Shift; before the fix there was no modifiers event, so Ctrl+C was a plain "c").
+- [x] Sway restarted under the running server: the next input reopened the virtual devices ("are back") and moved the pointer.
+- [ ] Super+N, and the text fallback typed as keys.
 - [ ] Privacy mode where `/dev/input` is root-only too: the local keyboard is likely not blocked.
 
 ## Recording results
