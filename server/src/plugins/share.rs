@@ -301,6 +301,15 @@ impl FolderTops {
     }
 }
 
+impl FolderTops {
+    /// The top folder `device`'s folder send `folder_id` is saving into.
+    pub(crate) fn top(&self, device: &str, folder_id: &str) -> Option<PathBuf> {
+        let tops = self.tops.lock().unwrap_or_else(|e| e.into_inner());
+        tops.get(&(device.to_string(), folder_id.to_string()))
+            .map(|(top, _)| top.clone())
+    }
+}
+
 /// A folder in `parent` named like `name` that did not exist before:
 /// `name`, else `name (1)`, `name (2)`… Made exclusively, so a send never
 /// merges into a folder that is already there.
@@ -540,8 +549,8 @@ impl Plugin for SharePlugin {
                 // A file of a folder send (T6b) goes to its place under the
                 // send's own new folder; its path was checked part by part.
                 // Made only now, so a share refused above leaves no folder.
-                let (dir, name) = match folder_of(body) {
-                    None => (dir, name.clone()),
+                let (dir, name, top) = match folder_of(body) {
+                    None => (dir, name.clone(), None),
                     Some((folder_id, folder, path)) => {
                         match folder_tops().place(
                             &dir,
@@ -550,7 +559,10 @@ impl Plugin for SharePlugin {
                             &folder,
                             &path,
                         ) {
-                            Ok(placed) => placed,
+                            Ok((dir, name)) => {
+                                let top = folder_tops().top(sender.device_id(), &folder_id);
+                                (dir, name, top)
+                            }
                             Err(reason) => return refused(reason).await,
                         }
                     }
@@ -571,7 +583,9 @@ impl Plugin for SharePlugin {
                                 limits: partial_limits(),
                                 on_saved: {
                                     let from = from.clone();
-                                    Box::new(move |path: &Path| on_received(path, size, &from))
+                                    Box::new(move |path: &Path| {
+                                        on_received(path, size, &from, top.as_deref())
+                                    })
                                 },
                             },
                         )
@@ -861,41 +875,84 @@ async fn present_key<S: tokio::io::AsyncWrite + Unpin>(stream: &mut S, key: &str
 
 /// Tell the owner a file arrived: a desktop notification, and a row in the
 /// received-files list the desktop app shows (roadmap F7).
-fn on_received(path: &Path, size: u64, from: &str) {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    if let Ok(dir) = crate::state::state_dir() {
-        record_received_in(&dir, path, &name, size, from);
-    }
-    let folder = path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|f| f.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let body = format!("{name} ({}) is in {folder}.", human_size(size));
+/// A file from `from` was saved at `path`; `top` is the folder of the
+/// folder send (T6b) it belongs to, if it does. It is listed for the
+/// desktop app and announced.
+fn on_received(path: &Path, size: u64, from: &str, top: Option<&Path>) {
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let Some((summary, body)) = received_in(&dir, path, size, from, top) else {
+        return;
+    };
     std::thread::spawn(move || {
-        let summary = "Pocketdesk: file received";
         if !crate::platform::notify(summary, &body, Duration::from_secs(8)) {
             tracing::info!("{summary} — {body}");
         }
     });
 }
 
-fn record_received_in(state_dir: &Path, path: &Path, name: &str, size: u64, from: &str) {
+/// List a received file in `state_dir`, and the notification to show for
+/// it, if any. A folder send's files make one row for the folder, and only
+/// its first file is announced: a folder of a thousand files is not a
+/// thousand notifications.
+fn received_in(
+    state_dir: &Path,
+    path: &Path,
+    size: u64,
+    from: &str,
+    top: Option<&Path>,
+) -> Option<(&'static str, String)> {
+    use pocketdesk_core::local::received::{self, ReceivedFile};
+    let name_of = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let parent_name = |p: &Path| p.parent().map(name_of).unwrap_or_default();
     // Transfers run concurrently; the list is read, changed and replaced.
     static LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LIST.lock().unwrap_or_else(|e| e.into_inner());
-    let entry = pocketdesk_core::local::received::ReceivedFile {
-        name: name.to_string(),
-        path: path.display().to_string(),
-        size,
-        received_unix: pocketdesk_core::local::pin::now_unix(),
-        from: from.to_string(),
-    };
-    if let Err(e) = pocketdesk_core::local::received::record(state_dir, entry) {
-        tracing::warn!("Could not record the received file: {e}");
+    let now = pocketdesk_core::local::pin::now_unix();
+    match top {
+        None => {
+            let name = name_of(path);
+            let entry = ReceivedFile {
+                name: name.clone(),
+                path: path.display().to_string(),
+                size,
+                received_unix: now,
+                from: from.to_string(),
+            };
+            if let Err(e) = received::record(state_dir, entry) {
+                tracing::warn!("Could not record the received file: {e}");
+            }
+            Some((
+                "Pocketdesk: file received",
+                format!("{name} ({}) is in {}.", human_size(size), parent_name(path)),
+            ))
+        }
+        Some(top) => {
+            let folder = name_of(top);
+            let entry = ReceivedFile {
+                name: format!("{folder}/"),
+                path: top.display().to_string(),
+                size,
+                received_unix: now,
+                from: from.to_string(),
+            };
+            match received::add_to_folder(state_dir, entry) {
+                Ok(true) => Some((
+                    "Pocketdesk: folder arriving",
+                    format!("{folder} is arriving in {}.", parent_name(top)),
+                )),
+                Ok(false) => None,
+                Err(e) => {
+                    tracing::warn!("Could not record the received file: {e}");
+                    None
+                }
+            }
+        }
     }
 }
 
@@ -1696,7 +1753,8 @@ mod tests {
     fn a_received_file_is_listed_for_the_desktop_app() {
         let state = temp_dir("list");
         let path = state.join("photo.jpg");
-        record_received_in(&state, &path, "photo.jpg", 2_100_000, "192.0.2.7");
+        let toast = received_in(&state, &path, 2_100_000, "192.0.2.7", None);
+        assert!(toast.is_some(), "a plain file is announced");
         let files = pocketdesk_core::local::received::read(&state);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].name, "photo.jpg");
@@ -1704,6 +1762,28 @@ mod tests {
         assert_eq!(files[0].path, path.display().to_string());
         assert_eq!(human_size(2_100_000), "2.0 MB");
         assert_eq!(human_size(512), "512 B");
+    }
+
+    #[test]
+    fn a_folders_files_are_one_row_and_one_toast() {
+        let state = temp_dir("list-folder");
+        let top = state.join("Trip");
+        let first = received_in(&state, &top.join("a.jpg"), 10, "phone", Some(&top));
+        let second = received_in(
+            &state,
+            &top.join("day 2").join("b.jpg"),
+            5,
+            "phone",
+            Some(&top),
+        );
+        let (_, body) = first.expect("the folder's first file is announced");
+        assert!(body.contains("Trip"), "{body}");
+        assert!(second.is_none(), "its later files are not");
+        let files = pocketdesk_core::local::received::read(&state);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, "Trip/");
+        assert_eq!(files[0].path, top.display().to_string());
+        assert_eq!(files[0].size, 15);
     }
 
     #[test]
