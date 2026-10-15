@@ -53,3 +53,10 @@ Android 10+ lets only the focused app, or the default keyboard, read the clipboa
 - **No launcher shortcut:** the four dynamic shortcuts are the saved computers'. The tile and the share sheet are the ways in.
 - **Device-checked (A71 → Windows), checklist §65:** the background push and the tile.
 - **Found on the device run:** a force-stopped app's notification listener is not bound again until the app is opened once. This matters to anyone testing with `am force-stop`, not to users.
+- **Fresh review (0 Critical, 1 Important), fixed one commit each:**
+  - copies a password manager marks private were pushed. They now stay on the computer: on Windows, `ExcludeClipboardContentFromMonitorProcessing`, `Clipboard Viewer Ignore`, or `CanIncludeInClipboardHistory` / `CanUploadToCloudClipboard` set to 0 (live-checked); on Wayland, `x-kde-passwordManagerHint`.
+  - Minors fixed: a failed Windows read was never retried; the note of a phone's own copy lingered; a copy made while no phone was connected was pushed when one came back; the watcher held large text twice; the applier could overwrite a fresh local copy during a session, or apply old text when switched on; its connect could hold up text replies; "Send clipboard" closed before its send finished.
+  - **Accepted:**
+    - a push goes to a device's newest connection, which for a moment can be a short query connection;
+    - the phone's switch decides only whether the text is applied. A phone with Clipboard on still receives the pushes while its link is up (SECURITY.md limit 8).
+- **Re-checked on the A71 after the fixes:** both directions, and the window closing once its send was done.
