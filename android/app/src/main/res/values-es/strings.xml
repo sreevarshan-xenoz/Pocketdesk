@@ -27,6 +27,10 @@
     <string name="settings_keep_screen_on_summary">Durante una sesión de transmisión</string>
     <string name="settings_auto_reconnect">Reconectar automáticamente</string>
     <string name="settings_auto_reconnect_summary">Si el enlace se corta (el equipo reinicia su servidor, despierta o vuelve la red), reintentar durante 10 minutos</string>
+    <string name="settings_others_choose">Permitir que otras apps elijan un equipo</string>
+    <string name="settings_others_choose_summary">Una app de automatización (Tasker y similares) puede indicar a qué equipo guardado va lo que comparte. Desactivado: va al último equipo usado</string>
+    <string name="share_not_saved">Ningún equipo guardado tiene esa dirección</string>
+    <string name="share_choosing_off">Otras apps no pueden elegir un equipo: actívalo en los Ajustes de Pocketdesk</string>
     <string name="settings_retry_transfers">Reintentar archivos fallidos</string>
     <string name="settings_retry_transfers_summary">Un archivo que se corta a mitad se vuelve a enviar hasta 3 veces, desde donde se detuvo</string>
     <string name="reconnecting_in">Reconectando en %1$d s…</string>

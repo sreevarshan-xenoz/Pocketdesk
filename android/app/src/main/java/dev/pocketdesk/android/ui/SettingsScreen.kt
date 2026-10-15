@@ -142,6 +142,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             ) { Prefs.setRetryTransfers(context, it) }
             boolRow(
                 LlIcons.Pin,
+                stringResource(R.string.settings_others_choose),
+                stringResource(R.string.settings_others_choose_summary),
+                Prefs.othersChooseComputer(context),
+            ) { Prefs.setOthersChooseComputer(context, it) }
+            boolRow(
+                LlIcons.Pin,
                 stringResource(R.string.settings_reveal_pin),
                 stringResource(R.string.settings_reveal_pin_summary),
                 Prefs.revealPin(context),

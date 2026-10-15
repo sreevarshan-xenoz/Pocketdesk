@@ -53,12 +53,30 @@ class ShortcutPlanTest {
     @Test
     fun aShareGoesToTheComputerAskedForOrTheLastOneUsed() {
         val hosts = listOf(host("10.0.0.1"), host("mypc.local"))
-        assertEquals(hosts[1], ShortcutPlan.shareHost("mypc.local", hosts))
-        assertEquals("none asked for: the last one used", hosts[0], ShortcutPlan.shareHost(null, hosts))
-        assertNull(
+        val share = ShortcutPlan::shareHost
+        assertEquals(ShortcutPlan.Share.To(hosts[1]), share("mypc.local", hosts, true))
+        assertEquals("none asked for: the last one used", ShortcutPlan.Share.To(hosts[0]), share(null, hosts, true))
+        assertEquals(
             "an address that is not saved never falls back to another computer",
-            ShortcutPlan.shareHost("10.9.9.9", hosts),
+            ShortcutPlan.Share.NotSaved,
+            share("10.9.9.9", hosts, true),
         )
-        assertNull(ShortcutPlan.shareHost(null, emptyList()))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("", hosts, true))
+        assertEquals(ShortcutPlan.Share.NoneSaved, share(null, emptyList(), true))
+    }
+
+    @Test
+    fun otherAppsChooseAComputerOnlyWhenThePersonLetsThem() {
+        val hosts = listOf(host("10.0.0.1"), host("mypc.local"))
+        assertEquals(
+            "off: a share naming a computer is refused, never sent elsewhere",
+            ShortcutPlan.Share.NotAllowed,
+            ShortcutPlan.shareHost("mypc.local", hosts, false),
+        )
+        assertEquals(
+            "a share that names none is not choosing",
+            ShortcutPlan.Share.To(hosts[0]),
+            ShortcutPlan.shareHost(null, hosts, false),
+        )
     }
 }

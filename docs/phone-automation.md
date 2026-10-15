@@ -1,8 +1,8 @@
 # Automating the phone app
 
-Automation apps on the phone (Tasker, MacroDroid, Automate and the like) can drive Pocketdesk with Android intents. These are the same entry points the launcher shortcuts, the Quick Settings tile and the share sheet use, so nothing here opens a door that was not already open. Every intent acts only on a computer already saved in the app; a computer that is not saved gets nothing.
+Automation apps on the phone (Tasker, MacroDroid, Automate and the like) can drive Pocketdesk with Android intents. These are the entry points the launcher shortcuts, the Quick Settings tile and the share sheet use, and any app on the phone can start them. Every intent acts only on a computer already saved in the app; a computer that is not saved gets nothing.
 
-The computer's address is the one shown on its card on the app's home screen (for example `192.168.1.20`, or a name such as `mypc.local`). It goes in the extra `dev.pocketdesk.android.extra.ADDRESS`.
+The computer's address is the one shown on its card on the app's home screen (for example `192.168.1.20`, or a name such as `mypc.local`), exactly: the same letters and case, with no port. It goes in the extra `dev.pocketdesk.android.extra.ADDRESS`; an empty or unexpanded one (a Tasker variable left as `%ADDR`) is refused.
 
 On the computer, scripts use the local API instead: `docs/local-api.md`.
 
@@ -35,7 +35,7 @@ Sends the Wake-on-LAN packets the computer's Wake settings describe. The compute
 | Type | `text/plain` |
 | Extras | `android.intent.extra.TEXT` = the text; `dev.pocketdesk.android.extra.ADDRESS` = the computer (optional) |
 
-Without the address, the text goes to the last computer used.
+Without the address, the text goes to the last computer used. Naming a computer needs **Settings → Let other apps choose a computer**, off by default: choosing where a share goes is more than the share sheet lets an app do. With it off, a share that names a computer is refused, never sent to another one.
 
 ## Send files to a computer
 
@@ -44,14 +44,14 @@ Without the address, the text goes to the last computer used.
 | Target | Activity `dev.pocketdesk.android/.ShareActivity` |
 | Action | `android.intent.action.SEND` (one file) or `android.intent.action.SEND_MULTIPLE` |
 | Type | the file's type, or `*/*` |
-| Extras | `android.intent.extra.STREAM` = the file's `content://` URI, with read permission granted; `dev.pocketdesk.android.extra.ADDRESS` = the computer (optional) |
+| Extras | `android.intent.extra.STREAM` = the file's `content://` URI, with read permission granted; `dev.pocketdesk.android.extra.ADDRESS` = the computer (optional, as for text) |
 
 The files land in the computer's Downloads, each resumable, as a share from any app does. The automation app must grant read access to the URI (Tasker: tick "Grant read permission"); a `file://` path is refused by Android.
 
 ## What to expect
 
 - **No result comes back** to the automation app. Pocketdesk shows the outcome as a toast or its transfer notification.
-- **A computer that is not saved**, named in the address extra, is refused with "That computer is no longer saved."; the share never goes to another computer instead.
+- **A computer that is not saved**, named in the address extra, is refused with "No saved computer has that address"; with the setting off, with "Other apps may not choose a computer". The share never goes to another computer instead.
 - **Android may block** an activity started from an app in the background. Automation apps usually need "Display over other apps" (Tasker asks for it) to start one from the background.
 
 ## Examples

@@ -33,12 +33,31 @@ object ShortcutPlan {
     fun savedHost(address: String?, hosts: List<HostStore.Host>): HostStore.Host? =
         address?.let { wanted -> hosts.firstOrNull { it.address == wanted } }
 
+    /** Where a share goes, or why it goes nowhere. */
+    sealed interface Share {
+        data class To(val host: HostStore.Host) : Share
+
+        /** No computer is saved. */
+        data object NoneSaved : Share
+
+        /** The computer named is not saved. */
+        data object NotSaved : Share
+
+        /** Another app named a computer, and the person has not let apps choose. */
+        data object NotAllowed : Share
+    }
+
     /**
-     * The computer a share goes to (T7b): the saved one [address] names, as
-     * for [savedHost], or the last one used when none is named. A named
-     * computer that is not saved gets nothing, never another computer:
-     * the share might be meant for that one only.
+     * Where a share goes (T7b): the last computer used, or the saved one
+     * [address] names when [othersMayChoose] (Settings, off by default:
+     * any app can start a share, and choosing the computer is more than the
+     * share sheet lets it do). A named computer is never swapped for
+     * another: refused when not saved, or when choosing is not allowed.
      */
-    fun shareHost(address: String?, hosts: List<HostStore.Host>): HostStore.Host? =
-        if (address == null) hosts.firstOrNull() else savedHost(address, hosts)
+    fun shareHost(address: String?, hosts: List<HostStore.Host>, othersMayChoose: Boolean): Share =
+        when {
+            address == null -> hosts.firstOrNull()?.let { Share.To(it) } ?: Share.NoneSaved
+            !othersMayChoose -> Share.NotAllowed
+            else -> savedHost(address, hosts)?.let { Share.To(it) } ?: Share.NotSaved
+        }
 }
