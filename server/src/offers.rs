@@ -27,6 +27,12 @@ pub const OFFER: &str = "kdeconnect.pocketdesk.file_offer";
 /// The phone declines an offer it will not fetch: `{id, reason}` (no room,
 /// too large, nowhere to save it).
 pub const DECLINE: &str = "kdeconnect.pocketdesk.file_offer_declined";
+/// The answer to a phone's request for a folder (`share::FOLDER_FETCH`):
+/// `{path, queued, reason}`. Sent before the folder's offers.
+pub const FOLDER_FETCH_REPLY: &str = "kdeconnect.pocketdesk.folder_fetch_reply";
+/// How many folder sends one phone may have on the way when it asks for
+/// another.
+const MAX_ASKED_FOLDERS: usize = 2;
 /// How long the phone has to fetch an offered file. Long enough for a phone
 /// that fetches a dropped batch one file after another; a folder's files
 /// have this long from the phone's last fetch of any of them.
@@ -227,7 +233,10 @@ fn sweep_in(table: &Table, now: Instant) -> Vec<String> {
 /// A folder send in progress (T6b): its files' offers, and how they ended.
 #[derive(Debug, Default)]
 struct Group {
-    total: usize,
+    /// The phone it goes to.
+    device: String,
+    /// Its files' offers; `None` while the folder is still being walked.
+    total: Option<usize>,
     ended: usize,
     failed: usize,
     last_reason: Option<String>,
@@ -245,19 +254,40 @@ fn groups() -> &'static Mutex<Groups> {
     GROUPS.get_or_init(Default::default)
 }
 
-/// Make `offer_ids` the files of the folder send `group`.
-fn start_group(group: &str, offer_ids: &[&str]) {
+/// Begin the folder send `group` to `device`, unless `device` already has
+/// `limit` on the way; whether it began.
+fn reserve_group(group: &str, device: &str, limit: Option<usize>) -> bool {
     let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());
+    let on_the_way = g.groups.values().filter(|g| g.device == device).count();
+    if limit.is_some_and(|limit| on_the_way >= limit) {
+        return false;
+    }
     g.groups.insert(
         group.to_string(),
         Group {
-            total: offer_ids.len(),
+            device: device.to_string(),
             ..Group::default()
         },
     );
+    true
+}
+
+/// Make `offer_ids` the files of the folder send `group`.
+fn start_group(group: &str, offer_ids: &[&str]) {
+    let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());
+    g.groups.entry(group.to_string()).or_default().total = Some(offer_ids.len());
     for id in offer_ids {
         g.member_of.insert(id.to_string(), group.to_string());
     }
+}
+
+/// Forget the folder send `group`, which offered nothing.
+fn drop_group(group: &str) {
+    groups()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .groups
+        .remove(group);
 }
 
 /// Record that offer `id` ended with `outcome`: its own row, or, for a
@@ -274,7 +304,7 @@ fn end_offer(dir: &Path, id: &str, outcome: Result<(), String>) {
                     group.failed += 1;
                     group.last_reason = Some(reason.clone());
                 }
-                if group.ended < group.total {
+                if group.total.is_none_or(|total| group.ended < total) {
                     return;
                 }
                 let group = g.groups.remove(&group_id).unwrap_or_default();
@@ -291,7 +321,7 @@ fn end_offer(dir: &Path, id: &str, outcome: Result<(), String>) {
                 Err(format!(
                     "{} of {} files not sent: {}",
                     group.failed,
-                    group.total,
+                    group.total.unwrap_or_default(),
                     group.last_reason.unwrap_or_default()
                 ))
             };
@@ -614,13 +644,104 @@ async fn deliver_folder(
     clients: &[Arc<dyn DeviceSender>],
     store: Option<&TrustStore>,
 ) {
+    let target = phone_for(&request, clients, store).map_err(str::to_string);
+    let _ = send_folder(dir, &request, &root, target.as_deref(), None).await;
+}
+
+/// The phone `asker` asked for the folder `root` from the remote browser,
+/// naming it `asked` (the path it browsed to): offer it the folder as the
+/// owner's sends are, with a row in the sent list, and answer first. A
+/// phone with [`MAX_ASKED_FOLDERS`] on the way is told it is busy.
+pub(crate) async fn offer_folder_to(
+    dir: &Path,
+    device_id: &str,
+    root: &Path,
+    asked: &str,
+    asker: &dyn DeviceSender,
+) -> Result<(), String> {
+    let request = SendRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        device_id: device_id.to_string(),
+        path: root.display().to_string(),
+        created_unix: now_unix(),
+    };
+    let reply = Reply { asked, to: asker };
+    send_folder(dir, &request, root, Ok(asker), Some(reply)).await
+}
+
+/// Where a phone's request for a folder is answered.
+#[derive(Clone, Copy)]
+struct Reply<'a> {
+    asked: &'a str,
+    to: &'a dyn DeviceSender,
+}
+
+impl Reply<'_> {
+    async fn send(&self, outcome: &Result<(), String>) {
+        answer_folder_request(self.to, self.asked, outcome).await;
+    }
+}
+
+/// Tell the phone `to` how its request for the folder `asked` went.
+pub(crate) async fn answer_folder_request(
+    to: &dyn DeviceSender,
+    asked: &str,
+    outcome: &Result<(), String>,
+) {
+    if let Err(reason) = outcome {
+        tracing::info!("Folder request from {} refused: {reason}", to.device_id());
+    }
+    let packet = NetworkPacket::new(FOLDER_FETCH_REPLY).with_body(serde_json::json!({
+        "path": asked,
+        "queued": outcome.is_ok(),
+        "reason": outcome.as_ref().err(),
+    }));
+    if let Err(e) = to.send_packet(&packet).await {
+        tracing::debug!("Could not answer a folder request: {e}");
+    }
+}
+
+/// Offer every file under `root` to `target` as the folder send `request`
+/// (T6b); its outcome. A phone's own request (`reply`) is answered before
+/// any offer, is held to [`MAX_ASKED_FOLDERS`], and gets no sent row when
+/// refused as busy.
+async fn send_folder(
+    dir: &Path,
+    request: &SendRequest,
+    root: &Path,
+    target: Result<&dyn DeviceSender, &String>,
+    reply: Option<Reply<'_>>,
+) -> Result<(), String> {
+    let limit = reply.map(|_| MAX_ASKED_FOLDERS);
+    if !reserve_group(&request.id, &request.device_id, limit) {
+        let busy = Err("busy: two folders are already on the way to this phone".to_string());
+        if let Some(reply) = reply {
+            reply.send(&busy).await;
+        }
+        return busy;
+    }
+    let outcome = offer_folder(dir, request, root, target, reply).await;
+    if outcome.is_err() {
+        drop_group(&request.id);
+    }
+    outcome
+}
+
+/// [`send_folder`] once the send is reserved.
+async fn offer_folder(
+    dir: &Path,
+    request: &SendRequest,
+    root: &Path,
+    target: Result<&dyn DeviceSender, &String>,
+    reply: Option<Reply<'_>>,
+) -> Result<(), String> {
     let folder = root
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Folder".to_string());
     // The phone takes a send's id as 32 hex digits; the outbox's has hyphens.
     let folder_id = request.id.replace('-', "");
-    let found = folder_files(&root);
+    let found = folder_files(root);
     // A folder whose own name the phone cannot make is refused, not sent
     // flat or renamed.
     let name_problem = pocketdesk_core::protocol::relpath::component_problem(&folder);
@@ -630,7 +751,7 @@ async fn deliver_folder(
             name_problem.clone().unwrap_or_default()
         )),
         Ok(found) if found.files.is_empty() => Err("the folder has nothing to send".to_string()),
-        Ok(_) => phone_for(&request, clients, store).map_err(str::to_string),
+        Ok(_) => target.map_err(String::clone),
         Err(reason) => Err(reason.clone()),
     };
     let total: u64 = found
@@ -655,9 +776,19 @@ async fn deliver_folder(
             tracing::warn!("Could not record the sent folder: {e}");
         }
     }
-    let (Ok(found), Ok(target)) = (found, checked) else {
-        return;
+    let (found, target) = match (found, checked) {
+        (Ok(found), Ok(target)) => (found, target),
+        (_, Err(reason)) | (Err(reason), _) => {
+            let refused = Err(reason);
+            if let Some(reply) = reply {
+                reply.send(&refused).await;
+            }
+            return refused;
+        }
     };
+    if let Some(reply) = reply {
+        reply.send(&Ok(())).await;
+    }
     if found.skipped > 0 || found.truncated {
         tracing::warn!(
             "Folder {folder}: {} names left out, cut short: {}",
@@ -700,7 +831,8 @@ async fn deliver_folder(
                     end_offer(dir, id, Err("phone not connected".to_string()));
                 }
             }
-            return;
+            // Its offers have ended, and so has the send.
+            return Ok(());
         }
     }
     tracing::info!(
@@ -709,6 +841,7 @@ async fn deliver_folder(
         found.files.len(),
         request.device_id
     );
+    Ok(())
 }
 
 /// The file's source id (T6a): 32 hex digits naming this file at this
@@ -866,6 +999,82 @@ mod tests {
         let listed = sent::read(&dir);
         let note = listed[0].note.as_deref().expect("a note");
         assert!(note.starts_with("1 "), "{note}");
+    }
+
+    fn folder_of_two(dir: &Path, name: &str) -> PathBuf {
+        let root = dir.join(name);
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("a.txt"), b"a").unwrap();
+        std::fs::write(root.join("sub").join("b.txt"), b"bb").unwrap();
+        root
+    }
+
+    #[tokio::test]
+    async fn a_folder_the_phone_asks_for_is_answered_then_offered_to_it() {
+        let dir = temp_dir("asked-folder");
+        let root = folder_of_two(&dir, "Notes");
+        let phone = Conn::new("phone-asks", true);
+        offer_folder_to(&dir, "phone-asks", &root, "Docs/Notes", &*phone)
+            .await
+            .unwrap();
+        let pushed = phone.sent.lock().unwrap().clone();
+        // The answer comes first: thousands of offers must not bury it.
+        assert_eq!(pushed[0].packet_type, FOLDER_FETCH_REPLY);
+        assert_eq!(pushed[0].body["path"], "Docs/Notes");
+        assert_eq!(pushed[0].body["queued"], true);
+        let offers: Vec<_> = pushed[1..]
+            .iter()
+            .filter(|p| p.packet_type == OFFER)
+            .collect();
+        assert_eq!(offers.len(), 2);
+        assert_eq!(offers[0].body["folder"], "Notes");
+        let listed = sent::read(&dir);
+        assert_eq!(listed.len(), 1, "one row, so the owner sees what left");
+        assert_eq!(listed[0].device_id, "phone-asks");
+        assert_eq!(listed[0].name, "Notes/");
+    }
+
+    #[tokio::test]
+    async fn a_phone_may_have_two_folders_on_the_way_and_no_more() {
+        let dir = temp_dir("asked-busy");
+        let phone = Conn::new("phone-busy", true);
+        for n in 0..2 {
+            let root = folder_of_two(&dir, &format!("F{n}"));
+            offer_folder_to(&dir, "phone-busy", &root, "x", &*phone)
+                .await
+                .unwrap();
+        }
+        let third = folder_of_two(&dir, "F2");
+        let refused = offer_folder_to(&dir, "phone-busy", &third, "F2", &*phone).await;
+        assert!(refused.unwrap_err().contains("busy"));
+        let last = phone.sent.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(last.packet_type, FOLDER_FETCH_REPLY);
+        assert_eq!(last.body["queued"], false);
+        assert_eq!(sent::read(&dir).len(), 2, "no row for a refused request");
+        // Another phone is not held up by this one.
+        let other = Conn::new("phone-other", true);
+        offer_folder_to(&dir, "phone-other", &third, "F2", &*other)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_empty_folder_the_phone_asks_for_is_answered_with_why() {
+        let dir = temp_dir("asked-empty");
+        let root = dir.join("Empty");
+        std::fs::create_dir_all(&root).unwrap();
+        let phone = Conn::new("phone-empty", true);
+        let refused = offer_folder_to(&dir, "phone-empty", &root, "Empty", &*phone).await;
+        assert!(refused.is_err());
+        let pushed = phone.sent.lock().unwrap().clone();
+        assert_eq!(pushed.len(), 1);
+        assert_eq!(pushed[0].body["queued"], false);
+        assert!(
+            pushed[0].body["reason"]
+                .as_str()
+                .unwrap()
+                .contains("nothing")
+        );
     }
 
     #[test]

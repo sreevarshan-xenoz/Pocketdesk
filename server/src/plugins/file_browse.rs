@@ -138,6 +138,29 @@ fn resolve_file_in(home: &Path, requested: &str) -> std::result::Result<(PathBuf
     Ok((real, metadata.len()))
 }
 
+/// The folder `requested` names below home, for a phone that asks for it
+/// whole (`share::FOLDER_FETCH`): its real path and the path as shown, by
+/// the browser's own rules. Home itself is refused: it holds too much to
+/// mean.
+pub(crate) fn resolve_folder(requested: &str) -> std::result::Result<(PathBuf, PathBuf), String> {
+    let home = dirs::home_dir().ok_or("this computer has no home folder")?;
+    resolve_folder_in(&home, requested)
+}
+
+fn resolve_folder_in(
+    home: &Path,
+    requested: &str,
+) -> std::result::Result<(PathBuf, PathBuf), String> {
+    let (real, shown) = resolve_in(home, requested).ok_or("not a folder in the home folder")?;
+    if home.canonicalize().is_ok_and(|h| h == real) {
+        return Err("not the whole home folder".to_string());
+    }
+    if !real.is_dir() {
+        return Err("not a folder".to_string());
+    }
+    Ok((real, shown))
+}
+
 /// The reply to a request for `requested`, browsing inside `home`.
 fn browse_reply(home: &Path, requested: &str) -> serde_json::Value {
     let Some((real, shown)) = resolve_in(home, requested) else {
@@ -557,6 +580,28 @@ mod tests {
             );
         }
         assert!(resolve_file_in(&home, "").is_err(), "home is a folder");
+    }
+
+    #[test]
+    fn only_a_real_folder_below_home_can_be_asked_for_whole() {
+        let home = temp_home("fetch-folder");
+        std::fs::write(home.join("a.txt"), "abc").unwrap();
+        std::fs::create_dir_all(home.join(".secret")).unwrap();
+        let docs = home.join("docs");
+        let (real, shown) = resolve_folder_in(&home, docs.to_str().unwrap()).unwrap();
+        assert_eq!(real, docs.canonicalize().unwrap());
+        assert_eq!(shown, docs);
+        for bad in [
+            String::new(),
+            "/".to_string(),
+            home.to_str().unwrap().to_string(),
+            home.join("a.txt").to_str().unwrap().to_string(),
+            home.join(".secret").to_str().unwrap().to_string(),
+            home.join("missing").to_str().unwrap().to_string(),
+            std::env::temp_dir().to_str().unwrap().to_string(),
+        ] {
+            assert!(resolve_folder_in(&home, &bad).is_err(), "{bad:?}");
+        }
     }
 
     #[cfg(unix)]

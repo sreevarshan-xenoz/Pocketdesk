@@ -124,6 +124,10 @@ pub const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 /// A download the desktop will not make, and why: `{key, reason}`, so the
 /// phone stops waiting at once instead of at its listener's timeout.
 pub const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
+/// The phone asks for a whole folder from the remote browser: `{path}`.
+/// It is offered as the owner's folder sends are (`offers`), and always
+/// answered (`offers::FOLDER_FETCH_REPLY`).
+pub const FOLDER_FETCH: &str = "kdeconnect.pocketdesk.folder_fetch";
 
 /// Transfers running at once from one phone, so one phone cannot hold every
 /// slot and starve the others (R3). Two, not one: a phone sends its next
@@ -433,7 +437,12 @@ impl Plugin for SharePlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.share.request", FETCH, crate::offers::DECLINE]
+        &[
+            "kdeconnect.share.request",
+            FETCH,
+            FOLDER_FETCH,
+            crate::offers::DECLINE,
+        ]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -441,12 +450,17 @@ impl Plugin for SharePlugin {
             "kdeconnect.share.request",
             FETCH_REFUSED,
             crate::offers::OFFER,
+            crate::offers::FOLDER_FETCH_REPLY,
         ]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         if packet.packet_type == FETCH {
             handle_fetch(packet, sender).await;
+            return Ok(());
+        }
+        if packet.packet_type == FOLDER_FETCH {
+            handle_folder_fetch(packet, sender).await;
             return Ok(());
         }
         if packet.packet_type == crate::offers::DECLINE {
@@ -619,6 +633,31 @@ impl Plugin for SharePlugin {
 
 /// A download the phone asked for: check it, then send the file from a task
 /// of its own, or tell the phone why not.
+/// The phone asks for the folder at `path` below home, whole: held to the
+/// remote browser's rules, then offered to it as the owner's folder sends
+/// are. Always answered.
+async fn handle_folder_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    let asked = packet
+        .body
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let refused = match crate::plugins::file_browse::resolve_folder(asked) {
+        Err(reason) => reason,
+        Ok((_, shown)) => match crate::state::state_dir() {
+            // Offered and answered there, or refused and answered there.
+            Ok(dir) => {
+                let _ =
+                    crate::offers::offer_folder_to(&dir, sender.device_id(), &shown, asked, sender)
+                        .await;
+                return;
+            }
+            Err(e) => format!("no state folder: {e}"),
+        },
+    };
+    crate::offers::answer_folder_request(sender, asked, &Err(refused)).await;
+}
+
 async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     // Without a key there is nothing to address a refusal to.
     let Some(key) = packet
@@ -2223,6 +2262,25 @@ mod tests {
         assert!(refusal(&phone).is_some());
         let made: Vec<_> = std::fs::read_dir(&downloads).unwrap().flatten().collect();
         assert!(made.is_empty(), "{made:?}");
+    }
+
+    #[tokio::test]
+    async fn a_folder_outside_home_is_refused_with_its_path() {
+        let plugin = SharePlugin::new();
+        assert!(
+            plugin.incoming_capabilities().contains(&FOLDER_FETCH),
+            "routed to this plugin"
+        );
+        let phone = Phone::at("192.0.2.7:51000");
+        let asked = std::env::temp_dir().display().to_string();
+        let packet =
+            NetworkPacket::new(FOLDER_FETCH).with_body(serde_json::json!({ "path": asked }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        let reply = phone.replies().pop().expect("an answer");
+        assert_eq!(reply.packet_type, crate::offers::FOLDER_FETCH_REPLY);
+        assert_eq!(reply.body["path"], asked.as_str());
+        assert_eq!(reply.body["queued"], false);
+        assert!(!reply.body["reason"].as_str().unwrap().is_empty());
     }
 
     #[tokio::test]
