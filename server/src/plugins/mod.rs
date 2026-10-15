@@ -18,7 +18,15 @@ pub mod sms;
 pub mod wake_relay;
 pub mod windows;
 
-use pocketdesk_core::protocol::kdeconnect::PluginRegistry;
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, PluginRegistry};
+
+/// Answer a request the phone's permissions refused, for the requests a
+/// phone waits on a reply for (a folder download, an audio request), so it
+/// is told why instead of timing out. Others go unanswered.
+pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    share::answer_denied(packet, sender).await;
+    audio_control::answer_denied(packet, sender).await;
+}
 
 /// Shorthand for the full plugin registry type with every plugin registered.
 pub type PluginSet = PluginRegistry;
