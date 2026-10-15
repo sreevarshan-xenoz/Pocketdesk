@@ -1163,7 +1163,8 @@ Owed:
 - [ ] Away from home (the internet link): both directions.
 - [ ] Desktop "Clipboard to phones" off: nothing pushed; a session still gets the clipboard on request.
 - [ ] A phone with Clipboard off on the desktop gets no pushes.
-- [ ] Linux: `wl-paste --type text` every 2 s, with text and with an image on the clipboard.
+- [x] Linux (the Azure VM, headless Sway, this branch's release build): text copied with `wl-copy` reached the A71 in the background. The VM had no `wl-clipboard` at first; without it the computer's clipboard is never read (`wl-paste` is a runtime need on Wayland).
+- [ ] Linux with an image on the clipboard, and a copy offering `x-kde-passwordManagerHint` (KeePassXC).
 - [ ] Android 10–12: the tile's window reads the clipboard.
 
 ## Recording results
