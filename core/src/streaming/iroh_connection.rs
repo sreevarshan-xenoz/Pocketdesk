@@ -323,6 +323,13 @@ impl OutStream for IrohSendStream {
             .finish()
             .map_err(|_: ClosedStream| ConnectionError::Closed)
     }
+
+    fn delivered(&self) -> super::connection::Delivered {
+        let stopped = self.inner.stopped();
+        Box::pin(async move {
+            let _ = stopped.await;
+        })
+    }
 }
 
 struct IrohRecvStream {

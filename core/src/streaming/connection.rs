@@ -90,7 +90,16 @@ pub trait OutStream: Send {
     /// Mark the end of the stream. Synchronous in quinn; kept so callers
     /// finish streams deterministically (uni-streams signal end-of-packet).
     fn finish(&mut self) -> Result<(), ConnectionError>;
+
+    /// Completes once the peer has every byte of this finished stream, or
+    /// the stream or connection is gone. The default completes at once.
+    fn delivered(&self) -> Delivered {
+        Box::pin(std::future::ready(()))
+    }
 }
+
+/// A finished stream's delivery ([`OutStream::delivered`]).
+pub type Delivered = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
 /// Read half of a stream returned by [`Connection::accept_uni`].
 #[async_trait]
@@ -313,6 +322,13 @@ impl OutStream for QuinnSendStream {
         // finished/reset — since callers finish right after a successful
         // write, that means the connection is gone.
         self.inner.finish().map_err(|_| ConnectionError::Closed)
+    }
+
+    fn delivered(&self) -> Delivered {
+        let stopped = self.inner.stopped();
+        Box::pin(async move {
+            let _ = stopped.await;
+        })
     }
 }
 

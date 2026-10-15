@@ -17,7 +17,7 @@ use super::audio::{AudioConfig, AudioEncoder as AudioOpusEncoder};
 use super::audio_capture;
 use super::bitrate::LossCeiling;
 use super::capture;
-use super::connection::{Connection, QuinnConnection, SharedConnection};
+use super::connection::{Connection, Delivered, QuinnConnection, SharedConnection};
 use super::encoder::VideoEncoder;
 use super::input_packet::{InputPacket, PRESET_AUTO, preset_bitrate_ceil};
 use super::session_telemetry::{SessionOutcome, SessionRecorder};
@@ -798,7 +798,8 @@ impl StreamingServer {
             );
         }.instrument(encode_span));
 
-        // Task 3: Packet transport — sends packets over QUIC (newest-only)
+        // Task 3: Packet transport — sends packets over QUIC (newest-only),
+        // at most `MAX_VIDEO_IN_FLIGHT` frames on the wire at once
         let telemetry_bytes_tx = telemetry.as_ref().map(|t| t.1.clone());
         let transport_cancel = cancel.clone();
         let transport_span = tracing::info_span!("video_transport");
@@ -808,6 +809,7 @@ impl StreamingServer {
             let mut bytes_sent = 0u64;
             let mut packets_dropped = 0u64;
             let mut connection_closed = false;
+            let mut in_flight = InFlight::new(MAX_VIDEO_IN_FLIGHT);
 
             loop {
                 tokio::select! {
@@ -859,6 +861,15 @@ impl StreamingServer {
                                 continue;
                             }
 
+                            // A slow link holds the next frame here, in the
+                            // queue the next batch trims, not in the
+                            // connection's send buffer.
+                            if !in_flight.admit(&transport_cancel).await {
+                                connection_closed = true;
+                                packets_dropped += 1;
+                                continue;
+                            }
+
                             // Open a unidirectional stream for this packet
                             match conn_for_transport.open_uni().await {
                                 Ok(mut send_stream) => {
@@ -891,6 +902,7 @@ impl StreamingServer {
                                         packets_dropped += 1;
                                         continue;
                                     }
+                                    in_flight.push(send_stream.delivered());
 
                                     packets_sent += 1;
                                     bytes_sent += data_len as u64;
@@ -1553,8 +1565,86 @@ async fn send_audio_packet(
     }
 }
 
+/// How many video frames may be on the wire, sent and not yet delivered,
+/// before the next waits. Without a bound, a slow link took every frame into
+/// the connection's send buffer (megabytes), where nothing could trim the
+/// stale ones and the phone waited behind them; a quarter-second of frames
+/// at 30 fps is enough not to throttle a healthy link's round trips.
+const MAX_VIDEO_IN_FLIGHT: usize = 8;
+
+/// The video frames on the wire ([`MAX_VIDEO_IN_FLIGHT`]).
+struct InFlight {
+    max: usize,
+    pending: std::collections::VecDeque<Delivered>,
+}
+
+impl InFlight {
+    fn new(max: usize) -> Self {
+        Self {
+            max: max.max(1),
+            pending: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// Wait for room for one more frame; false when `cancel` ended the wait.
+    async fn admit(&mut self, cancel: &CancellationToken) -> bool {
+        while self.pending.len() >= self.max {
+            // Waited on where it is, and removed only once delivered: a
+            // wait given up on must not lose count of a frame on the wire.
+            let Some(oldest) = self.pending.front_mut() else {
+                break;
+            };
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return false,
+                _ = oldest => {}
+            }
+            self.pending.pop_front();
+        }
+        !cancel.is_cancelled()
+    }
+
+    /// A frame just sent, delivered when `delivered` completes.
+    fn push(&mut self, delivered: Delivered) {
+        self.pending.push_back(delivered);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// The transport keeps at most so many video frames on the wire: on a
+    /// slow link the next waits for the oldest to be delivered, so frames
+    /// queue where they can be trimmed, not inside the connection.
+    #[tokio::test]
+    async fn a_frame_waits_while_the_link_still_carries_the_last_ones() {
+        let cancel = CancellationToken::new();
+        let mut in_flight = InFlight::new(2);
+        let (done_a, a) = tokio::sync::oneshot::channel::<()>();
+        let (_done_b, b) = tokio::sync::oneshot::channel::<()>();
+        assert!(in_flight.admit(&cancel).await, "room for the first");
+        in_flight.push(Box::pin(async move {
+            let _ = a.await;
+        }));
+        assert!(in_flight.admit(&cancel).await, "room for the second");
+        in_flight.push(Box::pin(async move {
+            let _ = b.await;
+        }));
+        // Full: the third waits until one of the two is delivered.
+        let third =
+            tokio::time::timeout(Duration::from_millis(100), in_flight.admit(&cancel)).await;
+        assert!(third.is_err(), "admitted while two were on the wire");
+        done_a.send(()).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), in_flight.admit(&cancel))
+                .await
+                .expect("admitted once the oldest was delivered")
+        );
+        // A session ending stops the wait.
+        in_flight.push(Box::pin(std::future::pending()));
+        cancel.cancel();
+        assert!(!in_flight.admit(&cancel).await, "cancelled, not admitted");
+    }
+
     use super::*;
     use crate::streaming::{EncoderPreset, H264Profile, HardwareEncoder, VideoCodec};
 
