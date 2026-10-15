@@ -423,6 +423,7 @@ mod tests {
             input: true,
             audio: true,
             mic: true,
+            video: true,
         };
         let view_only = Streamed {
             input: false,

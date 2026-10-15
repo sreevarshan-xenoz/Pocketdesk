@@ -1976,6 +1976,7 @@ pub async fn connect_streaming(
         Some(&client_identity().device_id),
         iroh_id.as_deref(),
         Some(codec_caps),
+        false,
     )
     .await
     .map_err(|e| {
@@ -2196,6 +2197,7 @@ pub async fn connect_streaming_wan(
         Some(&client_identity().device_id),
         None,
         Some(codec_caps),
+        false,
     )
     .await;
 

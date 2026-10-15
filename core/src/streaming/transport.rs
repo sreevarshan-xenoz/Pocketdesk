@@ -1103,6 +1103,10 @@ pub async fn receive_packets(
 /// Stream kind identifiers
 pub const STREAM_KIND_VIDEO: u8 = 0;
 pub const STREAM_KIND_AUDIO: u8 = 1;
+/// Server to client, once, on an input-only session (T10i): the session was
+/// admitted (the gate and the owner's approval passed), so input sent from
+/// now on is injected. No payload.
+pub const STREAM_KIND_READY: u8 = 2;
 
 /// Packet header for streaming transport
 ///

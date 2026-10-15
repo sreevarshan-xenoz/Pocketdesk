@@ -40,6 +40,15 @@ pub(crate) const IROH_KEY_MARKER: [u8; 2] = [0xFC, 0x00];
 /// `[0xFD, 0x00, caps:u8]`. Absent = legacy client that only decodes H.264.
 pub const CODEC_CAPS_MARKER: [u8; 2] = [0xFD, 0x00];
 
+/// Marker bytes for a client-to-server session mode stream (T10i):
+/// `[0xFB, 0x00, mode:u8]`. Absent = a session that streams the screen.
+pub const SESSION_MODE_MARKER: [u8; 2] = [0xFB, 0x00];
+
+/// [`SESSION_MODE_MARKER`] mode: input only, the phone as a remote. The
+/// computer captures, encodes and sends nothing, and says when the session
+/// is admitted with a [`super::transport::STREAM_KIND_READY`] stream.
+pub const SESSION_MODE_INPUT_ONLY: u8 = 1;
+
 /// `CODEC_CAPS_MARKER` bit 0: the client can decode H.265/HEVC Annex-B.
 /// H.264 is assumed for every client; future bits cover AV1 etc.
 pub const CODEC_CAP_HEVC: u8 = 0b0000_0001;
@@ -188,6 +197,21 @@ pub struct StreamingClient {
     /// than when a frame ends: a large frame on a slow link still shows
     /// the link is alive ([`StreamingClient::video_bytes`]).
     video_bytes: Arc<std::sync::atomic::AtomicU64>,
+    /// The session's input-only state (T10i): whether it is one, admitted,
+    /// or met a server too old to know it.
+    remote: RemoteFlags,
+}
+
+/// An input-only session's state (T10i), shared with the receive loop.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteFlags {
+    /// The session is input only: no picture or sound is expected.
+    pub input_only: bool,
+    /// The computer admitted it (its ready stream came).
+    pub ready: Arc<std::sync::atomic::AtomicBool>,
+    /// The computer sent a picture or sound anyway: it does not know
+    /// input-only sessions, and the session was closed.
+    pub too_old: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl StreamingClient {
@@ -213,6 +237,7 @@ impl StreamingClient {
             cancel: CancellationToken::new(),
             session_id: String::new(),
             video_bytes: Arc::default(),
+            remote: RemoteFlags::default(),
         };
         (client, frame_rx, audio_rx)
     }
@@ -224,13 +249,19 @@ impl StreamingClient {
         self.video_bytes.clone()
     }
 
+    /// The input-only state (T10i), for the caller to watch.
+    pub fn remote(&self) -> RemoteFlags {
+        self.remote.clone()
+    }
+
     /// Connect to a streaming server at the given address.
     ///
     /// The address should be in the form `"host:port"`, e.g. `"100.64.0.1:4716"`.
     /// Optionally sends a `monitor_index` to the server for multi-monitor selection.
     /// `device_id` is announced in-band so the server can apply its pairing gate.
     /// `codec_caps` (R4 C1, see [`CODEC_CAP_HEVC`]) advertises the client's
-    /// decodable set; `None` (older callers) means H.264-only.
+    /// decodable set; `None` (older callers) means H.264-only. With
+    /// `input_only` (T10i) the session carries input and no picture or sound.
     /// Returns the client and receiver channels for consuming video frames and audio packets.
     pub async fn connect(
         addr: &str,
@@ -239,6 +270,7 @@ impl StreamingClient {
         device_id: Option<&str>,
         iroh_id: Option<&str>,
         codec_caps: Option<u8>,
+        input_only: bool,
     ) -> Result<(
         Self,
         mpsc::Receiver<EncodedPacket>,
@@ -284,6 +316,7 @@ impl StreamingClient {
                 device_id,
                 iroh_id,
                 codec_caps,
+                input_only,
                 session_id,
             )
             .await;
@@ -304,6 +337,7 @@ impl StreamingClient {
         device_id: Option<&str>,
         iroh_id: Option<&str>,
         codec_caps: Option<u8>,
+        input_only: bool,
     ) -> (
         Self,
         mpsc::Receiver<EncodedPacket>,
@@ -315,6 +349,7 @@ impl StreamingClient {
             device_id,
             iroh_id,
             codec_caps,
+            input_only,
             uuid::Uuid::new_v4().to_string(),
         )
         .await
@@ -326,6 +361,7 @@ impl StreamingClient {
         device_id: Option<&str>,
         iroh_id: Option<&str>,
         codec_caps: Option<u8>,
+        input_only: bool,
         session_id: String,
     ) -> (
         Self,
@@ -336,8 +372,9 @@ impl StreamingClient {
         let (frame_tx, frame_rx) = mpsc::channel(channel_capacity);
         let (audio_tx, audio_rx) = mpsc::channel(channel_capacity);
 
-        // Send optional monitor_index to the server as a config stream
-        if let Some(index) = monitor_index {
+        // Send optional monitor_index to the server as a config stream (not
+        // for a remote: there is no picture to choose).
+        if let Some(index) = monitor_index.filter(|_| !input_only) {
             match connection.open_uni().await {
                 Ok(mut config_stream) => {
                     // Format: [0xFF, 0x00] config marker + 4 bytes LE monitor_index
@@ -405,9 +442,30 @@ impl StreamingClient {
             }
         }
 
+        // The phone as a remote (T10i): say so, and send no codec caps.
+        if input_only {
+            match connection.open_uni().await {
+                Ok(mut mode_stream) => {
+                    let buf = [
+                        SESSION_MODE_MARKER[0],
+                        SESSION_MODE_MARKER[1],
+                        SESSION_MODE_INPUT_ONLY,
+                    ];
+                    if let Err(e) = mode_stream.write_all(&buf).await {
+                        warn!(error = %e, "Failed to send the session mode");
+                    }
+                    if let Err(e) = mode_stream.finish() {
+                        warn!(error = %e, "Failed to finish the session mode stream");
+                    }
+                }
+                Err(e) => warn!(error = %e, "Failed to open the session mode stream"),
+            }
+        }
+
         // Advertise our decodable codec set (R4 C1). Absent = H.264-only.
         if let Some(caps) = codec_caps
             && caps != 0
+            && !input_only
         {
             match connection.open_uni().await {
                 Ok(mut caps_stream) => {
@@ -433,6 +491,10 @@ impl StreamingClient {
             cancel: CancellationToken::new(),
             session_id,
             video_bytes: Arc::default(),
+            remote: RemoteFlags {
+                input_only,
+                ..Default::default()
+            },
         };
 
         (client, frame_rx, audio_rx)
@@ -452,6 +514,7 @@ impl StreamingClient {
         let frame_tx = self.frame_tx.clone();
         let audio_tx = self.audio_tx.clone();
         let video_bytes = self.video_bytes.clone();
+        let remote = self.remote.clone();
 
         let span = tracing::info_span!(
             "client_loop",
@@ -484,6 +547,7 @@ impl StreamingClient {
                         recv_cancel,
                         e2e_samples,
                         video_bytes,
+                        remote,
                     )
                     .await;
                     match result {
@@ -599,6 +663,53 @@ enum AudioDelivery {
     NoConsumer,
 }
 
+/// What a stream of `kind` is to a session (T10i).
+#[derive(Debug, PartialEq, Eq)]
+enum RemoteStream {
+    /// The input-only session was admitted.
+    Ready,
+    /// A picture or sound on an input-only session: the computer does not
+    /// know the mode.
+    TooOld,
+    /// A picture or sound for a session that streams.
+    Media,
+}
+
+fn remote_stream(kind: u8, input_only: bool) -> RemoteStream {
+    if kind == transport::STREAM_KIND_READY {
+        RemoteStream::Ready
+    } else if input_only {
+        RemoteStream::TooOld
+    } else {
+        RemoteStream::Media
+    }
+}
+
+#[cfg(test)]
+mod remote_tests {
+    use super::*;
+
+    #[test]
+    fn a_remote_takes_its_ready_stream_and_refuses_a_picture() {
+        assert_eq!(
+            remote_stream(transport::STREAM_KIND_READY, true),
+            RemoteStream::Ready
+        );
+        assert_eq!(
+            remote_stream(transport::STREAM_KIND_VIDEO, true),
+            RemoteStream::TooOld
+        );
+        assert_eq!(
+            remote_stream(transport::STREAM_KIND_AUDIO, true),
+            RemoteStream::TooOld
+        );
+        assert_eq!(
+            remote_stream(transport::STREAM_KIND_VIDEO, false),
+            RemoteStream::Media
+        );
+    }
+}
+
 /// Queue one audio packet without ever making the caller wait for it.
 ///
 /// Video and audio share this one demux loop, and the loop is the only thing
@@ -634,6 +745,7 @@ async fn recv_with_cancel(
     cancel: CancellationToken,
     e2e_samples: Arc<SampleBatch>,
     video_bytes: Arc<std::sync::atomic::AtomicU64>,
+    remote: RemoteFlags,
 ) -> Result<()> {
     info!("Starting packet receiver (video + audio)");
     reset_e2e_probe();
@@ -676,6 +788,24 @@ async fn recv_with_cancel(
                                 continue;
                             }
                         };
+
+                        // T10i: an input-only session is admitted, or met a
+                        // computer that streams to it anyway (too old to know
+                        // the mode): that one is closed, not read.
+                        match remote_stream(header.stream_kind, remote.input_only) {
+                            RemoteStream::Ready => {
+                                remote.ready.store(true, std::sync::atomic::Ordering::Release);
+                                info!("The computer admitted the input-only session");
+                                continue;
+                            }
+                            RemoteStream::TooOld => {
+                                remote.too_old.store(true, std::sync::atomic::Ordering::Release);
+                                warn!("The computer streams to an input-only session: it is too old for it");
+                                connection.close(0u32, b"input-only session not known here");
+                                break;
+                            }
+                            RemoteStream::Media => {}
+                        }
 
                         // Read the payload (up to 10 MB for video, 64 KB for audio)
                         let max_size = if header.stream_kind == transport::STREAM_KIND_AUDIO {
