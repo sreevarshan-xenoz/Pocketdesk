@@ -1031,6 +1031,7 @@ Seen on the way: sessions ending every ~10 s, and slow transfers. First taken fo
 On the A71 against Windows, 2026-10-15, over Wi-Fi that lost about a third of its packets (strong signal, but large packets dropping; ~36 KB/s on the wire, pings 40-60 ms):
 - [x] Before: every session ended after 10-15 s ("video feed silent"). The desktop wrote ~2.5 MB of frames per session into the connection while ~0.5 MB reached the wire; the phone waited on one starved frame stream. Downloads during that churn ran at ~26 KB/s, and one file was published ~16 s after the desktop said it was saved (the same starved link).
 - [x] After (the phone counts video bytes, and the desktop keeps at most 8 frames on the wire): one session held 135 s until ended by hand, at 36 % loss.
+- [x] After the review (the window sized to a round trip, any delivery making room): a session held 90 s with no drop on the same link, pings averaging 77 ms.
 - [x] Loopback (`server/tests/session_record.rs`, a real capture and encode): with and without the bound, two runs each, frames encoded (168-196), rate (1.6-2.4 Mbit/s) and e2e p50 (16-21 ms) alike. Its e2e p99 of ~3 s is the same without the bound: older than this change, from the session's start.
 
 Owed:
