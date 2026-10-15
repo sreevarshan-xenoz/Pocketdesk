@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
@@ -150,8 +151,8 @@ fun RemoteDesktopView(
     // Real encoded frame size, reported by the decoder (the initial width/
     // height are only a guess until the first SPS).
     var videoSize by remember { mutableStateOf<IntSize?>(null) }
-    // Pinch-to-zoom only in DirectTouch: Trackpad already owns two-finger
-    // gestures for remote scrolling.
+    // This detector serves DirectTouch only: in Trackpad the engine tells a
+    // pinch (zoom, T9a) from a two-finger scroll itself.
     val zoomGesturesEnabled = inputMode == InputMode.DirectTouch
 
     BoxWithConstraints(modifier) {
@@ -448,25 +449,65 @@ private fun InputOverlay(
                         // stays in view px.
                         val travel =
                             if (layout.displayW > 0f) layout.videoW / layout.displayW else 1f
+                        // T9a: with exactly two fingers down, the engine is
+                        // given their centre's motion and their span, kept
+                        // to one pair: a pair that changes (a finger lifts or
+                        // lands) moves nothing and starts its span afresh.
+                        var pair: Set<PointerId>? = null
+                        var lastCentre = Offset.Zero
                         while (true) {
                             val event = awaitPointerEvent()
-                            val fingers = event.changes.count { it.pressed }
-                            val change = event.changes.firstOrNull { it.pressed }
+                            val pressed = event.changes.filter { it.pressed }
+                            val fingers = pressed.size
+                            val change = pressed.firstOrNull()
                             if (change == null) {
                                 sendPad(pad.up(event.changes.first().uptimeMillis))
                                 scope.scheduleHeldClick(pad, ::sendPad)
                                 break
                             }
-                            // A different finger leading is not motion.
-                            if (change.id != tracked) {
+                            var span = 0f
+                            val delta: Offset
+                            if (fingers == 2) {
+                                val ids = setOf(pressed[0].id, pressed[1].id)
+                                val centre = (pressed[0].position + pressed[1].position) / 2f
+                                if (ids != pair) {
+                                    pair = ids
+                                    delta = Offset.Zero
+                                } else {
+                                    delta = centre - lastCentre
+                                    span = (pressed[0].position - pressed[1].position).getDistance()
+                                }
+                                lastCentre = centre
                                 tracked = change.id
                                 last = change.position
+                            } else {
+                                pair = null
+                                // A different finger leading is not motion.
+                                if (change.id != tracked) {
+                                    tracked = change.id
+                                    last = change.position
+                                }
+                                delta = change.position - last
+                                last = change.position
                             }
-                            // Divide by zoom so the cursor's travel matches
-                            // the on-screen distance the finger covered.
-                            val delta = (change.position - last) / zoom.scale
-                            last = change.position
-                            sendPad(pad.move(delta.x, delta.y, fingers, cursorScale = travel))
+                            // Raw view px for the slop, scrolling and a pinch;
+                            // only the cursor is divided by zoom, so its travel
+                            // matches the on-screen distance the finger covered.
+                            val outputs = pad.move(
+                                delta.x,
+                                delta.y,
+                                fingers,
+                                cursorScale = travel / zoom.scale,
+                                span = span,
+                            )
+                            // A pinch zooms this view, panning with the
+                            // fingers' centre, as direct touch's pinch does.
+                            for (out in outputs) {
+                                if (out is PadOutput.Zoom) {
+                                    zoom.applyGesture(out.factor, delta, size.width.toFloat(), size.height.toFloat())
+                                }
+                            }
+                            sendPad(outputs)
                         }
                     }
                 }

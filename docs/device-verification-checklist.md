@@ -1095,6 +1095,26 @@ Owed:
 - [ ] After the review fixes: the song gone from the computer when the session ends, when Media is turned off, and when the phone's setting is turned off; reported again after a server restart; a press sent while the app was in the background not acting later.
 - [ ] Turning the setting on opening the notification access page.
 
+## 60. Pinch-zoom in trackpad mode (T9a)
+
+adb cannot make multi-finger gestures; the engine has 21 JVM tests. Owed, by hand on the A71:
+- [ ] In trackpad mode, two fingers spreading zoom the view, pinching zooms out, back to 1x.
+- [ ] Two fingers moving together still scroll the desktop, and a scroll that drifts apart does not start a zoom.
+- [ ] While pinching, moving the fingers pans the view; one finger lifting and landing again does not jump the zoom.
+- [ ] A two-finger tap is still a right click, a three-finger tap a middle click.
+- [ ] Zoomed in, the cursor's travel matches the finger's on-screen distance, and scrolling is not slowed by the zoom.
+
+## 61. Portrait sessions (T9b)
+
+On the A71 against Windows, 2026-10-15, portrait, input off for the phone:
+- [x] The session split: the 21:9 desktop in the top quarter, the trackpad dock and shortcut bar below (before, a letterboxed strip and black).
+- [x] After the review fixes: the chrome faded after a few seconds, leaving the whole desktop visible.
+
+Owed:
+- [ ] The on-screen keyboard opening in portrait: the layout stays split and the stream is not squeezed.
+- [ ] Turning the phone: on its side the A71 (860 dp wide) splits side by side, as before.
+- [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
