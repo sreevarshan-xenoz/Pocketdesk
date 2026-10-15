@@ -560,9 +560,12 @@ pub fn run_kick(target: &str, as_json: bool) -> i32 {
     code
 }
 
-/// Print `value` as one line of JSON on stdout.
+/// Print `value` as one line of JSON on stdout. A reader that closed the
+/// pipe early (`| head`) is not an error worth a panic.
 pub fn print(value: &Value) {
-    println!("{value}");
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{value}").and_then(|()| out.flush());
 }
 
 #[cfg(test)]
