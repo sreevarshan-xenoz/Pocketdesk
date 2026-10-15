@@ -424,6 +424,64 @@ pub fn print_devices(as_json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A failure, as a command run with `--json` prints it (exit code 1, or the
+/// command's own).
+pub fn error(reason: impl std::fmt::Display) -> Value {
+    versioned(json!({ "error": reason.to_string() }))
+}
+
+/// Ask the running server in `state_dir` to end the sessions `target`
+/// names (a device id, a prefix, a peer address, or "all"). What to print,
+/// and the exit code.
+pub fn kick_in(state_dir: &Path, target: &str, running: bool) -> (Value, i32) {
+    if !running {
+        return (
+            error("no running Pocketdesk server to end sessions through"),
+            exit::NO_SERVER,
+        );
+    }
+    let target = target.trim();
+    if target.is_empty() {
+        return (error("no session named"), exit::BAD_ARGUMENTS);
+    }
+    match pocketdesk_core::local::sessions::request_kick(
+        state_dir,
+        target,
+        pocketdesk_core::local::pin::now_unix(),
+    ) {
+        Ok(()) => (versioned(json!({ "kick_requested": target })), exit::DONE),
+        Err(e) => (
+            error(format!("could not ask the server: {e}")),
+            exit::FAILED,
+        ),
+    }
+}
+
+/// `pocketdesk kick`: prints the outcome and returns the exit code.
+pub fn run_kick(target: &str, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("No state folder: {e}");
+            return exit::FAILED;
+        }
+    };
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    let (out, code) = kick_in(&dir, target, running);
+    if as_json {
+        print(&out);
+    } else if let Some(reason) = out["error"].as_str() {
+        eprintln!("Error: {reason}");
+    } else {
+        println!(
+            "Kick request sent for '{}' — matching sessions end within ~1 s \
+             (verify with: pocketdesk status)",
+            target.trim()
+        );
+    }
+    code
+}
+
 /// Print `value` as one line of JSON on stdout.
 pub fn print(value: &Value) {
     println!("{value}");
@@ -649,6 +707,49 @@ mod tests {
             Some(std::time::Duration::from_millis(300)),
         );
         assert_eq!(code, exit::STILL_WAITING, "{out}");
+    }
+
+    #[test]
+    fn a_failure_in_json_is_an_object_a_script_can_read() {
+        let failed = error("no running Pocketdesk server");
+        assert_eq!(failed["api"], API);
+        assert_eq!(failed["error"], "no running Pocketdesk server");
+    }
+
+    #[test]
+    fn every_command_that_takes_json_says_so() {
+        use crate::cli::Commands;
+        assert!(Commands::Devices { json: true }.wants_json());
+        assert!(!Commands::Devices { json: false }.wants_json());
+        assert!(
+            Commands::Kick {
+                device: "all".into(),
+                json: true
+            }
+            .wants_json()
+        );
+        assert!(
+            Commands::Unpair {
+                device_id: None,
+                json: true
+            }
+            .wants_json()
+        );
+        assert!(Commands::RelayIds { json: true }.wants_json());
+        assert!(!Commands::Stop.wants_json());
+    }
+
+    #[test]
+    fn a_kick_needs_a_running_server_and_says_so() {
+        let dir = temp_dir("kick");
+        let (out, code) = kick_in(&dir, "all", false);
+        assert_eq!(code, exit::NO_SERVER);
+        assert!(out["error"].as_str().unwrap().contains("server"));
+        let (out, code) = kick_in(&dir, "  ", true);
+        assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
+        let (out, code) = kick_in(&dir, "all", true);
+        assert_eq!(code, exit::DONE, "{out}");
+        assert_eq!(out["kick_requested"], "all");
     }
 
     #[test]

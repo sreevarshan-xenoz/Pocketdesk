@@ -54,10 +54,21 @@ async fn main() -> Result<()> {
 
     tracing::info!("Pocketdesk server starting");
 
-    match cli
+    let command = cli
         .command
-        .unwrap_or(cli::Commands::Start { background: false })
-    {
+        .unwrap_or(cli::Commands::Start { background: false });
+    let wants_json = command.wants_json();
+    let result = run(command, config).await;
+    // A script reading `--json` reads its failures there too.
+    if wants_json && let Err(e) = &result {
+        local_api::print(&local_api::error(format!("{e:#}")));
+        std::process::exit(local_api::exit::FAILED);
+    }
+    result
+}
+
+async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
+    match command {
         cli::Commands::Start { .. } => {
             // R4 A2: register the session-outcome telemetry sink before any
             // streaming pipeline can run.
@@ -101,7 +112,7 @@ async fn main() -> Result<()> {
                 tolerance_pct,
             ))
         }
-        cli::Commands::List => service::list_peers().await,
+        cli::Commands::List { json } => service::list_peers(json).await,
         cli::Commands::Watch { interval } => service::watch_peers(interval).await,
         cli::Commands::Capabilities { json, markdown } => {
             service::print_capabilities(json, markdown).await
@@ -110,9 +121,11 @@ async fn main() -> Result<()> {
             let identity = kde::host_identity();
             service::connect_peer(peer, port, &identity).await
         }
-        cli::Commands::Pair { pin, grant } => service::pair(pin, grant).await,
-        cli::Commands::Unpair { device_id } => service::unpair(device_id).await,
-        cli::Commands::Kick { device } => service::kick(device).await,
+        cli::Commands::Pair { pin, grant, json } => service::pair(pin, grant, json).await,
+        cli::Commands::Unpair { device_id, json } => service::unpair(device_id, json).await,
+        cli::Commands::Kick { device, json } => {
+            std::process::exit(local_api::run_kick(&device, json))
+        }
         cli::Commands::Relay {
             port,
             hostname,
@@ -131,9 +144,18 @@ async fn main() -> Result<()> {
             })
             .await
         }
-        cli::Commands::RelayIds => {
-            for (who, id) in relay::relay_ids()? {
-                println!("{who}: {id}");
+        cli::Commands::RelayIds { json } => {
+            let ids = relay::relay_ids()?;
+            if json {
+                let ids: Vec<_> = ids
+                    .iter()
+                    .map(|(who, id)| serde_json::json!({ "who": who, "id": id }))
+                    .collect();
+                local_api::print(&local_api::versioned(serde_json::json!({ "ids": ids })));
+            } else {
+                for (who, id) in ids {
+                    println!("{who}: {id}");
+                }
             }
             Ok(())
         }

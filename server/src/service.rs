@@ -700,34 +700,27 @@ pub async fn print_status() -> Result<()> {
     Ok(())
 }
 
-/// R4 D2: request that the running daemon drop streaming session(s)
-/// matching `device` (id, id prefix, peer IP, or "all"). File-based, like
-/// the pairing PIN handoff — the daemon consumes it within ~1 s.
-pub async fn kick(device: String) -> Result<()> {
-    let pid_file = state::pid_file_path()?;
-    if !pid_file.exists() {
-        bail!("no running Pocketdesk server to kick through");
-    }
-    let target = device.trim().to_string();
-    if target.is_empty() {
-        bail!("kick target is empty");
-    }
-    pocketdesk_core::local::sessions::request_kick(
-        &state::state_dir()?,
-        &target,
-        local_pin::now_unix(),
-    )
-    .context("failed to write the kick request")?;
-    println!(
-        "Kick request sent for '{target}' — matching sessions end within ~1 s \
-         (verify with: pocketdesk status)"
-    );
-    Ok(())
-}
-
-pub async fn list_peers() -> Result<()> {
+pub async fn list_peers(json: bool) -> Result<()> {
     let tailscale = TailscaleClient::new().context("failed to initialize Tailscale client")?;
     let peers = tailscale.get_peers().await?;
+
+    if json {
+        let peers: Vec<_> = peers
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "name": p.name,
+                    "dns_name": p.dns_name,
+                    "online": p.online,
+                    "ips": p.ips,
+                })
+            })
+            .collect();
+        crate::local_api::print(&crate::local_api::versioned(
+            serde_json::json!({ "peers": peers }),
+        ));
+        return Ok(());
+    }
 
     if peers.is_empty() {
         println!("No peers found");
@@ -1278,7 +1271,7 @@ pub async fn print_capabilities(json: bool, markdown: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn pair(pin: Option<String>, grant: Option<u64>) -> Result<()> {
+pub async fn pair(pin: Option<String>, grant: Option<u64>, json: bool) -> Result<()> {
     let pin_value = match pin {
         Some(value) => {
             if !local_pin::is_valid(&value) {
@@ -1296,6 +1289,14 @@ pub async fn pair(pin: Option<String>, grant: Option<u64>) -> Result<()> {
         .with_context(|| format!("failed to write the PIN file in {}", dir.display()))?;
     let path = state::pair_pin_path()?;
 
+    if json {
+        crate::local_api::print(&crate::local_api::versioned(serde_json::json!({
+            "pin": pin_value,
+            "valid_secs": local_pin::PIN_TTL.as_secs(),
+            "grant_secs": grant,
+        })));
+        return Ok(());
+    }
     println!("Pairing PIN: {}", pin_value);
     match grant {
         Some(secs) => println!(
@@ -1343,27 +1344,36 @@ fn unpair_targets(
     }
 }
 
-pub async fn unpair(device_id: Option<String>) -> Result<()> {
+pub async fn unpair(device_id: Option<String>, json: bool) -> Result<()> {
     // Checked first, so a mistyped id is said plainly; the update below
     // re-reads the store under its lock.
     let trusted = TrustStore::load_or_create(state::trust_store_path()?)?.trusted_devices();
     unpair_targets(device_id.as_deref(), &trusted).map_err(anyhow::Error::msg)?;
+    let mut removed = Vec::new();
     TrustStore::update(state::trust_store_path()?, |store| {
         let targets = unpair_targets(device_id.as_deref(), &store.trusted_devices())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-        if targets.is_empty() {
-            println!("No trusted devices.");
-        }
         for id in &targets {
             store.untrust_device(id)?;
             // Its keys go too, so a phone that pairs again can bind new ones.
             if let Ok(dir) = state::state_dir() {
                 let _ = pocketdesk_core::local::device_keys::clear(&dir, id);
             }
-            println!("Untrusted {id}");
         }
+        removed = targets;
         Ok(())
     })?;
+    if json {
+        crate::local_api::print(&crate::local_api::versioned(
+            serde_json::json!({ "unpaired": removed }),
+        ));
+    } else if removed.is_empty() {
+        println!("No trusted devices.");
+    } else {
+        for id in &removed {
+            println!("Untrusted {id}");
+        }
+    }
     Ok(())
 }
 

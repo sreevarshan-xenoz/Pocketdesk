@@ -138,7 +138,11 @@ pub enum Commands {
         tolerance_pct: u64,
     },
     /// List peers currently visible on the tailnet
-    List,
+    List {
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Continuously watch peer discovery events
     Watch {
         /// Poll interval in seconds
@@ -172,17 +176,27 @@ pub enum Commands {
         /// Omit for permanent trust. R4 D3 one-off support sessions.
         #[arg(long, value_parser = parse_grant_secs)]
         grant: Option<u64>,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
     },
     /// Remove a paired device from the trust store (all if no id is given)
     Unpair {
         /// Device id to untrust (omit to untrust all devices)
         device_id: Option<String>,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
     },
     /// Drop a live streaming session (R4 D2): device id, a unique id
     /// prefix of >=6 chars, the peer IP, or "all"
     Kick {
         /// Session target — see the subcommand help
         device: String,
+        /// Print the local API's JSON (see docs/local-api.md). Exit codes:
+        /// 0 asked, 1 failed, 2 nothing named, 3 no server running
+        #[arg(long)]
+        json: bool,
     },
     /// Run your own relay for phones away from home (instead of n0's public
     /// ones). It must be reachable from the internet; set its URL as
@@ -209,7 +223,34 @@ pub enum Commands {
     },
     /// Print the endpoint ids a relay elsewhere should --allow: this
     /// computer's, and each paired phone's
-    RelayIds,
+    RelayIds {
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+impl Commands {
+    /// Whether this command prints the local API's JSON, so a failure is
+    /// printed as JSON too.
+    pub fn wants_json(&self) -> bool {
+        match self {
+            Commands::Status { json }
+            | Commands::Devices { json }
+            | Commands::Sent { json, .. }
+            | Commands::Received { json, .. }
+            | Commands::Send { json, .. }
+            | Commands::Sessions { json, .. }
+            | Commands::Bench { json, .. }
+            | Commands::List { json }
+            | Commands::Capabilities { json, .. }
+            | Commands::Pair { json, .. }
+            | Commands::Unpair { json, .. }
+            | Commands::Kick { json, .. }
+            | Commands::RelayIds { json } => *json,
+            _ => false,
+        }
+    }
 }
 
 /// Parse a `--grant` duration (`45s`, `15m`, `2h`, `7d`, combinable like
