@@ -148,8 +148,8 @@ fun RemoteDesktopView(
     // Real encoded frame size, reported by the decoder (the initial width/
     // height are only a guess until the first SPS).
     var videoSize by remember { mutableStateOf<IntSize?>(null) }
-    // Pinch-to-zoom only in DirectTouch: Trackpad already owns two-finger
-    // gestures for remote scrolling.
+    // This detector serves DirectTouch only: in Trackpad the engine tells a
+    // pinch (zoom, T9a) from a two-finger scroll itself.
     val zoomGesturesEnabled = inputMode == InputMode.DirectTouch
 
     BoxWithConstraints(modifier) {
@@ -440,9 +440,22 @@ private fun InputOverlay(
                         // stays in view px.
                         val travel =
                             if (layout.displayW > 0f) layout.videoW / layout.displayW else 1f
+                        // T9a: two fingers' centre, for a pinch's pan.
+                        var lastCentre: Offset? = null
                         while (true) {
                             val event = awaitPointerEvent()
                             val fingers = event.changes.count { it.pressed }
+                            val pressed = event.changes.filter { it.pressed }
+                            val span = if (pressed.size >= 2) {
+                                (pressed[0].position - pressed[1].position).getDistance()
+                            } else {
+                                0f
+                            }
+                            val centre = if (pressed.size >= 2) {
+                                (pressed[0].position + pressed[1].position) / 2f
+                            } else {
+                                null
+                            }
                             val change = event.changes.firstOrNull { it.pressed }
                             if (change == null) {
                                 sendPad(pad.up(event.changes.first().uptimeMillis))
@@ -458,7 +471,17 @@ private fun InputOverlay(
                             // the on-screen distance the finger covered.
                             val delta = (change.position - last) / zoom.scale
                             last = change.position
-                            sendPad(pad.move(delta.x, delta.y, fingers, cursorScale = travel))
+                            val outputs = pad.move(delta.x, delta.y, fingers, cursorScale = travel, span = span)
+                            // A pinch zooms this view, panning with the
+                            // fingers' centre, as direct touch's pinch does.
+                            val pan = lastCentre?.let { from -> centre?.let { it - from } } ?: Offset.Zero
+                            for (out in outputs) {
+                                if (out is PadOutput.Zoom) {
+                                    zoom.applyGesture(out.factor, pan, size.width.toFloat(), size.height.toFloat())
+                                }
+                            }
+                            lastCentre = centre
+                            sendPad(outputs)
                         }
                     }
                 }
