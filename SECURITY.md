@@ -79,6 +79,8 @@ These are real gaps in the current design. Plan around them.
 
 11. **With "Names from my contacts" on, the phone tells its computer who texts it** (roadmap T8e): the sender's name from the phone's contacts goes with each forwarded text and is kept owner-only in `sms.json` (turning `sms_names` off forgets the kept names at the next start). A name says what the phone's contacts call that number; a text's sender number can be spoofed, so a name is not proof of who sent it.
 
+12. **With "Let the computer answer notifications" on, the computer can act as you in the phone's apps** (roadmap T10c): it can press a notification's buttons (up to three, by title) and reply to a chat, from the desktop app's Notifications tab, at most 10 a minute. Only a notification sent in full (not one whose content the lock screen hides, nor one carrying a code), and only from the phone's own computer. The notifications that can be answered are kept owner-only in `phone_notifications.json` while the server runs. It is off by default, and the desktop's Notifications switch for the phone turns it off too.
+
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
 ## Using it safely today

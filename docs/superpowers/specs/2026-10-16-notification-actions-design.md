@@ -57,3 +57,12 @@ The computer shows the phone's notifications (N5a) and closes them when they clo
 - **Bridge:** the latch's bound, fields, and source.
 - **Kotlin (JVM):** `NotificationActionRule` (which actions to offer and their titles; the gates: setting, own computer, known notification, known action, budget).
 - **Device:** a notification with a reply action, from a probe app in the test APK, as the T8d probe did. Then reply from the desktop app's Messages tab, and check the probe received the text.
+
+## As built
+
+- **The answers have their own tab**, "Notifications", next to Messages, rather than sharing the texts' conversation view.
+- **The probe** was a throwaway app built as an uncommitted Gradle module. A test APK cannot post as another app.
+- **Found on the device run, fixed:**
+  - **Nearly every notification reached the computer as "New notification" (N5a).** Every Android notification is private unless its app says otherwise, and the lock screen hides a private one's content only when the user hides sensitive content. The rule hid it always. Now an app's own private follows the user's choice; a channel's or the user's private for an app still hides it.
+  - **Answers were dropped at once while the phone had no live link,** because its notifications went over one-off connections. The phone now keeps a link while answering is on, and the server holds an answer for its minute.
+- **Device-checked (A71 → Windows), checklist §66:** a reply through `RemoteInput`, a button, and an unoffered button refused.
