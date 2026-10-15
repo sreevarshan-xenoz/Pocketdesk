@@ -1,6 +1,6 @@
 # The phone's media from the computer (T8d)
 
-Date: 2026-10-15. Status: design, on autopilot (the user asked for the roadmap to keep going; the decisions are mine).
+Date: 2026-10-15. Status: built (see As built), on autopilot (the user asked for the roadmap to keep going; the decisions are mine).
 
 ## Why
 
@@ -36,3 +36,17 @@ T8 in the roadmap names "media controls both ways"; T8c did phone → computer. 
 - desktop: the card's text.
 - Kotlin: which session is reported (the playing one, else the most recent), when a report is sent (a change; `{}` once when playing stops), and that a press acts only with the setting on.
 - Device: something playing on the A71, shown in the Sessions tab, then paused and skipped from it.
+
+## As built
+
+- **Where it lives.** `core::protocol::phone_media` (packets, the report, `clean_line`, now shared with T8c), `core::local::phone_media` (the file and the press queue), the server's `PhoneMediaPlugin` and watcher, the Sessions tab, the bridge's `media_presses`, and the phone's `MediaRule` (JVM-tested) and `PhoneMediaEffect`.
+- **Changed from the design.**
+  - The phone reports while Pocketdesk is in front (like the battery and the control link it rides), not with the app in the background: music on a phone in a pocket is not covered yet.
+  - The computer shows a phone's media only while it is connected, paired and allowed Media, so no stale song outlives a session, a turned-off permission or the phone's switch.
+  - `phone_media.json` is written owner-only: it is listening history.
+- **Fresh review (0 Critical, 3 Important, minors), fixed one commit each:**
+  - stale reports (a session ended, Media or the phone's setting turned off) were still shown with live buttons;
+  - a phone still playing was never reported again after a server restart or reconnect;
+  - a press waiting on the phone had no age, so one sent while the app was in the background acted minutes later.
+  - Minors fixed: presses only to a phone still paired, the file owner-only, the desktop's notice in plain words, one session list per check.
+  - Ruled: the app's name may be the package name on Android 11+ (package visibility); orphaned temp files and one phone in two sessions showing two rows are left.

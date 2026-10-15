@@ -74,6 +74,8 @@ These are real gaps in the current design. Plan around them.
 
 9. **A phone with Links on can open web pages in this computer's browser** (roadmap T8a), up to 5 a minute, without asking, including pages on your home network such as a router's. Only `http` and `https` links go either way, never one to the computer's own loopback (`localhost`, 127/8, `::1`, in any spelling a browser reads as one) and never one with a user name or password. Links is on for every paired phone and guest by default, as Input is, and a phone with Input can type the same link. Turn Links off per phone in the Devices tab, or set "Links from phones" (`open_links = false`) to have links shown instead of opened. On the phone, any app can share a link to "Open on computer"; it goes to the last computer used.
 
+10. **A phone with "My media on the computer" on tells the computer what it plays** (roadmap T8d): the title, artist and app, kept owner-only in the state folder while it is connected. The computer, with that phone's Media permission on, can pause and skip it. Both sides must agree: the phone's setting (off by default) and the desktop's Media switch.
+
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
 ## Using it safely today
