@@ -1064,7 +1064,8 @@ On the A71 against Windows, 2026-10-15, LAN, input off for the phone:
 
 Owed:
 - [ ] The Devices tab's text, and its age after the session ends.
-- [ ] After the review fixes: the report going on the session's control link only (no "Incoming" connection per check on the desktop), and catching up after a Wi-Fi drop.
+- [x] After the review fixes: the report written at the session's start, and no control connection in the next 70 s beyond the two the session opened (the old loop dialed one per 15 s without a link).
+- [ ] Catching up after a Wi-Fi drop.
 - [ ] Unpairing the phone: its report gone from the file within 5 s.
 - [ ] The phone's "Share battery with the computer" off: no report; the desktop's "Phones' batteries" off: no notification.
 - [ ] A real discharge to 15 %, Android's own low flag, and Linux's notification.
