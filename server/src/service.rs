@@ -2019,6 +2019,23 @@ mod internet_control_tests {
         assert!(ping_over_iroh(&id, key).await);
     }
 
+    #[test]
+    fn a_phone_on_the_internet_road_receives_pushes_only_with_its_key() {
+        let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
+        let key = iroh::SecretKey::generate();
+        paired_with_iroh_key(&id, Some(&key));
+        let on_road = |key: &iroh::SecretKey| {
+            TcpDeviceSender::from_arc(Arc::new(Mutex::new(tokio::io::sink())), id.clone())
+                .with_peer_key(Some(pocketdesk_core::streaming::PeerKey::Iroh(
+                    key.public().to_string(),
+                )))
+        };
+        assert!(state::may_receive_pushes(&on_road(&key)));
+        assert!(!state::may_receive_pushes(&on_road(
+            &iroh::SecretKey::generate()
+        )));
+    }
+
     #[tokio::test]
     async fn another_key_or_no_registered_key_reaches_nothing() {
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());

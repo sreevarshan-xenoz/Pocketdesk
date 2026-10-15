@@ -131,9 +131,15 @@ pub fn pairing_required() -> bool {
 
 /// Whether a connection may be sent desktop state: never one that claims a
 /// paired device without its key (phase B); otherwise always with pairing
-/// off, and only a paired device's with it on.
+/// off, and only a paired device's with it on. Over the internet road, only
+/// the paired phone with its registered iroh key.
 pub fn may_receive_pushes(sender: &dyn DeviceSender) -> bool {
     use crate::plugins::pair::Standing;
+    // A connection over the internet road (T10a) proved an iroh key: it is
+    // held to that road's rule, never to the LAN's TLS key.
+    if let Some(key @ pocketdesk_core::streaming::PeerKey::Iroh(_)) = sender.peer_key() {
+        return crate::plugins::pair::internet_standing(sender.device_id(), Some(&key)).is_ok();
+    }
     match crate::plugins::pair::standing(sender.device_id(), sender.peer_key().as_ref()) {
         Standing::Paired => true,
         Standing::Unpaired => !PAIRING_REQUIRED.load(std::sync::atomic::Ordering::Relaxed),
