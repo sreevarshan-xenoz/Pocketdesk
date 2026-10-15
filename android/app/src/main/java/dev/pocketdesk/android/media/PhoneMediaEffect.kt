@@ -64,11 +64,12 @@ fun PhoneMediaEffect(address: String, controlPort: Int) {
                         // With the setting off, `{}` once, so the computer
                         // forgets the song it shows.
                         val now = if (on) MediaRule.pick(controllers.mapNotNull { describe(context, it) }) else null
-                        if (MediaRule.shouldSend(sent, now)) {
+                        val nowMs = android.os.SystemClock.elapsedRealtime()
+                        if (MediaRule.shouldSend(sent, now, nowMs)) {
                             val body = now?.let { json(it) } ?: JSONObject()
                             val result = RustCore.sendPhonePacket(address, controlPort, PHONE_MEDIA, body.toString())
                             if (result.isSuccess) {
-                                sent = MediaRule.Sent(any = true, last = now)
+                                sent = MediaRule.Sent(any = true, last = now, atMs = nowMs)
                             } else {
                                 Log.d(TAG, "Not sent: ${result.exceptionOrNull()?.message}")
                             }

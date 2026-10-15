@@ -1092,7 +1092,9 @@ On the A71 against Windows, 2026-10-15, LAN, input off for the phone. The A71 (L
 Owed:
 - [ ] The Sessions tab itself, and its buttons.
 - [ ] A real player (Spotify, a podcast app): its title, and the app's name (Android 11+ package visibility may give the package name).
-- [ ] After the review fixes: the song gone from the computer when the session ends, when Media is turned off, and when the phone's setting is turned off; reported again after a server restart; a press sent while the app was in the background not acting later.
+- [x] After the review fixes (2026-10-15, the probe again): the song gone within seconds when Media was turned off and when the session ended; reported again 9 s after a server restart mid-session.
+- [x] Found on that run: with Media turned back on the song did not return until it changed; fixed (the phone says it again each minute). Owed: re-check that it returns within a minute.
+- [ ] The phone's setting turned off clearing the song; a press sent while the app was in the background not acting later.
 - [ ] Turning the setting on opening the notification access page.
 
 ## 60. Pinch-zoom in trackpad mode (T9a)

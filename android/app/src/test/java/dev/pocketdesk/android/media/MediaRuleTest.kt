@@ -42,6 +42,19 @@ class MediaRuleTest {
     }
 
     @Test
+    fun whatPlaysIsSaidAgainEachMinuteSoAComputerThatDroppedItHearsIt() {
+        // The computer forgets a song when Media is turned off; turned back
+        // on, it hears the song again within a minute, not only on a change.
+        val song = media("Spotify", playing = true)
+        val sent = MediaRule.Sent(any = true, last = song, atMs = 1_000)
+        assertFalse(MediaRule.shouldSend(sent, song, nowMs = 1_000 + MediaRule.RESEND_MS - 1))
+        assertTrue(MediaRule.shouldSend(sent, song, nowMs = 1_000 + MediaRule.RESEND_MS))
+        // Nothing playing is not said again: {} once is enough.
+        val nothing = MediaRule.Sent(any = true, last = null, atMs = 1_000)
+        assertFalse(MediaRule.shouldSend(nothing, null, nowMs = 1_000 + 10 * MediaRule.RESEND_MS))
+    }
+
+    @Test
     fun aLostLinkForgetsWhatWasSentSoTheNextLinkHearsItAgain() {
         val song = media("Spotify", playing = true)
         val sent = MediaRule.Sent(any = true, last = song)
