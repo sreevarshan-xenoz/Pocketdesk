@@ -42,7 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
-- 2026-10-15: **A slow or lossy link no longer ends every session (branch `fix/slow-link-watchdog`).**
+- 2026-10-15: **T3 continued, the F-Droid build (branch `feat/fdroid-build`; plan `docs/research/2026-10-14-fdroid.md`).**
+  - **One build of the bridge:** `android/bridge/build-android.sh` (Rust pinned in `rust-toolchain-version`, NDK in `ndk-version`, `--locked`, one codegen unit, stripped, paths mapped away), used by CI and releases; on this box run it with `POCKETDESK_RUST_TOOLCHAIN=stable-x86_64-pc-windows-gnu`. Two builds from different folders gave identical bytes; the release APK went 106 → 62 MB with the stripped library.
+  - **Release signing** keeps AGP's 16 KB alignment (no `zipalign -f 4`), checked by `zipalign -c -P 16`.
+  - **Store listing** in `fastlane/metadata/android/en-US/` (screenshots owed).
+  - **Owed:** a cross-machine reproducibility check, `baseline.prof`, screenshots, a tagged release (the user's call), developer verification, the fdroiddata recipe.
+- 2026-10-15: **A slow or lossy link no longer ends every session (PR #55, merged).
   - **Found on the A71:** over Wi-Fi losing about a third of its packets, every session died after 10-15 s. The desktop pushed every frame into QUIC's send buffer (megabytes) with no backpressure, QUIC shared the link among hundreds of stale frame streams, and the phone, reading streams in order, waited on one that got almost nothing; its 10 s frame watchdog then dropped the link.
   - **Fixed:** the desktop keeps at most 8 video frames undelivered (`OutStream::delivered`, quinn/noq `stopped`), so the backlog stays in the queue the transport trims to the newest keyframe; the client counts video bytes as they arrive (`read_to_end_counting`, `StreamingClient::video_bytes`) and the phone's watchdog (`StallWatch`) drops the link only when neither a frame nor a byte has come for 10 s.
   - **Fresh review (0 Critical, 2 Important), fixed:** a fixed 8-frame bound throttled far paths (a frame is delivered a round trip after it is sent), so the window is now a round trip's frames at the session's rate (8 to 64); and only the oldest frame's delivery made room, so a lost packet held up frames already delivered. Also: the bridge's counter cleared on stop. Accepted: the rest of a batch is sent while the gate waits (at most 9 frames), a blocked transport delays the encoder's IDR handling until the next batch, and the counter sees only in-order bytes.
