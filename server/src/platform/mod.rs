@@ -52,26 +52,32 @@ pub fn notify(summary: &str, body: &str, expire: Duration) -> bool {
     }
     #[cfg(not(windows))]
     {
-        // Notification servers read the body as markup, and the text may be
-        // a stranger's (a phone's notification, N5a): escaped, and after
-        // `--`, so a body like `--wait` is not taken for an option.
-        let (summary, body) = (markup_escaped(summary), markup_escaped(body));
         std::process::Command::new("notify-send")
-            .args([
-                "--app-name",
-                "Pocketdesk",
-                "--expire",
-                &expire.as_millis().to_string(),
-                "--",
-                &summary,
-                &body,
-            ])
+            .args(notify_send_args(summary, body, expire))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
     }
+}
+
+/// `notify-send`'s arguments for a notification. Notification servers read
+/// the body as markup, and the text may be a stranger's (a phone's
+/// notification, N5a): escaped, and after `--`, so a body like `--wait` is
+/// not taken for an option. The expiry is `--expire-time`: libnotify's
+/// notify-send rejects `--expire` and shows nothing.
+#[cfg_attr(windows, allow(dead_code))]
+pub fn notify_send_args(summary: &str, body: &str, expire: Duration) -> Vec<String> {
+    vec![
+        "--app-name".to_string(),
+        "Pocketdesk".to_string(),
+        "--expire-time".to_string(),
+        expire.as_millis().to_string(),
+        "--".to_string(),
+        markup_escaped(summary),
+        markup_escaped(body),
+    ]
 }
 
 /// `text` with the characters freedesktop notification markup gives meaning
@@ -159,6 +165,25 @@ pub async fn request_stop(pid: u32) -> std::io::Result<bool> {
 
 #[cfg(test)]
 mod markup_tests {
+    /// libnotify's notify-send (0.8 on Ubuntu 24.04) knows `--expire-time`
+    /// and rejects `--expire`, which made every Linux notification fail.
+    #[test]
+    fn notify_send_is_given_options_it_knows() {
+        let args = super::notify_send_args("Text <b>", "--wait", std::time::Duration::from_secs(8));
+        assert_eq!(
+            args,
+            [
+                "--app-name",
+                "Pocketdesk",
+                "--expire-time",
+                "8000",
+                "--",
+                "Text &lt;b&gt;",
+                "--wait"
+            ]
+        );
+    }
+
     #[test]
     fn markup_in_a_notification_is_shown_as_text() {
         assert_eq!(

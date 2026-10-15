@@ -1051,10 +1051,10 @@ On the A71 against Windows, 2026-10-15, LAN, input off for the phone:
 Owed:
 - [ ] Chrome's and Firefox's share sheets ("Open on computer" listed, the title and link they share).
 - [ ] The desktop app's Send link, and its refusal for a phone with Links off.
-- [ ] `open_links = false`: a link shown as a notification, not opened.
-- [ ] Six links within a minute: the sixth not opened.
+- [x] `open_links = false`: links shown as notifications, none opened (2026-10-15, six links from "Open on computer").
+- [x] Six links within a minute: the sixth refused ("more than 5 a minute").
 - [ ] The phone's "Links from the computer" off: a link dropped.
-- [ ] Linux: `xdg-open`, and no zombie process after a link.
+- [x] Linux (2026-10-15, the release dry run's build on an Azure VM under a headless Sway, the A71 over the internet): "Open on computer" reached `xdg-open` with the link (the sentence's full stop left out), and no zombie process was left; `pocketdesk link` from the Linux CLI gave the phone its notification.
 
 ## 57. The phone's battery on the computer (T8b)
 
@@ -1068,7 +1068,8 @@ Owed:
 - [ ] Catching up after a Wi-Fi drop.
 - [ ] Unpairing the phone: its report gone from the file within 5 s.
 - [ ] The phone's "Share battery with the computer" off: no report; the desktop's "Phones' batteries" off: no notification.
-- [ ] A real discharge to 15 %, Android's own low flag, and Linux's notification.
+- [x] Linux: a faked 11 % was recorded and warned about in the log, but **no notification was shown**: every Linux notification failed (`notify-send --expire` is not an option). Fixed (`--expire-time`); owed: see it shown on Linux.
+- [ ] A real discharge to 15 %, and Android's own low flag.
 
 ## 58. The computer's media from the phone (T8c)
 
@@ -1081,7 +1082,8 @@ Owed:
 - [ ] A real player with a title: a browser video, Spotify; Next and Previous.
 - [ ] Nothing playing: "Nothing is playing".
 - [ ] The card cleared to the error alone with Audio off (fixed after the run).
-- [ ] Linux: `playerctl` present and missing.
+- [x] Linux: with `mpv` and its MPRIS plugin playing, the card showed "VM Test Tone" by "Pocketdesk · mpv", and Pause on the phone paused it (`playerctl status`: Paused).
+- [ ] Linux: `playerctl` missing.
 
 ## 59. The phone's media from the computer (T8d)
 
@@ -1092,7 +1094,9 @@ On the A71 against Windows, 2026-10-15, LAN, input off for the phone. The A71 (L
 Owed:
 - [ ] The Sessions tab itself, and its buttons.
 - [ ] A real player (Spotify, a podcast app): its title, and the app's name (Android 11+ package visibility may give the package name).
-- [ ] After the review fixes: the song gone from the computer when the session ends, when Media is turned off, and when the phone's setting is turned off; reported again after a server restart; a press sent while the app was in the background not acting later.
+- [x] After the review fixes (2026-10-15, the probe again): the song gone within seconds when Media was turned off and when the session ended; reported again 9 s after a server restart mid-session.
+- [x] Found on that run: with Media turned back on the song did not return until it changed; fixed (the phone says it again each minute). Owed: re-check that it returns within a minute.
+- [ ] The phone's setting turned off clearing the song; a press sent while the app was in the background not acting later.
 - [ ] Turning the setting on opening the notification access page.
 
 ## 60. Pinch-zoom in trackpad mode (T9a)
@@ -1111,7 +1115,7 @@ On the A71 against Windows, 2026-10-15, portrait, input off for the phone:
 - [x] After the review fixes: the chrome faded after a few seconds, leaving the whole desktop visible.
 
 Owed:
-- [ ] The on-screen keyboard opening in portrait: the layout stays split and the stream is not squeezed.
+- [x] The on-screen keyboard opening in portrait: the layout stayed split, the desktop kept its full top pane, and the key bar and keyboard sat over the dock (2026-10-15).
 - [ ] Turning the phone: on its side the A71 (860 dp wide) splits side by side, as before.
 - [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
 
