@@ -775,11 +775,17 @@ impl PocketdeskApp {
                         "{} ago",
                         human_duration(now.saturating_sub(file.sent_unix))
                     ));
+                    // What a folder send left out goes beside its state.
+                    let note = file
+                        .note
+                        .as_deref()
+                        .map(|n| format!(" · {n}"))
+                        .unwrap_or_default();
                     match &file.state {
-                        SentState::Offered => ui.label("waiting for the phone"),
-                        SentState::Sent => ui.label("saved on the phone"),
+                        SentState::Offered => ui.label(format!("waiting for the phone{note}")),
+                        SentState::Sent => ui.label(format!("saved on the phone{note}")),
                         SentState::Failed(reason) => ui.label(
-                            RichText::new(format!("not sent: {reason}"))
+                            RichText::new(format!("not sent: {reason}{note}"))
                                 .color(Color32::from_rgb(0xd9, 0x5c, 0x4a)),
                         ),
                     };

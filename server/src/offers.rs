@@ -430,6 +430,7 @@ async fn deliver(
             Ok(_) => SentState::Offered,
             Err(reason) => SentState::Failed(reason.to_string()),
         },
+        note: None,
     };
     {
         let _guard = sent_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -590,6 +591,18 @@ fn folder_files_with(root: &Path, private: &[PathBuf]) -> Result<FolderFiles, St
     Ok(found)
 }
 
+/// What the sent list says a folder send left out, if it left out anything.
+fn left_out_note(found: &FolderFiles) -> Option<String> {
+    match (found.skipped, found.truncated) {
+        (0, false) => None,
+        (0, true) => Some("cut short at the folder limits".to_string()),
+        (n, false) => Some(format!("{n} left out: names the phone cannot take")),
+        (n, true) => Some(format!(
+            "{n} left out: names the phone cannot take; cut short at the folder limits"
+        )),
+    }
+}
+
 /// Offer every file under the folder `root` to the request's phone (T6b),
 /// each as its own offer that names the send, the folder and the file's
 /// place in it. The sent list has one row for the folder, which ends when
@@ -636,6 +649,7 @@ async fn deliver_folder(
                 Ok(_) => SentState::Offered,
                 Err(reason) => SentState::Failed(reason.clone()),
             },
+            note: found.as_ref().ok().and_then(left_out_note),
         };
         if let Err(e) = sent::record(dir, row) {
             tracing::warn!("Could not record the sent folder: {e}");
@@ -837,6 +851,23 @@ mod tests {
         assert!(!found.truncated);
     }
 
+    #[tokio::test]
+    async fn a_folder_send_says_what_it_left_out() {
+        let dir = temp_dir("deliver-folder-note");
+        let root = dir.join("Notes");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), b"a").unwrap();
+        // A name the phone may not make: an invisible character in it.
+        std::fs::write(root.join("b\u{200B}.txt"), b"b").unwrap();
+        let store = trusting(&dir, "phone-a", true);
+        let tcp = Conn::new("phone-a", true);
+        let clients: [Arc<dyn DeviceSender>; 1] = [tcp.clone()];
+        deliver(&dir, request(&dir, &root), &clients, Some(&store)).await;
+        let listed = sent::read(&dir);
+        let note = listed[0].note.as_deref().expect("a note");
+        assert!(note.starts_with("1 "), "{note}");
+    }
+
     #[test]
     fn a_folder_leaves_out_the_servers_own_files() {
         let home = temp_dir("folder-private").join("home");
@@ -887,6 +918,7 @@ mod tests {
                 device_id: "phone-a".to_string(),
                 sent_unix: 1,
                 state: SentState::Offered,
+                note: None,
             },
         )
         .unwrap();
@@ -986,6 +1018,7 @@ mod tests {
             device_id: "phone-a".to_string(),
             sent_unix: 1,
             state: SentState::Offered,
+            note: None,
         };
         sent::record(&dir, file("o-decline")).unwrap();
         offer_at("o-decline", PathBuf::from("/a.pdf"), "phone-a", now);

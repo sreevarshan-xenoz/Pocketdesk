@@ -517,6 +517,7 @@ mod tests {
                     device_id: "a".to_string(),
                     sent_unix: n,
                     state: SentState::Sent,
+                    note: None,
                 },
             )
             .unwrap();
