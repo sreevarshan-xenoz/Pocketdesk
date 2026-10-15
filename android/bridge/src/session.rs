@@ -44,6 +44,10 @@ pub(crate) static CONNECT_LOCK: LazyLock<TokioMutex<()>> = LazyLock::new(|| Toki
 pub(crate) static CONTROL_PEER: LazyLock<TokioMutex<Option<(String, u16)>>> =
     LazyLock::new(|| TokioMutex::new(None));
 
+/// Whether the control link in [`CONTROL_PEER`] came by the internet road
+/// (T10a), where nothing pairs.
+pub(crate) static CONTROL_OVER_INTERNET: AtomicBool = AtomicBool::new(false);
+
 /// Global handle for the active control connection state.
 pub(crate) static CONNECTION_STATE: LazyLock<TokioMutex<api::ConnectionState>> =
     LazyLock::new(|| TokioMutex::new(api::ConnectionState::Disconnected));

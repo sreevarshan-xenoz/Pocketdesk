@@ -505,9 +505,10 @@ pub async fn connect_to_peer(
     use tracing::Instrument;
 
     let result = async move {
-        let dialed: Result<ControlDuplex, _> =
+        // The stream, and whether it came by the internet road.
+        let dialed: Result<(ControlDuplex, bool), _> =
             match conn_mgr.connect(&address, port, &identity).await {
-                Ok(stream) => Ok(Box::new(stream)),
+                Ok(stream) => Ok((Box::new(stream) as ControlDuplex, false)),
                 Err(home) => match wan_identity.as_deref().map(WanTarget::parse) {
                     Some(Ok(target)) if INTERNET_PAUSE.may_try(&address, Instant::now()) => {
                         tracing::info!(
@@ -517,7 +518,7 @@ pub async fn connect_to_peer(
                         match dial_internet_control(&target, &identity, &address, true).await {
                             Ok(stream) => {
                                 INTERNET_PAUSE.succeeded(&address);
-                                Ok(stream)
+                                Ok((stream, true))
                             }
                             Err(e) => {
                                 tracing::warn!("The internet road failed too: {e}");
@@ -538,7 +539,7 @@ pub async fn connect_to_peer(
                 },
             };
         match dialed {
-            Ok(stream) => {
+            Ok((stream, over_internet)) => {
                 let (reader, writer) = tokio::io::split(stream);
                 let writer_arc = Arc::new(Mutex::new(writer));
                 let replaced = (*CONTROL_WRITER).lock().await.replace(writer_arc.clone());
@@ -549,6 +550,7 @@ pub async fn connect_to_peer(
                     let _ = old.lock().await.shutdown().await;
                 }
                 *crate::CONTROL_PEER.lock().await = Some((address.clone(), port));
+                crate::CONTROL_OVER_INTERNET.store(over_internet, Ordering::SeqCst);
 
                 // Create a broadcast channel for forwarding incoming packets to Flutter
                 let (packet_tx, _) = broadcast::channel(256);
@@ -716,6 +718,7 @@ pub async fn connect_to_peer(
                             return;
                         }
                         *crate::CONTROL_PEER.lock().await = None;
+                        crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
                         *crate::INCOMING_PACKETS.lock().await = None;
                         let mut state_guard = (*CONNECTION_STATE).lock().await;
                         *state_guard = ConnectionState::Disconnected;
@@ -853,6 +856,22 @@ fn remember_paired_server(server_id: &str) {
     }
 }
 
+/// Nothing pairs over the internet road (T10a): the desktop drops pairing
+/// packets there, so asking on it would only wait out a timeout.
+async fn pairing_road_check(address: &str) -> Result<(), String> {
+    let over_internet = crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst)
+        && (*CONTROL_PEER)
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|(host, _)| host == address);
+    if over_internet {
+        Err("Pairing needs the same network as the computer, or Tailscale".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 /// Request a pairing PIN from the desktop (show-the-PIN flow).
 ///
 /// Pairing rides the live control connection when there is one. A second
@@ -863,6 +882,7 @@ fn remember_paired_server(server_id: &str) {
 /// `"pinSent"` when the desktop displayed a PIN to read off it, `"pinReady"`
 /// when `pocketdesk pair` already put a PIN up for manual entry, or `"error"`.
 pub async fn request_pair_pin(address: String, port: u16) -> Result<String, String> {
+    pairing_road_check(&address).await?;
     let request = NetworkPacket::new("kdeconnect.pocketdesk.pair")
         .with_body(serde_json::json!({ "requestPin": true }));
     let body = query_peer(
@@ -892,6 +912,7 @@ pub async fn pair_with_pin(
     if pin.len() != 6 || !pin.chars().all(|c| c.is_ascii_digit()) {
         return Err("PIN must be exactly 6 digits".to_string());
     }
+    pairing_road_check(&address).await?;
     let request =
         NetworkPacket::new("kdeconnect.pair").with_body(serde_json::json!({ "pin": pin }));
     let body = query_peer(
@@ -4340,6 +4361,21 @@ mod internet_road_tests {
     use super::*;
     use pocketdesk_core::protocol::{ALPN_CONTROL, HANDSHAKE_HELLO, HANDSHAKE_OK};
     use tokio::io::BufReader;
+
+    #[tokio::test]
+    async fn nothing_asks_to_pair_over_an_internet_link() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        *crate::CONTROL_PEER.lock().await = Some(("192.0.2.7".to_string(), 1716));
+        crate::CONTROL_OVER_INTERNET.store(true, Ordering::SeqCst);
+        let refused = pair_with_pin("192.0.2.7".into(), 1716, "123456".into()).await;
+        let other = pairing_road_check("198.51.100.3").await;
+        crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
+        let at_home = pairing_road_check("192.0.2.7").await;
+        *crate::CONTROL_PEER.lock().await = None;
+        assert!(matches!(refused, Err(e) if e.contains("same network")));
+        assert!(other.is_ok(), "only the computer that link goes to");
+        assert!(at_home.is_ok());
+    }
 
     #[test]
     fn a_failed_internet_dial_rests_that_computer_for_a_minute() {
