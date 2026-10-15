@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -27,12 +28,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -51,6 +57,23 @@ private data class AudioSnapshot(
     val muted: Boolean,
     val sinks: List<AudioSink>,
 )
+
+/** The `playing` object of a `media` answer (T8c), or null when nothing plays. */
+private fun parsePlaying(body: JSONObject): NowPlaying? {
+    val o = body.optJSONObject("playing") ?: return null
+    return NowPlaying(
+        title = o.optString("title"),
+        artist = o.optString("artist"),
+        app = o.optString("app"),
+        isPlaying = o.optBoolean("isPlaying"),
+        canPlayPause = o.optBoolean("canPlayPause"),
+        canNext = o.optBoolean("canNext"),
+        canPrevious = o.optBoolean("canPrevious"),
+    )
+}
+
+/** How often the card reads what is playing while the sheet is open. */
+private const val MEDIA_REFRESH_MS = 2_000L
 
 private fun parseSinks(body: JSONObject): List<AudioSink> {
     val arr = body.optJSONArray("sinks") ?: JSONArray()
@@ -84,6 +107,42 @@ fun AudioControlSheet(
     var errorRes by remember { mutableStateOf<Int?>(null) }
     var slider by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
+    // T8c: what the computer is playing. Its own errors (no player tool,
+    // a refused button) stay in its card, not the sheet's.
+    var mediaRead by remember { mutableStateOf(false) }
+    var playing by remember { mutableStateOf<NowPlaying?>(null) }
+    var mediaError by remember { mutableStateOf<String?>(null) }
+
+    suspend fun media(body: JSONObject): JSONObject? {
+        val result = withContext(Dispatchers.IO) {
+            RustCore.audioControl(address, controlPort, body.toString())
+        }
+        val answer = result.getOrNull()?.let { runCatching { JSONObject(it) }.getOrNull() }
+        return if (answer != null && answer.optBoolean("ok", true)) {
+            mediaError = null
+            answer
+        } else {
+            mediaError = answer?.optString("error")?.ifBlank { null }
+                ?: result.exceptionOrNull()?.message
+                ?: ""
+            null
+        }
+    }
+
+    suspend fun refreshMedia() {
+        val answer = media(JSONObject().put("action", "media"))
+        // A read that failed shows only why: the last track's buttons would
+        // fail the same way.
+        playing = answer?.let { parsePlaying(it) }
+        mediaRead = answer != null
+    }
+
+    fun mediaCommand(command: String) {
+        scope.launch {
+            media(JSONObject().put("action", "mediaControl").put("command", command))
+            refreshMedia()
+        }
+    }
 
     fun clearError() {
         errorText = null
@@ -130,10 +189,27 @@ fun AudioControlSheet(
         clearError()
         refreshAll()
     }
+    // Only while the app is in front: an open sheet left behind Home would
+    // otherwise keep asking the computer every 2 s.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(address, controlPort, lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                refreshMedia()
+                delay(MEDIA_REFRESH_MS)
+            }
+        }
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             Text(stringResource(R.string.desktop_audio), style = MaterialTheme.typography.titleMedium)
+            NowPlayingCard(
+                read = mediaRead,
+                playing = playing,
+                error = mediaError,
+                onCommand = ::mediaCommand,
+            )
             val s = snapshot
             val error = errorText ?: errorRes?.let { stringResource(it) }
             when {
@@ -265,5 +341,78 @@ fun AudioControlSheet(
                 }
             }
         }
+    }
+}
+
+/**
+ * "Now playing on the computer" (T8c): the title, who and where, and
+ * Previous, Play/Pause and Next, each disabled when the player cannot take it.
+ */
+@Composable
+private fun NowPlayingCard(
+    read: Boolean,
+    playing: NowPlaying?,
+    error: String?,
+    onCommand: (String) -> Unit,
+) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        Text(
+            stringResource(R.string.media_now_playing),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        when {
+            playing != null -> {
+                Text(
+                    playing.headline(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                val subline = playing.subline()
+                if (subline.isNotEmpty()) {
+                    Text(
+                        subline,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    IconButton(onClick = { onCommand("previous") }, enabled = playing.canPrevious) {
+                        LlIcon(LlIcons.SkipPrevious, stringResource(R.string.media_previous))
+                    }
+                    IconButton(onClick = { onCommand("playPause") }, enabled = playing.canPlayPause) {
+                        if (playing.isPlaying) {
+                            LlIcon(LlIcons.Pause, stringResource(R.string.media_pause))
+                        } else {
+                            LlIcon(LlIcons.Play, stringResource(R.string.media_play))
+                        }
+                    }
+                    IconButton(onClick = { onCommand("next") }, enabled = playing.canNext) {
+                        LlIcon(LlIcons.SkipNext, stringResource(R.string.media_next))
+                    }
+                }
+            }
+            read ->
+                Text(
+                    stringResource(R.string.media_nothing),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+        }
+        if (!error.isNullOrBlank()) {
+            Text(
+                error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
     }
 }

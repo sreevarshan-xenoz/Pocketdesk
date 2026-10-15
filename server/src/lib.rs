@@ -20,6 +20,7 @@ pub mod iroh_endpoint;
 pub mod kde;
 pub mod live_sessions;
 pub mod local_api;
+pub mod media;
 #[cfg(not(windows))]
 pub mod mic_relay;
 #[cfg(windows)]

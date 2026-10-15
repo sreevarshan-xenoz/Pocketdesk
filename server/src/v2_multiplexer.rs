@@ -151,7 +151,7 @@ pub async fn handle_v2_session(
                              } else {
                                  debug!("Denied {packet_type} from {control_device_id}: not permitted");
                              }
-                             crate::plugins::share::answer_denied(&p, &*control_sender).await;
+                             crate::plugins::answer_denied(&p, &*control_sender).await;
                              continue;
                          }
 

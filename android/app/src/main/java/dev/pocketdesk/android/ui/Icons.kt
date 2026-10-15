@@ -60,6 +60,10 @@ object LlIcons {
     val Warning = LlGlyph(R.drawable.ic_ll_warning)
     val Folder = LlGlyph(R.drawable.ic_ll_folder)
     val File = LlGlyph(R.drawable.ic_ll_file)
+    val Play = LlGlyph(R.drawable.ic_ll_play)
+    val Pause = LlGlyph(R.drawable.ic_ll_pause)
+    val SkipNext = LlGlyph(R.drawable.ic_ll_skip_next)
+    val SkipPrevious = LlGlyph(R.drawable.ic_ll_skip_previous)
 }
 
 /**

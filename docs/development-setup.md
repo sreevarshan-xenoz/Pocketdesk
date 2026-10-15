@@ -86,6 +86,8 @@ cargo test --workspace --exclude pocketdesk-android-bridge --exclude iroh-spike
 # live tests that need this desktop / GPU (capture, encoders, input, clipboard, toast):
 cargo test -p pocketdesk-core --lib -- --ignored wgc_ dxgi_ windows_rung_roundtrip
 cargo test -p pocketdesk-server --lib -- --ignored sendinput_drives clipboard_round_trips a_toast_is_shown
+# prints the current media session (start something playing first):
+cargo test -p pocketdesk-server --lib -- --ignored --nocapture the_current_media_session_is_read
 ```
 
 Run it with `cargo run --bin pocketdesk -- start`, or register it at logon

@@ -7,6 +7,7 @@ arch=('x86_64')
 url="https://github.com/sreevarshan-xenoz/Pocketdesk"
 license=('MIT' 'Apache')
 depends=('tailscale' 'ffmpeg' 'pipewire' 'xdg-desktop-portal')
+optdepends=('playerctl: what is playing, and Play/Pause and skip from the phone')
 makedepends=('cargo' 'git')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('SKIP')

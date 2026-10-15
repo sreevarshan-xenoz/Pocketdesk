@@ -42,6 +42,11 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T8c, the computer's media from the phone (branch `feat/media-controls`; spec `docs/superpowers/specs/2026-10-15-media-controls-design.md`, with an as-built section).**
+  - **How:** two actions on the audio request (Audio permission): `media` answers what is playing (Windows' Global System Media Transport Controls, Linux `playerctl`), `mediaControl` plays/pauses or skips; the Sound sheet's "Now playing on the computer" card polls every 2 s while open and in front.
+  - **Found on the way:** the bridge matched replies by packet type alone, so concurrent audio requests could take each other's replies; replies now name their action and the bridge checks it.
+  - **Device-verified (A71 → Windows):** the card, Pause and Play from the phone, and the Audio-off message. Owed: checklist §58, and the Linux `playerctl` path (CI compiles it; never run).
+  - **Fresh review (1 Critical, 4 Important), fixed.**
 - 2026-10-15: **T8b, the phone's battery on the computer (branch `feat/phone-status`; spec `docs/superpowers/specs/2026-10-15-phone-battery-design.md`, with an as-built section).**
   - **How:** during a session the phone sends KDE Connect's `kdeconnect.battery` on its control link (at the start, on a change, every 5 minutes; Settings "Share battery with the computer"); the server keeps each paired phone's last report in `phone_status.json` and warns once when one runs low (15 %, not charging; "Phones' batteries", `phone_battery_alerts`); the Devices tab and `pocketdesk devices --json` show it.
   - **Device-verified (A71 → Windows):** the report matching `dumpsys battery`, one warning at a faked 12 %, none again at 10 %.
