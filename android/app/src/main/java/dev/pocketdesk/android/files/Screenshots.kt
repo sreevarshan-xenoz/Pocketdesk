@@ -13,9 +13,11 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.edit
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.clip.ClipboardShared
 import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.service.TransferService
 import dev.pocketdesk.android.ui.ClipboardImages
+import dev.pocketdesk.android.ui.ImageClipRule
 import java.io.File
 
 /** Settings "New screenshots to the computer" (T10h). */
@@ -118,6 +120,8 @@ class Screenshots(private val ctx: Context) {
     private fun send(address: String, port: Int, uri: Uri) {
         if (ScreenshotPrefs.clipboard(ctx)) {
             val png = ClipboardImages.pngOf(ctx, uri)
+            // Named before it goes, so a session sync does not fetch it back.
+            png?.let { ClipboardShared.sentImageId = ImageClipRule.idOf(it) }
             val result =
                 png?.let { ClipboardImages.withStaged(ctx, it) { file -> RustCore.sendClipboardImage(address, port, file.absolutePath) } }
             if (result == null || result.isFailure) Log.w(TAG, "a screenshot did not reach the computer's clipboard: ${result?.exceptionOrNull()}")
