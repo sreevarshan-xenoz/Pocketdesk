@@ -212,8 +212,9 @@ fn folder_of(body: &serde_json::Value) -> Option<(String, String, Vec<String>)> 
     Some((folder_id, folder, path))
 }
 
-/// How long the top folder of one folder send is remembered: its files
-/// arrive one after another, and a retry may come minutes later.
+/// How long the top folder of one folder send is remembered after its last
+/// file: its files arrive one after another, and a retry may come minutes
+/// later.
 const FOLDER_SEND_TTL: Duration = Duration::from_secs(60 * 60);
 
 /// The top folder each folder send (T6b) put its files under, by the phone
@@ -240,6 +241,25 @@ impl FolderTops {
         folder: &str,
         path: &[String],
     ) -> std::result::Result<(PathBuf, String), String> {
+        self.place_at(
+            downloads,
+            device,
+            folder_id,
+            folder,
+            path,
+            std::time::Instant::now(),
+        )
+    }
+
+    fn place_at(
+        &self,
+        downloads: &Path,
+        device: &str,
+        folder_id: &str,
+        folder: &str,
+        path: &[String],
+        now: std::time::Instant,
+    ) -> std::result::Result<(PathBuf, String), String> {
         if !is_transfer_key(folder_id) {
             return Err("no usable folder id".to_string());
         }
@@ -252,13 +272,17 @@ impl FolderTops {
         let (name, within) = path.split_last().ok_or("no file name")?;
         let top = {
             let mut tops = self.tops.lock().unwrap_or_else(|e| e.into_inner());
-            tops.retain(|_, (_, at)| at.elapsed() < FOLDER_SEND_TTL);
+            tops.retain(|_, (_, at)| now.saturating_duration_since(*at) < FOLDER_SEND_TTL);
             let key = (device.to_string(), folder_id.to_string());
-            match tops.get(&key) {
-                Some((top, _)) => top.clone(),
+            match tops.get_mut(&key) {
+                // Each file keeps its send remembered a while longer.
+                Some((top, at)) => {
+                    *at = now;
+                    top.clone()
+                }
                 None => {
                     let top = new_folder(downloads, folder)?;
-                    tops.insert(key, (top.clone(), std::time::Instant::now()));
+                    tops.insert(key, (top.clone(), now));
                     top
                 }
             }
@@ -1349,6 +1373,36 @@ mod tests {
             downloads.join("Photos (3)"),
             "another phone's id is its own"
         );
+    }
+
+    #[test]
+    fn a_folder_send_that_keeps_going_keeps_its_folder() {
+        let downloads = temp_dir("folder-long").join("Downloads");
+        let tops = FolderTops::default();
+        let start = std::time::Instant::now();
+        let at = |minutes: u64| start + Duration::from_secs(minutes * 60);
+        let place = |file: &str, now| {
+            tops.place_at(
+                &downloads,
+                "phone",
+                FOLDER_A,
+                "Photos",
+                &parts(&[file]),
+                now,
+            )
+            .unwrap()
+            .0
+        };
+        let first = place("a.jpg", at(0));
+        // Files keep coming for longer than the TTL, never far apart.
+        assert_eq!(place("b.jpg", at(50)), first);
+        assert_eq!(
+            place("c.jpg", at(100)),
+            first,
+            "past an hour from the first"
+        );
+        // A send idle for longer than the TTL is forgotten.
+        assert_ne!(place("d.jpg", at(100 + 61)), first);
     }
 
     #[test]
