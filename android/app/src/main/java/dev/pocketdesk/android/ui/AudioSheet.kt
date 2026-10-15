@@ -130,10 +130,11 @@ fun AudioControlSheet(
     }
 
     suspend fun refreshMedia() {
-        media(JSONObject().put("action", "media"))?.let {
-            playing = parsePlaying(it)
-            mediaRead = true
-        }
+        val answer = media(JSONObject().put("action", "media"))
+        // A read that failed shows only why: the last track's buttons would
+        // fail the same way.
+        playing = answer?.let { parsePlaying(it) }
+        mediaRead = answer != null
     }
 
     fun mediaCommand(command: String) {
