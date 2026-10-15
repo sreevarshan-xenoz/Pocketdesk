@@ -181,7 +181,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **Blackout / pocket mode** — black, touch-locked screen while the session keeps streaming: the phone and its video surface go secure (no screenshots or Recents leakage), brightness drops; double-tap or back to unlock
 - **Localized UI** — English, Spanish and Tamil; pick per-app language from the "Language" button on the connect screen (Android 13+)
 - **Share to the desktop** — share text (to the desktop clipboard) or one or more files (to its Downloads folder, over the LAN) from any app, with progress in a notification; the desktop shows a notification per file. "Sent" means the desktop saved it
-- **Files on this computer** — in a session, browse the computer's home folder (hidden files left out) and download a file to Downloads/Pocketdesk, with progress in a notification. Files the desktop app sends arrive the same way while the session is up
+- **Files on this computer** — in a session, browse the computer's home folder (hidden files left out) and download a file to Downloads/Pocketdesk, with progress in a notification. Files the desktop app sends arrive the same way while the session is up, and without one with "Files from the computer in the background" on in the phone's Settings (on the same network; it uses notification access to stay connected)
 - **Every screen, one tap away** — with more than one monitor, the session's controls show a numbered chip per screen; tap one to switch the stream to it (Quick Settings → Monitor still lists them by name)
 - **Settings** with DataStore persistence
 

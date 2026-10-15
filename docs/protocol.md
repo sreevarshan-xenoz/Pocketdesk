@@ -391,7 +391,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/device_keys.json` | Per device: TLS key hash and iroh id | Default; atomic and synced | `core/src/local/device_keys.rs` |
 | `<state>/endpoint.json` | The WAN endpoint body: id, relay URLs, direct addresses, `dht` | Default | `core/src/local/identity.rs`, `iroh_endpoint.rs` |
 | `<state>/wan_status.json` | Yes/no facts (UDP, NAT varies, public IPv6, captive portal, DHT state). No addresses | Default | `core/src/local/diagnostics.rs` |
-| `<state>/live_sessions.json` | Live sessions: id, device id, peer address, transport, start time | Default | `server/src/live_sessions.rs`, `core/src/local/sessions.rs` |
+| `<state>/live_sessions.json` | Live sessions: id, device id, peer address, transport, start time; and the phones holding a control link (device id, whether files can reach it, T10d) | Default | `server/src/live_sessions.rs`, `core/src/local/sessions.rs` |
 | `<state>/streaming_sessions.log`, `streaming_sessions.jsonl` | One record per session: outcome, duration, device id, latency tails, link counters, encoder. Capped at 1 MiB and 4 MiB | Default | `server/src/session_telemetry.rs`, `core/src/streaming/session_telemetry.rs` |
 | `<state>/pending_approvals.json`, `approvals/` | Held sessions (device id, peer address) and the owner's answers | Default | `core/src/local/approval.rs` |
 | `<state>/received.json` | The last 50 received files: name, path, size, time, sending device | Default | `core/src/local/received.rs` |

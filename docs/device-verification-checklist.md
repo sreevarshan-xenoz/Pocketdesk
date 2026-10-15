@@ -1182,6 +1182,17 @@ Owed:
 - [ ] From away from home (the internet link).
 - [ ] An action that opens an activity on Android 14+ (background launches may be blocked).
 
+## 67. Files from the computer without a session (T10d)
+
+On the A71 against this box, 2026-10-16:
+- [x] With "Files from the computer in the background" on and notification access, the app in the background and no session, the mirror listed the phone as linked with files, and `pocketdesk send … --wait` ended "saved on the phone", MD5s matching. Android 16 let the listener start the download at once.
+
+Owed:
+- [ ] A phone that refuses background starts: the "The computer sends a file" notification, and Save downloading it.
+- [ ] A folder sent this way.
+- [ ] The desktop app's Files tab listing a linked phone with no session.
+- [ ] Away from home: `pocketdesk send` refused at once as not reachable.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
