@@ -114,10 +114,13 @@ class NotificationForwardRule(private val ownPackage: String) {
          * The strictest of the notification's own visibility, its channel's
          * lock-screen setting, the user's override from the ranking, and the
          * system's "hide sensitive content" (which makes everything private
-         * at most). Lower is stricter.
+         * at most). Lower is stricter. As on Android's lock screen, an app's
+         * own private (the default for every notification) hides content
+         * only when the user hides sensitive content; a channel's or the
+         * user's private hides it always.
          */
         fun effectiveVisibility(own: Int, channel: Int, ranking: Int, systemHidesSensitive: Boolean): Int {
-            var v = own
+            var v = if (own == VISIBILITY_PRIVATE && !systemHidesSensitive) VISIBILITY_PUBLIC else own
             if (channel != NO_OVERRIDE) v = minOf(v, channel)
             if (ranking != NO_OVERRIDE) v = minOf(v, ranking)
             if (systemHidesSensitive) v = minOf(v, VISIBILITY_PRIVATE)

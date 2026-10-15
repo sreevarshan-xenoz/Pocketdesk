@@ -104,6 +104,11 @@ class NotificationForwardRuleTest {
         assertEquals("the user's override", secret, eff(public, none, secret, false))
         assertEquals("the system hides sensitive content", private, eff(public, none, none, true))
         assertEquals("never looser than the app asked", secret, eff(secret, public, public, false))
+        // Android hides a private notification's content only when the user
+        // hides sensitive content (most apps post private, the default).
+        assertEquals("an app's private follows the lock screen", public, eff(private, none, none, false))
+        assertEquals(private, eff(private, none, none, true))
+        assertEquals("the user's private for this app", private, eff(private, none, private, false))
     }
 
     @Test
