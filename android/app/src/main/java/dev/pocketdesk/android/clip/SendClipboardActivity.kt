@@ -33,10 +33,17 @@ object SendClipboard {
  * shows, because Android lets only the app in focus read the clipboard. It
  * reads the text once it has focus, sends it to the phone's computer over
  * the live link, or opens one (over the internet when it must), says how it
- * went, and closes.
+ * went, and closes once the send is done.
  */
 class SendClipboardActivity : Activity() {
     private var done = false
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        // The window stays while the send runs (a closed one could leave the
+        // process frozen mid-send), so it must let every touch through.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+    }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
@@ -49,7 +56,13 @@ class SendClipboardActivity : Activity() {
             SendClipboard.Check.NoComputer -> say(app, getString(R.string.send_clipboard_no_computer))
             SendClipboard.Check.Empty -> say(app, getString(R.string.send_clipboard_empty))
             SendClipboard.Check.TooLong -> say(app, getString(R.string.send_clipboard_too_long))
-            SendClipboard.Check.Send -> Thread { send(app, host!!, text!!) }.start()
+            SendClipboard.Check.Send -> {
+                Thread {
+                    send(app, host!!, text!!)
+                    runOnUiThread { finish() }
+                }.start()
+                return
+            }
         }
         finish()
     }
