@@ -349,6 +349,44 @@ fn folder_part(body: &serde_json::Value) -> Option<(String, String, Vec<String>)
     .then(|| (id.to_string(), folder.to_string(), path))
 }
 
+/// Answers to the phone's folder requests (`folder_fetch_reply`), by the
+/// path asked: kept here as the reader sees them, so neither a burst of the
+/// folder's offers nor a second request can take one from its waiter.
+static FOLDER_REPLIES: LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>,
+> = LazyLock::new(Default::default);
+/// Woken as each folder answer arrives.
+pub(crate) static FOLDER_REPLY: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Keep a folder answer for its waiter.
+pub(crate) fn latch_folder_reply(body: &serde_json::Value) {
+    let Some(path) = body.get("path").and_then(|v| v.as_str()) else {
+        return;
+    };
+    let mut replies = FOLDER_REPLIES.lock().unwrap_or_else(|e| e.into_inner());
+    // Answers nobody waited for are not kept forever.
+    if replies.len() >= 16 {
+        replies.clear();
+    }
+    replies.insert(path.to_string(), body.clone());
+    drop(replies);
+    FOLDER_REPLY.notify_waiters();
+}
+
+/// The answer to the folder request for `path`, once.
+pub(crate) fn take_folder_reply(path: &str) -> Option<serde_json::Value> {
+    FOLDER_REPLIES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(path)
+}
+
+/// Packets the control reader keeps itself rather than broadcasting to the
+/// pollers: offers (thousands at once for a folder) and folder answers.
+pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
+    packet_type == crate::download::FILE_OFFER || packet_type == crate::download::FOLDER_FETCH_REPLY
+}
+
 /// Drain the queued offers as a JSON array.
 pub(crate) fn take_file_offers_json() -> String {
     let drained = PENDING_OFFERS

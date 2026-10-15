@@ -28,7 +28,7 @@ const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 /// The desktop will not send it: `{key, reason}`.
 const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
 const FOLDER_FETCH: &str = "kdeconnect.pocketdesk.folder_fetch";
-const FOLDER_FETCH_REPLY: &str = "kdeconnect.pocketdesk.folder_fetch_reply";
+pub(crate) const FOLDER_FETCH_REPLY: &str = "kdeconnect.pocketdesk.folder_fetch_reply";
 /// The desktop's owner sent this phone a file: `{id, name, size}`.
 pub(crate) const FILE_OFFER: &str = "kdeconnect.pocketdesk.file_offer";
 /// The phone will not fetch an offer: `{id, reason}`.
@@ -305,16 +305,22 @@ pub(crate) async fn send_watching_replies(
 /// control connection, which must be the one that asks: a one-off
 /// connection would close and lose them.
 pub async fn fetch_folder(address: String, port: u16, path: String) -> Result<(), String> {
-    let answer = crate::api::control_request(
-        &address,
-        port,
-        &folder_fetch_packet(&path),
-        FOLDER_FETCH_REPLY,
-        std::time::Duration::from_secs(30),
-    )
-    .await?
-    .ok_or("Not connected to this computer: open a session first")?;
-    folder_answer(&answer)
+    // An answer left from an earlier request for this folder is not this one's.
+    let _ = crate::take_folder_reply(&path);
+    crate::api::send_on_live(&address, port, &folder_fetch_packet(&path)).await?;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        // Armed before looking, so an answer between the two is not missed.
+        let arrived = crate::FOLDER_REPLY.notified();
+        tokio::pin!(arrived);
+        arrived.as_mut().enable();
+        if let Some(answer) = crate::take_folder_reply(&path) {
+            return folder_answer(&answer);
+        }
+        if tokio::time::timeout_at(deadline, arrived).await.is_err() {
+            return Err(crate::api::NoReply.to_string());
+        }
+    }
 }
 
 fn folder_fetch_packet(path: &str) -> NetworkPacket {
@@ -536,8 +542,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        FETCH_REFUSED, FOLDER_FETCH, Kept, Resume, await_and_receive, folder_answer,
-        folder_fetch_packet, receive_into, refusal_for,
+        FETCH_REFUSED, FOLDER_FETCH, FOLDER_FETCH_REPLY, Kept, Resume, await_and_receive,
+        folder_answer, folder_fetch_packet, receive_into, refusal_for,
     };
     use crate::api::transfer_progress;
     use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
@@ -999,6 +1005,27 @@ mod tests {
             folder_answer(&serde_json::json!({})).is_err(),
             "no answer is no folder"
         );
+    }
+
+    #[test]
+    fn each_folder_request_gets_its_own_answer() {
+        let _offers = crate::OFFERS_TEST_LOCK.blocking_lock();
+        crate::latch_folder_reply(&serde_json::json!({ "path": "A", "queued": true }));
+        crate::latch_folder_reply(
+            &serde_json::json!({ "path": "B", "queued": false, "reason": "busy" }),
+        );
+        assert_eq!(crate::take_folder_reply("B").unwrap()["queued"], false);
+        assert_eq!(crate::take_folder_reply("A").unwrap()["queued"], true);
+        assert!(crate::take_folder_reply("A").is_none(), "taken once");
+    }
+
+    #[test]
+    fn a_burst_of_offers_never_reaches_the_pollers() {
+        // A folder is offered file by file, thousands at once: kept out of
+        // the shared broadcast, so no waiting answer is pushed out by them.
+        assert!(crate::kept_from_pollers(super::FILE_OFFER));
+        assert!(crate::kept_from_pollers(FOLDER_FETCH_REPLY));
+        assert!(!crate::kept_from_pollers("kdeconnect.battery"));
     }
 
     #[test]
