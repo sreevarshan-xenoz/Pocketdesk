@@ -1,0 +1,27 @@
+Pocketdesk puts your Linux or Windows computer on your phone. You see its screen live, use it with touch, a trackpad and your phone's keyboard, move files and folders both ways, and share the clipboard, with your own computer and nothing in between.
+
+It needs the Pocketdesk program running on the computer (free software too, from the same project). Pair the phone once by scanning the code the computer shows.
+
+<b>What it does</b>
+<ul>
+<li>The computer's screen on the phone, in H.264 or HEVC, with its sound</li>
+<li>Touch, a trackpad with gestures, and a full keyboard with Ctrl, Alt, Super and function keys</li>
+<li>Files and whole folders both ways; transfers that stop part way continue</li>
+<li>Browse the computer's files and download them, or a whole folder</li>
+<li>Clipboard both ways, text and images</li>
+<li>The phone's notifications on the computer, and texts (SMS) with replies, if you turn them on</li>
+<li>Wake the computer from the phone, at home or from outside</li>
+<li>Several phones, per-phone permissions, and asking before each session</li>
+<li>Shortcuts, a Quick Settings tile and a widget, and intents for automation apps</li>
+</ul>
+
+<b>Where your data goes</b>
+<ul>
+<li>On your own network, the phone talks to your computer directly. Everything is encrypted (TLS 1.3 and QUIC), and each end proves its key.</li>
+<li>From outside your network, the connection goes direct when it can. When it cannot, it passes through a relay: by default the public relays run by n0 (the makers of iroh), which carry encrypted traffic they cannot read. You can run your own relay instead.</li>
+<li>So that the phone can find your computer when its address changes, the computer publishes a small signed record on the BitTorrent Mainline DHT: by default only which relay it uses, never your files or screen. It can be turned off.</li>
+<li>Reading notifications and texts needs Android's permissions for them. Both features are off until you turn them on, and only what you allow is sent, only to your own paired computer.</li>
+<li>No accounts, no analytics, no ads.</li>
+</ul>
+
+Pocketdesk is free software under the MIT or Apache-2.0 licence.
