@@ -78,8 +78,10 @@ pub fn server_exe(app_dir: &Path) -> PathBuf {
 /// The server program beside this app, if it is there (T10e: the file
 /// manager's "Send to phone" runs it).
 pub fn server_exe_beside_app() -> Option<PathBuf> {
-    let exe = server_exe(&app_dir());
-    exe.is_file().then_some(exe)
+    // Only the one truly beside the app: `server_exe`'s bare-name fallback
+    // would be read against whatever folder a file manager runs in.
+    let beside = app_dir().join(server_file_name());
+    (beside.is_absolute() && beside.is_file()).then_some(beside)
 }
 
 fn app_dir() -> PathBuf {
