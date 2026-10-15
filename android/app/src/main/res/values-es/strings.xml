@@ -482,7 +482,7 @@
     <string name="settings_files_background">Archivos del equipo en segundo plano</string>
     <string name="settings_files_background_summary">Lo que envía el equipo llega a Descargas sin una sesión, en esta red. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="settings_phone_folders">Carpetas que puede abrir el equipo</string>
-    <string name="settings_phone_folders_summary">La pestaña Teléfono del equipo puede listar estas carpetas y copiar sus archivos. Nada más del teléfono es accesible. Usa el acceso a las notificaciones para mantener la conexión</string>
+    <string name="settings_phone_folders_summary">La pestaña Teléfono del equipo puede listar estas carpetas y copiar sus archivos. Nada más del teléfono es accesible. Mientras haya una carpeta compartida se mantiene conectado al equipo, usando el acceso a las notificaciones</string>
     <string name="phone_folders_empty">Ninguna aún: el equipo no puede abrir nada en este teléfono. Añade una carpeta para que su pestaña Teléfono la liste y copie archivos</string>
     <string name="phone_folders_add">Añadir carpeta</string>
     <string name="phone_folders_remove">Quitar</string>
