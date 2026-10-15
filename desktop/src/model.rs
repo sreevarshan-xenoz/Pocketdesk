@@ -152,8 +152,6 @@ pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<Stri
     }
 }
 
-/// Ask the server to send the file at `path` to `device_id`; the file's
-/// name, or why not.
 /// Queue the link `url` for the phone `device_id` (T8a), which shows it as
 /// a notification that opens it; what to tell the owner.
 pub fn queue_link(
@@ -163,11 +161,20 @@ pub fn queue_link(
     now_unix: u64,
 ) -> Result<String, String> {
     let url = url.trim();
+    // The server would drop it: say so now.
+    let allowed = TrustStore::read(state_dir.join(TRUST_FILE))
+        .map(|store| store.permissions(device_id).allows(Capability::Links))
+        .unwrap_or(true);
+    if !allowed {
+        return Err("Not sent: Links is off for this phone (Devices tab).".to_string());
+    }
     pocketdesk_core::local::links::request(state_dir, device_id, url, now_unix)
         .map(|_| "Link sent: it waits on the phone as a notification.".to_string())
         .map_err(|e| format!("Not sent: {e}."))
 }
 
+/// Ask the server to send the file at `path` to `device_id`; the file's
+/// name, or why not.
 pub fn queue_send(
     state_dir: &Path,
     device_id: &str,
@@ -470,6 +477,15 @@ mod tests {
         assert_eq!(queued[0].url, "https://example.org/page", "trimmed");
         assert!(queue_link(&dir, "a", "javascript:alert(1)", 100).is_err());
         assert!(queue_link(&dir, "a", "", 100).is_err());
+
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("a").unwrap();
+        let mut permissions = store.permissions("a");
+        permissions.links = Some(false);
+        store.set_permissions("a", permissions).unwrap();
+        let refused = queue_link(&dir, "a", "https://example.org/", 100).unwrap_err();
+        assert!(refused.contains("Links"), "{refused}");
+        assert!(pocketdesk_core::local::links::take_all(&dir, 101).is_empty());
     }
 
     #[test]

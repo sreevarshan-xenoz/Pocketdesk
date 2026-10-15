@@ -446,7 +446,7 @@
     <string name="settings_background_remind_summary">Cuando las notificaciones o los mensajes están activados y Android puede frenarlos</string>
     <string name="bg_maker_guide_summary">Muchos teléfonos añaden su propio ahorro de batería además del de Android</string>
     <string name="open_on_computer_label">Abrir en el equipo</string>
-    <string name="link_sent">Abriendo en el equipo.</string>
+    <string name="link_sent">Enviado al equipo, que lo abre si admite enlaces.</string>
     <string name="link_not_web">No hay un enlace web que abrir (solo enlaces http y https).</string>
     <string name="link_from_computer">Un enlace de %1$s</string>
     <string name="channel_links">Enlaces del equipo</string>

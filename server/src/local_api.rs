@@ -368,14 +368,21 @@ pub fn link_in(state_dir: &Path, query: &str, url: &str, running: bool) -> (Valu
     if let Some(problem) = pocketdesk_core::protocol::link::link_problem(url) {
         return (error(problem), exit::BAD_ARGUMENTS);
     }
-    let ids = match trust_store(state_dir) {
-        Ok(store) => store.trusted_devices(),
+    let store = match trust_store(state_dir) {
+        Ok(store) => store,
         Err(reason) => return (error(reason), exit::FAILED),
     };
-    let device_id = match resolve_phone(&ids, query) {
+    let device_id = match resolve_phone(&store.trusted_devices(), query) {
         Ok(id) => id,
         Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
     };
+    // The server would drop it: say so now, not "queued".
+    if !store.permissions(&device_id).allows(Capability::Links) {
+        return (
+            error(format!("Links is off for {device_id} (the Devices tab)")),
+            exit::FAILED,
+        );
+    }
     let now = pocketdesk_core::local::pin::now_unix();
     if !live_sessions(state_dir, now, true)
         .iter()
@@ -1017,6 +1024,22 @@ mod tests {
         let help = ["pocketdesk", "send", "--help", "--json"];
         let err = crate::cli::Cli::try_parse_from(help).unwrap_err();
         assert!(usage_error(&help.map(std::ffi::OsString::from), &err).is_none());
+    }
+
+    #[test]
+    fn a_link_for_a_phone_with_links_off_is_refused_not_queued() {
+        let (dir, _) = send_setup("link-off");
+        let mut store = TrustStore::read(dir.join(TRUST_FILE)).unwrap();
+        let mut permissions = store.permissions("5f1c9b3d-6e70");
+        permissions.links = Some(false);
+        store.set_permissions("5f1c9b3d-6e70", permissions).unwrap();
+        let (out, code) = link_in(&dir, "5f1c9b", "https://example.org/a", true);
+        assert_eq!(code, exit::FAILED, "{out}");
+        assert!(out["error"].as_str().unwrap().contains("Links"), "{out}");
+        assert!(
+            pocketdesk_core::local::links::take_all(&dir, pocketdesk_core::local::pin::now_unix())
+                .is_empty()
+        );
     }
 
     #[test]
