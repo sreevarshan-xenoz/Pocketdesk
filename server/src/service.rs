@@ -1076,6 +1076,10 @@ pub(crate) async fn handle_internet_control(
             pairing_required,
         )
         .await;
+        // The phone hangs up first when it can: closing at once could
+        // overtake the last line written (a refusal), which QUIC would then
+        // never deliver.
+        let _ = timeout(Duration::from_secs(2), conn.closed()).await;
         conn.close(0u32.into(), b"control closed");
         served
     }
@@ -1144,8 +1148,10 @@ where
             w.flush().await?;
         }
 
-        // Step 2: Send identity packet
-        if let Some(ref identity) = identity_packet {
+        // Step 2: Send identity packet. Over the internet road the desktop
+        // names itself only once it has admitted the phone (below): anyone
+        // can dial its iroh id, which the DHT publishes.
+        if let (Some(identity), Road::Local { .. }) = (&identity_packet, road) {
             let mut w = writer.lock().await;
             let wire_bytes = identity.to_wire()?;
             w.write_all(&wire_bytes).await?;
@@ -1215,7 +1221,20 @@ where
                         "Refused {device_id}'s control connection over the internet: {}",
                         refusal.reason()
                     );
+                    // Said, so the phone counts this as a failed link and
+                    // backs off, instead of redialing a link that just ends.
+                    let mut w = writer.lock().await;
+                    let refused = format!("{}\n", pocketdesk_core::protocol::HANDSHAKE_REFUSED);
+                    let _ = w.write_all(refused.as_bytes()).await;
+                    let _ = w.flush().await;
+                    let _ = w.shutdown().await;
                     return Ok(());
+                }
+                // Admitted: the desktop's identity is the phone's answer.
+                if let Some(identity) = &identity_packet {
+                    let mut w = writer.lock().await;
+                    w.write_all(&identity.to_wire()?).await?;
+                    w.flush().await?;
                 }
                 None
             }
@@ -1943,15 +1962,45 @@ mod internet_control_tests {
             .unwrap()
     }
 
+    /// Counts the pairing packets dispatched to it.
+    struct CountingPairs(Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::protocol::kdeconnect::Plugin for CountingPairs {
+        fn name(&self) -> &'static str {
+            "counting-pairs"
+        }
+        fn incoming_capabilities(&self) -> &'static [&'static str] {
+            &["kdeconnect.pair", "kdeconnect.pocketdesk.pair"]
+        }
+        fn outgoing_capabilities(&self) -> &'static [&'static str] {
+            &[]
+        }
+        async fn handle_packet(
+            &self,
+            _packet: &NetworkPacket,
+            _sender: &dyn pocketdesk_core::protocol::kdeconnect::DeviceSender,
+        ) -> pocketdesk_core::error::Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
     /// A phone dials the internet road as `phone_key`, says it is
-    /// `device_id`, and sends one ping: whether the desktop's plugin saw it.
-    async fn ping_over_iroh(device_id: &str, phone_key: iroh::SecretKey) -> bool {
+    /// `device_id`, and sends one `packet_type`: how many packets the
+    /// desktop's plugins saw, or the handshake's failure.
+    async fn send_over_iroh(
+        device_id: &str,
+        phone_key: iroh::SecretKey,
+        packet_type: &str,
+    ) -> std::result::Result<usize, String> {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let desktop = endpoint(iroh::SecretKey::generate()).await;
         let phone = endpoint(phone_key).await;
         let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mut registry = PluginRegistry::default();
         registry.register(super::control_tls_tests::Counting(count.clone()));
+        registry.register(CountingPairs(count.clone()));
         let registry = Arc::new(registry);
         let serve = {
             let desktop = desktop.clone();
@@ -1964,21 +2013,33 @@ mod internet_control_tests {
                     .unwrap()
                     .await
                     .unwrap();
-                handle_internet_control(conn, None, &registry, None, None, true).await
+                let desktop_identity = Some(
+                    pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
+                        "road-desktop",
+                        "Road Desktop",
+                    )
+                    .as_identity_packet(),
+                );
+                handle_internet_control(conn, desktop_identity, &registry, None, None, true).await
             })
         };
         let conn = phone.connect(desktop.addr(), ALPN_CONTROL).await.unwrap();
         let (send, recv) = conn.open_bi().await.unwrap();
         let identity =
             pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(device_id, "Internet Phone");
-        let shook = pocketdesk_core::protocol::connection::control_handshake(
+        let shook = pocketdesk_core::protocol::connection::internet_control_handshake(
             tokio::io::join(recv, send),
             "desktop",
             &identity,
         )
-        .await;
-        if let Ok(mut stream) = shook {
-            let mut line = NetworkPacket::new("kdeconnect.ping").to_wire().unwrap();
+        .await
+        .map_err(|e| e.to_string());
+        let mut shook = shook;
+        if let Ok(stream) = shook.as_mut() {
+            let mut line = NetworkPacket::new(packet_type)
+                .with_body(serde_json::json!({ "pair": true }))
+                .to_wire()
+                .unwrap();
             if !line.ends_with(b"\n") {
                 line.push(b'\n');
             }
@@ -1991,7 +2052,7 @@ mod internet_control_tests {
         conn.close(0u32.into(), b"test");
         phone.close().await;
         desktop.close().await;
-        count.load(std::sync::atomic::Ordering::SeqCst) == 1
+        shook.map(|_| count.load(std::sync::atomic::Ordering::SeqCst))
     }
 
     fn paired_with_iroh_key(device_id: &str, key: Option<&iroh::SecretKey>) {
@@ -2016,7 +2077,14 @@ mod internet_control_tests {
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
         let key = iroh::SecretKey::generate();
         paired_with_iroh_key(&id, Some(&key));
-        assert!(ping_over_iroh(&id, key).await);
+        assert_eq!(
+            send_over_iroh(&id, key.clone(), "kdeconnect.ping").await,
+            Ok(1)
+        );
+        // Nothing pairs, or pairs again, over the internet.
+        for pairing in ["kdeconnect.pair", "kdeconnect.pocketdesk.pair"] {
+            assert_eq!(send_over_iroh(&id, key.clone(), pairing).await, Ok(0));
+        }
     }
 
     #[test]
@@ -2037,20 +2105,24 @@ mod internet_control_tests {
     }
 
     #[tokio::test]
-    async fn another_key_or_no_registered_key_reaches_nothing() {
+    async fn another_key_or_no_registered_key_is_refused_before_the_desktop_names_itself() {
+        let refused = |outcome: &std::result::Result<usize, String>| matches!(outcome, Err(e) if e.contains(pocketdesk_core::protocol::HANDSHAKE_REFUSED));
         let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
         paired_with_iroh_key(&id, Some(&iroh::SecretKey::generate()));
-        assert!(
-            !ping_over_iroh(&id, iroh::SecretKey::generate()).await,
-            "someone else's key, claiming the phone's id"
-        );
+        let outcome = send_over_iroh(&id, iroh::SecretKey::generate(), "kdeconnect.ping").await;
+        assert!(refused(&outcome), "someone else's key: {outcome:?}");
         let unregistered = format!("internet-{}", uuid::Uuid::new_v4().simple());
         paired_with_iroh_key(&unregistered, None);
-        assert!(
-            !ping_over_iroh(&unregistered, iroh::SecretKey::generate()).await,
-            "paired, but its iroh key never proved at home"
-        );
+        let outcome = send_over_iroh(
+            &unregistered,
+            iroh::SecretKey::generate(),
+            "kdeconnect.ping",
+        )
+        .await;
+        assert!(refused(&outcome), "no iroh key proved at home: {outcome:?}");
         let stranger = format!("internet-{}", uuid::Uuid::new_v4().simple());
-        assert!(!ping_over_iroh(&stranger, iroh::SecretKey::generate()).await);
+        let outcome =
+            send_over_iroh(&stranger, iroh::SecretKey::generate(), "kdeconnect.ping").await;
+        assert!(refused(&outcome), "a stranger: {outcome:?}");
     }
 }

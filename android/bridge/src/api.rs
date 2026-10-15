@@ -1994,10 +1994,11 @@ pub(crate) async fn dial_internet_control(
     )
     .await
     .map_err(|e| format!("{e:#}"))?;
-    let stream =
-        pocketdesk_core::protocol::connection::control_handshake(stream, address, identity)
-            .await
-            .map_err(|e| e.to_string())?;
+    let stream = pocketdesk_core::protocol::connection::internet_control_handshake(
+        stream, address, identity,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(Box::new(stream))
 }
 
@@ -4352,18 +4353,17 @@ mod internet_road_tests {
                 let mut hello = String::new();
                 recv.read_line(&mut hello).await.unwrap();
                 assert_eq!(hello.trim(), HANDSHAKE_HELLO);
-                send.write_all(
-                    format!(
-                        "{HANDSHAKE_OK}
-{{\"type\":\"kdeconnect.identity\"}}
-"
-                    )
-                    .as_bytes(),
-                )
-                .await
-                .unwrap();
+                send.write_all(format!("{HANDSHAKE_OK}\n").as_bytes())
+                    .await
+                    .unwrap();
                 let mut phone = String::new();
                 recv.read_line(&mut phone).await.unwrap();
+                // Admitted: the desktop names itself.
+                send.write_all(b"{\"type\":\"kdeconnect.identity\"}\n")
+                    .await
+                    .unwrap();
+                // Held open while the phone reads the answer.
+                tokio::time::sleep(Duration::from_millis(500)).await;
                 phone
             })
         };

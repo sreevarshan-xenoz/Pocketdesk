@@ -39,3 +39,7 @@ pub const TLS_HANDSHAKE_RECORD: u8 = 0x16;
 
 /// What a control port answers a client that does not speak TLS.
 pub const HANDSHAKE_TLS_REQUIRED: &str = "POCKETDESK_ERR 1 tls-required";
+
+/// What the control channel over the internet (T10a) answers a phone it
+/// does not admit, in place of the desktop's identity.
+pub const HANDSHAKE_REFUSED: &str = "POCKETDESK_ERR 1 refused";

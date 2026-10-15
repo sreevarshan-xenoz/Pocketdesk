@@ -78,4 +78,6 @@ A phone at home must keep the LAN road: it carries transfers, and it is the one 
 - **Found, not changed:** a computer that does not answer TCP is offered "Wake and connect" before a session. This was already so for sessions over the internet, and "Connect anyway" proceeds. An awake check over iroh is a follow-up.
 - **Accepted:**
   - iroh keeps a link alive with a heartbeat every 5 s, both ends, and the desktop's endpoint is shared with sessions, which need it for hole punching. A link held in the background costs radio wake-ups; it is measured in checklist §64.
-  - The desktop's identity goes to any iroh key that dials before the phone is judged, as on the LAN (SECURITY.md limit 7).
+- **Fresh review (0 Critical, 2 Important), fixed one commit each:**
+  - pushes never reached a phone on this road: `may_receive_pushes` judged its iroh key as a missing TLS key;
+  - a refused phone counted as connected, because the desktop answered the handshake before judging it, so it redialed every few seconds. On this road the desktop now names itself only once it has admitted the phone, and says `POCKETDESK_ERR 1 refused` otherwise. That also stops it naming the computer to any key that dials its published id.
