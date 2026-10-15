@@ -1,5 +1,6 @@
 package dev.pocketdesk.android.stream
 
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -13,6 +14,12 @@ sealed interface PadOutput {
     data class Click(val button: Int) : PadOutput
 
     data class Button(val button: Int, val pressed: Boolean) : PadOutput
+
+    /**
+     * Zoom the view by [factor] (T9a): the caller applies it, and pans by
+     * the fingers' centre. Nothing goes to the desktop.
+     */
+    data class Zoom(val factor: Float) : PadOutput
 }
 
 /**
@@ -29,6 +36,13 @@ sealed interface PadOutput {
  *   wait, so a lost timer or a torn-down view cannot leave a button stuck;
  * - two and three fingers tapped (no travel, lifted within [tapMaxMs]) are
  *   right and middle clicks, and two or more fingers moving scroll;
+ * - two fingers spreading or pinching zoom the view (T9a): a two-finger
+ *   gesture whose span changes past [slop] before its centre travels as far
+ *   (counted from when the second finger landed) is a pinch, otherwise a
+ *   scroll, and it stays what it began as until the fingers lift. A pinch is
+ *   never a click; each step zooms by at most 2x either way, and a pair that
+ *   breaks (a finger lifts) starts its span afresh. Only exactly two fingers
+ *   pinch, and only for a caller that gives the span (the dock does not);
  * - a tap, then a touch within [dragWindowMs] that moves, drags with the
  *   left button held until the fingers lift. That is one press and no
  *   click first, so the desktop does not see a double click (which would
@@ -58,6 +72,12 @@ class TrackpadGesture(
     private var moveCarryY = 0f
     private var scrollCarryX = 0f
     private var scrollCarryY = 0f
+    private var twoFinger = TwoFinger.UNDECIDED
+    private var twoTravel = 0f
+    private var startSpan = 0f
+    private var lastSpan = 0f
+
+    private enum class TwoFinger { UNDECIDED, SCROLL, PINCH }
 
     /**
      * The time a held-back one-finger click is due, or null. The caller
@@ -86,21 +106,53 @@ class TrackpadGesture(
         moveCarryY = 0f
         scrollCarryX = 0f
         scrollCarryY = 0f
+        twoFinger = TwoFinger.UNDECIDED
+        twoTravel = 0f
+        startSpan = 0f
+        lastSpan = 0f
         return out
     }
 
     /**
      * The fingers moved by ([dx], [dy]) with [fingers] down. Cursor motion is
      * further scaled by [cursorScale] (view to video pixels); scrolling and
-     * the slop are not.
+     * the slop are not. With two or more fingers, ([dx], [dy]) is their
+     * centre's motion. [span] is the distance between two fingers (view px),
+     * or 0 when the caller does not zoom or the pair just changed.
      */
-    fun move(dx: Float, dy: Float, fingers: Int, cursorScale: Float = 1f): List<PadOutput> {
+    fun move(dx: Float, dy: Float, fingers: Int, cursorScale: Float = 1f, span: Float = 0f): List<PadOutput> {
         maxFingers = maxOf(maxFingers, fingers)
         travelled += hypot(dx, dy)
         if (maxFingers >= 2 && !dragging) {
             // Another gesture begins: a tap that was waiting is a tap after all.
             val out = flushPending().toMutableList()
             armed = false
+            // Only the motion since the second finger landed decides.
+            twoTravel += hypot(dx, dy)
+            val pairSpan = if (fingers == 2) span else 0f
+            if (pairSpan > 0f && startSpan == 0f) startSpan = pairSpan
+            if (twoFinger == TwoFinger.UNDECIDED) {
+                val spread = if (startSpan > 0f && pairSpan > 0f) abs(pairSpan - startSpan) else 0f
+                if (spread > slop && spread > twoTravel) {
+                    twoFinger = TwoFinger.PINCH
+                    // The spread so far is zoomed now, from where it began.
+                    lastSpan = startSpan
+                } else if (twoTravel > slop) {
+                    twoFinger = TwoFinger.SCROLL
+                }
+            }
+            if (twoFinger == TwoFinger.PINCH) {
+                when {
+                    // The pair broke (a finger lifted): its span starts afresh.
+                    pairSpan <= 0f -> lastSpan = 0f
+                    lastSpan <= 0f -> lastSpan = pairSpan
+                    else -> {
+                        out += PadOutput.Zoom((pairSpan / lastSpan).coerceIn(MIN_ZOOM_STEP, MAX_ZOOM_STEP))
+                        lastSpan = pairSpan
+                    }
+                }
+                return out
+            }
             // Like the cursor, scrolling waits for the slop, so the jitter of a
             // second finger landing does not scroll before a right-click.
             // Natural scrolling: the content follows the fingers (finger down =
@@ -108,7 +160,7 @@ class TrackpadGesture(
             // content right = a negative horizontal wheel).
             scrollCarryX -= dx / pxPerNotch
             scrollCarryY += dy / pxPerNotch
-            if (travelled <= slop) return out
+            if (twoFinger != TwoFinger.SCROLL) return out
             val sx = scrollCarryX.toInt()
             val sy = scrollCarryY.toInt()
             if (sx == 0 && sy == 0) return out
@@ -145,7 +197,7 @@ class TrackpadGesture(
             dragging = false
             return listOf(PadOutput.Button(LEFT, false))
         }
-        if (travelled > slop) {
+        if (travelled > slop || twoFinger == TwoFinger.PINCH) {
             armed = false
             return flushPending()
         }
@@ -191,5 +243,9 @@ class TrackpadGesture(
         const val LEFT = 0
         const val MIDDLE = 1
         const val RIGHT = 2
+
+        /** The most one step of a pinch zooms out, and in. */
+        const val MIN_ZOOM_STEP = 0.5f
+        const val MAX_ZOOM_STEP = 2f
     }
 }
