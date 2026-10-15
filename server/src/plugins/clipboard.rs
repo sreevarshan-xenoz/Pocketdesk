@@ -282,31 +282,36 @@ fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
 
 /// The clipboard's text, if it holds any (T10b's watcher): never an image,
 /// and never a copy a password manager marked private.
+/// An error says the clipboard could not be read (another app held it).
 #[cfg(windows)]
-pub(crate) async fn read_text() -> Option<String> {
+pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
     use crate::platform::clipboard_windows as win;
     tokio::task::spawn_blocking(|| {
         if !win::has_text() || win::privacy_marks().private() {
-            return None;
+            return Ok(None);
         }
-        win::get_text().ok()
+        win::get_text().map(Some)
     })
     .await
-    .ok()
-    .flatten()
+    .map_err(|e| std::io::Error::other(e.to_string()))?
 }
 
 /// The clipboard's text, if it holds any (T10b's watcher): `wl-paste`
 /// asked for a text type only, so an image is never read, and nothing a
 /// password manager marked private.
+/// `wl-paste` fails on an empty clipboard, so a failure reads as no text.
 #[cfg(not(windows))]
-pub(crate) async fn read_text() -> Option<String> {
-    let types = wl_paste(&["--list-types"]).await.ok()?;
+pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
+    let Ok(types) = wl_paste(&["--list-types"]).await else {
+        return Ok(None);
+    };
     if crate::clipboard_push::private_types(&String::from_utf8_lossy(&types)) {
-        return None;
+        return Ok(None);
     }
-    let bytes = wl_paste(&["--no-newline", "--type", "text"]).await.ok()?;
-    String::from_utf8(bytes).ok()
+    let Ok(bytes) = wl_paste(&["--no-newline", "--type", "text"]).await else {
+        return Ok(None);
+    };
+    Ok(String::from_utf8(bytes).ok())
 }
 
 /// Set the system clipboard: the Win32 clipboard on Windows.

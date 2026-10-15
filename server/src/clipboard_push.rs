@@ -23,11 +23,19 @@ const TICK: Duration = Duration::from_secs(1);
 #[cfg(not(windows))]
 const TICK: Duration = Duration::from_secs(2);
 
-/// Change detection over successive reads of the clipboard's text.
+/// Change detection over successive reads of the clipboard's text. It keeps
+/// a hash of what it saw, not the text: a large copy is not held twice.
 #[derive(Debug, Default)]
 pub(crate) struct Watch {
-    seen: Option<String>,
+    seen: Option<u64>,
     primed: bool,
+}
+
+fn hash(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl Watch {
@@ -38,10 +46,11 @@ impl Watch {
         let first = !self.primed;
         self.primed = true;
         let text = text.filter(|t| !t.is_empty());
-        if text == self.seen.as_deref() {
+        let seen = text.map(hash);
+        if seen == self.seen {
             return None;
         }
-        self.seen = text.map(str::to_string);
+        self.seen = seen;
         if first {
             return None;
         }
@@ -94,6 +103,12 @@ pub(crate) fn note_from_phone(device_id: &str, text: &str) {
         Some((device_id.to_string(), text.to_string()));
 }
 
+/// The note, used once: the next change it explains, or not. A copy of the
+/// same text later is the computer's own, and goes to that phone too.
+fn take_from_phone() -> Option<(String, String)> {
+    FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
 /// The connections to push `text` to: those that may have it (`may`), but
 /// not the phone the text came from.
 pub(crate) fn targets(
@@ -126,6 +141,13 @@ pub(crate) async fn run() {
         tick.tick().await;
         let clients = crate::state::clone_clients().await;
         if clients.is_empty() {
+            // No phone to tell: what is copied meanwhile is not pushed when
+            // one comes back (a phone in a session asks for it itself).
+            watch = Watch::default();
+            #[cfg(windows)]
+            {
+                sequence = None;
+            }
             continue;
         }
         // On Windows the clipboard's sequence number says whether anything
@@ -136,21 +158,37 @@ pub(crate) async fn run() {
             if sequence == Some(now) {
                 continue;
             }
-            sequence = Some(now);
-        }
-        let text = crate::plugins::clipboard::read_text().await;
-        let Some(text) = watch.observe(text.as_deref()) else {
-            continue;
-        };
-        let from_phone = FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let targets = targets(clients, &text, from_phone.as_ref(), |c| {
-            crate::plugins::pair::permits(c.device_id(), "kdeconnect.clipboard")
-        });
-        let packet = packet(&text);
-        for target in targets {
-            if let Err(e) = target.send_packet(&packet).await {
-                tracing::debug!("Clipboard not pushed to {}: {e}", target.device_id());
+            // Noted only once the clipboard was read: a read that failed
+            // (another app held it) is tried again next tick.
+            match crate::plugins::clipboard::read_text().await {
+                Ok(text) => {
+                    sequence = Some(now);
+                    push_change(&mut watch, text, clients).await;
+                }
+                Err(e) => tracing::debug!("The clipboard was not read: {e}"),
             }
+        }
+        #[cfg(not(windows))]
+        {
+            let text = crate::plugins::clipboard::read_text().await.ok().flatten();
+            push_change(&mut watch, text, clients).await;
+        }
+    }
+}
+
+/// Push `text` to `clients` if it is a change.
+async fn push_change(watch: &mut Watch, text: Option<String>, clients: Vec<Arc<dyn DeviceSender>>) {
+    let Some(text) = watch.observe(text.as_deref()) else {
+        return;
+    };
+    let from_phone = take_from_phone();
+    let targets = targets(clients, &text, from_phone.as_ref(), |c| {
+        crate::plugins::pair::permits(c.device_id(), "kdeconnect.clipboard")
+    });
+    let packet = packet(&text);
+    for target in targets {
+        if let Err(e) = target.send_packet(&packet).await {
+            tracing::debug!("Clipboard not pushed to {}: {e}", target.device_id());
         }
     }
 }
@@ -194,6 +232,13 @@ mod tests {
         );
         assert!(private_types("text/plain\nx-kde-passwordManagerHint\n"));
         assert!(!private_types("text/plain;charset=utf-8\nTEXT\n"));
+    }
+
+    #[test]
+    fn the_note_of_a_phone_copy_is_used_once() {
+        note_from_phone("a", "hello");
+        assert_eq!(take_from_phone(), Some(("a".into(), "hello".into())));
+        assert_eq!(take_from_phone(), None);
     }
 
     #[test]
