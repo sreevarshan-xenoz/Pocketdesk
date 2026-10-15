@@ -85,7 +85,7 @@ object FolderWalk {
         if (name.endsWith(" ") || name.endsWith(".")) return false
         val stem = name.substringBefore('.').trimEnd().uppercase()
         if (stem in setOf("CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$")) return false
-        if (stem.length == 4 && (stem.startsWith("COM") || stem.startsWith("LPT")) && stem[3] in "123456789¹²³") {
+        if (stem.length == 4 && (stem.startsWith("COM") || stem.startsWith("LPT")) && stem[3] in "0123456789¹²³") {
             return false
         }
         return true

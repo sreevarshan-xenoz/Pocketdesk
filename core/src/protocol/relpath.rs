@@ -47,7 +47,8 @@ pub fn component_problem(component: &str) -> Option<String> {
 }
 
 /// Whether `name` is a Windows device name, with or without an extension
-/// (`NUL`, `com1.txt`, `LPT¹`): Windows opens the device, not a file.
+/// (`NUL`, `com1.txt`, `LPT0`, `LPT¹`): Windows opens the device, not a
+/// file.
 pub fn is_device_name(name: &str) -> bool {
     let stem = name.split('.').next().unwrap_or("").trim_end();
     let upper = stem.to_ascii_uppercase();
@@ -63,7 +64,7 @@ pub fn is_device_name(name: &str) -> bool {
     matches!(prefix.as_str(), "COM" | "LPT")
         && matches!(
             rest.as_str(),
-            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
         )
 }
 
@@ -141,6 +142,8 @@ mod tests {
             "COM1",
             "lpt9.log",
             "COM¹",
+            "COM0",
+            "lpt0.txt",
             "CON .txt",
             "name.",
             "name ",

@@ -75,7 +75,7 @@ class FolderWalkTest {
 
     @Test
     fun namesTheComputerRefusesAreSkipped() {
-        for (bad in listOf("NUL", "com1.txt", "a?b", "name.", "name ", "x\u0000y")) {
+        for (bad in listOf("NUL", "com1.txt", "COM0", "lpt0.log", "a?b", "name.", "name ", "x\u0000y")) {
             assertFalse(bad, FolderWalk.sendable(bad))
         }
         for (fine in listOf("résumé.pdf", "COM10", "photo (1).jpg")) {
