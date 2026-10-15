@@ -18,6 +18,15 @@ class PhoneFilesRuleTest {
     }
 
     @Test
+    fun `a folder's name is made one the computer takes`() {
+        assertFalse(PhoneFilesRule.validName("Pics\u200DFamily"))
+        assertEquals("Download", PhoneFilesRule.rootName("Download", "Folder 1"))
+        assertEquals("PicsFamily", PhoneFilesRule.rootName("Pics\u200DFamily", "Folder 1"))
+        assertEquals("Folder 1", PhoneFilesRule.rootName("..", "Folder 1"))
+        assertEquals(255, PhoneFilesRule.rootName("a".repeat(300), "Folder 1").length)
+    }
+
+    @Test
     fun `hidden names are not listed`() {
         assertFalse(PhoneFilesRule.listed(".nomedia"))
         assertTrue(PhoneFilesRule.listed("photo.jpg"))

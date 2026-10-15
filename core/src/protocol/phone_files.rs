@@ -80,17 +80,17 @@ pub struct Listing {
 }
 
 impl Listing {
-    /// A listing body as a phone sent it, held to the rules: a bad path or
-    /// root name refuses it; entries with bad names are left out, and past
-    /// [`MAX_ENTRIES`] cut.
+    /// A listing body as a phone sent it, held to the rules: a bad path
+    /// refuses it; roots and entries with bad names are left out, and past
+    /// [`MAX_ROOTS`] and [`MAX_ENTRIES`] cut.
     pub fn from_body(body: &serde_json::Value) -> Option<Self> {
         let mut listing: Listing = serde_json::from_value(body.clone()).ok()?;
-        if listing.roots.len() > MAX_ROOTS
-            || !listing.roots.iter().all(|r| valid_name(&r.name))
-            || !valid_path(&listing.path)
-        {
+        if !valid_path(&listing.path) {
             return None;
         }
+        // One root the phone named badly must not hide the others.
+        listing.roots.retain(|r| valid_name(&r.name));
+        listing.roots.truncate(MAX_ROOTS);
         listing.entries.retain(|e| valid_name(&e.name));
         listing.entries.truncate(MAX_ENTRIES);
         listing.error = listing
@@ -146,5 +146,24 @@ mod tests {
         assert!(listing.entries[1].dir);
         let bad = serde_json::json!({ "roots": [], "path": [".."] });
         assert!(Listing::from_body(&bad).is_none());
+    }
+
+    #[test]
+    fn a_badly_named_root_is_left_out_not_the_listing() {
+        let body = serde_json::json!({
+            "roots": [
+                { "id": 0, "name": "Pics\u{200D}Family" },
+                { "id": 1, "name": "Download" }
+            ],
+            "root": 1, "path": []
+        });
+        let listing = Listing::from_body(&body).unwrap();
+        assert_eq!(
+            listing.roots,
+            vec![Root {
+                id: 1,
+                name: "Download".into()
+            }]
+        );
     }
 }

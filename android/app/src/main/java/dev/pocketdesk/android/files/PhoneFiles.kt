@@ -102,7 +102,9 @@ class PhoneFiles(private val ctx: Context) {
 
     private fun list(request: Request, folders: List<PhoneFolders.Folder>) {
         val roots = JSONArray()
-        folders.forEach { roots.put(JSONObject().put("id", it.id).put("name", it.name)) }
+        folders.forEach {
+            roots.put(JSONObject().put("id", it.id).put("name", PhoneFilesRule.rootName(it.name, "Folder ${it.id + 1}")))
+        }
         val body = JSONObject().put("roots", roots).put("path", JSONArray(request.path))
         val folder = PhoneFilesRule.root(folders, request.root) ?: folders.firstOrNull()
         if (folder != null) {
