@@ -90,7 +90,10 @@ class Screenshots(private val ctx: Context) {
         val now = System.currentTimeMillis() / 1000
         val since = ScreenshotPrefs.since(ctx)
         var sent = 0
-        for (image in newImages(ScreenshotPrefs.lastId(ctx))) {
+        val images = newImages(ScreenshotPrefs.lastId(ctx))
+        // More waited than one look reads: the next tick goes on from here.
+        if (images.size > LOOK) dirty = true
+        for (image in images) {
             // One still being written is looked at again later, with what comes after it.
             if (image.pending) {
                 dirty = true
@@ -147,7 +150,7 @@ class Screenshots(private val ctx: Context) {
                 arrayOf(afterId.toString()),
                 "${MediaStore.Images.Media._ID} ASC",
             )?.use { c ->
-                while (c.moveToNext() && found.size <= ScreenshotRule.MAX_PER_TICK * 4) {
+                while (c.moveToNext() && found.size <= LOOK) {
                     val id = c.getLong(0)
                     val folder = c.getString(1)?.let { if (Build.VERSION.SDK_INT >= 29) it else File(it).parent }
                     found +=
@@ -190,6 +193,9 @@ class Screenshots(private val ctx: Context) {
 
     companion object {
         private const val TAG = "Screenshots"
+
+        /** New images one look reads, at most (one more says that more wait). */
+        private const val LOOK = ScreenshotRule.MAX_PER_TICK * 4
 
         @Suppress("DEPRECATION")
         private const val DATA = MediaStore.Images.Media.DATA
