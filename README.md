@@ -91,8 +91,11 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 | Single-window streaming | Hyprland (the window itself, even when covered) | a crop of the window as it shows on screen |
 | Window and workspace HUD | Hyprland | windows (polled) |
 | Start at login | systemd user unit | `pocketdesk install` (a logon task and firewall rules) |
+| Links from the phone open in | `xdg-open` | the default browser (`ShellExecute`) |
+| Now playing on the computer, from the phone | MPRIS through `playerctl` | the system media controls |
+| The phone's battery and media on the computer | yes | yes |
 | Desktop app tray | no (closing quits) | yes |
-| Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard). Not yet: files, notifications and texts, sound on the phone, GNOME/KDE, the desktop app | most rows, with a Galaxy A71 (2026-10). Not yet: start at login, the tray menu, single-window streaming |
+| Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard; 2026-10-15: links both ways, the phone's battery, now-playing and Pause through `playerctl`). Not yet: files, notifications and texts, sound on the phone, GNOME/KDE, the desktop app | most rows, with a Galaxy A71 (2026-10). Not yet: start at login, the tray menu, single-window streaming |
 
 The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 (Android 16) and an OPPO Reno8 (ColorOS).
 
