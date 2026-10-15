@@ -657,7 +657,16 @@ impl PocketdeskApp {
         if let Some((id, command)) = pressed {
             self.notice = Some(
                 match model::press_phone_media(&self.state_dir, &id, command, now_unix()) {
-                    Ok(()) => format!("Sent {command} to the phone."),
+                    // Asked, not done: the phone acts while Pocketdesk is
+                    // in front there, with its media setting on.
+                    Ok(()) => format!(
+                        "Asked the phone to {}.",
+                        match command {
+                            "next" => "skip ahead",
+                            "previous" => "go back",
+                            _ => "play or pause",
+                        }
+                    ),
                     Err(e) => e,
                 },
             );
