@@ -30,11 +30,14 @@ const MAX_ADDRESS: usize = 64;
 const MAX_PER_PACKET: usize = 50;
 
 static NOTIFY: AtomicBool = AtomicBool::new(true);
+/// `sms_names` from the config: keep the contact names phones share (T8e).
+static NAMES: AtomicBool = AtomicBool::new(true);
 static KEEP: AtomicUsize = AtomicUsize::new(sms::KEEP);
 
 /// Apply config.toml's `sms_notify` and `sms_keep` (read once, at start).
-pub fn configure(notify: bool, keep: u32) {
+pub fn configure(notify: bool, keep: u32, names: bool) {
     NOTIFY.store(notify, Ordering::Relaxed);
+    NAMES.store(names, Ordering::Relaxed);
     KEEP.store((keep as usize).max(1), Ordering::Relaxed);
 }
 
@@ -56,10 +59,17 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// The texts in a `kdeconnect.sms.messages` body: `(address, body, unix
-/// seconds)`, cleaned and bounded. `date` is milliseconds, as the phone sends
-/// it; a missing or absurd date is now.
-fn received_texts(body: &serde_json::Value, now: u64) -> Vec<(String, String, u64)> {
+/// One received text: address, body, unix seconds, and the sender's
+/// contact name when the phone shares one (T8e).
+type Received = (String, String, u64, Option<String>);
+
+/// The longest contact name kept, in characters.
+const MAX_NAME: usize = 64;
+
+/// The texts in a `kdeconnect.sms.messages` body, cleaned and bounded.
+/// `date` is milliseconds, as the phone sends it; a missing or absurd date
+/// is now. A contact name is kept on one line, and only with [`names`] on.
+fn received_texts(body: &serde_json::Value, now: u64, names: bool) -> Vec<Received> {
     let Some(messages) = body.get("messages").and_then(|v| v.as_array()) else {
         return Vec::new();
     };
@@ -86,7 +96,18 @@ fn received_texts(body: &serde_json::Value, now: u64) -> Vec<(String, String, u6
                 .map(|ms| ms / 1000)
                 .filter(|s| *s > 0 && *s <= now + 86_400)
                 .unwrap_or(now);
-            Some((address, text, at))
+            let name = m
+                .get("name")
+                .and_then(|v| v.as_str())
+                .filter(|_| names)
+                .map(|n| {
+                    pocketdesk_core::protocol::phone_media::clean_line(n)
+                        .chars()
+                        .take(MAX_NAME)
+                        .collect::<String>()
+                })
+                .filter(|n| !n.is_empty());
+            Some((address, text, at, name))
         })
         .collect()
 }
@@ -114,20 +135,20 @@ impl Plugin for SmsPlugin {
         };
         match packet.packet_type.as_str() {
             MESSAGES => {
-                let texts = received_texts(&packet.body, now_unix());
+                let texts = received_texts(&packet.body, now_unix(), NAMES.load(Ordering::Relaxed));
                 let phone = sender.device_id().to_string();
                 {
                     let _held = store_lock().lock().await;
                     let messages = texts
                         .iter()
-                        .map(|(address, body, at)| Message {
+                        .map(|(address, body, at, name)| Message {
                             device_id: phone.clone(),
                             address: address.clone(),
                             body: body.clone(),
                             at_unix: *at,
                             direction: Direction::Received,
                             reply: None,
-                            name: None,
+                            name: name.clone(),
                         })
                         .collect();
                     if let Err(e) = sms::record_all(&dir, messages, keep()) {
@@ -136,11 +157,14 @@ impl Plugin for SmsPlugin {
                 }
                 if NOTIFY.load(Ordering::Relaxed) {
                     // The phone's notification limit holds for texts too.
-                    for (address, body, _) in texts {
+                    for (address, body, _, name) in texts {
                         if !crate::plugins::notification::admit(&phone) {
                             continue;
                         }
-                        let summary = format!("Text from {address}");
+                        let summary = match name {
+                            Some(name) => format!("Text from {name} ({address})"),
+                            None => format!("Text from {address}"),
+                        };
                         let _ = tokio::task::spawn_blocking(move || {
                             crate::platform::notify(&summary, &body, Duration::from_secs(8))
                         })
@@ -433,17 +457,47 @@ mod tests {
             {"body": "no number"},
             {"address": "+44", "body": "later", "date": 99_999_999_999_999u64},
         ]});
-        let texts = received_texts(&body, now);
+        let texts = received_texts(&body, now, true);
         assert_eq!(
             texts,
             vec![
-                ("+1 555 0100".into(), "on my way".into(), 1_799_999_000),
-                ("+44".into(), "later".into(), now),
+                (
+                    "+1 555 0100".into(),
+                    "on my way".into(),
+                    1_799_999_000,
+                    None
+                ),
+                ("+44".into(), "later".into(), now, None),
             ]
         );
         let many = json!({"messages": (0..80).map(|i| json!({"address": "+1", "body": format!("m{i}")})).collect::<Vec<_>>()});
-        assert_eq!(received_texts(&many, now).len(), MAX_PER_PACKET);
-        assert!(received_texts(&json!({}), now).is_empty());
+        assert_eq!(received_texts(&many, now, true).len(), MAX_PER_PACKET);
+        assert!(received_texts(&json!({}), now, true).is_empty());
+    }
+
+    /// A text may carry the sender's contact name (T8e): kept on one line,
+    /// at most 64 characters, and dropped when names are turned off.
+    #[test]
+    fn a_contact_name_is_kept_clean_or_not_at_all() {
+        let now = 1_800_000_000;
+        let body = json!({"messages": [
+            {"address": "+1", "body": "hi", "name": " Ann\nLee\u{202e} "},
+            {"address": "+2", "body": "yo", "name": "B".repeat(100)},
+            {"address": "+3", "body": "hey", "name": "   "},
+        ]});
+        let names: Vec<Option<String>> = received_texts(&body, now, true)
+            .into_iter()
+            .map(|t| t.3)
+            .collect();
+        assert_eq!(
+            names,
+            vec![Some("Ann Lee".to_string()), Some("B".repeat(64)), None]
+        );
+        assert!(
+            received_texts(&body, now, false)
+                .iter()
+                .all(|t| t.3.is_none())
+        );
     }
 
     #[test]

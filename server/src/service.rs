@@ -143,7 +143,7 @@ pub async fn run(config: Config) -> Result<()> {
         config.phone_notifications,
         config.notifications_per_minute,
     );
-    crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
+    crate::plugins::sms::configure(config.sms_notify, config.sms_keep, config.sms_names);
     crate::plugins::links::configure(config.open_links);
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
     crate::wake_info::configure(config.wake_announce, config.wake_port);

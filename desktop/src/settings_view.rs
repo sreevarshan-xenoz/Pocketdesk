@@ -196,6 +196,12 @@ impl SettingsForm {
                 ui.label("Texts");
                 ui.checkbox(&mut e.sms_notify, "a notification for each text");
                 ui.end_row();
+                ui.label("");
+                ui.checkbox(
+                    &mut e.sms_names,
+                    "keep the contact names phones send with texts",
+                );
+                ui.end_row();
                 ui.label("Links from phones");
                 ui.checkbox(
                     &mut e.open_links,

@@ -75,6 +75,9 @@ pub struct Config {
     /// How many texts the Messages history keeps.
     #[serde(default = "default_sms_keep")]
     pub sms_keep: u32,
+    /// Keep the contact names phones send with their texts (T8e).
+    #[serde(default = "default_true")]
+    pub sms_names: bool,
     /// Open a link a phone hands over in the default browser (roadmap T8a);
     /// off, it is shown as a notification instead.
     #[serde(default = "default_true")]
@@ -197,6 +200,7 @@ impl Default for Config {
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
             sms_keep: default_sms_keep(),
+            sms_names: true,
             open_links: true,
             phone_battery_alerts: true,
             wake_announce: true,
@@ -360,6 +364,7 @@ impl Config {
         "open_links",
         "phone_battery_alerts",
         "sms_keep",
+        "sms_names",
         "wake_announce",
         "wake_port",
         "input_control",
@@ -501,6 +506,16 @@ mod tests {
         let back = Config::load_from(&path).unwrap();
         assert!(!back.wake_announce);
         assert_eq!(back.wake_port, 40009);
+    }
+
+    #[test]
+    fn contact_names_are_kept_by_default_and_the_choice_saves() {
+        assert!(Config::default().sms_names);
+        let path = temp("sms-names");
+        let mut config = Config::load_from(&path).unwrap();
+        config.sms_names = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().sms_names);
     }
 
     #[test]
