@@ -96,7 +96,10 @@ fun ClipboardSyncEffect(
                     }
 
                     when (val remote = RustCore.getClipboardState(address, controlPort).getOrNull()) {
-                        is RemoteClip.Image -> if (images.shouldFetch(remote.id, remote.size, now)) {
+                        // The phone's own screenshot (T10h) stays off the phone's clipboard.
+                        is RemoteClip.Image -> if (remote.id == ClipboardShared.sentImageId) {
+                            images.moved(remote.id)
+                        } else if (images.shouldFetch(remote.id, remote.size, now)) {
                             val part = ClipboardImages.partFile(context, remote.id)
                             val fetched = RustCore.fetchClipboardImage(address, controlPort, remote.id, part.path)
                             val kept = fetched.mapCatching { ClipboardImages.keepReceived(context, part, remote.id) }

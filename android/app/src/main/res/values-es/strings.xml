@@ -488,4 +488,11 @@
     <string name="phone_folders_remove">Quitar</string>
     <string name="phone_folders_storage">Almacenamiento</string>
     <string name="phone_folders_not_kept">Android no dejó que Pocketdesk conservara el acceso a esa carpeta</string>
+    <string name="settings_screenshots">Capturas nuevas al equipo</string>
+    <string name="screenshots_on">Enviar capturas nuevas</string>
+    <string name="screenshots_on_summary">Una captura de pantalla hecha en este teléfono llega a su equipo un momento después. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
+    <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano: toca para permitirlo</string>
+    <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
+    <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>
+    <string name="screenshots_save">Guardarlas en Descargas del equipo</string>
 </resources>

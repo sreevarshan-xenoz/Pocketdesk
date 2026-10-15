@@ -22,6 +22,14 @@ object ClipboardShared {
 
     /** Session clipboard syncs running: while one runs, it alone applies the computer's text. */
     val sessionSyncs = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * The id of the last image this phone put on the computer's clipboard
+     * outside a session sync (a screenshot, T10h): a session sync never
+     * fetches it back onto the phone's own clipboard.
+     */
+    @Volatile
+    var sentImageId: String? = null
 }
 
 /** The choices of the background applier (T10b). */
