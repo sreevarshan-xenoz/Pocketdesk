@@ -1046,6 +1046,7 @@ On the A71 against Windows, 2026-10-15, LAN, input off for the phone:
 - [x] `pocketdesk link` with `javascript:alert(1)`: exit 2, "not a web link".
 - [x] "Open on computer" with "A page https://example.org/..." opened the link in this computer's browser ("Opening a link from …" in the log); a share with only a `file:` link sent nothing.
 - [x] With the phone's Links permission off: a share from the phone was not opened, and a queued link was not sent ("links are off for this phone"). (Since then `pocketdesk link` and the app refuse such a link up front.)
+- [x] After the review fixes: "Read (https://example.org/…)." opened on the computer (from its own thread); "See http://localhost:8080/admin." was refused on the phone, and `pocketdesk link <phone> http://127.1/` with "a link to the machine's own address".
 
 Owed:
 - [ ] Chrome's and Firefox's share sheets ("Open on computer" listed, the title and link they share).
@@ -1053,7 +1054,6 @@ Owed:
 - [ ] `open_links = false`: a link shown as a notification, not opened.
 - [ ] Six links within a minute: the sixth not opened.
 - [ ] The phone's "Links from the computer" off: a link dropped.
-- [ ] After the review fixes: a link opening again from the phone (now on its own thread), and a `localhost` link refused on both ends.
 - [ ] Linux: `xdg-open`, and no zombie process after a link.
 
 ## Recording results
