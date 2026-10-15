@@ -581,14 +581,24 @@ impl InputInjector {
                 // This is a best-effort approach and does not handle Unicode.
                 let guard = state.get_mut().unwrap();
                 for ch in text.chars() {
-                    if let Some(keycode) = char_to_keycode(ch) {
+                    if let Some((keycode, shift)) = char_to_key(ch) {
                         let key = KeyCode(keycode);
-                        let events = [
+                        let shift_key = KeyCode::KEY_LEFTSHIFT.0;
+                        let mut events = Vec::with_capacity(8);
+                        if shift {
+                            events.push(InputEvent::new(EV_KEY, shift_key, 1));
+                            events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
+                        }
+                        events.extend([
                             InputEvent::new(EV_KEY, key.0, 1), // press
                             InputEvent::new(EV_SYN, SYN_REPORT, 0),
                             InputEvent::new(EV_KEY, key.0, 0), // release
                             InputEvent::new(EV_SYN, SYN_REPORT, 0),
-                        ];
+                        ]);
+                        if shift {
+                            events.push(InputEvent::new(EV_KEY, shift_key, 0));
+                            events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
+                        }
                         emit_uinput(guard, UinputDevice::Main, &events, "text input")?;
                     } else {
                         debug!("Cannot type character with uinput: {ch:?}");
@@ -1038,6 +1048,39 @@ fn key_to_evdev(key: Key) -> KeyCode {
     }
 }
 
+/// The key and whether Shift is held, on a US layout, for `ch`: capitals and
+/// the shifted symbols on their unshifted keys (roadmap 2666), the rest as
+/// [`char_to_keycode`] names them.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn char_to_key(ch: char) -> Option<(u16, bool)> {
+    if ch.is_ascii_uppercase() {
+        return char_to_keycode(ch.to_ascii_lowercase()).map(|code| (code, true));
+    }
+    let base = match ch {
+        '!' => '1',
+        '@' => '2',
+        '#' => '3',
+        '$' => '4',
+        '%' => '5',
+        '^' => '6',
+        '&' => '7',
+        '(' => '9',
+        ')' => '0',
+        '_' => '-',
+        '{' => '[',
+        '}' => ']',
+        '|' => '\\',
+        ':' => ';',
+        '"' => '\'',
+        '<' => ',',
+        '>' => '.',
+        '?' => '/',
+        '~' => '`',
+        _ => return char_to_keycode(ch).map(|code| (code, false)),
+    };
+    char_to_keycode(base).map(|code| (code, true))
+}
+
 /// Map a character to the Linux evdev keycode that produces it.
 ///
 /// Reads [`KEYCODE_MAP`] so the table stays the one place a character's key is
@@ -1101,6 +1144,24 @@ pub fn key_name_to_enigo_key(key: &str) -> Key {
                 Key::Unicode('?')
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod shifted_text_tests {
+    use super::*;
+
+    #[test]
+    fn capitals_and_shifted_symbols_hold_shift_on_their_key() {
+        assert_eq!(char_to_key('a'), Some((KeyCode::KEY_A.0, false)));
+        assert_eq!(char_to_key('A'), Some((KeyCode::KEY_A.0, true)));
+        assert_eq!(char_to_key('!'), Some((KeyCode::KEY_1.0, true)));
+        assert_eq!(char_to_key('?'), Some((KeyCode::KEY_SLASH.0, true)));
+        assert_eq!(char_to_key('"'), Some((KeyCode::KEY_APOSTROPHE.0, true)));
+        assert_eq!(char_to_key('|'), Some((KeyCode::KEY_BACKSLASH.0, true)));
+        assert_eq!(char_to_key('/'), Some((KeyCode::KEY_SLASH.0, false)));
+        assert_eq!(char_to_key(' '), Some((KeyCode::KEY_SPACE.0, false)));
+        assert_eq!(char_to_key('é'), None, "not on a US keyboard");
     }
 }
 
