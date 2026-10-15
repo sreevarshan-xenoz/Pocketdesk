@@ -14,6 +14,12 @@ use crate::model::Device;
 
 const REFRESH: Duration = Duration::from_secs(1);
 
+/// How long a list request waits for the phone's answer before the tab says so.
+const ANSWER_SECS: u64 = 15;
+
+/// A listing older than this says how old it is.
+const STALE_SECS: u64 = 30;
+
 #[derive(Default)]
 pub struct PhoneFilesView {
     /// The phone browsed.
@@ -21,6 +27,30 @@ pub struct PhoneFilesView {
     listings: BTreeMap<String, Kept>,
     read_at: Option<Instant>,
     notice: Option<String>,
+    /// The phone and the time of the list request still waiting for an answer.
+    waiting: Option<(String, u64)>,
+}
+
+/// What a list request waiting since `asked_unix` has come to, given the
+/// phone's kept listing time: `Some(true)` answered, `Some(false)` given
+/// up on, `None` still waiting.
+fn answered(asked_unix: u64, kept_unix: Option<u64>, now_unix: u64) -> Option<bool> {
+    if kept_unix.is_some_and(|at| at >= asked_unix) {
+        Some(true)
+    } else if now_unix.saturating_sub(asked_unix) > ANSWER_SECS {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// An age in words.
+fn age_text(secs: u64) -> String {
+    match secs {
+        0..60 => format!("{secs} s"),
+        60..3600 => format!("{} min", secs / 60),
+        _ => format!("{} h", secs / 3600),
+    }
 }
 
 /// A size in words.
@@ -59,6 +89,7 @@ impl PhoneFilesView {
     ) {
         match store::request(state_dir, phone, kind, root, &path, now_unix) {
             Ok(_) => {
+                self.waiting = (kind == Kind::List).then(|| (phone.to_string(), now_unix));
                 self.notice = Some(match kind {
                     Kind::List => "Asked the phone…".to_string(),
                     Kind::Fetch => format!(
@@ -104,16 +135,44 @@ impl PhoneFilesView {
                 }
             }
         });
+        if let Some((asking, asked_unix)) = self.waiting.clone() {
+            let kept_unix = self.listings.get(&asking).map(|k| k.at_unix);
+            match answered(asked_unix, kept_unix, now_unix) {
+                Some(true) => {
+                    self.waiting = None;
+                    self.notice = None;
+                }
+                Some(false) => {
+                    self.waiting = None;
+                    self.notice = Some(
+                        "The phone did not answer. Is it connected, with Files on in Devices, \
+                         and Pocketdesk allowed to run in the background on it?"
+                            .to_string(),
+                    );
+                }
+                None => {}
+            }
+        }
         if let Some(notice) = &self.notice {
             ui.label(RichText::new(notice).italics());
         }
         let kept = self.listings.get(&phone).cloned();
-        let Some(Kept { listing, .. }) = kept else {
+        let Some(Kept { listing, at_unix }) = kept else {
             if ui.button("Show the phone's shared folders").clicked() {
                 self.ask(state_dir, &phone, Kind::List, 0, Vec::new(), now_unix);
             }
             return;
         };
+        let age = now_unix.saturating_sub(at_unix);
+        if age > STALE_SECS {
+            ui.label(
+                RichText::new(format!(
+                    "Listed {} ago: Refresh to see the phone as it is now.",
+                    age_text(age)
+                ))
+                .color(Color32::GRAY),
+            );
+        }
         if let Some(error) = &listing.error {
             ui.label(RichText::new(error).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
         }
@@ -204,7 +263,26 @@ impl PhoneFilesView {
 
 #[cfg(test)]
 mod tests {
-    use super::size_text;
+    use super::{ANSWER_SECS, age_text, answered, size_text};
+
+    #[test]
+    fn a_list_request_is_answered_by_a_newer_listing_or_given_up() {
+        assert_eq!(answered(100, Some(100), 101), Some(true));
+        assert_eq!(
+            answered(100, Some(99), 101),
+            None,
+            "an older listing is no answer"
+        );
+        assert_eq!(answered(100, None, 100 + ANSWER_SECS), None);
+        assert_eq!(answered(100, Some(50), 101 + ANSWER_SECS), Some(false));
+    }
+
+    #[test]
+    fn ages_read_as_people_say_them() {
+        assert_eq!(age_text(45), "45 s");
+        assert_eq!(age_text(125), "2 min");
+        assert_eq!(age_text(7300), "2 h");
+    }
 
     #[test]
     fn sizes_read_as_people_say_them() {

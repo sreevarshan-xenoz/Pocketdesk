@@ -89,7 +89,9 @@ class PhoneFiles(private val ctx: Context) {
                 DocumentsContract.Document.COLUMN_SIZE,
                 DocumentsContract.Document.COLUMN_LAST_MODIFIED,
             )
-        ctx.contentResolver.query(uri, columns, null, null, null)?.use { c ->
+        // No cursor is a folder the phone can no longer read (its grant gone), not an empty one.
+        val cursor = ctx.contentResolver.query(uri, columns, null, null, null) ?: error("no cursor for $uri")
+        cursor.use { c ->
             var scanned = 0
             while (c.moveToNext()) {
                 if (++scanned > MAX_SCANNED) return false
@@ -108,7 +110,12 @@ class PhoneFiles(private val ctx: Context) {
         return true
     }
 
-    private fun list(request: Request, folders: List<PhoneFolders.Folder>) {
+    /**
+     * Answer with the listing of the folder [request] names; [note] is said
+     * with it (a fetch that failed). A folder the phone cannot read is
+     * answered with why, never left unanswered.
+     */
+    private fun list(request: Request, folders: List<PhoneFolders.Folder>, note: String? = null) {
         val roots = JSONArray()
         folders.forEach {
             roots.put(JSONObject().put("id", it.id).put("name", PhoneFilesRule.rootName(it.name, "Folder ${it.id + 1}")))
@@ -118,14 +125,17 @@ class PhoneFiles(private val ctx: Context) {
         if (folder != null) {
             body.put("root", folder.id)
             val tree = folder.uri.toUri()
-            val found = if (folder.id == request.root) resolve(tree, request.path) else resolve(tree, emptyList())
-            if (folder.id != request.root) body.put("path", JSONArray())
+            val asked = folder.id == request.root
+            if (!asked) body.put("path", JSONArray())
+            val found = runCatching { resolve(tree, if (asked) request.path else emptyList()) }
+            val target = found.getOrNull()
             when {
-                found == null -> body.put("error", "Not on the phone any more")
-                !found.second -> body.put("error", "Not a folder")
-                else -> {
+                found.isFailure -> body.put("error", UNREADABLE)
+                target == null -> body.put("error", "Not on the phone any more")
+                !target.second -> body.put("error", "Not a folder")
+                else -> runCatching {
                     val listed = mutableListOf<Child>()
-                    val whole = eachChild(tree, found.first) {
+                    val whole = eachChild(tree, target.first) {
                         if (PhoneFilesRule.listed(it.name)) listed += it
                         true
                     }
@@ -140,25 +150,43 @@ class PhoneFiles(private val ctx: Context) {
                         }
                     body.put("entries", entries)
                     body.put("truncated", !whole || listed.size > PhoneFilesRule.MAX_ENTRIES)
+                }.onFailure {
+                    Log.w(TAG, "could not list a shared folder", it)
+                    body.put("error", UNREADABLE)
                 }
             }
+            if (!asked && !body.has("error")) body.put("error", "That folder is no longer shared")
         }
+        if (note != null && !body.has("error")) body.put("error", note)
         RustCore.sendPhonePacket(request.host, request.port, LISTING, body.toString())
     }
 
+    /**
+     * Send the file [request] names, as the share sheet does; when it cannot
+     * be sent, answer with its folder's listing and why.
+     */
     private fun fetch(request: Request, folders: List<PhoneFolders.Folder>) {
-        val folder = PhoneFilesRule.root(folders, request.root) ?: return
-        val tree = folder.uri.toUri()
-        val (docId, dir) = resolve(tree, request.path) ?: return
-        if (dir) return
-        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, docId)
-        TransferService.start(ctx, request.host, request.port, listOf(uri))
+        val name = request.path.lastOrNull() ?: return
+        val problem =
+            runCatching {
+                val folder = PhoneFilesRule.root(folders, request.root) ?: return@runCatching "That folder is no longer shared"
+                val tree = folder.uri.toUri()
+                val (docId, dir) = resolve(tree, request.path) ?: return@runCatching "$name is not on the phone any more"
+                if (dir) return@runCatching "$name is a folder"
+                TransferService.start(ctx, request.host, request.port, listOf(DocumentsContract.buildDocumentUriUsingTree(tree, docId)))
+                null
+            }.getOrElse {
+                Log.w(TAG, "could not send a shared file", it)
+                "The phone could not send $name: open Pocketdesk on the phone and try again"
+            }
+        if (problem != null) list(request.copy(path = request.path.dropLast(1)), folders, problem)
     }
 
     private companion object {
         const val TAG = "PhoneFiles"
         const val LISTING = "kdeconnect.pocketdesk.phone_files.listing"
         const val RECONNECT_MS = 60_000L
+        const val UNREADABLE = "The phone cannot read this folder: remove it and add it again on the phone"
 
         /** Children of one folder looked at, at most. */
         const val MAX_SCANNED = 100_000
