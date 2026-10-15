@@ -112,6 +112,7 @@ class PhoneNotificationListener : NotificationListenerService() {
      */
     private val answerable = LinkedHashMap<String, Answerable>()
     private val answerBudget = NotificationActionRule.Budget()
+    private var answerConnectMs = 0L
     private val answerTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
     override fun onCreate() {
@@ -227,9 +228,17 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     /** Run the computer's answers that pass [NotificationActionRule.decide]. */
     private fun runAnswers() {
+        val own = PhoneLink.target(this)
+        // Answers come on the control link: keep one while answering is on.
+        if (Prefs.answerNotifications(this) && own != null && RustCore.controlPeer() == null) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - answerConnectMs >= 60_000L) {
+                answerConnectMs = now
+                RustCore.connectToPeer(own.address, own.controlPort, dev.pocketdesk.android.HostStore.wanIdentity(this, own.address))
+            }
+        }
         val answers = RustCore.takeNotificationAnswers()
         if (answers.isEmpty()) return
-        val own = PhoneLink.target(this)
         for (answer in answers) {
             val entry = synchronized(answerable) { answerable[answer.key] }
             val offered =
