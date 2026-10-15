@@ -64,9 +64,28 @@ class CapturedMouse(private val sensitivity: Float = 1f) {
         return out
     }
 
-    private companion object {
+    companion object {
+        /** Whether a session holds the pointer now (read by MainActivity's key dispatch). */
+        @Volatile
+        var captured = false
+
+        /** One axis of a batched event: Android keeps a fast mouse's earlier samples as history. */
+        fun batched(history: List<Float>, current: Float): Float = history.sum() + current
+
+        /**
+         * Whether a key event is swallowed: Android turns a mouse's Back and
+         * Forward buttons into the phone's Back and Forward keys too, and
+         * while the pointer is captured they belong to the desktop (a Back
+         * would end the session).
+         */
+        fun swallowsKey(keyCode: Int, fromMouse: Boolean, captured: Boolean): Boolean =
+            captured && fromMouse && (keyCode == KEYCODE_BACK || keyCode == KEYCODE_FORWARD)
+
+        private const val KEYCODE_BACK = 4
+        private const val KEYCODE_FORWARD = 125
+
         /** Android's button bits, and the wire's button codes. */
-        val BUTTONS = listOf(
+        private val BUTTONS = listOf(
             1 to TrackpadGesture.LEFT, // BUTTON_PRIMARY
             2 to TrackpadGesture.RIGHT, // BUTTON_SECONDARY
             4 to TrackpadGesture.MIDDLE, // BUTTON_TERTIARY

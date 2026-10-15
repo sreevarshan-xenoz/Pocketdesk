@@ -52,4 +52,30 @@ class CapturedMouseTest {
         )
         assertEquals(emptyList<PadOutput>(), mouse.release())
     }
+
+    @Test
+    fun aBatchedEventsSamplesAllCount() {
+        // Android batches a fast mouse's samples: each one is a delta.
+        assertEquals(10f, CapturedMouse.batched(listOf(2f, 3f, 1f), 4f), 0f)
+        assertEquals(-1f, CapturedMouse.batched(emptyList(), -1f), 0f)
+    }
+
+    @Test
+    fun theMousesBackAndForwardButtonsAreNotThePhonesBackWhileCaptured() {
+        val back = 4 // KeyEvent.KEYCODE_BACK
+        val forward = 125 // KeyEvent.KEYCODE_FORWARD
+        assertEquals(true, CapturedMouse.swallowsKey(back, fromMouse = true, captured = true))
+        assertEquals(true, CapturedMouse.swallowsKey(forward, fromMouse = true, captured = true))
+        assertEquals("not captured: the phone's own", false, CapturedMouse.swallowsKey(back, fromMouse = true, captured = false))
+        assertEquals("the phone's Back", false, CapturedMouse.swallowsKey(back, fromMouse = false, captured = true))
+        assertEquals(false, CapturedMouse.swallowsKey(66, fromMouse = true, captured = true))
+    }
+
+    @Test
+    fun aForwardButtonAndTheSidewaysWheelGoOut() {
+        val mouse = CapturedMouse()
+        assertEquals(listOf(PadOutput.Button(4, true)), mouse.event(0f, 0f, buttons = 16))
+        assertEquals(listOf(PadOutput.Scroll(1, 0)), mouse.event(0f, 0f, buttons = 16, hscroll = 1f))
+        assertEquals(listOf(PadOutput.Move(-2, 0)), mouse.event(-2.5f, 0f, buttons = 16))
+    }
 }

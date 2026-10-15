@@ -17,6 +17,9 @@ import android.view.ViewTreeObserver
  * [CapturedMouse] turns that into the trackpad's outputs. The touchscreen
  * keeps working, and Android releases the capture when the window loses
  * focus. Returns the function that undoes it all.
+ *
+ * Captured events go to whichever view has focus (the keyboard's sink takes
+ * it while the on-screen keyboard is open), so the handler follows focus.
  */
 fun attachMouseCapture(
     view: View,
@@ -26,73 +29,113 @@ fun attachMouseCapture(
 ): () -> Unit {
     val context = view.context
     val inputs = context.getSystemService(InputManager::class.java)
-    var mouse = CapturedMouse()
+    val mouse = CapturedMouse()
+    val handlers = mutableSetOf<View>()
+    var captured = false
 
     fun send(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { launchPadSend(it) }
 
-    fun update() {
-        val want = enabled() && view.hasWindowFocus() && mousePresent(context)
-        if (want && !view.hasPointerCapture()) {
-            // Captured events go to the focused view.
-            view.isFocusable = true
-            view.isFocusableInTouchMode = true
-            view.requestFocus()
-            view.requestPointerCapture()
-        } else if (!want && view.hasPointerCapture()) {
-            view.releasePointerCapture()
-            send(mouse.release())
-        }
+    fun released() {
+        captured = false
+        CapturedMouse.captured = false
+        send(mouse.release())
     }
 
-    view.setOnCapturedPointerListener { _, event ->
-        if (event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE) || event.isFromSource(InputDevice.SOURCE_MOUSE)) {
-            val scrolled = event.actionMasked == MotionEvent.ACTION_SCROLL
-            send(
-                mouse.event(
-                    dx = if (scrolled) 0f else event.x,
-                    dy = if (scrolled) 0f else event.y,
-                    buttons = event.buttonState,
-                    vscroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL),
-                    hscroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL),
-                ),
-            )
-            true
-        } else {
-            false
+    val onCaptured = View.OnCapturedPointerListener { _, event ->
+        // Captured mouse events are relative; anything else is not ours.
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE_RELATIVE)) return@OnCapturedPointerListener false
+        val scrolled = event.actionMasked == MotionEvent.ACTION_SCROLL
+        val history = 0 until event.historySize
+        send(
+            mouse.event(
+                dx = if (scrolled) 0f else CapturedMouse.batched(history.map { event.getHistoricalX(it) }, event.x),
+                dy = if (scrolled) 0f else CapturedMouse.batched(history.map { event.getHistoricalY(it) }, event.y),
+                buttons = event.buttonState,
+                vscroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL),
+                hscroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL),
+            ),
+        )
+        true
+    }
+
+    fun handle(target: View) {
+        if (handlers.add(target)) target.setOnCapturedPointerListener(onCaptured)
+    }
+
+    fun update() {
+        val want = enabled() && view.hasWindowFocus() && mousePresent(context)
+        if (want && !captured) {
+            // Captured events go to the focused view: start there.
+            view.isFocusable = true
+            view.isFocusableInTouchMode = true
+            if (view.rootView.findFocus() == null) view.requestFocus()
+            handle(view)
+            view.rootView.findFocus()?.let { handle(it) }
+            view.requestPointerCapture()
+            captured = true
+            CapturedMouse.captured = true
+        } else if (!want && captured) {
+            view.releasePointerCapture()
+            released()
         }
     }
 
     val focus = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
-        if (!hasFocus) {
+        if (!hasFocus && captured) {
             // Android has released the capture: let go of what was held.
-            send(mouse.release())
+            released()
         }
         update()
+    }
+    // The keyboard's sink, or any view, may take focus: the mouse follows.
+    val focusMoves = ViewTreeObserver.OnGlobalFocusChangeListener { _, newFocus ->
+        if (captured && newFocus != null) handle(newFocus)
     }
     val devices = object : InputManager.InputDeviceListener {
         override fun onInputDeviceAdded(deviceId: Int) = update()
         override fun onInputDeviceRemoved(deviceId: Int) = update()
         override fun onInputDeviceChanged(deviceId: Int) = update()
     }
+    // Leaving the session detaches the view before Compose disposes of it,
+    // and a detached view can no longer release the window's capture.
+    val attach = object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(v: View) = Unit
+        override fun onViewDetachedFromWindow(v: View) {
+            if (captured) {
+                v.releasePointerCapture()
+                released()
+            }
+        }
+    }
     view.viewTreeObserver.addOnWindowFocusChangeListener(focus)
+    view.viewTreeObserver.addOnGlobalFocusChangeListener(focusMoves)
+    view.addOnAttachStateChangeListener(attach)
     inputs?.registerInputDeviceListener(devices, Handler(Looper.getMainLooper()))
     view.post { update() }
 
     return {
         inputs?.unregisterInputDeviceListener(devices)
-        if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnWindowFocusChangeListener(focus)
-        view.setOnCapturedPointerListener(null)
-        if (view.hasPointerCapture()) view.releasePointerCapture()
-        send(mouse.release())
-        mouse = CapturedMouse()
+        view.removeOnAttachStateChangeListener(attach)
+        if (view.viewTreeObserver.isAlive) {
+            view.viewTreeObserver.removeOnWindowFocusChangeListener(focus)
+            view.viewTreeObserver.removeOnGlobalFocusChangeListener(focusMoves)
+        }
+        handlers.forEach { it.setOnCapturedPointerListener(null) }
+        handlers.clear()
+        if (captured) {
+            view.releasePointerCapture()
+            released()
+        }
     }
 }
 
-/** Whether a real mouse (not a touchpad emulating one) is connected. */
+/** Whether a real mouse is connected: not a virtual device, and not a touchpad reporting as one. */
 private fun mousePresent(context: Context): Boolean {
     val inputs = context.getSystemService(InputManager::class.java) ?: return false
     return inputs.inputDeviceIds.any { id ->
         val device = inputs.getInputDevice(id) ?: return@any false
-        !device.isVirtual && device.supportsSource(InputDevice.SOURCE_MOUSE)
+        !device.isVirtual &&
+            device.supportsSource(InputDevice.SOURCE_MOUSE) &&
+            !device.supportsSource(InputDevice.SOURCE_TOUCHPAD)
     }
 }
