@@ -25,6 +25,7 @@ object Prefs {
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
+    private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
@@ -115,6 +116,14 @@ object Prefs {
 
     fun setLinksFromComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_LINKS_FROM_COMPUTER, enabled) }
+    }
+
+    /** Whether a session tells the computer this phone's battery (T8b). On by default. */
+    fun shareBattery(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_SHARE_BATTERY, true)
+
+    fun setShareBattery(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_SHARE_BATTERY, enabled) }
     }
 
     fun retryTransfers(ctx: Context): Boolean =

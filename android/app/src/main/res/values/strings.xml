@@ -454,4 +454,6 @@
     <string name="channel_links">Links from the computer</string>
     <string name="settings_links_from_computer">Links from the computer</string>
     <string name="settings_links_from_computer_summary">A link the computer sends shows as a notification that opens it. Off: such links are dropped</string>
+    <string name="settings_share_battery">Share battery with the computer</string>
+    <string name="settings_share_battery_summary">During a session the computer shows this phone\'s battery, and warns when it runs low</string>
 </resources>

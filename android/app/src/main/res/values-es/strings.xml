@@ -452,4 +452,6 @@
     <string name="channel_links">Enlaces del equipo</string>
     <string name="settings_links_from_computer">Enlaces del equipo</string>
     <string name="settings_links_from_computer_summary">Un enlace que envía el equipo aparece como una notificación que lo abre. Desactivado: esos enlaces se descartan</string>
+    <string name="settings_share_battery">Compartir la batería con el equipo</string>
+    <string name="settings_share_battery_summary">Durante una sesión, el equipo muestra la batería de este teléfono y avisa cuando se está agotando</string>
 </resources>
