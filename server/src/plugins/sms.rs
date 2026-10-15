@@ -127,6 +127,7 @@ impl Plugin for SmsPlugin {
                             at_unix: *at,
                             direction: Direction::Received,
                             reply: None,
+                            name: None,
                         })
                         .collect();
                     if let Err(e) = sms::record_all(&dir, messages, keep()) {
@@ -219,6 +220,7 @@ fn reply_message(request: &ReplyRequest, state: ReplyState, now: u64) -> Message
             id: request.id.clone(),
             state,
         }),
+        name: None,
     }
 }
 
