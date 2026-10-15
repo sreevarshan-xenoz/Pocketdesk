@@ -50,7 +50,8 @@ pub fn write(state_dir: &Path, phones: &BTreeMap<String, PhoneMediaState>) -> io
     let path = state_dir.join(PHONE_MEDIA_FILE);
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
-    std::fs::write(&tmp, json)?;
+    // What a phone plays is listening history: owner-only, as texts are.
+    crate::secure_fs::write_private(&tmp, json.as_bytes())?;
     std::fs::rename(&tmp, &path)
 }
 
