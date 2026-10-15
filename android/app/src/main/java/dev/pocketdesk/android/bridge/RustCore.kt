@@ -128,6 +128,7 @@ object RustCore {
     private external fun nativeTakeFileOffers(): String
     private external fun nativeSendLink(address: String, port: Int, url: String): String
     private external fun nativeTakeLinks(): String
+    private external fun nativeTakeMediaPresses(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
     private external fun nativeVideoBytes(): Long
@@ -670,6 +671,10 @@ object RustCore {
     /** Hand [url] to the computer, which opens it in its browser (T8a). */
     fun sendLink(address: String, port: Int, url: String): Result<Unit> =
         envelope(nativeSendLink(address, port, url)).map { }
+
+    /** The computer's presses for the phone's player since the last call, oldest first (T8d). */
+    fun takeMediaPresses(): List<String> =
+        parseStringArray(envelope(nativeTakeMediaPresses()).getOrDefault("[]"))
 
     /** The links the computer handed over since the last call, oldest first (T8a). */
     fun takeLinks(): List<String> = parseStringArray(envelope(nativeTakeLinks()).getOrDefault("[]"))

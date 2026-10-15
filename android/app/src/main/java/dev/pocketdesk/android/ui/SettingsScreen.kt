@@ -34,6 +34,7 @@ import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.doctor.BackgroundLimit
 import dev.pocketdesk.android.doctor.BackgroundRunning
+import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 
 /** Appearance, session behavior and About — everything the old footer deep-link did, in one place. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -158,6 +159,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                 stringResource(R.string.settings_share_battery_summary),
                 Prefs.shareBattery(context),
             ) { Prefs.setShareBattery(context, it) }
+            boolRow(
+                LlIcons.Volume,
+                stringResource(R.string.settings_phone_media),
+                stringResource(R.string.settings_phone_media_summary),
+                Prefs.phoneMediaOnComputer(context),
+            ) { on ->
+                Prefs.setPhoneMediaOnComputer(context, on)
+                // Android shows other apps' media only to an app with notification access.
+                if (on && !PhoneNotificationPrefs.accessGranted(context)) {
+                    runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
+                }
+            }
             boolRow(
                 LlIcons.Pin,
                 stringResource(R.string.settings_reveal_pin),

@@ -460,4 +460,6 @@
     <string name="media_play">Reproducir</string>
     <string name="media_pause">Pausar</string>
     <string name="media_next">Siguiente</string>
+    <string name="settings_phone_media">Mi multimedia en el equipo</string>
+    <string name="settings_phone_media_summary">Durante una sesión, el equipo muestra lo que reproduce este teléfono y puede pausarlo y saltarlo. Requiere acceso a las notificaciones</string>
 </resources>
