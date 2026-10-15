@@ -691,6 +691,9 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .clear();
+                        // And links (T8a), shown as from the computer of
+                        // the session that takes them.
+                        crate::links::forget();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );

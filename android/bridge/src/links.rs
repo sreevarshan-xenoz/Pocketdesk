@@ -31,6 +31,12 @@ pub(crate) fn receive(body: &serde_json::Value) {
     }
 }
 
+/// Drop the links waiting: they came from a computer this phone is no
+/// longer connected to, and would be shown as the next one's.
+pub(crate) fn forget() {
+    WAITING.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
 /// The links waiting for the app, as a JSON array, oldest first; taken.
 pub(crate) fn take_links_json() -> String {
     let taken: Vec<String> = WAITING
@@ -70,6 +76,15 @@ mod tests {
         receive(&serde_json::json!({ "nothing": true }));
         let taken: Vec<String> = serde_json::from_str(&take_links_json()).unwrap();
         assert_eq!(taken, ["https://example.org/a"]);
+        assert_eq!(take_links_json(), "[]");
+    }
+
+    #[test]
+    fn links_waiting_when_the_connection_ends_are_forgotten() {
+        let _queue = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = take_links_json();
+        receive(&serde_json::json!({ "url": "https://example.org/old" }));
+        forget();
         assert_eq!(take_links_json(), "[]");
     }
 
