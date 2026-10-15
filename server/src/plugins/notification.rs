@@ -323,17 +323,21 @@ pub async fn run_answers() {
         return;
     };
     let _ = phone_notes::clear(&dir);
+    // Answers for a phone not connected yet wait here, within their time.
+    let mut waiting: Vec<AnswerRequest> = Vec::new();
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tick.tick().await;
-        let requests = phone_notes::take_all(&dir, unix_now());
-        if requests.is_empty() {
+        let now = unix_now();
+        waiting.extend(phone_notes::take_all(&dir, now));
+        if waiting.is_empty() {
             continue;
         }
         let notes = phone_notes::read(&dir);
         let clients = crate::state::clone_clients().await;
-        for request in requests {
+        let mut still = Vec::new();
+        for request in waiting.drain(..) {
             let Some(packet) = answer_packet(&notes, &request) else {
                 tracing::info!("An answer to a phone notification was dropped: not offered");
                 continue;
@@ -345,15 +349,20 @@ pub async fn run_answers() {
                 continue;
             }
             let Some(phone) = clients.iter().find(|c| c.device_id() == request.device_id) else {
-                tracing::info!(
-                    "An answer to a phone notification was dropped: the phone is not connected"
-                );
+                if now.saturating_sub(request.created_unix) < phone_notes::ANSWER_TTL_SECS {
+                    still.push(request);
+                } else {
+                    tracing::info!(
+                        "An answer to a phone notification was dropped: the phone did not connect in time"
+                    );
+                }
                 continue;
             };
             if let Err(e) = phone.send_packet(&packet).await {
                 tracing::warn!("An answer to a phone notification was not sent: {e}");
             }
         }
+        waiting = still;
     }
 }
 
