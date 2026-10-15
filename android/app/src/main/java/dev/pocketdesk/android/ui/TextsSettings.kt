@@ -36,6 +36,8 @@ fun TextsSection() {
     val reply = version.let { TextPrefs.reply(context) }
     val canReceive = version.let { TextPrefs.granted(context, Manifest.permission.RECEIVE_SMS) }
     val canSend = version.let { TextPrefs.granted(context, Manifest.permission.SEND_SMS) }
+    val names = version.let { TextPrefs.names(context) }
+    val canReadContacts = version.let { TextPrefs.granted(context, Manifest.permission.READ_CONTACTS) }
     val listening = version.let { PhoneNotificationPrefs.accessGranted(context) }
 
     val askReceive =
@@ -48,6 +50,21 @@ fun TextsSection() {
             TextPrefs.setReply(context, granted)
             version++
         }
+
+    val askContacts =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            TextPrefs.setNames(context, granted)
+            version++
+        }
+
+    fun setNames(on: Boolean) {
+        if (on && !canReadContacts) {
+            askContacts.launch(Manifest.permission.READ_CONTACTS)
+        } else {
+            TextPrefs.setNames(context, on)
+            version++
+        }
+    }
 
     fun setShow(on: Boolean) {
         if (on && !canReceive) {
@@ -103,5 +120,13 @@ fun TextsSection() {
                     setReply(!(reply && canSend))
                 }
             },
+    )
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.texts_names), style = MaterialTheme.typography.bodyLarge) },
+        supportingContent = {
+            Text(stringResource(R.string.texts_names_summary), style = MaterialTheme.typography.bodySmall)
+        },
+        trailingContent = { Switch(checked = names && canReadContacts, onCheckedChange = ::setNames) },
+        modifier = Modifier.clickable { setNames(!(names && canReadContacts)) },
     )
 }

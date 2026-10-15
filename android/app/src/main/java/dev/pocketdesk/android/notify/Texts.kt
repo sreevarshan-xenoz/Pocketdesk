@@ -161,6 +161,7 @@ class SmsReceiver : BroadcastReceiver() {
             app,
             texts.map { (address, body) ->
                 JSONObject().put("address", address).put("body", body).put("date", now).put("event", "received")
+                    .also { text -> contactName(app, address)?.let { text.put("name", it) } }
             },
         )
         RustCore.start(app)
