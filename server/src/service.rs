@@ -141,6 +141,7 @@ pub async fn run(config: Config) -> Result<()> {
         config.notifications_per_minute,
     );
     crate::plugins::sms::configure(config.sms_notify, config.sms_keep);
+    crate::plugins::links::configure(config.open_links);
     crate::wake_info::configure(config.wake_announce, config.wake_port);
     crate::driving::configure(config.input_control, config.input_idle_secs);
     crate::plugins::share::configure(config.transfer_keep_hours);
