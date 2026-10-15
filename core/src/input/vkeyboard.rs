@@ -33,7 +33,8 @@ const DEADLINE: Duration = Duration::from_millis(500);
 /// fills the socket.
 const KEYS_PER_WAIT: usize = 200;
 
-struct State;
+/// The event state every Wayland input object here shares.
+pub(super) struct State;
 
 /// Why there is no virtual keyboard.
 #[derive(Debug)]
@@ -111,44 +112,8 @@ impl VirtualKeyboard {
         Ok(())
     }
 
-    /// Wait up to [`DEADLINE`] for the compositor to have handled all that
-    /// was sent (a `wl_display.sync`).
     fn wait(&mut self) -> std::io::Result<()> {
-        let done = Arc::new(AtomicBool::new(false));
-        let _callback = self
-            .conn
-            .display()
-            .sync(&self.queue.handle(), Arc::clone(&done));
-        let until = Instant::now() + DEADLINE;
-        while !done.load(Ordering::Acquire) {
-            self.queue.flush().map_err(std::io::Error::other)?;
-            if let Some(guard) = self.queue.prepare_read() {
-                let left = until.saturating_duration_since(Instant::now());
-                if left.is_zero() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "the compositor did not answer",
-                    ));
-                }
-                let mut poll = libc::pollfd {
-                    fd: guard.connection_fd().as_raw_fd(),
-                    events: libc::POLLIN,
-                    revents: 0,
-                };
-                // SAFETY: one valid pollfd, for the length given.
-                let ready = unsafe { libc::poll(&mut poll, 1, left.as_millis() as libc::c_int) };
-                if ready < 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if ready > 0 {
-                    guard.read().map_err(std::io::Error::other)?;
-                }
-            }
-            self.queue
-                .dispatch_pending(&mut State)
-                .map_err(std::io::Error::other)?;
-        }
-        Ok(())
+        wait(&self.conn, &mut self.queue)
     }
 }
 
@@ -159,8 +124,45 @@ impl Drop for VirtualKeyboard {
     }
 }
 
+/// Wait up to [`DEADLINE`] for the compositor to have handled all that was
+/// sent on `conn` (a `wl_display.sync`).
+pub(super) fn wait(conn: &Connection, queue: &mut EventQueue<State>) -> std::io::Result<()> {
+    let done = Arc::new(AtomicBool::new(false));
+    let _callback = conn.display().sync(&queue.handle(), Arc::clone(&done));
+    let until = Instant::now() + DEADLINE;
+    while !done.load(Ordering::Acquire) {
+        queue.flush().map_err(std::io::Error::other)?;
+        if let Some(guard) = queue.prepare_read() {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "the compositor did not answer",
+                ));
+            }
+            let mut poll = libc::pollfd {
+                fd: guard.connection_fd().as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: one valid pollfd, for the length given.
+            let ready = unsafe { libc::poll(&mut poll, 1, left.as_millis() as libc::c_int) };
+            if ready < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if ready > 0 {
+                guard.read().map_err(std::io::Error::other)?;
+            }
+        }
+        queue
+            .dispatch_pending(&mut State)
+            .map_err(std::io::Error::other)?;
+    }
+    Ok(())
+}
+
 /// Milliseconds on the monotonic clock, the base compositors use for input.
-fn monotonic_ms() -> u32 {
+pub(super) fn monotonic_ms() -> u32 {
     let mut now = libc::timespec {
         tv_sec: 0,
         tv_nsec: 0,
@@ -171,7 +173,7 @@ fn monotonic_ms() -> u32 {
 }
 
 /// An anonymous file holding `map` and its terminating NUL.
-fn keymap_fd(map: &str) -> std::io::Result<OwnedFd> {
+pub(super) fn keymap_fd(map: &str) -> std::io::Result<OwnedFd> {
     let name = c"pocketdesk-keymap";
     // SAFETY: memfd_create with a valid C string; the result is checked.
     let raw = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
