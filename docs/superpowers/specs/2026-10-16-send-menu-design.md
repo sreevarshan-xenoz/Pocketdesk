@@ -26,3 +26,14 @@ The second half of item 5 in `docs/research/2026-10-15-what-makes-it-worth-using
 - **Device-checked (A71 → Windows):** with the phone linked in the background, `send-to-phone` with two files said "Sending to your phone: sendto-a.bin, sendto-b.bin", and both were saved with their MD5s matching.
 - **The Send To shortcut** was made and read back: the target is the server, the arguments `send-to-phone`, minimized. It was then removed.
 - **Owed:** picking Send To in Explorer itself, the Linux file managers, and the desktop app's switch (checklist §69).
+- **Fresh review (0 Critical, 2 Important), fixed:**
+  - the shortcut's paths were spliced into PowerShell code, and a typographic quote in a folder name ended the string. They now reach the script as environment variables.
+  - a file named like an option (`-x.txt`, `--help`) was read as one. Every entry now passes `--`; checked live with `-h`.
+  - Minors fixed:
+    - the Dolphin `Exec` line follows the Desktop Entry spec's quoting;
+    - the Nautilus and Nemo script reads their full-path variables (bare names, and none in search results, otherwise), with a test running it through `sh`;
+    - the desktop switch needs the server truly beside the app and reads its state once;
+    - `default_phone` has its test.
+  - **Accepted:**
+    - "Sending to your phone" is said when the files are queued; the server may still refuse one later, and the sent list says so;
+    - `installed_in` checks that the entries are there, not where they point.
