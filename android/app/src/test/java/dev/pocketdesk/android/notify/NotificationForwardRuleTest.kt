@@ -37,6 +37,15 @@ class NotificationForwardRuleTest {
     }
 
     @Test
+    fun aNotificationWithACodeReplacedIsNotSentInFull() {
+        val rule = NotificationForwardRule(own)
+        val out = rule.decide(note(text = "Your verification code is 482913"), enabled = true, shared = chat)!!
+        assertEquals(NotificationForwardRule.CODE_HIDDEN, out.text)
+        assertFalse(out.full)
+        assertTrue(rule.decide(note(key = "k2"), enabled = true, shared = chat)!!.full)
+    }
+
+    @Test
     fun nothingIsSentWhileSharingIsOffOrForAnAppNotSwitchedOn() {
         val rule = NotificationForwardRule(own)
         assertNull(rule.decide(note(), enabled = false, shared = chat))
@@ -64,7 +73,7 @@ class NotificationForwardRuleTest {
         )
         assertEquals(
             "private, with a public version: that version",
-            Outgoing("b", "Chat", "Chat", "1 new message", clearable = true),
+            Outgoing("b", "Chat", "Chat", "1 new message", clearable = true, full = false),
             rule.decide(
                 note(
                     key = "b",
@@ -78,7 +87,7 @@ class NotificationForwardRuleTest {
         )
         assertEquals(
             "private, without one: only that there is one",
-            Outgoing("c", "Chat", NotificationForwardRule.HIDDEN_TITLE, "", clearable = true),
+            Outgoing("c", "Chat", NotificationForwardRule.HIDDEN_TITLE, "", clearable = true, full = false),
             rule.decide(note(key = "c", visibility = NotificationForwardRule.VISIBILITY_PRIVATE), true, chat),
         )
     }

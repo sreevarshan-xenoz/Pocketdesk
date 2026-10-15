@@ -12,6 +12,7 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -105,6 +106,14 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val clipboard by lazy { dev.pocketdesk.android.clip.BackgroundClipboard(applicationContext) }
     private val clipboardTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /**
+     * The buttons and reply of each notification sent in full while answers
+     * are on (T10c), by key; the newest [MAX_ANSWERABLE]. Guarded by itself.
+     */
+    private val answerable = LinkedHashMap<String, Answerable>()
+    private val answerBudget = NotificationActionRule.Budget()
+    private val answerTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+
     override fun onCreate() {
         super.onCreate()
         rule = NotificationForwardRule(packageName)
@@ -121,6 +130,12 @@ class PhoneNotificationListener : NotificationListenerService() {
             5,
             TimeUnit.SECONDS,
         )
+        answerTicker.scheduleWithFixedDelay(
+            { runCatching { runAnswers() }.onFailure { Log.w("PhoneNotifications", "answers failed", it) } },
+            2,
+            2,
+            TimeUnit.SECONDS,
+        )
         clipboardTicker.scheduleWithFixedDelay(
             { runCatching { clipboard.tick() }.onFailure { Log.w("PhoneNotifications", "clipboard tick failed", it) } },
             5,
@@ -130,6 +145,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        answerTicker.shutdownNow()
         clipboardTicker.shutdownNow()
         replyTicker.shutdownNow()
         super.onDestroy()
@@ -144,6 +160,7 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         closedKeys.add(sbn.key)
+        synchronized(answerable) { answerable.remove(sbn.key) }
         worker.execute {
             // Closed on the phone: closed on the computer too (N5c), but only
             // one the computer was shown. What of it still waits is dropped.
@@ -175,10 +192,84 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("text", out.text)
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
+        if (out.full && Prefs.answerNotifications(this)) offerAnswers(sbn, body)
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
             .forEach { rule.removed(it) }
+    }
+
+    /**
+     * Offer the computer [sbn]'s buttons and its reply, if any, in [body],
+     * and remember them to run the computer's answer (T10c).
+     */
+    private fun offerAnswers(sbn: StatusBarNotification, body: JSONObject) {
+        val actions = sbn.notification.actions?.toList().orEmpty()
+        val infos =
+            actions.map { a ->
+                NotificationActionRule.ActionInfo(
+                    a.title?.toString(),
+                    takesText = a.remoteInputs?.any { it.allowFreeFormInput } == true,
+                )
+            }
+        val offered = NotificationActionRule.offered(infos)
+        val reply = NotificationActionRule.replyIndex(infos)?.let { actions[it] }
+        if (offered.isEmpty() && reply == null) return
+        if (offered.isNotEmpty()) body.put("actions", org.json.JSONArray(offered))
+        if (reply != null) body.put("requestReplyId", sbn.key)
+        val byTitle = offered.associateWith { title -> actions.first { it.title?.toString() == title } }
+        synchronized(answerable) {
+            answerable.remove(sbn.key)
+            answerable[sbn.key] = Answerable(byTitle, reply)
+            while (answerable.size > MAX_ANSWERABLE) answerable.remove(answerable.keys.first())
+        }
+    }
+
+    /** Run the computer's answers that pass [NotificationActionRule.decide]. */
+    private fun runAnswers() {
+        val answers = RustCore.takeNotificationAnswers()
+        if (answers.isEmpty()) return
+        val own = PhoneLink.target(this)
+        for (answer in answers) {
+            val entry = synchronized(answerable) { answerable[answer.key] }
+            val offered =
+                when {
+                    answer.message != null -> entry?.reply != null
+                    else -> entry?.actions?.containsKey(answer.action) == true
+                }
+            var decision =
+                NotificationActionRule.decide(
+                    settingOn = Prefs.answerNotifications(this),
+                    ownComputer = own != null && answer.host == own.address && answer.port == own.controlPort,
+                    known = entry != null,
+                    offered = offered,
+                    withinBudget = true,
+                )
+            // Only an answer that would run spends the budget.
+            if (decision == NotificationActionRule.Decision.Run && !answerBudget.take(SystemClock.elapsedRealtime())) {
+                decision = NotificationActionRule.Decision.TooMany
+            }
+            if (decision != NotificationActionRule.Decision.Run || entry == null) {
+                Log.i("PhoneNotifications", "an answer from the computer was not run: $decision")
+                continue
+            }
+            val ran =
+                runCatching {
+                    if (answer.message != null) {
+                        val action = entry.reply!!
+                        val inputs = action.remoteInputs
+                        val results = android.os.Bundle()
+                        inputs.forEach { results.putCharSequence(it.resultKey, answer.message) }
+                        val fill = Intent()
+                        android.app.RemoteInput.addResultsToIntent(inputs, fill, results)
+                        action.actionIntent.send(this, 0, fill)
+                    } else {
+                        entry.actions.getValue(answer.action!!).actionIntent.send()
+                    }
+                }
+            ran.onSuccess { Log.i("PhoneNotifications", "ran the computer's answer") }
+                .onFailure { Log.w("PhoneNotifications", "the computer's answer could not run", it) }
+        }
     }
 
     /** Send what waited, oldest first, until one fails. */
@@ -242,3 +333,9 @@ class PhoneNotificationListener : NotificationListenerService() {
 
 
 }
+
+/** A notification's buttons by title, and the button that takes a reply (T10c). */
+private class Answerable(val actions: Map<String, Notification.Action>, val reply: Notification.Action?)
+
+/** Answerable notifications remembered, at most. */
+private const val MAX_ANSWERABLE = 100

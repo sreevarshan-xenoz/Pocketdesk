@@ -677,6 +677,18 @@ pub async fn connect_to_peer(
                                 {
                                     crate::links::receive(&pkt.body);
                                 }
+                                // The computer's answers to this phone's
+                                // notifications (T10c), kept for the app.
+                                if trimmed.contains("kdeconnect.notification.")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                {
+                                    crate::notification_answers::receive(
+                                        &pkt.packet_type,
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    );
+                                }
                                 // The computer's clipboard (T10b), kept
                                 // for the app; still passed on, since it is
                                 // also the answer to the phone's request.
@@ -759,6 +771,7 @@ pub async fn connect_to_peer(
                         crate::links::forget();
                         crate::media_presses::forget();
                         crate::clipboard_push::forget();
+                        crate::notification_answers::forget();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );

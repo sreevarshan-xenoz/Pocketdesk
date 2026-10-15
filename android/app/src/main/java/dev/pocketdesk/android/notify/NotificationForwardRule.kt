@@ -20,8 +20,19 @@ data class PostedNote(
     val clearable: Boolean,
 )
 
-/** What the desktop is sent for one notification. */
-data class Outgoing(val id: String, val app: String, val title: String, val text: String, val clearable: Boolean)
+/**
+ * What the desktop is sent for one notification. [full] when it goes as
+ * the app wrote it: not a private one's public version, not hidden, no code
+ * replaced. Only such a one offers the computer its buttons (T10c).
+ */
+data class Outgoing(
+    val id: String,
+    val app: String,
+    val title: String,
+    val text: String,
+    val clearable: Boolean,
+    val full: Boolean = true,
+)
 
 /**
  * Which of the phone's notifications go to the desktop, and as what (N5a).
@@ -42,12 +53,12 @@ class NotificationForwardRule(private val ownPackage: String) {
         if (!enabled || note.pkg == ownPackage || note.pkg !in shared) return null
         if (note.ongoing || note.groupSummary || note.localOnly || note.otherProfile) return null
         if (note.visibility == VISIBILITY_SECRET) return null
-        val (title, text) = shown(note) ?: return null
+        val (title, text, full) = shown(note) ?: return null
         if (sent[note.key] == title to text) return null
         sent.remove(note.key)
         sent[note.key] = title to text
         while (sent.size > REMEMBERED) sent.remove(sent.keys.first())
-        return Outgoing(note.key, note.appLabel, title, text, note.clearable)
+        return Outgoing(note.key, note.appLabel, title, text, note.clearable, full)
     }
 
     /**
@@ -57,16 +68,22 @@ class NotificationForwardRule(private val ownPackage: String) {
      */
     fun removed(key: String): Boolean = sent.remove(key) != null
 
-    private fun shown(note: PostedNote): Pair<String, String>? {
+    /** The title and text shown, and whether that is the notification in full. */
+    private fun shown(note: PostedNote): Triple<String, String, Boolean>? {
         if (note.visibility == VISIBILITY_PRIVATE) {
             val title = note.publicTitle?.trim().orEmpty()
             val text = note.publicText?.trim().orEmpty()
-            return if (title.isEmpty() && text.isEmpty()) HIDDEN_TITLE to "" else title.ifEmpty { note.appLabel } to text
+            return if (title.isEmpty() && text.isEmpty()) {
+                Triple(HIDDEN_TITLE, "", false)
+            } else {
+                Triple(title.ifEmpty { note.appLabel }, text, false)
+            }
         }
         val title = note.title?.trim().orEmpty()
         val text = note.text?.trim().orEmpty()
         if (title.isEmpty() && text.isEmpty()) return null
-        return title.ifEmpty { note.appLabel } to if (looksLikeCode("$title $text")) CODE_HIDDEN else text
+        val code = looksLikeCode("$title $text")
+        return Triple(title.ifEmpty { note.appLabel }, if (code) CODE_HIDDEN else text, !code)
     }
 
     companion object {
