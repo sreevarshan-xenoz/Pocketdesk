@@ -42,6 +42,10 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T9b, portrait sessions (branch `feat/portrait-sessions`; spec as T9a's).**
+  - **How:** "Pane: auto" now stacks an upright phone's session: the stream on top, sized to the desktop's shape (a quarter to 60 %), the trackpad dock and shortcut bar below. Tablets, foldables and wide windows are unchanged. `PaneRule` (JVM-tested) holds the table.
+  - **Fresh review (0 Critical, 3 Important), fixed:** chrome that never faded over the small pane, a layout the keyboard could flip, and the keyboard bar padding a stream above it.
+  - **Device-verified (A71):** the split and the chrome fading. Owed: checklist §61.
 - 2026-10-15: **T9a, pinch-zoom in trackpad mode (branch `feat/trackpad-pinch`; spec `docs/superpowers/specs/2026-10-15-mobile-input-design.md`).**
   - **How:** `TrackpadGesture` tells a two-finger pinch (the span changes before the centre travels) from a scroll; a pinch zooms the view and pans it, a scroll goes to the desktop as before. The view gives the engine one pair's centre motion and span, in view px.
   - **Fresh review (0 Critical, 4 Important), fixed:** classification by the first finger's travel, zoomed units, and a changed pair jumping the zoom. Ruled: the view does not follow the cursor.
