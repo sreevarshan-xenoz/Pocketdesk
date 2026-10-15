@@ -20,6 +20,7 @@ pub mod phone_notes;
 pub mod phone_status;
 pub mod pin;
 pub mod received;
+pub mod send_menu;
 pub mod sent;
 pub mod server;
 pub mod sessions;
