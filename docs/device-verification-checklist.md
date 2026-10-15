@@ -1014,6 +1014,20 @@ Owed:
 - [ ] `send` of a folder with `--wait`, and a phone that leaves mid-send (exit 1).
 - [ ] A broken config.toml with `--json` (exit 1, JSON).
 
+## 54. Automation apps on the phone (T7b)
+
+On the A71 against Windows, 2026-10-15 (`docs/phone-automation.md`):
+- [x] A text share naming a computer that is not saved reached no computer: no clipboard packet at the desktop, its clipboard unchanged.
+
+Owed:
+- [ ] Tasker itself: the clipboard recipe, a file with "Grant read permission", Connect and Wake from a task.
+- [ ] A share naming one of two saved computers goes to that one (the A71 has one saved).
+- [ ] From the background, with and without "Display over other apps".
+
+Seen on the way, to look into:
+- With this computer's display asleep, a session ends every ~10 s: the capture sends no frames, and the phone's 10 s frame-gap watchdog takes that for a dead link. A desktop left with its screen off cannot hold a session.
+- During that churn, a 654 KB download to the phone ran at ~26 KB/s (1.2 MB took a second with a steady session), and once the phone published a downloaded file ~16 s after the desktop said it was saved. Not reproduced with a steady session.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

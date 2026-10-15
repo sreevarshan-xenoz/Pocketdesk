@@ -42,6 +42,10 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T7b, automation apps on the phone (branch `feat/phone-automation`; `docs/phone-automation.md`).**
+  - **What:** the intents automation apps can use (Connect, Wake, text to a computer's clipboard, files to it) are documented with Tasker and adb recipes; a share may now name one of the saved computers with `dev.pocketdesk.android.extra.ADDRESS` (`ShortcutPlan.shareHost`, JVM-tested), and an unsaved one gets nothing. No new capability, so no switch.
+  - **Device-checked:** a share naming an unsaved address reached no computer. Owed: checklist §54 (Tasker itself, two saved computers).
+  - **Found on the way, open:** with the desktop's display asleep, a session ends every ~10 s (no frames, so the phone's frame-gap watchdog drops it), and transfers during that churn were slow; details in checklist §54.
 - 2026-10-15: **T7a, the local API on the desktop (branch `feat/local-api`; spec `docs/superpowers/specs/2026-10-15-local-api-design.md`, contract `docs/local-api.md`).**
   - **What:** `pocketdesk devices`, `sent`, `received` and `send <phone> <path> [--wait]` are new; `--json` on those and on `status`, `list`, `pair`, `unpair`, `kick` and `relay-ids`, each run one object with `"api": 1`, failures included (usage and config errors too), with exit codes 0–4. No listener: the program over the owner's own state folder (`server/src/local_api.rs`).
   - **`send`** goes through the outbox the desktop app writes, so the server's checks apply; it refuses at once a phone not in a session and the server's own files.
