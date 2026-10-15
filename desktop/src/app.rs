@@ -1033,7 +1033,6 @@ pub fn human_size(bytes: u64) -> String {
     format!("{value:.1} {}", UNITS[unit])
 }
 
-/// `75` → "1m 15s", `7200` → "2h 0m".
 /// A phone's last battery report for the Devices tab (T8b): its charge,
 /// whether it is charging, and its age once it is over a minute old.
 pub fn battery_text(
@@ -1054,6 +1053,7 @@ pub fn battery_text(
     text
 }
 
+/// `75` → "1m 15s", `7200` → "2h 0m".
 pub fn human_duration(secs: u64) -> String {
     match secs {
         0..60 => format!("{secs}s"),

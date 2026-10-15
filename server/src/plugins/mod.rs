@@ -20,7 +20,7 @@ pub mod windows;
 
 use pocketdesk_core::protocol::kdeconnect::PluginRegistry;
 
-/// Shorthand for the full plugin registry type with all 16 plugins registered.
+/// Shorthand for the full plugin registry type with every plugin registered.
 pub type PluginSet = PluginRegistry;
 
 /// Register all 16 KDE Connect plugins and return the registry.
