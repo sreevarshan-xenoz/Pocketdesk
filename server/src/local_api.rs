@@ -1001,6 +1001,51 @@ mod tests {
     }
 
     #[test]
+    fn the_default_phone_is_a_paired_one_in_a_session_then_one_linked_at_home() {
+        let (dir, _) = send_setup("default-phone");
+        TrustStore::load_or_create(dir.join(TRUST_FILE))
+            .unwrap()
+            .trust_device("a71e00aa-0002")
+            .unwrap();
+        let mirror = |sessions: &[&str], linked: Value| {
+            let sessions: Vec<Value> = sessions
+                .iter()
+                .map(|p| json!({ "device_id": p, "peer": "192.0.2.7:1", "transport": "lan", "started_unix": 1 }))
+                .collect();
+            std::fs::write(
+                dir.join(LIVE_FILE),
+                json!({ "updated_unix": pocketdesk_core::local::pin::now_unix(), "sessions": sessions, "linked": linked }).to_string(),
+            )
+            .unwrap();
+        };
+        let now = pocketdesk_core::local::pin::now_unix();
+        let linked = json!([{ "device_id": "a71e00aa-0002", "files": true }]);
+        mirror(&["5f1c9b3d-6e70"], linked.clone());
+        assert_eq!(
+            default_phone(&dir, now, true).as_deref(),
+            Some("5f1c9b3d-6e70"),
+            "a session first"
+        );
+        mirror(&["stranger"], linked.clone());
+        assert_eq!(
+            default_phone(&dir, now, true).as_deref(),
+            Some("a71e00aa-0002"),
+            "not an unpaired session"
+        );
+        mirror(
+            &[],
+            json!([{ "device_id": "a71e00aa-0002", "files": false }]),
+        );
+        assert_eq!(
+            default_phone(&dir, now, true),
+            None,
+            "linked only over the internet"
+        );
+        mirror(&[], linked);
+        assert_eq!(default_phone(&dir, now, false), None, "no server");
+    }
+
+    #[test]
     fn send_to_phone_goes_to_the_connected_phone_and_says_why_not() {
         let (dir, file) = send_setup("send-to-phone");
         let (summary, body, code) = send_to_phone_in(&dir, std::slice::from_ref(&file), &|| true);
