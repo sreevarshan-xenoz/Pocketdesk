@@ -37,3 +37,23 @@ A browsed folder has "Download this folder". The phone gets the whole folder, in
 - bridge: `nativeFetchFolder` returns the desktop's answer: queued, or its reason; no answer is an error.
 - Kotlin: the row is shown for a folder and not for home.
 - Device: download a three-level folder from the browser; MD5s; the desktop's Files tab row.
+
+## As built (2026-10-15)
+
+- **Not through the outbox.** The plugin hands the folder straight to the offer module (`offers::offer_folder_to`), which sends the owner's folders too (`send_folder`). Writing an outbox request would have left a gap between "queued" and "started" in which the per-phone limit could not count. The checks, walk, limits, offers and the sent row are the owner's, as designed.
+- **Checks before "queued":** the browser's rules (`file_browse::resolve_folder`; home itself refused), a phone the desktop can dial back (the downloads' own rule), at most 10 asks a minute and 2 folders of its own on the way per phone. A refused ask gets no sent row, so the owner's history is not pushed out.
+- **At the fetch:** each file of an asked folder is checked again by the browser's rules (`file_browse::still_within`), in case the folder changed since the walk. The owner's sends are not held to them.
+- **The answer** (`folder_fetch_reply`) goes before the offers. The phone's control reader keeps it by path, for its own waiter, and keeps offers out of the shared broadcast, so neither a burst of offers nor a second request can take it. A request the permissions deny is answered too.
+- **The phone** shows the answer as a toast, not a snackbar, from a scope that outlives the sheet; the row is disabled while a request is in flight.
+- **Fresh review (0 Critical, 2 Important, 7 Minor), fixed one commit each:**
+  - "queued" was promised to a connection the desktop cannot dial back (every file then failed);
+  - the answer could be lost behind the offers, or taken by another request's waiter;
+  - a denied request was dropped silently;
+  - a cancelled request could hold a phone's place for good, and the owner's sends counted against it;
+  - a file swapped for a link after the walk was not caught;
+  - nothing limited asking again and again, refused asks crowded the sent list, and a walk of empty folders had no bound (now 100 000 entries);
+  - the walk ran on the runtime thread;
+  - the answer was lost when the sheet closed;
+  - and these docs.
+- **Left as limits:** a phone that leaves mid-folder keeps its offers (and its place) until they expire, 10 minutes after the last fetch; the offers themselves are written on the asking phone's connection.
+- **Device-verified (A71 → Windows, LAN), after the fixes:** "Download this folder" on an 8-file, three-level folder in home with a dot-file and a file Windows marks hidden: all 8 in Download/Pocketdesk at their places, MD5s matching, the hidden two left out; the desktop's row "sent". Home shows no row.

@@ -989,6 +989,18 @@ Owed:
 - [ ] Names Windows refuses on the phone (`a:b`) left out and counted.
 - [ ] Android 8–9, and the Linux host.
 
+## 52. Download a folder from the remote browser
+
+On the A71 against Windows, 2026-10-15 (`2026-10-15-download-folder-design.md`):
+- [x] Home shows no "Download this folder"; a folder below it does.
+- [x] An 8-file folder in three levels, with a dot-file and a file Windows marks hidden: all 8 at their places in Download/Pocketdesk, MD5s matching, the hidden two left out; the desktop's Files tab row "sent".
+
+Owed:
+- [ ] The toast: "Asked the computer for …", and a refusal's reason (Files off, a third folder while two are on the way).
+- [ ] Closing the sheet before the answer, and the toast still showing.
+- [ ] A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
+- [ ] The Linux host.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
