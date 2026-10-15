@@ -47,6 +47,33 @@ pub fn read(state_dir: &Path) -> Vec<ReceivedFile> {
 pub fn record(state_dir: &Path, file: ReceivedFile) -> io::Result<()> {
     let mut files = read(state_dir);
     files.push(file);
+    write(state_dir, files)
+}
+
+/// Add a file of a folder send (T6b) to its folder's row, `folder` naming
+/// the folder and this file's size: one row per folder, holding every
+/// file's bytes, moved to the end as files arrive. Whether this made the
+/// row (the folder's first file). The caller serializes calls.
+pub fn add_to_folder(state_dir: &Path, folder: ReceivedFile) -> io::Result<bool> {
+    let mut files = read(state_dir);
+    let first = match files.iter().position(|f| f.path == folder.path) {
+        Some(at) => {
+            let mut row = files.remove(at);
+            row.size += folder.size;
+            row.received_unix = folder.received_unix;
+            files.push(row);
+            false
+        }
+        None => {
+            files.push(folder);
+            true
+        }
+    };
+    write(state_dir, files)?;
+    Ok(first)
+}
+
+fn write(state_dir: &Path, mut files: Vec<ReceivedFile>) -> io::Result<()> {
     let excess = files.len().saturating_sub(KEEP);
     files.drain(..excess);
     let json = serde_json::to_string(&ReceivedList { files }).map_err(io::Error::other)?;
@@ -89,6 +116,29 @@ mod tests {
         assert_eq!(files.len(), KEEP);
         assert_eq!(files.first(), Some(&file(5)));
         assert_eq!(files.last(), Some(&file(KEEP as u64 + 4)));
+    }
+
+    #[test]
+    fn a_folders_files_add_up_in_one_row() {
+        let dir = temp_dir("folder");
+        record(&dir, file(1)).unwrap();
+        let part = |size, at| ReceivedFile {
+            name: "Trip/".to_string(),
+            path: "/downloads/Trip".to_string(),
+            size,
+            received_unix: at,
+            from: "phone".to_string(),
+        };
+        assert!(
+            add_to_folder(&dir, part(10, 5)).unwrap(),
+            "the folder's first file"
+        );
+        record(&dir, file(2)).unwrap();
+        assert!(!add_to_folder(&dir, part(7, 9)).unwrap(), "a later one");
+        let files = read(&dir);
+        assert_eq!(files.len(), 3, "one row for the folder");
+        // Newest last, with every file's bytes.
+        assert_eq!(files.last(), Some(&part(17, 9)));
     }
 
     #[test]

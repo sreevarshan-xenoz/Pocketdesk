@@ -108,6 +108,9 @@ object RustCore {
         name: String,
         size: Long,
         source: String,
+        folderId: String,
+        folder: String,
+        pathJson: String,
     ): String
     private external fun nativeTransferProgress(): LongArray?
     private external fun nativeFetchFile(
@@ -571,9 +574,36 @@ object RustCore {
         envelope(nativeSendFile(address, port, filePath)).map { }
 
     /** Send [size] bytes from [fd], which the bridge takes over and closes (F7). */
-    /** Send [size] bytes from [fd] as [name]; [source] names the file so a retry continues it (T6a). */
-    fun sendFileFd(address: String, port: Int, fd: Int, name: String, size: Long, source: String): Result<Unit> =
-        envelope(nativeSendFileFd(address, port, fd, name, size, source)).map { }
+    /**
+     * Send [size] bytes from [fd] as [name]; [source] names the file so a
+     * retry continues it (T6a). With a [part], it is one file of a folder
+     * send and lands at its path under that folder (T6b).
+     */
+    fun sendFileFd(
+        address: String,
+        port: Int,
+        fd: Int,
+        name: String,
+        size: Long,
+        source: String,
+        part: FolderPart? = null,
+    ): Result<Unit> =
+        envelope(
+            nativeSendFileFd(
+                address,
+                port,
+                fd,
+                name,
+                size,
+                source,
+                part?.folderId.orEmpty(),
+                part?.folder.orEmpty(),
+                org.json.JSONArray(part?.path.orEmpty()).toString(),
+            ),
+        ).map { }
+
+    /** Where a file sits in a folder the phone sends (T6b). */
+    data class FolderPart(val folderId: String, val folder: String, val path: List<String>)
 
     /** The running file transfer as (bytes sent, total). */
     fun transferProgress(): Pair<Long, Long> {

@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.service
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -39,6 +40,50 @@ class TransferRetryTest {
             5L,
             TransferRetry.delayBefore(1, "The computer refused the file: this phone's last transfer is still running", enabled = true),
         )
+    }
+
+    @Test
+    fun aComputerThatIsNotListeningIsTriedAgain() {
+        // The network's "connection refused" is not the computer saying no.
+        for (error in listOf(
+            "Connection refused (os error 111)",
+            "No connection could be made because the target machine actively refused it. (os error 10061)",
+        )) {
+            assertEquals(error, 5L, TransferRetry.delayBefore(1, error, enabled = true))
+        }
+    }
+
+    @Test
+    fun aFolderSendStopsOnceThreeFilesInARowCouldNotReachTheComputer() {
+        val streak = TransferRetry.FolderStreak()
+        val gone = "The transfer failed: connection refused by the network"
+        assertTrue(streak.record(sent = false, error = gone))
+        assertTrue("one that went through starts the count again", streak.record(sent = true, error = null))
+        assertTrue(streak.record(sent = false, error = gone))
+        assertTrue(streak.record(sent = false, error = gone))
+        assertFalse("the third in a row stops the send", streak.record(sent = false, error = gone))
+    }
+
+    @Test
+    fun filesTheComputerRefusesOneByOneDoNotStopAFolder() {
+        val streak = TransferRetry.FolderStreak()
+        repeat(10) {
+            assertTrue(streak.record(sent = false, error = "big.iso is larger than 8 GB"))
+            assertTrue(streak.record(sent = false, error = "cannot open locked.db"))
+        }
+    }
+
+    @Test
+    fun whatThePhoneItselfRefusesIsNotRetriedInAnyLanguage() {
+        for (refusal in listOf(
+            TransferRetry.Refusal("No hay espacio para foto.jpg"),
+            TransferRetry.Refusal("unsafe place in a folder: ../x"),
+            TransferRetry.Refusal("cannot create a.jpg"),
+        )) {
+            assertNull(refusal.message, TransferRetry.delayAfter(1, refusal, enabled = true))
+        }
+        assertEquals(5L, TransferRetry.delayAfter(1, java.io.IOException("connection reset"), enabled = true))
+        assertEquals(5L, TransferRetry.delayAfter(1, null, enabled = true))
     }
 
     @Test

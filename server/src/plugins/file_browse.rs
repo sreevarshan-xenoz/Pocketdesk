@@ -33,7 +33,7 @@ fn resolve_in(home: &Path, requested: &str) -> Option<(PathBuf, PathBuf)> {
 
 /// The server's own folders, as real paths: its state (keys, the trust
 /// store, the PIN) and its config. Both may lie inside home.
-fn private_dirs() -> Vec<PathBuf> {
+pub(crate) fn private_dirs() -> Vec<PathBuf> {
     [
         pocketdesk_core::local::paths::state_dir(),
         pocketdesk_core::local::paths::config_dir(),
@@ -198,7 +198,7 @@ fn within_budget(entries: Vec<serde_json::Value>, budget: usize) -> (Vec<serde_j
 /// on Windows anything marked hidden. A home folder is full of them
 /// (`.cache`, `AppData`, `desktop.ini`), and on a phone they bury the
 /// folders a person means to open.
-fn is_hidden(name: &str, metadata: &std::fs::Metadata) -> bool {
+pub(crate) fn is_hidden(name: &str, metadata: &std::fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;

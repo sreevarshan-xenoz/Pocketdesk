@@ -2,6 +2,8 @@ package dev.pocketdesk.android.ui
 
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -83,6 +85,10 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
     var lastGood by remember { mutableStateOf<RemoteFolder?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<RemoteEntry?>(null) }
+    // T6b: a folder from the phone, picked with the system's folder picker.
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) TransferService.sendFolder(context, address, controlPort, tree)
+    }
 
     LaunchedEffect(address, controlPort, path) {
         folder = null
@@ -117,6 +123,12 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                     modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
                 )
             }
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.files_send_folder)) },
+                supportingContent = { Text(stringResource(R.string.files_send_folder_summary)) },
+                leadingContent = { LlIcon(LlIcons.Folder, null) },
+                modifier = Modifier.clickable { pickFolder.launch(null) },
+            )
             val parent = folder?.parent ?: if (failure != null) RemoteFiles.wayBack(path, lastGood) else null
             if (parent != null) {
                 ListItem(
@@ -199,6 +211,15 @@ private fun download(context: Context, address: String, controlPort: Int, entry:
     Toast.makeText(context, context.getString(R.string.files_download_started, entry.name), Toast.LENGTH_SHORT).show()
 }
 
+/** The place in a folder send an offer names (T6b), if it names one. */
+private fun folderPartOf(offer: org.json.JSONObject): RustCore.FolderPart? {
+    val id = offer.optString("folderId").ifEmpty { return null }
+    val folder = offer.optString("folder").ifEmpty { return null }
+    val path = offer.optJSONArray("path") ?: return null
+    val names = (0 until path.length()).map { path.optString(it) }
+    return if (names.isEmpty() || names.any { it.isEmpty() }) null else RustCore.FolderPart(id, folder, names)
+}
+
 /**
  * Files the computer's owner sent this phone (F7b): while the session is
  * up, each offer the bridge latched is downloaded to Downloads, with the
@@ -214,6 +235,13 @@ fun FileOffersEffect(address: String, controlPort: Int) {
                 for (i in 0 until list.length()) {
                     val offer = list.optJSONObject(i) ?: continue
                     val id = offer.optString("id").ifEmpty { continue }
+                    // A file of a folder whose place the phone may not make
+                    // is declined with the reason, never saved elsewhere.
+                    val refused = offer.optString("folderRefused")
+                    if (refused.isNotEmpty()) {
+                        withContext(Dispatchers.IO) { RustCore.declineOffer(address, controlPort, id, refused) }
+                        continue
+                    }
                     TransferService.receive(
                         context,
                         address,
@@ -223,6 +251,7 @@ fun FileOffersEffect(address: String, controlPort: Int) {
                         offer.optString("name").ifEmpty { "download" },
                         offer.optLong("size"),
                         offer.optString("source"),
+                        folderPartOf(offer),
                     )
                 }
             }

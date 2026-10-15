@@ -40,6 +40,9 @@ class TransferService : Service() {
 
         class Send(override val address: String, override val port: Int, val uris: List<Uri>) : Job
 
+        /** Every file under a folder the person picked (T6b). */
+        class SendFolder(override val address: String, override val port: Int, val tree: Uri) : Job
+
         class Receive(
             override val address: String,
             override val port: Int,
@@ -49,6 +52,8 @@ class TransferService : Service() {
             val size: Long,
             /** The file's id at its source, so a retry continues it (T6a); "" for none. */
             val source: String,
+            /** Where it sits in a folder the computer sends (T6b), if it does. */
+            val folder: RustCore.FolderPart?,
         ) : Job
     }
 
@@ -70,6 +75,7 @@ class TransferService : Service() {
     private var lastSaved: Uri? = null
     private var lastAddress = ""
     private var lastError: String? = null
+    private var notice: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -125,8 +131,10 @@ class TransferService : Service() {
                 intent.getStringExtra(EXTRA_NAME) ?: "download",
                 intent.getLongExtra(EXTRA_SIZE, 0L),
                 intent.getStringExtra(EXTRA_SOURCE) ?: "",
+                folderOf(intent),
             )
         }
+        androidx.core.content.IntentCompat.getParcelableExtra(intent, EXTRA_TREE, Uri::class.java)?.let { return Job.SendFolder(address, port, it) }
         val uris = intent.clipData
             ?.let { clip -> (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } }
             .orEmpty()
@@ -139,6 +147,7 @@ class TransferService : Service() {
         try {
             when (job) {
                 is Job.Send -> sendAll(job)
+                is Job.SendFolder -> sendFolder(job)
                 is Job.Receive -> receive(job)
             }
         } catch (t: Throwable) {
@@ -157,33 +166,118 @@ class TransferService : Service() {
                 "shared.bin"
             }
             val title = getString(R.string.transfer_sending, index + 1, job.uris.size)
-            show(progressNotification(title, name, 0))
-            var result = sendOne(job.address, job.port, uri, name) { percent ->
-                show(progressNotification(title, name, percent))
-            }
-            // A failed file goes again a few times: the computer kept what
-            // arrived, so each retry continues where the last one stopped.
-            var attempt = 1
-            while (result.isFailure) {
-                val error = result.exceptionOrNull()?.message
-                val wait = TransferRetry.delayBefore(attempt, error, Prefs.retryTransfers(this)) ?: break
-                Log.i(TAG, "sending $name failed ($error); trying again in $wait s")
-                show(progressNotification(getString(R.string.transfer_retrying, attempt), name, 0))
-                Thread.sleep(wait * 1000)
-                attempt++
-                result = sendOne(job.address, job.port, uri, name) { percent ->
-                    show(progressNotification(title, name, percent))
-                }
-            }
-            sendCount++
-            if (result.isSuccess) {
-                sentTotal++
-            } else {
-                lastError = result.exceptionOrNull()?.message
-                Log.w(TAG, "sending $name failed: $lastError")
-            }
+            sendCounted(job.address, job.port, uri, name, null, title)
         }
     }
+
+    /**
+     * Send every file under the folder the person picked (T6b), each with
+     * its path under it, as one send the computer puts in a new folder.
+     */
+    private fun sendFolder(job: Job.SendFolder) {
+        val rootId = DocumentsContract.getTreeDocumentId(job.tree)
+        val folder = documentName(job.tree, rootId) ?: "Folder"
+        val plan = FolderWalk.plan(rootId) { children(job.tree, it) }
+        if (plan.files.isEmpty()) {
+            // Nothing could be read or sent: a failure, not "0 sent".
+            sendCount++
+            lastError = getString(R.string.transfer_folder_empty, folder)
+            Log.w(TAG, "folder $folder: nothing to send (${plan.skipped} left out)")
+            return
+        }
+        val folderId = java.util.UUID.randomUUID().toString().replace("-", "")
+        val streak = TransferRetry.FolderStreak()
+        for ((index, file) in plan.files.withIndex()) {
+            val uri = DocumentsContract.buildDocumentUriUsingTree(job.tree, file.id)
+            val part = RustCore.FolderPart(folderId, folder, file.path)
+            val title = getString(R.string.transfer_sending_folder, folder, index + 1, plan.files.size)
+            val result = sendCounted(job.address, job.port, uri, file.path.last(), part, title)
+            if (!streak.record(result.isSuccess, result.exceptionOrNull()?.message)) {
+                // The computer stopped answering: the rest are not sent.
+                val left = plan.files.size - index - 1
+                sendCount += left
+                lastError = getString(R.string.transfer_folder_stopped, folder, left)
+                Log.w(TAG, "folder $folder: stopped with $left files left (${result.exceptionOrNull()?.message})")
+                return
+            }
+        }
+        if (plan.skipped > 0 || plan.truncated) {
+            notice = getString(R.string.transfer_folder_partial, folder, plan.skipped)
+            Log.w(TAG, "folder $folder: ${plan.skipped} names skipped, cut short: ${plan.truncated}")
+        }
+    }
+
+    /** One file sent, retried as the settings say, and counted; how it went. */
+    private fun sendCounted(
+        address: String,
+        port: Int,
+        uri: Uri,
+        name: String,
+        part: RustCore.FolderPart?,
+        title: String,
+    ): Result<Unit> {
+        show(progressNotification(title, name, 0))
+        var result = sendOne(address, port, uri, name, part) { percent ->
+            show(progressNotification(title, name, percent))
+        }
+        // A failed file goes again a few times: the computer kept what
+        // arrived, so each retry continues where the last one stopped.
+        var attempt = 1
+        while (result.isFailure) {
+            val error = result.exceptionOrNull()?.message
+            val wait = TransferRetry.delayBefore(attempt, error, Prefs.retryTransfers(this)) ?: break
+            Log.i(TAG, "sending $name failed ($error); trying again in $wait s")
+            show(progressNotification(getString(R.string.transfer_retrying, attempt), name, 0))
+            Thread.sleep(wait * 1000)
+            attempt++
+            result = sendOne(address, port, uri, name, part) { percent ->
+                show(progressNotification(title, name, percent))
+            }
+        }
+        sendCount++
+        if (result.isSuccess) {
+            sentTotal++
+        } else {
+            lastError = result.exceptionOrNull()?.message
+            Log.w(TAG, "sending $name failed: $lastError")
+        }
+        return result
+    }
+
+    /** The children of folder [id] in the picked [tree]; null when the provider could not list it. */
+    private fun children(tree: Uri, id: String): List<FolderWalk.Entry>? {
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+        )
+        val uri = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id)
+        return runCatching {
+            contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        add(
+                            FolderWalk.Entry(
+                                id = cursor.getString(0) ?: continue,
+                                name = cursor.getString(1) ?: continue,
+                                isDir = cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR,
+                                size = if (cursor.isNull(3)) 0 else cursor.getLong(3),
+                            ),
+                        )
+                    }
+                }
+            }
+        }.onFailure { Log.w(TAG, "could not list a folder: ${it.message}") }.getOrNull()
+    }
+
+    /** The display name of document [id] in [tree]. */
+    private fun documentName(tree: Uri, id: String): String? =
+        runCatching {
+            val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+            contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)
+                ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        }.getOrNull()?.takeIf { FolderWalk.sendable(it) }
 
     private fun receive(job: Job.Receive) {
         val title = getString(R.string.transfer_receiving)
@@ -193,9 +287,9 @@ class TransferService : Service() {
         // A broken download goes again a few times, continuing what it kept.
         var attempt = 1
         while (result.isFailure) {
-            val error = result.exceptionOrNull()?.message
-            val wait = TransferRetry.delayBefore(attempt, error, Prefs.retryTransfers(this)) ?: break
-            Log.i(TAG, "receiving ${job.name} failed ($error); trying again in $wait s")
+            val error = result.exceptionOrNull()
+            val wait = TransferRetry.delayAfter(attempt, error, Prefs.retryTransfers(this)) ?: break
+            Log.i(TAG, "receiving ${job.name} failed (${error?.message}); trying again in $wait s")
             show(progressNotification(getString(R.string.transfer_retrying, attempt), job.name, 0))
             Thread.sleep(wait * 1000)
             attempt++
@@ -221,6 +315,7 @@ class TransferService : Service() {
             receiveCount = 0
             lastSaved = null
             lastError = null
+            notice = null
             current = null
             runCatching { stopForeground(STOP_FOREGROUND_DETACH) }
             runCatching { manager().notify(NOTIFICATION_ID, done) }
@@ -259,6 +354,7 @@ class TransferService : Service() {
         port: Int,
         uri: Uri,
         name: String,
+        part: RustCore.FolderPart?,
         onProgress: (Int) -> Unit,
     ): Result<Unit> = try {
         val descriptor = contentResolver.openFileDescriptor(uri, "r")
@@ -272,7 +368,7 @@ class TransferService : Service() {
             size > 0L -> {
                 val source = SourceId.of(uri.toString(), size, lastModified(uri))
                 withProgress({ size }, onProgress) {
-                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source)
+                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source, part)
                 }
             }
             else -> {
@@ -291,13 +387,24 @@ class TransferService : Service() {
         if (job.size > MAX_RECEIVE_BYTES || !DownloadTarget.hasRoomFor(this, job.size)) {
             return refuse(job, getString(R.string.transfer_no_space, job.name))
         }
+        // A file of a folder from the computer (T6b) goes under that send's
+        // own new folder, at its place, every name checked again here.
+        val folders = job.folder?.let { part ->
+            if (!FolderWalk.receivable(part.folder, part.path)) {
+                return refuse(job, "unsafe place in a folder: ${part.path.joinToString("/")}")
+            }
+            val top = synchronized(folderTops) {
+                folderTops.getOrPut(part.folderId) { DownloadTarget.freeFolder(this, part.folder) }
+            }
+            listOf(top) + part.path.dropLast(1)
+        }.orEmpty()
         // A part an earlier attempt kept is continued in place (T6a).
         // With retries off nothing is kept for one: no source, no record.
         val source = if (Prefs.retryTransfers(this)) job.source else ""
         val kept = source.takeIf { it.isNotEmpty() }
             ?.let { RustCore.partialLocation(job.address, it) }
             ?.let { DownloadTarget.reopen(this, it) }
-        val target = kept ?: DownloadTarget.create(this, job.name)
+        val target = kept ?: DownloadTarget.create(this, job.name, folders)
             ?: return refuse(job, "cannot create ${job.name}")
         return try {
             val saved = withProgress({ job.size }, onProgress) {
@@ -337,7 +444,7 @@ class TransferService : Service() {
             RustCore.declineOffer(job.address, job.port, job.value, reason)
                 .onFailure { Log.w(TAG, "could not decline ${job.value}: ${it.message}") }
         }
-        return Result.failure(IllegalStateException(reason))
+        return Result.failure(TransferRetry.Refusal(reason))
     }
 
     private fun sendCopy(address: String, port: Int, uri: Uri, name: String): Result<Unit> {
@@ -439,11 +546,14 @@ class TransferService : Service() {
                 getString(R.string.transfer_some_failed, outcome.failed, outcome.count)
         }
         val failed = outcome is TransferSummary.Outcome.NotSent || outcome is TransferSummary.Outcome.Failed
+        val detail = TransferSummary.detail(failed, lastError, notice)
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
             .setContentTitle(title)
-            .setContentText(if (failed) lastError else null)
+            .setContentText(detail)
             .setAutoCancel(true)
+        // A detail is often longer than one line.
+        detail?.let { builder.setStyle(Notification.BigTextStyle().bigText(it)) }
         // Tapping a finished download opens it.
         val saved = lastSaved
         if (!failed && saved != null) {
@@ -473,6 +583,28 @@ class TransferService : Service() {
         private const val EXTRA_NAME = "name"
         private const val EXTRA_SIZE = "size"
         private const val EXTRA_SOURCE = "source"
+        private const val EXTRA_TREE = "tree"
+        private const val EXTRA_FOLDER_ID = "folder_id"
+        private const val EXTRA_FOLDER = "folder"
+        private const val EXTRA_PATH = "path"
+
+        /**
+         * The top folder each folder send from the computer was saved in
+         * (T6b), for the sends still arriving: the least recently used go
+         * past [MAX_FOLDER_SENDS].
+         */
+        private val folderTops = object : LinkedHashMap<String, String>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) =
+                size > MAX_FOLDER_SENDS
+        }
+        private const val MAX_FOLDER_SENDS = 32
+
+        private fun folderOf(intent: Intent): RustCore.FolderPart? {
+            val id = intent.getStringExtra(EXTRA_FOLDER_ID)?.takeIf { it.isNotEmpty() } ?: return null
+            val folder = intent.getStringExtra(EXTRA_FOLDER) ?: return null
+            val path = intent.getStringArrayListExtra(EXTRA_PATH)?.takeIf { it.isNotEmpty() } ?: return null
+            return RustCore.FolderPart(id, folder, path)
+        }
         private const val KEEP_PARTIAL_HOURS = 24
 
         /** Send [uris] to the desktop at [address]; the caller's read grant passes on. */
@@ -484,6 +616,19 @@ class TransferService : Service() {
                 .putExtra(EXTRA_PORT, port)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             intent.clipData = clip
+            context.startForegroundService(intent)
+        }
+
+        /**
+         * Send every file under the folder [tree] the person picked (T6b).
+         * The app's own picker granted this app the tree, so the service
+         * reads it with no grant passed on (one would not cover an extra).
+         */
+        fun sendFolder(context: Context, address: String, port: Int, tree: Uri) {
+            val intent = Intent(context, TransferService::class.java)
+                .putExtra(EXTRA_ADDRESS, address)
+                .putExtra(EXTRA_PORT, port)
+                .putExtra(EXTRA_TREE, tree)
             context.startForegroundService(intent)
         }
 
@@ -502,6 +647,7 @@ class TransferService : Service() {
             name: String,
             size: Long,
             source: String,
+            folder: RustCore.FolderPart? = null,
         ) {
             val intent = Intent(context, TransferService::class.java)
                 .putExtra(EXTRA_ADDRESS, address)
@@ -512,6 +658,11 @@ class TransferService : Service() {
                 .putExtra(EXTRA_NAME, name)
                 .putExtra(EXTRA_SIZE, size)
                 .putExtra(EXTRA_SOURCE, source)
+            folder?.let {
+                intent.putExtra(EXTRA_FOLDER_ID, it.folderId)
+                    .putExtra(EXTRA_FOLDER, it.folder)
+                    .putStringArrayListExtra(EXTRA_PATH, ArrayList(it.path))
+            }
             context.startForegroundService(intent)
         }
     }

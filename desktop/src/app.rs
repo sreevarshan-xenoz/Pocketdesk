@@ -723,18 +723,25 @@ impl PocketdeskApp {
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.send_path)
-                    .hint_text("Path to a file")
+                    .hint_text("Path to a file or folder")
                     .desired_width(360.0),
             );
             if ui.button("Send").clicked() && !self.send_path.trim().is_empty() {
                 send = Some(PathBuf::from(self.send_path.trim()));
             }
-            if crate::pick_file::AVAILABLE
-                && ui
+            if crate::pick_file::AVAILABLE {
+                if ui
                     .add_enabled(self.picking.is_none(), egui::Button::new("Choose file…"))
                     .clicked()
-            {
-                self.picking = Some(crate::pick_file::spawn());
+                {
+                    self.picking = Some(crate::pick_file::spawn(false));
+                }
+                if ui
+                    .add_enabled(self.picking.is_none(), egui::Button::new("Choose folder…"))
+                    .clicked()
+                {
+                    self.picking = Some(crate::pick_file::spawn(true));
+                }
             }
         });
         if let Some(path) = send {
@@ -745,7 +752,7 @@ impl PocketdeskApp {
         let hint = if hovering {
             RichText::new("Drop to send.").strong()
         } else {
-            RichText::new("Or drop files on this window.").color(MUTED)
+            RichText::new("Or drop files or folders on this window.").color(MUTED)
         };
         ui.label(hint);
     }
@@ -768,11 +775,17 @@ impl PocketdeskApp {
                         "{} ago",
                         human_duration(now.saturating_sub(file.sent_unix))
                     ));
+                    // What a folder send left out goes beside its state.
+                    let note = file
+                        .note
+                        .as_deref()
+                        .map(|n| format!(" · {n}"))
+                        .unwrap_or_default();
                     match &file.state {
-                        SentState::Offered => ui.label("waiting for the phone"),
-                        SentState::Sent => ui.label("saved on the phone"),
+                        SentState::Offered => ui.label(format!("waiting for the phone{note}")),
+                        SentState::Sent => ui.label(format!("saved on the phone{note}")),
                         SentState::Failed(reason) => ui.label(
-                            RichText::new(format!("not sent: {reason}"))
+                            RichText::new(format!("not sent: {reason}{note}"))
                                 .color(Color32::from_rgb(0xd9, 0x5c, 0x4a)),
                         ),
                     };

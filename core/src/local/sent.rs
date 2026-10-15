@@ -39,6 +39,10 @@ pub struct SentFile {
     pub device_id: String,
     pub sent_unix: u64,
     pub state: SentState,
+    /// What the person should know beside the state: what a folder send
+    /// (T6b) left out. Absent in lists written before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -105,6 +109,7 @@ mod tests {
             device_id: "phone".to_string(),
             sent_unix: n,
             state: SentState::Offered,
+            note: None,
         }
     }
 
@@ -118,6 +123,21 @@ mod tests {
         let files = read(&dir);
         assert_eq!(files.len(), KEEP);
         assert_eq!(files.first(), Some(&file(3)));
+    }
+
+    #[test]
+    fn a_note_is_kept_and_a_row_without_one_still_reads() {
+        let dir = temp_dir("note");
+        let mut noted = file(1);
+        noted.note = Some("2 files left out".to_string());
+        record(&dir, noted.clone()).unwrap();
+        assert_eq!(read(&dir), [noted]);
+        // A row without one is written as before notes existed, and such
+        // a row still reads.
+        let plain = serde_json::to_string(&file(2)).unwrap();
+        assert!(!plain.contains("note"), "{plain}");
+        std::fs::write(dir.join(SENT_FILE), format!(r#"{{"files":[{plain}]}}"#)).unwrap();
+        assert_eq!(read(&dir), [file(2)]);
     }
 
     #[test]

@@ -956,10 +956,40 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_offer_keeps_its_place_only_when_every_name_is_safe() {
+        let _offers = crate::OFFERS_TEST_LOCK.blocking_lock();
+        let _ = crate::take_file_offers_json();
+        let id = "00112233445566778899aabbccddeeff";
+        crate::queue_file_offer(&serde_json::json!({
+            "id": "safe", "name": "a.jpg", "size": 3,
+            "folderId": id, "folder": "Trip", "path": ["day 2", "a.jpg"],
+        }));
+        crate::queue_file_offer(&serde_json::json!({
+            "id": "climbs", "name": "x", "size": 3,
+            "folderId": id, "folder": "Trip", "path": ["..", "x"],
+        }));
+        let taken: Vec<serde_json::Value> =
+            serde_json::from_str(&crate::take_file_offers_json()).unwrap();
+        assert_eq!(taken[0]["path"], serde_json::json!(["day 2", "a.jpg"]));
+        assert_eq!(taken[0]["folder"], "Trip");
+        assert!(
+            taken[1].get("path").is_none(),
+            "an unsafe place is never kept"
+        );
+        assert!(
+            taken[1]["folderRefused"].is_string(),
+            "and the offer is to be declined"
+        );
+    }
+
+    #[test]
     fn offers_are_kept_once_each_and_bounded() {
         let _offers = crate::OFFERS_TEST_LOCK.blocking_lock();
         let _ = crate::take_file_offers_json();
-        for n in 0..20 {
+        // A whole folder send (T6b: up to 10 000 files) arrives before the
+        // app drains, plus a few single files: none may be lost.
+        let total = 10_000 + 20;
+        for n in 0..total {
             let body = serde_json::json!({ "id": format!("o{n}"), "name": "a.pdf", "size": 3 });
             crate::queue_file_offer(&body);
             crate::queue_file_offer(&body);
@@ -967,8 +997,22 @@ mod tests {
         crate::queue_file_offer(&serde_json::json!({ "name": "no id" }));
         let taken: Vec<serde_json::Value> =
             serde_json::from_str(&crate::take_file_offers_json()).unwrap();
-        assert_eq!(taken.len(), 16);
-        assert_eq!(taken[0]["id"], "o4", "the oldest go first");
+        assert_eq!(taken.len(), total, "each once, none dropped");
+        assert_eq!(taken[0]["id"], "o0");
         assert_eq!(crate::take_file_offers_json(), "[]");
+
+        // Past the bound, the oldest go first.
+        for n in 0..crate::MAX_QUEUED_OFFERS + 3 {
+            crate::queue_file_offer(
+                &serde_json::json!({ "id": format!("p{n}"), "name": "a", "size": 1 }),
+            );
+        }
+        let taken: Vec<serde_json::Value> =
+            serde_json::from_str(&crate::take_file_offers_json()).unwrap();
+        assert_eq!(taken.len(), crate::MAX_QUEUED_OFFERS);
+        assert_eq!(taken[0]["id"], "p3");
+        // A drained id may be offered again (a retry's new offer).
+        crate::queue_file_offer(&serde_json::json!({ "id": "p3", "name": "a", "size": 1 }));
+        assert_ne!(crate::take_file_offers_json(), "[]");
     }
 }

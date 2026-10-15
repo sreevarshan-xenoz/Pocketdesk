@@ -20,6 +20,38 @@ object TransferRetry {
         return DELAYS_SECONDS[attempt - 1]
     }
 
+    /** The phone itself will not take this file (no room, an unsafe place): never retried. */
+    class Refusal(message: String) : Exception(message)
+
+    /** [delayBefore] for a failure [error]: a [Refusal] is final, whatever it says. */
+    fun delayAfter(attempt: Int, error: Throwable?, enabled: Boolean): Long? =
+        if (error is Refusal) null else delayBefore(attempt, error?.message, enabled)
+
+    /**
+     * Whether a folder send goes on (T6b). It stops once [GIVE_UP_AFTER]
+     * files in a row failed, each after its own retries, for a reason that
+     * is not the file's own (the computer stopped answering): going on
+     * would only try every other file the same way, for hours. A file the
+     * computer refused or that cannot be read does not count.
+     */
+    class FolderStreak {
+        private var failedInARow = 0
+
+        /** Record one file's outcome; false when the send should stop. */
+        fun record(sent: Boolean, error: String?): Boolean {
+            failedInARow = when {
+                sent -> 0
+                error != null && isFinal(error) -> failedInARow
+                else -> failedInARow + 1
+            }
+            return failedInARow < GIVE_UP_AFTER
+        }
+
+        companion object {
+            const val GIVE_UP_AFTER = 3
+        }
+    }
+
     private fun isFinal(error: String): Boolean {
         // A computer that refused only because it was busy may take it later.
         if (BUSY.any { error.contains(it, ignoreCase = true) }) return false
@@ -28,7 +60,9 @@ object TransferRetry {
 
     /** Failures a retry would only repeat. */
     private val FINAL = listOf(
-        "refused",
+        // The computer's own refusals ("The computer refused the file: …"),
+        // not the network's "connection refused", which a retry may outlast.
+        "computer refused",
         "is empty",
         "empty file",
         "cannot open",

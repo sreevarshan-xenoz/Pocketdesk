@@ -244,10 +244,47 @@ pub(crate) fn queue_sms_request(body: &serde_json::Value, host: &str, port: u16)
     }
 }
 
+/// The most offers waiting: a whole folder send (T6b, up to 10 000 files,
+/// offered at once) and a few single files beside it.
+pub(crate) const MAX_QUEUED_OFFERS: usize = 10_000 + 64;
+
+/// Offers waiting, oldest first, with the ids they hold.
+#[derive(Default)]
+pub(crate) struct OfferQueue {
+    offers: std::collections::VecDeque<serde_json::Value>,
+    ids: std::collections::HashSet<String>,
+}
+
+impl OfferQueue {
+    /// Queue `offer` under `id`, once per id; past the bound the oldest goes.
+    fn push(&mut self, id: String, offer: serde_json::Value) {
+        if !self.ids.insert(id) {
+            return;
+        }
+        self.offers.push_back(offer);
+        if self.offers.len() > MAX_QUEUED_OFFERS
+            && let Some(old) = self.offers.pop_front()
+            && let Some(old_id) = old.get("id").and_then(|v| v.as_str())
+        {
+            self.ids.remove(old_id);
+        }
+    }
+
+    /// Every offer waiting, oldest first; the queue is left empty.
+    fn take(&mut self) -> Vec<serde_json::Value> {
+        self.ids.clear();
+        self.offers.drain(..).collect()
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.take();
+    }
+}
+
 /// Files the desktop offered (F7b `file_offer`), waiting for the session
 /// to start their download. Bounded; drained by [`take_file_offers_json`].
-pub(crate) static PENDING_OFFERS: LazyLock<std::sync::Mutex<Vec<serde_json::Value>>> =
-    LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+pub(crate) static PENDING_OFFERS: LazyLock<std::sync::Mutex<OfferQueue>> =
+    LazyLock::new(Default::default);
 
 /// Tests that touch the offer queue run one at a time: it is process-wide,
 /// and one test's drain or overflow would take another's offer.
@@ -272,20 +309,52 @@ pub(crate) fn queue_file_offer(body: &serde_json::Value) {
     {
         entry["source"] = serde_json::json!(source);
     }
-    let mut q = PENDING_OFFERS.lock().unwrap_or_else(|e| e.into_inner());
-    if q.iter().any(|o| o.get("id") == entry.get("id")) {
-        return;
+    // A file of a folder send (T6b): its place, when every name in it is one
+    // the phone may make. One that is not is refused, never saved flat or
+    // renamed: the app declines it with the reason.
+    if body.get("folderId").is_some() {
+        match folder_part(body) {
+            Some(folder) => {
+                entry["folderId"] = serde_json::json!(folder.0);
+                entry["folder"] = serde_json::json!(folder.1);
+                entry["path"] = serde_json::json!(folder.2);
+            }
+            None => {
+                entry["folderRefused"] = serde_json::json!("an unsafe place in a folder");
+            }
+        }
     }
-    q.push(entry);
-    const MAX_QUEUED: usize = 16;
-    if q.len() > MAX_QUEUED {
-        q.remove(0);
-    }
+    PENDING_OFFERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(id.to_string(), entry);
+}
+
+/// An offer's folder fields (T6b), if all are there and safe: the send's
+/// id (32 hex digits), the folder's name and the file's path under it.
+fn folder_part(body: &serde_json::Value) -> Option<(String, String, Vec<String>)> {
+    use pocketdesk_core::protocol::relpath;
+    let id = body.get("folderId")?.as_str()?;
+    let folder = body.get("folder")?.as_str()?;
+    let path: Vec<String> = body
+        .get("path")?
+        .as_array()?
+        .iter()
+        .map(|p| p.as_str().map(str::to_string))
+        .collect::<Option<_>>()?;
+    let id_ok = id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit());
+    (id_ok
+        && relpath::component_problem(folder).is_none()
+        && relpath::path_problem(&path).is_none())
+    .then(|| (id.to_string(), folder.to_string(), path))
 }
 
 /// Drain the queued offers as a JSON array.
 pub(crate) fn take_file_offers_json() -> String {
-    let drained = std::mem::take(&mut *PENDING_OFFERS.lock().unwrap_or_else(|e| e.into_inner()));
+    let drained = PENDING_OFFERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
     serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
 }
 

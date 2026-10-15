@@ -132,3 +132,28 @@ Minors left, with reason:
 - A paired phone that knows another phone's offer id (a random UUID) could abort that phone's running fetch: the supersede runs before the offer's owner is checked.
 - The phone keys its records by the computer's address, not its identity; the prefix hash still decides whether to continue.
 - A disk-full failure keeps its part until the sweep.
+
+## As built: T6b (2026-10-15)
+
+- **Paths:** `core::protocol::relpath` checks every name of a file's place in a folder (and the folder's own name); a bad one is refused, never repaired. The phone's `FolderWalk.sendable` applies the same rules before sending.
+- **Phone to computer:** the session's Files sheet has "Send a folder to this computer" (Android's folder picker). `FolderWalk` walks the tree (folders first, hidden entries left out, names the computer would refuse counted) and each file goes as a share with `folderId`, `folder` and `path`. The server puts every file of one send under one new `Downloads/<folder>` and checks the folder on disk stays inside it.
+- **Computer to phone:** a send request that names a folder is offered file by file, each offer carrying the same fields; the sent list has one row for the folder, ending when every file has. The phone saves each file under one new `Download/Pocketdesk/<folder>` at its path (checked again on the phone).
+- **Differences from the design:**
+  - "Download folder" from the remote browser is not built: the browser still downloads files one at a time;
+  - one progress notification per file, with the folder named, not one for the whole folder;
+  - on the phone, a folder already there is found among this app's own downloads only (Android shows an app only its own entries).
+- **Device-verified (A71 ↔ Windows, LAN):** a folder of three files in three levels each way, MD5s matching, the hidden file left out; the desktop's row "sent"; a second send landing in "Name (1)". That first computer → phone run wrote its own request with a 32-hex id, which hid the first Critical below.
+- **Fresh review (2 Critical, 8 Important), fixed one commit each:**
+  - the desktop app's outbox ids are hyphenated, which the phone refused as a folder id, so every file of a folder landed flat (now sent without hyphens; and a place the phone refuses is declined, never saved flat);
+  - the phone held 16 offers, so a folder of more files lost the rest (now a whole folder and a few files beside it);
+  - a refused folder share left empty folders, made before the key and slot checks;
+  - a phone's send longer than an hour split into "Name (1)" (the desktop now remembers a send for an hour after its last file);
+  - a long folder's later offers expired (a folder's offers now share their 10 minutes, moved on by every fetch);
+  - nobody was told what a folder left out (a note on the desktop's sent row, and a notice on the phone even when the rest went);
+  - a folder sent to a computer that went away retried every file for hours (it stops after three files in a row);
+  - the desktop's folder walk sent Windows-hidden entries and the server's own keys (it now uses the remote browser's rules);
+  - a folder the phone could not list was sent as an empty one;
+  - a folder from the phone was a toast and a received row per file (now one of each per folder).
+
+  Minors fixed: COM0/LPT0, invisible characters on the phone, the phone's depth check one short, the phone's own refusals retried, the phone's map of folder sends never pruned, an unused path set and a grant flag that did nothing. Found on the way: "connection refused" from a computer not listening was taken for the computer refusing, so it was never retried.
+- **Re-verified on the device (A71 ↔ Windows, LAN), after the fixes:** a request written as the desktop app writes it (hyphenated id) for a 20-file folder in three levels, a dot-file and a name with a zero-width space: all 20 files in their folders on the phone, MD5s matching, the row "sent" with "1 left out: names the phone cannot take"; the same folder sent back from the phone: the same tree in Downloads, MD5s matching, one received row of 8 030 000 bytes.

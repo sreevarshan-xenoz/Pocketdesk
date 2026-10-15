@@ -194,6 +194,148 @@ pub(crate) fn transfer_slots() -> &'static TransferSlots {
     SLOTS.get_or_init(|| TransferSlots::new(MAX_TRANSFERS, MAX_TRANSFERS_PER_PHONE))
 }
 
+/// A share request's folder fields (T6b): the send's id, the top folder's
+/// name and the file's path under it, as a list of names. `None` for a
+/// plain file.
+fn folder_of(body: &serde_json::Value) -> Option<(String, String, Vec<String>)> {
+    let folder_id = body.get("folderId")?.as_str()?.to_string();
+    let folder = body.get("folder")?.as_str()?.to_string();
+    let path = body
+        .get("path")?
+        .as_array()?
+        .iter()
+        .map(|p| p.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+        // A path that is not all names is refused by the checks, not
+        // quietly treated as a plain file.
+        .unwrap_or_default();
+    Some((folder_id, folder, path))
+}
+
+/// How long the top folder of one folder send is remembered after its last
+/// file: its files arrive one after another, and a retry may come minutes
+/// later.
+const FOLDER_SEND_TTL: Duration = Duration::from_secs(60 * 60);
+
+/// The top folder each folder send (T6b) put its files under, by the phone
+/// and the send's id, so every file of one send lands in one new folder
+/// and two sends never mix.
+#[derive(Default)]
+pub(crate) struct FolderTops {
+    tops: std::sync::Mutex<
+        std::collections::HashMap<(String, String), (PathBuf, std::time::Instant)>,
+    >,
+}
+
+impl FolderTops {
+    /// Where a file of `device`'s folder send `folder_id` goes: the folder
+    /// for its `path` (components under the top, the file's name last),
+    /// made if needed, and the file's name. The top is a new folder in
+    /// `downloads` named like `folder` (`Name`, `Name (1)`…), made by the
+    /// send's first file. A path that could leave the top is refused.
+    pub(crate) fn place(
+        &self,
+        downloads: &Path,
+        device: &str,
+        folder_id: &str,
+        folder: &str,
+        path: &[String],
+    ) -> std::result::Result<(PathBuf, String), String> {
+        self.place_at(
+            downloads,
+            device,
+            folder_id,
+            folder,
+            path,
+            std::time::Instant::now(),
+        )
+    }
+
+    fn place_at(
+        &self,
+        downloads: &Path,
+        device: &str,
+        folder_id: &str,
+        folder: &str,
+        path: &[String],
+        now: std::time::Instant,
+    ) -> std::result::Result<(PathBuf, String), String> {
+        if !is_transfer_key(folder_id) {
+            return Err("no usable folder id".to_string());
+        }
+        if let Some(problem) = pocketdesk_core::protocol::relpath::component_problem(folder) {
+            return Err(format!("the folder's name: {problem}"));
+        }
+        if let Some(problem) = pocketdesk_core::protocol::relpath::path_problem(path) {
+            return Err(format!("the file's place in the folder: {problem}"));
+        }
+        let (name, within) = path.split_last().ok_or("no file name")?;
+        let top = {
+            let mut tops = self.tops.lock().unwrap_or_else(|e| e.into_inner());
+            tops.retain(|_, (_, at)| now.saturating_duration_since(*at) < FOLDER_SEND_TTL);
+            let key = (device.to_string(), folder_id.to_string());
+            match tops.get_mut(&key) {
+                // Each file keeps its send remembered a while longer.
+                Some((top, at)) => {
+                    *at = now;
+                    top.clone()
+                }
+                None => {
+                    let top = new_folder(downloads, folder)?;
+                    tops.insert(key, (top.clone(), now));
+                    top
+                }
+            }
+        };
+        let dir = within.iter().fold(top.clone(), |dir, part| dir.join(part));
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("could not make {}: {e}", dir.display()))?;
+        // Each component was checked, but the folder on disk has the last
+        // word (a link planted inside the top would show here).
+        let real_top = std::fs::canonicalize(&top).map_err(|e| e.to_string())?;
+        let real_dir = std::fs::canonicalize(&dir).map_err(|e| e.to_string())?;
+        if !real_dir.starts_with(&real_top) {
+            return Err("the file's folder leads out of the sent folder".to_string());
+        }
+        Ok((dir, name.clone()))
+    }
+}
+
+impl FolderTops {
+    /// The top folder `device`'s folder send `folder_id` is saving into.
+    pub(crate) fn top(&self, device: &str, folder_id: &str) -> Option<PathBuf> {
+        let tops = self.tops.lock().unwrap_or_else(|e| e.into_inner());
+        tops.get(&(device.to_string(), folder_id.to_string()))
+            .map(|(top, _)| top.clone())
+    }
+}
+
+/// A folder in `parent` named like `name` that did not exist before:
+/// `name`, else `name (1)`, `name (2)`… Made exclusively, so a send never
+/// merges into a folder that is already there.
+fn new_folder(parent: &Path, name: &str) -> std::result::Result<PathBuf, String> {
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    for n in 0..1000 {
+        let candidate = if n == 0 {
+            parent.join(name)
+        } else {
+            parent.join(format!("{name} ({n})"))
+        };
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("could not make {}: {e}", candidate.display())),
+        }
+    }
+    Err(format!("too many folders named like {name}"))
+}
+
+/// The folder sends in progress, shared by every connection.
+pub(crate) fn folder_tops() -> &'static FolderTops {
+    static TOPS: std::sync::OnceLock<FolderTops> = std::sync::OnceLock::new();
+    TOPS.get_or_init(FolderTops::default)
+}
+
 /// The transfer running for each file, by a key naming it (T6a). A phone
 /// whose Wi-Fi dropped retries before this side notices the old connection
 /// is dead (no reset arrives, so it waits out its idle limit); its retry
@@ -404,6 +546,27 @@ impl Plugin for SharePlugin {
                     Ok(slot) => slot,
                     Err(reason) => return refused(reason.to_string()).await,
                 };
+                // A file of a folder send (T6b) goes to its place under the
+                // send's own new folder; its path was checked part by part.
+                // Made only now, so a share refused above leaves no folder.
+                let (dir, name, top) = match folder_of(body) {
+                    None => (dir, name.clone(), None),
+                    Some((folder_id, folder, path)) => {
+                        match folder_tops().place(
+                            &dir,
+                            sender.device_id(),
+                            &folder_id,
+                            &folder,
+                            &path,
+                        ) {
+                            Ok((dir, name)) => {
+                                let top = folder_tops().top(sender.device_id(), &folder_id);
+                                (dir, name, top)
+                            }
+                            Err(reason) => return refused(reason).await,
+                        }
+                    }
+                };
                 running()
                     .spawn(running_key, async move {
                         match receive_file(
@@ -420,7 +583,9 @@ impl Plugin for SharePlugin {
                                 limits: partial_limits(),
                                 on_saved: {
                                     let from = from.clone();
-                                    Box::new(move |path: &Path| on_received(path, size, &from))
+                                    Box::new(move |path: &Path| {
+                                        on_received(path, size, &from, top.as_deref())
+                                    })
                                 },
                             },
                         )
@@ -710,41 +875,84 @@ async fn present_key<S: tokio::io::AsyncWrite + Unpin>(stream: &mut S, key: &str
 
 /// Tell the owner a file arrived: a desktop notification, and a row in the
 /// received-files list the desktop app shows (roadmap F7).
-fn on_received(path: &Path, size: u64, from: &str) {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    if let Ok(dir) = crate::state::state_dir() {
-        record_received_in(&dir, path, &name, size, from);
-    }
-    let folder = path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|f| f.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let body = format!("{name} ({}) is in {folder}.", human_size(size));
+/// A file from `from` was saved at `path`; `top` is the folder of the
+/// folder send (T6b) it belongs to, if it does. It is listed for the
+/// desktop app and announced.
+fn on_received(path: &Path, size: u64, from: &str, top: Option<&Path>) {
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let Some((summary, body)) = received_in(&dir, path, size, from, top) else {
+        return;
+    };
     std::thread::spawn(move || {
-        let summary = "Pocketdesk: file received";
         if !crate::platform::notify(summary, &body, Duration::from_secs(8)) {
             tracing::info!("{summary} — {body}");
         }
     });
 }
 
-fn record_received_in(state_dir: &Path, path: &Path, name: &str, size: u64, from: &str) {
+/// List a received file in `state_dir`, and the notification to show for
+/// it, if any. A folder send's files make one row for the folder, and only
+/// its first file is announced: a folder of a thousand files is not a
+/// thousand notifications.
+fn received_in(
+    state_dir: &Path,
+    path: &Path,
+    size: u64,
+    from: &str,
+    top: Option<&Path>,
+) -> Option<(&'static str, String)> {
+    use pocketdesk_core::local::received::{self, ReceivedFile};
+    let name_of = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let parent_name = |p: &Path| p.parent().map(name_of).unwrap_or_default();
     // Transfers run concurrently; the list is read, changed and replaced.
     static LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LIST.lock().unwrap_or_else(|e| e.into_inner());
-    let entry = pocketdesk_core::local::received::ReceivedFile {
-        name: name.to_string(),
-        path: path.display().to_string(),
-        size,
-        received_unix: pocketdesk_core::local::pin::now_unix(),
-        from: from.to_string(),
-    };
-    if let Err(e) = pocketdesk_core::local::received::record(state_dir, entry) {
-        tracing::warn!("Could not record the received file: {e}");
+    let now = pocketdesk_core::local::pin::now_unix();
+    match top {
+        None => {
+            let name = name_of(path);
+            let entry = ReceivedFile {
+                name: name.clone(),
+                path: path.display().to_string(),
+                size,
+                received_unix: now,
+                from: from.to_string(),
+            };
+            if let Err(e) = received::record(state_dir, entry) {
+                tracing::warn!("Could not record the received file: {e}");
+            }
+            Some((
+                "Pocketdesk: file received",
+                format!("{name} ({}) is in {}.", human_size(size), parent_name(path)),
+            ))
+        }
+        Some(top) => {
+            let folder = name_of(top);
+            let entry = ReceivedFile {
+                name: format!("{folder}/"),
+                path: top.display().to_string(),
+                size,
+                received_unix: now,
+                from: from.to_string(),
+            };
+            match received::add_to_folder(state_dir, entry) {
+                Ok(true) => Some((
+                    "Pocketdesk: folder arriving",
+                    format!("{folder} is arriving in {}.", parent_name(top)),
+                )),
+                Ok(false) => None,
+                Err(e) => {
+                    tracing::warn!("Could not record the received file: {e}");
+                    None
+                }
+            }
+        }
     }
 }
 
@@ -1156,6 +1364,135 @@ mod tests {
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
 
+    fn parts(p: &[&str]) -> Vec<String> {
+        p.iter().map(|s| s.to_string()).collect()
+    }
+
+    const FOLDER_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const FOLDER_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    #[test]
+    fn the_files_of_one_folder_share_a_new_top_folder() {
+        let downloads = temp_dir("folders");
+        let tops = FolderTops::default();
+        std::fs::create_dir_all(downloads.join("Photos")).unwrap(); // already there
+        let (dir, name) = tops
+            .place(
+                &downloads,
+                "phone",
+                FOLDER_A,
+                "Photos",
+                &parts(&["2026", "beach.jpg"]),
+            )
+            .unwrap();
+        assert_eq!(dir, downloads.join("Photos (1)").join("2026"));
+        assert_eq!(name, "beach.jpg");
+        assert!(dir.is_dir());
+        let (dir, _) = tops
+            .place(
+                &downloads,
+                "phone",
+                FOLDER_A,
+                "Photos",
+                &parts(&["top.jpg"]),
+            )
+            .unwrap();
+        assert_eq!(
+            dir,
+            downloads.join("Photos (1)"),
+            "the same send, the same folder"
+        );
+        let (dir, _) = tops
+            .place(
+                &downloads,
+                "phone",
+                FOLDER_B,
+                "Photos",
+                &parts(&["top.jpg"]),
+            )
+            .unwrap();
+        assert_eq!(
+            dir,
+            downloads.join("Photos (2)"),
+            "another send, a new folder"
+        );
+        let (dir, _) = tops
+            .place(
+                &downloads,
+                "other-phone",
+                FOLDER_A,
+                "Photos",
+                &parts(&["x.jpg"]),
+            )
+            .unwrap();
+        assert_eq!(
+            dir,
+            downloads.join("Photos (3)"),
+            "another phone's id is its own"
+        );
+    }
+
+    #[test]
+    fn a_folder_send_that_keeps_going_keeps_its_folder() {
+        let downloads = temp_dir("folder-long").join("Downloads");
+        let tops = FolderTops::default();
+        let start = std::time::Instant::now();
+        let at = |minutes: u64| start + Duration::from_secs(minutes * 60);
+        let place = |file: &str, now| {
+            tops.place_at(
+                &downloads,
+                "phone",
+                FOLDER_A,
+                "Photos",
+                &parts(&[file]),
+                now,
+            )
+            .unwrap()
+            .0
+        };
+        let first = place("a.jpg", at(0));
+        // Files keep coming for longer than the TTL, never far apart.
+        assert_eq!(place("b.jpg", at(50)), first);
+        assert_eq!(
+            place("c.jpg", at(100)),
+            first,
+            "past an hour from the first"
+        );
+        // A send idle for longer than the TTL is forgotten.
+        assert_ne!(place("d.jpg", at(100 + 61)), first);
+    }
+
+    #[test]
+    fn a_folder_path_that_climbs_out_is_refused() {
+        let downloads = temp_dir("folders-bad");
+        let tops = FolderTops::default();
+        for bad in [
+            parts(&["..", "x"]),
+            parts(&["a", "..", "..", "x"]),
+            parts(&["C:", "x"]),
+            parts(&[]),
+        ] {
+            assert!(
+                tops.place(&downloads, "phone", FOLDER_A, "Photos", &bad)
+                    .is_err(),
+                "{bad:?}"
+            );
+        }
+        assert!(
+            tops.place(&downloads, "phone", "not-an-id", "Photos", &parts(&["x"]))
+                .is_err()
+        );
+        assert!(
+            tops.place(&downloads, "phone", FOLDER_A, "..", &parts(&["x"]))
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read_dir(&downloads).unwrap().count(),
+            0,
+            "nothing was made"
+        );
+    }
+
     #[test]
     fn the_sweep_leaves_a_part_a_receive_is_writing() {
         let store = Store::new(temp_dir("sweep-in-use"));
@@ -1416,7 +1753,8 @@ mod tests {
     fn a_received_file_is_listed_for_the_desktop_app() {
         let state = temp_dir("list");
         let path = state.join("photo.jpg");
-        record_received_in(&state, &path, "photo.jpg", 2_100_000, "192.0.2.7");
+        let toast = received_in(&state, &path, 2_100_000, "192.0.2.7", None);
+        assert!(toast.is_some(), "a plain file is announced");
         let files = pocketdesk_core::local::received::read(&state);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].name, "photo.jpg");
@@ -1424,6 +1762,28 @@ mod tests {
         assert_eq!(files[0].path, path.display().to_string());
         assert_eq!(human_size(2_100_000), "2.0 MB");
         assert_eq!(human_size(512), "512 B");
+    }
+
+    #[test]
+    fn a_folders_files_are_one_row_and_one_toast() {
+        let state = temp_dir("list-folder");
+        let top = state.join("Trip");
+        let first = received_in(&state, &top.join("a.jpg"), 10, "phone", Some(&top));
+        let second = received_in(
+            &state,
+            &top.join("day 2").join("b.jpg"),
+            5,
+            "phone",
+            Some(&top),
+        );
+        let (_, body) = first.expect("the folder's first file is announced");
+        assert!(body.contains("Trip"), "{body}");
+        assert!(second.is_none(), "its later files are not");
+        let files = pocketdesk_core::local::received::read(&state);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].name, "Trip/");
+        assert_eq!(files[0].path, top.display().to_string());
+        assert_eq!(files[0].size, 15);
     }
 
     #[test]
@@ -1717,6 +2077,7 @@ mod tests {
     struct Phone {
         peer: SocketAddr,
         sent: std::sync::Mutex<Vec<NetworkPacket>>,
+        keyless: bool,
     }
 
     impl Phone {
@@ -1724,6 +2085,15 @@ mod tests {
             Self {
                 peer: peer.parse().unwrap(),
                 sent: Default::default(),
+                keyless: false,
+            }
+        }
+
+        /// A phone whose connection proved no key: it can move no files.
+        fn keyless(peer: &str) -> Self {
+            Self {
+                keyless: true,
+                ..Self::at(peer)
             }
         }
 
@@ -1744,6 +2114,9 @@ mod tests {
             Some(self.peer)
         }
         fn peer_key(&self) -> Option<pocketdesk_core::streaming::PeerKey> {
+            if self.keyless {
+                return None;
+            }
             Some(pocketdesk_core::streaming::PeerKey::Tls(
                 certs().1.cert_fingerprint(),
             ))
@@ -1807,6 +2180,49 @@ mod tests {
             reason.contains("size") || reason.contains("large"),
             "{reason}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_folder_share_whose_path_climbs_out_is_refused() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("192.0.2.7:51000");
+        let packet = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "x.txt",
+                "folder": "Photos",
+                "folderId": FOLDER_A,
+                "path": ["..", "..", "x.txt"],
+                "payloadTransferInfo": { "port": 40000, "key": KEY },
+            }))
+            .with_payload_size(10);
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        let (key, reason) = refusal(&phone).expect("a refusal");
+        assert_eq!(key, KEY);
+        assert!(reason.contains("place in the folder"), "{reason}");
+    }
+
+    #[tokio::test]
+    async fn a_refused_folder_share_makes_no_folder() {
+        let downloads =
+            std::env::temp_dir().join(format!("ll-share-refused-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&downloads);
+        std::fs::create_dir_all(&downloads).unwrap();
+        let plugin = SharePlugin::with_download_dir(downloads.clone());
+        // This phone's connection proved no key, so no transfer can start.
+        let phone = Phone::keyless("192.0.2.7:51000");
+        let packet = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "a.jpg",
+                "folder": "Photos",
+                "folderId": FOLDER_A,
+                "path": ["day 1", "a.jpg"],
+                "payloadTransferInfo": { "port": 40000, "key": KEY },
+            }))
+            .with_payload_size(10);
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        assert!(refusal(&phone).is_some());
+        let made: Vec<_> = std::fs::read_dir(&downloads).unwrap().flatten().collect();
+        assert!(made.is_empty(), "{made:?}");
     }
 
     #[tokio::test]
