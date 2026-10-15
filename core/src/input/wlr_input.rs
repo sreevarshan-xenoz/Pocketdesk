@@ -126,6 +126,52 @@ fn io_error(e: wayland_client::backend::WaylandError) -> std::io::Error {
     }
 }
 
+/// The modifier state a virtual keyboard must send itself: wlroots does not
+/// derive it from a virtual keyboard's keys, so without it Ctrl+C reaches
+/// the window as a plain "c". Real modifier bits of the keys keymap (xkb:
+/// Shift, Lock, Control, Mod1 = Alt, Mod4 = Super).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Mods {
+    pub depressed: u32,
+    pub locked: u32,
+}
+
+const SHIFT: u32 = 1 << 0;
+const LOCK: u32 = 1 << 1;
+const CONTROL: u32 = 1 << 2;
+const MOD1: u32 = 1 << 3;
+const MOD4: u32 = 1 << 6;
+
+impl Mods {
+    /// The modifier bit the evdev key `code` holds while down, if any.
+    fn held_bit(code: u16) -> Option<u32> {
+        match code {
+            42 | 54 => Some(SHIFT),   // KEY_LEFTSHIFT, KEY_RIGHTSHIFT
+            29 | 97 => Some(CONTROL), // KEY_LEFTCTRL, KEY_RIGHTCTRL
+            56 | 100 => Some(MOD1),   // KEY_LEFTALT, KEY_RIGHTALT (Alt_R on us)
+            125 | 126 => Some(MOD4),  // KEY_LEFTMETA, KEY_RIGHTMETA
+            _ => None,
+        }
+    }
+
+    /// Follow the evdev key `code` going down or up; whether the state
+    /// changed. Caps Lock toggles on its press.
+    pub fn key(&mut self, code: u16, pressed: bool) -> bool {
+        let before = *self;
+        if let Some(bit) = Self::held_bit(code) {
+            if pressed {
+                self.depressed |= bit;
+            } else {
+                self.depressed &= !bit;
+            }
+        } else if code == 58 && pressed {
+            // KEY_CAPSLOCK
+            self.locked ^= LOCK;
+        }
+        *self != before
+    }
+}
+
 /// The compositor's virtual pointer and keyboard. When the connection
 /// breaks (the compositor restarted), it is opened again: at once, then
 /// every [`WlrInput::RETRY`] while input arrives; input in between is
@@ -134,6 +180,8 @@ fn io_error(e: wayland_client::backend::WaylandError) -> std::io::Error {
 pub struct WlrInput {
     link: Option<Link>,
     retry_at: Instant,
+    /// The modifiers held through this connection's keyboard.
+    mods: Mods,
 }
 
 impl WlrInput {
@@ -146,6 +194,7 @@ impl WlrInput {
         Ok(Self {
             link: Some(within(Link::open)?),
             retry_at: Instant::now(),
+            mods: Mods::default(),
         })
     }
 
@@ -186,6 +235,8 @@ impl WlrInput {
             Ok(link) => {
                 tracing::info!("The compositor's virtual pointer and keyboard are back");
                 self.link = Some(link);
+                // The compositor released what the old keyboard held.
+                self.mods = Mods::default();
                 Ok(())
             }
             Err(e) => {
@@ -247,10 +298,20 @@ impl WlrInput {
         })
     }
 
-    /// Press or release the evdev key `code`.
+    /// Press or release the evdev key `code`, and say the modifier state
+    /// when it changes.
     pub fn key(&mut self, code: u16, pressed: bool) -> std::io::Result<()> {
         let time = monotonic_ms();
-        self.send(|l| l.keyboard.key(time, code.into(), u32::from(pressed)))
+        let mut mods = self.mods;
+        let changed = mods.key(code, pressed);
+        self.send(|l| {
+            l.keyboard.key(time, code.into(), u32::from(pressed));
+            if changed {
+                l.keyboard.modifiers(mods.depressed, 0, mods.locked, 0);
+            }
+        })?;
+        self.mods = mods;
+        Ok(())
     }
 }
 
@@ -274,6 +335,26 @@ mod tests {
         assert_eq!(wheel(true, 1), (-NOTCH, -1));
         assert_eq!(wheel(true, -2), (2.0 * NOTCH, 2));
         assert_eq!(wheel(false, 1), (NOTCH, 1));
+    }
+
+    #[test]
+    fn held_modifiers_and_caps_lock_make_the_state_sent() {
+        let mut mods = Mods::default();
+        assert!(mods.key(29, true), "Ctrl down");
+        assert!(!mods.key(46, true), "C is no modifier");
+        assert_eq!(mods.depressed, CONTROL);
+        assert!(mods.key(42, true));
+        assert_eq!(mods.depressed, CONTROL | SHIFT);
+        assert!(mods.key(29, false));
+        assert!(mods.key(42, false));
+        assert_eq!(mods, Mods::default());
+        assert!(mods.key(58, true));
+        assert!(!mods.key(58, false));
+        assert_eq!(mods.locked, LOCK);
+        assert!(mods.key(125, true));
+        assert_eq!(mods.depressed, MOD4);
+        assert!(mods.key(56, true));
+        assert_eq!(mods.depressed, MOD4 | MOD1);
     }
 
     #[test]
