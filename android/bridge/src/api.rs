@@ -2040,6 +2040,8 @@ async fn install_streaming(
 
     let cancel = client.cancel_token();
     let client_cancel = cancel.clone();
+    // Taken before the client moves into its task.
+    let video_bytes = client.video_bytes();
     let task = tokio::spawn(async move {
         client.start().await;
         tracing::info!("Streaming client start loop exited");
@@ -2131,6 +2133,7 @@ async fn install_streaming(
     }
     *VIDEO_RX.lock().await = Some(packet_rx);
     *AUDIO_RX.lock().await = Some(audio_rx);
+    *crate::VIDEO_BYTES.lock().unwrap_or_else(|e| e.into_inner()) = Some(video_bytes);
     *handle = Some(StreamingHandle {
         address: address.clone(),
         port,
@@ -2372,6 +2375,8 @@ pub async fn stop_streaming() -> Result<(), String> {
 
     STREAMING_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
     *STREAM_CLOSED_REASON.lock().unwrap() = None;
+    // No session, no video counted: the next one installs its own.
+    *crate::VIDEO_BYTES.lock().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(())
 }
 

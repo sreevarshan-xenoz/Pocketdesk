@@ -164,8 +164,9 @@ class H264Decoder(
             //
             // The first frame gets longer: a desktop that asks before each
             // session holds the stream until its owner answers (up to 30 s).
-            var lastFrameAt = SystemClock.elapsedRealtime()
-            var sawFrame = false
+            // Video bytes count as well as whole frames: a large keyframe on
+            // a slow link takes longer than the stall limit to arrive.
+            val watch = StallWatch(STALL_MS, FIRST_FRAME_MS, SystemClock.elapsedRealtime())
             while (gate.isOpen) {
                 val frames = RustCore.receiveFrames(timeoutMs = POLL_TIMEOUT_MS)
                 if (frames.isEmpty()) {
@@ -176,16 +177,14 @@ class H264Decoder(
                         onClosed?.invoke(reason)
                         break
                     }
-                    val silentFor = SystemClock.elapsedRealtime() - lastFrameAt
-                    if (silentFor > if (sawFrame) STALL_MS else FIRST_FRAME_MS) {
-                        Log.w(TAG, "video feed silent for $silentFor ms — link dropped")
+                    if (watch.stalled(SystemClock.elapsedRealtime(), RustCore.videoBytes())) {
+                        Log.w(TAG, "no video frame or byte for ${STALL_MS / 1000} s — link dropped")
                         onStalled?.invoke()
                         break
                     }
                     continue
                 }
-                lastFrameAt = SystemClock.elapsedRealtime()
-                sawFrame = true
+                watch.frame(SystemClock.elapsedRealtime())
                 for (frame in frames) {
                     if (!gate.isOpen) break
                     if (mediaCodec == null) {

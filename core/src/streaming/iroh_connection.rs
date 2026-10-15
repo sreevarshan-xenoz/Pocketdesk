@@ -323,6 +323,13 @@ impl OutStream for IrohSendStream {
             .finish()
             .map_err(|_: ClosedStream| ConnectionError::Closed)
     }
+
+    fn delivered(&self) -> super::connection::Delivered {
+        let stopped = self.inner.stopped();
+        Box::pin(async move {
+            let _ = stopped.await;
+        })
+    }
 }
 
 struct IrohRecvStream {
@@ -344,6 +351,28 @@ impl InStream for IrohRecvStream {
             ReadToEndError::Read(other) => ConnectionError::Other(other.to_string()),
             ReadToEndError::TooLong => ConnectionError::Other("stream exceeds limit".into()),
         })
+    }
+
+    async fn read_to_end_counting(
+        &mut self,
+        limit: usize,
+        progress: &std::sync::atomic::AtomicU64,
+    ) -> Result<Vec<u8>, ConnectionError> {
+        let mut data = Vec::new();
+        loop {
+            let chunk = self.inner.read_chunk(limit).await.map_err(|e| match e {
+                ReadError::ConnectionLost(e) => classify_conn_error(e),
+                other => ConnectionError::Other(other.to_string()),
+            })?;
+            let Some(chunk) = chunk else {
+                return Ok(data);
+            };
+            if data.len() + chunk.len() > limit {
+                return Err(ConnectionError::Other("stream exceeds limit".into()));
+            }
+            progress.fetch_add(chunk.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            data.extend_from_slice(&chunk);
+        }
     }
 }
 

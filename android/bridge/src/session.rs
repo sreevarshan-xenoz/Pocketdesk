@@ -132,6 +132,21 @@ pub(crate) static VIDEO_RX: LazyLock<
     TokioMutex<Option<tokio::sync::mpsc::Receiver<pocketdesk_core::streaming::EncodedPacket>>>,
 > = LazyLock::new(|| TokioMutex::new(None));
 
+/// The live session's video byte count, as its frames arrive
+/// (`StreamingClient::video_bytes`): the phone's watchdog reads it to tell
+/// a slow link from a dead one.
+pub(crate) static VIDEO_BYTES: std::sync::Mutex<Option<Arc<AtomicU64>>> =
+    std::sync::Mutex::new(None);
+
+/// Video bytes the live session has received so far; 0 with none.
+pub(crate) fn video_bytes() -> u64 {
+    VIDEO_BYTES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map_or(0, |b| b.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// The live session's audio receiver, apart from [`STREAMING_HANDLE`] and
 /// [`VIDEO_RX`] for the same reason: `receive_audio` waits on it.
 pub(crate) static AUDIO_RX: LazyLock<

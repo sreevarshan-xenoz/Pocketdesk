@@ -184,6 +184,10 @@ pub struct StreamingClient {
     cancel: CancellationToken,
     /// Unique session ID for tracking this connection
     session_id: String,
+    /// Video payload bytes received so far, counted as they arrive rather
+    /// than when a frame ends: a large frame on a slow link still shows
+    /// the link is alive ([`StreamingClient::video_bytes`]).
+    video_bytes: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl StreamingClient {
@@ -208,8 +212,16 @@ impl StreamingClient {
             audio_tx,
             cancel: CancellationToken::new(),
             session_id: String::new(),
+            video_bytes: Arc::default(),
         };
         (client, frame_rx, audio_rx)
+    }
+
+    /// The video payload bytes this client has received, counted as they
+    /// arrive: a watchdog can tell a slow link (still counting) from a dead
+    /// one.
+    pub fn video_bytes(&self) -> Arc<std::sync::atomic::AtomicU64> {
+        self.video_bytes.clone()
     }
 
     /// Connect to a streaming server at the given address.
@@ -420,6 +432,7 @@ impl StreamingClient {
             audio_tx,
             cancel: CancellationToken::new(),
             session_id,
+            video_bytes: Arc::default(),
         };
 
         (client, frame_rx, audio_rx)
@@ -438,6 +451,7 @@ impl StreamingClient {
         let cancel = self.cancel.clone();
         let frame_tx = self.frame_tx.clone();
         let audio_tx = self.audio_tx.clone();
+        let video_bytes = self.video_bytes.clone();
 
         let span = tracing::info_span!(
             "client_loop",
@@ -463,9 +477,15 @@ impl StreamingClient {
             let recv_span = tracing::info_span!("packet_recv");
             let mut recv_handle = tokio::spawn(
                 async move {
-                    let result =
-                        recv_with_cancel(&connection, frame_tx, audio_tx, recv_cancel, e2e_samples)
-                            .await;
+                    let result = recv_with_cancel(
+                        &connection,
+                        frame_tx,
+                        audio_tx,
+                        recv_cancel,
+                        e2e_samples,
+                        video_bytes,
+                    )
+                    .await;
                     match result {
                         Ok(()) => debug!("Frame receiver finished normally"),
                         Err(e) => warn!(error = %e, "Frame receiver error"),
@@ -613,6 +633,7 @@ async fn recv_with_cancel(
     audio_tx: mpsc::Sender<AudioPacket>,
     cancel: CancellationToken,
     e2e_samples: Arc<SampleBatch>,
+    video_bytes: Arc<std::sync::atomic::AtomicU64>,
 ) -> Result<()> {
     info!("Starting packet receiver (video + audio)");
     reset_e2e_probe();
@@ -662,7 +683,15 @@ async fn recv_with_cancel(
                         } else {
                             10 * 1024 * 1024
                         };
-                        let data = match recv_stream.read_to_end(max_size).await {
+                        // Video is counted as it arrives (a slow keyframe is
+                        // not a dead link); audio flows even when video does
+                        // not, so it is not counted.
+                        let read = if header.stream_kind == transport::STREAM_KIND_AUDIO {
+                            recv_stream.read_to_end(max_size).await
+                        } else {
+                            recv_stream.read_to_end_counting(max_size, &video_bytes).await
+                        };
+                        let data = match read {
                             Ok(data) => data,
                             Err(e) => {
                                 warn!("Failed to read packet data (seq={}, kind={}): {e}", header.sequence, header.stream_kind);
