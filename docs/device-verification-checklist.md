@@ -1054,7 +1054,7 @@ Owed:
 - [x] `open_links = false`: links shown as notifications, none opened (2026-10-15, six links from "Open on computer").
 - [x] Six links within a minute: the sixth refused ("more than 5 a minute").
 - [ ] The phone's "Links from the computer" off: a link dropped.
-- [ ] Linux: `xdg-open`, and no zombie process after a link.
+- [x] Linux (2026-10-15, the release dry run's build on an Azure VM under a headless Sway, the A71 over the internet): "Open on computer" reached `xdg-open` with the link (the sentence's full stop left out), and no zombie process was left; `pocketdesk link` from the Linux CLI gave the phone its notification.
 
 ## 57. The phone's battery on the computer (T8b)
 
@@ -1068,7 +1068,8 @@ Owed:
 - [ ] Catching up after a Wi-Fi drop.
 - [ ] Unpairing the phone: its report gone from the file within 5 s.
 - [ ] The phone's "Share battery with the computer" off: no report; the desktop's "Phones' batteries" off: no notification.
-- [ ] A real discharge to 15 %, Android's own low flag, and Linux's notification.
+- [x] Linux: a faked 11 % was recorded and warned about in the log, but **no notification was shown**: every Linux notification failed (`notify-send --expire` is not an option). Fixed (`--expire-time`); owed: see it shown on Linux.
+- [ ] A real discharge to 15 %, and Android's own low flag.
 
 ## 58. The computer's media from the phone (T8c)
 
@@ -1081,7 +1082,8 @@ Owed:
 - [ ] A real player with a title: a browser video, Spotify; Next and Previous.
 - [ ] Nothing playing: "Nothing is playing".
 - [ ] The card cleared to the error alone with Audio off (fixed after the run).
-- [ ] Linux: `playerctl` present and missing.
+- [x] Linux: with `mpv` and its MPRIS plugin playing, the card showed "VM Test Tone" by "Pocketdesk · mpv", and Pause on the phone paused it (`playerctl status`: Paused).
+- [ ] Linux: `playerctl` missing.
 
 ## 59. The phone's media from the computer (T8d)
 

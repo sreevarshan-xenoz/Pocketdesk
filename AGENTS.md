@@ -42,6 +42,7 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **The T8 features on Linux (Azure VM, headless Sway, the release dry run's build; branch `fix/linux-notify-send`).** Links both ways (`xdg-open`, `pocketdesk link`), the phone's battery and now-playing through `playerctl`/MPRIS (with Pause from the phone) all worked over the internet with the A71. **Found: every Linux desktop notification had been failing** (`notify-send --expire` is rejected by libnotify's notify-send 0.8): fixed with `--expire-time`. Owed: seeing one shown on Linux after the fix.
 - 2026-10-15: **T8e, contact names in texts (branch `feat/contact-names`; as-built in `docs/superpowers/specs/2026-10-14-sms-design.md`).**
   - **How:** the phone's "Names from my contacts" (off; asks for contacts access) sends each forwarded text's sender name from its contacts, looked up as the text leaves; the computer keeps it unless `sms_names` is off (which also forgets kept names at the next start) and shows "Ann (number)" in Messages and notifications.
   - **Fresh review (0 Critical, 3 Important), fixed:** a main-thread lookup, names sent after the switch was turned off, and kept names surviving `sms_names` off. SECURITY.md limit 11.
