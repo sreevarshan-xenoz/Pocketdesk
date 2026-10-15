@@ -49,8 +49,11 @@ object PhoneLink {
         // send on it.
         if (sent.isFailure && RustCore.controlPeer() == null) {
             val wan = HostStore.wanIdentity(ctx, host.address)
-            if (wan != null && RustCore.connectToPeer(host.address, host.controlPort, wan).isSuccess) {
-                sent = send()
+            // A failed connect still comes back as a success envelope: what
+            // counts is whether a link is now up.
+            if (wan != null) {
+                RustCore.connectToPeer(host.address, host.controlPort, wan)
+                if (RustCore.controlPeer() != null) sent = send()
             }
         }
         return sent.onFailure {
