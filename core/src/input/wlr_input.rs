@@ -5,7 +5,7 @@
 //! make `/dev/uinput` root-only, and with no uinput a desktop had no input
 //! at all; any client of the session may use these.
 
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, AsRawFd};
 use std::time::{Duration, Instant};
 
 use wayland_client::globals::registry_queue_init;
@@ -79,9 +79,31 @@ impl Link {
         })
     }
 
-    /// Send what is queued, and dispatch what the compositor sent.
+    /// Send what is queued, read what the compositor sent without waiting
+    /// (so its side of the socket never fills, and an error or a closed
+    /// connection is seen now), and dispatch it.
     fn flush(&mut self) -> std::io::Result<()> {
         self.conn.flush().map_err(io_error)?;
+        if let Some(guard) = self.queue.prepare_read() {
+            let mut poll = libc::pollfd {
+                fd: guard.connection_fd().as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: one valid pollfd, for the length given; no wait.
+            let ready = unsafe { libc::poll(&mut poll, 1, 0) };
+            if ready < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if ready > 0 {
+                match guard.read() {
+                    Ok(_) => {}
+                    Err(wayland_client::backend::WaylandError::Io(e))
+                        if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e) => return Err(io_error(e)),
+                }
+            }
+        }
         self.queue
             .dispatch_pending(&mut State)
             .map_err(std::io::Error::other)?;
