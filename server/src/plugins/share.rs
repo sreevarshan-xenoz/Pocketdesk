@@ -413,16 +413,18 @@ impl Plugin for SharePlugin {
                                 source: source.as_deref(),
                                 store: &store,
                                 limits: partial_limits(),
+                                on_saved: {
+                                    let from = from.clone();
+                                    Box::new(move |path: &Path| on_received(path, size, &from))
+                                },
                             },
                         )
                         .await
                         {
-                            Ok(path) => {
-                                // The bytes are in: give the slot back before the
-                                // bookkeeping, for the phone's next file.
+                            Ok(_) => {
+                                // Placed and recorded (receive_file does it,
+                                // so a superseded attempt still finishes).
                                 drop(slot);
-                                tracing::info!("File received: {} ({size} bytes)", path.display());
-                                on_received(&path, size, &from);
                             }
                             Err(e) => tracing::warn!("File transfer of {name} failed: {e}"),
                         }
@@ -922,6 +924,9 @@ struct Incoming<'a> {
     store: &'a Store,
     /// How much unfinished work is kept; an age of 0 keeps none.
     limits: pocketdesk_core::protocol::partials::Limits,
+    /// Told where the file went once it is in place (the notification and
+    /// the received list), before the phone hears "saved".
+    on_saved: Box<dyn FnOnce(&Path) + Send>,
 }
 
 /// Connect to the phone at `from` and receive one file with the resumable
@@ -944,6 +949,7 @@ async fn receive_file(
         source,
         store,
         limits,
+        on_saved,
     } = incoming;
     if size == 0 || size > MAX_FILE_BYTES {
         return Err(io_error(
@@ -959,7 +965,7 @@ async fn receive_file(
     std::fs::create_dir_all(store.dir()).map_err(|e| io_error("create_dir", e))?;
     let location = format!("{}.part", Store::id(device, &source));
     // In use before the sweep, so the sweep keeps this transfer's own part.
-    let _in_use = InUse::new(&location);
+    let in_use_guard = InUse::new(&location);
     sweep_partials(store, limits);
     let part_path = store.dir().join(&location);
     let record = store
@@ -1028,10 +1034,30 @@ async fn receive_file(
             if offset > 0 {
                 tracing::info!("Continued {name} from {offset} of {size} bytes");
             }
-            let placed = place(&part_path, dir, name).await;
-            forget();
-            transfer::finish(&mut stream, placed.is_ok(), Pace::DEFAULT).await;
-            placed
+            // Its own task: a retry that supersedes this attempt (the phone
+            // gave up waiting while a large copy ran) must not stop the move
+            // half way, nor leave the record of a file already in Downloads.
+            let completion = tokio::spawn({
+                let part_path = part_path.clone();
+                let dir = dir.to_path_buf();
+                let name = name.to_string();
+                let records = Store::new(store.dir().to_path_buf());
+                let device = device.to_string();
+                let source = source.clone();
+                async move {
+                    let _in_use = in_use_guard;
+                    let placed = place(&part_path, &dir, &name).await;
+                    records.remove(&device, &source);
+                    let _ = std::fs::remove_file(&part_path);
+                    if let Ok(path) = &placed {
+                        tracing::info!("File received: {} ({size} bytes)", path.display());
+                        on_saved(path);
+                    }
+                    transfer::finish(&mut stream, placed.is_ok(), Pace::DEFAULT).await;
+                    placed
+                }
+            });
+            completion.await.map_err(|e| io_error("place", e))?
         }
         Err(e) => {
             // Only a broken connection is worth continuing; a changed or
@@ -1377,6 +1403,7 @@ mod tests {
             source,
             store,
             limits: LIMITS,
+            on_saved: Box::new(|_| {}),
         }
     }
 
