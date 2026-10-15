@@ -15,7 +15,7 @@ Sending a document to the phone meant opening a remote-desktop session first.
 - **The mirror:** `live_sessions.json` gains `linked`. It lists each phone holding a control link, in a session or not, and whether files can reach it. They can when one of its links has an address the computer can dial back; an internet-only link (T10a) has none.
 - **Sending:**
   - the desktop app's Files tab and `pocketdesk send` take a phone in a session, or linked with `files`;
-  - `pocketdesk link` takes any linked phone.
+  - `pocketdesk link` still needs a session, since only the session screen shows a link.
 - **The phone:** Settings "Files from the computer in the background" (off by default). The notification listener keeps the control link to the phone's computer, as the clipboard and answers do, and takes each offer on its 5 s tick.
   - Where Android lets it, the download starts at once in the transfer service.
   - Otherwise a notification "The computer sends a file" offers it, and Save starts it.

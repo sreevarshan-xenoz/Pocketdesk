@@ -76,14 +76,6 @@ impl LiveMirror {
                 .iter()
                 .any(|p| p.device_id == device_id && p.files)
     }
-
-    /// Whether anything the server pushes reaches `device_id` now.
-    pub fn reaches(&self, device_id: &str) -> bool {
-        self.sessions
-            .iter()
-            .any(|s| s.device_id.as_deref() == Some(device_id))
-            || self.linked.iter().any(|p| p.device_id == device_id)
-    }
 }
 
 impl LiveMirror {
@@ -272,8 +264,8 @@ mod tests {
         ))
         .unwrap();
         assert!(mirror.files_reach("in-session") && mirror.files_reach("at-home"));
-        assert!(!mirror.files_reach("away") && mirror.reaches("away"));
-        assert!(!mirror.reaches("stranger"));
+        assert!(!mirror.files_reach("away"));
+        assert!(!mirror.files_reach("stranger"));
         // A mirror from before T10d has no `linked`.
         let old = parse_mirror(r#"{"updated_unix":1,"sessions":[]}"#).unwrap();
         assert!(old.linked.is_empty());

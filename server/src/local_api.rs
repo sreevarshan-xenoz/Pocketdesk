@@ -401,10 +401,14 @@ pub fn link_in(state_dir: &Path, query: &str, url: &str, running: bool) -> (Valu
         );
     }
     let now = pocketdesk_core::local::pin::now_unix();
-    if !live_mirror(state_dir, now, true).is_some_and(|m| m.reaches(&device_id)) {
+    // Only a session shows a link on the phone.
+    if !live_sessions(state_dir, now, true)
+        .iter()
+        .any(|s| s.device_id.as_deref() == Some(device_id.as_str()))
+    {
         return (
             error(format!(
-                "{device_id} is not connected: open Pocketdesk on the phone first"
+                "{device_id} is not in a session: open one on the phone first"
             )),
             exit::FAILED,
         );
