@@ -184,7 +184,21 @@ class PhoneNotificationListener : NotificationListenerService() {
         if (note.pkg != packageName && !note.ongoing && !note.otherProfile) {
             PhoneNotificationPrefs.recordSeen(this, note.pkg, note.appLabel)
         }
-        val out = rule.decide(note, enabled = true, shared = PhoneNotificationPrefs.shared(this)) ?: return
+        // What it offers the computer to answer (T10c), part of what is sent.
+        val actions = if (Prefs.answerNotifications(this)) sbn.notification.actions?.toList().orEmpty() else emptyList()
+        val infos = actionInfos(actions)
+        val offered = NotificationActionRule.offered(infos)
+        val reply = NotificationActionRule.replyIndex(infos)?.let { actions[it] }
+        val offer = NotificationActionRule.signature(offered, reply != null)
+        val out = rule.decide(note, enabled = true, shared = PhoneNotificationPrefs.shared(this), offer = offer)
+        if (out == null) {
+            // Nothing new to send; an app that posts again often replaces
+            // its intents, so the ones kept are refreshed.
+            synchronized(answerable) {
+                if (sbn.key in answerable) answerable[sbn.key] = Answerable(byTitle(offered, actions), reply)
+            }
+            return
+        }
         val body =
             JSONObject()
                 .put("id", out.id)
@@ -193,7 +207,7 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("text", out.text)
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
-        if (out.full && Prefs.answerNotifications(this)) offerAnswers(sbn, body)
+        if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
@@ -204,33 +218,50 @@ class PhoneNotificationListener : NotificationListenerService() {
      * Offer the computer [sbn]'s buttons and its reply, if any, in [body],
      * and remember them to run the computer's answer (T10c).
      */
-    private fun offerAnswers(sbn: StatusBarNotification, body: JSONObject) {
-        val actions = sbn.notification.actions?.toList().orEmpty()
-        val infos =
-            actions.map { a ->
-                NotificationActionRule.ActionInfo(
-                    a.title?.toString(),
-                    takesText = a.remoteInputs?.any { it.allowFreeFormInput } == true,
-                )
-            }
-        val offered = NotificationActionRule.offered(infos)
-        val reply = NotificationActionRule.replyIndex(infos)?.let { actions[it] }
-        if (offered.isEmpty() && reply == null) return
-        if (offered.isNotEmpty()) body.put("actions", org.json.JSONArray(offered))
-        if (reply != null) body.put("requestReplyId", sbn.key)
-        val byTitle = offered.associateWith { title -> actions.first { it.title?.toString() == title } }
+    private fun offerAnswers(
+        key: String,
+        body: JSONObject,
+        offered: List<String>,
+        actions: List<Notification.Action>,
+        reply: Notification.Action?,
+    ) {
         synchronized(answerable) {
-            answerable.remove(sbn.key)
-            answerable[sbn.key] = Answerable(byTitle, reply)
+            answerable.remove(key)
+            if (offered.isEmpty() && reply == null) return
+            answerable[key] = Answerable(byTitle(offered, actions), reply)
             while (answerable.size > MAX_ANSWERABLE) answerable.remove(answerable.keys.first())
         }
+        if (offered.isNotEmpty()) body.put("actions", org.json.JSONArray(offered))
+        if (reply != null) body.put("requestReplyId", key)
     }
+
+    /** The offered buttons by title. */
+    private fun byTitle(offered: List<String>, actions: List<Notification.Action>): Map<String, Notification.Action> =
+        offered.associateWith { title -> actions.first { it.title?.toString() == title } }
+
+    /**
+     * What each button is, for [NotificationActionRule]: one that needs the
+     * phone unlocked (Android 12+), has no intent, or offers only fixed
+     * choices is never the computer's to press.
+     */
+    private fun actionInfos(actions: List<Notification.Action>): List<NotificationActionRule.ActionInfo> =
+        actions.map { a ->
+            val inputs = a.remoteInputs
+            val freeForm = inputs?.any { it.allowFreeFormInput } == true
+            val needsUnlock = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && a.isAuthenticationRequired
+            NotificationActionRule.ActionInfo(
+                a.title?.toString(),
+                takesText = freeForm,
+                usable = a.actionIntent != null && !needsUnlock && (inputs.isNullOrEmpty() || freeForm),
+            )
+        }
 
     /** Run the computer's answers that pass [NotificationActionRule.decide]. */
     private fun runAnswers() {
         val own = PhoneLink.target(this)
         // Answers come on the control link: keep one while answering is on.
-        if (Prefs.answerNotifications(this) && own != null && RustCore.controlPeer() == null) {
+        val answering = Prefs.answerNotifications(this) && PhoneNotificationPrefs.enabled(this)
+        if (answering && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
                 answerConnectMs = now
@@ -248,8 +279,8 @@ class PhoneNotificationListener : NotificationListenerService() {
                 }
             var decision =
                 NotificationActionRule.decide(
-                    settingOn = Prefs.answerNotifications(this),
-                    ownComputer = own != null && answer.host == own.address && answer.port == own.controlPort,
+                    settingOn = answering,
+                    ownComputer = NotificationActionRule.fromOwnComputer(answer.host, answer.port, own?.address, own?.controlPort),
                     known = entry != null,
                     offered = offered,
                     withinBudget = true,
@@ -266,7 +297,8 @@ class PhoneNotificationListener : NotificationListenerService() {
                 runCatching {
                     if (answer.message != null) {
                         val action = entry.reply!!
-                        val inputs = action.remoteInputs
+                        // Only the inputs that take free text are filled.
+                        val inputs = action.remoteInputs.filter { it.allowFreeFormInput }.toTypedArray()
                         val results = android.os.Bundle()
                         inputs.forEach { results.putCharSequence(it.resultKey, answer.message) }
                         val fill = Intent()
@@ -306,7 +338,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     /** Whether the user set the lock screen to hide sensitive content. */
     private fun systemHidesSensitive(): Boolean =
         runCatching { Settings.Secure.getInt(contentResolver, "lock_screen_allow_private_notifications", 1) == 0 }
-            .getOrDefault(false)
+            // Unreadable: taken as hiding, so content is never sent the
+            // lock screen might hide.
+            .getOrDefault(true)
 
     private fun toNote(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>): PostedNote {
         val n = sbn.notification

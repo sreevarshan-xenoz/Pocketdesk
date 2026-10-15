@@ -27,6 +27,35 @@ class NotificationActionRuleTest {
     }
 
     @Test
+    fun `a button that needs the phone unlocked, or has nothing to run, is never offered`() {
+        val actions =
+            listOf(
+                NotificationActionRule.ActionInfo("Approve", takesText = false, usable = false),
+                NotificationActionRule.ActionInfo("Reply", takesText = true, usable = false),
+                NotificationActionRule.ActionInfo("Snooze", takesText = false),
+            )
+        assertEquals(listOf("Snooze"), NotificationActionRule.offered(actions))
+        assertNull(NotificationActionRule.replyIndex(actions))
+    }
+
+    @Test
+    fun `answers come only from the computer the phone sends to`() {
+        assertEquals(true, NotificationActionRule.fromOwnComputer("192.0.2.7", 1716, "192.0.2.7", 1716))
+        assertEquals(false, NotificationActionRule.fromOwnComputer("192.0.2.7", 1717, "192.0.2.7", 1716))
+        assertEquals(false, NotificationActionRule.fromOwnComputer("198.51.100.3", 1716, "192.0.2.7", 1716))
+        assertEquals(false, NotificationActionRule.fromOwnComputer("192.0.2.7", 1716, null, null))
+    }
+
+    @Test
+    fun `the signature of what is offered changes with the buttons`() {
+        val a = NotificationActionRule.signature(listOf("Mark as read"), reply = true)
+        assertEquals(a, NotificationActionRule.signature(listOf("Mark as read"), reply = true))
+        assert(a != NotificationActionRule.signature(listOf("Mark as read"), reply = false))
+        assert(a != NotificationActionRule.signature(listOf("Archive"), reply = true))
+        assertEquals("", NotificationActionRule.signature(emptyList(), reply = false))
+    }
+
+    @Test
     fun `an answer runs only when every gate is open`() {
         fun decide(
             on: Boolean = true,

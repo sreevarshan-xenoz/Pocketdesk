@@ -5,8 +5,13 @@ package dev.pocketdesk.android.notify
  * an answer from it runs (T10c). Pure, for JVM tests.
  */
 object NotificationActionRule {
-    /** What a `Notification.Action` is, for the choice: its title and whether it takes text. */
-    data class ActionInfo(val title: String?, val takesText: Boolean)
+    /**
+     * What a `Notification.Action` is, for the choice: its title, whether it
+     * takes typed text, and whether the computer may run it at all ([usable]
+     * is false for one that needs the phone unlocked, has no intent, or
+     * offers only fixed choices).
+     */
+    data class ActionInfo(val title: String?, val takesText: Boolean, val usable: Boolean = true)
 
     /** Buttons offered, at most (core's `MAX_ACTIONS`). */
     const val MAX_ACTIONS = 3
@@ -21,7 +26,7 @@ object NotificationActionRule {
     fun offered(actions: List<ActionInfo>): List<String> =
         actions
             .asSequence()
-            .filter { !it.takesText }
+            .filter { it.usable && !it.takesText }
             .mapNotNull { it.title }
             .filter(::usableTitle)
             .distinct()
@@ -29,7 +34,18 @@ object NotificationActionRule {
             .toList()
 
     /** The index of the first button that takes text, if any. */
-    fun replyIndex(actions: List<ActionInfo>): Int? = actions.indexOfFirst { it.takesText }.takeIf { it >= 0 }
+    fun replyIndex(actions: List<ActionInfo>): Int? = actions.indexOfFirst { it.usable && it.takesText }.takeIf { it >= 0 }
+
+    /** Whether an answer from [host]:[port] is from the computer the phone sends to. */
+    fun fromOwnComputer(host: String, port: Int, ownAddress: String?, ownPort: Int?): Boolean =
+        ownAddress != null && host == ownAddress && port == ownPort
+
+    /**
+     * What a notification offers, as one string: a change to it is a change
+     * to send, even when the title and text stay the same.
+     */
+    fun signature(offered: List<String>, reply: Boolean): String =
+        if (offered.isEmpty() && !reply) "" else offered.joinToString("\u0000") + if (reply) "\u0000reply" else ""
 
     private fun usableTitle(title: String): Boolean =
         title.isNotBlank() && title.length <= MAX_TITLE_CHARS && title.none { it.isISOControl() }

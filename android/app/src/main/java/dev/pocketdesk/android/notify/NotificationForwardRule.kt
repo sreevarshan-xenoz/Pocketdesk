@@ -47,16 +47,21 @@ data class Outgoing(
  */
 class NotificationForwardRule(private val ownPackage: String) {
     // Insertion-ordered, so the oldest is dropped first.
-    private val sent = LinkedHashMap<String, Pair<String, String>>()
+    private val sent = LinkedHashMap<String, Triple<String, String, String>>()
 
-    fun decide(note: PostedNote, enabled: Boolean, shared: Set<String>): Outgoing? {
+    /**
+     * [offer] is what the notification offers the computer to answer
+     * ([NotificationActionRule.signature]): a change to it is sent again,
+     * even when the title and text stay the same.
+     */
+    fun decide(note: PostedNote, enabled: Boolean, shared: Set<String>, offer: String = ""): Outgoing? {
         if (!enabled || note.pkg == ownPackage || note.pkg !in shared) return null
         if (note.ongoing || note.groupSummary || note.localOnly || note.otherProfile) return null
         if (note.visibility == VISIBILITY_SECRET) return null
         val (title, text, full) = shown(note) ?: return null
-        if (sent[note.key] == title to text) return null
+        if (sent[note.key] == Triple(title, text, offer)) return null
         sent.remove(note.key)
-        sent[note.key] = title to text
+        sent[note.key] = Triple(title, text, offer)
         while (sent.size > REMEMBERED) sent.remove(sent.keys.first())
         return Outgoing(note.key, note.appLabel, title, text, note.clearable, full)
     }

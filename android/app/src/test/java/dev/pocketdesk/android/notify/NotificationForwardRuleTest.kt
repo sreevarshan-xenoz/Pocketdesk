@@ -37,6 +37,14 @@ class NotificationForwardRuleTest {
     }
 
     @Test
+    fun anUpdateThatChangesOnlyWhatItOffersIsSentAgain() {
+        val rule = NotificationForwardRule(own)
+        assertTrue(rule.decide(note(), true, chat, offer = "Reply") != null)
+        assertNull(rule.decide(note(), true, chat, offer = "Reply"))
+        assertTrue(rule.decide(note(), true, chat, offer = "Archive") != null)
+    }
+
+    @Test
     fun aNotificationWithACodeReplacedIsNotSentInFull() {
         val rule = NotificationForwardRule(own)
         val out = rule.decide(note(text = "Your verification code is 482913"), enabled = true, shared = chat)!!
