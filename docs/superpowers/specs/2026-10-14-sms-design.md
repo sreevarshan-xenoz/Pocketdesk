@@ -92,3 +92,10 @@ Everything here is the user's to set:
 - **Found on the re-run, fixed:**
   - **Half-open control links.** Three connections in a row were reset on the desktop's side about 20 s after connecting (the cause was not found; a fourth was not), while the phone's socket stayed open. The phone never noticed, so its reply loop never dialed again. Both ends now turn on TCP keepalive (30 s, then every 10 s), so a dead link ends within about a minute.
   - **Silent failures.** A failing reply tick was swallowed, and a panic in the bridge's tasks went to stderr, which Android discards. Both now reach logcat.
+
+## Contact names (T8e, 2026-10-15)
+
+- **What:** with the phone's "Names from my contacts" on (off by default; it asks for contacts access), each forwarded text carries `name`, the sender's name in the phone's contacts (`ContactsContract.PhoneLookup`). The computer keeps it (`Message.name`, one line of 64 characters) unless `sms_names` is off, and the Messages tab and text notifications read "Ann (+1 555 0100)".
+- **Where:** `notify/ContactNames.kt` (`ContactNameRule`, JVM-tested), `Texts.flush`, `TextsSettings`; `core::local::sms` (`name`, `Conversation.name`, `forget_names`); the server's sms plugin; the desktop's Messages tab and Settings.
+- **Fresh review (0 Critical, 3 Important), fixed:** the name was looked up on the main thread where a text arrived and stored with the queued text, so a text queued while the computer was away still went with its name after the switch was turned off (it is now looked up as the text leaves, on the worker); turning `sms_names` off kept the names already stored (they are forgotten at the next start). Minors fixed: sender IDs with letters are not looked up, and names are cut between characters.
+- **Device:** no SIM: the switch and its permission were checked on the A71; receiving is owed (checklist §63).

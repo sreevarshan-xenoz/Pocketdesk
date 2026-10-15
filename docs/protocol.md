@@ -186,7 +186,7 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 | Phone notifications | `kdeconnect.notification` | phone → desktop | `{id, app, title, text, time, isClearable}`, or `{id, isCancel}` | Notifications | `server/src/plugins/notification.rs`, `android/app/.../notify/PhoneNotifications.kt` |
 | Desktop notifications | `kdeconnect.notification` | desktop → phone | The desktop's own notifications `{id, app, title, text, ticker, urgency}`, except Pocketdesk's own | — (sent to every phone that may receive pushes) | `server/src/notification_monitor.rs`, `server/src/service.rs` |
 | Notifications | `kdeconnect.notification.request` | phone → desktop | Request. The reply is an empty `kdeconnect.notification` | Always | `server/src/plugins/notification.rs` |
-| Texts (SMS) | `kdeconnect.sms.messages` | phone → desktop | `{address, body, date, event}` per text | Texts | `server/src/plugins/sms.rs`, `android/app/.../notify/Texts.kt` |
+| Texts (SMS) | `kdeconnect.sms.messages` | phone → desktop | `{address, body, date, event, name?}` per text; `name` is the sender's name from the phone's contacts (T8e), sent only with the phone's "Names from my contacts" on and looked up as the text leaves, kept only with `sms_names` (one line, 64 characters) | Texts | `server/src/plugins/sms.rs`, `android/app/.../notify/Texts.kt` |
 | Texts (SMS) | `kdeconnect.sms.request` | desktop → phone | A reply to send: number and body | — | same |
 | Texts (SMS) | `kdeconnect.pocketdesk.sms_sent` | phone → desktop | `{id, ok, error}` | Texts | same |
 | Battery | `kdeconnect.battery.request` / `kdeconnect.battery` | phone → desktop / back | The desktop's charge, whether it is charging, `noBattery` | Always | `server/src/plugins/battery.rs` |
@@ -387,7 +387,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/phone_media_out/` | The desktop app's presses for a phone's player, one file each, taken within 10 s | Default | `core/src/local/phone_media.rs` |
 | `<state>/phone_status.json` | Each paired phone's last battery report: charge, charging, when it came. Written by the server at most every 5 s; a phone no longer paired is dropped | Default | `core/src/local/phone_status.rs`, `server/src/plugins/phone_battery.rs` |
 | `<state>/links_out/` | Links the app or `pocketdesk link` hands to a phone, one file each, taken within 60 s | Default | `core/src/local/links.rs` |
-| `<state>/sms.json`, `sms_outbox/` | Texts and replies (newest 1000 by default) | Owner-only | `core/src/local/sms.rs` |
+| `<state>/sms.json`, `sms_outbox/` | Texts and replies (newest 1000 by default), with senders' contact names when the phone shares them; `sms_names` off forgets them at the next start | Owner-only | `core/src/local/sms.rs` |
 | `<state>/replies.log` | `<time>\t<notification id>\t<reply text>` for each notification reply | Default | `server/src/plugins/notification_reply.rs` |
 | `<state>/kick`, `kicks/`, `control/` | Requests from the app and CLI to end a session or hand control over | Default | `core/src/local/sessions.rs`, `paths.rs` |
 | `<state>/server.pid` | Server pid | Default | `server/src/state.rs` |
@@ -408,7 +408,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | SharedPreferences `pocketdesk-host` | Saved computers: address, ports, WoL MAC, `wake_info`, wake settings, `wan_identity` (endpoint JSON), monitor, paired flag | `android/app/.../HostStore.kt` |
 | SharedPreferences `pocketdesk-ui` | App settings | `Prefs.kt` |
 | SharedPreferences `pocketdesk-phone-notifications` | On/off, the opted-in app list, seen ids | `notify/PhoneNotifications.kt` |
-| SharedPreferences `pocketdesk-texts` | On/off, and up to 200 texts queued while the computer is away, with send tracking | `notify/Texts.kt` |
+| SharedPreferences `pocketdesk-texts` | On/off (show, reply, names), and up to 200 texts queued while the computer is away (without names: a name is looked up as a text leaves), with send tracking | `notify/Texts.kt` |
 | `cache/share`, `cache/clipboard`, `cache/clipboard-out` | Files being shared, clipboard images | `service/TransferService.kt`, `ui/ClipboardImages.kt` |
 | MediaStore `Downloads/Pocketdesk` (shared storage) | Files received from the desktop | `service/DownloadTarget.kt` |
 

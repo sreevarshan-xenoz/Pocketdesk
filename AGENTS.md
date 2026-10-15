@@ -42,6 +42,10 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T8e, contact names in texts (branch `feat/contact-names`; as-built in `docs/superpowers/specs/2026-10-14-sms-design.md`).**
+  - **How:** the phone's "Names from my contacts" (off; asks for contacts access) sends each forwarded text's sender name from its contacts, looked up as the text leaves; the computer keeps it unless `sms_names` is off (which also forgets kept names at the next start) and shows "Ann (number)" in Messages and notifications.
+  - **Fresh review (0 Critical, 3 Important), fixed:** a main-thread lookup, names sent after the switch was turned off, and kept names surviving `sms_names` off. SECURITY.md limit 11.
+  - **Device:** no SIM; the switch and permission checked on the A71. Owed: checklist §63.
 - 2026-10-15: **T9c, a mouse on the phone (branch `feat/pointer-capture`; spec as T9a's).**
   - **How:** a USB/Bluetooth mouse connected to the phone is captured by the session (`requestPointerCapture`), its relative motion, buttons and wheel sent as the trackpad's outputs (`CapturedMouse`, JVM-tested); the handler follows focus; Settings "Use a connected mouse on the computer".
   - **Fresh review (0 Critical, 4 Important), fixed:** dead after the keyboard took focus, batched samples dropped, a capture left over Home, the mouse's Back ending the session.
