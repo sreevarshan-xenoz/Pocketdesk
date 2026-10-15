@@ -13,11 +13,26 @@
 # it was built.
 set -eu
 
-here=$(cd "$(dirname "$0")" && pwd)
-root=$(cd "$here/../.." && pwd)
+# Physical paths: rustc sees them, not a symlink's.
+here=$(cd "$(dirname "$0")" && pwd -P)
+root=$(cd "$here/../.." && pwd -P)
 out="$here/../app/src/main/jniLibs"
 toolchain=${POCKETDESK_RUST_TOOLCHAIN:-$(cat "$here/rust-toolchain-version")}
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
+
+# The NDK: CI and F-Droid must use the pinned one (ANDROID_NDK_HOME); a
+# developer may build with another, and is told so.
+ndk=$(cat "$here/ndk-version")
+case "${ANDROID_NDK_HOME:-}" in
+    *"$ndk") ;;
+    *)
+        if [ "${CI:-}" = true ]; then
+            echo "ANDROID_NDK_HOME must be the pinned NDK $ndk, not '${ANDROID_NDK_HOME:-}'" >&2
+            exit 1
+        fi
+        echo "note: not the pinned NDK $ndk (ANDROID_NDK_HOME='${ANDROID_NDK_HOME:-}'): fine for development, not for a release" >&2
+        ;;
+esac
 
 export RUSTUP_TOOLCHAIN="$toolchain"
 # The toolchain's own sources (std, inlined into the library) live under it.
@@ -32,7 +47,10 @@ fi
 
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 export CARGO_PROFILE_RELEASE_STRIP=symbols
-export RUSTFLAGS="--remap-path-prefix=$root=/pocketdesk --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$sysroot=/rust -C link-arg=-Wl,--build-id=none ${RUSTFLAGS:-}"
+# rustc applies the last mapping that matches, so the checkout comes last:
+# it wins even when it lies inside Cargo's home. Flags of the caller's go
+# first, so they cannot undo these.
+export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$sysroot=/rust --remap-path-prefix=$root=/pocketdesk -C link-arg=-Wl,--build-id=none"
 
 rm -rf "$out/arm64-v8a"
 cd "$here"
