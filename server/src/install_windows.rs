@@ -331,6 +331,13 @@ pub fn install(elevated: bool) -> Result<()> {
         }
     }
 
+    // "Send to phone" in Explorer's Send To menu (T10e).
+    use pocketdesk_core::local::send_menu;
+    match send_menu::data_dir().and_then(|data| send_menu::install_in(&data, &exe)) {
+        Ok(()) => println!("Added \"{}\" to Explorer's Send To menu", send_menu::LABEL),
+        Err(e) => println!("\"{}\" was not added to Send To ({e})", send_menu::LABEL),
+    }
+
     match unsafe { task.Run(&none) } {
         Ok(_) => println!("Started Pocketdesk; it will start again at every logon"),
         Err(e) => {
@@ -366,6 +373,16 @@ pub fn uninstall() -> Result<()> {
         Ok(0) => println!("Removed the firewall rules"),
         Ok(code) => println!("Firewall rules were not removed (helper exited {code})"),
         Err(e) => println!("Firewall rules were not removed ({e:#})"),
+    }
+    use pocketdesk_core::local::send_menu;
+    if send_menu::data_dir()
+        .and_then(|data| send_menu::remove_in(&data))
+        .is_ok()
+    {
+        println!(
+            "Removed \"{}\" from Explorer's Send To menu",
+            send_menu::LABEL
+        );
     }
     let subkey = HSTRING::from(r"Software\Classes\AppUserModelId\Pocketdesk.Server");
     let _ = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, &subkey) };
