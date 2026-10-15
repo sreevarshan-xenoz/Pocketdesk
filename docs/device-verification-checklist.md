@@ -1234,6 +1234,7 @@ On the A71 against this box, 2026-10-16:
 - [x] Settings "Send new screenshots" asked for photo access and turned on.
 - [x] A screenshot (`input keyevent 120`, the app in the background) landed on the computer's clipboard (1080x2400) and in Downloads, MD5s matching.
 - [x] An image added under `DCIM/Camera` was not sent; with the switch off, a new screenshot was not sent.
+- [x] After the review fixes: a screenshot taken with the server stopped waited, and arrived about 20 s after it started (MD5s matching); revoking photo access turned the switch off.
 
 Owed:
 - [ ] A screenshot with the side keys, and a JPEG screenshot (One UI's other format).
