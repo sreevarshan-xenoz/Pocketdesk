@@ -44,7 +44,8 @@ The detailed build journal lives in `git log` — one conventional commit per lo
 
 - 2026-10-15: **T3 continued, the F-Droid build (branch `feat/fdroid-build`; plan `docs/research/2026-10-14-fdroid.md`).**
   - **One build of the bridge:** `android/bridge/build-android.sh` (Rust pinned in `rust-toolchain-version`, NDK in `ndk-version`, `--locked`, one codegen unit, stripped, paths mapped away), used by CI and releases; on this box run it with `POCKETDESK_RUST_TOOLCHAIN=stable-x86_64-pc-windows-gnu`. Two builds from different folders gave identical bytes; the release APK went 106 → 62 MB with the stripped library.
-  - **Release signing** keeps AGP's 16 KB alignment (no `zipalign -f 4`), checked by `zipalign -c -P 16`.
+  - **Release signing** keeps AGP's layout: no `zipalign -f 4`, and `apksigner --alignment-preserved true` (by default build-tools 35+ re-aligns with its own padding, moving 458 of 474 entries); the workflow checks every entry against AGP's unsigned APK.
+  - **Fresh review (0 Critical, 2 Important), fixed:** that re-alignment, and a store listing that claimed "nothing in between" without saying what relays and DHT nodes see (IPs, who talks to whom); plus the remap order, caller flags, physical paths and the NDK pin enforced in CI.
   - **Store listing** in `fastlane/metadata/android/en-US/` (screenshots owed).
   - **Owed:** a cross-machine reproducibility check, `baseline.prof`, screenshots, a tagged release (the user's call), developer verification, the fdroiddata recipe.
 - 2026-10-15: **A slow or lossy link no longer ends every session (PR #55, merged).
