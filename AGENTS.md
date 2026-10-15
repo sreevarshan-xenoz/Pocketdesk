@@ -42,6 +42,10 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-16: **F4, typing any character on Linux (branch `feat/linux-typing`).**
+  - **How:** on wlroots compositors the server types text through `zwp_virtual_keyboard_v1`, uploading a keymap with one key per character as wtype does (`core::input::{xkb_keymap, vkeyboard}`), so accents, other scripts and emoji arrive on any layout. Elsewhere uinput now holds Shift for capitals and shifted symbols (roadmap 2666).
+  - **Fresh review (0 Critical, 2 Important), fixed:** a failure mid-text retyped what had gone out, and the Wayland waits had no deadline on the input task; plus a cached failed connect, CRLF, keymap re-uploads and key times.
+  - **Checked on the Azure VM (Sway) from the A71:** `Héllo Wörld € 😀 தமிழ் ABC!` typed into `wev`. The Linux module was type-checked here in a scratch crate and built by CI. Owed: checklist §68, and text without uinput access (found: no injector at all then).
 - 2026-10-16: **v0.2.0 released** (tag on `bd6e7a8`, the commit the dry run verified): the Android APK (release-signed), the Windows zip and the Linux tar.gz with `SHA256SUMS`. Checked before the tag: the sums, the APK's signer, `pocketdesk --version` and the APK's `versionName` 0.2.0, and the Linux build's desktop notification on the Azure VM (the notify-send fix).
 - 2026-10-16: **T10e, "Send to phone" in the file manager (branch `feat/send-menu`; spec `docs/superpowers/specs/2026-10-16-send-menu-design.md`).**
   - **How:** `pocketdesk send-to-phone <paths…>` sends to the phone files reach now (a session first, else linked at home) and reports in a desktop notification. `pocketdesk send-menu [--remove]` (and Windows `install` / `uninstall`, and the desktop app's Settings) adds Explorer's Send To shortcut, or Nautilus/Nemo scripts and a Dolphin service menu (`core::local::send_menu`).

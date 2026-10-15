@@ -232,6 +232,61 @@ pub struct InputInjector {
     /// Button mask of the previous `Gamepad` packet. That packet is a state
     /// snapshot, so every bit must be treated as an edge (see 2063).
     gamepad_buttons: u16,
+    /// The compositor's virtual keyboard for text (roadmap F4): not tried
+    /// yet (`None`), not offered (`Some(None)`), or ready.
+    #[cfg(target_os = "linux")]
+    vkeyboard: VkState,
+}
+
+/// The compositor's virtual keyboard for text (roadmap F4).
+#[cfg(target_os = "linux")]
+enum VkState {
+    Untried,
+    Ready(pocketdesk_core::input::vkeyboard::VirtualKeyboard),
+    /// The compositor does not offer one (GNOME, KDE).
+    Unsupported,
+    /// Connecting or typing failed: tried again after this.
+    RetryAfter(std::time::Instant),
+}
+
+#[cfg(target_os = "linux")]
+impl VkState {
+    /// How long a failed virtual keyboard rests before it is tried again.
+    const RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+    fn retry_later() -> Self {
+        VkState::RetryAfter(std::time::Instant::now() + Self::RETRY)
+    }
+
+    /// The keyboard, connecting first when it is time to.
+    fn ready(&mut self) -> Option<&mut pocketdesk_core::input::vkeyboard::VirtualKeyboard> {
+        use pocketdesk_core::input::vkeyboard::{ConnectError, VirtualKeyboard};
+        let due = match self {
+            VkState::Untried => true,
+            VkState::RetryAfter(at) => std::time::Instant::now() >= *at,
+            VkState::Ready(_) | VkState::Unsupported => false,
+        };
+        if due {
+            *self = match VirtualKeyboard::connect() {
+                Ok(vk) => {
+                    info!("Text is typed through the compositor's virtual keyboard");
+                    VkState::Ready(vk)
+                }
+                Err(ConnectError::Unsupported) => {
+                    info!("No virtual keyboard: text is typed as US-layout keys");
+                    VkState::Unsupported
+                }
+                Err(ConnectError::Failed(e)) => {
+                    warn!("Virtual keyboard unavailable for now: {e}");
+                    Self::retry_later()
+                }
+            };
+        }
+        match self {
+            VkState::Ready(vk) => Some(vk),
+            _ => None,
+        }
+    }
 }
 
 /// What a gamepad button bit stands for on the desktop. The gamepad is a wire
@@ -331,6 +386,8 @@ impl InputInjector {
                 return Ok(Self {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
+                    #[cfg(target_os = "linux")]
+                    vkeyboard: VkState::Untried,
                 });
             }
             Err(e) => e,
@@ -375,6 +432,7 @@ impl InputInjector {
                 abs: Some(build_abs_device()?),
             })),
             gamepad_buttons: 0,
+            vkeyboard: VkState::Untried,
         })
     }
 
@@ -577,18 +635,50 @@ impl InputInjector {
             }
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
-                // For uinput, fall back to keycode simulation for ASCII.
-                // This is a best-effort approach and does not handle Unicode.
+                // Any character, whatever the layout, where the compositor
+                // offers a virtual keyboard (wlroots: Sway, Hyprland; F4).
+                let mut rest = std::borrow::Cow::Borrowed(text);
+                if let Some(vk) = self.vkeyboard.ready() {
+                    match vk.type_text(text) {
+                        Ok(()) => return Ok(()),
+                        Err((sent, e)) => {
+                            // What went out is not typed again; the rest goes
+                            // as keys, and the keyboard is tried again later.
+                            warn!("Virtual keyboard failed, typing the rest as keys: {e}");
+                            self.vkeyboard = VkState::retry_later();
+                            rest = std::borrow::Cow::Owned(
+                                text.chars()
+                                    .filter(|&c| {
+                                        pocketdesk_core::input::xkb_keymap::keysym_name(c).is_some()
+                                    })
+                                    .skip(sent)
+                                    .collect(),
+                            );
+                        }
+                    }
+                }
+                // Otherwise keycodes for what a US layout types, Shift
+                // included; other characters cannot be typed this way.
                 let guard = state.get_mut().unwrap();
-                for ch in text.chars() {
-                    if let Some(keycode) = char_to_keycode(ch) {
+                for ch in rest.chars() {
+                    if let Some((keycode, shift)) = char_to_key(ch) {
                         let key = KeyCode(keycode);
-                        let events = [
+                        let shift_key = KeyCode::KEY_LEFTSHIFT.0;
+                        let mut events = Vec::with_capacity(8);
+                        if shift {
+                            events.push(InputEvent::new(EV_KEY, shift_key, 1));
+                            events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
+                        }
+                        events.extend([
                             InputEvent::new(EV_KEY, key.0, 1), // press
                             InputEvent::new(EV_SYN, SYN_REPORT, 0),
                             InputEvent::new(EV_KEY, key.0, 0), // release
                             InputEvent::new(EV_SYN, SYN_REPORT, 0),
-                        ];
+                        ]);
+                        if shift {
+                            events.push(InputEvent::new(EV_KEY, shift_key, 0));
+                            events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
+                        }
                         emit_uinput(guard, UinputDevice::Main, &events, "text input")?;
                     } else {
                         debug!("Cannot type character with uinput: {ch:?}");
@@ -1038,6 +1128,39 @@ fn key_to_evdev(key: Key) -> KeyCode {
     }
 }
 
+/// The key and whether Shift is held, on a US layout, for `ch`: capitals and
+/// the shifted symbols on their unshifted keys (roadmap 2666), the rest as
+/// [`char_to_keycode`] names them.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn char_to_key(ch: char) -> Option<(u16, bool)> {
+    if ch.is_ascii_uppercase() {
+        return char_to_keycode(ch.to_ascii_lowercase()).map(|code| (code, true));
+    }
+    let base = match ch {
+        '!' => '1',
+        '@' => '2',
+        '#' => '3',
+        '$' => '4',
+        '%' => '5',
+        '^' => '6',
+        '&' => '7',
+        '(' => '9',
+        ')' => '0',
+        '_' => '-',
+        '{' => '[',
+        '}' => ']',
+        '|' => '\\',
+        ':' => ';',
+        '"' => '\'',
+        '<' => ',',
+        '>' => '.',
+        '?' => '/',
+        '~' => '`',
+        _ => return char_to_keycode(ch).map(|code| (code, false)),
+    };
+    char_to_keycode(base).map(|code| (code, true))
+}
+
 /// Map a character to the Linux evdev keycode that produces it.
 ///
 /// Reads [`KEYCODE_MAP`] so the table stays the one place a character's key is
@@ -1101,6 +1224,24 @@ pub fn key_name_to_enigo_key(key: &str) -> Key {
                 Key::Unicode('?')
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod shifted_text_tests {
+    use super::*;
+
+    #[test]
+    fn capitals_and_shifted_symbols_hold_shift_on_their_key() {
+        assert_eq!(char_to_key('a'), Some((KeyCode::KEY_A.0, false)));
+        assert_eq!(char_to_key('A'), Some((KeyCode::KEY_A.0, true)));
+        assert_eq!(char_to_key('!'), Some((KeyCode::KEY_1.0, true)));
+        assert_eq!(char_to_key('?'), Some((KeyCode::KEY_SLASH.0, true)));
+        assert_eq!(char_to_key('"'), Some((KeyCode::KEY_APOSTROPHE.0, true)));
+        assert_eq!(char_to_key('|'), Some((KeyCode::KEY_BACKSLASH.0, true)));
+        assert_eq!(char_to_key('/'), Some((KeyCode::KEY_SLASH.0, false)));
+        assert_eq!(char_to_key(' '), Some((KeyCode::KEY_SPACE.0, false)));
+        assert_eq!(char_to_key('é'), None, "not on a US keyboard");
     }
 }
 

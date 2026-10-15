@@ -24,7 +24,7 @@ capture = [
     "wayland-portal",
 ]
 encode = ["dep:ffmpeg-sidecar", "dep:ffmpeg-next"]
-injection = ["dep:evdev"]
+injection = ["dep:evdev", "dep:wayland-client", "dep:wayland-protocols-misc"]
 wayland-portal = ["ashpd?/screencast"]
 x11-capture = ["dep:xcap"]
 
@@ -123,6 +123,8 @@ bitflags = { version = "2", optional = true }
 ffmpeg-next = { workspace = true, optional = true }
 # Input injection via uinput
 evdev = { workspace = true, optional = true }
+# F4: wlroots' virtual keyboard, to type any character.
+wayland-protocols-misc = { version = "0.3", features = ["client"], optional = true }
 
 # Windows: capture backends, and owner-only file ACLs (secure_fs) on every
 # Windows build.
