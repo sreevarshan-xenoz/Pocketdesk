@@ -59,13 +59,19 @@ impl Command {
     }
 }
 
-/// `text` without control characters, trimmed, at most [`MAX_TEXT`]
-/// characters.
+/// `text` on one line: control characters (line breaks among them) become
+/// spaces, runs of spaces one, invisible format characters (a right-to-left
+/// override, zero-width ones) go; at most [`MAX_TEXT`] characters.
 pub fn clean(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control())
-        .collect::<String>()
-        .trim()
+    let spaced: String = text
+        .chars()
+        .filter(|c| !pocketdesk_core::protocol::kdeconnect::is_invisible_format(*c))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    spaced
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
         .chars()
         .take(MAX_TEXT)
         .collect()
@@ -128,7 +134,7 @@ mod tests {
     fn what_is_playing_is_sent_cleaned_and_nothing_is_null() {
         assert_eq!(answer(None), json!({"ok": true, "playing": null}));
         let playing = NowPlaying {
-            title: " Song\u{7}\nTitle ".to_string(),
+            title: " Song\u{7}\nTitle\u{202e} x ".to_string(),
             artist: "A".repeat(300),
             app: "Spotify.exe".to_string(),
             is_playing: true,
@@ -138,7 +144,10 @@ mod tests {
         };
         let sent = answer(Some(playing));
         assert_eq!(sent["ok"], true);
-        assert_eq!(sent["playing"]["title"], "SongTitle");
+        assert_eq!(
+            sent["playing"]["title"], "Song Title x",
+            "lines become spaces"
+        );
         assert_eq!(
             sent["playing"]["artist"].as_str().unwrap().chars().count(),
             MAX_TEXT
