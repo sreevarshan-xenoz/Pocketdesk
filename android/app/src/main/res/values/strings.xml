@@ -36,6 +36,7 @@
     <string name="settings_auto_reconnect_summary">When the link drops (the computer restarts its server, wakes up, or the network returns), try again for 10 minutes</string>
     <string name="settings_others_choose">Let other apps choose a computer</string>
     <string name="settings_others_choose_summary">An automation app (Tasker and the like) may name which saved computer its share goes to. Off: shares go to the last computer used</string>
+    <string name="share_not_content">Only files another app shares can be sent, not a path to one</string>
     <string name="share_not_saved">No saved computer has that address</string>
     <string name="share_choosing_off">Other apps may not choose a computer: turn it on in Pocketdesk\'s Settings</string>
     <string name="settings_retry_transfers">Retry failed files</string>

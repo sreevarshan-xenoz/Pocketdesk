@@ -2,6 +2,8 @@ package dev.pocketdesk.android.shortcuts
 
 import dev.pocketdesk.android.HostStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -63,6 +65,15 @@ class ShortcutPlanTest {
         )
         assertEquals(ShortcutPlan.Share.NotSaved, share("", hosts, true))
         assertEquals(ShortcutPlan.Share.NoneSaved, share(null, emptyList(), true))
+    }
+
+    @Test
+    fun onlyFilesAnotherAppSharesAreSentNeverAPathItNames() {
+        assertTrue(ShortcutPlan.shareable(listOf("content", "content")))
+        // A file:// path is opened with this app's own rights: its keys.
+        assertFalse(ShortcutPlan.shareable(listOf("content", "file")))
+        assertFalse(ShortcutPlan.shareable(listOf("android.resource")))
+        assertFalse(ShortcutPlan.shareable(listOf(null)))
     }
 
     @Test

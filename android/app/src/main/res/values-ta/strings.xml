@@ -29,6 +29,7 @@
     <string name="settings_auto_reconnect_summary">இணைப்பு துண்டிக்கப்பட்டால் (கணினி தன் சேவையகத்தை மீண்டும் தொடங்கினால், விழித்தெழுந்தால், அல்லது பிணையம் திரும்பினால்) 10 நிமிடங்கள் மீண்டும் முயலும்</string>
     <string name="settings_others_choose">பிற செயலிகள் கணினியைத் தேர்ந்தெடுக்க அனுமதி</string>
     <string name="settings_others_choose_summary">தானியக்கச் செயலி (Tasker போன்றவை) தன் பகிர்வு எந்தச் சேமித்த கணினிக்குச் செல்ல வேண்டும் எனக் குறிப்பிடலாம். அணைத்தால்: கடைசியாகப் பயன்படுத்திய கணினிக்குச் செல்லும்</string>
+    <string name="share_not_content">பிற செயலி பகிரும் கோப்புகளை மட்டுமே அனுப்ப முடியும், கோப்பின் பாதையை அல்ல</string>
     <string name="share_not_saved">அந்த முகவரியுடன் சேமித்த கணினி இல்லை</string>
     <string name="share_choosing_off">பிற செயலிகள் கணினியைத் தேர்ந்தெடுக்க முடியாது: Pocketdesk அமைப்புகளில் இதை இயக்கவும்</string>
     <string name="settings_retry_transfers">தோல்வியுற்ற கோப்புகளை மீண்டும் அனுப்பு</string>

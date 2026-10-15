@@ -46,7 +46,7 @@ Without the address, the text goes to the last computer used. Naming a computer 
 | Type | the file's type, or `*/*` |
 | Extras | `android.intent.extra.STREAM` = the file's `content://` URI, with read permission granted; `dev.pocketdesk.android.extra.ADDRESS` = the computer (optional, as for text) |
 
-The files land in the computer's Downloads, each resumable, as a share from any app does. The automation app must grant read access to the URI (Tasker: tick "Grant read permission"); a `file://` path is refused by Android.
+The files land in the computer's Downloads, each resumable, as a share from any app does. The automation app must grant read access to the URI (Tasker: tick "Grant read permission"). Only `content://` URIs are taken: a share naming a `file://` path is refused, since the app would open it with its own rights.
 
 ## What to expect
 

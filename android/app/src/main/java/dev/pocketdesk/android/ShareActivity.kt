@@ -53,6 +53,8 @@ class ShareActivity : ComponentActivity() {
         val text =
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
         when {
+            uris.isNotEmpty() && !ShortcutPlan.shareable(uris.map { it.scheme }) ->
+                done(getString(R.string.share_not_content))
             uris.isNotEmpty() -> {
                 // The service reads the files under this screen's grant. A
                 // share that gave no permission to read them (the sender

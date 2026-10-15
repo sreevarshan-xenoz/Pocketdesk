@@ -33,6 +33,13 @@ object ShortcutPlan {
     fun savedHost(address: String?, hosts: List<HostStore.Host>): HostStore.Host? =
         address?.let { wanted -> hosts.firstOrNull { it.address == wanted } }
 
+    /**
+     * Whether files shared with these URI [schemes] may be sent: only what
+     * another app shares through a provider (`content`). A `file` path is
+     * opened with this app's own rights, which reach its keys and pairings.
+     */
+    fun shareable(schemes: List<String?>): Boolean = schemes.all { it == "content" }
+
     /** Where a share goes, or why it goes nowhere. */
     sealed interface Share {
         data class To(val host: HostStore.Host) : Share
