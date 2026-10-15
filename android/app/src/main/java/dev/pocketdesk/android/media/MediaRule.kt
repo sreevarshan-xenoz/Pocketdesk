@@ -29,6 +29,9 @@ object MediaRule {
     /** Whether [now] must be sent after [sent]: a change, or `{}` once when playing stops. */
     fun shouldSend(sent: Sent, now: Media?): Boolean = if (sent.any) now != sent.last else now != null
 
+    /** What was sent, as far as a computer [linked] (or not) still knows it. */
+    fun forLink(sent: Sent, linked: Boolean): Sent = if (linked) sent else Sent()
+
     /** Whether a press for [command] is acted on. */
     fun accepts(command: String, settingOn: Boolean): Boolean = settingOn && command in COMMANDS
 }

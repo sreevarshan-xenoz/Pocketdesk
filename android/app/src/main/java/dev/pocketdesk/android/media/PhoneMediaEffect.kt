@@ -44,18 +44,26 @@ fun PhoneMediaEffect(address: String, controlPort: Int) {
                 withContext(Dispatchers.IO) {
                     val on = Prefs.phoneMediaOnComputer(context) &&
                         PhoneNotificationPrefs.accessGranted(context)
+                    val linked = !ControlLink.needsConnect(RustCore.controlPeer(), address, controlPort)
+                    // A computer reached again (a restart, a dropped link)
+                    // knows nothing of what was sent: it hears it again.
+                    sent = MediaRule.forLink(sent, linked)
                     val presses = RustCore.takeMediaPresses()
-                    val controllers = if (on) controllers(context) else emptyList()
+                    var controllers = if (on) controllers(context) else emptyList()
                     // Presses act on the session reported, the one the computer shows.
                     for (command in presses) {
                         if (!MediaRule.accepts(command, on)) continue
                         val target = sent.last?.packageName ?: continue
                         controllers.firstOrNull { it.packageName == target }?.let { press(it, command) }
                     }
-                    val linked = !ControlLink.needsConnect(RustCore.controlPeer(), address, controlPort)
-                    if (on && linked) {
-                        if (presses.isNotEmpty()) delay(300) // the player's new state
-                        val now = MediaRule.pick(controllers(context).mapNotNull { describe(context, it) })
+                    if (linked) {
+                        if (on && presses.isNotEmpty()) {
+                            delay(300) // the player's new state
+                            controllers = controllers(context)
+                        }
+                        // With the setting off, `{}` once, so the computer
+                        // forgets the song it shows.
+                        val now = if (on) MediaRule.pick(controllers.mapNotNull { describe(context, it) }) else null
                         if (MediaRule.shouldSend(sent, now)) {
                             val body = now?.let { json(it) } ?: JSONObject()
                             val result = RustCore.sendPhonePacket(address, controlPort, PHONE_MEDIA, body.toString())

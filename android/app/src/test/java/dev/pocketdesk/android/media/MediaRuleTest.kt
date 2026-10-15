@@ -42,6 +42,16 @@ class MediaRuleTest {
     }
 
     @Test
+    fun aLostLinkForgetsWhatWasSentSoTheNextLinkHearsItAgain() {
+        val song = media("Spotify", playing = true)
+        val sent = MediaRule.Sent(any = true, last = song)
+        assertEquals(sent, MediaRule.forLink(sent, linked = true))
+        // A computer restarted, or reached again, knows nothing: say it again.
+        val afresh = MediaRule.forLink(sent, linked = false)
+        assertTrue(MediaRule.shouldSend(afresh, song))
+    }
+
+    @Test
     fun aPressActsOnlyWithTheSettingOnAndOnlyForTheThreeCommands() {
         assertTrue(MediaRule.accepts("playPause", settingOn = true))
         assertTrue(MediaRule.accepts("next", settingOn = true))
