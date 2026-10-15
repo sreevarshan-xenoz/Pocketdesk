@@ -534,8 +534,17 @@ async fn deliver_folder(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Folder".to_string());
+    // The phone takes a send's id as 32 hex digits; the outbox's has hyphens.
+    let folder_id = request.id.replace('-', "");
     let found = folder_files(&root);
+    // A folder whose own name the phone cannot make is refused, not sent
+    // flat or renamed.
+    let name_problem = pocketdesk_core::protocol::relpath::component_problem(&folder);
     let checked = match &found {
+        _ if name_problem.is_some() => Err(format!(
+            "the folder's name: {}",
+            name_problem.clone().unwrap_or_default()
+        )),
         Ok(found) if found.files.is_empty() => Err("the folder has nothing to send".to_string()),
         Ok(_) => phone_for(&request, clients, store).map_err(str::to_string),
         Err(reason) => Err(reason.clone()),
@@ -588,7 +597,7 @@ async fn deliver_folder(
             "name": file.path.last(),
             "size": file.size,
             "source": source_of(&file.full, file.size),
-            "folderId": request.id,
+            "folderId": folder_id,
             "folder": folder,
             "path": file.path,
         }));
@@ -948,7 +957,11 @@ mod tests {
 
         let pushed = tcp.sent.lock().unwrap().clone();
         assert_eq!(pushed.len(), 2);
-        assert_eq!(pushed[0].body["folderId"], sent_request.id);
+        // The id the phone takes: 32 hex digits, whatever the outbox's is.
+        let folder_id = pushed[0].body["folderId"].as_str().unwrap();
+        assert_eq!(folder_id.len(), 32, "{folder_id}");
+        assert!(folder_id.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(folder_id, sent_request.id.replace('-', ""));
         assert_eq!(pushed[0].body["folder"], "Trip");
         assert_eq!(
             pushed[0].body["path"],
