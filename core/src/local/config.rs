@@ -79,6 +79,10 @@ pub struct Config {
     /// off, it is shown as a notification instead.
     #[serde(default = "default_true")]
     pub open_links: bool,
+    /// A notification when a phone in a session reports a low battery
+    /// (roadmap T8b).
+    #[serde(default = "default_true")]
+    pub phone_battery_alerts: bool,
     /// Tell paired phones how to wake this computer: its adapter's MAC and
     /// broadcast address (roadmap N6).
     #[serde(default = "default_true")]
@@ -194,6 +198,7 @@ impl Default for Config {
             sms_notify: true,
             sms_keep: default_sms_keep(),
             open_links: true,
+            phone_battery_alerts: true,
             wake_announce: true,
             wake_port: 0,
             input_control: InputControlMode::One,
@@ -353,6 +358,7 @@ impl Config {
         "notifications_per_minute",
         "sms_notify",
         "open_links",
+        "phone_battery_alerts",
         "sms_keep",
         "wake_announce",
         "wake_port",
@@ -495,6 +501,16 @@ mod tests {
         let back = Config::load_from(&path).unwrap();
         assert!(!back.wake_announce);
         assert_eq!(back.wake_port, 40009);
+    }
+
+    #[test]
+    fn low_battery_warnings_are_on_by_default_and_the_choice_saves() {
+        assert!(Config::default().phone_battery_alerts);
+        let path = temp("battery-alerts");
+        let mut config = Config::load_from(&path).unwrap();
+        config.phone_battery_alerts = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().phone_battery_alerts);
     }
 
     #[test]
