@@ -125,6 +125,10 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val phoneFiles by lazy { dev.pocketdesk.android.files.PhoneFiles(applicationContext) }
     private val phoneFilesTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /** New screenshots to the computer (T10h), on a 2 s tick of their own: a send takes seconds. */
+    private val screenshots by lazy { dev.pocketdesk.android.files.Screenshots(applicationContext) }
+    private val screenshotsTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+
     override fun onCreate() {
         super.onCreate()
         rule = NotificationForwardRule(packageName)
@@ -155,6 +159,12 @@ class PhoneNotificationListener : NotificationListenerService() {
             2,
             TimeUnit.SECONDS,
         )
+        screenshotsTicker.scheduleWithFixedDelay(
+            { runCatching { screenshots.tick() }.onFailure { Log.w("PhoneNotifications", "screenshots failed", it) } },
+            2,
+            2,
+            TimeUnit.SECONDS,
+        )
         clipboardTicker.scheduleWithFixedDelay(
             {
                 runCatching { clipboard.tick() }.onFailure { Log.w("PhoneNotifications", "clipboard tick failed", it) }
@@ -169,6 +179,8 @@ class PhoneNotificationListener : NotificationListenerService() {
     override fun onDestroy() {
         answerTicker.shutdownNow()
         phoneFilesTicker.shutdownNow()
+        screenshotsTicker.shutdownNow()
+        screenshots.close()
         clipboardTicker.shutdownNow()
         replyTicker.shutdownNow()
         super.onDestroy()

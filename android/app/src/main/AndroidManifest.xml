@@ -16,6 +16,13 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <!-- T8e: a forwarded text's sender name, only with "Names from my contacts" on. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- T10h: new screenshots to the computer, only while that switch is on. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Android 14+: "selected photos only" is handled; Settings asks for all photos, as new screenshots need. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <!-- Texts are optional: the app installs on tablets and phones without a
          SIM, and simply has nothing to forward there. -->

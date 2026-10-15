@@ -152,9 +152,13 @@ object ClipboardImages {
         null
     }.onFailure { Log.w(TAG, "could not read the clipboard image", it) }.getOrNull()
 
-    /** Send [png] from a file (the bridge reads a path), and remove the file after. */
+    /**
+     * Send [png] from a file (the bridge reads a path), and remove the file
+     * after. Each send its own file: a session's sync and a screenshot
+     * (T10h) may stage at once.
+     */
     fun <T> withStaged(ctx: Context, png: ByteArray, send: (File) -> T): T {
-        val file = File(ctx.cacheDir, "clipboard-out").apply { mkdirs() }.resolve("out.png")
+        val file = File.createTempFile("out", ".png", File(ctx.cacheDir, "clipboard-out").apply { mkdirs() })
         file.writeBytes(png)
         try {
             return send(file)
