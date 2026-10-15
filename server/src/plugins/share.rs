@@ -631,8 +631,6 @@ impl Plugin for SharePlugin {
     }
 }
 
-/// A download the phone asked for: check it, then send the file from a task
-/// of its own, or tell the phone why not.
 /// Answer a packet the owner's permissions denied, when its sender waits for
 /// an answer: a folder request is told why, so the phone does not wait on
 /// silence. Every other denied packet stays unanswered.
@@ -678,6 +676,8 @@ async fn handle_folder_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) 
     crate::offers::answer_folder_request(sender, asked, &Err(refused)).await;
 }
 
+/// A download the phone asked for: check it, then send the file from a task
+/// of its own, or tell the phone why not.
 async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     // Without a key there is nothing to address a refusal to.
     let Some(key) = packet
