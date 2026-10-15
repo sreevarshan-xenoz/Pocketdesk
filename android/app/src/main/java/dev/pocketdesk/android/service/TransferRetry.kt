@@ -16,16 +16,27 @@ object TransferRetry {
      */
     fun delayBefore(attempt: Int, error: String?, enabled: Boolean): Long? {
         if (!enabled || attempt < 1 || attempt > DELAYS_SECONDS.size) return null
-        if (error != null && FINAL.any { error.contains(it, ignoreCase = true) }) return null
+        if (error != null && isFinal(error)) return null
         return DELAYS_SECONDS[attempt - 1]
+    }
+
+    private fun isFinal(error: String): Boolean {
+        // A computer that refused only because it was busy may take it later.
+        if (BUSY.any { error.contains(it, ignoreCase = true) }) return false
+        return FINAL.any { error.contains(it, ignoreCase = true) }
     }
 
     /** Failures a retry would only repeat. */
     private val FINAL = listOf(
         "refused",
         "is empty",
+        "empty file",
         "cannot open",
         "larger than",
+        "not accepted",
         "permission",
     )
+
+    /** Refusals that last only while other transfers run. */
+    private val BUSY = listOf("busy", "still running")
 }

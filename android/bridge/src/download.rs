@@ -403,7 +403,7 @@ where
     );
     let mut stream = tokio::select! {
         accepted = accept => accepted.map_err(|_| "The computer did not send the file".to_string())??,
-        reason = refused => return Err(reason),
+        reason = refused => return Err(format!("The computer refused the download: {reason}")),
     };
     receive_into(&mut stream, out, limit, counted, kept).await
 }
@@ -489,9 +489,8 @@ where
                 k.store.remove(k.device, &k.resume.source);
             }
             Err(match e {
-                TransferError::Size(size) => {
-                    format!("{size} bytes is more than this phone takes")
-                }
+                TransferError::Size(0) => "the computer sent an empty file".to_string(),
+                TransferError::Size(size) => format!("a size of {size} bytes was not accepted"),
                 TransferError::Io(e) => format!("The connection failed: {e}"),
                 other => format!("The download failed: {other}"),
             })
@@ -890,7 +889,10 @@ mod tests {
         )
         .await
         .expect("no wait for the listener's timeout");
-        assert_eq!(got, Err("the offer expired".to_string()));
+        assert_eq!(
+            got,
+            Err("The computer refused the download: the offer expired".to_string())
+        );
     }
 
     #[test]

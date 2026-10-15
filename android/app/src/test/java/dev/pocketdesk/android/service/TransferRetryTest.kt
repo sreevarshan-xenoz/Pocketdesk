@@ -19,12 +19,26 @@ class TransferRetryTest {
     @Test
     fun aRefusalOrAFileThatCannotBeSentIsNotRetried() {
         for (error in listOf(
-            "The computer refused the file: busy",
+            "The computer refused the file: the phone may not send files",
             "photo.jpg is empty",
             "cannot open photo.jpg",
         )) {
             assertNull(error, TransferRetry.delayBefore(1, error, enabled = true))
         }
+    }
+
+    @Test
+    fun aRefusedDownloadIsFinalButABusyComputerIsWorthWaitingFor() {
+        assertNull(TransferRetry.delayBefore(1, "The computer refused the download: the offer expired", enabled = true))
+        assertNull(TransferRetry.delayBefore(1, "a size of 12 bytes was not accepted", enabled = true))
+        assertEquals(
+            5L,
+            TransferRetry.delayBefore(1, "The computer refused the file: the desktop is busy with other transfers", enabled = true),
+        )
+        assertEquals(
+            5L,
+            TransferRetry.delayBefore(1, "The computer refused the file: this phone's last transfer is still running", enabled = true),
+        )
     }
 
     @Test
