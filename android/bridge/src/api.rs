@@ -509,18 +509,26 @@ pub async fn connect_to_peer(
             match conn_mgr.connect(&address, port, &identity).await {
                 Ok(stream) => Ok(Box::new(stream)),
                 Err(home) => match wan_identity.as_deref().map(WanTarget::parse) {
-                    Some(Ok(target)) => {
+                    Some(Ok(target)) if INTERNET_PAUSE.may_try(&address, Instant::now()) => {
                         tracing::info!(
                             error = %home,
                             "No control link at home; trying the internet road"
                         );
                         match dial_internet_control(&target, &identity, &address, true).await {
-                            Ok(stream) => Ok(stream),
+                            Ok(stream) => {
+                                INTERNET_PAUSE.succeeded(&address);
+                                Ok(stream)
+                            }
                             Err(e) => {
                                 tracing::warn!("The internet road failed too: {e}");
+                                INTERNET_PAUSE.failed(&address, Instant::now());
                                 Err(home)
                             }
                         }
+                    }
+                    Some(Ok(_)) => {
+                        tracing::debug!("The internet road failed a moment ago; not yet again");
+                        Err(home)
                     }
                     Some(Err(e)) => {
                         tracing::warn!("Unusable WAN identity: {e}");
@@ -1930,6 +1938,39 @@ pub async fn connect_streaming(
     )
     .await
 }
+
+/// How long the internet road rests for a computer after a failed dial.
+/// Several loops ask for the control link (the session, clipboard, texts,
+/// the background sender); without a rest each would pay a full dial (an
+/// endpoint, relays, perhaps the DHT) every few seconds while the computer
+/// is off.
+const INTERNET_REST: Duration = Duration::from_secs(60);
+
+/// When each computer's internet road may be tried again.
+pub(crate) struct InternetPause(std::sync::Mutex<std::collections::HashMap<String, Instant>>);
+
+impl InternetPause {
+    pub(crate) fn may_try(&self, address: &str, now: Instant) -> bool {
+        let rests = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        rests.get(address).is_none_or(|until| now >= *until)
+    }
+
+    pub(crate) fn failed(&self, address: &str, now: Instant) {
+        let mut rests = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        rests.retain(|_, until| *until > now);
+        rests.insert(address.to_string(), now + INTERNET_REST);
+    }
+
+    pub(crate) fn succeeded(&self, address: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(address);
+    }
+}
+
+pub(crate) static INTERNET_PAUSE: std::sync::LazyLock<InternetPause> =
+    std::sync::LazyLock::new(|| InternetPause(std::sync::Mutex::default()));
 
 /// Where a computer is on the internet road: the parts of the
 /// `kdeconnect.pocketdesk.endpoint` body a dial needs.
@@ -4299,6 +4340,23 @@ mod internet_road_tests {
     use super::*;
     use pocketdesk_core::protocol::{ALPN_CONTROL, HANDSHAKE_HELLO, HANDSHAKE_OK};
     use tokio::io::BufReader;
+
+    #[test]
+    fn a_failed_internet_dial_rests_that_computer_for_a_minute() {
+        let pause = InternetPause(std::sync::Mutex::default());
+        let now = Instant::now();
+        assert!(pause.may_try("192.0.2.7", now));
+        pause.failed("192.0.2.7", now);
+        assert!(!pause.may_try("192.0.2.7", now + Duration::from_secs(30)));
+        assert!(pause.may_try("198.51.100.3", now), "only that computer");
+        assert!(pause.may_try("192.0.2.7", now + INTERNET_REST));
+        pause.failed("192.0.2.7", now);
+        pause.succeeded("192.0.2.7");
+        assert!(
+            pause.may_try("192.0.2.7", now),
+            "a link that came up clears it"
+        );
+    }
 
     #[test]
     fn a_wan_identity_names_the_dial() {
