@@ -56,6 +56,15 @@ pub fn thread(
     rows
 }
 
+/// A conversation's title: the sender's contact name and number when the
+/// phone shared the name (T8e), else the number.
+pub fn title(address: &str, name: Option<&str>) -> String {
+    match name {
+        Some(name) => format!("{name} ({address})"),
+        None => address.to_string(),
+    }
+}
+
 /// A reply's state, as the tab says it.
 pub fn status_text(state: &ReplyState) -> String {
     match state {
@@ -133,7 +142,7 @@ impl MessagesView {
                     for c in &conversations {
                         let key = (c.device_id.clone(), c.address.clone());
                         let preview: String = c.last_body.chars().take(40).collect();
-                        let label = format!("{}\n{preview}", c.address);
+                        let label = format!("{}\n{preview}", title(&c.address, c.name.as_deref()));
                         if ui
                             .selectable_label(self.selected.as_ref() == Some(&key), label)
                             .clicked()
@@ -146,7 +155,11 @@ impl MessagesView {
             let pane = &mut columns[1];
             match self.selected.clone() {
                 Some((device, address)) => {
-                    pane.strong(&address);
+                    let name = conversations
+                        .iter()
+                        .find(|c| c.device_id == device && c.address == address)
+                        .and_then(|c| c.name.clone());
+                    pane.strong(title(&address, name.as_deref()));
                     pane.label(
                         RichText::new(format!("through {}", crate::app::short(&device)))
                             .color(Color32::GRAY),
@@ -231,6 +244,12 @@ impl MessagesView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_conversation_is_titled_by_its_contact_name_when_it_has_one() {
+        assert_eq!(title("+1 555 0100", None), "+1 555 0100");
+        assert_eq!(title("+1 555 0100", Some("Ann")), "Ann (+1 555 0100)");
+    }
     use pocketdesk_core::local::sms::Reply;
 
     fn message(
