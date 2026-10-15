@@ -86,6 +86,52 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Value {
     versioned(json!({ "server_running": running, "devices": devices }))
 }
 
+/// Whether the server runs, the phones in a session now, and how phones
+/// reach this computer from outside (`endpoint.json`, when the server
+/// keeps one).
+pub fn status(state_dir: &Path, now_unix: u64, running: bool) -> Value {
+    let pid = running
+        .then(|| pocketdesk_core::local::server::server_pid(state_dir))
+        .flatten();
+    let sessions: Vec<Value> = live_sessions(state_dir, now_unix, running)
+        .into_iter()
+        .map(|s| {
+            json!({
+                "session_id": s.id,
+                "device_id": s.device_id,
+                "peer": s.peer,
+                "transport": s.transport,
+                "started_unix": s.started_unix,
+                "driving": s.driving,
+            })
+        })
+        .collect();
+    let endpoint = running
+        .then(|| pocketdesk_core::local::identity::read_endpoint(state_dir))
+        .flatten();
+    versioned(json!({
+        "server": {
+            "running": running,
+            "pid": pid,
+            "version": env!("CARGO_PKG_VERSION"),
+        },
+        "sessions": sessions,
+        "endpoint": endpoint,
+    }))
+}
+
+/// `pocketdesk status --json`.
+pub fn print_status() -> anyhow::Result<()> {
+    let dir = crate::state::state_dir()?;
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    print(&status(
+        &dir,
+        pocketdesk_core::local::pin::now_unix(),
+        running,
+    ));
+    Ok(())
+}
+
 /// The last `count` files sent to phones, newest first, and how each went.
 pub fn sent_list(state_dir: &Path, count: usize) -> Value {
     use pocketdesk_core::local::sent::{self, SentState};
@@ -350,6 +396,27 @@ mod tests {
         let got = received_list(&dir, 10);
         assert_eq!(got["received"][0]["name"], "photo.jpg");
         assert_eq!(got["received"][0]["still_there"], true);
+    }
+
+    #[test]
+    fn status_says_whether_the_server_runs_and_who_is_connected() {
+        let dir = temp_dir("status");
+        let stopped = status(&dir, 101, false);
+        assert_eq!(stopped["api"], API);
+        assert_eq!(stopped["server"]["running"], false);
+        assert_eq!(stopped["server"]["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(stopped["sessions"], json!([]));
+        assert_eq!(stopped["endpoint"], Value::Null);
+        std::fs::write(
+            dir.join(LIVE_FILE),
+            r#"{"updated_unix":100,"sessions":[{"id":7,"device_id":"phone-a","peer":"192.0.2.7:1","transport":"wan","started_unix":90,"driving":true}]}"#,
+        )
+        .unwrap();
+        let running = status(&dir, 101, true);
+        let session = &running["sessions"][0];
+        assert_eq!(session["device_id"], "phone-a");
+        assert_eq!(session["transport"], "wan");
+        assert_eq!(session["driving"], true);
     }
 
     #[test]

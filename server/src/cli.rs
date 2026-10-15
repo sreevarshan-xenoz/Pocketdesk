@@ -43,7 +43,12 @@ pub enum Commands {
     /// Stop a running server process started with `pocketdesk start`
     Stop,
     /// Print local tailscale status
-    Status,
+    Status {
+        /// Print the local API's JSON instead: the server, the phones in a
+        /// session, and the internet endpoint (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// List the paired phones: what each may do, whether a key is bound to
     /// it, and whether it is in a session now
     Devices {

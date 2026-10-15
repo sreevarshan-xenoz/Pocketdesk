@@ -65,7 +65,8 @@ async fn main() -> Result<()> {
             service::run(config).await
         }
         cli::Commands::Stop => service::stop().await,
-        cli::Commands::Status => service::print_status().await,
+        cli::Commands::Status { json: false } => service::print_status().await,
+        cli::Commands::Status { json: true } => local_api::print_status(),
         cli::Commands::Devices { json } => local_api::print_devices(json),
         cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
         cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
