@@ -485,23 +485,6 @@ impl Plugin for SharePlugin {
                 let Some(dir) = self.download_dir.clone() else {
                     return refused("no downloads or home folder".into()).await;
                 };
-                // A file of a folder send (T6b) goes to its place under the
-                // send's own new folder; its path was checked part by part.
-                let (dir, name) = match folder_of(body) {
-                    None => (dir, name.clone()),
-                    Some((folder_id, folder, path)) => {
-                        match folder_tops().place(
-                            &dir,
-                            sender.device_id(),
-                            &folder_id,
-                            &folder,
-                            &path,
-                        ) {
-                            Ok(placed) => placed,
-                            Err(reason) => return refused(reason).await,
-                        }
-                    }
-                };
                 // The bytes travel inside TLS with the phone that asked
                 // (phase C): the key its control connection proved.
                 let tls = match transfer_tls(sender) {
@@ -529,6 +512,24 @@ impl Plugin for SharePlugin {
                 let slot = match transfer_slots().take(sender.device_id()) {
                     Ok(slot) => slot,
                     Err(reason) => return refused(reason.to_string()).await,
+                };
+                // A file of a folder send (T6b) goes to its place under the
+                // send's own new folder; its path was checked part by part.
+                // Made only now, so a share refused above leaves no folder.
+                let (dir, name) = match folder_of(body) {
+                    None => (dir, name.clone()),
+                    Some((folder_id, folder, path)) => {
+                        match folder_tops().place(
+                            &dir,
+                            sender.device_id(),
+                            &folder_id,
+                            &folder,
+                            &path,
+                        ) {
+                            Ok(placed) => placed,
+                            Err(reason) => return refused(reason).await,
+                        }
+                    }
                 };
                 running()
                     .spawn(running_key, async move {
@@ -1942,6 +1943,7 @@ mod tests {
     struct Phone {
         peer: SocketAddr,
         sent: std::sync::Mutex<Vec<NetworkPacket>>,
+        keyless: bool,
     }
 
     impl Phone {
@@ -1949,6 +1951,15 @@ mod tests {
             Self {
                 peer: peer.parse().unwrap(),
                 sent: Default::default(),
+                keyless: false,
+            }
+        }
+
+        /// A phone whose connection proved no key: it can move no files.
+        fn keyless(peer: &str) -> Self {
+            Self {
+                keyless: true,
+                ..Self::at(peer)
             }
         }
 
@@ -1969,6 +1980,9 @@ mod tests {
             Some(self.peer)
         }
         fn peer_key(&self) -> Option<pocketdesk_core::streaming::PeerKey> {
+            if self.keyless {
+                return None;
+            }
             Some(pocketdesk_core::streaming::PeerKey::Tls(
                 certs().1.cert_fingerprint(),
             ))
@@ -2051,6 +2065,30 @@ mod tests {
         let (key, reason) = refusal(&phone).expect("a refusal");
         assert_eq!(key, KEY);
         assert!(reason.contains("place in the folder"), "{reason}");
+    }
+
+    #[tokio::test]
+    async fn a_refused_folder_share_makes_no_folder() {
+        let downloads =
+            std::env::temp_dir().join(format!("ll-share-refused-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&downloads);
+        std::fs::create_dir_all(&downloads).unwrap();
+        let plugin = SharePlugin::with_download_dir(downloads.clone());
+        // This phone's connection proved no key, so no transfer can start.
+        let phone = Phone::keyless("192.0.2.7:51000");
+        let packet = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": "a.jpg",
+                "folder": "Photos",
+                "folderId": FOLDER_A,
+                "path": ["day 1", "a.jpg"],
+                "payloadTransferInfo": { "port": 40000, "key": KEY },
+            }))
+            .with_payload_size(10);
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        assert!(refusal(&phone).is_some());
+        let made: Vec<_> = std::fs::read_dir(&downloads).unwrap().flatten().collect();
+        assert!(made.is_empty(), "{made:?}");
     }
 
     #[tokio::test]
