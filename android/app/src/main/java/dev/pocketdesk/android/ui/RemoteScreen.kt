@@ -827,25 +827,33 @@ fun RemoteScreen(
         // stream pane and a control dock (native trackpad + shortcut bar), so
         // the finger never covers the remote view — RustDesk's tablet UI is
         // just a stretched phone layout; we own both endpoints and can split.
-        val wide = maxWidth >= 600.dp
-        val autoDual = foldSplit != PaneSplit.None || wide
+        // T9b: a phone held upright splits too, the stream on top sized to
+        // the desktop's shape and the controls below (PaneRule).
+        val autoSplit = PaneRule.autoSplit(foldSplit, maxWidth.value, maxHeight.value)
         val dualPane = when (paneMode) {
-            PaneMode.Auto -> autoDual
+            PaneMode.Auto -> autoSplit != PaneSplit.None
             PaneMode.Dual -> true
             PaneMode.Single -> false
         }
         val split = when {
             !dualPane -> PaneSplit.None
-            foldSplit != PaneSplit.None -> foldSplit
-            else -> PaneSplit.Vertical // tablet / unfolded, no hinge axis to read
+            autoSplit != PaneSplit.None -> autoSplit
+            else -> PaneSplit.Vertical // asked for two panes: side by side
         }
         val vertical = split == PaneSplit.Vertical
+        val streamShare = PaneRule.streamFraction(
+            split,
+            hinge = foldSplit != PaneSplit.None,
+            widthPx = constraints.maxWidth.toFloat(),
+            heightPx = constraints.maxHeight.toFloat(),
+            videoAspect = if (videoSize.height > 0) videoSize.width.toFloat() / videoSize.height else 0f,
+        )
         // Only the stream Box's size changes across a fold, so the SurfaceView
         // subtree is reused — the decode session is not torn down on a hinge.
         val streamMod = when {
             !dualPane -> Modifier.fillMaxSize()
             vertical -> Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterStart)
-            else -> Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.TopCenter)
+            else -> Modifier.fillMaxWidth().fillMaxHeight(streamShare).align(Alignment.TopCenter)
         }
         // Any touch on the stream brings the chrome back. Observing on the
         // Initial pass means the parent sees the down before the video's own
@@ -1279,7 +1287,7 @@ fun RemoteScreen(
                 if (vertical) {
                     Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterEnd)
                 } else {
-                    Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.BottomCenter)
+                    Modifier.fillMaxWidth().fillMaxHeight(1f - streamShare).align(Alignment.BottomCenter)
                 }
             ControlDock(address = address, port = port, modifier = dockMod)
         }
