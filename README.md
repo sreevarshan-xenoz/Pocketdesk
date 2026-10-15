@@ -119,8 +119,9 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **The phone's notifications on the computer** — off until you turn it on in the phone's Settings ("This phone's notifications") and grant notification access. They go to the computer you used last, as system notifications (a toast on Windows).
   - **Which apps:** each app is listed once it has notified, and shares nothing until you switch it on.
   - **Never sent:** ongoing ones (music, navigation, calls), Pocketdesk's own, ones an app keeps on the device, and a work profile's.
-  - **Lock-screen privacy carries over:** anything the phone hides there stays hidden. A private notification arrives as only "New notification", and a one-time code is replaced. On Android 15 and newer, the system itself also hides the content of sensitive notifications, such as one-time codes, from apps like this one.
+  - **Lock-screen privacy carries over:** anything the phone hides there stays hidden. A notification whose content the lock screen hides (because you hide sensitive content, or chose that for its app) arrives as only "New notification", and a one-time code is replaced. On Android 15 and newer, the system itself also hides the content of sensitive notifications, such as one-time codes, from apps like this one.
   - **On the computer:** at most 20 a minute are shown from one phone, and each phone's Notifications switch in the Devices tab can turn them off.
+  - **Answer them from the computer:** with "Let the computer answer notifications" on in the phone's Settings, the desktop app's Notifications tab lists the ones that have buttons, presses them, and replies to chats, as you.
   - **When the computer can't be reached** (the phone asleep, the computer away): a notification waits on the phone, in memory and never on disk, for up to 10 minutes from when it was first posted (at most 20 of them), and goes once it can, oldest first; an update replaces the waiting version. One closed meanwhile is dropped, and one the computer already shows is still closed there.
   - **Texts (SMS):** the phone's Settings has "Texts on my computer", three switches, all off by default:
     - "Show texts on my computer" sends incoming texts to the computer you used last. They appear in the desktop app's Messages tab, with a notification each.
@@ -180,7 +181,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **Blackout / pocket mode** — black, touch-locked screen while the session keeps streaming: the phone and its video surface go secure (no screenshots or Recents leakage), brightness drops; double-tap or back to unlock
 - **Localized UI** — English, Spanish and Tamil; pick per-app language from the "Language" button on the connect screen (Android 13+)
 - **Share to the desktop** — share text (to the desktop clipboard) or one or more files (to its Downloads folder, over the LAN) from any app, with progress in a notification; the desktop shows a notification per file. "Sent" means the desktop saved it
-- **Files on this computer** — in a session, browse the computer's home folder (hidden files left out) and download a file to Downloads/Pocketdesk, with progress in a notification. Files the desktop app sends arrive the same way while the session is up
+- **Files on this computer** — in a session, browse the computer's home folder (hidden files left out) and download a file to Downloads/Pocketdesk, with progress in a notification. Files the desktop app sends arrive the same way while the session is up, and without one with "Files from the computer in the background" on in the phone's Settings (on the same network; it uses notification access to stay connected)
 - **Every screen, one tap away** — with more than one monitor, the session's controls show a numbered chip per screen; tap one to switch the stream to it (Quick Settings → Monitor still lists them by name)
 - **Settings** with DataStore persistence
 
@@ -333,7 +334,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/confi
 - **Devices**: paired phones, which one is connected, and Remove. Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
 - **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
 - **Sessions**: live sessions, with End, and with several phones, which one drives and Give control.
-- **Files**: send a file to a phone that is in a session (pick the phone, then a path, "Choose file…" on Windows, or drop files on the window), the files sent and whether each was saved, and files received from phones, newest first, with Show in folder.
+- **Files**: send a file to a phone connected on this network, in a session or not (pick the phone, then a path, "Choose file…" on Windows, or drop files on the window), the files sent and whether each was saved, and files received from phones, newest first, with Show in folder.
 - **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
 - **Diagnostics**: why a phone might not connect. It checks the server, its ports, the firewall, the addresses phones can use and the internet path, shows the last session (encoder and latency), and copies a debug report for an issue.
 - **Logs**: the server's log.

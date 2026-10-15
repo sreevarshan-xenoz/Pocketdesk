@@ -130,6 +130,7 @@ object RustCore {
     private external fun nativeTakeLinks(): String
     private external fun nativeTakeMediaPresses(): String
     private external fun nativeTakeClipboardPush(): String
+    private external fun nativeTakeNotificationAnswers(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
     private external fun nativeVideoBytes(): Long
@@ -688,6 +689,25 @@ object RustCore {
                 JSONObject(json).let { ClipboardPushed(it.getString("host"), it.getInt("port"), it.getString("content")) }
             }.getOrNull()
         }
+
+    /** The computer's answers to this phone's notifications since the last call (T10c). */
+    fun takeNotificationAnswers(): List<NotificationAnswer> =
+        runCatching {
+            val array = org.json.JSONArray(envelope(nativeTakeNotificationAnswers()).getOrDefault("[]"))
+            (0 until array.length()).map { i ->
+                val a = array.getJSONObject(i)
+                NotificationAnswer(
+                    a.getString("host"),
+                    a.getInt("port"),
+                    a.getString("key"),
+                    a.optString("action").takeIf { a.has("action") },
+                    a.optString("message").takeIf { a.has("message") },
+                )
+            }
+        }.getOrDefault(emptyList())
+
+    /** One answer from the computer at [host]:[port] to notification [key]: a button, or a reply. */
+    data class NotificationAnswer(val host: String, val port: Int, val key: String, val action: String?, val message: String?)
 
     /** One `kdeconnect.clipboard` text from the computer at [host]:[port]. */
     data class ClipboardPushed(val host: String, val port: Int, val content: String)

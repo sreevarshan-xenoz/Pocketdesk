@@ -20,8 +20,19 @@ data class PostedNote(
     val clearable: Boolean,
 )
 
-/** What the desktop is sent for one notification. */
-data class Outgoing(val id: String, val app: String, val title: String, val text: String, val clearable: Boolean)
+/**
+ * What the desktop is sent for one notification. [full] when it goes as
+ * the app wrote it: not a private one's public version, not hidden, no code
+ * replaced. Only such a one offers the computer its buttons (T10c).
+ */
+data class Outgoing(
+    val id: String,
+    val app: String,
+    val title: String,
+    val text: String,
+    val clearable: Boolean,
+    val full: Boolean = true,
+)
 
 /**
  * Which of the phone's notifications go to the desktop, and as what (N5a).
@@ -36,18 +47,23 @@ data class Outgoing(val id: String, val app: String, val title: String, val text
  */
 class NotificationForwardRule(private val ownPackage: String) {
     // Insertion-ordered, so the oldest is dropped first.
-    private val sent = LinkedHashMap<String, Pair<String, String>>()
+    private val sent = LinkedHashMap<String, Triple<String, String, String>>()
 
-    fun decide(note: PostedNote, enabled: Boolean, shared: Set<String>): Outgoing? {
+    /**
+     * [offer] is what the notification offers the computer to answer
+     * ([NotificationActionRule.signature]): a change to it is sent again,
+     * even when the title and text stay the same.
+     */
+    fun decide(note: PostedNote, enabled: Boolean, shared: Set<String>, offer: String = ""): Outgoing? {
         if (!enabled || note.pkg == ownPackage || note.pkg !in shared) return null
         if (note.ongoing || note.groupSummary || note.localOnly || note.otherProfile) return null
         if (note.visibility == VISIBILITY_SECRET) return null
-        val (title, text) = shown(note) ?: return null
-        if (sent[note.key] == title to text) return null
+        val (title, text, full) = shown(note) ?: return null
+        if (sent[note.key] == Triple(title, text, offer)) return null
         sent.remove(note.key)
-        sent[note.key] = title to text
+        sent[note.key] = Triple(title, text, offer)
         while (sent.size > REMEMBERED) sent.remove(sent.keys.first())
-        return Outgoing(note.key, note.appLabel, title, text, note.clearable)
+        return Outgoing(note.key, note.appLabel, title, text, note.clearable, full)
     }
 
     /**
@@ -57,16 +73,22 @@ class NotificationForwardRule(private val ownPackage: String) {
      */
     fun removed(key: String): Boolean = sent.remove(key) != null
 
-    private fun shown(note: PostedNote): Pair<String, String>? {
+    /** The title and text shown, and whether that is the notification in full. */
+    private fun shown(note: PostedNote): Triple<String, String, Boolean>? {
         if (note.visibility == VISIBILITY_PRIVATE) {
             val title = note.publicTitle?.trim().orEmpty()
             val text = note.publicText?.trim().orEmpty()
-            return if (title.isEmpty() && text.isEmpty()) HIDDEN_TITLE to "" else title.ifEmpty { note.appLabel } to text
+            return if (title.isEmpty() && text.isEmpty()) {
+                Triple(HIDDEN_TITLE, "", false)
+            } else {
+                Triple(title.ifEmpty { note.appLabel }, text, false)
+            }
         }
         val title = note.title?.trim().orEmpty()
         val text = note.text?.trim().orEmpty()
         if (title.isEmpty() && text.isEmpty()) return null
-        return title.ifEmpty { note.appLabel } to if (looksLikeCode("$title $text")) CODE_HIDDEN else text
+        val code = looksLikeCode("$title $text")
+        return Triple(title.ifEmpty { note.appLabel }, if (code) CODE_HIDDEN else text, !code)
     }
 
     companion object {
@@ -97,10 +119,13 @@ class NotificationForwardRule(private val ownPackage: String) {
          * The strictest of the notification's own visibility, its channel's
          * lock-screen setting, the user's override from the ranking, and the
          * system's "hide sensitive content" (which makes everything private
-         * at most). Lower is stricter.
+         * at most). Lower is stricter. As on Android's lock screen, an app's
+         * own private (the default for every notification) hides content
+         * only when the user hides sensitive content; a channel's or the
+         * user's private hides it always.
          */
         fun effectiveVisibility(own: Int, channel: Int, ranking: Int, systemHidesSensitive: Boolean): Int {
-            var v = own
+            var v = if (own == VISIBILITY_PRIVATE && !systemHidesSensitive) VISIBILITY_PUBLIC else own
             if (channel != NO_OVERRIDE) v = minOf(v, channel)
             if (ranking != NO_OVERRIDE) v = minOf(v, ranking)
             if (systemHidesSensitive) v = minOf(v, VISIBILITY_PRIVATE)

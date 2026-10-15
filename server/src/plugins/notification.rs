@@ -6,6 +6,8 @@
 //! one phone are shown, the rest dropped. `phone_notifications = false` shows
 //! none (a phone's cancels still close what is shown).
 
+use pocketdesk_core::local::phone_notes::{self, Answer, AnswerRequest, PhoneNote};
+use pocketdesk_core::protocol::notification_action;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -212,7 +214,22 @@ impl Plugin for NotificationPlugin {
                     if let Some(tag) = &tag {
                         close_desktop_notification(tag).await;
                     }
+                    // And it can no longer be answered (T10c).
+                    if !id.is_empty()
+                        && let Ok(dir) = crate::state::state_dir()
+                    {
+                        let _ = phone_notes::forget(&dir, sender.device_id(), id);
+                    }
                     return Ok(());
+                }
+                // An update that no longer offers buttons or a reply (or
+                // is now sent redacted) can no longer be answered (T10c).
+                let note = answerable(sender.device_id(), &packet.body, unix_now());
+                if note.is_none()
+                    && notification_action::valid_key(id)
+                    && let Ok(dir) = crate::state::state_dir()
+                {
+                    let _ = phone_notes::forget(&dir, sender.device_id(), id);
                 }
                 if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
                     return Ok(());
@@ -225,9 +242,18 @@ impl Plugin for NotificationPlugin {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .admit(sender.device_id(), Instant::now(), limit);
-                if admitted
-                    && let Err(e) =
-                        show_desktop_notification(tag.as_deref(), &app, &title, &text).await
+                if !admitted {
+                    return Ok(());
+                }
+                // One that offers buttons or a reply is kept for the desktop
+                // app to answer (T10c).
+                if let Some(note) = note
+                    && let Ok(dir) = crate::state::state_dir()
+                    && let Err(e) = phone_notes::keep(&dir, note)
+                {
+                    tracing::warn!("A phone notification was not kept to answer: {e}");
+                }
+                if let Err(e) = show_desktop_notification(tag.as_deref(), &app, &title, &text).await
                 {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
@@ -240,6 +266,112 @@ impl Plugin for NotificationPlugin {
             _ => {}
         }
         Ok(())
+    }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// The note to keep for a phone notification `body` that can be answered:
+/// one that offers buttons, or a reply for itself (`requestReplyId` is its
+/// own id). The fields are those shown, held to the same limits.
+pub(crate) fn answerable(
+    device_id: &str,
+    body: &serde_json::Value,
+    now_unix: u64,
+) -> Option<PhoneNote> {
+    let key = body.get("id").and_then(|v| v.as_str())?;
+    if !notification_action::valid_key(key) {
+        return None;
+    }
+    let actions = notification_action::offered_actions(body);
+    let reply = body.get("requestReplyId").and_then(|v| v.as_str()) == Some(key);
+    if actions.is_empty() && !reply {
+        return None;
+    }
+    let (app, title, text) = to_show(body)?;
+    Some(PhoneNote {
+        device_id: device_id.to_string(),
+        key: key.to_string(),
+        app,
+        title,
+        text,
+        at_unix: now_unix,
+        actions,
+        reply,
+    })
+}
+
+/// The packet that sends `request` to its phone, if the notification is
+/// still kept for that phone and offered that answer.
+pub(crate) fn answer_packet(notes: &[PhoneNote], request: &AnswerRequest) -> Option<NetworkPacket> {
+    let note = notes
+        .iter()
+        .find(|n| n.device_id == request.device_id && n.key == request.key)?;
+    match &request.answer {
+        Answer::Action(title) if note.actions.contains(title) => {
+            notification_action::action_packet(&note.key, title)
+        }
+        Answer::Reply(message) if note.reply => {
+            notification_action::reply_packet(&note.key, message)
+        }
+        _ => None,
+    }
+}
+
+/// Send the desktop app's answers to the phones' notifications (T10c),
+/// each to its own phone if it is connected and may receive them. Runs for
+/// the server's life; the kept notifications of an earlier run are dropped
+/// first.
+pub async fn run_answers() {
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let _ = phone_notes::clear(&dir);
+    // Answers for a phone not connected yet wait here, within their time.
+    let mut waiting: Vec<AnswerRequest> = Vec::new();
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tick.tick().await;
+        let now = unix_now();
+        waiting.extend(phone_notes::take_all(&dir, now));
+        if waiting.is_empty() {
+            continue;
+        }
+        let notes = phone_notes::read(&dir);
+        let clients = crate::state::clone_clients().await;
+        let mut still = Vec::new();
+        for request in waiting.drain(..) {
+            let Some(packet) = answer_packet(&notes, &request) else {
+                tracing::info!("An answer to a phone notification was dropped: not offered");
+                continue;
+            };
+            if !crate::plugins::pair::permits(&request.device_id, &packet.packet_type) {
+                tracing::info!(
+                    "An answer to a phone notification was dropped: Notifications is off"
+                );
+                continue;
+            }
+            let Some(phone) = clients.iter().find(|c| c.device_id() == request.device_id) else {
+                if now.saturating_sub(request.created_unix) < phone_notes::ANSWER_TTL_SECS {
+                    still.push(request);
+                } else {
+                    tracing::info!(
+                        "An answer to a phone notification was dropped: the phone did not connect in time"
+                    );
+                }
+                continue;
+            };
+            if let Err(e) = phone.send_packet(&packet).await {
+                tracing::warn!("An answer to a phone notification was not sent: {e}");
+            }
+        }
+        waiting = still;
     }
 }
 
@@ -383,6 +515,77 @@ async fn close_desktop_notification(tag: &str) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_a_notification_with_buttons_or_its_own_reply_is_kept() {
+        let full = json!({
+            "id": "0|com.chat|1", "app": "Chat", "title": "Ann", "text": "Lunch?",
+            "actions": ["Mark as read", "Mute"], "requestReplyId": "0|com.chat|1"
+        });
+        let note = answerable("phone", &full, 100).unwrap();
+        assert_eq!(note.actions, ["Mark as read", "Mute"]);
+        assert!(note.reply);
+        assert_eq!((note.title.as_str(), note.at_unix), ("Ann", 100));
+        let plain = json!({"id": "k", "app": "Chat", "title": "Ann", "text": "Hi"});
+        assert!(answerable("phone", &plain, 100).is_none());
+        let foreign_reply = json!({"id": "k", "app": "Chat", "title": "Ann", "text": "Hi", "requestReplyId": "other"});
+        assert!(
+            answerable("phone", &foreign_reply, 100).is_none(),
+            "a reply for another notification"
+        );
+        let no_id = json!({"app": "Chat", "title": "Ann", "text": "Hi", "actions": ["Ok"]});
+        assert!(answerable("phone", &no_id, 100).is_none());
+    }
+
+    #[test]
+    fn an_answer_goes_only_as_the_notification_offered() {
+        let notes = vec![PhoneNote {
+            device_id: "phone".into(),
+            key: "k".into(),
+            app: "Chat".into(),
+            title: "Ann".into(),
+            text: "Lunch?".into(),
+            at_unix: 1,
+            actions: vec!["Mark as read".into()],
+            reply: false,
+        }];
+        let ask = |device: &str, key: &str, answer: Answer| AnswerRequest {
+            id: "00000000-0000-0000-0000-000000000000".into(),
+            device_id: device.into(),
+            key: key.into(),
+            answer,
+            created_unix: 1,
+        };
+        let press = answer_packet(
+            &notes,
+            &ask("phone", "k", Answer::Action("Mark as read".into())),
+        )
+        .unwrap();
+        assert_eq!(press.packet_type, notification_action::NOTIFICATION_ACTION);
+        assert!(
+            answer_packet(&notes, &ask("phone", "k", Answer::Action("Delete".into()))).is_none(),
+            "not offered"
+        );
+        assert!(
+            answer_packet(&notes, &ask("phone", "k", Answer::Reply("hi".into()))).is_none(),
+            "takes no reply"
+        );
+        assert!(
+            answer_packet(
+                &notes,
+                &ask("other", "k", Answer::Action("Mark as read".into()))
+            )
+            .is_none(),
+            "another phone's"
+        );
+        assert!(
+            answer_packet(
+                &notes,
+                &ask("phone", "gone", Answer::Action("Mark as read".into()))
+            )
+            .is_none()
+        );
+    }
 
     #[test]
     fn at_most_twenty_a_minute_are_shown_from_one_phone() {

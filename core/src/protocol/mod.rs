@@ -3,6 +3,7 @@ pub mod clipboard;
 pub mod connection;
 pub mod kdeconnect;
 pub mod link;
+pub mod notification_action;
 pub mod partials;
 pub mod permissions;
 pub mod phone_media;

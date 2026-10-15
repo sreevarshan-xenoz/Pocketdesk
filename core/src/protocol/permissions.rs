@@ -88,7 +88,10 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         | "kdeconnect.pocketdesk.privacy"
         | "kdeconnect.pocketdesk.wol" => Capability::Power,
         "kdeconnect.pocketdesk.exec" => Capability::Exec,
-        "kdeconnect.notification" => Capability::Notifications,
+        "kdeconnect.notification"
+        // Answers to the phone's notifications (T10c).
+        | crate::protocol::notification_action::NOTIFICATION_REPLY
+        | crate::protocol::notification_action::NOTIFICATION_ACTION => Capability::Notifications,
         "kdeconnect.sms.messages" | "kdeconnect.pocketdesk.sms_sent" => Capability::Texts,
         crate::protocol::link::LINK => Capability::Links,
         crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,
@@ -266,6 +269,14 @@ mod tests {
             ("kdeconnect.pocketdesk.wol", Some(Capability::Power)),
             ("kdeconnect.pocketdesk.exec", Some(Capability::Exec)),
             ("kdeconnect.notification", Some(Capability::Notifications)),
+            (
+                "kdeconnect.notification.reply",
+                Some(Capability::Notifications),
+            ),
+            (
+                "kdeconnect.notification.action",
+                Some(Capability::Notifications),
+            ),
             ("kdeconnect.notification.request", None),
             ("kdeconnect.sms.messages", Some(Capability::Texts)),
             ("kdeconnect.pocketdesk.sms_sent", Some(Capability::Texts)),

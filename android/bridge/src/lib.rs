@@ -11,6 +11,7 @@ mod download;
 mod links;
 mod logcat;
 mod media_presses;
+mod notification_answers;
 mod rates;
 mod session;
 
@@ -1004,6 +1005,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeCli
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(clipboard_push::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's answers to this phone's notifications since the last call
+/// (T10c), as a JSON array of `{host, port, key, action | message}`:
+/// `{"ok": "[...]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeNotificationAnswers(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(notification_answers::take_json()));
     to_jstring(&mut env, json)
 }
 

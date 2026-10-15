@@ -344,10 +344,28 @@ pub(crate) fn queue_file_offer(body: &serde_json::Value) {
             }
         }
     }
+    // When it came: an offer lasts 10 minutes on the computer, and one
+    // older is not started (T10d).
+    entry["queuedUnix"] = serde_json::json!(unix_now());
     PENDING_OFFERS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .push(id.to_string(), entry);
+}
+
+/// How long an offer is worth starting: the computer's offer lifetime.
+const OFFER_LIFETIME_SECS: u64 = 10 * 60;
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Whether an offer queued at `queued_unix` may still be started at `now`.
+fn offer_fresh(queued_unix: Option<u64>, now: u64) -> bool {
+    queued_unix.is_none_or(|at| now.saturating_sub(at) < OFFER_LIFETIME_SECS)
 }
 
 /// An offer's folder fields (T6b), if all are there and safe: the send's
@@ -408,14 +426,20 @@ pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
         || packet_type == crate::download::FOLDER_FETCH_REPLY
         || packet_type == pocketdesk_core::protocol::link::LINK
         || packet_type == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
+        || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION
+        || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_REPLY
 }
 
 /// Drain the queued offers as a JSON array.
 pub(crate) fn take_file_offers_json() -> String {
-    let drained = PENDING_OFFERS
+    let now = unix_now();
+    let drained: Vec<serde_json::Value> = PENDING_OFFERS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .take();
+        .take()
+        .into_iter()
+        .filter(|o| offer_fresh(o.get("queuedUnix").and_then(|v| v.as_u64()), now))
+        .collect();
     serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -505,5 +529,17 @@ mod connect_generation_tests {
         let new = gens.begin();
         assert!(!gens.is_current(old));
         assert!(gens.is_current(new));
+    }
+}
+
+#[cfg(test)]
+mod offer_age_tests {
+    use super::offer_fresh;
+
+    #[test]
+    fn an_offer_is_started_only_within_its_ten_minutes() {
+        assert!(offer_fresh(Some(1_000), 1_000 + 599));
+        assert!(!offer_fresh(Some(1_000), 1_000 + 600));
+        assert!(offer_fresh(None, 5_000), "an offer from before the stamp");
     }
 }

@@ -86,7 +86,7 @@ A sent row's `state` is `offered` (the phone has not taken it yet), `sent` (save
 
 ### `pocketdesk send <phone> <path> [--wait SECONDS] --json`
 
-Sends a file or a folder to a phone in a session, exactly as the desktop app's Files tab does, so the server's checks apply: the phone is paired, may take files and is connected; a folder leaves out hidden files and stops at its limits. A phone not in a session is refused at once (exit 1), since an offer reaches only a phone in one.
+Sends a file or a folder to a connected phone, exactly as the desktop app's Files tab does, so the server's checks apply: the phone is paired, may take files and is connected; a folder leaves out hidden files and stops at its limits. Connected means in a session, or holding a control link on this network (the phone's app open, or a background feature keeping one, T10d). A phone not connected so, or connected only over the internet (the computer cannot dial it back), is refused at once (exit 1).
 
 ```json
 {"api": 1, "id": "8b4b2722-…", "device_id": "0d7c3a52-…", "path": "C:\\Users\\me\\report.pdf",
