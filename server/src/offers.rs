@@ -363,13 +363,7 @@ pub(crate) fn source_of(path: &Path, size: u64) -> String {
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let digest = ring::digest::digest(
         &ring::digest::SHA256,
-        format!(
-            "{}
-{size}
-{modified}",
-            canonical.display()
-        )
-        .as_bytes(),
+        format!("{}\n{size}\n{modified}", canonical.display()).as_bytes(),
     );
     digest.as_ref()[..16]
         .iter()
