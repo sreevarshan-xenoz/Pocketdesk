@@ -498,14 +498,28 @@ struct FolderFiles {
     truncated: bool,
 }
 
-/// The files under `root` to offer (T6b): hidden entries and links left
-/// out, names `relpath` refuses counted and left out, at most
+/// The files under `root` to offer (T6b): hidden entries (a leading dot,
+/// or marked hidden on Windows), links and the server's own state and
+/// config left out, names `relpath` refuses counted and left out, at most
 /// [`MAX_FOLDER_FILES`], 32 folders deep and [`MAX_FOLDER_BYTES`] in all,
 /// and no single file over 8 GB. In name order, so the phone sees a send
 /// the same way twice.
 fn folder_files(root: &Path) -> Result<FolderFiles, String> {
+    folder_files_with(root, &crate::plugins::file_browse::private_dirs())
+}
+
+/// [`folder_files`], leaving out anything at or below a folder in
+/// `private` (real paths).
+fn folder_files_with(root: &Path, private: &[PathBuf]) -> Result<FolderFiles, String> {
+    use crate::plugins::file_browse::is_hidden;
     use pocketdesk_core::protocol::relpath;
-    fn walk(dir: &Path, under: &[String], found: &mut FolderFiles, bytes: &mut u64) {
+    fn walk(
+        dir: &Path,
+        under: &[String],
+        private: &[PathBuf],
+        found: &mut FolderFiles,
+        bytes: &mut u64,
+    ) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -516,13 +530,15 @@ fn folder_files(root: &Path) -> Result<FolderFiles, String> {
                 return;
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                continue;
-            }
             let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
                 continue;
             };
-            if meta.file_type().is_symlink() {
+            // Links (and Windows junctions) are not followed, so every path
+            // here stays under the real root and is compared as it is.
+            if meta.file_type().is_symlink()
+                || is_hidden(&name, &meta)
+                || private.iter().any(|p| entry.path().starts_with(p))
+            {
                 continue;
             }
             if relpath::component_problem(&name).is_some() {
@@ -536,7 +552,7 @@ fn folder_files(root: &Path) -> Result<FolderFiles, String> {
                     found.truncated = true;
                     return;
                 }
-                walk(&entry.path(), &path, found, bytes);
+                walk(&entry.path(), &path, private, found, bytes);
             } else if meta.is_file() {
                 if meta.len() > MAX_FILE_BYTES {
                     found.skipped += 1;
@@ -555,12 +571,22 @@ fn folder_files(root: &Path) -> Result<FolderFiles, String> {
             }
         }
     }
-    if !root.is_dir() {
-        return Err("not a folder".to_string());
+    let real = root
+        .canonicalize()
+        .ok()
+        .filter(|r| r.is_dir())
+        .ok_or("not a folder")?;
+    if private.iter().any(|p| real.starts_with(p)) {
+        return Err("the server's own folder".to_string());
     }
     let mut found = FolderFiles::default();
     let mut bytes = 0;
-    walk(root, &[], &mut found, &mut bytes);
+    walk(&real, &[], private, &mut found, &mut bytes);
+    // Offered under the root as the owner named it, not the long form
+    // Windows resolves it to.
+    for file in &mut found.files {
+        file.full = file.path.iter().fold(root.to_path_buf(), |p, n| p.join(n));
+    }
     Ok(found)
 }
 
@@ -797,7 +823,7 @@ mod tests {
         std::fs::write(root.join(".git").join("x"), b"h").unwrap();
         std::fs::write(root.join("day 1").join("a.jpg"), b"aa").unwrap();
         std::fs::write(root.join("day 1").join("raw").join("b.raw"), b"bbb").unwrap();
-        let found = folder_files(&root).unwrap();
+        let found = folder_files_with(&root, &[]).unwrap();
         let paths: Vec<Vec<String>> = found.files.iter().map(|f| f.path.clone()).collect();
         assert_eq!(
             paths,
@@ -809,6 +835,43 @@ mod tests {
         );
         assert_eq!(found.files.iter().map(|f| f.size).sum::<u64>(), 6);
         assert!(!found.truncated);
+    }
+
+    #[test]
+    fn a_folder_leaves_out_the_servers_own_files() {
+        let home = temp_dir("folder-private").join("home");
+        let state = home.join("AppData").join("pocketdesk");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("identity.key"), b"k").unwrap();
+        std::fs::write(home.join("notes.txt"), b"n").unwrap();
+        let private = [state.canonicalize().unwrap()];
+        let found = folder_files_with(&home, &private).unwrap();
+        let paths: Vec<Vec<String>> = found.files.iter().map(|f| f.path.clone()).collect();
+        assert_eq!(paths, vec![vec!["notes.txt".to_string()]]);
+        // A folder inside them is refused whole.
+        assert!(folder_files_with(&state, &private).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_leaves_out_what_windows_marks_hidden() {
+        use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
+        use windows::core::HSTRING;
+        let root = temp_dir("folder-winhidden").join("Docs");
+        std::fs::create_dir_all(root.join("AppData")).unwrap();
+        std::fs::write(root.join("AppData").join("secret"), b"s").unwrap();
+        std::fs::write(root.join("desktop.ini"), b"h").unwrap();
+        std::fs::write(root.join("a.txt"), b"a").unwrap();
+        for hidden in [root.join("AppData"), root.join("desktop.ini")] {
+            // SAFETY: a plain call with a valid, NUL-terminated path.
+            unsafe {
+                SetFileAttributesW(&HSTRING::from(hidden.as_os_str()), FILE_ATTRIBUTE_HIDDEN)
+            }
+            .unwrap();
+        }
+        let found = folder_files_with(&root, &[]).unwrap();
+        let paths: Vec<Vec<String>> = found.files.iter().map(|f| f.path.clone()).collect();
+        assert_eq!(paths, vec![vec!["a.txt".to_string()]]);
     }
 
     #[test]
