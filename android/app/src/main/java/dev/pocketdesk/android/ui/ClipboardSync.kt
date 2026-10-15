@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.clip.ClipboardShared
 import dev.pocketdesk.android.bridge.RemoteClip
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
@@ -79,6 +80,7 @@ fun ClipboardSyncEffect(
                     if (local != null && local != lastLocal) {
                         lastLocal = local
                         if (RustCore.sendClipboard(address, controlPort, local).isSuccess) {
+                            ClipboardShared.lastExchanged = local
                             ClipHistory.add(context, local)
                             lastRemote = local
                             images.textMoved()
@@ -108,6 +110,7 @@ fun ClipboardSyncEffect(
                         val text = remote.content
                         if (text != lastRemote) {
                             lastRemote = text
+                            ClipboardShared.lastExchanged = text
                             ClipHistory.add(context, text)
                             if (text.isNotBlank() && text != lastLocal) {
                                 writeLocalClipboard(context, text)

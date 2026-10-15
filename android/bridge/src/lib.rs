@@ -6,6 +6,7 @@
 //! polls; there is no callback channel yet.
 
 mod api;
+mod clipboard_push;
 mod download;
 mod links;
 mod logcat;
@@ -992,6 +993,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendLin
     let address = jstring_to_string(&mut env, &address);
     let url = jstring_to_string(&mut env, &url);
     let json = envelope_unit(RUNTIME.block_on(links::send_link(address, port as u16, url)));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's clipboard text as it last arrived (T10b), taken:
+/// `{"ok": "{host, port, content}"}`, or `{"ok": ""}` when nothing came.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeClipboardPush(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(clipboard_push::take_json()));
     to_jstring(&mut env, json)
 }
 

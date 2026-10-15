@@ -97,6 +97,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val replies by lazy { SmsReplies(applicationContext) }
     private val replyTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /** The computer's clipboard without a session (T10b), on the same tick. */
+    private val clipboard by lazy { dev.pocketdesk.android.clip.BackgroundClipboard(applicationContext) }
+
     override fun onCreate() {
         super.onCreate()
         rule = NotificationForwardRule(packageName)
@@ -106,6 +109,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         replyTicker.scheduleWithFixedDelay(
             {
                 runCatching { replies.tick() }.onFailure { Log.w("PhoneNotifications", "reply tick failed", it) }
+                runCatching { clipboard.tick() }.onFailure { Log.w("PhoneNotifications", "clipboard tick failed", it) }
                 // Notifications that waited (the phone asleep, the computer away) go now.
                 worker.execute { sendWaiting() }
             },

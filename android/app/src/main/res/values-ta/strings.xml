@@ -461,4 +461,12 @@
     <string name="texts_names_summary">செய்தி கணினியில் எண்ணுடன், இந்தத் தொலைபேசியின் தொடர்புகளில் உள்ள அனுப்புநரின் பெயருடன் காட்டப்படும்</string>
     <string name="settings_capture_mouse">இணைக்கப்பட்ட சுட்டியைக் கணினியில் பயன்படுத்து</string>
     <string name="settings_capture_mouse_summary">அமர்வின்போது இந்தத் தொலைபேசியில் இணைத்த சுட்டி (USB அல்லது Bluetooth) கணினியின் சுட்டுக்குறியை நகர்த்திச் சொடுக்கும்</string>
+    <string name="send_clipboard_label">கிளிப்போர்டை அனுப்பு</string>
+    <string name="send_clipboard_no_computer">முதலில் ஒரு கணினியுடன் இணைக்கவும்</string>
+    <string name="send_clipboard_empty">கிளிப்போர்டில் அனுப்ப உரை இல்லை</string>
+    <string name="send_clipboard_too_long">கிளிப்போர்டு உரை அனுப்ப மிக நீளமானது</string>
+    <string name="send_clipboard_sent">கிளிப்போர்டு %1$s க்கு அனுப்பப்பட்டது</string>
+    <string name="send_clipboard_failed">%1$s ஐ அடைய முடியவில்லை</string>
+    <string name="settings_clipboard_background">பின்னணியில் கணினியின் கிளிப்போர்டு</string>
+    <string name="settings_clipboard_background_summary">கணினியில் நீங்கள் நகலெடுப்பது அமர்வு இல்லாமலும், வீட்டிற்கு வெளியேயும் இந்த ஃபோனை அடையும். இதற்கு அறிவிப்பு அணுகல் தேவை, அது இணைப்பை வைத்திருக்கும்</string>
 </resources>

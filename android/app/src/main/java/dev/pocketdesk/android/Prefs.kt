@@ -27,6 +27,7 @@ object Prefs {
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
+    private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
@@ -134,6 +135,17 @@ object Prefs {
 
     fun setPhoneMediaOnComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_PHONE_MEDIA, enabled) }
+    }
+
+    /**
+     * Whether the computer's clipboard reaches the phone without a session
+     * (T10b): the notification listener keeps a link for it. Off by default.
+     */
+    fun clipboardInBackground(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_CLIPBOARD_BACKGROUND, false)
+
+    fun setClipboardInBackground(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CLIPBOARD_BACKGROUND, enabled) }
     }
 
     /** Whether a mouse connected to the phone drives the computer's cursor in a session (T9c). On by default. */

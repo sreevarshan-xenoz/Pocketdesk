@@ -155,6 +155,18 @@ fun SettingsScreen(onBack: () -> Unit) {
             ) { Prefs.setLinksFromComputer(context, it) }
             boolRow(
                 LlIcons.Wifi,
+                stringResource(R.string.settings_clipboard_background),
+                stringResource(R.string.settings_clipboard_background_summary),
+                Prefs.clipboardInBackground(context),
+            ) { on ->
+                Prefs.setClipboardInBackground(context, on)
+                // The notification listener is what holds the link in the background.
+                if (on && !PhoneNotificationPrefs.accessGranted(context)) {
+                    runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
+                }
+            }
+            boolRow(
+                LlIcons.Wifi,
                 stringResource(R.string.settings_share_battery),
                 stringResource(R.string.settings_share_battery_summary),
                 Prefs.shareBattery(context),

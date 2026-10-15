@@ -114,6 +114,27 @@
             android:name=".ui.NotificationReplyReceiver"
             android:exported="false" />
 
+        <!-- T10b: reads the clipboard once in focus, sends it, closes; never shown. -->
+        <activity
+            android:name=".clip.SendClipboardActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- T10b: the phone's clipboard to its computer from Quick Settings. -->
+        <service
+            android:name=".shortcuts.SendClipboardTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_pocketdesk"
+            android:label="@string/send_clipboard_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- F11: one tap to the last computer from Quick Settings. -->
         <service
             android:name=".shortcuts.ConnectTileService"
