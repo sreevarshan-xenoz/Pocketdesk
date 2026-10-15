@@ -964,6 +964,16 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchFo
     to_jstring(&mut env, json)
 }
 
+/// Video bytes the live session has received so far, counted as frames
+/// arrive (0 with no session): the watchdog's sign that a slow link lives.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeVideoBytes(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jni::sys::jlong {
+    crate::video_bytes() as jni::sys::jlong
+}
+
 /// Files the desktop offered since the last call: `{"ok": "[{id,name,size}]"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeFileOffers(

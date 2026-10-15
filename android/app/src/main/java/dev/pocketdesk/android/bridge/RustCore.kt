@@ -128,6 +128,7 @@ object RustCore {
     private external fun nativeTakeFileOffers(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
+    private external fun nativeVideoBytes(): Long
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
     private external fun nativeGetMonitors(address: String, port: Int): String
     private external fun nativeGetBattery(address: String, port: Int): String
@@ -657,6 +658,9 @@ object RustCore {
      */
     fun fetchFolder(address: String, port: Int, path: String): Result<Unit> =
         envelope(nativeFetchFolder(address, port, path)).map { }
+
+    /** Video bytes the live session has received, counted as frames arrive (0 with none). */
+    fun videoBytes(): Long = nativeVideoBytes()
 
     /** Files the desktop offered since the last call, as a JSON array of `{id, name, size}`. */
     fun takeFileOffers(): String = envelope(nativeTakeFileOffers()).getOrDefault("[]")
