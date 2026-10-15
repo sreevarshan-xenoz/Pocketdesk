@@ -642,7 +642,11 @@ async fn handle_folder_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) 
         .get("path")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    let refused = match crate::plugins::file_browse::resolve_folder(asked) {
+    // Every file would be fetched by a download, so a phone the desktop
+    // cannot dial back is told now, not promised a folder that never comes.
+    let checked =
+        dial_back(sender).and_then(|_| crate::plugins::file_browse::resolve_folder(asked));
+    let refused = match checked {
         Err(reason) => reason,
         Ok((_, shown)) => match crate::state::state_dir() {
             // Offered and answered there, or refused and answered there.
@@ -729,13 +733,7 @@ fn plan_fetch(
         .and_then(|p| u16::try_from(p).ok())
         .filter(|p| *p != 0)
         .ok_or("no port to send to")?;
-    let ip = sender
-        .peer_addr()
-        .map(|a| a.ip())
-        .ok_or("downloads need the local network connection")?;
-    if !dialable(ip) {
-        return Err(format!("will not connect back to {ip}"));
-    }
+    let ip = dial_back(sender)?;
     // Taken before an offer is redeemed, so a busy desktop does not spend
     // one of the phone's tries.
     let slot = transfer_slots().take(sender.device_id())?;
@@ -1019,6 +1017,19 @@ pub(crate) fn is_transfer_key(key: &str) -> bool {
 /// (a loopback peer means a local proxy such as `adb reverse`, and the
 /// phone's port would name a service on this machine), and not an address
 /// that is no single host or is the link-local range (cloud metadata).
+/// The address a download to `sender` would be dialed at, or why there is
+/// none: the desktop dials the transport's peer, and only a real one.
+fn dial_back(sender: &dyn DeviceSender) -> std::result::Result<IpAddr, String> {
+    let ip = sender
+        .peer_addr()
+        .map(|a| a.ip())
+        .ok_or("downloads need the local network connection")?;
+    if !dialable(ip) {
+        return Err(format!("will not connect back to {ip}"));
+    }
+    Ok(ip)
+}
+
 pub(crate) fn dialable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -2262,6 +2273,29 @@ mod tests {
         assert!(refusal(&phone).is_some());
         let made: Vec<_> = std::fs::read_dir(&downloads).unwrap().flatten().collect();
         assert!(made.is_empty(), "{made:?}");
+    }
+
+    #[tokio::test]
+    async fn a_folder_is_not_promised_to_a_connection_the_desktop_cannot_dial() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("127.0.0.1:51000");
+        // A folder that is not there: whatever the order of the checks, this
+        // test never offers a real folder or writes the real sent list.
+        let home = dirs::home_dir().unwrap();
+        let asked = home.join("pd-test-no-such-folder").display().to_string();
+        let packet =
+            NetworkPacket::new(FOLDER_FETCH).with_body(serde_json::json!({ "path": asked }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        let reply = phone.replies().pop().expect("an answer");
+        assert_eq!(reply.body["queued"], false);
+        assert!(
+            reply.body["reason"]
+                .as_str()
+                .unwrap()
+                .contains("connect back"),
+            "{}",
+            reply.body["reason"]
+        );
     }
 
     #[tokio::test]
