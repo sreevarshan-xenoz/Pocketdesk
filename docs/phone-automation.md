@@ -14,7 +14,7 @@ On the computer, scripts use the local API instead: `docs/local-api.md`.
 | Action | `dev.pocketdesk.android.action.CONNECT` |
 | Extra | `dev.pocketdesk.android.extra.ADDRESS` = the saved computer's address |
 
-Opens the app and starts a session with that computer.
+Opens the app and starts a session with that computer, in place of any session already open. Relaunching it from Recents does not connect again.
 
 ## Wake a computer
 
@@ -24,7 +24,7 @@ Opens the app and starts a session with that computer.
 | Action | `dev.pocketdesk.android.action.WAKE` |
 | Extra | `dev.pocketdesk.android.extra.ADDRESS` = the saved computer's address |
 
-Sends the Wake-on-LAN packets the computer's Wake settings describe. The computer must have taught the phone how to wake it (a session while it was awake), or have a MAC address set by hand.
+Sends the Wake-on-LAN packets the computer's Wake settings describe. The computer must have taught the phone how to wake it (a session while it was awake), or have a MAC address set by hand; otherwise the app says it does not know how to wake it yet. Away from the computer's network, only an outside address and port or a relay computer set in its Wake settings can reach it.
 
 ## Put text on a computer's clipboard
 
