@@ -31,7 +31,7 @@ pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
 /// Shorthand for the full plugin registry type with every plugin registered.
 pub type PluginSet = PluginRegistry;
 
-/// Register all 16 KDE Connect plugins and return the registry.
+/// Register every plugin and return the registry.
 pub fn register_all() -> PluginSet {
     let mut registry = PluginRegistry::new();
     registry.register(battery::BatteryPlugin::new());
