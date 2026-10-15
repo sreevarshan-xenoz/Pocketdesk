@@ -14,6 +14,8 @@ use crate::audio_control;
 /// - `{action: "setMuted", muted: bool}`
 /// - `{action: "sinks"}` → `{ok, sinks: [{index, name, description, isDefault}], default}`
 /// - `{action: "selectSink", name}` → routes the default output
+/// - `{action: "media"}` → `{ok, playing}`: what is playing (T8c, [`crate::media`])
+/// - `{action: "mediaControl", command: "playPause" | "next" | "previous"}`
 #[derive(Debug, Default)]
 pub struct AudioControlPlugin;
 
@@ -47,6 +49,11 @@ impl Plugin for AudioControlPlugin {
             .and_then(|v| v.as_u64())
             .map(|v| v as u32);
         let muted = packet.body.get("muted").and_then(|v| v.as_bool());
+        let command = packet
+            .body
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         let sink = packet
             .body
             .get("name")
@@ -69,6 +76,11 @@ impl Plugin for AudioControlPlugin {
             "selectSink" => match sink {
                 Some(name) => audio_control::select_sink(name).map(|_| json!({ "ok": true })),
                 None => Err("selectSink requires {name}".to_string()),
+            },
+            "media" => crate::media::now_playing().map(crate::media::answer),
+            "mediaControl" => match command.as_deref().and_then(crate::media::Command::parse) {
+                Some(command) => crate::media::command(command).map(|_| json!({ "ok": true })),
+                None => Err("mediaControl takes playPause, next or previous".to_string()),
             },
             _ => audio_control::status(),
         })
