@@ -6,16 +6,18 @@ Design: `docs/superpowers/specs/2026-10-15-local-api-design.md`. Source: `server
 
 ## The rules
 
-- **One JSON object per run** on stdout, on one line. `sessions --json` prints one object per line instead (one per session), as it always has. Logs go to stderr.
+These hold for `status`, `devices`, `sent`, `received`, `send`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
+
+- **One JSON object per run** on stdout, on one line. Logs go to stderr.
 - **Every object carries `"api": 1`.** Within version 1, fields are only ever added, never renamed, removed or given another meaning. A field a script does not know should be ignored.
-- **A failure is JSON too.** A command run with `--json` that fails prints `{"api": 1, "error": "…"}` and exits with a code other than 0.
+- **A failure is JSON too**, for any command run with `--json`: a usage error, a config.toml that does not parse, or the command failing prints `{"api": 1, "error": "…"}` and exits with a code other than 0. A script can test for `error`.
 - **Exit codes:**
 
   | Code | Meaning |
   |---|---|
   | 0 | Done |
-  | 1 | Failed (the `error` or `reason` field says why) |
-  | 2 | Bad arguments: no phone by that name, a path that is not there |
+  | 1 | Failed (`error` says why), including `unpair` of a phone that is not paired and `pair` with a PIN that is not 6 digits |
+  | 2 | Bad arguments: a usage error, no phone by that name for `send`, a path that is not there, nothing named for `kick` |
   | 3 | No Pocketdesk server is running, and the command needs one |
   | 4 | `--wait` ran out while the phone had still not saved the file |
 
@@ -55,7 +57,7 @@ The paired phones.
 
 ### `pocketdesk sent --json` and `pocketdesk received --json`
 
-The desktop app's Files tab: the last 20 (`--count N` for more), newest first.
+The desktop app's Files tab: the last 20 (`--count N` for another number; the lists keep 50), newest first.
 
 ```json
 {"api": 1, "sent": [{"id": "8b4b2722-…", "name": "Trip/", "path": "C:\\Users\\me\\Trip", "size": 8030000,
@@ -87,7 +89,7 @@ Sends a file or a folder to a phone in a session, exactly as the desktop app's F
  "state": "queued", "reason": null, "note": null}
 ```
 
-Without `--wait` it ends once the request is written for the server to take (`queued`); a server that stops before taking it drops it after a minute. With `--wait`, it waits up to that many seconds. Once the server has taken the request, `state`, `reason` and `note` are the sent list's (`offered` while the phone has not saved it yet), and the exit code is 0 when the phone saved it, 1 when it failed, 4 when time ran out, and 3 when the server stopped while waiting. A send refused before it was queued has `"state": "refused"` and a `reason`.
+Without `--wait` it ends once the request is written for the server to take (`queued`); a server that stops before taking it drops it after a minute. With `--wait`, it waits up to that many seconds. Once the server has taken the request, `state`, `reason` and `note` are the sent list's (`offered` while the phone has not saved it yet), and the exit code is 0 when the phone saved it, 1 when it failed, 4 when time ran out, and 3 when the server stopped while waiting. A send refused before it was queued has `"state": "refused"`, with the same text in `reason` and `error`.
 
 ```sh
 pocketdesk send 0d7c3a backup.tar --wait 600 --json || notify-send "backup did not reach the phone"

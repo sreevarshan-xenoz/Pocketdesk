@@ -440,7 +440,7 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 | `pocketdesk install [--elevated]` | *Windows:* register the logon task, start it, and open the firewall ports |
 | `pocketdesk uninstall` | *Windows:* remove the logon task, firewall rules and notification identity |
 
-Every command that reports or acts takes `--json`, for scripts: one object per run carrying `"api": 1`, failures included, with documented exit codes. `docs/local-api.md` is the contract. There is no listener behind it: it is this program, run as you, over your own state folder.
+For scripts, `status`, `devices`, `sent`, `received`, `send`, `kick`, `pair`, `unpair`, `list` and `relay-ids` take `--json`: one object per run carrying `"api": 1`, failures included, with documented exit codes (`sessions`, `capabilities` and `bench` keep their own JSON formats). `docs/local-api.md` is the contract. There is no listener behind it: it is this program, run as you, over your own state folder.
 
 ### Capabilities Are Generated, Not Written
 

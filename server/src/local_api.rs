@@ -249,9 +249,11 @@ pub fn send_in(
     running: &dyn Fn() -> bool,
     wait: Option<std::time::Duration>,
 ) -> (Value, i32) {
+    // A refusal is a failure like any other (`error`), and a send's state
+    // (`state`, `reason`) too.
     let refused = |code: i32, reason: String| {
         (
-            versioned(json!({ "state": "refused", "reason": reason })),
+            versioned(json!({ "state": "refused", "reason": reason, "error": reason })),
             code,
         )
     };
@@ -345,7 +347,11 @@ pub fn run_send(query: &str, path: &Path, wait_secs: Option<u64>, as_json: bool)
     let dir = match crate::state::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!("No state folder: {e}");
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
             return exit::FAILED;
         }
     };
@@ -513,7 +519,11 @@ pub fn run_kick(target: &str, as_json: bool) -> i32 {
     let dir = match crate::state::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
-            eprintln!("No state folder: {e}");
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
             return exit::FAILED;
         }
     };
@@ -679,6 +689,11 @@ mod tests {
         assert_eq!(code, exit::NO_SERVER, "{out}");
         let (out, code) = send_in(&dir, "ffffff", &file, &|| true, None);
         assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
+        assert_eq!(out["state"], "refused");
+        assert_eq!(
+            out["error"], out["reason"],
+            "a failure is found where every failure is"
+        );
         let (out, code) = send_in(&dir, "5f1c9b", &dir.join("missing.pdf"), &|| true, None);
         assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
         assert!(
