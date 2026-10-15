@@ -4,7 +4,8 @@
 //! `<state>/phone_status.json` at most every [`WRITE_EVERY`], and, with
 //! `phone_battery_alerts` on, warns once when a phone runs low.
 //!
-//! The battery is status, not an action, so no permission gates it.
+//! The battery is status, not an action, so no permission gates it; only
+//! a paired phone's report is taken.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -141,6 +142,16 @@ impl Plugin for PhoneBatteryPlugin {
         if packet.packet_type != BATTERY {
             return Ok(());
         }
+        // Only a paired phone's: with `pairing_required = false` anyone
+        // could otherwise fill the reports and raise warnings under
+        // made-up ids.
+        if !crate::plugins::pair::is_paired_device(sender.device_id()) {
+            tracing::debug!(
+                "A battery report from unpaired {} was ignored",
+                sender.device_id()
+            );
+            return Ok(());
+        }
         let Some(report) = BatteryReport::from_body(&packet.body) else {
             tracing::debug!("A battery report from {} was not read", sender.device_id());
             return Ok(());
@@ -227,6 +238,57 @@ mod tests {
             reports.batteries["phone-b"].charge, 12,
             "kept with the setting off"
         );
+    }
+
+    struct Phone {
+        id: &'static str,
+        sent: Mutex<Vec<NetworkPacket>>,
+    }
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Phone {
+        fn device_id(&self) -> &str {
+            self.id
+        }
+        fn connection_id(&self) -> &str {
+            self.id
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.sent.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    /// Only a paired phone's report is kept (or warned about): with
+    /// `pairing_required = false` anyone could otherwise fill the reports
+    /// and raise warnings under made-up ids. Nothing is answered.
+    #[tokio::test]
+    async fn only_a_paired_phones_report_is_kept_and_none_is_answered() {
+        let dir = pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        std::fs::create_dir_all(dir).unwrap();
+        pocketdesk_core::protocol::kdeconnect::TrustStore::update(
+            dir.join("trusted_devices.json"),
+            |store| store.trust_device("battery-paired"),
+        )
+        .unwrap();
+        let report = NetworkPacket::new(BATTERY)
+            .with_body(serde_json::json!({"currentCharge": 41, "isCharging": false}));
+        for id in ["battery-paired", "battery-stranger"] {
+            let phone = Phone {
+                id,
+                sent: Mutex::default(),
+            };
+            PhoneBatteryPlugin
+                .handle_packet(&report, &phone)
+                .await
+                .unwrap();
+            assert!(phone.sent.lock().unwrap().is_empty(), "{id} answered");
+        }
+        let reports = REPORTS.lock().unwrap();
+        assert_eq!(reports.batteries["battery-paired"].charge, 41);
+        assert!(!reports.batteries.contains_key("battery-stranger"));
     }
 
     #[test]
