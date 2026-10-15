@@ -20,6 +20,13 @@ object TransferRetry {
         return DELAYS_SECONDS[attempt - 1]
     }
 
+    /** The phone itself will not take this file (no room, an unsafe place): never retried. */
+    class Refusal(message: String) : Exception(message)
+
+    /** [delayBefore] for a failure [error]: a [Refusal] is final, whatever it says. */
+    fun delayAfter(attempt: Int, error: Throwable?, enabled: Boolean): Long? =
+        if (error is Refusal) null else delayBefore(attempt, error?.message, enabled)
+
     /**
      * Whether a folder send goes on (T6b). It stops once [GIVE_UP_AFTER]
      * files in a row failed, each after its own retries, for a reason that

@@ -74,6 +74,19 @@ class TransferRetryTest {
     }
 
     @Test
+    fun whatThePhoneItselfRefusesIsNotRetriedInAnyLanguage() {
+        for (refusal in listOf(
+            TransferRetry.Refusal("No hay espacio para foto.jpg"),
+            TransferRetry.Refusal("unsafe place in a folder: ../x"),
+            TransferRetry.Refusal("cannot create a.jpg"),
+        )) {
+            assertNull(refusal.message, TransferRetry.delayAfter(1, refusal, enabled = true))
+        }
+        assertEquals(5L, TransferRetry.delayAfter(1, java.io.IOException("connection reset"), enabled = true))
+        assertEquals(5L, TransferRetry.delayAfter(1, null, enabled = true))
+    }
+
+    @Test
     fun nothingIsRetriedWhenRetriesAreOff() {
         assertNull(TransferRetry.delayBefore(1, "reset", enabled = false))
     }

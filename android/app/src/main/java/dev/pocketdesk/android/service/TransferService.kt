@@ -287,9 +287,9 @@ class TransferService : Service() {
         // A broken download goes again a few times, continuing what it kept.
         var attempt = 1
         while (result.isFailure) {
-            val error = result.exceptionOrNull()?.message
-            val wait = TransferRetry.delayBefore(attempt, error, Prefs.retryTransfers(this)) ?: break
-            Log.i(TAG, "receiving ${job.name} failed ($error); trying again in $wait s")
+            val error = result.exceptionOrNull()
+            val wait = TransferRetry.delayAfter(attempt, error, Prefs.retryTransfers(this)) ?: break
+            Log.i(TAG, "receiving ${job.name} failed (${error?.message}); trying again in $wait s")
             show(progressNotification(getString(R.string.transfer_retrying, attempt), job.name, 0))
             Thread.sleep(wait * 1000)
             attempt++
@@ -444,7 +444,7 @@ class TransferService : Service() {
             RustCore.declineOffer(job.address, job.port, job.value, reason)
                 .onFailure { Log.w(TAG, "could not decline ${job.value}: ${it.message}") }
         }
-        return Result.failure(IllegalStateException(reason))
+        return Result.failure(TransferRetry.Refusal(reason))
     }
 
     private fun sendCopy(address: String, port: Int, uri: Uri, name: String): Result<Unit> {
