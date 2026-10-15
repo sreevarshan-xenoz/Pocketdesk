@@ -1,6 +1,6 @@
 # The phone's battery on the computer (T8b)
 
-Date: 2026-10-15. Status: design, on autopilot (the user asked for the roadmap to keep going; the decisions are mine).
+Date: 2026-10-15. Status: built (see As built), on autopilot (the user asked for the roadmap to keep going; the decisions are mine).
 
 ## Why
 
@@ -35,3 +35,17 @@ T8 in the roadmap: "phone status on the desktop". The phone can already read the
 - desktop: the Devices tab's text for a fresh, old and missing report; the setting saves.
 - Kotlin: when the phone sends (start, a whole percent, the plug, nothing otherwise), JVM-tested.
 - Device: the A71's battery on the Windows Devices tab and in `pocketdesk devices --json`.
+
+## As built
+
+- **Where it lives.** The phone's `BatteryRule` (JVM-tested) and `BatteryEffect`; the bridge's allow-list of packets the app may send; the server's `PhoneBatteryPlugin` (`server/src/plugins/phone_battery.rs`) beside the computer's own `BatteryPlugin`, which answers `kdeconnect.battery.request`; `core::local::phone_status`; the desktop's `battery_text`.
+- **Changed from the design.**
+  - The warning names the phone by the first 8 characters of its id ("Phone 1a2b3c4d: battery low (12 %)"): the computer keeps no names for phones.
+  - The phone reads Android's battery every 15 s instead of keeping a receiver, and sends again every 5 minutes so the report's age stays fresh.
+  - The low flag is the battery broadcast's `EXTRA_BATTERY_LOW` (Android 9 and newer; older phones never send it), not `ACTION_BATTERY_LOW`.
+- **Fresh review (0 Critical, 3 Important, 7 Minor), fixed one commit each:**
+  - the phone opened a throwaway connection every 15 s when the session's control link was down: it now sends only on that link, while the app is started;
+  - reports were never pruned (a removed phone's stayed on disk, and 64 ids filled every slot): phones no longer paired are forgotten each tick, and the oldest report makes room;
+  - with `pairing_required = false` anyone could write reports and raise warnings under made-up ids: only a paired phone's report is taken, with a test that dispatches real packets.
+  - Minors fixed: two doc comments, and the phone's summary promising a warning the desktop may have turned off.
+  - Ruled: the warning's state is in memory, so a restart may warn again at once; a phone's own low flag does not re-arm the warning; "charging" means plugged in, as KDE Connect reports it.

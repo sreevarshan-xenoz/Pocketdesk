@@ -1056,6 +1056,19 @@ Owed:
 - [ ] The phone's "Links from the computer" off: a link dropped.
 - [ ] Linux: `xdg-open`, and no zombie process after a link.
 
+## 57. The phone's battery on the computer (T8b)
+
+On the A71 against Windows, 2026-10-15, LAN, input off for the phone:
+- [x] At the session's start `phone_status.json` held the phone's battery, 100 % and charging over USB, matching `dumpsys battery`.
+- [x] `dumpsys battery unplug` and `set level 12`: one notification on the computer, "Phone <id>: battery low (12 %)"; `set level 10` gave none more; `pocketdesk devices --json` showed 10 %, not charging.
+
+Owed:
+- [ ] The Devices tab's text, and its age after the session ends.
+- [ ] After the review fixes: the report going on the session's control link only (no "Incoming" connection per check on the desktop), and catching up after a Wi-Fi drop.
+- [ ] Unpairing the phone: its report gone from the file within 5 s.
+- [ ] The phone's "Share battery with the computer" off: no report; the desktop's "Phones' batteries" off: no notification.
+- [ ] A real discharge to 15 %, Android's own low flag, and Linux's notification.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
