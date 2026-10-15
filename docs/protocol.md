@@ -170,7 +170,7 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 | Clipboard image | `kdeconnect.pocketdesk.clipboard_image` | phone → desktop | `{size, port, key}` (the desktop then dials back, §1.4) | Clipboard | `core/src/protocol/clipboard.rs` |
 | Clipboard image | `kdeconnect.pocketdesk.clipboard_image_fetch` | phone → desktop | `{id, port, key}` | Clipboard | same |
 | Notification reply | `kdeconnect.pocketdesk.notification_reply` | phone → desktop | Reply text for a desktop notification. Put on the desktop clipboard and appended to `replies.log` | Clipboard | `server/src/plugins/notification_reply.rs` |
-| Files | `kdeconnect.share.request` | phone → desktop | File name, size, `{port, key}`; or a URL (shown as a notification) | Files | `server/src/plugins/share.rs` |
+| Files | `kdeconnect.share.request` | phone → desktop | File name, size, `{port, key}`, `sourceId` (the file's id, so a retry continues it); for a file of a folder also `folder`, `folderId` (one per send) and `path` (its names under the folder, checked one by one and refused if any could leave it: `core::protocol::relpath`). Each send's files go under one new `Downloads/<folder>` (`Name (1)` when taken). Or a URL (shown as a notification) | Files | `server/src/plugins/share.rs` |
 | Files | `kdeconnect.filebrowse.request` / `.response` | phone → desktop / back | A folder listing under home | Files | `server/src/plugins/file_browse.rs` |
 | Files | `kdeconnect.pocketdesk.file_fetch` | phone → desktop | `{path or offer, port, key}` | Files | `server/src/plugins/share.rs` |
 | Files | `kdeconnect.pocketdesk.file_fetch_refused` | desktop → phone | `{key, reason}` | — | same |
