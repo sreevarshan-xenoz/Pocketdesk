@@ -74,7 +74,7 @@ Each item gets its own spec section, results written into the checklist, and fix
 - **T5:** `docs/protocol.md` (branch `fix/protocol-audit`). Writing it found eleven fixes, among them the phone's relay lookups going to public DNS resolvers, the wake relay sending wherever a phone named, and TLS 1.2 still accepted on TCP.
 - **T6a:** resumable, hash-checked transfers both ways (PR #50; spec `2026-10-14-resumable-transfers-design.md`).
 - **T6b:** folders both ways, each file resumable (PR #51), and "Download this folder" in the remote browser (PR #52; spec `2026-10-15-download-folder-design.md`).
-- **T7a:** the local API on the desktop: `--json` on the CLI, `devices`, `sent`, `received`, `send`, and `docs/local-api.md` (branch `feat/local-api`; spec `2026-10-15-local-api-design.md`). T7b, automation apps on the phone, is next.
+- **T7a:** the local API on the desktop: `--json` on the CLI, `devices`, `sent`, `received`, `send`, and `docs/local-api.md` (branch `feat/local-api`; spec `2026-10-15-local-api-design.md`). **T7b:** automation apps on the phone: the intents documented (`docs/phone-automation.md`), and a share may name the saved computer it goes to (branch `feat/phone-automation`).
 - **R2:** run on the A71 against Windows (branch `fix/r2-control-link`). The control connection now comes back after a network drop, and a dropped link reconnects by itself. Owed: an hour-long run, sleep and wake, mobile data, and Linux.
 
 **Deferred, with reason:**

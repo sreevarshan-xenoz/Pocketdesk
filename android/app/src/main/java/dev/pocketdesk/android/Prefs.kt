@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
+    private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
@@ -99,6 +100,14 @@ object Prefs {
     }
 
     /** T6: a file that fails to send is sent again, continuing where it stopped. */
+    /** Whether other apps may name the computer a share goes to (T7b). Off by default. */
+    fun othersChooseComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_OTHERS_CHOOSE_COMPUTER, false)
+
+    fun setOthersChooseComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_OTHERS_CHOOSE_COMPUTER, enabled) }
+    }
+
     fun retryTransfers(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_RETRY_TRANSFERS, true)
 

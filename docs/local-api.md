@@ -110,4 +110,4 @@ Removes a paired phone, or every one when none is named: `{"api": 1, "unpaired":
 
 ## The phone
 
-Automation apps on the phone (Tasker and the like) are a later step (T7b): the intents that exist today and a switch to let other apps use Pocketdesk.
+Automation apps on the phone (Tasker and the like) use Android intents: connect, wake, text to a computer's clipboard, files to it. `docs/phone-automation.md` lists them.

@@ -32,4 +32,39 @@ object ShortcutPlan {
      */
     fun savedHost(address: String?, hosts: List<HostStore.Host>): HostStore.Host? =
         address?.let { wanted -> hosts.firstOrNull { it.address == wanted } }
+
+    /**
+     * Whether files shared with these URI [schemes] may be sent: only what
+     * another app shares through a provider (`content`). A `file` path is
+     * opened with this app's own rights, which reach its keys and pairings.
+     */
+    fun shareable(schemes: List<String?>): Boolean = schemes.all { it == "content" }
+
+    /** Where a share goes, or why it goes nowhere. */
+    sealed interface Share {
+        data class To(val host: HostStore.Host) : Share
+
+        /** No computer is saved. */
+        data object NoneSaved : Share
+
+        /** The computer named is not saved. */
+        data object NotSaved : Share
+
+        /** Another app named a computer, and the person has not let apps choose. */
+        data object NotAllowed : Share
+    }
+
+    /**
+     * Where a share goes (T7b): the last computer used, or the saved one
+     * [address] names when [othersMayChoose] (Settings, off by default:
+     * any app can start a share, and choosing the computer is more than the
+     * share sheet lets it do). A named computer is never swapped for
+     * another: refused when not saved, or when choosing is not allowed.
+     */
+    fun shareHost(address: String?, hosts: List<HostStore.Host>, othersMayChoose: Boolean): Share =
+        when {
+            address == null -> hosts.firstOrNull()?.let { Share.To(it) } ?: Share.NoneSaved
+            !othersMayChoose -> Share.NotAllowed
+            else -> savedHost(address, hosts)?.let { Share.To(it) } ?: Share.NotSaved
+        }
 }

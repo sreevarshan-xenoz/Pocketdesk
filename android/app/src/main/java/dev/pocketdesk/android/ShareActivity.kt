@@ -7,6 +7,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.service.TransferService
+import dev.pocketdesk.android.shortcuts.ShortcutPlan
+import dev.pocketdesk.android.shortcuts.Shortcuts
 
 /**
  * Share target (Tier 1 #4, F7): text goes to the desktop clipboard; one or
@@ -14,7 +16,9 @@ import dev.pocketdesk.android.service.TransferService
  * so the transfer outlives this screen, which closes at once.
  *
  * Requires a saved host ([HostStore]) — the shared item never picks a
- * destination itself.
+ * destination itself. Another app (an automation app, T7b) may name one of
+ * the saved computers with the extra [Shortcuts.EXTRA_ADDRESS]; without it,
+ * the last computer used.
  */
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,16 +35,26 @@ class ShareActivity : ComponentActivity() {
     }
 
     private fun handle(intent: Intent) {
-        val host = HostStore.lastHost(this)
-        if (host == null) {
-            done(getString(R.string.share_no_host))
-            return
+        // Present at all counts as naming one: an extra of the wrong type is
+        // refused, not taken for "the last computer".
+        val asked = if (intent.hasExtra(Shortcuts.EXTRA_ADDRESS)) {
+            intent.getStringExtra(Shortcuts.EXTRA_ADDRESS).orEmpty()
+        } else {
+            null
+        }
+        val host = when (val share = ShortcutPlan.shareHost(asked, HostStore.hosts(this), Prefs.othersChooseComputer(this))) {
+            is ShortcutPlan.Share.To -> share.host
+            ShortcutPlan.Share.NoneSaved -> return done(getString(R.string.share_no_host))
+            ShortcutPlan.Share.NotSaved -> return done(getString(R.string.share_not_saved))
+            ShortcutPlan.Share.NotAllowed -> return done(getString(R.string.share_choosing_off))
         }
 
         val uris = sharedUris(intent)
         val text =
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
         when {
+            uris.isNotEmpty() && !ShortcutPlan.shareable(uris.map { it.scheme }) ->
+                done(getString(R.string.share_not_content))
             uris.isNotEmpty() -> {
                 // The service reads the files under this screen's grant. A
                 // share that gave no permission to read them (the sender
