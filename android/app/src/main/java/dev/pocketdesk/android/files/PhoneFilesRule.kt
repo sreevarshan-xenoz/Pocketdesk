@@ -44,6 +44,9 @@ object PhoneFilesRule {
 
     fun validPath(path: List<String>): Boolean = path.size <= MAX_DEPTH && path.all(::validName)
 
+    /** Whether the phone answers a request for [path]: a valid path through no hidden name, as a listing shows. */
+    fun reachable(path: List<String>): Boolean = validPath(path) && path.all(::listed)
+
     /** Whether an entry is listed: a usable name that is not hidden. */
     fun listed(name: String): Boolean = validName(name) && !name.startsWith(".")
 

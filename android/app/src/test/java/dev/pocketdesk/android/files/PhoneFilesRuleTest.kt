@@ -31,6 +31,8 @@ class PhoneFilesRuleTest {
         assertFalse(PhoneFilesRule.listed(".nomedia"))
         assertTrue(PhoneFilesRule.listed("photo.jpg"))
         assertFalse(PhoneFilesRule.listed("a/b"))
+        assertTrue(PhoneFilesRule.reachable(listOf("Docs", "a.pdf")))
+        assertFalse("never a hidden one, even named", PhoneFilesRule.reachable(listOf(".thumbnails", "a.jpg")))
     }
 
     @Test

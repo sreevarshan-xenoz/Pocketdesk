@@ -37,7 +37,7 @@ class PhoneFiles(private val ctx: Context) {
         }
         for (request in takeRequests()) {
             if (!PhoneFilesRule.fromOwnComputer(request.host, request.port, own?.address, own?.controlPort)) continue
-            if (!PhoneFilesRule.validPath(request.path)) continue
+            if (!PhoneFilesRule.reachable(request.path)) continue
             runCatching { if (request.fetch) fetch(request, folders) else list(request, folders) }
                 .onFailure { Log.w(TAG, "a request for this phone's files failed", it) }
         }
