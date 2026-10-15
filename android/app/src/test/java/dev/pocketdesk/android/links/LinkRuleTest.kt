@@ -21,6 +21,43 @@ class LinkRuleTest {
         assertFalse(LinkRule.openable("https://example.org/" + "a".repeat(LinkRule.MAX_BYTES)))
     }
 
+    /** The same cases as `core::protocol::link`'s loopback test; keep them alike. */
+    @Test
+    fun aLinkToALoopbackHostOrNoHostIsRefused() {
+        for (bad in listOf(
+            "https://:80/",
+            "http://localhost:8080/admin",
+            "http://LOCALHOST./",
+            "http://app.localhost/",
+            "http://127.0.0.1/",
+            "http://127.9.9.9:3000/",
+            "http://127.1/",
+            "http://2130706433/",
+            "http://0x7f000001/",
+            "http://0x7f.0.0.1/",
+            "http://0177.0.0.1/",
+            "http://0.0.0.0:8000/",
+            "http://[::1]:8000/",
+            "http://[::]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://%6c%6fcalhost/",
+            "http://\uff11\uff12\uff17.0.0.1/",
+            "http://127\u30020\u30020\u30021/",
+        )) {
+            assertFalse(bad, LinkRule.openable(bad))
+        }
+        for (fine in listOf(
+            "http://192.0.2.7/",
+            "http://[2001:db8::1]:8080/",
+            "https://localhost.example.org/",
+            "https://cafe.de/",
+            "https://1password.com/",
+            "https://m\u00fcnchen.de/",
+        )) {
+            assertTrue(fine, LinkRule.openable(fine))
+        }
+    }
+
     @Test
     fun theLinkIsFoundInWhatABrowserShares() {
         // Browsers often share "title + link".
