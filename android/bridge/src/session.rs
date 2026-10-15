@@ -399,7 +399,9 @@ pub(crate) fn take_folder_reply(path: &str) -> Option<serde_json::Value> {
 /// Packets the control reader keeps itself rather than broadcasting to the
 /// pollers: offers (thousands at once for a folder) and folder answers.
 pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
-    packet_type == crate::download::FILE_OFFER || packet_type == crate::download::FOLDER_FETCH_REPLY
+    packet_type == crate::download::FILE_OFFER
+        || packet_type == crate::download::FOLDER_FETCH_REPLY
+        || packet_type == pocketdesk_core::protocol::link::LINK
 }
 
 /// Drain the queued offers as a JSON array.
