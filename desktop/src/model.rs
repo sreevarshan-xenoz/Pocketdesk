@@ -154,6 +154,20 @@ pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<Stri
 
 /// Ask the server to send the file at `path` to `device_id`; the file's
 /// name, or why not.
+/// Queue the link `url` for the phone `device_id` (T8a), which shows it as
+/// a notification that opens it; what to tell the owner.
+pub fn queue_link(
+    state_dir: &Path,
+    device_id: &str,
+    url: &str,
+    now_unix: u64,
+) -> Result<String, String> {
+    let url = url.trim();
+    pocketdesk_core::local::links::request(state_dir, device_id, url, now_unix)
+        .map(|_| "Link sent: it waits on the phone as a notification.".to_string())
+        .map_err(|e| format!("Not sent: {e}."))
+}
+
 pub fn queue_send(
     state_dir: &Path,
     device_id: &str,
@@ -445,6 +459,17 @@ mod tests {
         let snap = snapshot_with(&dir, 101, true);
         let ids: Vec<_> = send_targets(&snap).iter().map(|d| d.id.clone()).collect();
         assert_eq!(ids, ["a"]);
+    }
+
+    #[test]
+    fn a_link_is_queued_for_the_server_and_one_that_may_not_open_is_refused() {
+        let dir = temp_dir("link");
+        assert!(queue_link(&dir, "a", " https://example.org/page ", 100).is_ok());
+        let queued = pocketdesk_core::local::links::take_all(&dir, 101);
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].url, "https://example.org/page", "trimmed");
+        assert!(queue_link(&dir, "a", "javascript:alert(1)", 100).is_err());
+        assert!(queue_link(&dir, "a", "", 100).is_err());
     }
 
     #[test]

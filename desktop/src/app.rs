@@ -116,6 +116,8 @@ pub struct PocketdeskApp {
     send_to: Option<String>,
     /// The Files tab's path field.
     send_path: String,
+    /// The link the send box hands to the phone (T8a).
+    send_link: String,
     /// A "Choose file…" dialog that is open.
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
     /// The Diagnostics tab (F10).
@@ -144,6 +146,7 @@ impl PocketdeskApp {
             raised_approvals: Vec::new(),
             send_to: None,
             send_path: String::new(),
+            send_link: String::new(),
             picking: None,
             diagnostics: Default::default(),
             messages: Default::default(),
@@ -752,6 +755,28 @@ impl PocketdeskApp {
         if let Some(path) = send {
             self.send_file(&path);
             self.send_path.clear();
+        }
+        let mut link = None;
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.send_link)
+                    .hint_text("A web link (http or https)")
+                    .desired_width(360.0),
+            );
+            if ui.button("Send link").clicked() && !self.send_link.trim().is_empty() {
+                link = Some(self.send_link.clone());
+            }
+        });
+        if let Some(url) = link {
+            self.notice = Some(
+                match model::queue_link(&self.state_dir, &device, &url, now_unix()) {
+                    Ok(said) => {
+                        self.send_link.clear();
+                        said
+                    }
+                    Err(e) => e,
+                },
+            );
         }
         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
         let hint = if hovering {
