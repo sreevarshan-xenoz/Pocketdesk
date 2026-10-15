@@ -5157,6 +5157,7 @@ dependencies = [
  "uuid",
  "wayland-backend",
  "wayland-client",
+ "wayland-protocols-misc",
  "wayland-protocols-wlr",
  "wayland-scanner",
  "windows 0.62.2",
