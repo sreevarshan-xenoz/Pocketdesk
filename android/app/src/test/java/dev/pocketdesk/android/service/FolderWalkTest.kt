@@ -74,6 +74,16 @@ class FolderWalkTest {
     }
 
     @Test
+    fun aPlaceFromTheComputerIsTakenToTheSameDepthTheComputerAllows() {
+        val deepest = (1..FolderWalk.MAX_DEPTH).map { "d$it" }
+        assertTrue("as deep as the computer sends", FolderWalk.receivable("Trip", deepest))
+        assertFalse(FolderWalk.receivable("Trip", deepest + "x"))
+        assertFalse("no name", FolderWalk.receivable("Trip", emptyList()))
+        assertFalse(FolderWalk.receivable("..", listOf("a.jpg")))
+        assertFalse(FolderWalk.receivable("Trip", listOf("..", "a.jpg")))
+    }
+
+    @Test
     fun namesTheComputerRefusesAreSkipped() {
         for (bad in listOf(
             "NUL", "com1.txt", "COM0", "lpt0.log", "a?b", "name.", "name ", "x\u0000y",

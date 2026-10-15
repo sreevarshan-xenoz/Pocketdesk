@@ -86,6 +86,15 @@ object FolderWalk {
         c == '\u061C' || c in '\u200B'..'\u200F' || c in '\u202A'..'\u202E' ||
             c in '\u2060'..'\u2069' || c == '\uFEFF'
 
+    /**
+     * Whether the phone makes a place the computer sent (T6b): the folder
+     * [folder] and the file's [path] under it, its name last, held to the
+     * computer's rules (`relpath::path_problem`: at most [MAX_DEPTH] names
+     * under the folder).
+     */
+    fun receivable(folder: String, path: List<String>): Boolean =
+        path.isNotEmpty() && path.size <= MAX_DEPTH && sendable(folder) && path.all(::sendable)
+
     /** Whether the computer takes [name] as one name in a path. */
     fun sendable(name: String): Boolean {
         if (name.isEmpty() || name == "." || name == "..") return false

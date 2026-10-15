@@ -390,8 +390,7 @@ class TransferService : Service() {
         // A file of a folder from the computer (T6b) goes under that send's
         // own new folder, at its place, every name checked again here.
         val folders = job.folder?.let { part ->
-            val names = listOf(part.folder) + part.path
-            if (names.size > FolderWalk.MAX_DEPTH || !names.all(FolderWalk::sendable)) {
+            if (!FolderWalk.receivable(part.folder, part.path)) {
                 return refuse(job, "unsafe place in a folder: ${part.path.joinToString("/")}")
             }
             val top = synchronized(folderTops) {
