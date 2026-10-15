@@ -97,6 +97,19 @@ pub trait OutStream: Send {
 pub trait InStream: Send {
     async fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ConnectionError>;
     async fn read_to_end(&mut self, limit: usize) -> Result<Vec<u8>, ConnectionError>;
+
+    /// [`InStream::read_to_end`], adding each part's size to `progress` as
+    /// it arrives: a large frame on a slow link shows it is still coming.
+    /// The default counts it all at the end.
+    async fn read_to_end_counting(
+        &mut self,
+        limit: usize,
+        progress: &std::sync::atomic::AtomicU64,
+    ) -> Result<Vec<u8>, ConnectionError> {
+        let data = self.read_to_end(limit).await?;
+        progress.fetch_add(data.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        Ok(data)
+    }
 }
 
 /// Which transport stack a connection rides. The pipeline is deliberately
@@ -326,6 +339,35 @@ impl InStream for QuinnRecvStream {
             other => ConnectionError::Other(other.to_string()),
         })
     }
+
+    async fn read_to_end_counting(
+        &mut self,
+        limit: usize,
+        progress: &std::sync::atomic::AtomicU64,
+    ) -> Result<Vec<u8>, ConnectionError> {
+        let mut data = Vec::new();
+        loop {
+            let chunk = self
+                .inner
+                .read_chunk(limit, true)
+                .await
+                .map_err(|e| match e {
+                    quinn::ReadError::ConnectionLost(e) => classify_conn_error(e),
+                    other => ConnectionError::Other(other.to_string()),
+                })?;
+            let Some(chunk) = chunk else {
+                return Ok(data);
+            };
+            if data.len() + chunk.bytes.len() > limit {
+                return Err(ConnectionError::Other("stream exceeds limit".into()));
+            }
+            progress.fetch_add(
+                chunk.bytes.len() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            data.extend_from_slice(&chunk.bytes);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -381,6 +423,70 @@ mod tests {
             PeerKey::Tls([0xab; 32]).to_string(),
             format!("tls:{}", "ab".repeat(32))
         );
+    }
+
+    /// A client and server connection over quinn loopback.
+    async fn loopback_pair() -> (SharedConnection, SharedConnection) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let certs = Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let mut client_endpoint =
+            quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).expect("client endpoint");
+        client_endpoint
+            .set_default_client_config(certs.client_config(alpn).expect("client config"));
+        let raw = client_endpoint
+            .connect(addr, "pocketdesk.local")
+            .expect("dial")
+            .await
+            .expect("connect");
+        let client: SharedConnection = Arc::new(QuinnConnection::new(raw));
+        (client, accept.await.expect("accept task"))
+    }
+
+    /// A frame that arrives slowly is counted as its bytes come, not only
+    /// when it ends: a slow link is still a live one (the phone's watchdog).
+    #[tokio::test]
+    async fn a_stream_is_counted_as_its_bytes_arrive() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let (client, server) = loopback_pair().await;
+        let counted = Arc::new(AtomicU64::new(0));
+        let first = vec![7u8; 64 * 1024];
+        let (read, ()) = tokio::join!(
+            async {
+                let mut reader = server.accept_uni().await.expect("accept_uni");
+                reader
+                    .read_to_end_counting(1024 * 1024, &counted)
+                    .await
+                    .expect("read")
+            },
+            async {
+                let mut writer = client.open_uni().await.expect("open_uni");
+                writer.write_all(&first).await.expect("first half");
+                // The rest only once the reader has counted some: a count
+                // made at the end would never come.
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while counted.load(Ordering::Relaxed) == 0 {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("counted before the stream ended");
+                writer.write_all(&first).await.expect("second half");
+                writer.finish().expect("finish");
+            }
+        );
+        assert_eq!(read.len(), 2 * first.len());
+        assert_eq!(counted.load(Ordering::Relaxed), read.len() as u64);
     }
 
     /// Full trait exercise over a real quinn loopback connection: open/accept
