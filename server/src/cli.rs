@@ -71,6 +71,18 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Hand a web link to a paired phone in a session: it waits there as a
+    /// notification that opens it. Exit codes: 0 sent, 1 failed, 2 bad
+    /// arguments (not an http or https link), 3 no server running
+    Link {
+        /// The phone: its device id, or 6 or more of its first characters
+        phone: String,
+        /// The link (http or https)
+        url: String,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// List the files sent to phones, newest first, and how each went
     Sent {
         /// How many to list
