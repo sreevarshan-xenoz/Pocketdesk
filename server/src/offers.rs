@@ -83,13 +83,17 @@ fn offer_in(table: &Table, id: &str, path: PathBuf, device_id: &str, now: Instan
 /// refused and left for its own phone.
 pub fn redeem(id: &str, device_id: &str) -> Result<PathBuf, &'static str> {
     let redeemed = redeem_at(id, device_id, Instant::now());
-    if redeemed == Err(OFFER_EXPIRED) {
-        finish(id, Err(EXPIRED.to_string()));
+    // An offer this ends records why, so the sent list never waits on it.
+    match redeemed {
+        Err(OFFER_EXPIRED) => finish(id, Err(EXPIRED.to_string())),
+        Err(TOO_MANY) => finish(id, Err(TOO_MANY.to_string())),
+        _ => {}
     }
     redeemed
 }
 
 const OFFER_EXPIRED: &str = "the offer expired";
+const TOO_MANY: &str = "the phone tried too many times";
 
 fn redeem_at(id: &str, device_id: &str, now: Instant) -> Result<PathBuf, &'static str> {
     redeem_in(offers(), id, device_id, now)
@@ -114,7 +118,7 @@ fn redeem_in(
     }
     if offer.attempts >= MAX_ATTEMPTS {
         offers.remove(id);
-        return Err("the phone tried too many times");
+        return Err(TOO_MANY);
     }
     offer.attempts += 1;
     Ok(offer.path.clone())
