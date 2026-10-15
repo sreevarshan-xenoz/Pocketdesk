@@ -758,6 +758,14 @@ fn plan_fetch(
         (path, size, None)
     } else if let Some(id) = body.get("offer").and_then(|v| v.as_str()) {
         let path = crate::offers::redeem(id, &phone_of(sender))?;
+        // A file of a folder the phone asked for is held to the browser's
+        // rules again now, not only when the folder was walked.
+        if let Some(within) = crate::offers::asked_within(id)
+            && let Err(reason) = crate::plugins::file_browse::still_within(&path, &within)
+        {
+            crate::offers::fail(id, reason.clone());
+            return Err(reason);
+        }
         let Some(size) = std::fs::metadata(&path)
             .ok()
             .filter(|m| m.is_file())

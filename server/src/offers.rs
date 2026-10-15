@@ -61,6 +61,9 @@ struct Offer {
     /// Fetches begun. One runs at a time: a retry replaces an attempt
     /// still running (`share::running`).
     attempts: u8,
+    /// The real root of the folder the phone asked for, when it did: the
+    /// file is checked against it again as it is fetched.
+    within: Option<PathBuf>,
 }
 
 /// Offers by id. The server has one ([`offers`]); a test that sweeps uses
@@ -89,15 +92,41 @@ fn offer_in(table: &Table, id: &str, path: PathBuf, device_id: &str, now: Instan
 
 /// Offer each of a folder send's `files` `(id, path)` to `device_id`, under
 /// one deadline.
-fn offer_folder_at(files: &[(String, PathBuf)], device_id: &str, now: Instant) {
-    offer_folder_in(offers(), files, device_id, now);
+fn offer_folder_at(
+    files: &[(String, PathBuf)],
+    device_id: &str,
+    within: Option<&Path>,
+    now: Instant,
+) {
+    offer_folder_in(offers(), files, device_id, within, now);
 }
 
-fn offer_folder_in(table: &Table, files: &[(String, PathBuf)], device_id: &str, now: Instant) {
+fn offer_folder_in(
+    table: &Table,
+    files: &[(String, PathBuf)],
+    device_id: &str,
+    within: Option<&Path>,
+    now: Instant,
+) {
     let deadline: Deadline = Arc::new(Mutex::new(now + OFFER_TTL));
     for (id, path) in files {
         offer_with(table, id, path.clone(), device_id, deadline.clone());
+        if let Some(within) = within
+            && let Some(offer) = table.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id)
+        {
+            offer.within = Some(within.to_path_buf());
+        }
     }
+}
+
+/// The real root of the folder the phone asked for that offer `id` is
+/// part of, if the phone asked for it (`None` for the owner's sends).
+pub(crate) fn asked_within(id: &str) -> Option<PathBuf> {
+    offers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id)
+        .and_then(|o| o.within.clone())
 }
 
 fn offer_with(table: &Table, id: &str, path: PathBuf, device_id: &str, expires: Deadline) {
@@ -109,6 +138,7 @@ fn offer_with(table: &Table, id: &str, path: PathBuf, device_id: &str, expires: 
             device_id: device_id.to_string(),
             expires,
             attempts: 0,
+            within: None,
         },
     );
 }
@@ -820,7 +850,15 @@ async fn offer_folder(
         .cloned()
         .zip(found.files.iter().map(|f| f.full.clone()))
         .collect();
-    offer_folder_at(&offered, &request.device_id, Instant::now());
+    // A folder the phone asked for keeps the browser's rules until each
+    // file is fetched.
+    let within = reply.and_then(|_| root.canonicalize().ok());
+    offer_folder_at(
+        &offered,
+        &request.device_id,
+        within.as_deref(),
+        Instant::now(),
+    );
     for (file, id) in found.files.iter().zip(&ids) {
         let packet = NetworkPacket::new(OFFER).with_body(serde_json::json!({
             "id": id,
@@ -1022,6 +1060,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_asked_folders_offers_remember_where_they_must_stay() {
+        let dir = temp_dir("asked-within");
+        let root = folder_of_two(&dir, "Kept");
+        let phone = Conn::new("phone-within", true);
+        offer_folder_to(&dir, "phone-within", &root, "Kept", &*phone)
+            .await
+            .unwrap();
+        let first = phone.sent.lock().unwrap()[1].body["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(asked_within(&first), Some(root.canonicalize().unwrap()));
+        // The owner's own sends are not held to the browser's rules.
+        let owner = Conn::new("phone-owner-within", true);
+        let store = trusting(&dir, "phone-owner-within", true);
+        let clients: [Arc<dyn DeviceSender>; 1] = [owner.clone()];
+        let mut request = request(&dir, &root);
+        request.device_id = "phone-owner-within".to_string();
+        deliver(&dir, request, &clients, Some(&store)).await;
+        let id = owner.sent.lock().unwrap()[0].body["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(asked_within(&id), None);
+    }
+
+    #[tokio::test]
     async fn a_folder_the_phone_asks_for_is_answered_then_offered_to_it() {
         let dir = temp_dir("asked-folder");
         let root = folder_of_two(&dir, "Notes");
@@ -1218,7 +1283,7 @@ mod tests {
             ("f-1".to_string(), PathBuf::from("/t/a")),
             ("f-2".to_string(), PathBuf::from("/t/b")),
         ];
-        offer_folder_in(&table, &files, "phone-a", now);
+        offer_folder_in(&table, &files, "phone-a", None, now);
         // The first file is fetched late, and takes a long time.
         let begun = now + OFFER_TTL - Duration::from_secs(60);
         assert!(redeem_in(&table, "f-1", "phone-a", begun).is_ok());
