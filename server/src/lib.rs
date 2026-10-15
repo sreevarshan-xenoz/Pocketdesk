@@ -19,6 +19,7 @@ pub mod install_windows;
 pub mod iroh_endpoint;
 pub mod kde;
 pub mod live_sessions;
+pub mod local_api;
 #[cfg(not(windows))]
 pub mod mic_relay;
 #[cfg(windows)]

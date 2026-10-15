@@ -42,7 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
-- 2026-10-15: **"Download this folder" in the remote browser (branch `feat/download-folder`; spec `docs/superpowers/specs/2026-10-15-download-folder-design.md`, with an as-built section).**
+- 2026-10-15: **T7a, the local API on the desktop (branch `feat/local-api`; spec `docs/superpowers/specs/2026-10-15-local-api-design.md`, contract `docs/local-api.md`).**
+  - **What:** `pocketdesk devices`, `sent`, `received` and `send <phone> <path> [--wait]` are new; `--json` on those and on `status`, `list`, `pair`, `unpair`, `kick` and `relay-ids`, each run one object with `"api": 1`, failures included (usage and config errors too), with exit codes 0–4. No listener: the program over the owner's own state folder (`server/src/local_api.rs`).
+  - **`send`** goes through the outbox the desktop app writes, so the server's checks apply; it refuses at once a phone not in a session and the server's own files.
+  - **Fresh review (0 Critical, 4 Important), fixed one commit each,** plus seven minors; the doc test holds every `--json` command to `docs/local-api.md`.
+  - **Verified on this box with the A71:** status, devices and `send --wait` ending "sent" with the MD5 matching. Owed: checklist §53.
+- 2026-10-15: **"Download this folder" in the remote browser (PR #52, merged; spec `docs/superpowers/specs/2026-10-15-download-folder-design.md`, with an as-built section).**
   - **How:** the phone sends `folder_fetch {path}`; the desktop holds it to the browser's rules and to a phone it can dial back, then offers it as the owner's folder sends are, answering first (`folder_fetch_reply`). Limits per phone: 2 of its own on the way, 10 asks a minute.
   - **Fresh review (0 Critical, 2 Important, 7 Minor), fixed one commit each:** "queued" promised to an undialable connection, the answer lost behind the offers or taken by another waiter; plus a silent denial, a reservation that could leak, a file swapped after the walk, repeated asks, the walk's bound and thread, and the answer lost when the sheet closed.
   - **Lesson:** a red-phase handler test reached the real state folder and wrote a row into the real `sent.json` (removed). Handler tests must name paths that do not exist, or use `POCKETDESK_STATE_DIR`.

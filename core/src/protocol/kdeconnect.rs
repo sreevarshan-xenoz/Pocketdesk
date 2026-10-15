@@ -484,20 +484,29 @@ impl TrustStore {
 
     pub fn load_or_create(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-
+        let store = Self::read(&path)?;
         if !path.exists() {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            let empty = Self {
+            store.persist()?;
+        }
+        Ok(store)
+    }
+
+    /// The store at `path`, written nowhere: a missing file is an empty
+    /// store, and one that cannot be read is an error, never "no devices".
+    /// For readers that must not change the file.
+    pub fn read(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        if !path.exists() {
+            return Ok(Self {
                 path,
                 trusted_device_ids: HashSet::new(),
                 grants: HashMap::new(),
                 permissions: HashMap::new(),
-            };
-            empty.persist()?;
-            return Ok(empty);
+            });
         }
 
         let bytes =

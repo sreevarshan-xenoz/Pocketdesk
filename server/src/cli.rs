@@ -43,7 +43,52 @@ pub enum Commands {
     /// Stop a running server process started with `pocketdesk start`
     Stop,
     /// Print local tailscale status
-    Status,
+    Status {
+        /// Print the local API's JSON instead: the server, the phones in a
+        /// session, and the internet endpoint (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the paired phones: what each may do, whether a key is bound to
+    /// it, and whether it is in a session now
+    Devices {
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
+    /// Send a file or a folder to a paired phone in a session, as the desktop
+    /// app's Files tab does. Exit codes: 0 done, 1 failed, 2 bad arguments,
+    /// 3 no server running, 4 still waiting when --wait ran out
+    Send {
+        /// The phone: its device id, or 6 or more of its first characters
+        phone: String,
+        /// The file or folder to send
+        path: std::path::PathBuf,
+        /// Wait up to this many seconds for the phone to save it
+        #[arg(long, value_name = "SECONDS")]
+        wait: Option<u64>,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the files sent to phones, newest first, and how each went
+    Sent {
+        /// How many to list
+        #[arg(short, long, default_value_t = 20)]
+        count: usize,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the files received from phones, newest first
+    Received {
+        /// How many to list
+        #[arg(short, long, default_value_t = 20)]
+        count: usize,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Show recorded streaming-session outcomes (R4 A2 telemetry log)
     Sessions {
         /// Number of recent sessions to list
@@ -93,7 +138,11 @@ pub enum Commands {
         tolerance_pct: u64,
     },
     /// List peers currently visible on the tailnet
-    List,
+    List {
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Continuously watch peer discovery events
     Watch {
         /// Poll interval in seconds
@@ -127,17 +176,27 @@ pub enum Commands {
         /// Omit for permanent trust. R4 D3 one-off support sessions.
         #[arg(long, value_parser = parse_grant_secs)]
         grant: Option<u64>,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
     },
     /// Remove a paired device from the trust store (all if no id is given)
     Unpair {
         /// Device id to untrust (omit to untrust all devices)
         device_id: Option<String>,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
     },
     /// Drop a live streaming session (R4 D2): device id, a unique id
     /// prefix of >=6 chars, the peer IP, or "all"
     Kick {
         /// Session target — see the subcommand help
         device: String,
+        /// Print the local API's JSON (see docs/local-api.md). Exit codes:
+        /// 0 asked, 1 failed, 2 nothing named, 3 no server running
+        #[arg(long)]
+        json: bool,
     },
     /// Run your own relay for phones away from home (instead of n0's public
     /// ones). It must be reachable from the internet; set its URL as
@@ -164,7 +223,11 @@ pub enum Commands {
     },
     /// Print the endpoint ids a relay elsewhere should --allow: this
     /// computer's, and each paired phone's
-    RelayIds,
+    RelayIds {
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Parse a `--grant` duration (`45s`, `15m`, `2h`, `7d`, combinable like

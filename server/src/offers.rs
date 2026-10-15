@@ -520,7 +520,12 @@ async fn deliver(
         .ok()
         .filter(|m| m.is_file())
         .map(|m| m.len());
-    let checked = check(&request, size, clients, store);
+    // The server's keys and trust store go nowhere, whoever names them.
+    let checked = if is_servers_own(&path, &crate::plugins::file_browse::private_dirs()) {
+        Err("the server's own files are not sent")
+    } else {
+        check(&request, size, clients, store)
+    };
     let file = SentFile {
         id: request.id.clone(),
         name: name.clone(),
@@ -985,6 +990,13 @@ pub(crate) fn source_of(path: &Path, size: u64) -> String {
 
 /// Whether `request` may be offered: the file, the phone's permission, and
 /// a live connection to it. The connection and the file's size.
+/// Whether `path` is one of the server's own files: inside its state or
+/// config folder (`private`, real paths), by the real path.
+fn is_servers_own(path: &Path, private: &[PathBuf]) -> bool {
+    path.canonicalize()
+        .is_ok_and(|real| private.iter().any(|p| real.starts_with(p)))
+}
+
 fn check(
     request: &SendRequest,
     size: Option<u64>,
@@ -1279,6 +1291,19 @@ mod tests {
         let all = folder_files_capped(&root, &[], 100).unwrap();
         assert!(!all.truncated);
         assert_eq!(all.files.len(), 1);
+    }
+
+    #[test]
+    fn the_servers_own_files_are_never_sent_alone_either() {
+        let dir = temp_dir("own-file");
+        let state = dir.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("identity.key"), b"k").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"n").unwrap();
+        let private = [state.canonicalize().unwrap()];
+        assert!(is_servers_own(&state.join("identity.key"), &private));
+        assert!(!is_servers_own(&dir.join("notes.txt"), &private));
+        assert!(!is_servers_own(&dir.join("missing.txt"), &private));
     }
 
     #[test]

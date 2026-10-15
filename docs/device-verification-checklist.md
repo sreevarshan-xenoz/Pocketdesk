@@ -1001,6 +1001,19 @@ Owed:
 - [ ] A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
 - [ ] The Linux host.
 
+## 53. The local API (T7)
+
+On this box with the A71, 2026-10-15 (`docs/local-api.md`):
+- [x] `status --json` with the server stopped (running false), and with the phone in a LAN session.
+- [x] `devices --json`: three paired phones, the connected one marked, Input off as set.
+- [x] `send <prefix> <file> --wait 120 --json`: "sent", exit 0, MD5 matching on the phone; with no phone connected, refused at once; with no server, exit 3; a usage error as JSON, exit 2.
+- Seen on the way: the desktop's "sent" can come a moment before the phone's download is published (the MediaStore entry is still pending for a few milliseconds). Not new to this change.
+
+Owed:
+- [ ] The Linux host: `status`, `devices`, `send --wait`.
+- [ ] `send` of a folder with `--wait`, and a phone that leaves mid-send (exit 1).
+- [ ] A broken config.toml with `--json` (exit 1, JSON).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -10,10 +10,32 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[tokio::main]
 async fn main() -> Result<()> {
     platform::init_process();
-    let cli = cli::Cli::parse();
+    // With --json, even a usage error is JSON (exit 2, like clap's own).
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    let cli = match cli::Cli::try_parse_from(&args) {
+        Ok(cli) => cli,
+        Err(e) => match local_api::usage_error(&args, &e) {
+            Some(out) => {
+                local_api::print(&out);
+                std::process::exit(local_api::exit::BAD_ARGUMENTS);
+            }
+            None => e.exit(),
+        },
+    };
+    // Clap takes --json only on a command that has it, so its presence is
+    // the answer for every command, new ones included.
+    let wants_json = args.iter().any(|a| a == "--json");
 
-    // Load configuration first
-    let config = config::Config::load()?;
+    // Load configuration first. A config.toml that does not parse fails a
+    // `--json` command as JSON too.
+    let config = match config::Config::load() {
+        Ok(config) => config,
+        Err(e) if wants_json => {
+            local_api::print(&local_api::error(format!("{e:#}")));
+            std::process::exit(local_api::exit::FAILED);
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     let background = matches!(cli.command, Some(cli::Commands::Start { background: true }));
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -54,10 +76,20 @@ async fn main() -> Result<()> {
 
     tracing::info!("Pocketdesk server starting");
 
-    match cli
+    let command = cli
         .command
-        .unwrap_or(cli::Commands::Start { background: false })
-    {
+        .unwrap_or(cli::Commands::Start { background: false });
+    let result = run(command, config).await;
+    // A script reading `--json` reads its failures there too.
+    if wants_json && let Err(e) = &result {
+        local_api::print(&local_api::error(format!("{e:#}")));
+        std::process::exit(local_api::exit::FAILED);
+    }
+    result
+}
+
+async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
+    match command {
         cli::Commands::Start { .. } => {
             // R4 A2: register the session-outcome telemetry sink before any
             // streaming pipeline can run.
@@ -65,7 +97,20 @@ async fn main() -> Result<()> {
             service::run(config).await
         }
         cli::Commands::Stop => service::stop().await,
-        cli::Commands::Status => service::print_status().await,
+        cli::Commands::Status { json: false } => service::print_status().await,
+        cli::Commands::Status { json: true } => local_api::print_status(),
+        cli::Commands::Devices { json } => local_api::print_devices(json),
+        cli::Commands::Send {
+            phone,
+            path,
+            wait,
+            json,
+        } => {
+            // Like `bench`, the exit code is what a script reads.
+            std::process::exit(local_api::run_send(&phone, &path, wait, json))
+        }
+        cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
+        cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
         cli::Commands::Sessions { count, json } => session_telemetry::print_sessions(count, json),
         cli::Commands::Bench {
             target,
@@ -88,7 +133,7 @@ async fn main() -> Result<()> {
                 tolerance_pct,
             ))
         }
-        cli::Commands::List => service::list_peers().await,
+        cli::Commands::List { json } => service::list_peers(json).await,
         cli::Commands::Watch { interval } => service::watch_peers(interval).await,
         cli::Commands::Capabilities { json, markdown } => {
             service::print_capabilities(json, markdown).await
@@ -97,9 +142,11 @@ async fn main() -> Result<()> {
             let identity = kde::host_identity();
             service::connect_peer(peer, port, &identity).await
         }
-        cli::Commands::Pair { pin, grant } => service::pair(pin, grant).await,
-        cli::Commands::Unpair { device_id } => service::unpair(device_id).await,
-        cli::Commands::Kick { device } => service::kick(device).await,
+        cli::Commands::Pair { pin, grant, json } => service::pair(pin, grant, json).await,
+        cli::Commands::Unpair { device_id, json } => service::unpair(device_id, json).await,
+        cli::Commands::Kick { device, json } => {
+            std::process::exit(local_api::run_kick(&device, json))
+        }
         cli::Commands::Relay {
             port,
             hostname,
@@ -118,9 +165,18 @@ async fn main() -> Result<()> {
             })
             .await
         }
-        cli::Commands::RelayIds => {
-            for (who, id) in relay::relay_ids()? {
-                println!("{who}: {id}");
+        cli::Commands::RelayIds { json } => {
+            let ids = relay::relay_ids()?;
+            if json {
+                let ids: Vec<_> = ids
+                    .iter()
+                    .map(|(who, id)| serde_json::json!({ "who": who, "id": id }))
+                    .collect();
+                local_api::print(&local_api::versioned(serde_json::json!({ "ids": ids })));
+            } else {
+                for (who, id) in ids {
+                    println!("{who}: {id}");
+                }
             }
             Ok(())
         }
