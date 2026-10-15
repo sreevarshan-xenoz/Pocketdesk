@@ -42,6 +42,17 @@ class TransferRetryTest {
     }
 
     @Test
+    fun aComputerThatIsNotListeningIsTriedAgain() {
+        // The network's "connection refused" is not the computer saying no.
+        for (error in listOf(
+            "Connection refused (os error 111)",
+            "No connection could be made because the target machine actively refused it. (os error 10061)",
+        )) {
+            assertEquals(error, 5L, TransferRetry.delayBefore(1, error, enabled = true))
+        }
+    }
+
+    @Test
     fun nothingIsRetriedWhenRetriesAreOff() {
         assertNull(TransferRetry.delayBefore(1, "reset", enabled = false))
     }

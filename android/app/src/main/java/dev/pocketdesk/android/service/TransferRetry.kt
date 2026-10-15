@@ -28,7 +28,9 @@ object TransferRetry {
 
     /** Failures a retry would only repeat. */
     private val FINAL = listOf(
-        "refused",
+        // The computer's own refusals ("The computer refused the file: …"),
+        // not the network's "connection refused", which a retry may outlast.
+        "computer refused",
         "is empty",
         "empty file",
         "cannot open",
