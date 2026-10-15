@@ -222,6 +222,15 @@ impl Plugin for NotificationPlugin {
                     }
                     return Ok(());
                 }
+                // An update that no longer offers buttons or a reply (or
+                // is now sent redacted) can no longer be answered (T10c).
+                let note = answerable(sender.device_id(), &packet.body, unix_now());
+                if note.is_none()
+                    && notification_action::valid_key(id)
+                    && let Ok(dir) = crate::state::state_dir()
+                {
+                    let _ = phone_notes::forget(&dir, sender.device_id(), id);
+                }
                 if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
                     return Ok(());
                 }
@@ -238,7 +247,7 @@ impl Plugin for NotificationPlugin {
                 }
                 // One that offers buttons or a reply is kept for the desktop
                 // app to answer (T10c).
-                if let Some(note) = answerable(sender.device_id(), &packet.body, unix_now())
+                if let Some(note) = note
                     && let Ok(dir) = crate::state::state_dir()
                     && let Err(e) = phone_notes::keep(&dir, note)
                 {
