@@ -1180,6 +1180,7 @@ async fn handle_connection_with_kde(
                                         "Denied {packet_type} from {device_id}: not permitted"
                                     );
                                 }
+                                crate::plugins::share::answer_denied(&packet, sender_ref).await;
                                 continue;
                             }
                             let packet_span = tracing::debug_span!("packet", type = %packet_type);

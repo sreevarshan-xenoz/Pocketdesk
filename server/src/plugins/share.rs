@@ -633,6 +633,22 @@ impl Plugin for SharePlugin {
 
 /// A download the phone asked for: check it, then send the file from a task
 /// of its own, or tell the phone why not.
+/// Answer a packet the owner's permissions denied, when its sender waits for
+/// an answer: a folder request is told why, so the phone does not wait on
+/// silence. Every other denied packet stays unanswered.
+pub(crate) async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    if packet.packet_type != FOLDER_FETCH {
+        return;
+    }
+    let asked = packet
+        .body
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let refused = Err("Files is turned off for this phone on the computer".to_string());
+    crate::offers::answer_folder_request(sender, asked, &refused).await;
+}
+
 /// The phone asks for the folder at `path` below home, whole: held to the
 /// remote browser's rules, then offered to it as the owner's folder sends
 /// are. Always answered.
@@ -2296,6 +2312,24 @@ mod tests {
             "{}",
             reply.body["reason"]
         );
+    }
+
+    #[tokio::test]
+    async fn a_folder_request_the_permissions_deny_is_still_answered() {
+        let phone = Phone::at("192.0.2.7:51000");
+        let asked = NetworkPacket::new(FOLDER_FETCH).with_body(serde_json::json!({ "path": "x" }));
+        answer_denied(&asked, &phone).await;
+        let reply = phone
+            .replies()
+            .pop()
+            .expect("an answer, not 30 s of silence");
+        assert_eq!(reply.body["path"], "x");
+        assert_eq!(reply.body["queued"], false);
+        assert!(reply.body["reason"].as_str().unwrap().contains("Files"));
+        // Other denied packets stay unanswered, as before.
+        let other = NetworkPacket::new(FETCH).with_body(serde_json::json!({ "path": "x" }));
+        answer_denied(&other, &phone).await;
+        assert_eq!(phone.replies().len(), 1);
     }
 
     #[tokio::test]
