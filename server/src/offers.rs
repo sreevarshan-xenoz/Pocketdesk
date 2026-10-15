@@ -235,6 +235,9 @@ fn sweep_in(table: &Table, now: Instant) -> Vec<String> {
 struct Group {
     /// The phone it goes to.
     device: String,
+    /// The phone asked for it (rather than the owner sending it): counted
+    /// against that phone's [`MAX_ASKED_FOLDERS`].
+    asked: bool,
     /// Its files' offers; `None` while the folder is still being walked.
     total: Option<usize>,
     ended: usize,
@@ -254,22 +257,44 @@ fn groups() -> &'static Mutex<Groups> {
     GROUPS.get_or_init(Default::default)
 }
 
-/// Begin the folder send `group` to `device`, unless `device` already has
-/// `limit` on the way; whether it began.
-fn reserve_group(group: &str, device: &str, limit: Option<usize>) -> bool {
-    let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());
-    let on_the_way = g.groups.values().filter(|g| g.device == device).count();
-    if limit.is_some_and(|limit| on_the_way >= limit) {
-        return false;
+/// A folder send reserved and not yet started ([`start_group`]): dropped
+/// before it starts (refused, or its request's future cancelled), the
+/// reservation goes, so it can never hold a phone's place for good.
+struct Reservation(String);
+
+impl Reservation {
+    /// Reserve the folder send `group` to `device`. `limit` is set for a
+    /// phone's own request: refused (`None`) while that phone already has
+    /// `limit` of its own on the way.
+    fn take(group: &str, device: &str, limit: Option<usize>) -> Option<Self> {
+        let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());
+        let asked_on_the_way = g
+            .groups
+            .values()
+            .filter(|g| g.asked && g.device == device)
+            .count();
+        if limit.is_some_and(|limit| asked_on_the_way >= limit) {
+            return None;
+        }
+        g.groups.insert(
+            group.to_string(),
+            Group {
+                device: device.to_string(),
+                asked: limit.is_some(),
+                ..Group::default()
+            },
+        );
+        Some(Self(group.to_string()))
     }
-    g.groups.insert(
-        group.to_string(),
-        Group {
-            device: device.to_string(),
-            ..Group::default()
-        },
-    );
-    true
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());
+        if g.groups.get(&self.0).is_some_and(|g| g.total.is_none()) {
+            g.groups.remove(&self.0);
+        }
+    }
 }
 
 /// Make `offer_ids` the files of the folder send `group`.
@@ -279,15 +304,6 @@ fn start_group(group: &str, offer_ids: &[&str]) {
     for id in offer_ids {
         g.member_of.insert(id.to_string(), group.to_string());
     }
-}
-
-/// Forget the folder send `group`, which offered nothing.
-fn drop_group(group: &str) {
-    groups()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .groups
-        .remove(group);
 }
 
 /// Record that offer `id` ended with `outcome`: its own row, or, for a
@@ -713,18 +729,14 @@ async fn send_folder(
     reply: Option<Reply<'_>>,
 ) -> Result<(), String> {
     let limit = reply.map(|_| MAX_ASKED_FOLDERS);
-    if !reserve_group(&request.id, &request.device_id, limit) {
+    let Some(_reserved) = Reservation::take(&request.id, &request.device_id, limit) else {
         let busy = Err("busy: two folders are already on the way to this phone".to_string());
         if let Some(reply) = reply {
             reply.send(&busy).await;
         }
         return busy;
-    }
-    let outcome = offer_folder(dir, request, root, target, reply).await;
-    if outcome.is_err() {
-        drop_group(&request.id);
-    }
-    outcome
+    };
+    offer_folder(dir, request, root, target, reply).await
 }
 
 /// [`send_folder`] once the send is reserved.
@@ -1056,6 +1068,28 @@ mod tests {
         offer_folder_to(&dir, "phone-other", &third, "F2", &*other)
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn a_reservation_dropped_before_its_folder_starts_frees_the_phone() {
+        for n in 0..3 {
+            // Each dropped as if its request's future were cancelled.
+            let held = Reservation::take(&format!("cancelled-{n}"), "phone-cancel", Some(2));
+            assert!(held.is_some(), "reservation {n}");
+        }
+        let started = Reservation::take("started", "phone-cancel", Some(2)).unwrap();
+        start_group("started", &["started-offer"]);
+        drop(started);
+        assert!(Reservation::take("next", "phone-cancel", Some(2)).is_some());
+    }
+
+    #[test]
+    fn the_owners_sends_do_not_count_against_the_phones_own_requests() {
+        let _a = Reservation::take("owner-a", "phone-owner", None).unwrap();
+        let _b = Reservation::take("owner-b", "phone-owner", None).unwrap();
+        start_group("owner-a", &["owner-a-1"]);
+        start_group("owner-b", &["owner-b-1"]);
+        assert!(Reservation::take("asked", "phone-owner", Some(2)).is_some());
     }
 
     #[tokio::test]
