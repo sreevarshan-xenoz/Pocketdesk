@@ -2,6 +2,8 @@ package dev.pocketdesk.android.ui
 
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -83,6 +85,10 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
     var lastGood by remember { mutableStateOf<RemoteFolder?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<RemoteEntry?>(null) }
+    // T6b: a folder from the phone, picked with the system's folder picker.
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) TransferService.sendFolder(context, address, controlPort, tree)
+    }
 
     LaunchedEffect(address, controlPort, path) {
         folder = null
@@ -117,6 +123,12 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                     modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
                 )
             }
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.files_send_folder)) },
+                supportingContent = { Text(stringResource(R.string.files_send_folder_summary)) },
+                leadingContent = { LlIcon(LlIcons.Folder, null) },
+                modifier = Modifier.clickable { pickFolder.launch(null) },
+            )
             val parent = folder?.parent ?: if (failure != null) RemoteFiles.wayBack(path, lastGood) else null
             if (parent != null) {
                 ListItem(

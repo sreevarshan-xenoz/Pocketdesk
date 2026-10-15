@@ -1357,7 +1357,16 @@ pub async fn send_file(address: String, port: u16, file_path: String) -> Result<
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_millis());
     let source = source_id(&format!("{file_path}\n{file_size}\n{modified}"));
-    send_stream(address, port, filename, file_size, file, Some(source)).await
+    send_stream(address, port, filename, file_size, file, Some(source), None).await
+}
+
+/// Where a file sits in a folder the phone sends (T6b): the send's id, the
+/// folder's name, and the file's path under it (its own name last).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderPart {
+    pub folder_id: String,
+    pub folder: String,
+    pub path: Vec<String>,
 }
 
 /// A file's source id (T6a): 32 hex digits naming the file at its source,
@@ -1382,6 +1391,7 @@ pub async fn send_file_fd(
     name: String,
     size: u64,
     source: String,
+    folder: Option<FolderPart>,
 ) -> Result<(), String> {
     use std::os::fd::FromRawFd;
     if fd < 0 {
@@ -1398,6 +1408,7 @@ pub async fn send_file_fd(
         size,
         tokio::fs::File::from_std(file),
         source,
+        folder,
     )
     .await
 }
@@ -1410,6 +1421,7 @@ pub async fn send_file_fd(
     _name: String,
     _size: u64,
     _source: String,
+    _folder: Option<FolderPart>,
 ) -> Result<(), String> {
     Err("file descriptors are only passed on Android".to_string())
 }
@@ -1424,6 +1436,7 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
     file_size: u64,
     mut file: R,
     source: Option<String>,
+    folder: Option<FolderPart>,
 ) -> Result<(), String> {
     // This transfer's counters from the start: the phone reads them while
     // waiting for the desktop too, and must not see the last file's.
@@ -1443,6 +1456,11 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
     });
     if let Some(source) = &source {
         body["sourceId"] = serde_json::json!(source);
+    }
+    if let Some(part) = &folder {
+        body["folderId"] = serde_json::json!(part.folder_id);
+        body["folder"] = serde_json::json!(part.folder);
+        body["path"] = serde_json::json!(part.path);
     }
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(body)

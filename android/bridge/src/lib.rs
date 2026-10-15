@@ -791,7 +791,9 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
 }
 
 /// Send a file from a file descriptor the caller gives up (F7), naming it by
-/// `source` so a retry continues it (T6a): `{"ok": null}` or `{"err": "..."}`.
+/// `source` so a retry continues it (T6a), and, for a file of a folder send,
+/// where it sits (`folder_id`, `folder`, `path_json` a JSON array of names;
+/// T6b): `{"ok": null}` or `{"err": "..."}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFileFd(
     mut env: JNIEnv<'_>,
@@ -802,10 +804,23 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
     name: JString<'_>,
     size: jlong,
     source: JString<'_>,
+    folder_id: JString<'_>,
+    folder: JString<'_>,
+    path_json: JString<'_>,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let name = jstring_to_string(&mut env, &name);
     let source = jstring_to_string(&mut env, &source);
+    let folder_id = jstring_to_string(&mut env, &folder_id);
+    let folder = jstring_to_string(&mut env, &folder);
+    let path: Vec<String> =
+        serde_json::from_str(&jstring_to_string(&mut env, &path_json)).unwrap_or_default();
+    // A file of a folder send (T6b) when the send has an id; else a plain file.
+    let folder = (!folder_id.is_empty()).then_some(api::FolderPart {
+        folder_id,
+        folder,
+        path,
+    });
     let size = u64::try_from(size).unwrap_or(0);
     let json = envelope_unit(RUNTIME.block_on(api::send_file_fd(
         address,
@@ -814,6 +829,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
         name,
         size,
         source,
+        folder,
     )));
     to_jstring(&mut env, json)
 }
