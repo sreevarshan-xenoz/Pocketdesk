@@ -161,7 +161,6 @@ class SmsReceiver : BroadcastReceiver() {
             app,
             texts.map { (address, body) ->
                 JSONObject().put("address", address).put("body", body).put("date", now).put("event", "received")
-                    .also { text -> contactName(app, address)?.let { text.put("name", it) } }
             },
         )
         RustCore.start(app)
@@ -177,7 +176,17 @@ object Texts {
         if (!TextPrefs.show(ctx)) return
         val batch = TextPrefs.queued(ctx)
         if (batch.isEmpty()) return
-        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(batch)))
+        // The sender's name is looked up as the text leaves (T8e), here on the
+        // worker, not where it arrived on the main thread, and only if the
+        // switch is still on now: a text queued with names on goes without
+        // one once they are turned off.
+        val named = batch.map { text ->
+            JSONObject(text.toString()).apply {
+                remove("name")
+                contactName(ctx, optString("address"))?.let { put("name", it) }
+            }
+        }
+        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(named)))
         if (sent) TextPrefs.dequeue(ctx, batch.size)
     }
 
