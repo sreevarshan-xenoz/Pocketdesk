@@ -649,6 +649,21 @@ class TransferService : Service() {
             source: String,
             folder: RustCore.FolderPart? = null,
         ) {
+            context.startForegroundService(receiveIntent(context, address, port, isOffer, value, name, size, source, folder))
+        }
+
+        /** The intent that starts a download, to start now or from a notification's tap (T10d). */
+        fun receiveIntent(
+            context: Context,
+            address: String,
+            port: Int,
+            isOffer: Boolean,
+            value: String,
+            name: String,
+            size: Long,
+            source: String,
+            folder: RustCore.FolderPart? = null,
+        ): Intent {
             val intent = Intent(context, TransferService::class.java)
                 .putExtra(EXTRA_ADDRESS, address)
                 .putExtra(EXTRA_PORT, port)
@@ -663,7 +678,7 @@ class TransferService : Service() {
                     .putExtra(EXTRA_FOLDER, it.folder)
                     .putStringArrayListExtra(EXTRA_PATH, ArrayList(it.path))
             }
-            context.startForegroundService(intent)
+            return intent
         }
     }
 }

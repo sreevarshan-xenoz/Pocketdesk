@@ -19,6 +19,9 @@ pub struct Device {
     pub grant_remaining: Option<u64>,
     /// Whether it has a live streaming session right now.
     pub connected: bool,
+    /// Whether a file can be offered to it now: in a session, or holding a
+    /// control link at home (T10d).
+    pub takes_files: bool,
     /// What the owner lets it do (roadmap F5).
     pub permissions: DevicePermissions,
     /// Its last battery report (T8b), if it ever sent one.
@@ -67,7 +70,8 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         .and_then(|raw| sessions::parse_mirror(&raw))
         .filter(|m| running && m.is_fresh(now_unix));
     let shared_control = mirror.as_ref().is_some_and(|m| m.shared_control);
-    let sessions = mirror.map(|m| m.sessions).unwrap_or_default();
+    let takes_files = |id: &str| mirror.as_ref().is_some_and(|m| m.files_reach(id));
+    let sessions = mirror.clone().map(|m| m.sessions).unwrap_or_default();
     let batteries = pocketdesk_core::local::phone_status::read(state_dir);
     let devices = match TrustStore::load_or_create(state_dir.join(TRUST_FILE)) {
         Ok(store) => store
@@ -76,6 +80,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
             .map(|id| Device {
                 grant_remaining: store.grant_remaining(&id),
                 connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
+                takes_files: takes_files(&id),
                 permissions: store.permissions(&id),
                 battery: batteries.get(&id).copied(),
                 id,
@@ -117,8 +122,6 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
     }
 }
 
-/// The phones a file can be sent to: those in a session now, since only
-/// then does a phone hold the connection an offer reaches (F7b).
 /// What the Sessions tab shows about who drives (roadmap N7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlCell {
@@ -144,8 +147,10 @@ pub fn control_cell(
     }
 }
 
+/// The phones a file can be sent to: in a session, or holding a control
+/// link the server can dial back (T10d).
 pub fn send_targets(snapshot: &Snapshot) -> Vec<&Device> {
-    snapshot.devices.iter().filter(|d| d.connected).collect()
+    snapshot.devices.iter().filter(|d| d.takes_files).collect()
 }
 
 /// The phone a send goes to: the one the owner chose, while it is still in
@@ -156,13 +161,13 @@ pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<Stri
     match chosen {
         Some(id) if targets.iter().any(|d| d.id == id) => Ok(id.to_string()),
         Some(_) => Err(
-            "The phone you chose has left its session. Choose a phone, then send again."
+            "The phone you chose is no longer connected. Choose a phone, then send again."
                 .to_string(),
         ),
         None => targets
             .first()
             .map(|d| d.id.clone())
-            .ok_or_else(|| "No phone is in a session to send to.".to_string()),
+            .ok_or_else(|| "No phone is connected on this network to send to.".to_string()),
     }
 }
 

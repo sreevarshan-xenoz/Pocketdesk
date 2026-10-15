@@ -106,6 +106,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val clipboard by lazy { dev.pocketdesk.android.clip.BackgroundClipboard(applicationContext) }
     private val clipboardTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /** Files the computer sends with no session open (T10d), on the clipboard's ticker. */
+    private val files by lazy { dev.pocketdesk.android.service.BackgroundFiles(applicationContext) }
+
     /**
      * The buttons and reply of each notification sent in full while answers
      * are on (T10c), by key; the newest [MAX_ANSWERABLE]. Guarded by itself.
@@ -138,7 +141,10 @@ class PhoneNotificationListener : NotificationListenerService() {
             TimeUnit.SECONDS,
         )
         clipboardTicker.scheduleWithFixedDelay(
-            { runCatching { clipboard.tick() }.onFailure { Log.w("PhoneNotifications", "clipboard tick failed", it) } },
+            {
+                runCatching { clipboard.tick() }.onFailure { Log.w("PhoneNotifications", "clipboard tick failed", it) }
+                runCatching { files.tick() }.onFailure { Log.w("PhoneNotifications", "files tick failed", it) }
+            },
             5,
             5,
             TimeUnit.SECONDS,

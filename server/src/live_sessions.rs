@@ -44,7 +44,12 @@ pub fn parse_kick_file(raw: &str, now_unix: u64) -> Option<String> {
 
 /// Serialize the registry snapshot in the mirror format the CLI's `status`
 /// and the desktop app read.
-pub fn render_json(live: &[LiveSession], driver: Option<u64>, now_unix: u64) -> String {
+pub fn render_json(
+    live: &[LiveSession],
+    driver: Option<u64>,
+    linked: &[shared::LinkedPhone],
+    now_unix: u64,
+) -> String {
     let sessions: Vec<MirrorSession> = live
         .iter()
         .map(|s| MirrorSession {
@@ -56,7 +61,7 @@ pub fn render_json(live: &[LiveSession], driver: Option<u64>, now_unix: u64) -> 
             started_unix: s.started_unix,
         })
         .collect();
-    shared::render_mirror(&sessions, crate::driving::is_shared(), now_unix)
+    shared::render_mirror(&sessions, crate::driving::is_shared(), linked, now_unix)
 }
 
 /// Atomic mirror write: tmp + rename, so `status` never sees a torn file.
@@ -289,8 +294,10 @@ pub async fn run_watcher() {
         }
         prev_ids = ids;
 
-        // 3. Mirror for `pocketdesk status`, rewritten only on change.
-        let json = render_json(&live, driver, now);
+        // 3. Mirror for `pocketdesk status`, rewritten only on change. It
+        //    also names the phones with a control link (T10d).
+        let linked = linked_phones(&crate::state::clone_clients().await);
+        let json = render_json(&live, driver, &linked, now);
         if json != prev_json {
             if let Err(e) = write_live_json(&json) {
                 tracing::warn!(error = %e, "Failed to mirror live sessions file");
@@ -299,6 +306,21 @@ pub async fn run_watcher() {
             }
         }
     }
+}
+
+/// Each phone with a control link, and whether files can reach it: its link
+/// has an address to dial back (T10d).
+pub fn linked_phones(
+    clients: &[std::sync::Arc<dyn pocketdesk_core::protocol::kdeconnect::DeviceSender>],
+) -> Vec<shared::LinkedPhone> {
+    // One connection per device: the one pushes go to.
+    clients
+        .iter()
+        .map(|client| shared::LinkedPhone {
+            device_id: client.device_id().to_string(),
+            files: client.peer_addr().is_some(),
+        })
+        .collect()
 }
 
 /// CLI-side rendering of the mirrored file: one line per live session.
@@ -458,7 +480,7 @@ mod tests {
             session(Some("abcdef0123456789"), true),
             session(None, false),
         ];
-        let json = render_json(&live, None, 1_030);
+        let json = render_json(&live, None, &[], 1_030);
         let lines = format_status_lines(&json, 1_030).expect("parseable");
         assert_eq!(lines.len(), 2);
         assert!(lines[0].starts_with("abcdef012345…"));

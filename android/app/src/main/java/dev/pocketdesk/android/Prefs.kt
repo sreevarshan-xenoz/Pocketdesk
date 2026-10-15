@@ -29,6 +29,7 @@ object Prefs {
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
+    private const val KEY_FILES_BACKGROUND = "files_in_background"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
@@ -158,6 +159,17 @@ object Prefs {
 
     fun setAnswerNotifications(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_ANSWER_NOTIFICATIONS, enabled) }
+    }
+
+    /**
+     * Whether files the computer sends arrive without a session (T10d): the
+     * notification listener keeps a link for them. Off by default.
+     */
+    fun filesInBackground(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_FILES_BACKGROUND, false)
+
+    fun setFilesInBackground(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_FILES_BACKGROUND, enabled) }
     }
 
     /** Whether a mouse connected to the phone drives the computer's cursor in a session (T9c). On by default. */

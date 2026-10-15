@@ -44,12 +44,17 @@ pub fn capability_name(capability: Capability) -> &'static str {
 /// The live sessions the running server reports, if it runs and its report
 /// is fresh.
 pub fn live_sessions(state_dir: &Path, now_unix: u64, running: bool) -> Vec<MirrorSession> {
+    live_mirror(state_dir, now_unix, running)
+        .map(|m| m.sessions)
+        .unwrap_or_default()
+}
+
+/// The running server's fresh mirror, if there is one.
+fn live_mirror(state_dir: &Path, now_unix: u64, running: bool) -> Option<sessions::LiveMirror> {
     std::fs::read_to_string(state_dir.join(LIVE_FILE))
         .ok()
         .and_then(|raw| sessions::parse_mirror(&raw))
         .filter(|m| running && m.is_fresh(now_unix))
-        .map(|m| m.sessions)
-        .unwrap_or_default()
 }
 
 /// The paired phones: what each may do, whether a key is bound to it, and
@@ -285,16 +290,16 @@ pub fn send_in(
         Ok(id) => id,
         Err(reason) => return refused(exit::BAD_ARGUMENTS, reason),
     };
-    // An offer reaches only a phone in a session: say so now, not after
-    // queueing a send the server can only fail.
+    // An offer reaches only a phone connected at home (in a session, or
+    // holding a control link, T10d): say so now, not after queueing a send
+    // the server can only fail.
     let now = pocketdesk_core::local::pin::now_unix();
-    if !live_sessions(state_dir, now, true)
-        .iter()
-        .any(|s| s.device_id.as_deref() == Some(device_id.as_str()))
-    {
+    if !live_mirror(state_dir, now, true).is_some_and(|m| m.files_reach(&device_id)) {
         return refused(
             exit::FAILED,
-            format!("{device_id} is not in a session: open one on the phone first"),
+            format!(
+                "{device_id} is not connected on this network: open Pocketdesk on the phone first"
+            ),
         );
     }
     let Ok(full) = std::path::absolute(path) else {
@@ -396,6 +401,7 @@ pub fn link_in(state_dir: &Path, query: &str, url: &str, running: bool) -> (Valu
         );
     }
     let now = pocketdesk_core::local::pin::now_unix();
+    // Only a session shows a link on the phone.
     if !live_sessions(state_dir, now, true)
         .iter()
         .any(|s| s.device_id.as_deref() == Some(device_id.as_str()))
@@ -855,12 +861,35 @@ mod tests {
     }
 
     #[test]
-    fn a_send_to_a_phone_not_in_a_session_is_refused_at_once() {
+    fn a_send_to_a_phone_linked_at_home_is_queued_and_away_is_refused() {
+        let (dir, file) = send_setup("send-linked");
+        let linked = |files: bool| {
+            std::fs::write(
+                dir.join(LIVE_FILE),
+                json!({
+                    "updated_unix": pocketdesk_core::local::pin::now_unix(),
+                    "sessions": [],
+                    "linked": [{ "device_id": "5f1c9b3d-6e70", "files": files }],
+                })
+                .to_string(),
+            )
+            .unwrap();
+        };
+        linked(true);
+        let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
+        assert_eq!(code, exit::DONE, "linked at home, no session: {out}");
+        linked(false);
+        let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
+        assert_eq!(code, exit::FAILED, "linked over the internet only: {out}");
+    }
+
+    #[test]
+    fn a_send_to_a_phone_not_connected_is_refused_at_once() {
         let (dir, file) = send_setup("send-away");
         in_session(&dir, &[]);
         let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
         assert_eq!(code, exit::FAILED, "{out}");
-        assert!(out["error"].as_str().unwrap().contains("session"));
+        assert!(out["error"].as_str().unwrap().contains("not connected"));
         assert!(
             pocketdesk_core::local::outbox::take_all(&dir, pocketdesk_core::local::pin::now_unix())
                 .is_empty()
