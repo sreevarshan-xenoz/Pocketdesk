@@ -44,6 +44,13 @@ pub enum Commands {
     Stop,
     /// Print local tailscale status
     Status,
+    /// List the paired phones: what each may do, whether a key is bound to
+    /// it, and whether it is in a session now
+    Devices {
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Show recorded streaming-session outcomes (R4 A2 telemetry log)
     Sessions {
         /// Number of recent sessions to list
