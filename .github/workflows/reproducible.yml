@@ -1,0 +1,117 @@
+name: Reproducible APK
+
+# Roadmap T3, step 4: the unsigned release APK must come out byte for byte
+# the same on two machines, as F-Droid checks before it publishes a build
+# signed with the developer's key. Two runner images, each with the source
+# in a different folder, build it; the compare job says which entries differ
+# when they do (baseline.prof is the documented suspect).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "android/**"
+      - "core/**"
+      - "Cargo.lock"
+      - ".github/workflows/reproducible.yml"
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "core/**"
+      - "Cargo.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            folder: first
+          - runner: ubuntu-22.04
+            folder: second/elsewhere
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.folder }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ${{ matrix.folder }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install platform, build-tools and NDK
+        run: |
+          (yes || true) | sdkmanager --install "platforms;android-37.0" "build-tools;36.1.0" >/dev/null
+          NDK=$(cat android/bridge/ndk-version)
+          (yes || true) | sdkmanager --install "ndk;$NDK" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK" >> "$GITHUB_ENV"
+
+      - name: Install cargo-ndk and the bridge's pinned Rust
+        run: |
+          rustup toolchain install "$(cat android/bridge/rust-toolchain-version)" \
+            --profile minimal --target aarch64-linux-android
+          cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Build the arm64 bridge
+        run: sh android/bridge/build-android.sh
+
+      - name: Assemble the unsigned release APK
+        working-directory: ${{ matrix.folder }}/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Hash what was built
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk "$GITHUB_WORKSPACE/out/app.apk"
+          cp android/app/src/main/jniLibs/arm64-v8a/libpocketdesk_android_bridge.so "$GITHUB_WORKSPACE/out/bridge.so"
+          (cd "$GITHUB_WORKSPACE/out" && sha256sum app.apk bridge.so)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.runner }}
+          path: out/
+
+  compare:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Compare the two builds
+        shell: bash
+        run: |
+          sha256sum build-*/app.apk build-*/bridge.so
+          python3 - build-ubuntu-24.04 build-ubuntu-22.04 <<'PY'
+          import hashlib, sys, zipfile
+          a, b = sys.argv[1], sys.argv[2]
+          def entries(apk):
+              with zipfile.ZipFile(apk) as z:
+                  return {i.filename: hashlib.sha256(z.read(i.filename)).hexdigest() for i in z.infolist()}
+          ok = True
+          for name in ("bridge.so", "app.apk"):
+              ha = hashlib.sha256(open(f"{a}/{name}", "rb").read()).hexdigest()
+              hb = hashlib.sha256(open(f"{b}/{name}", "rb").read()).hexdigest()
+              print(f"{name}: {'same' if ha == hb else 'DIFFERENT'}")
+              ok &= ha == hb
+          ea, eb = entries(f"{a}/app.apk"), entries(f"{b}/app.apk")
+          differ = sorted(n for n in set(ea) | set(eb) if ea.get(n) != eb.get(n))
+          for n in differ:
+              print(f"  differs: {n}")
+          sys.exit(0 if ok else 1)
+          PY
