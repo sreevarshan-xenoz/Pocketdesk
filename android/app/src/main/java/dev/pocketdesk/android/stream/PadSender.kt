@@ -22,6 +22,8 @@ fun sendPadOutputs(address: String, port: Int, outputs: List<PadOutput>, send: (
                 RustCore.sendMouseClick(out.button, false)
             }
             is PadOutput.Button -> send { RustCore.sendMouseClick(out.button, out.pressed) }
+            // The view's own: the in-stream trackpad zooms before sending.
+            is PadOutput.Zoom -> Unit
         }
     }
 }

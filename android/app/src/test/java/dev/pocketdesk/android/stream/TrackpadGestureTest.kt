@@ -153,4 +153,35 @@ class TrackpadGestureTest {
         assertEquals(emptyList<PadOutput>(), pad.move(1f, 0f, fingers = 2))
         assertEquals(listOf(PadOutput.Click(TrackpadGesture.RIGHT)), pad.up(120))
     }
+
+    @Test
+    fun twoFingersSpreadingZoomAndNeverScrollOrClick() {
+        val pad = pad()
+        pad.down(0)
+        // The fingers spread (span 100 -> 130) while their centre barely moves.
+        assertEquals(emptyList<PadOutput>(), pad.move(0f, 1f, fingers = 2, span = 100f))
+        assertEquals(listOf(PadOutput.Zoom(1.3f)), pad.move(0f, 0f, fingers = 2, span = 130f))
+        assertEquals(listOf(PadOutput.Zoom(1.5f)), pad.move(0f, 0f, fingers = 2, span = 195f))
+        // A pinch stays a pinch: moving together now pans, it does not scroll.
+        assertEquals(listOf(PadOutput.Zoom(1f)), pad.move(0f, 40f, fingers = 2, span = 195f))
+        assertEquals("a pinch is not a right click", emptyList<PadOutput>(), pad.up(120))
+    }
+
+    @Test
+    fun twoFingersMovingTogetherStillScrollAndAScrollNeverZooms() {
+        val pad = TrackpadGesture(slop = 8f, pxPerNotch = 10f)
+        pad.down(0)
+        assertEquals(listOf(PadOutput.Scroll(0, 3)), pad.move(0f, 30f, fingers = 2, span = 100f))
+        // Once scrolling, the fingers drifting apart does not start a zoom.
+        assertEquals(listOf(PadOutput.Scroll(0, 1)), pad.move(0f, 10f, fingers = 2, span = 140f))
+        assertEquals(emptyList<PadOutput>(), pad.up(500))
+    }
+
+    @Test
+    fun withoutASpanTwoFingersOnlyScroll() {
+        // The foldable dock gives no span: it never zooms.
+        val pad = TrackpadGesture(slop = 8f, pxPerNotch = 10f)
+        pad.down(0)
+        assertEquals(listOf(PadOutput.Scroll(0, 3)), pad.move(0f, 30f, fingers = 2))
+    }
 }

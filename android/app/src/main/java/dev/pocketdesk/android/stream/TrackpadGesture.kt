@@ -1,5 +1,6 @@
 package dev.pocketdesk.android.stream
 
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -13,6 +14,12 @@ sealed interface PadOutput {
     data class Click(val button: Int) : PadOutput
 
     data class Button(val button: Int, val pressed: Boolean) : PadOutput
+
+    /**
+     * Zoom the view by [factor] (T9a): the caller applies it, and pans by
+     * the fingers' centre. Nothing goes to the desktop.
+     */
+    data class Zoom(val factor: Float) : PadOutput
 }
 
 /**
@@ -29,6 +36,11 @@ sealed interface PadOutput {
  *   wait, so a lost timer or a torn-down view cannot leave a button stuck;
  * - two and three fingers tapped (no travel, lifted within [tapMaxMs]) are
  *   right and middle clicks, and two or more fingers moving scroll;
+ * - two fingers spreading or pinching zoom the view (T9a): a two-finger
+ *   gesture whose span changes past [slop] before its centre travels as far
+ *   is a pinch, otherwise a scroll, and it stays what it began as until the
+ *   fingers lift. A pinch is never a click. Only a caller that gives the span
+ *   gets pinches (the foldable dock does not);
  * - a tap, then a touch within [dragWindowMs] that moves, drags with the
  *   left button held until the fingers lift. That is one press and no
  *   click first, so the desktop does not see a double click (which would
@@ -58,6 +70,11 @@ class TrackpadGesture(
     private var moveCarryY = 0f
     private var scrollCarryX = 0f
     private var scrollCarryY = 0f
+    private var twoFinger = TwoFinger.UNDECIDED
+    private var startSpan = 0f
+    private var lastSpan = 0f
+
+    private enum class TwoFinger { UNDECIDED, SCROLL, PINCH }
 
     /**
      * The time a held-back one-finger click is due, or null. The caller
@@ -86,21 +103,44 @@ class TrackpadGesture(
         moveCarryY = 0f
         scrollCarryX = 0f
         scrollCarryY = 0f
+        twoFinger = TwoFinger.UNDECIDED
+        startSpan = 0f
+        lastSpan = 0f
         return out
     }
 
     /**
      * The fingers moved by ([dx], [dy]) with [fingers] down. Cursor motion is
      * further scaled by [cursorScale] (view to video pixels); scrolling and
-     * the slop are not.
+     * the slop are not. [span] is the distance between two fingers (view
+     * px), or 0 when the caller does not zoom.
      */
-    fun move(dx: Float, dy: Float, fingers: Int, cursorScale: Float = 1f): List<PadOutput> {
+    fun move(dx: Float, dy: Float, fingers: Int, cursorScale: Float = 1f, span: Float = 0f): List<PadOutput> {
         maxFingers = maxOf(maxFingers, fingers)
         travelled += hypot(dx, dy)
         if (maxFingers >= 2 && !dragging) {
             // Another gesture begins: a tap that was waiting is a tap after all.
             val out = flushPending().toMutableList()
             armed = false
+            if (span > 0f && startSpan == 0f) {
+                startSpan = span
+                lastSpan = span
+            }
+            if (twoFinger == TwoFinger.UNDECIDED) {
+                val spread = if (startSpan > 0f && span > 0f) abs(span - startSpan) else 0f
+                if (spread > slop && spread > travelled) {
+                    twoFinger = TwoFinger.PINCH
+                } else if (travelled > slop) {
+                    twoFinger = TwoFinger.SCROLL
+                }
+            }
+            if (twoFinger == TwoFinger.PINCH) {
+                if (span > 0f && lastSpan > 0f) {
+                    out += PadOutput.Zoom(span / lastSpan)
+                    lastSpan = span
+                }
+                return out
+            }
             // Like the cursor, scrolling waits for the slop, so the jitter of a
             // second finger landing does not scroll before a right-click.
             // Natural scrolling: the content follows the fingers (finger down =
@@ -145,7 +185,7 @@ class TrackpadGesture(
             dragging = false
             return listOf(PadOutput.Button(LEFT, false))
         }
-        if (travelled > slop) {
+        if (travelled > slop || twoFinger == TwoFinger.PINCH) {
             armed = false
             return flushPending()
         }
