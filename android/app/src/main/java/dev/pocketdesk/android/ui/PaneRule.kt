@@ -29,6 +29,37 @@ object PaneRule {
     }
 
     /**
+     * The split for the Pane [mode] in a window [widthDp] by [heightDp]
+     * (measured without the on-screen keyboard), [fold] a hinge or none:
+     * Auto as [autoSplit]; Dual two panes, stacked when upright (as Auto
+     * there) and side by side otherwise; Single one. Picture-in-picture shows
+     * the stream alone.
+     */
+    fun resolve(mode: PaneMode, fold: PaneSplit, widthDp: Float, heightDp: Float, pip: Boolean): PaneSplit {
+        if (pip) return PaneSplit.None
+        val auto = autoSplit(fold, widthDp, heightDp)
+        return when (mode) {
+            PaneMode.Auto -> auto
+            PaneMode.Dual -> if (auto != PaneSplit.None) auto else PaneSplit.Vertical
+            PaneMode.Single -> PaneSplit.None
+        }
+    }
+
+    /**
+     * Whether a [split]'s dock keeps the session's chrome from fading: a
+     * side-by-side dock or a hinge's is a control surface of its own, but
+     * on an upright phone the chrome would sit over a small stream for good.
+     */
+    fun chromeStays(split: PaneSplit, hinge: Boolean): Boolean =
+        split == PaneSplit.Vertical || (split == PaneSplit.Horizontal && hinge)
+
+    /**
+     * Whether the keyboard bar, along the window's bottom, covers the stream
+     * in a [split] (it then needs padding): not when the stream is on top.
+     */
+    fun streamUnderKeyboardBar(split: PaneSplit): Boolean = split != PaneSplit.Horizontal
+
+    /**
      * The share of the window's height the stream pane takes in a [split]
      * ([hinge] when a fold made it): on a phone held upright, as tall as a
      * desktop of [videoAspect] (width / height) is at full width, within
@@ -41,7 +72,7 @@ object PaneRule {
         heightPx: Float,
         videoAspect: Float,
     ): Float {
-        if (split != PaneSplit.Horizontal || hinge || videoAspect <= 0f || heightPx <= 0f) return 0.5f
+        if (split != PaneSplit.Horizontal || hinge || videoAspect <= 0f || widthPx <= 0f || heightPx <= 0f) return 0.5f
         return (widthPx / videoAspect / heightPx).coerceIn(MIN_PORTRAIT_STREAM, MAX_PORTRAIT_STREAM)
     }
 }

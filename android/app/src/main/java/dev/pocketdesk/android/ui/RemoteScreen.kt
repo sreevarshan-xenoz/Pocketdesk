@@ -829,31 +829,34 @@ fun RemoteScreen(
         // just a stretched phone layout; we own both endpoints and can split.
         // T9b: a phone held upright splits too, the stream on top sized to
         // the desktop's shape and the controls below (PaneRule).
-        val autoSplit = PaneRule.autoSplit(foldSplit, maxWidth.value, maxHeight.value)
-        val dualPane = when (paneMode) {
-            PaneMode.Auto -> autoSplit != PaneSplit.None
-            PaneMode.Dual -> true
-            PaneMode.Single -> false
-        }
-        val split = when {
-            !dualPane -> PaneSplit.None
-            autoSplit != PaneSplit.None -> autoSplit
-            else -> PaneSplit.Vertical // asked for two panes: side by side
-        }
+        // Decided on the window, not this box: the box shrinks while the
+        // on-screen keyboard is up, and the layout must not flip under it.
+        val window = LocalWindowInfo.current.containerSize
+        val density = LocalDensity.current
+        val hinge = foldSplit != PaneSplit.None
+        val split = PaneRule.resolve(
+            paneMode,
+            foldSplit,
+            widthDp = window.width / density.density,
+            heightDp = window.height / density.density,
+            pip = inPictureInPicture,
+        )
+        val dualPane = split != PaneSplit.None
         val vertical = split == PaneSplit.Vertical
         val streamShare = PaneRule.streamFraction(
             split,
-            hinge = foldSplit != PaneSplit.None,
-            widthPx = constraints.maxWidth.toFloat(),
-            heightPx = constraints.maxHeight.toFloat(),
+            hinge = hinge,
+            widthPx = window.width.toFloat(),
+            heightPx = window.height.toFloat(),
             videoAspect = if (videoSize.height > 0) videoSize.width.toFloat() / videoSize.height else 0f,
         )
+        val streamHeight = with(density) { (window.height * streamShare).toDp() }.coerceAtMost(maxHeight)
         // Only the stream Box's size changes across a fold, so the SurfaceView
         // subtree is reused — the decode session is not torn down on a hinge.
         val streamMod = when {
             !dualPane -> Modifier.fillMaxSize()
             vertical -> Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterStart)
-            else -> Modifier.fillMaxWidth().fillMaxHeight(streamShare).align(Alignment.TopCenter)
+            else -> Modifier.fillMaxWidth().height(streamHeight).align(Alignment.TopCenter)
         }
         // Any touch on the stream brings the chrome back. Observing on the
         // Initial pass means the parent sees the down before the video's own
@@ -861,7 +864,15 @@ fun RemoteScreen(
         // desktop — no swallowed input, no invisible edge strip to hunt for.
         Box(
             modifier = streamMod
-                .then(if (keyboardOpen) Modifier.padding(bottom = keyboardBarHeight(compactBar)) else Modifier)
+                .then(
+                    // The bar runs along the window's bottom: it covers the
+                    // stream unless the stream sits on top (PaneRule).
+                    if (keyboardOpen && PaneRule.streamUnderKeyboardBar(split)) {
+                        Modifier.padding(bottom = keyboardBarHeight(compactBar))
+                    } else {
+                        Modifier
+                    },
+                )
                 .pointerInput(Unit) {
                 awaitEachGesture {
                     while (true) {
@@ -898,11 +909,13 @@ fun RemoteScreen(
         }
 
         // UI refresh: chrome auto-hide timer. Sticky (never fades) while any
-        // sheet is open or the dual-pane dock is on screen — the dock is a
-        // permanent control surface, and fading the stream chrome next to it
-        // would look broken, not immersive.
+        // sheet is open or a side-by-side (or hinged) dock is on screen — that
+        // dock is a permanent control surface, and fading the stream chrome
+        // next to it would look broken. An upright phone's small stream pane
+        // fades as a full one does, or the chrome would cover it for good.
         val chromeSticky = showQuick || showPicker || showMonitorPicker ||
-            showPairing || showAudio || showHistory || dualPane || keyboardOpen || showSendText || showFiles
+            showPairing || showAudio || showHistory || PaneRule.chromeStays(split, hinge) ||
+            keyboardOpen || showSendText || showFiles
         LaunchedEffect(chromeVisible, status, chromeSticky) {
             if (chromeVisible && !chromeSticky && status is StreamStatus.Up) {
                 delay(6_000)
@@ -1287,7 +1300,8 @@ fun RemoteScreen(
                 if (vertical) {
                     Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterEnd)
                 } else {
-                    Modifier.fillMaxWidth().fillMaxHeight(1f - streamShare).align(Alignment.BottomCenter)
+                    Modifier.fillMaxWidth().height((maxHeight - streamHeight).coerceAtLeast(0.dp))
+                        .align(Alignment.BottomCenter)
                 }
             ControlDock(address = address, port = port, modifier = dockMod)
         }

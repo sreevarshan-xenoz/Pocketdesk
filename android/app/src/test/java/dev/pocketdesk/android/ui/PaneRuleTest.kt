@@ -30,4 +30,50 @@ class PaneRuleTest {
         assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Horizontal, true, 1080f, 2400f, 16f / 9f), 1e-4f)
         assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Vertical, false, 1600f, 2400f, 16f / 9f), 1e-4f)
     }
+
+    @Test
+    fun theModeAndTheWindowGiveTheSplitAndPictureInPictureIsOnePane() {
+        val portrait = 400f to 860f
+        val wideLandscape = 860f to 400f
+        val narrowLandscape = 560f to 400f
+        fun split(mode: PaneMode, size: Pair<Float, Float>, pip: Boolean = false, fold: PaneSplit = PaneSplit.None) =
+            PaneRule.resolve(mode, fold, size.first, size.second, pip)
+        assertEquals(PaneSplit.Horizontal, split(PaneMode.Auto, portrait))
+        assertEquals(PaneSplit.Vertical, split(PaneMode.Auto, wideLandscape))
+        assertEquals(PaneSplit.None, split(PaneMode.Auto, narrowLandscape))
+        // Dual asks for two panes: stacked when upright, else side by side.
+        assertEquals(PaneSplit.Horizontal, split(PaneMode.Dual, portrait))
+        assertEquals(PaneSplit.Vertical, split(PaneMode.Dual, narrowLandscape))
+        assertEquals(PaneSplit.None, split(PaneMode.Single, portrait))
+        // Picture-in-picture shows the stream alone, whatever its shape.
+        assertEquals(PaneSplit.None, split(PaneMode.Auto, portrait, pip = true))
+        assertEquals(PaneSplit.None, split(PaneMode.Dual, wideLandscape, pip = true))
+        // A hinge keeps its axis.
+        assertEquals(PaneSplit.Vertical, split(PaneMode.Auto, portrait, fold = PaneSplit.Vertical))
+    }
+
+    @Test
+    fun theBoundariesFavourTheOldLayouts() {
+        // Exactly 600 dp wide is wide, even upright: side by side, as before.
+        assertEquals(PaneSplit.Vertical, PaneRule.autoSplit(PaneSplit.None, 600f, 1000f))
+        assertEquals(PaneSplit.Horizontal, PaneRule.autoSplit(PaneSplit.None, 599.9f, 1000f))
+        // Exactly 1.25 times as tall is upright.
+        assertEquals(PaneSplit.Horizontal, PaneRule.autoSplit(PaneSplit.None, 400f, 500f))
+        assertEquals(PaneSplit.None, PaneRule.autoSplit(PaneSplit.None, 400f, 499f))
+        // Nothing to size against: half.
+        assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 0f, 2400f, 16f / 9f), 1e-4f)
+        assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, -1f), 1e-4f)
+    }
+
+    @Test
+    fun onlyTheUprightSplitFadesItsChromeAndKeepsTheStreamClearOfTheKeyboardBar() {
+        // The upright split's stream sits on top: the bar covers the dock.
+        assertEquals(false, PaneRule.chromeStays(PaneSplit.Horizontal, hinge = false))
+        assertEquals(true, PaneRule.chromeStays(PaneSplit.Vertical, hinge = false))
+        assertEquals(true, PaneRule.chromeStays(PaneSplit.Horizontal, hinge = true))
+        assertEquals(false, PaneRule.chromeStays(PaneSplit.None, hinge = false))
+        assertEquals(false, PaneRule.streamUnderKeyboardBar(PaneSplit.Horizontal))
+        assertEquals(true, PaneRule.streamUnderKeyboardBar(PaneSplit.Vertical))
+        assertEquals(true, PaneRule.streamUnderKeyboardBar(PaneSplit.None))
+    }
 }
