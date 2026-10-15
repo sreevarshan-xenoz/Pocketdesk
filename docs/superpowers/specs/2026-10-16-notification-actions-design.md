@@ -66,3 +66,13 @@ The computer shows the phone's notifications (N5a) and closes them when they clo
   - **Nearly every notification reached the computer as "New notification" (N5a).** Every Android notification is private unless its app says otherwise, and the lock screen hides a private one's content only when the user hides sensitive content. The rule hid it always. Now an app's own private follows the user's choice; a channel's or the user's private for an app still hides it.
   - **Answers were dropped at once while the phone had no live link,** because its notifications went over one-off connections. The phone now keeps a link while answering is on, and the server holds an answer for its minute.
 - **Device-checked (A71 → Windows), checklist §66:** a reply through `RemoteInput`, a button, and an unoffered button refused.
+- **Fresh review (0 Critical, 3 Important), fixed:**
+  - buttons Android runs only once the phone is unlocked were offered. They now never are, nor buttons without an intent or offering only fixed choices; device-checked with an `Approve` that requires unlocking.
+  - an offer outlived the notification's current buttons. What a notification offers is now part of the duplicate check; a re-post refreshes the kept intents; the server forgets a note that no longer offers anything.
+  - the store's writes were unlocked.
+  - Minors fixed: "queued" instead of "sent" in the app; the lock-screen setting read fails closed; answers run only while the phone's notifications are on; the own-computer check moved into the tested rule.
+- **Accepted:**
+  - `phone_notifications.json` is emptied at the next start, not when the server stops or a phone is unpaired;
+  - an answer that the newest connection does not take is not retried;
+  - an action that opens an activity may be blocked by Android 14+'s background-launch limits;
+  - the hold-until-connect watcher has no test of its own.

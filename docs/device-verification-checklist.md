@@ -1172,6 +1172,8 @@ On the A71 against this box, 2026-10-16, with a throwaway chat app that posts a 
 - [x] The computer showed it in full and kept it with its button and its reply.
 - [x] A reply written as the desktop app writes it reached the app through its `RemoteInput`; "Mark as read" ran; a button it did not offer was refused by the server.
 - [x] Found and fixed on the way: nearly every notification arrived as "New notification" (an app's default private was always hidden), and answers were dropped while the phone had no live link.
+- [x] After the review fixes: a button that requires unlocking (`Approve`) was not offered, and a press of it was refused; reply and "Mark as read" ran again.
+- [ ] "Hide sensitive content" on the lock screen turned on: the probe's notification arrives as "New notification" and offers nothing.
 
 Owed:
 - [ ] The desktop app's Notifications tab itself (its buttons and reply box), and a real chat app (WhatsApp, Signal, Messages).
