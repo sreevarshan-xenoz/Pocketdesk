@@ -75,6 +75,10 @@ pub struct Config {
     /// How many texts the Messages history keeps.
     #[serde(default = "default_sms_keep")]
     pub sms_keep: u32,
+    /// Open a link a phone hands over in the default browser (roadmap T8a);
+    /// off, it is shown as a notification instead.
+    #[serde(default = "default_true")]
+    pub open_links: bool,
     /// Tell paired phones how to wake this computer: its adapter's MAC and
     /// broadcast address (roadmap N6).
     #[serde(default = "default_true")]
@@ -189,6 +193,7 @@ impl Default for Config {
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
             sms_keep: default_sms_keep(),
+            open_links: true,
             wake_announce: true,
             wake_port: 0,
             input_control: InputControlMode::One,
@@ -347,6 +352,7 @@ impl Config {
         "phone_notifications",
         "notifications_per_minute",
         "sms_notify",
+        "open_links",
         "sms_keep",
         "wake_announce",
         "wake_port",
@@ -489,6 +495,16 @@ mod tests {
         let back = Config::load_from(&path).unwrap();
         assert!(!back.wake_announce);
         assert_eq!(back.wake_port, 40009);
+    }
+
+    #[test]
+    fn links_from_phones_open_by_default_and_the_choice_saves() {
+        assert!(Config::default().open_links);
+        let path = temp("open-links");
+        let mut config = Config::load_from(&path).unwrap();
+        config.open_links = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().open_links);
     }
 
     #[test]

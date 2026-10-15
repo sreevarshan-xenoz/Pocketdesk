@@ -36,6 +36,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::Exec => "exec",
         Capability::Notifications => "notifications",
         Capability::Texts => "texts",
+        Capability::Links => "links",
     }
 }
 
@@ -352,6 +353,85 @@ fn wait_deadline(wait: std::time::Duration) -> std::time::Instant {
     let now = std::time::Instant::now();
     now.checked_add(wait)
         .unwrap_or_else(|| now + std::time::Duration::from_secs(365 * 24 * 3600))
+}
+
+/// Ask the running server in `state_dir` to hand the link `url` to the
+/// phone `query` names (T8a): a phone in a session, a link that may be
+/// opened. What to print, and the exit code.
+pub fn link_in(state_dir: &Path, query: &str, url: &str, running: bool) -> (Value, i32) {
+    if !running {
+        return (
+            error("no Pocketdesk server is running to send it"),
+            exit::NO_SERVER,
+        );
+    }
+    if let Some(problem) = pocketdesk_core::protocol::link::link_problem(url) {
+        return (error(problem), exit::BAD_ARGUMENTS);
+    }
+    let store = match trust_store(state_dir) {
+        Ok(store) => store,
+        Err(reason) => return (error(reason), exit::FAILED),
+    };
+    let device_id = match resolve_phone(&store.trusted_devices(), query) {
+        Ok(id) => id,
+        Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
+    };
+    // The server would drop it: say so now, not "queued".
+    if !store.permissions(&device_id).allows(Capability::Links) {
+        return (
+            error(format!("Links is off for {device_id} (the Devices tab)")),
+            exit::FAILED,
+        );
+    }
+    let now = pocketdesk_core::local::pin::now_unix();
+    if !live_sessions(state_dir, now, true)
+        .iter()
+        .any(|s| s.device_id.as_deref() == Some(device_id.as_str()))
+    {
+        return (
+            error(format!(
+                "{device_id} is not in a session: open one on the phone first"
+            )),
+            exit::FAILED,
+        );
+    }
+    match pocketdesk_core::local::links::request(state_dir, &device_id, url, now) {
+        Ok(request) => (
+            versioned(json!({
+                "id": request.id,
+                "device_id": device_id,
+                "url": request.url,
+                "state": "queued",
+            })),
+            exit::DONE,
+        ),
+        Err(e) => (error(format!("could not queue it: {e}")), exit::FAILED),
+    }
+}
+
+/// `pocketdesk link`: prints the outcome and returns the exit code.
+pub fn run_link(query: &str, url: &str, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
+            return exit::FAILED;
+        }
+    };
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    let (out, code) = link_in(&dir, query, url, running);
+    if as_json {
+        print(&out);
+    } else if let Some(reason) = out["error"].as_str() {
+        eprintln!("Error: {reason}");
+    } else {
+        println!("sent to the phone, where it waits as a notification");
+    }
+    code
 }
 
 /// `pocketdesk send`: prints the outcome and returns the exit code.
@@ -944,6 +1024,48 @@ mod tests {
         let help = ["pocketdesk", "send", "--help", "--json"];
         let err = crate::cli::Cli::try_parse_from(help).unwrap_err();
         assert!(usage_error(&help.map(std::ffi::OsString::from), &err).is_none());
+    }
+
+    #[test]
+    fn a_link_for_a_phone_with_links_off_is_refused_not_queued() {
+        let (dir, _) = send_setup("link-off");
+        let mut store = TrustStore::read(dir.join(TRUST_FILE)).unwrap();
+        let mut permissions = store.permissions("5f1c9b3d-6e70");
+        permissions.links = Some(false);
+        store.set_permissions("5f1c9b3d-6e70", permissions).unwrap();
+        let (out, code) = link_in(&dir, "5f1c9b", "https://example.org/a", true);
+        assert_eq!(code, exit::FAILED, "{out}");
+        assert!(out["error"].as_str().unwrap().contains("Links"), "{out}");
+        assert!(
+            pocketdesk_core::local::links::take_all(&dir, pocketdesk_core::local::pin::now_unix())
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_link_is_queued_for_a_phone_in_a_session_and_refused_otherwise() {
+        let (dir, _) = send_setup("link");
+        let (out, code) = link_in(&dir, "5f1c9b", "https://example.org/a", true);
+        assert_eq!(code, exit::DONE, "{out}");
+        assert_eq!(out["api"], API);
+        assert_eq!(out["state"], "queued");
+        let queued =
+            pocketdesk_core::local::links::take_all(&dir, pocketdesk_core::local::pin::now_unix());
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].device_id, "5f1c9b3d-6e70");
+
+        let (out, code) = link_in(&dir, "5f1c9b", "javascript:alert(1)", true);
+        assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
+        assert!(out["error"].as_str().unwrap().contains("web link"));
+        let (_, code) = link_in(&dir, "5f1c9b", "https://example.org/", false);
+        assert_eq!(code, exit::NO_SERVER);
+        in_session(&dir, &[]);
+        let (_, code) = link_in(&dir, "5f1c9b", "https://example.org/", true);
+        assert_eq!(code, exit::FAILED, "not in a session");
+        assert!(
+            pocketdesk_core::local::links::take_all(&dir, pocketdesk_core::local::pin::now_unix())
+                .is_empty()
+        );
     }
 
     #[test]

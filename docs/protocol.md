@@ -155,7 +155,7 @@ Anyone who sees the code while it is valid holds everything needed to pair withi
 
 ### 3.1 Control channel packets
 
-The permission column comes from `capability_for` in `core/src/protocol/permissions.rs`. "Always" means a paired device may always send the packet. Before pairing (with `pairing_required = true`), only `kdeconnect.pair` and `kdeconnect.pocketdesk.pair` are dispatched (`service.rs`). On v2, `kdeconnect.identity` is also allowed (`v2_multiplexer.rs`). Packets from the desktop to the phone are not gated by per-device permissions. They go only to devices that may receive pushes (`server/src/state.rs`, `may_receive_pushes`).
+The permission column comes from `capability_for` in `core/src/protocol/permissions.rs`. "Always" means a paired device may always send the packet. Before pairing (with `pairing_required = true`), only `kdeconnect.pair` and `kdeconnect.pocketdesk.pair` are dispatched (`service.rs`). On v2, `kdeconnect.identity` is also allowed (`v2_multiplexer.rs`). Packets from the desktop to the phone are not gated by per-device permissions, except a link (`kdeconnect.pocketdesk.link`), which goes only to a phone with Links on. They go only to devices that may receive pushes (`server/src/state.rs`, `may_receive_pushes`).
 
 Defaults: every permission is on except Exec (`Capability::default_allowed`).
 
@@ -170,7 +170,7 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 | Clipboard image | `kdeconnect.pocketdesk.clipboard_image` | phone → desktop | `{size, port, key}` (the desktop then dials back, §1.4) | Clipboard | `core/src/protocol/clipboard.rs` |
 | Clipboard image | `kdeconnect.pocketdesk.clipboard_image_fetch` | phone → desktop | `{id, port, key}` | Clipboard | same |
 | Notification reply | `kdeconnect.pocketdesk.notification_reply` | phone → desktop | Reply text for a desktop notification. Put on the desktop clipboard and appended to `replies.log` | Clipboard | `server/src/plugins/notification_reply.rs` |
-| Files | `kdeconnect.share.request` | phone → desktop | File name, size, `{port, key}`, `sourceId` (the file's id, so a retry continues it); for a file of a folder also `folder`, `folderId` (one per send) and `path` (its names under the folder, checked one by one and refused if any could leave it: `core::protocol::relpath`). Each send's files go under one new `Downloads/<folder>` (`Name (1)` when taken), made only once the share passes every check, and listed and announced once per folder. Or a URL (shown as a notification) | Files | `server/src/plugins/share.rs` |
+| Files | `kdeconnect.share.request` | phone → desktop | File name, size, `{port, key}`, `sourceId` (the file's id, so a retry continues it); for a file of a folder also `folder`, `folderId` (one per send) and `path` (its names under the folder, checked one by one and refused if any could leave it: `core::protocol::relpath`). Each send's files go under one new `Downloads/<folder>` (`Name (1)` when taken), made only once the share passes every check, and listed and announced once per folder | Files | `server/src/plugins/share.rs` |
 | Files | `kdeconnect.filebrowse.request` / `.response` | phone → desktop / back | A folder listing under home | Files | `server/src/plugins/file_browse.rs` |
 | Files | `kdeconnect.pocketdesk.file_fetch` | phone → desktop | `{path or offer, port, key}` | Files | `server/src/plugins/share.rs` |
 | Files | `kdeconnect.pocketdesk.file_fetch_refused` | desktop → phone | `{key, reason}` | — | same |
@@ -178,6 +178,7 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 | Files | `kdeconnect.pocketdesk.file_offer_declined` | phone → desktop | Offer id, reason | Files | same |
 | Files | `kdeconnect.pocketdesk.folder_fetch` | phone → desktop | `{path}`: a folder below home, from the remote browser, held to the browser's rules (home itself refused) and to a desktop that can dial the phone back. Offered as the owner's folder sends are, each file checked again by those rules when fetched; at most 2 on the way and 10 asked a minute per phone. A denied one is still answered | Files | `server/src/plugins/share.rs`, `server/src/offers.rs` |
 | Files | `kdeconnect.pocketdesk.folder_fetch_reply` | desktop → phone | `{path, queued, reason}`, sent before the folder's offers; the phone keeps it by `path` | — | same |
+| Links | `kdeconnect.pocketdesk.link` | both | `{url}`: an `http` or `https` link of at most 2048 bytes, with a host that is not the receiver's own loopback, and no user name, password, space or control character (`core::protocol::link::link_problem`, `LinkRule.kt`). From the phone, the desktop opens it in the default browser on a thread of its own (`ShellExecuteW`, `xdg-open`), or shows it when `open_links = false`; 5 a minute per phone. From the desktop (queued in `links_out/` by the app or `pocketdesk link`), the phone shows a notification that opens it | Links | `server/src/plugins/links.rs`, `android/bridge/src/links.rs`, `android/app/.../ui/LinksEffect.kt` |
 | Desktop sound control | `kdeconnect.pocketdesk.audio` | both | Volume, mute, output device | Audio | `server/src/plugins/audio_control.rs` |
 | Power | `kdeconnect.pocketdesk.power` | phone → desktop | Lock, sleep, shut down | Power | `server/src/plugins/power.rs` |
 | Privacy mode | `kdeconnect.pocketdesk.privacy` | both | Grab the desk's keyboard and mouse, show the shield | Power | `server/src/plugins/privacy.rs` |
@@ -379,6 +380,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/pending_approvals.json`, `approvals/` | Held sessions (device id, peer address) and the owner's answers | Default | `core/src/local/approval.rs` |
 | `<state>/received.json` | The last 50 received files: name, path, size, time, sending device | Default | `core/src/local/received.rs` |
 | `<state>/outbox/`, `sent.json` | Files the app sends to a phone, and their state | Default | `core/src/local/outbox.rs`, `sent.rs` |
+| `<state>/links_out/` | Links the app or `pocketdesk link` hands to a phone, one file each, taken within 60 s | Default | `core/src/local/links.rs` |
 | `<state>/sms.json`, `sms_outbox/` | Texts and replies (newest 1000 by default) | Owner-only | `core/src/local/sms.rs` |
 | `<state>/replies.log` | `<time>\t<notification id>\t<reply text>` for each notification reply | Default | `server/src/plugins/notification_reply.rs` |
 | `<state>/kick`, `kicks/`, `control/` | Requests from the app and CLI to end a session or hand control over | Default | `core/src/local/sessions.rs`, `paths.rs` |
@@ -420,6 +422,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | Transfer pace | 10 s to connect, 30 s idle, at least 32 KiB/s | `share.rs` |
 | Clipboard image | 32 MiB PNG, 40 megapixels | `core/src/protocol/clipboard.rs`, `server/src/platform/clip_image.rs` |
 | Phone notifications shown | 20 a minute by default (`notifications_per_minute`) | `core/src/local/config.rs` |
+| Links | 5 a minute per phone opened on the desktop; 2048 bytes; at most 16 waiting on the phone | `server/src/plugins/links.rs`, `core/src/protocol/link.rs`, `android/bridge/src/links.rs` |
 | Text replies from the phone | 5 a minute; at most 2000 characters | `android/app/.../notify/SmsReplyRule.kt`, `core/src/local/sms.rs` |
 | QUIC idle and keepalive | 45 s idle, 15 s keepalive | `core/src/streaming/transport.rs` |
 | PIN | 300 s; 5 wrong guesses; one new PIN per 10 s | §2.5 |

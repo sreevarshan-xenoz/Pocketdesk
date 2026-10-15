@@ -126,6 +126,8 @@ object RustCore {
     private external fun nativePartialLocation(address: String, source: String): String
     private external fun nativeSweepPartials(maxAgeHours: Int): String
     private external fun nativeTakeFileOffers(): String
+    private external fun nativeSendLink(address: String, port: Int, url: String): String
+    private external fun nativeTakeLinks(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
     private external fun nativeVideoBytes(): Long
@@ -664,6 +666,13 @@ object RustCore {
 
     /** Files the desktop offered since the last call, as a JSON array of `{id, name, size}`. */
     fun takeFileOffers(): String = envelope(nativeTakeFileOffers()).getOrDefault("[]")
+
+    /** Hand [url] to the computer, which opens it in its browser (T8a). */
+    fun sendLink(address: String, port: Int, url: String): Result<Unit> =
+        envelope(nativeSendLink(address, port, url)).map { }
+
+    /** The links the computer handed over since the last call, oldest first (T8a). */
+    fun takeLinks(): List<String> = parseStringArray(envelope(nativeTakeLinks()).getOrDefault("[]"))
 
     fun listRemoteFiles(address: String, port: Int, remotePath: String): Result<String> =
         envelope(nativeListRemoteFiles(address, port, remotePath))

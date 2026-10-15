@@ -42,6 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-15: **T8a, links both ways (branch `feat/link-handoff`; spec `docs/superpowers/specs/2026-10-15-link-handoff-design.md`, with an as-built section).**
+  - **Wire:** `kdeconnect.pocketdesk.link {url}` both ways, under a new per-phone Links permission; only `http(s)` links of at most 2048 bytes with a host that is not the receiver's own loopback and no credentials (`core::protocol::link`, the phone's `LinkRule`).
+  - **Phone → computer:** the share sheet's "Open on computer" sends the first link; the server opens it in the default browser on a thread of its own, or shows it (desktop Settings "Links from phones", `open_links`), 5 a minute per phone.
+  - **Computer → phone:** the desktop app's "Send link" or `pocketdesk link <phone> <url>` queues it (`<state>/links_out/`); the phone shows a notification that opens it (phone Settings "Links from the computer").
+  - **Device-verified (A71 ↔ Windows):** both ways, a `javascript:` link refused, Links off refusing both ways.
+  - **Fresh review (0 Critical, 4 Important), fixed:** "queued" for a phone with Links off, `localhost` links, `ShellExecuteW` in the packet loop without COM, and the docs. Owed: checklist §56.
 - 2026-10-15: **T3 continued, the F-Droid build (branch `feat/fdroid-build`; plan `docs/research/2026-10-14-fdroid.md`).**
   - **One build of the bridge:** `android/bridge/build-android.sh` (Rust pinned in `rust-toolchain-version`, NDK in `ndk-version`, `--locked`, one codegen unit, stripped, paths mapped away), used by CI and releases; on this box run it with `POCKETDESK_RUST_TOOLCHAIN=stable-x86_64-pc-windows-gnu`. Two builds from different folders gave identical bytes; the release APK went 106 → 62 MB with the stripped library.
   - **Release signing** keeps AGP's layout: no `zipalign -f 4`, and `apksigner --alignment-preserved true` (by default build-tools 35+ re-aligns with its own padding, moving 458 of 474 entries); the workflow checks every entry against AGP's unsigned APK.

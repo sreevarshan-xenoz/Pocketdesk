@@ -22,6 +22,8 @@ pub const PENDING_APPROVALS_FILE: &str = "pending_approvals.json";
 pub const APPROVAL_DIR: &str = "approvals";
 pub const RECEIVED_FILE: &str = "received.json";
 pub const OUTBOX_DIR: &str = "outbox";
+/// Links the desktop app or the local API asks the server to hand to a phone (T8a).
+pub const LINKS_DIR: &str = "links_out";
 pub const SENT_FILE: &str = "sent.json";
 pub const DEVICE_KEYS_FILE: &str = "device_keys.json";
 /// What the server measured about its internet path (N1): yes/no facts,

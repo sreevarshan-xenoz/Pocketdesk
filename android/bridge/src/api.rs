@@ -629,6 +629,14 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                 {
                                     crate::queue_file_offer(&pkt.body);
                                 }
+                                // A link the computer handed over (T8a),
+                                // kept for the app to show.
+                                if trimmed.contains("pocketdesk.link")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == pocketdesk_core::protocol::link::LINK
+                                {
+                                    crate::links::receive(&pkt.body);
+                                }
                                 // The answer to a folder request (T6b),
                                 // kept by the path asked.
                                 if trimmed.contains("folder_fetch_reply")
@@ -683,6 +691,9 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .clear();
+                        // And links (T8a), shown as from the computer of
+                        // the session that takes them.
+                        crate::links::forget();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );

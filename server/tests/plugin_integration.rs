@@ -83,20 +83,21 @@ async fn test_input_plugin_mouse() {
     assert!(echo.is_some(), "Input plugin should echo mousepad events");
 }
 
+/// A link is its own packet now (`kdeconnect.pocketdesk.link`, T8a): a URL
+/// share is no longer echoed back to the phone as a notification.
 #[tokio::test]
-async fn test_share_plugin_url() {
+async fn test_share_plugin_url_is_not_echoed() {
     let registry = build_test_registry();
     let sender = MockSender::new();
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(serde_json::json!({ "url": "https://example.com" }));
-    registry.dispatch_packet(&request, &sender).await.unwrap();
+    let _ = registry.dispatch_packet(&request, &sender).await;
     let sent = sender.sent.lock().await;
-    let notification = sent
-        .iter()
-        .find(|p| p.packet_type == "kdeconnect.notification");
     assert!(
-        notification.is_some(),
-        "Share plugin should send notification for URL shares"
+        !sent
+            .iter()
+            .any(|p| p.packet_type == "kdeconnect.notification"),
+        "a URL share is not echoed back as a notification"
     );
 }
 

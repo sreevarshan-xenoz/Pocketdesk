@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod exec;
 pub mod file_browse;
 pub mod input;
+pub mod links;
 pub mod monitors;
 pub mod notification;
 pub mod notification_reply;
@@ -41,5 +42,6 @@ pub fn register_all() -> PluginSet {
     registry.register(audio_control::AudioControlPlugin);
     registry.register(pair::PairPlugin);
     registry.register(sms::SmsPlugin);
+    registry.register(links::LinksPlugin::default());
     registry
 }

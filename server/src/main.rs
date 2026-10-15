@@ -100,6 +100,9 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
         cli::Commands::Status { json: false } => service::print_status().await,
         cli::Commands::Status { json: true } => local_api::print_status(),
         cli::Commands::Devices { json } => local_api::print_devices(json),
+        cli::Commands::Link { phone, url, json } => {
+            std::process::exit(local_api::run_link(&phone, &url, json))
+        }
         cli::Commands::Send {
             phone,
             path,

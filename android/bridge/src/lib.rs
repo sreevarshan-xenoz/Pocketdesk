@@ -7,6 +7,7 @@
 
 mod api;
 mod download;
+mod links;
 mod logcat;
 mod rates;
 mod session;
@@ -972,6 +973,33 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeVideoBy
     _class: JClass<'_>,
 ) -> jni::sys::jlong {
     crate::video_bytes() as jni::sys::jlong
+}
+
+/// Hand a web link to the computer to open in its browser (T8a):
+/// `{"ok": null}`, or `{"error": reason}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendLink(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    url: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let url = jstring_to_string(&mut env, &url);
+    let json = envelope_unit(RUNTIME.block_on(links::send_link(address, port as u16, url)));
+    to_jstring(&mut env, json)
+}
+
+/// Links the computer handed over since the last call, as a JSON array of
+/// strings: `{"ok": "[...]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeLinks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(links::take_links_json()));
+    to_jstring(&mut env, json)
 }
 
 /// Files the desktop offered since the last call: `{"ok": "[{id,name,size}]"}`.

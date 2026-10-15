@@ -10,6 +10,7 @@ pub mod config;
 pub mod device_keys;
 pub mod diagnostics;
 pub mod identity;
+pub mod links;
 pub mod network;
 pub mod outbox;
 pub mod pair_link;

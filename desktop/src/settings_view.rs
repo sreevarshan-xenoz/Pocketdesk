@@ -196,6 +196,12 @@ impl SettingsForm {
                 ui.label("Texts");
                 ui.checkbox(&mut e.sms_notify, "a notification for each text");
                 ui.end_row();
+                ui.label("Links from phones");
+                ui.checkbox(
+                    &mut e.open_links,
+                    "open in the browser (off: show as a notification)",
+                );
+                ui.end_row();
                 ui.label("Messages history");
                 ui.add(
                     egui::DragValue::new(&mut e.sms_keep)
