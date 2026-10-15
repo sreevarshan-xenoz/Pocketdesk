@@ -2,18 +2,40 @@
 //! Sound sheet drives `wpctl`/`pactl`.
 
 use std::process::{Command as Process, Stdio};
+use std::time::{Duration, Instant};
 
-use super::{Command, NowPlaying, PLAYERCTL_FORMAT, parse_playerctl};
+use super::{Command, DEADLINE, NowPlaying, PLAYERCTL_FORMAT, parse_playerctl};
 
+/// Run `playerctl` with `args`, waiting at most [`DEADLINE`]: a player that
+/// hangs on D-Bus must not hold the phone's control connection. One still
+/// running then is killed.
 fn playerctl(args: &[&str]) -> Result<std::process::Output, String> {
-    Process::new("playerctl")
+    let mut child = Process::new("playerctl")
         .args(args)
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => "playerctl is not installed".to_string(),
             _ => format!("playerctl: {e}"),
-        })
+        })?;
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("the player did not answer in time".to_string());
+            }
+            Err(e) => return Err(format!("playerctl: {e}")),
+        }
+    }
+    child
+        .wait_with_output()
+        .map_err(|e| format!("playerctl: {e}"))
 }
 
 /// What is playing now, or `None` when no player is running.

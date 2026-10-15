@@ -7,12 +7,33 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
 };
 
-use super::{Command, NowPlaying};
+use super::{Command, DEADLINE, NowPlaying};
+
+/// The result of `operation`, waited for at most [`DEADLINE`]: a player
+/// that never answers must not hold the phone's control connection, which
+/// waits on this call. One still running then is cancelled.
+fn within<T: windows::core::RuntimeType + 'static>(
+    operation: windows_future::IAsyncOperation<T>,
+) -> windows::core::Result<T> {
+    use windows_future::AsyncStatus;
+    let deadline = std::time::Instant::now() + DEADLINE;
+    while operation.Status()? == AsyncStatus::Started {
+        if std::time::Instant::now() >= deadline {
+            let _ = operation.Cancel();
+            return Err(windows::core::Error::new(
+                windows::Win32::Foundation::E_ABORT,
+                "the player did not answer in time",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    operation.GetResults()
+}
 
 /// The session the system names as current, if any.
 fn current() -> Result<Option<Session>, String> {
     let manager = Manager::RequestAsync()
-        .and_then(|request| request.join())
+        .and_then(within)
         .map_err(|e| format!("the media sessions could not be read: {e}"))?;
     // No current session comes back as an error for a null result.
     Ok(manager.GetCurrentSession().ok())
@@ -24,7 +45,7 @@ pub fn now_playing() -> Result<Option<NowPlaying>, String> {
         return Ok(None);
     };
     let read = || -> windows::core::Result<NowPlaying> {
-        let properties = session.TryGetMediaPropertiesAsync()?.join()?;
+        let properties = within(session.TryGetMediaPropertiesAsync()?)?;
         let info = session.GetPlaybackInfo()?;
         let controls = info.Controls()?;
         Ok(NowPlaying {
@@ -52,7 +73,7 @@ pub fn command(command: Command) -> Result<(), String> {
         Command::Next => session.TrySkipNextAsync(),
         Command::Previous => session.TrySkipPreviousAsync(),
     }
-    .and_then(|request| request.join())
+    .and_then(within)
     .map_err(|e| format!("the player could not be asked: {e}"))?;
     if done {
         Ok(())

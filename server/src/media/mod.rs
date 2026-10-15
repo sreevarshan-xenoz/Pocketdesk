@@ -19,6 +19,10 @@ mod windows;
 #[cfg(windows)]
 pub use windows::{command, now_playing};
 
+/// The longest a player is waited for: the phone's control connection waits
+/// on the answer, so a player that hangs must not hold it.
+pub const DEADLINE: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// The longest title, artist or app name sent, in characters.
 const MAX_TEXT: usize = 200;
 
