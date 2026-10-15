@@ -1,6 +1,6 @@
 # Mobile input (T9)
 
-Date: 2026-10-15. Status: T9a and T9b built (see As built); T9c designed. On autopilot (the user asked for the roadmap to keep going; the decisions are mine).
+Date: 2026-10-15. Status: T9a, T9b and T9c built (see As built). On autopilot (the user asked for the roadmap to keep going; the decisions are mine).
 
 ## Why
 
@@ -26,6 +26,14 @@ In portrait, the letterboxed desktop fills about a third of the screen and the r
 ## T9c: pointer capture
 
 A mouse plugged into the phone (USB OTG or Bluetooth) should drive the desktop's cursor with relative motion, not the phone's own pointer. Android's pointer capture (`View.requestPointerCapture`) gives raw relative events. The session will capture while it is in front in trackpad mode and a mouse is present, and release on Back or when focus is lost. No mouse is at hand here, so its device check stays owed.
+
+## As built (T9c)
+
+- **Where it lives.** `stream/CapturedMouse.kt` (JVM-tested: motion with the fraction carried, button edges for left, right, middle, back and forward, wheel notches in the desktop mouse's directions, batched samples summed, which key events to swallow) and `stream/MouseCapture.kt` (the capture itself); MainActivity's `onKeyDown`/`onKeyUp`; Settings "Use a connected mouse on the computer", on by default.
+- **How.** While the setting is on, a real mouse (not a touchpad) is connected and the window has focus, the session's video view captures the pointer; captured events go to the focused view, so the handler follows focus (the keyboard's sink takes it while open). The touchscreen keeps working; Android releases the capture when the window loses focus, and the session releases it when it ends, letting go of held buttons.
+- **Fresh review (0 Critical, 4 Important), fixed:** the mouse went dead once the keyboard took focus; batched samples were dropped (a fast mouse lost most of its travel); leaving the session could leave the pointer captured and hidden over Home; the mouse's Back button also fired the phone's Back and ended the session. Minors fixed: absolute mouse events ignored, touchpads not taken for mice.
+- **Ruled:** no mouse sensitivity setting (the desktop's own pointer settings apply); blackout and picture-in-picture do not stop the capture.
+- **Device:** no mouse was at hand; a session started and ended normally with no mouse connected. Owed: checklist §62.
 
 ## As built (T9b)
 

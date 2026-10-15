@@ -1115,6 +1115,15 @@ Owed:
 - [ ] Turning the phone: on its side the A71 (860 dp wide) splits side by side, as before.
 - [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
 
+## 62. A mouse on the phone (T9c)
+
+No mouse was at hand; with none connected, a session on the A71 started and Back ended it as before. Owed, with a USB OTG or Bluetooth mouse:
+- [ ] Motion, all five buttons and the wheel (both ways) reach the desktop, and a fast mouse keeps its travel.
+- [ ] The phone's pointer is hidden during the session and back over Home after Exit.
+- [ ] Opening and closing the in-session keyboard: the mouse keeps working.
+- [ ] The mouse's Back button goes to the desktop and does not end the session.
+- [ ] Settings off: the phone's own pointer, no capture.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
