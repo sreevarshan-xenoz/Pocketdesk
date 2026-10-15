@@ -6,6 +6,7 @@
 //! at all; any client of the session may use these.
 
 use std::os::fd::AsFd;
+use std::time::{Duration, Instant};
 
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::wl_pointer::{Axis, ButtonState};
@@ -43,18 +44,16 @@ pub fn wheel(axis_vertical: bool, notches: i32) -> (f64, i32) {
     (f64::from(steps) * NOTCH, steps)
 }
 
-/// The compositor's virtual pointer and keyboard.
-pub struct WlrInput {
+/// One connection's virtual pointer and keyboard.
+struct Link {
     conn: Connection,
     queue: EventQueue<State>,
     pointer: ZwlrVirtualPointerV1,
     keyboard: ZwpVirtualKeyboardV1,
 }
 
-impl WlrInput {
-    /// Connect to the compositor `WAYLAND_DISPLAY` names and make both, or
-    /// say why not ([`ConnectError::Unsupported`] where it offers neither).
-    pub fn connect() -> Result<Self, ConnectError> {
+impl Link {
+    fn open() -> Result<Self, ConnectError> {
         let failed = |e: &dyn std::fmt::Display| ConnectError::Failed(e.to_string());
         let conn = Connection::connect_to_env().map_err(|e| failed(&e))?;
         let (globals, mut queue) = registry_queue_init::<State>(&conn).map_err(|e| failed(&e))?;
@@ -80,18 +79,119 @@ impl WlrInput {
         })
     }
 
+    /// Send what is queued, and dispatch what the compositor sent.
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.conn.flush().map_err(io_error)?;
+        self.queue
+            .dispatch_pending(&mut State)
+            .map_err(std::io::Error::other)?;
+        Ok(())
+    }
+}
+
+impl Drop for Link {
+    fn drop(&mut self) {
+        self.pointer.destroy();
+        self.keyboard.destroy();
+        let _ = self.conn.flush();
+    }
+}
+
+fn io_error(e: wayland_client::backend::WaylandError) -> std::io::Error {
+    match e {
+        wayland_client::backend::WaylandError::Io(e) => e,
+        other => std::io::Error::other(other),
+    }
+}
+
+/// The compositor's virtual pointer and keyboard. When the connection
+/// breaks (the compositor restarted), it is opened again: at once, then
+/// every [`WlrInput::RETRY`] while input arrives; input in between is
+/// dropped, as it would be with no compositor. The compositor releases
+/// what a closed connection's devices held.
+pub struct WlrInput {
+    link: Option<Link>,
+    retry_at: Instant,
+}
+
+impl WlrInput {
+    /// How long a lost connection rests before it is opened again.
+    pub const RETRY: Duration = Duration::from_secs(5);
+
+    /// Connect to the compositor `WAYLAND_DISPLAY` names and make both, or
+    /// say why not ([`ConnectError::Unsupported`] where it offers neither).
+    pub fn connect() -> Result<Self, ConnectError> {
+        Ok(Self {
+            link: Some(Link::open()?),
+            retry_at: Instant::now(),
+        })
+    }
+
+    /// Make the requests `op` makes and send them, opening the connection
+    /// again first when it was lost, and once more when it breaks now.
+    fn send(&mut self, op: impl Fn(&Link)) -> std::io::Result<()> {
+        if self.link.is_none() {
+            if Instant::now() < self.retry_at {
+                return Ok(());
+            }
+            self.reopen()?;
+        }
+        let Some(link) = self.link.as_mut() else {
+            return Ok(());
+        };
+        op(link);
+        match link.flush() {
+            Ok(()) => Ok(()),
+            // A full socket: the compositor is slow, not gone.
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Err(e),
+            Err(e) => {
+                tracing::warn!(
+                    "The compositor's virtual pointer and keyboard went away ({e}): opening them again"
+                );
+                self.link = None;
+                self.reopen()?;
+                let Some(link) = self.link.as_mut() else {
+                    return Err(e);
+                };
+                op(link);
+                link.flush()
+            }
+        }
+    }
+
+    fn reopen(&mut self) -> std::io::Result<()> {
+        match Link::open() {
+            Ok(link) => {
+                tracing::info!("The compositor's virtual pointer and keyboard are back");
+                self.link = Some(link);
+                Ok(())
+            }
+            Err(e) => {
+                self.retry_at = Instant::now() + Self::RETRY;
+                Err(std::io::Error::other(format!(
+                    "the compositor's virtual pointer and keyboard: {e:?}"
+                )))
+            }
+        }
+    }
+
     pub fn motion(&mut self, dx: i32, dy: i32) -> std::io::Result<()> {
-        self.pointer
-            .motion(monotonic_ms(), f64::from(dx), f64::from(dy));
-        self.frame()
+        let time = monotonic_ms();
+        self.send(|l| {
+            l.pointer.motion(time, f64::from(dx), f64::from(dy));
+            l.pointer.frame();
+        })
     }
 
     /// Move to (`x`, `y`) of 0..=65535 over the whole output layout, as
     /// the uinput absolute pointer does.
     pub fn motion_absolute(&mut self, x: u16, y: u16) -> std::io::Result<()> {
-        self.pointer
-            .motion_absolute(monotonic_ms(), x.into(), y.into(), 65_535, 65_535);
-        self.frame()
+        let time = monotonic_ms();
+        self.send(|l| {
+            l.pointer
+                .motion_absolute(time, x.into(), y.into(), 65_535, 65_535);
+            l.pointer.frame();
+        })
     }
 
     /// Press or release the evdev button `code` (BTN_LEFT, ...).
@@ -101,59 +201,42 @@ impl WlrInput {
         } else {
             ButtonState::Released
         };
-        self.pointer.button(monotonic_ms(), code.into(), state);
-        self.frame()
+        let time = monotonic_ms();
+        self.send(|l| {
+            l.pointer.button(time, code.into(), state);
+            l.pointer.frame();
+        })
     }
 
     /// Turn the wheel `x` notches right and `y` notches up.
     pub fn scroll(&mut self, x: i32, y: i32) -> std::io::Result<()> {
         let time = monotonic_ms();
-        for (axis, notches, vertical) in [
-            (Axis::VerticalScroll, y, true),
-            (Axis::HorizontalScroll, x, false),
-        ] {
-            if notches != 0 {
-                let (value, steps) = wheel(vertical, notches);
-                self.pointer.axis_discrete(time, axis, value, steps);
+        self.send(|l| {
+            for (axis, notches, vertical) in [
+                (Axis::VerticalScroll, y, true),
+                (Axis::HorizontalScroll, x, false),
+            ] {
+                if notches != 0 {
+                    let (value, steps) = wheel(vertical, notches);
+                    l.pointer.axis_discrete(time, axis, value, steps);
+                }
             }
-        }
-        self.frame()
+            l.pointer.frame();
+        })
     }
 
     /// Press or release the evdev key `code`.
     pub fn key(&mut self, code: u16, pressed: bool) -> std::io::Result<()> {
-        self.keyboard
-            .key(monotonic_ms(), code.into(), u32::from(pressed));
-        self.flush()
-    }
-
-    fn frame(&mut self) -> std::io::Result<()> {
-        self.pointer.frame();
-        self.flush()
-    }
-
-    /// Send what is queued, and take in what the compositor sent, so its
-    /// side of the socket never fills.
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.conn.flush().map_err(std::io::Error::other)?;
-        self.queue
-            .dispatch_pending(&mut State)
-            .map_err(std::io::Error::other)?;
-        Ok(())
+        let time = monotonic_ms();
+        self.send(|l| l.keyboard.key(time, code.into(), u32::from(pressed)))
     }
 }
 
 impl std::fmt::Debug for WlrInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WlrInput").finish_non_exhaustive()
-    }
-}
-
-impl Drop for WlrInput {
-    fn drop(&mut self) {
-        self.pointer.destroy();
-        self.keyboard.destroy();
-        let _ = self.conn.flush();
+        f.debug_struct("WlrInput")
+            .field("connected", &self.link.is_some())
+            .finish_non_exhaustive()
     }
 }
 
