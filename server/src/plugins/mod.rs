@@ -10,6 +10,7 @@ pub mod notification;
 pub mod notification_reply;
 pub mod pair;
 pub mod phone_battery;
+pub mod phone_files;
 pub mod phone_media;
 pub mod power;
 pub mod privacy;
@@ -38,6 +39,7 @@ pub fn register_all() -> PluginSet {
     registry.register(battery::BatteryPlugin::new());
     registry.register(phone_battery::PhoneBatteryPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
+    registry.register(phone_files::PhoneFilesPlugin);
     registry.register(clipboard::ClipboardPlugin::new());
     registry.register(notification::NotificationPlugin::new());
     registry.register(share::SharePlugin::new());

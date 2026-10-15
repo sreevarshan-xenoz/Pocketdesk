@@ -6,6 +6,7 @@ pub mod link;
 pub mod notification_action;
 pub mod partials;
 pub mod permissions;
+pub mod phone_files;
 pub mod phone_media;
 pub mod relpath;
 pub mod transfer;

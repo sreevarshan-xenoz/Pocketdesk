@@ -12,6 +12,7 @@ mod links;
 mod logcat;
 mod media_presses;
 mod notification_answers;
+mod phone_file_requests;
 mod rates;
 mod session;
 
@@ -1017,6 +1018,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeNot
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(notification_answers::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's requests to browse this phone's shared folders since the
+/// last call (T10g): `{"ok": "[{host, port, fetch, root, path}]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePhoneFileRequests(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(phone_file_requests::take_json()));
     to_jstring(&mut env, json)
 }
 

@@ -81,6 +81,8 @@ These are real gaps in the current design. Plan around them.
 
 12. **With "Let the computer answer notifications" on, the computer can act as you in the phone's apps** (roadmap T10c): it can press a notification's buttons (up to three, by title, never one Android runs only once the phone is unlocked) and reply to a chat, from the desktop app's Notifications tab, at most 10 a minute. Only a notification sent in full (not one whose content the lock screen hides, nor one carrying a code), and only from the phone's own computer. The notifications that can be answered are kept owner-only in `phone_notifications.json` while the server runs. It is off by default, and the desktop's Notifications switch for the phone turns it off too.
 
+13. **The folders a phone shares (roadmap T10g) can be read by its computer.** In the desktop app's Phone tab, or by anything running as you that writes its requests, the computer lists them and copies any file in them, hidden ones (a leading dot) left out. Only folders the phone's owner picked in Settings, "Folders the computer may open", and only from that phone's own computer, with its Files permission on. Removing a folder there gives its grant back.
+
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
 ## Using it safely today

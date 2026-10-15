@@ -101,6 +101,8 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::links::run_watcher());
     tokio::spawn(crate::plugins::phone_battery::run_writer());
     tokio::spawn(crate::plugins::phone_media::run_watcher());
+    // The desktop app's requests to browse the phones' storage (T10g).
+    tokio::spawn(crate::plugins::phone_files::run_watcher());
     tokio::spawn(crate::plugins::sms::run_watcher());
 
     // Prepare shared state for v2 multiplexer and v1 streaming.

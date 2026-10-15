@@ -90,6 +90,7 @@ pub enum Tab {
     Files,
     Messages,
     Notifications,
+    Phone,
     Settings,
     Diagnostics,
     Logs,
@@ -132,6 +133,8 @@ pub struct PocketdeskApp {
     messages: crate::messages_view::MessagesView,
     /// The Notifications tab (T10c).
     notes: crate::notes_view::NotesView,
+    /// The Phone tab (T10g).
+    phone_files: crate::phone_files_view::PhoneFilesView,
     /// Whether "Send to phone" is in the file manager, as last read (T10e).
     send_menu_installed: Option<bool>,
 }
@@ -161,6 +164,7 @@ impl PocketdeskApp {
             diagnostics: Default::default(),
             messages: Default::default(),
             notes: Default::default(),
+            phone_files: Default::default(),
             send_menu_installed: None,
         }
     }
@@ -1065,6 +1069,7 @@ impl eframe::App for PocketdeskApp {
                     (Tab::Files, "Files"),
                     (Tab::Messages, "Messages"),
                     (Tab::Notifications, "Notifications"),
+                    (Tab::Phone, "Phone"),
                     (Tab::Settings, "Settings"),
                     (Tab::Diagnostics, "Diagnostics"),
                     (Tab::Logs, "Logs"),
@@ -1096,6 +1101,10 @@ impl eframe::App for PocketdeskApp {
                     .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
             }
             Tab::Notifications => self.notes.show(ui, &self.state_dir, now_unix()),
+            Tab::Phone => {
+                self.phone_files
+                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
+            }
             Tab::Settings => self.settings_tab(ui),
             Tab::Diagnostics => self
                 .diagnostics

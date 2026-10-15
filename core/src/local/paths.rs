@@ -29,6 +29,10 @@ pub const SENT_FILE: &str = "sent.json";
 pub const PHONE_STATUS_FILE: &str = "phone_status.json";
 /// Each phone's last media report (T8d), written by the server.
 pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
+/// Each phone's last listing of its shared folders (T10g).
+pub const PHONE_FILES_FILE: &str = "phone_files.json";
+/// The desktop app's requests to browse them (T10g).
+pub const PHONE_FILES_DIR: &str = "phone_files_out";
 /// Phone notifications the computer can answer (T10c).
 pub const PHONE_NOTES_FILE: &str = "phone_notifications.json";
 /// Answers to them the desktop app asks the server to send (T10c).
