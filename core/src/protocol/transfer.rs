@@ -2,7 +2,7 @@
 //!
 //! Runs inside the transfer TLS (`pocketdesk-transfer/2`) once the desktop
 //! has presented the one-time key. The roles are the data's: the *sender*
-//! has the file, the *receiver* keeps what arrived. Either may be the end
+//! has the file, the *receiver* keeps what it has made durable. Either may be the end
 //! that dialled.
 //!
 //! 1. The sender: the file's size, a big-endian `u64`.
@@ -344,7 +344,7 @@ where
             Ok(n) => n,
             Err(e) => {
                 // A connection that fails (TLS closed without close_notify,
-                // a reset, a stall) keeps what arrived for the next attempt.
+                // a reset, a stall) keeps what was committed for the next attempt.
                 commit(partial, size, received, &mut committed, &mut on_commit).await?;
                 return Err(e.into());
             }
