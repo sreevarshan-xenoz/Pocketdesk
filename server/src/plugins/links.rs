@@ -111,6 +111,47 @@ impl Plugin for LinksPlugin {
     }
 }
 
+/// Daemon task: hand each link the desktop app or the local API queued
+/// (`core::local::links`) to its phone, if the phone is connected and may
+/// take links.
+pub async fn run_watcher() {
+    let Ok(dir) = crate::state::state_dir() else {
+        tracing::warn!("No state directory: handing links to phones is off");
+        return;
+    };
+    loop {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let now = pocketdesk_core::local::pin::now_unix();
+        for request in pocketdesk_core::local::links::take_all(&dir, now) {
+            let clients = crate::state::clone_clients().await;
+            let allowed = crate::plugins::pair::permits(&request.device_id, LINK);
+            if let Err(reason) = push(&request, &clients, allowed).await {
+                tracing::info!("Link for {} not sent: {reason}", request.device_id);
+            }
+        }
+    }
+}
+
+/// Push one queued link to its phone.
+async fn push(
+    request: &pocketdesk_core::local::links::LinkRequest,
+    clients: &[Arc<dyn DeviceSender>],
+    allowed: bool,
+) -> std::result::Result<(), String> {
+    if !allowed {
+        return Err("links are off for this phone".to_string());
+    }
+    let phone = clients
+        .iter()
+        .find(|c| c.device_id() == request.device_id)
+        .ok_or("the phone is not connected")?;
+    let packet = NetworkPacket::new(LINK).with_body(serde_json::json!({ "url": request.url }));
+    phone
+        .send_packet(&packet)
+        .await
+        .map_err(|e| format!("could not send: {e}"))
+}
+
 /// Open `url` (already checked) with the system's handler for web links:
 /// `ShellExecuteW` on Windows, `xdg-open` on Linux. Never a shell.
 fn open_in_browser(url: &str) -> std::result::Result<(), String> {
@@ -204,6 +245,63 @@ mod tests {
         configure(true);
         assert!(opened.lock().unwrap().is_empty());
         assert_eq!(*shown.lock().unwrap(), ["https://example.org/"]);
+    }
+
+    struct Phone {
+        id: &'static str,
+        sent: Mutex<Vec<NetworkPacket>>,
+    }
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Phone {
+        fn device_id(&self) -> &str {
+            self.id
+        }
+        fn connection_id(&self) -> &str {
+            self.id
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.sent.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_queued_link_goes_to_its_phone_when_it_may_take_links() {
+        let a = Arc::new(Phone {
+            id: "phone-a",
+            sent: Mutex::default(),
+        });
+        let b = Arc::new(Phone {
+            id: "phone-b",
+            sent: Mutex::default(),
+        });
+        let clients: Vec<Arc<dyn DeviceSender>> = vec![a.clone(), b.clone()];
+        let request = pocketdesk_core::local::links::LinkRequest {
+            id: "x".to_string(),
+            device_id: "phone-b".to_string(),
+            url: "https://example.org/".to_string(),
+            created_unix: 1,
+        };
+        push(&request, &clients, true).await.unwrap();
+        assert!(a.sent.lock().unwrap().is_empty());
+        let sent = b.sent.lock().unwrap().clone();
+        assert_eq!(sent[0].packet_type, LINK);
+        assert_eq!(sent[0].body["url"], "https://example.org/");
+        assert!(
+            push(&request, &clients, false)
+                .await
+                .unwrap_err()
+                .contains("off")
+        );
+        let mut away = request.clone();
+        away.device_id = "phone-c".to_string();
+        assert!(
+            push(&away, &clients, true)
+                .await
+                .unwrap_err()
+                .contains("not connected")
+        );
     }
 
     #[test]
