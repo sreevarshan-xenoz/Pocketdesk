@@ -62,10 +62,10 @@ impl Reports {
         }
     }
 
-    /// Forget every phone not in `paired`.
-    fn keep_only(&mut self, paired: &std::collections::HashSet<String>) {
+    /// Forget every phone not in `shown`.
+    fn keep_only(&mut self, shown: &std::collections::HashSet<String>) {
         let before = self.phones.len();
-        self.phones.retain(|id, _| paired.contains(id));
+        self.phones.retain(|id, _| shown.contains(id));
         if self.phones.len() != before {
             self.dirty = true;
         }
@@ -138,15 +138,19 @@ pub async fn run_watcher() {
             continue;
         }
         last_write = tokio::time::Instant::now();
+        let connected: Vec<String> = crate::state::clone_clients()
+            .await
+            .iter()
+            .map(|c| c.device_id().to_string())
+            .collect();
         // An unreadable store forgets no one.
-        let paired: Option<std::collections::HashSet<String>> =
-            TrustStore::read(dir.join(TRUST_FILE))
-                .ok()
-                .map(|store| store.trusted_devices().into_iter().collect());
+        let shown = TrustStore::read(dir.join(TRUST_FILE))
+            .ok()
+            .map(|store| showable(&connected, &store));
         let phones = {
             let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(paired) = &paired {
-                reports.keep_only(paired);
+            if let Some(shown) = &shown {
+                reports.keep_only(shown);
             }
             if !reports.dirty {
                 continue;
@@ -158,6 +162,22 @@ pub async fn run_watcher() {
             tracing::warn!("Could not keep the phones' media: {e}");
         }
     }
+}
+
+/// The phones whose media may be shown: connected now, paired, and allowed
+/// Media. A report from any other is forgotten, so a phone whose session
+/// ended, or whose Media was turned off, leaves no stale song behind.
+fn showable(connected: &[String], store: &TrustStore) -> std::collections::HashSet<String> {
+    connected
+        .iter()
+        .filter(|id| {
+            store.is_trusted(id)
+                && store
+                    .permissions(id)
+                    .allows(pocketdesk_core::protocol::permissions::Capability::Media)
+        })
+        .cloned()
+        .collect()
 }
 
 /// Send one press to its phone.
@@ -227,6 +247,26 @@ mod tests {
         reports.keep_only(&["phone-new".to_string()].into());
         assert_eq!(reports.phones.len(), 1);
         assert!(reports.dirty);
+    }
+
+    /// Only a phone that is connected, paired and allowed Media has its
+    /// media shown: one whose session ended, or whose Media is off, keeps
+    /// no stale song with buttons that would be refused.
+    #[test]
+    fn only_connected_paired_phones_with_media_on_are_shown() {
+        let dir = std::env::temp_dir().join(format!("pd-media-showable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        for id in ["here", "media-off", "away"] {
+            store.trust_device(id).unwrap();
+        }
+        let mut off = store.permissions("media-off");
+        off.media = Some(false);
+        store.set_permissions("media-off", off).unwrap();
+        let connected = ["here", "media-off", "stranger"].map(str::to_string);
+        let shown = showable(&connected, &store);
+        assert_eq!(shown, ["here".to_string()].into());
     }
 
     struct Phone {
