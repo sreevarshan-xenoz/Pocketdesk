@@ -125,6 +125,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 
     Each phone has a Texts permission in Devices. Settings sets whether texts make a notification and how many the history keeps.
   - **Closed on the phone, closed here:** read, swipe or clear one on the phone, and it leaves the computer too (the Action Center on Windows; on Linux, any notification server that closes on request).
+- **Links both ways** — share a page to "Open on computer" on the phone and it opens in the computer's browser; the desktop app's Files tab ("Send link") or `pocketdesk link` hands one to the phone, where a notification opens it. Only `http` and `https` links, never one to the machine's own `localhost`, at most 5 a minute from a phone. Each phone has a Links permission in Devices; the desktop's Settings "Links from phones" shows a link instead of opening it, and the phone's Settings "Links from the computer" turns them off.
 - **Notification reply** — answer desktop notifications from the phone; the desktop records the reply, copies it to the clipboard and shows a confirmation
 - **Find my device** — ring the desktop from the phone, or ring the phone from the desktop
 - **PIN pairing** — 6-digit PIN pairing (shown on the desktop or printed by `pocketdesk pair`); unpaired connections are locked out — the control channel (TCP and v2/QUIC) and the video/input stream all enforce it — unless `pairing_required = false`

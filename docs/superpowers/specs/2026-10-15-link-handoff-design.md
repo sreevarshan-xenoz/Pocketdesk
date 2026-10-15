@@ -1,6 +1,6 @@
 # Link handoff (T8a)
 
-Date: 2026-10-15. Status: design, on autopilot (the user asked for the roadmap to keep going; the decisions are mine).
+Date: 2026-10-15. Status: built (see As built), on autopilot (the user asked for the roadmap to keep going; the decisions are mine).
 
 ## Why
 
@@ -33,3 +33,19 @@ T8 in the roadmap: KDE Connect's best-loved small features. Link handoff is the 
 - bridge: a pushed link is kept for the app; the phone's send.
 - Kotlin: the URL check, and the notification decision (setting off, not a link).
 - Device: a link from Chrome's share sheet opening on Windows; one from the desktop app tapped on the phone.
+
+## As built
+
+- **Where it lives.**
+  - The check is `core::protocol::link::link_problem`, mirrored by the phone's `LinkRule`; one set of loopback cases tests both.
+  - Desktop: the server's `LinksPlugin` (opening, the rate, `open_links`), and the queue `core::local::links` (`<state>/links_out/`, one file per link, 60 s) that the desktop app and `pocketdesk link` write and the server's watcher pushes.
+  - Phone: the bridge keeps pushed links (`android/bridge/src/links.rs`, at most 16) until the session's `LinksEffect` posts them.
+- **Changed from the design.**
+  - The notification's title names the computer by its address ("A link from 192.0.2.7"): the phone keeps no name for a saved computer.
+  - The phone's toast says "Sent to the computer, to open there if it allows links", because a refused link gets no reply.
+- **Fresh review (0 Critical, 4 Important, 8 Minor), fixed one commit each:**
+  - `pocketdesk link` and the app said "queued" for a phone with Links off: both now refuse up front;
+  - a phone could have the computer's browser request its own `localhost` (in any spelling a browser reads as loopback): both ends refuse it, and a link with no host (`https://:80`);
+  - `ShellExecuteW` ran in the phone's packet loop without COM: links open on a thread of their own with COM, and `xdg-open` is waited for (no zombie);
+  - docs (this section, protocol.md, SECURITY.md limit 9, README, the man page, the config example, checklist §56).
+  - Minors fixed: links left waiting when the connection ends are dropped, and a shared link leaves out the sentence's punctuation. Ruled: Links stays on by default for guests, as Input is (SECURITY.md limit 9); the notification is already private on the lock screen (Android's default, so the phone's own setting applies); a link lost because notifications are denied is dropped silently, as desktop notifications are.

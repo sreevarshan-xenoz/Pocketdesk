@@ -72,6 +72,8 @@ These are real gaps in the current design. Plan around them.
 7. **The desktop names itself to anyone who connects.** Any client that completes the TLS or QUIC handshake, with any certificate, gets the desktop's device id, name and plugin list before it is judged, and its certificate. Anyone on the network sees the same id and name in the mDNS announcement unless `lan_discovery = false`.
 8. **The permissions limit what a phone may ask for, not what the desktop tells it.** A paired phone with every permission off still receives the desktop's notifications, its window titles (window list and workspace HUD), its battery, the wake details (the MAC) and the internet endpoint. Unpair a phone to stop them.
 
+9. **A phone with Links on can open web pages in this computer's browser** (roadmap T8a), up to 5 a minute, without asking, including pages on your home network such as a router's. Only `http` and `https` links go either way, never one to the computer's own loopback (`localhost`, 127/8, `::1`, in any spelling a browser reads as one) and never one with a user name or password. Links is on for every paired phone and guest by default, as Input is, and a phone with Input can type the same link. Turn Links off per phone in the Devices tab, or set "Links from phones" (`open_links = false`) to have links shown instead of opened. On the phone, any app can share a link to "Open on computer"; it goes to the last computer used.
+
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
 ## Using it safely today

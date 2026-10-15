@@ -98,7 +98,7 @@ pocketdesk send 0d7c3a backup.tar --wait 600 --json || notify-send "backup did n
 
 ### `pocketdesk link <phone> <url> --json`
 
-Hands a web link to a phone in a session; it waits there as a notification that opens it (T8a). Only `http` and `https` links of at most 2048 bytes, with no user name or password. `{"api": 1, "id": "…", "device_id": "…", "url": "…", "state": "queued"}`. Exit 2 for a link that may not be opened, 1 for a phone not in a session, 3 when no server runs.
+Hands a web link to a phone in a session; it waits there as a notification that opens it (T8a). Only `http` and `https` links of at most 2048 bytes, with no user name or password, and not to the phone's own `localhost`. `{"api": 1, "id": "…", "device_id": "…", "url": "…", "state": "queued"}`. Exit 2 for a link that may not be opened, 1 for a phone not in a session or with its Links permission off, 3 when no server runs.
 
 ### `pocketdesk kick <target> --json`
 

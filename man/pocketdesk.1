@@ -43,6 +43,16 @@ is a device id or 6 or more of its first characters. Exit codes: 0 done,
 .B \-\-wait
 ran out.
 .TP
+.B link \fIPHONE\fR \fIURL\fR [\-\-json]
+Hand a web link to a paired phone in a session, where it waits as a
+notification that opens it. Only
+.B http
+and
+.B https
+links. Exit codes: 0 sent, 1 failed (the phone is not in a session, or its
+Links permission is off), 2 bad arguments (a link that may not be opened),
+3 no server running.
+.TP
 .B sessions [\-\-count \fIN\fR] [\-\-json]
 Show recorded streaming\-session outcomes (default: last 10); with
 .BR \-\-json ,
