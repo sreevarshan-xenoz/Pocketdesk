@@ -438,6 +438,8 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 | `pocketdesk send <phone> <path> [--wait SECONDS]` | Send a file or folder to a phone, as the desktop app's Files tab does; the exit code says how it went |
 | `pocketdesk sent` / `received [--count N] [--json]` | The Files tab's two lists |
 | `pocketdesk link <phone> <url>` | Hand a web link to a phone; it waits there as a notification that opens it |
+| `pocketdesk send-to-phone <paths…>` | Send files to the phone connected on this network (what "Send to phone" in the file manager runs) |
+| `pocketdesk send-menu [--remove]` | Add "Send to phone" to Explorer's Send To menu, or to Nautilus, Nemo and Dolphin (`install` adds it on Windows) |
 | `pocketdesk list` | List available peers on tailnet |
 | `pocketdesk watch` | Watch for peer discovery events |
 | `pocketdesk connect <peer>` | Connect to a specific peer |
