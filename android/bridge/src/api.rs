@@ -1015,6 +1015,20 @@ impl From<NoReply> for String {
 /// `Ok(None)` means there is no live control connection: the caller should use
 /// [`oneshot_request`]. `Err(NoReply)` means the connection is live but the
 /// server never answered.
+/// Whether `reply` answers `request`: a reply that names an action (the
+/// audio replies do, T8c) answers only a request that named the same one,
+/// since every audio action replies with the same packet type. A reply
+/// left over from a request that timed out is skipped, not taken.
+fn reply_answers(request: &serde_json::Value, reply: &serde_json::Value) -> bool {
+    match (
+        request.get("action").and_then(|a| a.as_str()),
+        reply.get("action").and_then(|a| a.as_str()),
+    ) {
+        (Some(asked), Some(answered)) => asked == answered,
+        _ => true,
+    }
+}
+
 async fn control_request(
     address: &str,
     port: u16,
@@ -1053,6 +1067,7 @@ async fn control_request(
             Ok(Ok(line)) => {
                 if let Ok(packet) = NetworkPacket::from_wire(&line)
                     && packet.packet_type == reply_type
+                    && reply_answers(&request.body, &packet.body)
                 {
                     return Ok(Some(packet.body));
                 }
@@ -1061,6 +1076,32 @@ async fn control_request(
             // so a lagging subscriber simply means "no answer on this one".
             Ok(Err(_)) | Err(_) => return Err(NoReply),
         }
+    }
+}
+
+#[cfg(test)]
+mod reply_tests {
+    use serde_json::json;
+
+    /// Several audio requests share one reply type: a reply naming another
+    /// request's action is not this one's (T8c).
+    #[test]
+    fn a_reply_naming_another_action_does_not_answer() {
+        let media = json!({"action": "media"});
+        assert!(super::reply_answers(
+            &media,
+            &json!({"action": "media", "ok": true})
+        ));
+        assert!(!super::reply_answers(
+            &media,
+            &json!({"action": "status", "volume": 40})
+        ));
+        // Replies that name no action, and requests that name none, as before.
+        assert!(super::reply_answers(&media, &json!({"volume": 40})));
+        assert!(super::reply_answers(
+            &json!({}),
+            &json!({"action": "status"})
+        ));
     }
 }
 
@@ -1103,6 +1144,7 @@ async fn oneshot_request(
             Ok(Ok(Some(line))) => {
                 if let Ok(packet) = NetworkPacket::from_wire(&line)
                     && packet.packet_type == reply_type
+                    && reply_answers(&request.body, &packet.body)
                 {
                     break packet.body;
                 }
