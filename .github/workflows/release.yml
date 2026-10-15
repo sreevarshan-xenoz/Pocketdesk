@@ -210,12 +210,25 @@ jobs:
             ./gradlew assembleRelease --no-daemon
             BT=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)
             # AGP's output is already aligned (the native library to 16 KB
-            # pages); a zipalign -f 4 here could undo that and make the APK
-            # differ from F-Droid's build of the same source. apksigner signs
-            # it as it is, and the check proves the alignment survived.
-            "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-pass env:KEYSTORE_PASSWORD \
+            # pages). apksigner from build-tools 35 on re-aligns by default,
+            # with its own padding, which moves every entry and makes the
+            # signed APK differ from F-Droid's unsigned build of the same
+            # source: --alignment-preserved keeps AGP's layout as it is.
+            "$BT/apksigner" sign --alignment-preserved true \
+              --ks "$RUNNER_TEMP/release.jks" --ks-pass env:KEYSTORE_PASSWORD \
               --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD \
               --out "../release/$base.apk" app/build/outputs/apk/release/app-release-unsigned.apk
+            # Proof: every entry where AGP put it, with the same padding.
+            python3 - app/build/outputs/apk/release/app-release-unsigned.apk "../release/$base.apk" <<'PY'
+          import sys, zipfile
+          def layout(path):
+              with zipfile.ZipFile(path) as z:
+                  return {i.filename: (i.header_offset, i.extra) for i in z.infolist()
+                          if not i.filename.startswith("META-INF/")}
+          unsigned, signed = layout(sys.argv[1]), layout(sys.argv[2])
+          moved = [name for name in unsigned if signed.get(name) != unsigned[name]]
+          sys.exit(f"signing moved {len(moved)} entries, e.g. {moved[:3]}" if moved else 0)
+          PY
             "$BT/zipalign" -c -P 16 -v 4 "../release/$base.apk" > /dev/null
           else
             ./gradlew assembleDebug --no-daemon
