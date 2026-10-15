@@ -695,10 +695,15 @@ impl InputInjector {
                     if shifted {
                         wlr.key(shift, true)?;
                     }
-                    wlr.key(code, true)?;
-                    wlr.key(code, false)?;
+                    let typed = wlr.key(code, true).and_then(|()| wlr.key(code, false));
+                    // Shift goes up even when the key failed, or what comes
+                    // next arrives shifted.
                     if shifted {
-                        wlr.key(shift, false)?;
+                        let released = wlr.key(shift, false);
+                        typed?;
+                        released?;
+                    } else {
+                        typed?;
                     }
                 }
                 Ok(())
