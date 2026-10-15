@@ -23,7 +23,7 @@ const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 10] = [
+const PERMISSIONS: [(Capability, &str, &str); 11] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -73,6 +73,11 @@ const PERMISSIONS: [(Capability, &str, &str); 10] = [
         Capability::Links,
         "Open its links here",
         "A link shared from the phone opens in this computer's browser (http and https only).",
+    ),
+    (
+        Capability::Media,
+        "Show and control its media here",
+        "What the phone plays (title, artist, app) shows in Sessions, with Play/Pause and skip.",
     ),
 ];
 

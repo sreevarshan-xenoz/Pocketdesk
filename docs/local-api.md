@@ -51,7 +51,7 @@ The paired phones.
               "key_bound": true, "internet_key_bound": true,
               "permissions": {"input": true, "clipboard": true, "files": true, "audio": true,
                               "mic": true, "power": true, "exec": false,
-                              "notifications": true, "texts": true, "links": true},
+                              "notifications": true, "texts": true, "links": true, "media": true},
               "battery": {"charge": 54, "charging": false, "updated_unix": 1792069000}}]}
 ```
 
