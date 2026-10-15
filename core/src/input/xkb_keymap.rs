@@ -10,7 +10,8 @@ pub const MAX_KEYS: usize = 200;
 /// character; xkbcommon maps Latin-1 ones to their legacy keysyms itself.
 pub fn keysym_name(ch: char) -> Option<String> {
     match ch {
-        '\n' | '\r' => Some("Return".to_string()),
+        // A CR, alone or before an LF, types nothing: one Return per line.
+        '\n' => Some("Return".to_string()),
         '\t' => Some("Tab".to_string()),
         c if c.is_control() => None,
         c => Some(format!("U{:04X}", c as u32)),
@@ -79,6 +80,7 @@ mod tests {
         assert_eq!(keysym_name('த').as_deref(), Some("U0BA4"));
         assert_eq!(keysym_name('😀').as_deref(), Some("U1F600"));
         assert_eq!(keysym_name('\n').as_deref(), Some("Return"));
+        assert_eq!(keysym_name('\r'), None, "CRLF is one Return");
         assert_eq!(keysym_name('\u{7}'), None);
         let map = keymap_for(&['h', 'é']).unwrap();
         assert!(map.contains("maximum = 11;"));

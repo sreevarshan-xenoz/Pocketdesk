@@ -235,7 +235,58 @@ pub struct InputInjector {
     /// The compositor's virtual keyboard for text (roadmap F4): not tried
     /// yet (`None`), not offered (`Some(None)`), or ready.
     #[cfg(target_os = "linux")]
-    vkeyboard: Option<Option<pocketdesk_core::input::vkeyboard::VirtualKeyboard>>,
+    vkeyboard: VkState,
+}
+
+/// The compositor's virtual keyboard for text (roadmap F4).
+#[cfg(target_os = "linux")]
+enum VkState {
+    Untried,
+    Ready(pocketdesk_core::input::vkeyboard::VirtualKeyboard),
+    /// The compositor does not offer one (GNOME, KDE).
+    Unsupported,
+    /// Connecting or typing failed: tried again after this.
+    RetryAfter(std::time::Instant),
+}
+
+#[cfg(target_os = "linux")]
+impl VkState {
+    /// How long a failed virtual keyboard rests before it is tried again.
+    const RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+    fn retry_later() -> Self {
+        VkState::RetryAfter(std::time::Instant::now() + Self::RETRY)
+    }
+
+    /// The keyboard, connecting first when it is time to.
+    fn ready(&mut self) -> Option<&mut pocketdesk_core::input::vkeyboard::VirtualKeyboard> {
+        use pocketdesk_core::input::vkeyboard::{ConnectError, VirtualKeyboard};
+        let due = match self {
+            VkState::Untried => true,
+            VkState::RetryAfter(at) => std::time::Instant::now() >= *at,
+            VkState::Ready(_) | VkState::Unsupported => false,
+        };
+        if due {
+            *self = match VirtualKeyboard::connect() {
+                Ok(vk) => {
+                    info!("Text is typed through the compositor's virtual keyboard");
+                    VkState::Ready(vk)
+                }
+                Err(ConnectError::Unsupported) => {
+                    info!("No virtual keyboard: text is typed as US-layout keys");
+                    VkState::Unsupported
+                }
+                Err(ConnectError::Failed(e)) => {
+                    warn!("Virtual keyboard unavailable for now: {e}");
+                    Self::retry_later()
+                }
+            };
+        }
+        match self {
+            VkState::Ready(vk) => Some(vk),
+            _ => None,
+        }
+    }
 }
 
 /// What a gamepad button bit stands for on the desktop. The gamepad is a wire
@@ -336,7 +387,7 @@ impl InputInjector {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
                     #[cfg(target_os = "linux")]
-                    vkeyboard: None,
+                    vkeyboard: VkState::Untried,
                 });
             }
             Err(e) => e,
@@ -381,7 +432,7 @@ impl InputInjector {
                 abs: Some(build_abs_device()?),
             })),
             gamepad_buttons: 0,
-            vkeyboard: None,
+            vkeyboard: VkState::Untried,
         })
     }
 
@@ -586,30 +637,30 @@ impl InputInjector {
             InputBackend::Uinput(state) => {
                 // Any character, whatever the layout, where the compositor
                 // offers a virtual keyboard (wlroots: Sway, Hyprland; F4).
-                if self.vkeyboard.is_none() {
-                    let vk = pocketdesk_core::input::vkeyboard::VirtualKeyboard::connect();
-                    if vk.is_some() {
-                        info!("Text is typed through the compositor's virtual keyboard");
-                    } else {
-                        info!("No virtual keyboard: text is typed as US-layout keys");
-                    }
-                    self.vkeyboard = Some(vk);
-                }
-                if let Some(Some(vk)) = self.vkeyboard.as_mut() {
+                let mut rest = std::borrow::Cow::Borrowed(text);
+                if let Some(vk) = self.vkeyboard.ready() {
                     match vk.type_text(text) {
                         Ok(()) => return Ok(()),
-                        Err(e) => {
-                            // Tried again next time: the compositor may have
-                            // restarted.
-                            warn!("Virtual keyboard failed, typing as keys: {e}");
-                            self.vkeyboard = None;
+                        Err((sent, e)) => {
+                            // What went out is not typed again; the rest goes
+                            // as keys, and the keyboard is tried again later.
+                            warn!("Virtual keyboard failed, typing the rest as keys: {e}");
+                            self.vkeyboard = VkState::retry_later();
+                            rest = std::borrow::Cow::Owned(
+                                text.chars()
+                                    .filter(|&c| {
+                                        pocketdesk_core::input::xkb_keymap::keysym_name(c).is_some()
+                                    })
+                                    .skip(sent)
+                                    .collect(),
+                            );
                         }
                     }
                 }
                 // Otherwise keycodes for what a US layout types, Shift
                 // included; other characters cannot be typed this way.
                 let guard = state.get_mut().unwrap();
-                for ch in text.chars() {
+                for ch in rest.chars() {
                     if let Some((keycode, shift)) = char_to_key(ch) {
                         let key = KeyCode(keycode);
                         let shift_key = KeyCode::KEY_LEFTSHIFT.0;
