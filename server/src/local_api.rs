@@ -119,8 +119,9 @@ pub fn status(state_dir: &Path, now_unix: u64, running: bool) -> Value {
         "server": {
             "running": running,
             "pid": pid,
-            "version": env!("CARGO_PKG_VERSION"),
         },
+        // This program's: the running server may be an older one.
+        "pocketdesk_version": env!("CARGO_PKG_VERSION"),
         "sessions": sessions,
         "endpoint": endpoint,
     }))
@@ -656,7 +657,9 @@ mod tests {
         let stopped = status(&dir, 101, false);
         assert_eq!(stopped["api"], API);
         assert_eq!(stopped["server"]["running"], false);
-        assert_eq!(stopped["server"]["version"], env!("CARGO_PKG_VERSION"));
+        // This program's version: a running server may be an older one.
+        assert_eq!(stopped["pocketdesk_version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(stopped["server"].get("version"), None);
         assert_eq!(stopped["sessions"], json!([]));
         assert_eq!(stopped["endpoint"], Value::Null);
         std::fs::write(
