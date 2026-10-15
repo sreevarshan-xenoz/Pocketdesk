@@ -448,5 +448,5 @@
     <string name="settings_links_from_computer">கணினியிலிருந்து இணைப்புகள்</string>
     <string name="settings_links_from_computer_summary">கணினி அனுப்பும் இணைப்பு, அதைத் திறக்கும் அறிவிப்பாகக் காட்டப்படும். அணைத்தால்: அத்தகைய இணைப்புகள் கைவிடப்படும்</string>
     <string name="settings_share_battery">மின்கலத்தைக் கணினியுடன் பகிர்</string>
-    <string name="settings_share_battery_summary">அமர்வின்போது கணினி இந்தத் தொலைபேசியின் மின்கல நிலையைக் காட்டும்; குறைந்தால் எச்சரிக்கும்</string>
+    <string name="settings_share_battery_summary">அமர்வின்போது கணினி இந்தத் தொலைபேசியின் மின்கல நிலையைக் காட்டும்; குறைந்தால் எச்சரிக்கலாம்</string>
 </resources>
