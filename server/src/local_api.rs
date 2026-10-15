@@ -58,6 +58,12 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
     let live = live_sessions(state_dir, now_unix, running);
     let keys = device_keys::read(state_dir).unwrap_or_default();
     let batteries = pocketdesk_core::local::phone_status::read(state_dir);
+    // Only a running server's: what played in an earlier run is not now.
+    let media = if running {
+        pocketdesk_core::local::phone_media::read(state_dir)
+    } else {
+        Default::default()
+    };
     let store = trust_store(state_dir)?;
     let devices: Vec<Value> = store
         .trusted_devices()
@@ -83,6 +89,8 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
                 "permissions": allowed,
                 // The phone's last battery report (T8b), or null.
                 "battery": batteries.get(&id),
+                // What it plays (T8d), or null.
+                "media": media.get(&id).map(|m| &m.media),
             })
         })
         .collect();
@@ -687,6 +695,23 @@ mod tests {
             },
         );
         pocketdesk_core::local::phone_status::write(&dir, &batteries).unwrap();
+        let mut media = std::collections::BTreeMap::new();
+        media.insert(
+            "phone-a".to_string(),
+            pocketdesk_core::local::phone_media::PhoneMediaState {
+                media: pocketdesk_core::protocol::phone_media::PhoneMedia {
+                    title: "Song".to_string(),
+                    artist: String::new(),
+                    app: "Spotify".to_string(),
+                    is_playing: true,
+                    can_play_pause: true,
+                    can_next: true,
+                    can_previous: true,
+                },
+                updated_unix: 99,
+            },
+        );
+        pocketdesk_core::local::phone_media::write(&dir, &media).unwrap();
         let listed = devices(&dir, 101, true).unwrap();
         assert_eq!(listed["api"], API);
         assert_eq!(listed["server_running"], true);
@@ -703,6 +728,18 @@ mod tests {
             json!({"charge": 54, "charging": true, "updated_unix": 95})
         );
         assert_eq!(b["battery"], Value::Null, "never reported");
+        assert_eq!(a["media"]["title"], "Song");
+        assert_eq!(a["media"]["isPlaying"], true);
+        assert_eq!(b["media"], Value::Null, "plays nothing");
+        let stopped = devices(&dir, 101, false).unwrap();
+        assert!(
+            stopped["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|d| d["media"] == Value::Null),
+            "a stopped server's phones play nothing it knows of"
+        );
         assert_eq!(b["in_session"], false);
         assert!(b["grant_remaining_secs"].as_u64().is_some_and(|s| s <= 60));
         // A server that is not running has no sessions, whatever its file says.

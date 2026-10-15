@@ -52,10 +52,12 @@ The paired phones.
               "permissions": {"input": true, "clipboard": true, "files": true, "audio": true,
                               "mic": true, "power": true, "exec": false,
                               "notifications": true, "texts": true, "links": true, "media": true},
-              "battery": {"charge": 54, "charging": false, "updated_unix": 1792069000}}]}
+              "battery": {"charge": 54, "charging": false, "updated_unix": 1792069000},
+              "media": {"title": "Song", "artist": "Artist", "app": "Spotify", "isPlaying": true,
+                        "canPlayPause": true, "canNext": true, "canPrevious": true}}]}
 ```
 
-`grant_remaining_secs` is null for a lasting pairing and counts down for one made with `pair --grant`. `key_bound` says the phone has proved its key on this network; `internet_key_bound`, from outside. Each permission is what the phone may do now, defaults included. `battery` is the phone's last report, sent during sessions (null if it never reported); `updated_unix` says how old it is.
+`grant_remaining_secs` is null for a lasting pairing and counts down for one made with `pair --grant`. `key_bound` says the phone has proved its key on this network; `internet_key_bound`, from outside. Each permission is what the phone may do now, defaults included. `battery` is the phone's last report, sent during sessions (null if it never reported); `updated_unix` says how old it is. `media` is what the phone plays, as it says during a session with "My media on the computer" on (null when nothing, or with the server stopped).
 
 ### `pocketdesk sent --json` and `pocketdesk received --json`
 
