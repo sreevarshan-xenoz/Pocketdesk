@@ -27,25 +27,57 @@ pub enum Kind {
     Shortcut,
 }
 
-/// `s` as one word for `sh` and for a `.desktop` Exec line.
+/// `s` as one word for `sh`.
 pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// The Nautilus and Nemo script: they pass the chosen files as arguments.
+/// `s` as one argument of a Desktop Entry `Exec` line: double-quoted, with
+/// `"`, `` ` ``, `$` and `\` escaped by the quoting rule, then a `\` doubled
+/// again by the string rule (so four), and `%` written `%%`.
+pub fn desktop_exec_quote(s: &str) -> String {
+    let mut quoted = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => quoted.push_str("\\\\\\\\"),
+            '"' | '`' | '$' => {
+                quoted.push('\\');
+                quoted.push(c);
+            }
+            '%' => quoted.push_str("%%"),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+/// The Nautilus and Nemo script. Both name the chosen local files, with
+/// their full paths, one per line, in an environment variable (the
+/// arguments are bare names, and not even that in search results); the
+/// arguments are the fallback. `--` keeps a file named like an option a
+/// file.
 pub fn file_manager_script(exe: &Path) -> String {
+    let exe = shell_quote(&exe.to_string_lossy());
     format!(
-        "#!/bin/sh\n# Pocketdesk: send the chosen files to your phone.\nexec {} {} \"$@\"\n",
-        shell_quote(&exe.to_string_lossy()),
-        COMMAND
+        "#!/bin/sh\n\
+         # Pocketdesk: send the chosen files to your phone.\n\
+         paths=\"${{NAUTILUS_SCRIPT_SELECTED_FILE_PATHS:-$NEMO_SCRIPT_SELECTED_FILE_PATHS}}\"\n\
+         if [ -n \"$paths\" ]; then\n\
+         \x20   # One path per line; split only there, and expand no wildcard.\n\
+         \x20   IFS='\n'\n\
+         \x20   set -f\n\
+         \x20   exec {exe} {COMMAND} -- $paths\n\
+         fi\n\
+         exec {exe} {COMMAND} -- \"$@\"\n"
     )
 }
 
 /// The Dolphin service menu, for every file and folder.
 pub fn dolphin_menu(exe: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Service\nMimeType=all/allfiles;inode/directory;\nActions=sendToPhone\nX-KDE-Priority=TopLevel\n\n[Desktop Action sendToPhone]\nName={LABEL}\nIcon=phone\nExec={} {} %F\n",
-        shell_quote(&exe.to_string_lossy()),
+        "[Desktop Entry]\nType=Service\nMimeType=all/allfiles;inode/directory;\nActions=sendToPhone\nX-KDE-Priority=TopLevel\n\n[Desktop Action sendToPhone]\nName={LABEL}\nIcon=phone\nExec={} {} -- %F\n",
+        desktop_exec_quote(&exe.to_string_lossy()),
         COMMAND
     )
 }
@@ -146,20 +178,20 @@ fn make_shortcut(path: &Path, exe: &Path) -> io::Result<()> {
         .join("v1.0")
         .join("powershell.exe");
     // A canonical path's `\\?\` prefix is no use to a shortcut.
-    let quote = |s: &Path| {
-        let s = s.to_string_lossy();
-        let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
-        format!("'{}'", s.replace('\'', "''"))
+    let plain = |s: &Path| {
+        let s = s.to_string_lossy().into_owned();
+        s.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(s)
     };
+    // The paths reach the script as environment variables, never in its
+    // text: no name can end a string and run code there.
     let script = format!(
-        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut({}); $s.TargetPath = {}; $s.Arguments = '{}'; $s.WindowStyle = 7; $s.Description = 'Send to your phone with Pocketdesk'; $s.Save()",
-        quote(path),
-        quote(exe),
-        COMMAND
+        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:PD_LNK); $s.TargetPath = $env:PD_EXE; $s.Arguments = '{COMMAND} --'; $s.WindowStyle = 7; $s.Description = 'Send to your phone with Pocketdesk'; $s.Save()"
     );
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let status = std::process::Command::new(powershell)
+        .env("PD_LNK", plain(path))
+        .env("PD_EXE", plain(exe))
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .creation_flags(CREATE_NO_WINDOW)
         .status()?;
@@ -188,11 +220,62 @@ mod tests {
         let script = file_manager_script(exe);
         assert!(script.starts_with("#!/bin/sh\n"));
         assert!(
-            script.contains(r#"exec '/opt/pocket desk/it'\''s/pocketdesk' send-to-phone "$@""#)
+            script.contains(r#"exec '/opt/pocket desk/it'\''s/pocketdesk' send-to-phone -- "$@""#)
         );
+        assert!(
+            script
+                .contains(r#"exec '/opt/pocket desk/it'\''s/pocketdesk' send-to-phone -- $paths"#)
+        );
+        assert!(script.contains("NAUTILUS_SCRIPT_SELECTED_FILE_PATHS"));
+        assert!(script.contains("set -f"));
         let menu = dolphin_menu(exe);
-        assert!(menu.contains("Exec='/opt/pocket desk/it'\\''s/pocketdesk' send-to-phone %F"));
+        assert!(menu.contains(r#"Exec="/opt/pocket desk/it's/pocketdesk" send-to-phone -- %F"#));
         assert!(menu.contains("Name=Send to phone"));
+    }
+
+    #[test]
+    fn an_exec_argument_is_quoted_as_the_desktop_entry_spec_says() {
+        assert_eq!(desktop_exec_quote("/a b/c"), r#""/a b/c""#);
+        assert_eq!(desktop_exec_quote(r#"/x"y`z$w"#), r#""/x\"y\`z\$w""#);
+        assert_eq!(desktop_exec_quote("/100%/p"), r#""/100%%/p""#);
+        assert_eq!(desktop_exec_quote(r"/a\b"), r#""/a\\\\b""#);
+    }
+
+    /// Run the script through `sh` with names a shell could misread, and
+    /// read the arguments it passes on.
+    #[cfg(unix)]
+    #[test]
+    fn the_script_passes_each_chosen_path_whole() {
+        let dir = std::env::temp_dir().join(format!("pd-send-script-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A stand-in for the server that prints its arguments, one a line.
+        let exe = dir.join("print args");
+        std::fs::write(&exe, "#!/bin/sh\nfor a in \"$@\"; do echo \"[$a]\"; done\n").unwrap();
+        make_executable(&exe).unwrap();
+        let script = dir.join("script");
+        std::fs::write(&script, file_manager_script(&exe)).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg(&script)
+            .env(
+                "NAUTILUS_SCRIPT_SELECTED_FILE_PATHS",
+                "/a b/it's $x *\n/-c.txt\n",
+            )
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "[send-to-phone]\n[--]\n[/a b/it's $x *]\n[/-c.txt]\n"
+        );
+        let out = std::process::Command::new("sh")
+            .arg(&script)
+            .args(["-h", "plain name"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "[send-to-phone]\n[--]\n[-h]\n[plain name]\n"
+        );
     }
 
     #[test]
