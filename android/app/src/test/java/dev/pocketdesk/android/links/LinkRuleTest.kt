@@ -69,4 +69,17 @@ class LinkRuleTest {
         assertNull(LinkRule.find("no link here"))
         assertNull(LinkRule.find("javascript:alert(1)"))
     }
+
+    @Test
+    fun punctuationAroundALinkInASentenceIsNotPartOfIt() {
+        assertEquals("https://example.org/p", LinkRule.find("See https://example.org/p."))
+        assertEquals("https://example.org/p", LinkRule.find("(https://example.org/p)"))
+        assertEquals("https://example.org/p", LinkRule.find("\"https://example.org/p\","))
+        assertEquals("https://example.org/p", LinkRule.find("<https://example.org/p>"))
+        // A bracket the link opened is its own.
+        assertEquals(
+            "https://en.wikipedia.org/wiki/Foo_(bar)",
+            LinkRule.find("Read https://en.wikipedia.org/wiki/Foo_(bar)!"),
+        )
+    }
 }

@@ -74,5 +74,27 @@ object LinkRule {
     }
 
     /** The first link in [text] that may be opened (a browser shares "title link"). */
-    fun find(text: String): String? = text.split(Regex("""\s+""")).firstOrNull { openable(it) }
+    fun find(text: String): String? =
+        text.split(Regex("""\s+""")).map { trimmed(it) }.firstOrNull { openable(it) }
+
+    /**
+     * [word] without the punctuation a sentence puts around a link: quotes,
+     * brackets, a full stop. A closing bracket the link itself opened stays
+     * (`…/Foo_(bar)`).
+     */
+    private fun trimmed(word: String): String {
+        var link = word.trimStart('(', '<', '[', '"', '\'')
+        while (link.isNotEmpty()) {
+            val last = link.last()
+            val strip = when (last) {
+                '.', ',', ';', ':', '!', '?', '"', '\'', '>' -> true
+                ')' -> link.count { it == '(' } < link.count { it == ')' }
+                ']' -> link.count { it == '[' } < link.count { it == ']' }
+                else -> false
+            }
+            if (!strip) break
+            link = link.dropLast(1)
+        }
+        return link
+    }
 }
