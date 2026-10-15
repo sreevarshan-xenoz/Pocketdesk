@@ -580,6 +580,9 @@ async fn deliver(
 
 /// The most files one folder send offers.
 const MAX_FOLDER_FILES: usize = 10_000;
+/// The most entries one folder walk looks at (folders, files and names
+/// left out alike), so a tree of empty folders cannot keep it going.
+const MAX_FOLDER_ENTRIES: usize = 100_000;
 /// The most bytes one folder send offers.
 const MAX_FOLDER_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
@@ -604,7 +607,8 @@ struct FolderFiles {
 /// The files under `root` to offer (T6b): hidden entries (a leading dot,
 /// or marked hidden on Windows), links and the server's own state and
 /// config left out, names `relpath` refuses counted and left out, at most
-/// [`MAX_FOLDER_FILES`], 32 folders deep and [`MAX_FOLDER_BYTES`] in all,
+/// [`MAX_FOLDER_FILES`], 32 folders deep, [`MAX_FOLDER_BYTES`] in all and
+/// [`MAX_FOLDER_ENTRIES`] looked at,
 /// and no single file over 8 GB. In name order, so the phone sees a send
 /// the same way twice.
 fn folder_files(root: &Path) -> Result<FolderFiles, String> {
@@ -614,6 +618,15 @@ fn folder_files(root: &Path) -> Result<FolderFiles, String> {
 /// [`folder_files`], leaving out anything at or below a folder in
 /// `private` (real paths).
 fn folder_files_with(root: &Path, private: &[PathBuf]) -> Result<FolderFiles, String> {
+    folder_files_capped(root, private, MAX_FOLDER_ENTRIES)
+}
+
+/// [`folder_files_with`], looking at no more than `max_entries` entries.
+fn folder_files_capped(
+    root: &Path,
+    private: &[PathBuf],
+    max_entries: usize,
+) -> Result<FolderFiles, String> {
     use crate::plugins::file_browse::is_hidden;
     use pocketdesk_core::protocol::relpath;
     fn walk(
@@ -622,6 +635,7 @@ fn folder_files_with(root: &Path, private: &[PathBuf]) -> Result<FolderFiles, St
         private: &[PathBuf],
         found: &mut FolderFiles,
         bytes: &mut u64,
+        entries_left: &mut usize,
     ) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -632,6 +646,11 @@ fn folder_files_with(root: &Path, private: &[PathBuf]) -> Result<FolderFiles, St
             if found.truncated {
                 return;
             }
+            if *entries_left == 0 {
+                found.truncated = true;
+                return;
+            }
+            *entries_left -= 1;
             let name = entry.file_name().to_string_lossy().into_owned();
             let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
                 continue;
@@ -655,7 +674,7 @@ fn folder_files_with(root: &Path, private: &[PathBuf]) -> Result<FolderFiles, St
                     found.truncated = true;
                     return;
                 }
-                walk(&entry.path(), &path, private, found, bytes);
+                walk(&entry.path(), &path, private, found, bytes, entries_left);
             } else if meta.is_file() {
                 if meta.len() > MAX_FILE_BYTES {
                     found.skipped += 1;
@@ -684,7 +703,15 @@ fn folder_files_with(root: &Path, private: &[PathBuf]) -> Result<FolderFiles, St
     }
     let mut found = FolderFiles::default();
     let mut bytes = 0;
-    walk(&real, &[], private, &mut found, &mut bytes);
+    let mut entries_left = max_entries;
+    walk(
+        &real,
+        &[],
+        private,
+        &mut found,
+        &mut bytes,
+        &mut entries_left,
+    );
     // Offered under the root as the owner named it, not the long form
     // Windows resolves it to.
     for file in &mut found.files {
@@ -1229,6 +1256,22 @@ mod tests {
         assert!(refused.unwrap_err().contains("wait"));
         let last = phone.sent.lock().unwrap().last().cloned().unwrap();
         assert_eq!(last.body["queued"], false);
+    }
+
+    #[test]
+    fn a_walk_stops_at_its_entries_whatever_they_are() {
+        // Empty folders and skipped names are walked too: they count.
+        let root = temp_dir("folder-entries").join("Wide");
+        for n in 0..5 {
+            std::fs::create_dir_all(root.join(format!("d{n}"))).unwrap();
+        }
+        std::fs::write(root.join("z.txt"), b"z").unwrap();
+        let found = folder_files_capped(&root, &[], 3).unwrap();
+        assert!(found.truncated);
+        assert!(found.files.is_empty());
+        let all = folder_files_capped(&root, &[], 100).unwrap();
+        assert!(!all.truncated);
+        assert_eq!(all.files.len(), 1);
     }
 
     #[test]
