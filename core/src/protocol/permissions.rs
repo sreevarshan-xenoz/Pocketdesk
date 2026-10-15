@@ -74,6 +74,7 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         "kdeconnect.share.request"
         | "kdeconnect.filebrowse.request"
         | "kdeconnect.pocketdesk.file_fetch"
+        | "kdeconnect.pocketdesk.folder_fetch"
         | "kdeconnect.pocketdesk.file_offer_declined" => Capability::Files,
         "kdeconnect.pocketdesk.audio" => Capability::Audio,
         // Waking another machine through this one is a power action too.
@@ -167,6 +168,12 @@ mod tests {
         );
         assert_eq!(
             capability_for("kdeconnect.pocketdesk.file_offer_declined"),
+            Some(Capability::Files)
+        );
+        // A whole folder from the remote browser: an unlisted type would be
+        // allowed for every phone.
+        assert_eq!(
+            capability_for("kdeconnect.pocketdesk.folder_fetch"),
             Some(Capability::Files)
         );
     }
