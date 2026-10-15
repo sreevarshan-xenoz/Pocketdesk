@@ -2375,6 +2375,8 @@ pub async fn stop_streaming() -> Result<(), String> {
 
     STREAMING_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
     *STREAM_CLOSED_REASON.lock().unwrap() = None;
+    // No session, no video counted: the next one installs its own.
+    *crate::VIDEO_BYTES.lock().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(())
 }
 
