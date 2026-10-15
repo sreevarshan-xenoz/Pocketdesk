@@ -389,7 +389,12 @@ pub fn run_send(query: &str, path: &Path, wait_secs: Option<u64>, as_json: bool)
             .as_str()
             .map(|n| format!(" ({n})"))
             .unwrap_or_default();
-        println!("{how}{note}");
+        // A send that did not go is an error: on stderr, as errors are.
+        if matches!(code, exit::DONE | exit::STILL_WAITING) {
+            println!("{how}{note}");
+        } else {
+            eprintln!("{how}{note}");
+        }
     }
     code
 }
