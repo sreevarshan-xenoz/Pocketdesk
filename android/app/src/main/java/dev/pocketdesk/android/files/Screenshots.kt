@@ -190,8 +190,12 @@ class Screenshots(private val ctx: Context) {
         return found
     }
 
+    /** Set once the listener goes: no observer is made after. */
+    private var closed = false
+
+    @Synchronized
     private fun startWatching() {
-        if (observer != null) return
+        if (observer != null || closed) return
         val watch =
             object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
@@ -205,13 +209,18 @@ class Screenshots(private val ctx: Context) {
         }.onFailure { Log.w(TAG, "could not watch for new screenshots", it) }
     }
 
+    @Synchronized
     private fun stopWatching() {
         observer?.let { runCatching { ctx.contentResolver.unregisterContentObserver(it) } }
         observer = null
     }
 
-    /** Stop watching, when the listener goes. */
-    fun close() = stopWatching()
+    /** Stop watching, when the listener goes; a tick still running makes no observer after. */
+    @Synchronized
+    fun close() {
+        closed = true
+        stopWatching()
+    }
 
     companion object {
         private const val TAG = "Screenshots"
