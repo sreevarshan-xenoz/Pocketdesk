@@ -230,29 +230,6 @@ pub enum Commands {
     },
 }
 
-impl Commands {
-    /// Whether this command prints the local API's JSON, so a failure is
-    /// printed as JSON too.
-    pub fn wants_json(&self) -> bool {
-        match self {
-            Commands::Status { json }
-            | Commands::Devices { json }
-            | Commands::Sent { json, .. }
-            | Commands::Received { json, .. }
-            | Commands::Send { json, .. }
-            | Commands::Sessions { json, .. }
-            | Commands::Bench { json, .. }
-            | Commands::List { json }
-            | Commands::Capabilities { json, .. }
-            | Commands::Pair { json, .. }
-            | Commands::Unpair { json, .. }
-            | Commands::Kick { json, .. }
-            | Commands::RelayIds { json } => *json,
-            _ => false,
-        }
-    }
-}
-
 /// Parse a `--grant` duration (`45s`, `15m`, `2h`, `7d`, combinable like
 /// `1h30m`) into seconds. Used as a clap `value_parser` so bad input fails
 /// at argument parsing.

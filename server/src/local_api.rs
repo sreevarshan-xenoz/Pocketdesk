@@ -783,29 +783,6 @@ mod tests {
     }
 
     #[test]
-    fn every_command_that_takes_json_says_so() {
-        use crate::cli::Commands;
-        assert!(Commands::Devices { json: true }.wants_json());
-        assert!(!Commands::Devices { json: false }.wants_json());
-        assert!(
-            Commands::Kick {
-                device: "all".into(),
-                json: true
-            }
-            .wants_json()
-        );
-        assert!(
-            Commands::Unpair {
-                device_id: None,
-                json: true
-            }
-            .wants_json()
-        );
-        assert!(Commands::RelayIds { json: true }.wants_json());
-        assert!(!Commands::Stop.wants_json());
-    }
-
-    #[test]
     fn a_kick_needs_a_running_server_and_says_so() {
         let dir = temp_dir("kick");
         let (out, code) = kick_in(&dir, "all", false);

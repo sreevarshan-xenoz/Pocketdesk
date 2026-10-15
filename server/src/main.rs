@@ -22,7 +22,9 @@ async fn main() -> Result<()> {
             None => e.exit(),
         },
     };
-    let wants_json = cli.command.as_ref().is_some_and(|c| c.wants_json());
+    // Clap takes --json only on a command that has it, so its presence is
+    // the answer for every command, new ones included.
+    let wants_json = args.iter().any(|a| a == "--json");
 
     // Load configuration first. A config.toml that does not parse fails a
     // `--json` command as JSON too.
