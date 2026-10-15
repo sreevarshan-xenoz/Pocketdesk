@@ -46,6 +46,15 @@ struct NotesFile {
     notes: Vec<PhoneNote>,
 }
 
+/// One writer at a time within the server: two connections keeping and
+/// forgetting at once would lose each other's change, and share the temp
+/// file.
+static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn writing() -> std::sync::MutexGuard<'static, ()> {
+    WRITING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// The kept notifications, oldest first; none when there is no file or it
 /// cannot be read.
 pub fn read(state_dir: &Path) -> Vec<PhoneNote> {
@@ -69,6 +78,7 @@ fn write(state_dir: &Path, notes: Vec<PhoneNote>) -> io::Result<()> {
 /// Keep `note`, replacing the phone's earlier one of the same key; the
 /// oldest go past [`MAX_KEPT`].
 pub fn keep(state_dir: &Path, note: PhoneNote) -> io::Result<()> {
+    let _one = writing();
     let mut notes = read(state_dir);
     notes.retain(|n| !(n.device_id == note.device_id && n.key == note.key));
     notes.push(note);
@@ -79,6 +89,7 @@ pub fn keep(state_dir: &Path, note: PhoneNote) -> io::Result<()> {
 
 /// Drop the phone's notification `key` (the phone closed it).
 pub fn forget(state_dir: &Path, device_id: &str, key: &str) -> io::Result<()> {
+    let _one = writing();
     let mut notes = read(state_dir);
     let before = notes.len();
     notes.retain(|n| !(n.device_id == device_id && n.key == key));
@@ -90,6 +101,7 @@ pub fn forget(state_dir: &Path, device_id: &str, key: &str) -> io::Result<()> {
 
 /// Drop them all (at start: they belong to a run that ended).
 pub fn clear(state_dir: &Path) -> io::Result<()> {
+    let _one = writing();
     match std::fs::remove_file(state_dir.join(PHONE_NOTES_FILE)) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
