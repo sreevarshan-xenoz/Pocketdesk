@@ -50,7 +50,9 @@ impl NotesView {
         };
         match phone_notes::request(state_dir, &note.device_id, &note.key, answer, now_unix) {
             Ok(_) => {
-                self.notice = Some(format!("Sent {what} to {}", note.app));
+                // Queued: the server sends it within a minute, once the
+                // phone is connected.
+                self.notice = Some(format!("Queued {what} for {}", note.app));
                 self.drafts
                     .remove(&(note.device_id.clone(), note.key.clone()));
             }
