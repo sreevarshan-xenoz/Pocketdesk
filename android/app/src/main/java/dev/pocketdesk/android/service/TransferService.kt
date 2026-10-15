@@ -292,7 +292,9 @@ class TransferService : Service() {
             return refuse(job, getString(R.string.transfer_no_space, job.name))
         }
         // A part an earlier attempt kept is continued in place (T6a).
-        val kept = job.source.takeIf { it.isNotEmpty() }
+        // With retries off nothing is kept for one: no source, no record.
+        val source = if (Prefs.retryTransfers(this)) job.source else ""
+        val kept = source.takeIf { it.isNotEmpty() }
             ?.let { RustCore.partialLocation(job.address, it) }
             ?.let { DownloadTarget.reopen(this, it) }
         val target = kept ?: DownloadTarget.create(this, job.name)
@@ -305,7 +307,7 @@ class TransferService : Service() {
                     job.isOffer,
                     job.value,
                     target.descriptor.detachFd(),
-                    job.source,
+                    source,
                     job.name,
                     target.location,
                 )
@@ -315,8 +317,8 @@ class TransferService : Service() {
                 Result.success(target.viewUri)
             } else {
                 // Kept for a retry only when the bridge recorded this place.
-                val resumable = job.source.isNotEmpty() &&
-                    RustCore.partialLocation(job.address, job.source) == target.location
+                val resumable = source.isNotEmpty() &&
+                    RustCore.partialLocation(job.address, source) == target.location
                 if (resumable) target.keepForRetry() else target.discard()
                 Result.failure(saved.exceptionOrNull() ?: IllegalStateException("not saved"))
             }
