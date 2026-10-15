@@ -51,6 +51,24 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// List the files sent to phones, newest first, and how each went
+    Sent {
+        /// How many to list
+        #[arg(short, long, default_value_t = 20)]
+        count: usize,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the files received from phones, newest first
+    Received {
+        /// How many to list
+        #[arg(short, long, default_value_t = 20)]
+        count: usize,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Show recorded streaming-session outcomes (R4 A2 telemetry log)
     Sessions {
         /// Number of recent sessions to list

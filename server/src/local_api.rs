@@ -86,6 +86,97 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Value {
     versioned(json!({ "server_running": running, "devices": devices }))
 }
 
+/// The last `count` files sent to phones, newest first, and how each went.
+pub fn sent_list(state_dir: &Path, count: usize) -> Value {
+    use pocketdesk_core::local::sent::{self, SentState};
+    let rows: Vec<Value> = sent::read(state_dir)
+        .into_iter()
+        .rev()
+        .take(count)
+        .map(|file| {
+            let (state, reason) = match &file.state {
+                SentState::Offered => ("offered", None),
+                SentState::Sent => ("sent", None),
+                SentState::Failed(reason) => ("failed", Some(reason.clone())),
+            };
+            json!({
+                "id": file.id,
+                "name": file.name,
+                "path": file.path,
+                "size": file.size,
+                "device_id": file.device_id,
+                "sent_unix": file.sent_unix,
+                "state": state,
+                "reason": reason,
+                "note": file.note,
+            })
+        })
+        .collect();
+    versioned(json!({ "sent": rows }))
+}
+
+/// The last `count` files received from phones, newest first.
+pub fn received_list(state_dir: &Path, count: usize) -> Value {
+    let rows: Vec<Value> = pocketdesk_core::local::received::read(state_dir)
+        .into_iter()
+        .rev()
+        .take(count)
+        .map(|file| {
+            json!({
+                "name": file.name,
+                "still_there": Path::new(&file.path).exists(),
+                "path": file.path,
+                "size": file.size,
+                "received_unix": file.received_unix,
+                "from": file.from,
+            })
+        })
+        .collect();
+    versioned(json!({ "received": rows }))
+}
+
+/// `pocketdesk sent` and `pocketdesk received`.
+pub fn print_files(sent: bool, count: usize, as_json: bool) -> anyhow::Result<()> {
+    let dir = crate::state::state_dir()?;
+    let listed = if sent {
+        sent_list(&dir, count)
+    } else {
+        received_list(&dir, count)
+    };
+    if as_json {
+        print(&listed);
+        return Ok(());
+    }
+    let key = if sent { "sent" } else { "received" };
+    let rows = listed[key].as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        println!("Nothing {key} yet");
+    }
+    for row in rows {
+        let name = row["name"].as_str().unwrap_or_default();
+        if sent {
+            let how = match row["state"].as_str() {
+                Some("failed") => format!("not sent: {}", row["reason"].as_str().unwrap_or("")),
+                Some("sent") => "saved on the phone".to_string(),
+                _ => "waiting for the phone".to_string(),
+            };
+            let note = row["note"]
+                .as_str()
+                .map(|n| format!(" ({n})"))
+                .unwrap_or_default();
+            println!("{name}  {how}{note}");
+        } else {
+            let gone = if row["still_there"] == true {
+                ""
+            } else {
+                "  (moved or deleted)"
+            };
+            println!("{name}  {}{gone}", row["path"].as_str().unwrap_or_default());
+        }
+    }
+    Ok(())
+}
+
 /// The paired phone `query` names: its id, or a unique prefix of at least
 /// six characters of it.
 pub fn resolve_phone(ids: &[String], query: &str) -> Result<String, String> {
@@ -206,6 +297,59 @@ mod tests {
                 .iter()
                 .all(|d| d["in_session"] == false)
         );
+    }
+
+    #[test]
+    fn sent_and_received_are_listed_newest_first_with_how_each_went() {
+        use pocketdesk_core::local::received::{self, ReceivedFile};
+        use pocketdesk_core::local::sent::{self, SentFile, SentState};
+        let dir = temp_dir("lists");
+        for (n, state) in [SentState::Sent, SentState::Failed("no room".to_string())]
+            .into_iter()
+            .enumerate()
+        {
+            sent::record(
+                &dir,
+                SentFile {
+                    id: format!("s{n}"),
+                    name: format!("f{n}.pdf"),
+                    path: format!("/f{n}.pdf"),
+                    size: 1,
+                    device_id: "phone-a".to_string(),
+                    sent_unix: n as u64,
+                    state,
+                    note: (n == 1).then(|| "1 left out".to_string()),
+                },
+            )
+            .unwrap();
+        }
+        let listed = sent_list(&dir, 10);
+        assert_eq!(listed["api"], API);
+        let rows = listed["sent"].as_array().unwrap();
+        assert_eq!(rows[0]["id"], "s1", "newest first");
+        assert_eq!(rows[0]["state"], "failed");
+        assert_eq!(rows[0]["reason"], "no room");
+        assert_eq!(rows[0]["note"], "1 left out");
+        assert_eq!(rows[1]["state"], "sent");
+        assert_eq!(rows[1]["reason"], Value::Null);
+        assert_eq!(sent_list(&dir, 1)["sent"].as_array().unwrap().len(), 1);
+
+        let saved = dir.join("photo.jpg");
+        std::fs::write(&saved, b"x").unwrap();
+        received::record(
+            &dir,
+            ReceivedFile {
+                name: "photo.jpg".to_string(),
+                path: saved.display().to_string(),
+                size: 1,
+                received_unix: 5,
+                from: "phone-a".to_string(),
+            },
+        )
+        .unwrap();
+        let got = received_list(&dir, 10);
+        assert_eq!(got["received"][0]["name"], "photo.jpg");
+        assert_eq!(got["received"][0]["still_there"], true);
     }
 
     #[test]

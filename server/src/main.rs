@@ -67,6 +67,8 @@ async fn main() -> Result<()> {
         cli::Commands::Stop => service::stop().await,
         cli::Commands::Status => service::print_status().await,
         cli::Commands::Devices { json } => local_api::print_devices(json),
+        cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
+        cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
         cli::Commands::Sessions { count, json } => session_telemetry::print_sessions(count, json),
         cli::Commands::Bench {
             target,
