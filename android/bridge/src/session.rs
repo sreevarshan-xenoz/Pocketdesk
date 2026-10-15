@@ -272,6 +272,13 @@ pub(crate) fn queue_file_offer(body: &serde_json::Value) {
     {
         entry["source"] = serde_json::json!(source);
     }
+    // A file of a folder send (T6b), kept only when every name in its place
+    // is one the phone may make; else it arrives as a plain file.
+    if let Some(folder) = folder_part(body) {
+        entry["folderId"] = serde_json::json!(folder.0);
+        entry["folder"] = serde_json::json!(folder.1);
+        entry["path"] = serde_json::json!(folder.2);
+    }
     let mut q = PENDING_OFFERS.lock().unwrap_or_else(|e| e.into_inner());
     if q.iter().any(|o| o.get("id") == entry.get("id")) {
         return;
@@ -281,6 +288,25 @@ pub(crate) fn queue_file_offer(body: &serde_json::Value) {
     if q.len() > MAX_QUEUED {
         q.remove(0);
     }
+}
+
+/// An offer's folder fields (T6b), if all are there and safe: the send's
+/// id (32 hex digits), the folder's name and the file's path under it.
+fn folder_part(body: &serde_json::Value) -> Option<(String, String, Vec<String>)> {
+    use pocketdesk_core::protocol::relpath;
+    let id = body.get("folderId")?.as_str()?;
+    let folder = body.get("folder")?.as_str()?;
+    let path: Vec<String> = body
+        .get("path")?
+        .as_array()?
+        .iter()
+        .map(|p| p.as_str().map(str::to_string))
+        .collect::<Option<_>>()?;
+    let id_ok = id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit());
+    (id_ok
+        && relpath::component_problem(folder).is_none()
+        && relpath::path_problem(&path).is_none())
+    .then(|| (id.to_string(), folder.to_string(), path))
 }
 
 /// Drain the queued offers as a JSON array.

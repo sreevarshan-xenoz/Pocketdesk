@@ -56,15 +56,47 @@ object DownloadTarget {
         }
     }
 
-    /** A new, empty file named like [name], or `null` when none can be made. */
-    fun create(context: Context, name: String): Target? = runCatching {
+    /**
+     * A new, empty file named like [name], or `null` when none can be made.
+     * [folders] are the folders under Downloads/Pocketdesk it goes in (a
+     * folder from the computer, T6b), each already checked.
+     */
+    fun create(context: Context, name: String, folders: List<String> = emptyList()): Target? = runCatching {
         val safe = DownloadName.safe(name)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            createMedia(context, safe)
+            createMedia(context, safe, folders)
         } else {
-            createLegacy(context, safe)
+            createLegacy(context, safe, folders)
         }
     }.getOrNull()
+
+    /**
+     * A name for a folder from the computer under Downloads/Pocketdesk that
+     * none of this app's downloads use yet: [base], else `base (1)`…
+     */
+    fun freeFolder(context: Context, base: String): String =
+        FolderWalk.freeName(base) { candidate ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                folderInUse(context, candidate)
+            } else {
+                val root = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                root != null && File(File(root, FOLDER), candidate).exists()
+            }
+        }
+
+    /** Whether any of this app's downloads sits in Downloads/Pocketdesk/[name]. */
+    private fun folderInUse(context: Context, name: String): Boolean = runCatching {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@runCatching false
+        val prefix = "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER/$name/"
+        val like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        context.contentResolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Downloads._ID),
+            "${MediaStore.Downloads.RELATIVE_PATH} LIKE ? ESCAPE '\\'",
+            arrayOf(like),
+            null,
+        )?.use { it.count > 0 } ?: false
+    }.getOrDefault(false)
 
     /**
      * The unfinished file an earlier attempt kept at [location], opened to
@@ -108,12 +140,13 @@ object DownloadTarget {
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(DownloadName.extension(name))
             ?: "application/octet-stream"
 
-    private fun createMedia(context: Context, name: String): Target? {
+    private fun createMedia(context: Context, name: String, folders: List<String>): Target? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val under = (listOf(Environment.DIRECTORY_DOWNLOADS, FOLDER) + folders).joinToString("/")
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
             put(MediaStore.Downloads.MIME_TYPE, mimeOf(name))
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER")
+            put(MediaStore.Downloads.RELATIVE_PATH, under)
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val resolver = context.contentResolver
@@ -127,9 +160,9 @@ object DownloadTarget {
         return Target(descriptor, context, uri, null)
     }
 
-    private fun createLegacy(context: Context, name: String): Target? {
+    private fun createLegacy(context: Context, name: String, folders: List<String>): Target? {
         val base = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return null
-        val dir = File(base, FOLDER).apply { mkdirs() }
+        val dir = folders.fold(File(base, FOLDER)) { parent, folder -> File(parent, folder) }.apply { mkdirs() }
         val ext = DownloadName.extension(name).let { if (it.isEmpty()) "" else ".$it" }
         val stem = if (ext.isEmpty()) name else name.dropLast(ext.length)
         val file = generateSequence(0) { it + 1 }.take(1000)

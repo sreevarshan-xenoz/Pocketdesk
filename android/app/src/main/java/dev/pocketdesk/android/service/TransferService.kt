@@ -52,6 +52,8 @@ class TransferService : Service() {
             val size: Long,
             /** The file's id at its source, so a retry continues it (T6a); "" for none. */
             val source: String,
+            /** Where it sits in a folder the computer sends (T6b), if it does. */
+            val folder: RustCore.FolderPart?,
         ) : Job
     }
 
@@ -128,6 +130,7 @@ class TransferService : Service() {
                 intent.getStringExtra(EXTRA_NAME) ?: "download",
                 intent.getLongExtra(EXTRA_SIZE, 0L),
                 intent.getStringExtra(EXTRA_SOURCE) ?: "",
+                folderOf(intent),
             )
         }
         androidx.core.content.IntentCompat.getParcelableExtra(intent, EXTRA_TREE, Uri::class.java)?.let { return Job.SendFolder(address, port, it) }
@@ -365,13 +368,25 @@ class TransferService : Service() {
         if (job.size > MAX_RECEIVE_BYTES || !DownloadTarget.hasRoomFor(this, job.size)) {
             return refuse(job, getString(R.string.transfer_no_space, job.name))
         }
+        // A file of a folder from the computer (T6b) goes under that send's
+        // own new folder, at its place, every name checked again here.
+        val folders = job.folder?.let { part ->
+            val names = listOf(part.folder) + part.path
+            if (names.size > FolderWalk.MAX_DEPTH || !names.all(FolderWalk::sendable)) {
+                return refuse(job, "unsafe place in a folder: ${part.path.joinToString("/")}")
+            }
+            val top = synchronized(folderTops) {
+                folderTops.getOrPut(part.folderId) { DownloadTarget.freeFolder(this, part.folder) }
+            }
+            listOf(top) + part.path.dropLast(1)
+        }.orEmpty()
         // A part an earlier attempt kept is continued in place (T6a).
         // With retries off nothing is kept for one: no source, no record.
         val source = if (Prefs.retryTransfers(this)) job.source else ""
         val kept = source.takeIf { it.isNotEmpty() }
             ?.let { RustCore.partialLocation(job.address, it) }
             ?.let { DownloadTarget.reopen(this, it) }
-        val target = kept ?: DownloadTarget.create(this, job.name)
+        val target = kept ?: DownloadTarget.create(this, job.name, folders)
             ?: return refuse(job, "cannot create ${job.name}")
         return try {
             val saved = withProgress({ job.size }, onProgress) {
@@ -548,6 +563,19 @@ class TransferService : Service() {
         private const val EXTRA_SIZE = "size"
         private const val EXTRA_SOURCE = "source"
         private const val EXTRA_TREE = "tree"
+        private const val EXTRA_FOLDER_ID = "folder_id"
+        private const val EXTRA_FOLDER = "folder"
+        private const val EXTRA_PATH = "path"
+
+        /** The top folder each folder send from the computer was saved in (T6b). */
+        private val folderTops = mutableMapOf<String, String>()
+
+        private fun folderOf(intent: Intent): RustCore.FolderPart? {
+            val id = intent.getStringExtra(EXTRA_FOLDER_ID)?.takeIf { it.isNotEmpty() } ?: return null
+            val folder = intent.getStringExtra(EXTRA_FOLDER) ?: return null
+            val path = intent.getStringArrayListExtra(EXTRA_PATH)?.takeIf { it.isNotEmpty() } ?: return null
+            return RustCore.FolderPart(id, folder, path)
+        }
         private const val KEEP_PARTIAL_HOURS = 24
 
         /** Send [uris] to the desktop at [address]; the caller's read grant passes on. */
@@ -587,6 +615,7 @@ class TransferService : Service() {
             name: String,
             size: Long,
             source: String,
+            folder: RustCore.FolderPart? = null,
         ) {
             val intent = Intent(context, TransferService::class.java)
                 .putExtra(EXTRA_ADDRESS, address)
@@ -597,6 +626,11 @@ class TransferService : Service() {
                 .putExtra(EXTRA_NAME, name)
                 .putExtra(EXTRA_SIZE, size)
                 .putExtra(EXTRA_SOURCE, source)
+            folder?.let {
+                intent.putExtra(EXTRA_FOLDER_ID, it.folderId)
+                    .putExtra(EXTRA_FOLDER, it.folder)
+                    .putStringArrayListExtra(EXTRA_PATH, ArrayList(it.path))
+            }
             context.startForegroundService(intent)
         }
     }

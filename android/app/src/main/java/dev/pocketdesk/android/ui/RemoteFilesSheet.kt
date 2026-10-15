@@ -211,6 +211,15 @@ private fun download(context: Context, address: String, controlPort: Int, entry:
     Toast.makeText(context, context.getString(R.string.files_download_started, entry.name), Toast.LENGTH_SHORT).show()
 }
 
+/** The place in a folder send an offer names (T6b), if it names one. */
+private fun folderPartOf(offer: org.json.JSONObject): RustCore.FolderPart? {
+    val id = offer.optString("folderId").ifEmpty { return null }
+    val folder = offer.optString("folder").ifEmpty { return null }
+    val path = offer.optJSONArray("path") ?: return null
+    val names = (0 until path.length()).map { path.optString(it) }
+    return if (names.isEmpty() || names.any { it.isEmpty() }) null else RustCore.FolderPart(id, folder, names)
+}
+
 /**
  * Files the computer's owner sent this phone (F7b): while the session is
  * up, each offer the bridge latched is downloaded to Downloads, with the
@@ -235,6 +244,7 @@ fun FileOffersEffect(address: String, controlPort: Int) {
                         offer.optString("name").ifEmpty { "download" },
                         offer.optLong("size"),
                         offer.optString("source"),
+                        folderPartOf(offer),
                     )
                 }
             }

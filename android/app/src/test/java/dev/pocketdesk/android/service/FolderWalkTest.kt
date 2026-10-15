@@ -55,6 +55,13 @@ class FolderWalkTest {
     }
 
     @Test
+    fun aReceivedFolderGetsANameNoEarlierOneHas() {
+        assertEquals("Trip", FolderWalk.freeName("Trip") { false })
+        val taken = setOf("Trip", "Trip (1)")
+        assertEquals("Trip (2)", FolderWalk.freeName("Trip") { it in taken })
+    }
+
+    @Test
     fun namesTheComputerRefusesAreSkipped() {
         for (bad in listOf("NUL", "com1.txt", "a?b", "name.", "name ", "x\u0000y")) {
             assertFalse(bad, FolderWalk.sendable(bad))

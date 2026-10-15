@@ -61,6 +61,17 @@ object FolderWalk {
         return Plan(files, skipped, truncated)
     }
 
+    /**
+     * A name for a folder received from the computer (T6b) that no earlier
+     * one has: [base], else `base (1)`, `base (2)`… so a send never merges
+     * into a folder that is already there.
+     */
+    fun freeName(base: String, taken: (String) -> Boolean): String =
+        generateSequence(0) { it + 1 }
+            .map { n -> if (n == 0) base else "$base ($n)" }
+            .take(1000)
+            .firstOrNull { !taken(it) } ?: "$base (${System.currentTimeMillis()})"
+
     /** Whether the computer takes [name] as one name in a path. */
     fun sendable(name: String): Boolean {
         if (name.isEmpty() || name == "." || name == "..") return false
