@@ -232,6 +232,10 @@ pub struct InputInjector {
     /// Button mask of the previous `Gamepad` packet. That packet is a state
     /// snapshot, so every bit must be treated as an edge (see 2063).
     gamepad_buttons: u16,
+    /// The compositor's virtual keyboard for text (roadmap F4): not tried
+    /// yet (`None`), not offered (`Some(None)`), or ready.
+    #[cfg(target_os = "linux")]
+    vkeyboard: Option<Option<pocketdesk_core::input::vkeyboard::VirtualKeyboard>>,
 }
 
 /// What a gamepad button bit stands for on the desktop. The gamepad is a wire
@@ -331,6 +335,8 @@ impl InputInjector {
                 return Ok(Self {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
+                    #[cfg(target_os = "linux")]
+                    vkeyboard: None,
                 });
             }
             Err(e) => e,
@@ -375,6 +381,7 @@ impl InputInjector {
                 abs: Some(build_abs_device()?),
             })),
             gamepad_buttons: 0,
+            vkeyboard: None,
         })
     }
 
@@ -577,8 +584,30 @@ impl InputInjector {
             }
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
-                // For uinput, fall back to keycode simulation for ASCII.
-                // This is a best-effort approach and does not handle Unicode.
+                // Any character, whatever the layout, where the compositor
+                // offers a virtual keyboard (wlroots: Sway, Hyprland; F4).
+                if self.vkeyboard.is_none() {
+                    let vk = pocketdesk_core::input::vkeyboard::VirtualKeyboard::connect();
+                    if vk.is_some() {
+                        info!("Text is typed through the compositor's virtual keyboard");
+                    } else {
+                        info!("No virtual keyboard: text is typed as US-layout keys");
+                    }
+                    self.vkeyboard = Some(vk);
+                }
+                if let Some(Some(vk)) = self.vkeyboard.as_mut() {
+                    match vk.type_text(text) {
+                        Ok(()) => return Ok(()),
+                        Err(e) => {
+                            // Tried again next time: the compositor may have
+                            // restarted.
+                            warn!("Virtual keyboard failed, typing as keys: {e}");
+                            self.vkeyboard = None;
+                        }
+                    }
+                }
+                // Otherwise keycodes for what a US layout types, Shift
+                // included; other characters cannot be typed this way.
                 let guard = state.get_mut().unwrap();
                 for ch in text.chars() {
                     if let Some((keycode, shift)) = char_to_key(ch) {
