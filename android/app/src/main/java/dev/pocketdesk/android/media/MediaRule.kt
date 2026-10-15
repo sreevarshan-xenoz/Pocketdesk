@@ -20,14 +20,27 @@ object MediaRule {
         val canPrevious: Boolean,
     )
 
-    /** What was last sent: [any] once something has been. */
-    data class Sent(val any: Boolean = false, val last: Media? = null)
+    /**
+     * What plays is said again this often even unchanged: a computer that
+     * dropped it (Media turned off, then on) hears it again.
+     */
+    const val RESEND_MS = 60_000L
+
+    /** What was last sent ([any] once something has been), and when ([atMs]). */
+    data class Sent(val any: Boolean = false, val last: Media? = null, val atMs: Long = 0)
 
     /** The session to report: the first playing one, else the most recent (Android lists it first). */
     fun pick(sessions: List<Media>): Media? = sessions.firstOrNull { it.isPlaying } ?: sessions.firstOrNull()
 
-    /** Whether [now] must be sent after [sent]: a change, or `{}` once when playing stops. */
-    fun shouldSend(sent: Sent, now: Media?): Boolean = if (sent.any) now != sent.last else now != null
+    /**
+     * Whether [now] must be sent at [nowMs] after [sent]: a change, `{}`
+     * once when playing stops, or what plays again every [RESEND_MS].
+     */
+    fun shouldSend(sent: Sent, now: Media?, nowMs: Long = 0): Boolean = when {
+        !sent.any -> now != null
+        now != sent.last -> true
+        else -> now != null && nowMs - sent.atMs >= RESEND_MS
+    }
 
     /** What was sent, as far as a computer [linked] (or not) still knows it. */
     fun forLink(sent: Sent, linked: Boolean): Sent = if (linked) sent else Sent()
