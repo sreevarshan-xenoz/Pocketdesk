@@ -1051,8 +1051,8 @@ On the A71 against Windows, 2026-10-15, LAN, input off for the phone:
 Owed:
 - [ ] Chrome's and Firefox's share sheets ("Open on computer" listed, the title and link they share).
 - [ ] The desktop app's Send link, and its refusal for a phone with Links off.
-- [ ] `open_links = false`: a link shown as a notification, not opened.
-- [ ] Six links within a minute: the sixth not opened.
+- [x] `open_links = false`: links shown as notifications, none opened (2026-10-15, six links from "Open on computer").
+- [x] Six links within a minute: the sixth refused ("more than 5 a minute").
 - [ ] The phone's "Links from the computer" off: a link dropped.
 - [ ] Linux: `xdg-open`, and no zombie process after a link.
 
@@ -1111,7 +1111,7 @@ On the A71 against Windows, 2026-10-15, portrait, input off for the phone:
 - [x] After the review fixes: the chrome faded after a few seconds, leaving the whole desktop visible.
 
 Owed:
-- [ ] The on-screen keyboard opening in portrait: the layout stays split and the stream is not squeezed.
+- [x] The on-screen keyboard opening in portrait: the layout stayed split, the desktop kept its full top pane, and the key bar and keyboard sat over the dock (2026-10-15).
 - [ ] Turning the phone: on its side the A71 (860 dp wide) splits side by side, as before.
 - [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
 
