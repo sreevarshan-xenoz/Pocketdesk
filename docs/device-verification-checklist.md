@@ -1104,6 +1104,17 @@ adb cannot make multi-finger gestures; the engine has 21 JVM tests. Owed, by han
 - [ ] A two-finger tap is still a right click, a three-finger tap a middle click.
 - [ ] Zoomed in, the cursor's travel matches the finger's on-screen distance, and scrolling is not slowed by the zoom.
 
+## 61. Portrait sessions (T9b)
+
+On the A71 against Windows, 2026-10-15, portrait, input off for the phone:
+- [x] The session split: the 21:9 desktop in the top quarter, the trackpad dock and shortcut bar below (before, a letterboxed strip and black).
+- [x] After the review fixes: the chrome faded after a few seconds, leaving the whole desktop visible.
+
+Owed:
+- [ ] The on-screen keyboard opening in portrait: the layout stays split and the stream is not squeezed.
+- [ ] Turning the phone: on its side the A71 (860 dp wide) splits side by side, as before.
+- [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -1,6 +1,6 @@
 # Mobile input (T9)
 
-Date: 2026-10-15. Status: T9a built (see As built); T9b and T9c designed. On autopilot (the user asked for the roadmap to keep going; the decisions are mine).
+Date: 2026-10-15. Status: T9a and T9b built (see As built); T9c designed. On autopilot (the user asked for the roadmap to keep going; the decisions are mine).
 
 ## Why
 
@@ -26,6 +26,14 @@ In portrait, the letterboxed desktop fills about a third of the screen and the r
 ## T9c: pointer capture
 
 A mouse plugged into the phone (USB OTG or Bluetooth) should drive the desktop's cursor with relative motion, not the phone's own pointer. Android's pointer capture (`View.requestPointerCapture`) gives raw relative events. The session will capture while it is in front in trackpad mode and a mouse is present, and release on Back or when focus is lost. No mouse is at hand here, so its device check stays owed.
+
+## As built (T9b)
+
+- **Where it lives.** `ui/PaneRule.kt` (JVM-tested): `resolve` (the Pane mode and the window give the split), `streamFraction`, `chromeStays`, `streamUnderKeyboardBar`; RemoteScreen applies them.
+- **The rule.** A hinge keeps its axis; 600 dp or wider is side by side, as before; a window 1.25 times taller than wide stacks the stream on top (a quarter to 60 % of the screen, by the desktop's shape) over the dock. Dual asks for two panes (stacked when upright); picture-in-picture shows the stream alone.
+- **Fresh review (0 Critical, 3 Important), fixed:** the upright layout's chrome never faded (it counted as a tablet's dock) and covered the small stream; the split was decided on a box the on-screen keyboard shrinks, so it could flip as the keyboard opened, and the keyboard bar padded a stream that sits above it; picture-in-picture kept the fraction-sized pane.
+- **Ruled:** Dual on an upright phone is the same as Auto (two panes, stacked); the pane jumps once from half to its size when the first frame gives the desktop's shape.
+- **Device-verified (A71, portrait):** a 21:9 desktop in the top quarter with the trackpad and shortcut bar below, the chrome fading after a few seconds.
 
 ## As built (T9a)
 
