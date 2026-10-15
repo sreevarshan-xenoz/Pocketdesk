@@ -75,6 +75,13 @@ pub fn server_exe(app_dir: &Path) -> PathBuf {
     }
 }
 
+/// The server program beside this app, if it is there (T10e: the file
+/// manager's "Send to phone" runs it).
+pub fn server_exe_beside_app() -> Option<PathBuf> {
+    let exe = server_exe(&app_dir());
+    exe.is_file().then_some(exe)
+}
+
 fn app_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
