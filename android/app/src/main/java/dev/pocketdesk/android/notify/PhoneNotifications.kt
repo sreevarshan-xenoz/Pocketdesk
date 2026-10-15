@@ -118,6 +118,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     private var answerConnectMs = 0L
     private val answerTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /** The computer browsing this phone's shared folders (T10g), on the answers' ticker. */
+    private val phoneFiles by lazy { dev.pocketdesk.android.files.PhoneFiles(applicationContext) }
+
     override fun onCreate() {
         super.onCreate()
         rule = NotificationForwardRule(packageName)
@@ -135,7 +138,10 @@ class PhoneNotificationListener : NotificationListenerService() {
             TimeUnit.SECONDS,
         )
         answerTicker.scheduleWithFixedDelay(
-            { runCatching { runAnswers() }.onFailure { Log.w("PhoneNotifications", "answers failed", it) } },
+            {
+                runCatching { runAnswers() }.onFailure { Log.w("PhoneNotifications", "answers failed", it) }
+                runCatching { phoneFiles.tick() }.onFailure { Log.w("PhoneNotifications", "phone files failed", it) }
+            },
             2,
             2,
             TimeUnit.SECONDS,

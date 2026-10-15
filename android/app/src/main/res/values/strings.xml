@@ -483,4 +483,10 @@
     <string name="offer_save">Save</string>
     <string name="settings_files_background">Files from the computer in the background</string>
     <string name="settings_files_background_summary">What the computer sends arrives in Downloads without a session, on this network. It needs notification access, which keeps the connection</string>
+    <string name="settings_phone_folders">Folders the computer may open</string>
+    <string name="settings_phone_folders_summary">The computer\'s Phone tab can list these folders and copy their files to itself. Nothing else on the phone is reachable. It uses notification access to stay connected</string>
+    <string name="phone_folders_empty">None yet: the computer cannot open anything on this phone. Add a folder to let its Phone tab list it and copy files from it</string>
+    <string name="phone_folders_add">Add folder</string>
+    <string name="phone_folders_remove">Remove</string>
+    <string name="phone_folders_storage">Storage</string>
 </resources>
