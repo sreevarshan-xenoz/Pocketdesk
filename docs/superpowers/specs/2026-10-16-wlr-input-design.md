@@ -36,3 +36,9 @@ Every request waits for the compositor within its deadline, as F4's text does.
   - a session moves the pointer;
   - clicks land (seen with `wev`);
   - keys and text type.
+
+## As built
+
+- **One module, `core::input::wlr_input`:** a `WlrInput` holds the virtual pointer and a virtual keyboard with the keys keymap (`evdev+aliases(qwerty)`, `pc+us+inet(evdev)`). Text keeps its own F4 keyboard (`vkeyboard`), so the keys keymap is never swapped out.
+- **The server's order on Wayland:** uinput, then `Wlr`, then enigo. The log names the choice: "using the compositor's virtual pointer and keyboard (uinput: …)".
+- **Device-checked (A71 → Azure VM, Sway, `/dev/uinput` root-only, over the internet):** trackpad motion (43 motion events in `wev`), a tap as a left press and release, "Hi PD!" with its capitals and `!`, Enter, and Esc from the shortcut bar as a key.

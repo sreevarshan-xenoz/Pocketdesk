@@ -80,7 +80,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 |---|---|---|
 | Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
-| Remote input | uinput (Wayland), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
+| Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
 | Clipboard: text anywhere, images on the same network or Tailscale | `wl-clipboard` (Wayland only) | Win32 clipboard |
 | Files both ways, remote browsing (same network or Tailscale) | yes | yes |
 | Desktop sound on the phone | PipeWire | WASAPI loopback |

@@ -42,6 +42,9 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-16: **T10f, input on wlroots without uinput (branch `feat/wlr-input`; spec `docs/superpowers/specs/2026-10-16-wlr-input-design.md`).**
+  - **How:** when uinput cannot be opened (root-only, the default on most distributions), the server injects through the compositor: `zwlr_virtual_pointer_v1` for the pointer and `zwp_virtual_keyboard_v1` with a `pc+us` keys keymap (`core::input::wlr_input`), before falling back to enigo. Found on the VM during F4, where input had done nothing.
+  - **Device-checked (A71 → Azure VM, Sway, uinput root-only):** pointer motion, a click, text with capitals, Enter and Esc in `wev`. Owed: checklist §71.
 - 2026-10-16: **F4, typing any character on Linux (branch `feat/linux-typing`).**
   - **How:** on wlroots compositors the server types text through `zwp_virtual_keyboard_v1`, uploading a keymap with one key per character as wtype does (`core::input::{xkb_keymap, vkeyboard}`), so accents, other scripts and emoji arrive on any layout. Elsewhere uinput now holds Shift for capitals and shifted symbols (roadmap 2666).
   - **Fresh review (0 Critical, 2 Important), fixed:** a failure mid-text retyped what had gone out, and the Wayland waits had no deadline on the input task; plus a cached failed connect, CRLF, keymap re-uploads and key times.

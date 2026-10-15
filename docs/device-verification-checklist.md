@@ -1216,6 +1216,18 @@ Owed:
 - [ ] The desktop app's Settings switch, and `install` / `uninstall` adding and removing the entry.
 - [ ] No phone connected: the notification says so.
 
+## 71. Input on wlroots without uinput (T10f)
+
+On the Azure VM (headless Sway, `/dev/uinput` root-only) from the A71 over the internet, 2026-10-16:
+- [x] The server log: "Input injector: using the compositor's virtual pointer and keyboard".
+- [x] Trackpad motion and a tap reached `wev` as pointer motion and a left press and release.
+- [x] "Hi PD!" typed (capitals and `!`), Enter, and Esc from the shortcut bar.
+
+Owed:
+- [ ] Hyprland, river, labwc and Wayfire.
+- [ ] Direct touch (absolute moves), scrolling, right and middle clicks, and a two-output layout.
+- [ ] A shortcut with modifiers (Super+N, Ctrl+Alt+Del).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
