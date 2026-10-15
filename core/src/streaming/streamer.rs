@@ -1163,11 +1163,14 @@ impl StreamingServer {
             let audio_cancel = cancel.clone();
             let audio_conn = connection.clone();
             tasks.spawn(
-                async move {
-                    if let Err(e) = run_audio_pipeline(audio_conn, audio_cancel).await {
-                        error!(error = %e, "Audio pipeline failed");
-                    }
-                }
+                until_cancelled(
+                    async move {
+                        if let Err(e) = run_audio_pipeline(audio_conn, audio_cancel.clone()).await {
+                            error!(error = %e, "Audio pipeline failed");
+                        }
+                    },
+                    cancel.clone(),
+                )
                 .instrument(tracing::info_span!("audio_pipeline")),
             );
         }
@@ -1449,6 +1452,15 @@ fn negotiate_codec(caps: u8, hevc_allowed: bool, current: VideoCodec) -> Option<
     }
 }
 
+/// Run `task`, then wait for `cancel`: a task whose ending must not end the
+/// session (the first task of the session's set to finish ends it). Audio
+/// ends at once on a computer with no audio capture, and the session then
+/// went with it.
+async fn until_cancelled(task: impl std::future::Future<Output = ()>, cancel: CancellationToken) {
+    task.await;
+    cancel.cancelled().await;
+}
+
 /// `read_exact` bounded by a short timeout; false on timeout or error.
 async fn read_with_timeout(stream: &mut dyn super::connection::InStream, buf: &mut [u8]) -> bool {
     matches!(
@@ -1707,6 +1719,21 @@ mod tests {
     }
 
     use super::*;
+
+    #[tokio::test]
+    async fn an_audio_task_that_ends_at_once_does_not_end_the_session() {
+        let cancel = CancellationToken::new();
+        let mut tasks = JoinSet::new();
+        // No audio capture: the audio task's own work ends at once.
+        tasks.spawn(until_cancelled(async {}, cancel.clone()));
+        let early = tokio::time::timeout(Duration::from_millis(100), tasks.join_next()).await;
+        assert!(
+            early.is_err(),
+            "the session's task set must not end with audio"
+        );
+        cancel.cancel();
+        assert!(tasks.join_next().await.is_some());
+    }
     use crate::streaming::{EncoderPreset, H264Profile, HardwareEncoder, VideoCodec};
 
     /// R2: a session whose client stopped reporting is ended, but a few
