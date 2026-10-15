@@ -68,6 +68,15 @@ async fn main() -> Result<()> {
         cli::Commands::Status { json: false } => service::print_status().await,
         cli::Commands::Status { json: true } => local_api::print_status(),
         cli::Commands::Devices { json } => local_api::print_devices(json),
+        cli::Commands::Send {
+            phone,
+            path,
+            wait,
+            json,
+        } => {
+            // Like `bench`, the exit code is what a script reads.
+            std::process::exit(local_api::run_send(&phone, &path, wait, json))
+        }
         cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
         cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
         cli::Commands::Sessions { count, json } => session_telemetry::print_sessions(count, json),

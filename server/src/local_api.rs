@@ -223,6 +223,139 @@ pub fn print_files(sent: bool, count: usize, as_json: bool) -> anyhow::Result<()
     Ok(())
 }
 
+/// The exit codes the local API's commands end with (`docs/local-api.md`).
+pub mod exit {
+    pub const DONE: i32 = 0;
+    pub const FAILED: i32 = 1;
+    pub const BAD_ARGUMENTS: i32 = 2;
+    pub const NO_SERVER: i32 = 3;
+    pub const STILL_WAITING: i32 = 4;
+}
+
+/// Ask the server in `state_dir` to send `path` to the phone `query`
+/// names, as the desktop app's Files tab does (an outbox request), and,
+/// with `wait`, wait up to that long for the sent list to say how it went.
+/// What to print, and the exit code.
+pub fn send_in(
+    state_dir: &Path,
+    query: &str,
+    path: &Path,
+    running: bool,
+    wait: Option<std::time::Duration>,
+) -> (Value, i32) {
+    let refused = |code: i32, reason: String| {
+        (
+            versioned(json!({ "state": "refused", "reason": reason })),
+            code,
+        )
+    };
+    if !running {
+        return refused(
+            exit::NO_SERVER,
+            "no Pocketdesk server is running to send it".to_string(),
+        );
+    }
+    let ids = TrustStore::load_or_create(state_dir.join(TRUST_FILE))
+        .map(|s| s.trusted_devices())
+        .unwrap_or_default();
+    let device_id = match resolve_phone(&ids, query) {
+        Ok(id) => id,
+        Err(reason) => return refused(exit::BAD_ARGUMENTS, reason),
+    };
+    let Ok(full) = std::path::absolute(path) else {
+        return refused(
+            exit::BAD_ARGUMENTS,
+            format!("{} cannot be named", path.display()),
+        );
+    };
+    if !full.exists() {
+        return refused(
+            exit::BAD_ARGUMENTS,
+            format!("{} is not there", full.display()),
+        );
+    }
+    let now = pocketdesk_core::local::pin::now_unix();
+    let request = match pocketdesk_core::local::outbox::request(
+        state_dir,
+        &device_id,
+        &full.to_string_lossy(),
+        now,
+    ) {
+        Ok(request) => request,
+        Err(e) => return refused(exit::FAILED, format!("could not queue it: {e}")),
+    };
+    let mut out = json!({
+        "id": request.id,
+        "device_id": device_id,
+        "path": request.path,
+        "state": "queued",
+        "reason": null,
+        "note": null,
+    });
+    let Some(wait) = wait else {
+        return (versioned(out), exit::DONE);
+    };
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        let row = sent_list(state_dir, usize::MAX)["sent"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|r| r["id"] == out["id"]).cloned());
+        if let Some(row) = row
+            && row["state"] != "offered"
+        {
+            for key in ["state", "reason", "note"] {
+                out[key] = row[key].clone();
+            }
+            let code = if row["state"] == "sent" {
+                exit::DONE
+            } else {
+                exit::FAILED
+            };
+            return (versioned(out), code);
+        }
+        if std::time::Instant::now() >= deadline {
+            return (versioned(out), exit::STILL_WAITING);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+/// `pocketdesk send`: prints the outcome and returns the exit code.
+pub fn run_send(query: &str, path: &Path, wait_secs: Option<u64>, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("No state folder: {e}");
+            return exit::FAILED;
+        }
+    };
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    let (out, code) = send_in(
+        &dir,
+        query,
+        path,
+        running,
+        wait_secs.map(std::time::Duration::from_secs),
+    );
+    if as_json {
+        print(&out);
+    } else {
+        let how = match out["state"].as_str() {
+            Some("queued") => "queued for the phone".to_string(),
+            Some("offered") => "offered, the phone has not taken it yet".to_string(),
+            Some("sent") => "saved on the phone".to_string(),
+            Some(state) => format!("{state}: {}", out["reason"].as_str().unwrap_or("")),
+            None => "unknown".to_string(),
+        };
+        let note = out["note"]
+            .as_str()
+            .map(|n| format!(" ({n})"))
+            .unwrap_or_default();
+        println!("{how}{note}");
+    }
+    code
+}
+
 /// The paired phone `query` names: its id, or a unique prefix of at least
 /// six characters of it.
 pub fn resolve_phone(ids: &[String], query: &str) -> Result<String, String> {
@@ -417,6 +550,105 @@ mod tests {
         assert_eq!(session["device_id"], "phone-a");
         assert_eq!(session["transport"], "wan");
         assert_eq!(session["driving"], true);
+    }
+
+    fn send_setup(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = temp_dir(name);
+        TrustStore::load_or_create(dir.join(TRUST_FILE))
+            .unwrap()
+            .trust_device("5f1c9b3d-6e70")
+            .unwrap();
+        let file = dir.join("report.pdf");
+        std::fs::write(&file, b"r").unwrap();
+        (dir, file)
+    }
+
+    #[test]
+    fn a_send_is_refused_before_it_is_queued_when_it_cannot_go() {
+        let (dir, file) = send_setup("send-refused");
+        let (out, code) = send_in(&dir, "5f1c9b", &file, false, None);
+        assert_eq!(code, exit::NO_SERVER, "{out}");
+        let (out, code) = send_in(&dir, "ffffff", &file, true, None);
+        assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
+        let (out, code) = send_in(&dir, "5f1c9b", &dir.join("missing.pdf"), true, None);
+        assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
+        assert!(
+            pocketdesk_core::local::outbox::take_all(&dir, pocketdesk_core::local::pin::now_unix())
+                .is_empty(),
+            "nothing queued"
+        );
+    }
+
+    #[test]
+    fn a_send_is_queued_as_the_desktop_app_queues_one() {
+        let (dir, file) = send_setup("send-queued");
+        let (out, code) = send_in(&dir, "5f1c9b", &file, true, None);
+        assert_eq!(code, exit::DONE);
+        assert_eq!(out["api"], API);
+        assert_eq!(out["state"], "queued");
+        assert_eq!(out["device_id"], "5f1c9b3d-6e70");
+        let queued =
+            pocketdesk_core::local::outbox::take_all(&dir, pocketdesk_core::local::pin::now_unix());
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].id, out["id"].as_str().unwrap());
+        assert_eq!(queued[0].device_id, "5f1c9b3d-6e70");
+    }
+
+    #[test]
+    fn a_send_waited_for_ends_as_the_sent_list_says() {
+        use pocketdesk_core::local::sent::{self, SentFile, SentState};
+        let (dir, file) = send_setup("send-wait");
+        // The server's part, played here: take the request, then record it failed.
+        let server_dir = dir.clone();
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let taken = pocketdesk_core::local::outbox::take_all(
+                    &server_dir,
+                    pocketdesk_core::local::pin::now_unix(),
+                );
+                if let Some(request) = taken.into_iter().next() {
+                    sent::record(
+                        &server_dir,
+                        SentFile {
+                            id: request.id,
+                            name: "report.pdf".to_string(),
+                            path: request.path,
+                            size: 1,
+                            device_id: request.device_id,
+                            sent_unix: 1,
+                            state: SentState::Failed("phone not connected".to_string()),
+                            note: None,
+                        },
+                    )
+                    .unwrap();
+                    return;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        });
+        let (out, code) = send_in(
+            &dir,
+            "5f1c9b",
+            &file,
+            true,
+            Some(std::time::Duration::from_secs(10)),
+        );
+        server.join().unwrap();
+        assert_eq!(code, exit::FAILED, "{out}");
+        assert_eq!(out["state"], "failed");
+        assert_eq!(out["reason"], "phone not connected");
+
+        // Nobody takes this one: the wait runs out.
+        let (out, code) = send_in(
+            &dir,
+            "5f1c9b",
+            &file,
+            true,
+            Some(std::time::Duration::from_millis(300)),
+        );
+        assert_eq!(code, exit::STILL_WAITING, "{out}");
     }
 
     #[test]
