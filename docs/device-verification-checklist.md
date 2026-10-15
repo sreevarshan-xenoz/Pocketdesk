@@ -1143,6 +1143,7 @@ Owed (a SIM):
 On the A71 against this box, 2026-10-16: the saved computer's control port was pointed at a closed port, so TCP failed as it does away from home:
 - [x] The phone logged "No control link at home; trying the internet road", then connected; the desktop logged a control connection over the internet and admitted it (the phone's iroh key was registered).
 - [x] Clipboard both ways, the battery and the 4 s clipboard polls ran on it.
+- [x] After the review fixes: `pocketdesk link` to the phone reached it over this link and showed as a notification (a desktop push).
 
 Owed:
 - [ ] From outside the home network (mobile data, or another Wi-Fi), with Tailscale off: notifications, texts, battery and the phone's media reach the computer with the app in the background, and Send link reaches the phone.
@@ -1150,6 +1151,7 @@ Owed:
 - [ ] Unpairing on the desktop ends the internet link's packets at once.
 - [ ] A file offer to a phone on the internet link fails as "not reachable", not stuck.
 - [ ] The phone's battery over an hour with the link up in the background (iroh's 5 s heartbeat).
+- [ ] A session riding a relay (no direct path) with the control link up at the same time: both use the phone's one iroh key from two endpoints, and a relay may route to only one of them.
 
 ## Recording results
 
