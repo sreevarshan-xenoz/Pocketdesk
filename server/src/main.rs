@@ -112,6 +112,10 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             // Like `bench`, the exit code is what a script reads.
             std::process::exit(local_api::run_send(&phone, &path, wait, json))
         }
+        cli::Commands::SendToPhone { paths } => {
+            std::process::exit(local_api::run_send_to_phone(&paths))
+        }
+        cli::Commands::SendMenu { remove } => local_api::run_send_menu(remove),
         cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
         cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
         cli::Commands::Sessions { count, json } => session_telemetry::print_sessions(count, json),
