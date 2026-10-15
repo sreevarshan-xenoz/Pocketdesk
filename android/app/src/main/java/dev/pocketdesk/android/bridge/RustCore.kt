@@ -29,7 +29,7 @@ object RustCore {
     private external fun nativeIsDiscoveryActive(): Boolean
     private external fun nativeCheckTailscaleStatus(): String
     private external fun nativeGetPeers(): String
-    private external fun nativeConnectToPeer(address: String, port: Int): String
+    private external fun nativeConnectToPeer(address: String, port: Int, wanIdentity: String): String
     private external fun nativeSendClipboard(address: String, port: Int, content: String): String
     private external fun nativeGetClipboard(address: String, port: Int): String
     private external fun nativeGetClipboardState(address: String, port: Int): String
@@ -218,8 +218,12 @@ object RustCore {
     /** Raw JSON peer list: `[{name, dnsName, ips, ...}]`. */
     fun getPeers(): Result<String> = envelope(nativeGetPeers())
 
-    fun connectToPeer(address: String, port: Int): Result<String> =
-        envelope(nativeConnectToPeer(address, port))
+    /**
+     * The control link to [address]: TLS over TCP, else, with the computer's
+     * cached [wanIdentity], over the internet (T10a).
+     */
+    fun connectToPeer(address: String, port: Int, wanIdentity: String? = null): Result<String> =
+        envelope(nativeConnectToPeer(address, port, wanIdentity ?: ""))
 
     /** One-shot JSON snapshot of the session state machine. */
     fun sessionStatusJson(): String = nativeSessionStatus()

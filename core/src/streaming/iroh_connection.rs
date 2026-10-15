@@ -233,6 +233,72 @@ impl IrohDial {
         device_key: Option<iroh::SecretKey>,
         dht: Option<DhtAddressLookup>,
     ) -> Result<Self> {
+        let alpn = StreamTransportConfig::default().alpn;
+        Self::dial_alpn(
+            &alpn,
+            endpoint_id,
+            relay_urls,
+            direct_addrs,
+            use_relays,
+            timeout,
+            device_key,
+            dht,
+        )
+        .await
+    }
+
+    /// Dial as [`Self::dial`] does, for the control channel (T10a), and
+    /// open its one stream. The stream keeps the dial's endpoint for its
+    /// life.
+    pub async fn dial_control(
+        endpoint_id: &str,
+        relay_urls: &[String],
+        direct_addrs: &[String],
+        use_relays: bool,
+        timeout: Duration,
+        device_key: Option<iroh::SecretKey>,
+        dht: Option<DhtAddressLookup>,
+    ) -> Result<IrohControlStream> {
+        let dial = Self::dial_alpn(
+            crate::protocol::ALPN_CONTROL,
+            endpoint_id,
+            relay_urls,
+            direct_addrs,
+            use_relays,
+            timeout,
+            device_key,
+            dht,
+        )
+        .await?;
+        let (send, recv) = match tokio::time::timeout(timeout, dial.raw.open_bi()).await {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(e)) => {
+                dial.close().await;
+                return Err(anyhow::anyhow!("no control stream: {e}"));
+            }
+            Err(_) => {
+                dial.close().await;
+                anyhow::bail!("no control stream in time");
+            }
+        };
+        Ok(IrohControlStream {
+            io: tokio::io::join(recv, send),
+            dial: Some(dial),
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn dial_alpn(
+        alpn: &[u8],
+        endpoint_id: &str,
+        relay_urls: &[String],
+        direct_addrs: &[String],
+        use_relays: bool,
+        timeout: Duration,
+        device_key: Option<iroh::SecretKey>,
+        dht: Option<DhtAddressLookup>,
+    ) -> Result<Self> {
+        let alpn = alpn.to_vec();
         let id: iroh::EndpointId = endpoint_id.parse().context("invalid iroh EndpointId")?;
         let relay_urls = relay_urls
             .iter()
@@ -252,7 +318,6 @@ impl IrohDial {
             addr = addr.with_ip_addr(a);
         }
 
-        let alpn = StreamTransportConfig::default().alpn;
         let mut builder = Endpoint::builder(Minimal);
         // Device keys: dial as this device's own key, so the desktop can bind
         // the session to it; without one, iroh makes a throwaway key.
@@ -299,6 +364,59 @@ impl IrohDial {
         self.raw
             .close(iroh::endpoint::VarInt::from_u32(0), b"session end");
         self.endpoint.close().await;
+    }
+}
+
+/// The control channel's stream over iroh (T10a), holding the dial whose
+/// endpoint carries it. Dropped, it closes the connection and the endpoint.
+pub struct IrohControlStream {
+    io: tokio::io::Join<RecvStream, SendStream>,
+    dial: Option<IrohDial>,
+}
+
+impl tokio::io::AsyncRead for IrohControlStream {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_read(cx, buf)
+    }
+}
+
+impl tokio::io::AsyncWrite for IrohControlStream {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.io).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_shutdown(cx)
+    }
+}
+
+impl Drop for IrohControlStream {
+    fn drop(&mut self) {
+        // iroh logs an error for an endpoint dropped while live: close it,
+        // where a runtime is there to run the close.
+        if let Some(dial) = self.dial.take()
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            runtime.spawn(dial.close());
+        }
     }
 }
 
@@ -469,6 +587,66 @@ mod tests {
             .await
             .expect("endpoint bind");
         (endpoint, addr)
+    }
+
+    /// The control road's dial (T10a): one stream each way, carried by the
+    /// dial's own endpoint.
+    #[tokio::test]
+    async fn the_control_dial_opens_one_stream_both_ways() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (desktop, desktop_addr) = bind_loopback_endpoint(crate::protocol::ALPN_CONTROL).await;
+        let echo = {
+            let desktop = desktop.clone();
+            tokio::spawn(async move {
+                let conn = desktop
+                    .accept()
+                    .await
+                    .unwrap()
+                    .accept()
+                    .unwrap()
+                    .await
+                    .unwrap();
+                assert_eq!(conn.alpn(), crate::protocol::ALPN_CONTROL);
+                let (mut send, mut recv) = conn.accept_bi().await.unwrap();
+                let mut hello = [0u8; 6];
+                recv.read_exact(&mut hello).await.unwrap();
+                send.write_all(&hello).await.unwrap();
+                send.finish().unwrap();
+                conn.closed().await;
+            })
+        };
+        let mut stream = IrohDial::dial_control(
+            &desktop.id().to_string(),
+            &[],
+            &[desktop_addr.to_string()],
+            false,
+            Duration::from_secs(5),
+            None,
+            None,
+        )
+        .await
+        .expect("dial the control road");
+        stream
+            .write_all(
+                b"hello
+",
+            )
+            .await
+            .unwrap();
+        let mut back = [0u8; 6];
+        stream.read_exact(&mut back).await.unwrap();
+        assert_eq!(
+            &back,
+            b"hello
+"
+        );
+        drop(stream);
+        tokio::time::timeout(Duration::from_secs(5), echo)
+            .await
+            .expect("the connection closes with the stream")
+            .unwrap();
+        desktop.close().await;
     }
 
     /// Same exercise as `connection::tests::quinn_connection_roundtrip`,

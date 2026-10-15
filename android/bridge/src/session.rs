@@ -23,9 +23,10 @@ pub(crate) const MAX_FRAMES_PER_RECEIVE: usize = 16;
 /// Maximum number of audio packets to drain per `receive_audio` call.
 pub(crate) const MAX_AUDIO_PACKETS_PER_RECEIVE: usize = 32;
 
-/// The write half of a control connection (TLS over TCP, phase B).
+/// The write half of a control connection: TLS over TCP (phase B), or a
+/// stream over iroh (the internet road, T10a).
 pub(crate) type ControlWriter =
-    tokio::io::WriteHalf<pocketdesk_core::protocol::connection::ControlStream>;
+    tokio::io::WriteHalf<pocketdesk_core::protocol::connection::ControlDuplex>;
 
 /// Global handle for the active control connection writer.
 pub(crate) static CONTROL_WRITER: LazyLock<TokioMutex<Option<Arc<TokioMutex<ControlWriter>>>>> =
@@ -42,6 +43,10 @@ pub(crate) static CONNECT_LOCK: LazyLock<TokioMutex<()>> = LazyLock::new(|| Toki
 /// tell a live session to the requested desktop from one to another host.
 pub(crate) static CONTROL_PEER: LazyLock<TokioMutex<Option<(String, u16)>>> =
     LazyLock::new(|| TokioMutex::new(None));
+
+/// Whether the control link in [`CONTROL_PEER`] came by the internet road
+/// (T10a), where nothing pairs.
+pub(crate) static CONTROL_OVER_INTERNET: AtomicBool = AtomicBool::new(false);
 
 /// Global handle for the active control connection state.
 pub(crate) static CONNECTION_STATE: LazyLock<TokioMutex<api::ConnectionState>> =

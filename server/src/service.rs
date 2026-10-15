@@ -322,6 +322,9 @@ pub async fn run(config: Config) -> Result<()> {
     // R1 stage 3: WAN (iroh) endpoint alongside the quinn LAN listener.
     // A bind failure (no network, relays unreachable) must not take the LAN
     // experience down, so the endpoint is optional at runtime.
+    // Control connections over the internet road (T10a) come from the WAN
+    // listener to the loop below, which owns the plugins.
+    let (internet_control_tx, mut internet_control) = tokio::sync::mpsc::channel(16);
     let wan_endpoint = match iroh_endpoint::spawn_wan_endpoint(
         streaming_config.clone(),
         input_tx.clone(),
@@ -333,6 +336,7 @@ pub async fn run(config: Config) -> Result<()> {
             mic_relay_device: config.mic_relay_device.clone(),
             relay_urls: config.relay_urls.clone(),
             dht_publish: config.dht_publish,
+            control: Some(internet_control_tx),
         },
     )
     .await
@@ -512,6 +516,28 @@ pub async fn run(config: Config) -> Result<()> {
                     }
                     Err(error) => tracing::warn!("Accept error: {}", error),
                 }
+            }
+            Some((conn, slot)) = internet_control.recv() => {
+                let identity_packet = kde_service.identity_packet().clone();
+                let registry_clone = Arc::clone(&registry);
+                let hypr = hypr_ipc.clone();
+                let wan = wan_endpoint.clone();
+                let pairing_required = config.pairing_required;
+                tokio::spawn(async move {
+                    let _slot: tokio::sync::OwnedSemaphorePermit = slot;
+                    if let Err(error) = handle_internet_control(
+                        conn,
+                        identity_packet,
+                        &registry_clone,
+                        hypr.as_deref(),
+                        wan.as_ref(),
+                        pairing_required,
+                    )
+                    .await
+                    {
+                        tracing::warn!("internet control connection failed: {error:#}");
+                    }
+                });
             }
             quic_incoming = quic_endpoint.accept() => {
                 if let Some(incoming) = quic_incoming {
@@ -828,7 +854,7 @@ async fn seed_desktop_state(
     sender: &Arc<dyn DeviceSender>,
     hypr_ipc: Option<&HyprlandIpc>,
     wan_endpoint: Option<&iroh::Endpoint>,
-    local: Option<std::net::IpAddr>,
+    road: Road,
 ) {
     // Workspace HUD with the current compositor state (R3#8)
     if let Some(ipc) = hypr_ipc {
@@ -842,7 +868,12 @@ async fn seed_desktop_state(
     if let Some(endpoint) = wan_endpoint {
         iroh_endpoint::push_endpoint_to(sender, endpoint).await;
     }
-    // How to wake this computer, for the adapter the phone reached (N6).
+    // How to wake this computer, for the adapter the phone reached (N6). A
+    // connection over the internet reached none: the phone keeps the one it
+    // learned at home.
+    let Road::Local { local, .. } = road else {
+        return;
+    };
     let wake = tokio::task::spawn_blocking(move || crate::wake_info::packet_for_connection(local))
         .await
         .ok();
@@ -928,7 +959,6 @@ async fn handle_connection_with_kde(
     wan_endpoint: Option<&iroh::Endpoint>,
     pairing_required: bool,
 ) -> Result<()> {
-    use tokio::io::AsyncWriteExt;
     use tracing::Instrument;
 
     let peer_addr = stream.peer_addr().ok();
@@ -973,7 +1003,109 @@ async fn handle_connection_with_kde(
             .1
             .peer_certificates()
             .and_then(pocketdesk_core::streaming::PeerKey::from_tls_certs);
+        serve_control(
+            stream,
+            Road::Local {
+                peer: peer_addr,
+                local: local_ip,
+            },
+            peer_key,
+            identity_packet,
+            registry,
+            hypr_ipc,
+            wan_endpoint,
+            pairing_required,
+        )
+        .await
+    }
+    .instrument(conn_span)
+    .await
+}
 
+/// Which road a control connection came by.
+#[derive(Debug, Clone, Copy)]
+enum Road {
+    /// TLS over TCP, from `peer`, reaching this computer's `local` address.
+    Local {
+        peer: Option<std::net::SocketAddr>,
+        local: Option<std::net::IpAddr>,
+    },
+    /// iroh, from anywhere (T10a): only a paired phone with its registered
+    /// iroh key, no pairing, and no address to dial back.
+    Internet,
+}
+
+/// A control connection over the internet road (T10a): the phone opens one
+/// bidirectional stream on an iroh connection with [`ALPN_CONTROL`] and
+/// runs the same handshake and packets on it as on the TCP channel.
+///
+/// [`ALPN_CONTROL`]: pocketdesk_core::protocol::ALPN_CONTROL
+pub(crate) async fn handle_internet_control(
+    conn: iroh::endpoint::Connection,
+    identity_packet: Option<NetworkPacket>,
+    registry: &Arc<PluginRegistry>,
+    hypr_ipc: Option<&HyprlandIpc>,
+    wan_endpoint: Option<&iroh::Endpoint>,
+    pairing_required: bool,
+) -> Result<()> {
+    use tracing::Instrument;
+    let conn_span = tracing::info_span!(
+        "conn",
+        id = %uuid::Uuid::new_v4(),
+        peer = tracing::field::Empty,
+        transport = "iroh",
+        proto = %pocketdesk_core::protocol::PROTOCOL_VERSION
+    );
+    async move {
+        tracing::info!("Handling a control connection over the internet");
+        let peer_key = Some(pocketdesk_core::streaming::PeerKey::Iroh(
+            conn.remote_id().to_string(),
+        ));
+        let (send, recv) = timeout(Duration::from_secs(8), conn.accept_bi())
+            .await
+            .context("control stream timeout")?
+            .context("no control stream")?;
+        let served = serve_control(
+            tokio::io::join(recv, send),
+            Road::Internet,
+            peer_key,
+            identity_packet,
+            registry,
+            hypr_ipc,
+            wan_endpoint,
+            pairing_required,
+        )
+        .await;
+        // The phone hangs up first when it can: closing at once could
+        // overtake the last line written (a refusal), which QUIC would then
+        // never deliver.
+        let _ = timeout(Duration::from_secs(2), conn.closed()).await;
+        conn.close(0u32.into(), b"control closed");
+        served
+    }
+    .instrument(conn_span)
+    .await
+}
+
+/// The control channel past its transport: the handshake, the phone's
+/// identity held to the key its road proved, and the packet loop.
+#[allow(clippy::too_many_arguments)]
+async fn serve_control<S>(
+    stream: S,
+    road: Road,
+    peer_key: Option<pocketdesk_core::streaming::PeerKey>,
+    identity_packet: Option<NetworkPacket>,
+    registry: &Arc<PluginRegistry>,
+    hypr_ipc: Option<&HyprlandIpc>,
+    wan_endpoint: Option<&iroh::Endpoint>,
+    pairing_required: bool,
+) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+{
+    use tokio::io::AsyncWriteExt;
+    use tracing::Instrument;
+    {
         let (reader_half, writer_half) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader_half);
 
@@ -1016,8 +1148,10 @@ async fn handle_connection_with_kde(
             w.flush().await?;
         }
 
-        // Step 2: Send identity packet
-        if let Some(ref identity) = identity_packet {
+        // Step 2: Send identity packet. Over the internet road the desktop
+        // names itself only once it has admitted the phone (below): anyone
+        // can dial its iroh id, which the DHT publishes.
+        if let (Some(identity), Road::Local { .. }) = (&identity_packet, road) {
             let mut w = writer.lock().await;
             let wire_bytes = identity.to_wire()?;
             w.write_all(&wire_bytes).await?;
@@ -1057,24 +1191,58 @@ async fn handle_connection_with_kde(
             tracing::warn!("Control connection with an unusable deviceId; dropped");
             return Ok(());
         };
-        let Some(peer_addr) = peer_addr else {
-            return Ok(());
+        let peer = match road {
+            Road::Local { peer: None, .. } => return Ok(()),
+            Road::Local {
+                peer: Some(peer_addr),
+                ..
+            } => {
+                // A connection that claims a paired device without its key
+                // is kept for pairing only (the owner's PIN recovers a phone
+                // whose key changed); the per-packet gate below holds it
+                // there.
+                if let crate::plugins::pair::Standing::WrongKey(refusal) =
+                    crate::plugins::pair::admit_control(&device_id, peer_addr, peer_key.as_ref())
+                {
+                    tracing::warn!(
+                        "Control connection for {device_id} held to pairing only: {}",
+                        refusal.reason()
+                    );
+                }
+                Some(peer_addr)
+            }
+            Road::Internet => {
+                // Nothing is kept for pairing on this road: a connection
+                // that is not the paired phone with its iroh key ends here.
+                if let Err(refusal) =
+                    crate::plugins::pair::internet_standing(&device_id, peer_key.as_ref())
+                {
+                    tracing::warn!(
+                        "Refused {device_id}'s control connection over the internet: {}",
+                        refusal.reason()
+                    );
+                    // Said, so the phone counts this as a failed link and
+                    // backs off, instead of redialing a link that just ends.
+                    let mut w = writer.lock().await;
+                    let refused = format!("{}\n", pocketdesk_core::protocol::HANDSHAKE_REFUSED);
+                    let _ = w.write_all(refused.as_bytes()).await;
+                    let _ = w.flush().await;
+                    let _ = w.shutdown().await;
+                    return Ok(());
+                }
+                // Admitted: the desktop's identity is the phone's answer.
+                if let Some(identity) = &identity_packet {
+                    let mut w = writer.lock().await;
+                    w.write_all(&identity.to_wire()?).await?;
+                    w.flush().await?;
+                }
+                None
+            }
         };
-        // A connection that claims a paired device without its key is kept
-        // for pairing only (the owner's PIN recovers a phone whose key
-        // changed); the per-packet gate below holds it there.
-        if let crate::plugins::pair::Standing::WrongKey(refusal) =
-            crate::plugins::pair::admit_control(&device_id, peer_addr, peer_key.as_ref())
-        {
-            tracing::warn!(
-                "Control connection for {device_id} held to pairing only: {}",
-                refusal.reason()
-            );
-        }
 
         let sender: Arc<dyn DeviceSender> = Arc::new(
             TcpDeviceSender::from_arc(writer, device_id.clone())
-                .with_peer(Some(peer_addr))
+                .with_peer(peer)
                 .with_peer_key(peer_key.clone()),
         );
         let sender_ref = &*sender;
@@ -1103,7 +1271,7 @@ async fn handle_connection_with_kde(
         // phone polling with a permission off would otherwise log each poll.
         let mut denied_said = std::collections::HashSet::new();
         if state::may_receive_pushes(&*sender) {
-            seed_desktop_state(&sender, hypr_ipc, wan_endpoint, local_ip).await;
+            seed_desktop_state(&sender, hypr_ipc, wan_endpoint, road).await;
             seeded = true;
         }
 
@@ -1149,13 +1317,30 @@ async fn handle_connection_with_kde(
                             // Re-read per packet: pairing, unpairing or a key
                             // change applies to a connection already open.
                             use crate::plugins::pair::Standing;
-                            let may_act =
-                                match crate::plugins::pair::standing(&device_id, peer_key.as_ref())
-                                {
+                            let may_act = match road {
+                                Road::Local { .. } => match crate::plugins::pair::standing(
+                                    &device_id,
+                                    peer_key.as_ref(),
+                                ) {
                                     Standing::Paired => true,
                                     Standing::Unpaired => !pairing_required,
                                     Standing::WrongKey(_) => false,
-                                };
+                                },
+                                Road::Internet => crate::plugins::pair::internet_standing(
+                                    &device_id,
+                                    peer_key.as_ref(),
+                                )
+                                .is_ok(),
+                            };
+                            // Pairing stays at home: on the internet road
+                            // nothing pairs, or pairs again (T10a).
+                            if pairing_packet && matches!(road, Road::Internet) {
+                                tracing::info!(
+                                    "Ignored {packet_type} from {device_id}: no pairing over \
+                                     the internet"
+                                );
+                                continue;
+                            }
                             if !pairing_packet && !may_act {
                                 if refusal_said {
                                     tracing::debug!(
@@ -1202,7 +1387,7 @@ async fn handle_connection_with_kde(
                                 tracing::info!(
                                     "Peer paired on this connection; seeding desktop state"
                                 );
-                                seed_desktop_state(&sender, hypr_ipc, wan_endpoint, local_ip).await;
+                                seed_desktop_state(&sender, hypr_ipc, wan_endpoint, road).await;
                                 seeded = true;
                             }
                         }
@@ -1232,8 +1417,6 @@ async fn handle_connection_with_kde(
 
         Ok(())
     }
-    .instrument(conn_span)
-    .await
 }
 
 pub async fn print_capabilities(json: bool, markdown: bool) -> Result<()> {
@@ -1531,7 +1714,7 @@ mod control_tls_tests {
     }
 
     /// Counts the packets the connection handler dispatches to it.
-    struct Counting(Arc<std::sync::atomic::AtomicUsize>);
+    pub(super) struct Counting(pub(super) Arc<std::sync::atomic::AtomicUsize>);
 
     #[async_trait::async_trait]
     impl pocketdesk_core::protocol::kdeconnect::Plugin for Counting {
@@ -1758,5 +1941,188 @@ mod injector_retry_tests {
         assert!(retry_injector_now(None, t), "never tried yet");
         assert!(!retry_injector_now(Some(t), t + Duration::from_secs(3)));
         assert!(retry_injector_now(Some(t), t + INJECTOR_RETRY));
+    }
+}
+
+#[cfg(test)]
+mod internet_control_tests {
+    use super::*;
+    use pocketdesk_core::protocol::ALPN_CONTROL;
+    use tokio::io::AsyncWriteExt;
+
+    async fn endpoint(key: iroh::SecretKey) -> iroh::Endpoint {
+        iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+            .secret_key(key)
+            .alpns(vec![ALPN_CONTROL.to_vec()])
+            .relay_mode(iroh::RelayMode::Disabled)
+            .bind_addr(std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+            .unwrap()
+            .bind()
+            .await
+            .unwrap()
+    }
+
+    /// Counts the pairing packets dispatched to it.
+    struct CountingPairs(Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::protocol::kdeconnect::Plugin for CountingPairs {
+        fn name(&self) -> &'static str {
+            "counting-pairs"
+        }
+        fn incoming_capabilities(&self) -> &'static [&'static str] {
+            &["kdeconnect.pair", "kdeconnect.pocketdesk.pair"]
+        }
+        fn outgoing_capabilities(&self) -> &'static [&'static str] {
+            &[]
+        }
+        async fn handle_packet(
+            &self,
+            _packet: &NetworkPacket,
+            _sender: &dyn pocketdesk_core::protocol::kdeconnect::DeviceSender,
+        ) -> pocketdesk_core::error::Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// A phone dials the internet road as `phone_key`, says it is
+    /// `device_id`, and sends one `packet_type`: how many packets the
+    /// desktop's plugins saw, or the handshake's failure.
+    async fn send_over_iroh(
+        device_id: &str,
+        phone_key: iroh::SecretKey,
+        packet_type: &str,
+    ) -> std::result::Result<usize, String> {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let desktop = endpoint(iroh::SecretKey::generate()).await;
+        let phone = endpoint(phone_key).await;
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut registry = PluginRegistry::default();
+        registry.register(super::control_tls_tests::Counting(count.clone()));
+        registry.register(CountingPairs(count.clone()));
+        let registry = Arc::new(registry);
+        let serve = {
+            let desktop = desktop.clone();
+            tokio::spawn(async move {
+                let conn = desktop
+                    .accept()
+                    .await
+                    .unwrap()
+                    .accept()
+                    .unwrap()
+                    .await
+                    .unwrap();
+                let desktop_identity = Some(
+                    pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
+                        "road-desktop",
+                        "Road Desktop",
+                    )
+                    .as_identity_packet(),
+                );
+                handle_internet_control(conn, desktop_identity, &registry, None, None, true).await
+            })
+        };
+        let conn = phone.connect(desktop.addr(), ALPN_CONTROL).await.unwrap();
+        let (send, recv) = conn.open_bi().await.unwrap();
+        let identity =
+            pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(device_id, "Internet Phone");
+        let shook = pocketdesk_core::protocol::connection::internet_control_handshake(
+            tokio::io::join(recv, send),
+            "desktop",
+            &identity,
+        )
+        .await
+        .map_err(|e| e.to_string());
+        let mut shook = shook;
+        if let Ok(stream) = shook.as_mut() {
+            let mut line = NetworkPacket::new(packet_type)
+                .with_body(serde_json::json!({ "pair": true }))
+                .to_wire()
+                .unwrap();
+            if !line.ends_with(b"\n") {
+                line.push(b'\n');
+            }
+            let _ = stream.write_all(&line).await;
+            let _ = stream.flush().await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let _ = stream.shutdown().await;
+        }
+        let _ = timeout(Duration::from_secs(5), serve).await;
+        conn.close(0u32.into(), b"test");
+        phone.close().await;
+        desktop.close().await;
+        shook.map(|_| count.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    fn paired_with_iroh_key(device_id: &str, key: Option<&iroh::SecretKey>) {
+        pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        let dir = state::state_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        TrustStore::update(state::trust_store_path().unwrap(), |store| {
+            store.trust_device(device_id)
+        })
+        .unwrap();
+        if let Some(key) = key {
+            use pocketdesk_core::local::device_keys::{self, Slot};
+            device_keys::register(&dir, device_id, Slot::Tls, &"1".repeat(64)).unwrap();
+            device_keys::register(&dir, device_id, Slot::Iroh, &key.public().to_string()).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_paired_phone_with_its_iroh_key_reaches_the_plugins() {
+        let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
+        let key = iroh::SecretKey::generate();
+        paired_with_iroh_key(&id, Some(&key));
+        assert_eq!(
+            send_over_iroh(&id, key.clone(), "kdeconnect.ping").await,
+            Ok(1)
+        );
+        // Nothing pairs, or pairs again, over the internet.
+        for pairing in ["kdeconnect.pair", "kdeconnect.pocketdesk.pair"] {
+            assert_eq!(send_over_iroh(&id, key.clone(), pairing).await, Ok(0));
+        }
+    }
+
+    #[test]
+    fn a_phone_on_the_internet_road_receives_pushes_only_with_its_key() {
+        let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
+        let key = iroh::SecretKey::generate();
+        paired_with_iroh_key(&id, Some(&key));
+        let on_road = |key: &iroh::SecretKey| {
+            TcpDeviceSender::from_arc(Arc::new(Mutex::new(tokio::io::sink())), id.clone())
+                .with_peer_key(Some(pocketdesk_core::streaming::PeerKey::Iroh(
+                    key.public().to_string(),
+                )))
+        };
+        assert!(state::may_receive_pushes(&on_road(&key)));
+        assert!(!state::may_receive_pushes(&on_road(
+            &iroh::SecretKey::generate()
+        )));
+    }
+
+    #[tokio::test]
+    async fn another_key_or_no_registered_key_is_refused_before_the_desktop_names_itself() {
+        let refused = |outcome: &std::result::Result<usize, String>| matches!(outcome, Err(e) if e.contains(pocketdesk_core::protocol::HANDSHAKE_REFUSED));
+        let id = format!("internet-{}", uuid::Uuid::new_v4().simple());
+        paired_with_iroh_key(&id, Some(&iroh::SecretKey::generate()));
+        let outcome = send_over_iroh(&id, iroh::SecretKey::generate(), "kdeconnect.ping").await;
+        assert!(refused(&outcome), "someone else's key: {outcome:?}");
+        let unregistered = format!("internet-{}", uuid::Uuid::new_v4().simple());
+        paired_with_iroh_key(&unregistered, None);
+        let outcome = send_over_iroh(
+            &unregistered,
+            iroh::SecretKey::generate(),
+            "kdeconnect.ping",
+        )
+        .await;
+        assert!(refused(&outcome), "no iroh key proved at home: {outcome:?}");
+        let stranger = format!("internet-{}", uuid::Uuid::new_v4().simple());
+        let outcome =
+            send_over_iroh(&stranger, iroh::SecretKey::generate(), "kdeconnect.ping").await;
+        assert!(refused(&outcome), "a stranger: {outcome:?}");
     }
 }

@@ -2,9 +2,11 @@ package dev.pocketdesk.android.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -45,13 +47,14 @@ object ControlLink {
 @Composable
 fun ControlLinkEffect(address: String, controlPort: Int) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
     LaunchedEffect(address, controlPort, lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             withContext(Dispatchers.IO) {
                 var failures = 0
                 while (isActive) {
                     if (ControlLink.needsConnect(RustCore.controlPeer(), address, controlPort)) {
-                        RustCore.connectToPeer(address, controlPort)
+                        RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
                         val up = !ControlLink.needsConnect(RustCore.controlPeer(), address, controlPort)
                         failures = if (up) 0 else failures + 1
                     } else {

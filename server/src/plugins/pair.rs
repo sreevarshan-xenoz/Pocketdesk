@@ -364,6 +364,44 @@ fn decide_control_identity_in(
     }
 }
 
+/// May a control connection over the internet road (iroh, T10a) go by
+/// `device_id`? Only a paired device whose iroh key, registered from a LAN
+/// session its TLS key proved, is the key this connection proved. Nothing
+/// binds by first use here and no pairing runs on this road, whether or not
+/// pairing is required: anyone on the internet can dial it.
+pub(crate) fn internet_standing(
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+) -> std::result::Result<(), pocketdesk_core::local::device_keys::Refusal> {
+    match state::state_dir() {
+        Ok(dir) => internet_standing_in(&dir, device_id, key, is_paired_device(device_id)),
+        Err(_) => Err(pocketdesk_core::local::device_keys::Refusal::StoreUnreadable),
+    }
+}
+
+fn internet_standing_in(
+    dir: &std::path::Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    paired: bool,
+) -> std::result::Result<(), pocketdesk_core::local::device_keys::Refusal> {
+    use pocketdesk_core::local::device_keys::{self, Refusal, Slot, Verdict};
+    if !paired {
+        return Err(Refusal::NotRegistered);
+    }
+    let presented = match key {
+        Some(pocketdesk_core::streaming::PeerKey::Iroh(id)) => Some(id.as_str()),
+        _ => None,
+    };
+    match device_keys::check(dir, device_id, Slot::Iroh, presented) {
+        Verdict::Matches => Ok(()),
+        Verdict::Refused(refusal) => Err(refusal),
+        // Nothing to hold the key to: not this road.
+        Verdict::FirstUse | Verdict::Unbound if presented.is_some() => Err(Refusal::NotRegistered),
+        Verdict::FirstUse | Verdict::Unbound => Err(Refusal::NoKey),
+    }
+}
+
 /// May files move between this desktop and the device a connection goes by,
 /// over a transfer pinned to `key` (phase C)? A paired device must have
 /// proved that very key and had it bound: one with no key bound yet may be
@@ -966,6 +1004,48 @@ mod tests {
         assert!(
             decide_control_identity_in(&dir, "phone", None, true).is_err(),
             "no key, now that the phone has one"
+        );
+    }
+
+    #[test]
+    fn the_internet_road_admits_only_a_paired_phone_with_its_registered_iroh_key() {
+        use pocketdesk_core::local::device_keys::{self, Refusal, Slot};
+        let dir = key_dir("internet");
+        let iroh = PeerKey::Iroh("a".repeat(64));
+        // Paired, with only a LAN key: it has never named an iroh key.
+        assert!(allowed(&dir, &claim(Some(PeerKey::Tls([1; 32])), None)));
+        assert_eq!(
+            internet_standing_in(&dir, "phone", Some(&iroh), true),
+            Err(Refusal::NotRegistered)
+        );
+        device_keys::register(&dir, "phone", Slot::Iroh, &"a".repeat(64)).unwrap();
+        assert_eq!(
+            internet_standing_in(&dir, "phone", Some(&iroh), true),
+            Ok(())
+        );
+        assert_eq!(
+            internet_standing_in(&dir, "phone", Some(&PeerKey::Iroh("b".repeat(64))), true),
+            Err(Refusal::WrongKey),
+            "another iroh key"
+        );
+        assert_eq!(
+            internet_standing_in(&dir, "phone", Some(&PeerKey::Tls([1; 32])), true),
+            Err(Refusal::NoKey),
+            "a TLS key is not this road's"
+        );
+        assert_eq!(
+            internet_standing_in(&dir, "phone", None, true),
+            Err(Refusal::NoKey)
+        );
+        assert_eq!(
+            internet_standing_in(&dir, "phone", Some(&iroh), false),
+            Err(Refusal::NotRegistered),
+            "unpaired, whatever its keys say"
+        );
+        // A device with no keys at all passes nothing here (no first use).
+        assert_eq!(
+            internet_standing_in(&dir, "stranger", Some(&iroh), true),
+            Err(Refusal::NotRegistered)
         );
     }
 

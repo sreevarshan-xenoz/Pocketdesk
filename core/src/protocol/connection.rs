@@ -11,6 +11,15 @@ use uuid;
 /// A control connection: TLS over TCP (phase B), already past the handshake.
 pub type ControlStream = tokio_rustls::client::TlsStream<TcpStream>;
 
+/// Any stream a control connection can run on: TLS over TCP, or a stream of
+/// an iroh connection (the internet road, T10a).
+pub trait ControlIo: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin {}
+
+impl<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin> ControlIo for S {}
+
+/// A control connection on either road, past the handshake.
+pub type ControlDuplex = Box<dyn ControlIo>;
+
 /// The address a control connection reached.
 pub fn control_peer_addr(stream: &ControlStream) -> std::io::Result<std::net::SocketAddr> {
     stream.get_ref().0.peer_addr()
@@ -84,7 +93,7 @@ impl ConnectionManager {
                     port,
                     reason: format!("not an address: {e}"),
                 })?;
-            let mut stream = tokio::time::timeout(
+            let stream = tokio::time::timeout(
                 self.timeout,
                 tokio_rustls::TlsConnector::from(self.tls.clone()).connect(server_name, stream),
             )
@@ -99,78 +108,292 @@ impl ConnectionManager {
                 reason: format!("TLS: {e}"),
             })?;
 
-            // Step 1: Perform Handshake Hello
-            stream
-                .write_all(format!("{}\n", HANDSHAKE_HELLO).as_bytes())
-                .await
-                .map_err(|e| PocketdeskError::Io {
-                    operation: "write handshake hello",
-                    detail: e.to_string(),
-                })?;
-
-            // Step 2: Read handshake response with timeout
-            let mut reader = BufReader::new(stream);
-            let mut response = String::new();
-            tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut response))
-                .await
-                .map_err(|_| PocketdeskError::Timeout {
-                    operation: "handshake response",
-                    duration_ms: 5000,
-                })?
-                .map_err(|e| PocketdeskError::HandshakeFailed {
-                    peer: address.to_string(),
-                    response: e.to_string(),
-                })?;
-
-            if response.trim() != HANDSHAKE_OK {
-                return Err(PocketdeskError::HandshakeFailed {
-                    peer: address.to_string(),
-                    response: response.trim().to_string(),
-                });
-            }
-
-            // Step 3: Read server's identity packet (optional)
-            let mut identity_response = String::new();
-            match tokio::time::timeout(
-                Duration::from_secs(3),
-                reader.read_line(&mut identity_response),
-            )
-            .await
-            {
-                Ok(Ok(_)) if !identity_response.trim().is_empty() => {
-                    debug!("Received server identity: {}", identity_response.trim());
-                }
-                _ => {
-                    debug!("No server identity packet received or timeout");
-                }
-            }
-
-            // Step 4: Send client identity packet
-            let identity_packet = identity.as_identity_packet();
-            let identity_bytes =
-                identity_packet
-                    .to_wire()
-                    .map_err(|e| PocketdeskError::Serialization {
-                        format: "JSON",
-                        detail: e.to_string(),
-                    })?;
-
-            let mut stream = reader.into_inner();
-            stream
-                .write_all(&identity_bytes)
-                .await
-                .map_err(|e| PocketdeskError::Io {
-                    operation: "send identity packet",
-                    detail: e.to_string(),
-                })?;
-            stream.flush().await.map_err(|e| PocketdeskError::Io {
-                operation: "flush identity packet",
-                detail: e.to_string(),
-            })?;
-
-            Ok(stream)
+            control_handshake(stream, address, identity).await
         }
         .instrument(span)
         .await
+    }
+}
+
+/// The control channel's opening, on a stream already secured (TLS over
+/// TCP, or an iroh stream): our HELLO, the desktop's OK and identity, then
+/// ours. `peer` names the desktop in errors.
+pub async fn control_handshake<S>(stream: S, peer: &str, identity: &DeviceIdentity) -> Result<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let address = peer;
+    let mut stream = stream;
+    // Step 1: Perform Handshake Hello
+    stream
+        .write_all(format!("{}\n", HANDSHAKE_HELLO).as_bytes())
+        .await
+        .map_err(|e| PocketdeskError::Io {
+            operation: "write handshake hello",
+            detail: e.to_string(),
+        })?;
+
+    // Step 2: Read handshake response with timeout
+    let mut reader = BufReader::new(stream);
+    let mut response = String::new();
+    tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut response))
+        .await
+        .map_err(|_| PocketdeskError::Timeout {
+            operation: "handshake response",
+            duration_ms: 5000,
+        })?
+        .map_err(|e| PocketdeskError::HandshakeFailed {
+            peer: address.to_string(),
+            response: e.to_string(),
+        })?;
+
+    if response.trim() != HANDSHAKE_OK {
+        return Err(PocketdeskError::HandshakeFailed {
+            peer: address.to_string(),
+            response: response.trim().to_string(),
+        });
+    }
+
+    // Step 3: Read server's identity packet (optional)
+    let mut identity_response = String::new();
+    match tokio::time::timeout(
+        Duration::from_secs(3),
+        reader.read_line(&mut identity_response),
+    )
+    .await
+    {
+        Ok(Ok(_)) if !identity_response.trim().is_empty() => {
+            debug!("Received server identity: {}", identity_response.trim());
+        }
+        _ => {
+            debug!("No server identity packet received or timeout");
+        }
+    }
+
+    // Step 4: Send client identity packet
+    let identity_packet = identity.as_identity_packet();
+    let identity_bytes = identity_packet
+        .to_wire()
+        .map_err(|e| PocketdeskError::Serialization {
+            format: "JSON",
+            detail: e.to_string(),
+        })?;
+
+    let mut stream = reader.into_inner();
+    stream
+        .write_all(&identity_bytes)
+        .await
+        .map_err(|e| PocketdeskError::Io {
+            operation: "send identity packet",
+            detail: e.to_string(),
+        })?;
+    stream.flush().await.map_err(|e| PocketdeskError::Io {
+        operation: "flush identity packet",
+        detail: e.to_string(),
+    })?;
+
+    Ok(stream)
+}
+
+/// The control channel's opening over the internet road (T10a). The desktop
+/// names itself only once it has admitted the phone: our HELLO, its OK, our
+/// identity, then its identity, which is the admission. A refusal
+/// ([`super::HANDSHAKE_REFUSED`]) or a closed stream fails the handshake, so
+/// a phone the desktop will not take never counts as connected. Lines are
+/// read a byte at a time: the desktop's pushes follow its identity at once,
+/// and a buffered reader would swallow them.
+pub async fn internet_control_handshake<S>(
+    mut stream: S,
+    peer: &str,
+    identity: &DeviceIdentity,
+) -> Result<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let failed = |response: String| PocketdeskError::HandshakeFailed {
+        peer: peer.to_string(),
+        response,
+    };
+    stream
+        .write_all(format!("{HANDSHAKE_HELLO}\n").as_bytes())
+        .await
+        .map_err(|e| PocketdeskError::Io {
+            operation: "write handshake hello",
+            detail: e.to_string(),
+        })?;
+    let ok = read_line_unbuffered(&mut stream, Duration::from_secs(8))
+        .await
+        .map_err(failed)?;
+    if ok.trim() != HANDSHAKE_OK {
+        return Err(failed(ok.trim().to_string()));
+    }
+    let identity_bytes =
+        identity
+            .as_identity_packet()
+            .to_wire()
+            .map_err(|e| PocketdeskError::Serialization {
+                format: "JSON",
+                detail: e.to_string(),
+            })?;
+    stream
+        .write_all(&identity_bytes)
+        .await
+        .map_err(|e| PocketdeskError::Io {
+            operation: "send identity packet",
+            detail: e.to_string(),
+        })?;
+    stream.flush().await.map_err(|e| PocketdeskError::Io {
+        operation: "flush identity packet",
+        detail: e.to_string(),
+    })?;
+    let admitted = read_line_unbuffered(&mut stream, Duration::from_secs(10))
+        .await
+        .map_err(failed)?;
+    match super::kdeconnect::NetworkPacket::from_wire(admitted.trim()) {
+        Ok(packet) if packet.packet_type == "kdeconnect.identity" => {
+            debug!("Admitted over the internet");
+            Ok(stream)
+        }
+        _ => Err(failed(admitted.trim().to_string())),
+    }
+}
+
+/// One line, read a byte at a time within `deadline`, at most 64 KiB.
+async fn read_line_unbuffered<S>(
+    stream: &mut S,
+    deadline: Duration,
+) -> std::result::Result<String, String>
+where
+    S: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    const MAX: usize = 64 * 1024;
+    tokio::time::timeout(deadline, async {
+        let mut line = Vec::new();
+        loop {
+            match stream.read_u8().await {
+                Ok(b'\n') => break,
+                Ok(byte) if line.len() < MAX => line.push(byte),
+                Ok(_) => return Err("a handshake line too long".to_string()),
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    return Err("the desktop closed the connection".to_string());
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        String::from_utf8(line).map_err(|_| "a handshake line that is not text".to_string())
+    })
+    .await
+    .map_err(|_| "no answer in time".to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncReadExt;
+
+    #[tokio::test]
+    async fn the_handshake_runs_on_any_stream() {
+        let (phone, desktop) = tokio::io::duplex(64 * 1024);
+        let identity = DeviceIdentity::new("duplex-phone", "Duplex Phone");
+        let desktop = tokio::spawn(async move {
+            let mut desktop = BufReader::new(desktop);
+            let mut hello = String::new();
+            desktop.read_line(&mut hello).await.unwrap();
+            assert_eq!(hello.trim(), HANDSHAKE_HELLO);
+            let inner = desktop.get_mut();
+            inner
+                .write_all(
+                    format!("{HANDSHAKE_OK}\n{{\"type\":\"kdeconnect.identity\"}}\n").as_bytes(),
+                )
+                .await
+                .unwrap();
+            let mut identity = String::new();
+            desktop.read_line(&mut identity).await.unwrap();
+            identity
+        });
+        let _stream = control_handshake(phone, "duplex", &identity).await.unwrap();
+        let sent = desktop.await.unwrap();
+        assert!(sent.contains("duplex-phone"), "our identity: {sent}");
+    }
+
+    /// The desktop's side of the internet road's opening, answering
+    /// `after_identity` once the phone has named itself.
+    fn internet_desktop(
+        desktop: tokio::io::DuplexStream,
+        after_identity: &'static str,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut desktop = BufReader::new(desktop);
+            let mut hello = String::new();
+            desktop.read_line(&mut hello).await.unwrap();
+            assert_eq!(hello.trim(), HANDSHAKE_HELLO);
+            desktop
+                .get_mut()
+                .write_all(format!("{HANDSHAKE_OK}\n").as_bytes())
+                .await
+                .unwrap();
+            let mut phone = String::new();
+            desktop.read_line(&mut phone).await.unwrap();
+            assert!(phone.contains("road-phone"));
+            desktop
+                .get_mut()
+                .write_all(after_identity.as_bytes())
+                .await
+                .unwrap();
+            // Held open: only what was said decides.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        })
+    }
+
+    #[tokio::test]
+    async fn the_internet_road_counts_only_an_admitted_phone_as_connected() {
+        let identity = DeviceIdentity::new("road-phone", "Road Phone");
+        let (phone, desktop) = tokio::io::duplex(64 * 1024);
+        internet_desktop(
+            desktop,
+            "{\"type\":\"kdeconnect.identity\"}\n{\"type\":\"kdeconnect.pocketdesk.endpoint\"}\n",
+        );
+        let mut stream = internet_control_handshake(phone, "desktop", &identity)
+            .await
+            .expect("admitted");
+        // The push right behind the identity is still there to read.
+        let mut next = String::new();
+        BufReader::new(&mut stream)
+            .read_line(&mut next)
+            .await
+            .unwrap();
+        assert!(next.contains("pocketdesk.endpoint"), "{next}");
+
+        let (phone, desktop) = tokio::io::duplex(64 * 1024);
+        internet_desktop(desktop, "POCKETDESK_ERR 1 refused\n");
+        assert!(matches!(
+            internet_control_handshake(phone, "desktop", &identity).await,
+            Err(PocketdeskError::HandshakeFailed { .. })
+        ));
+
+        let (phone, desktop) = tokio::io::duplex(64 * 1024);
+        let closing = internet_desktop(desktop, "");
+        closing.abort();
+        assert!(
+            internet_control_handshake(phone, "desktop", &identity)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_in_place_of_ok_fails_the_handshake() {
+        let (phone, mut desktop) = tokio::io::duplex(4096);
+        let identity = DeviceIdentity::new("duplex-phone", "Duplex Phone");
+        tokio::spawn(async move {
+            let mut hello = [0u8; 64];
+            let _ = desktop.read(&mut hello).await;
+            desktop.write_all(b"POCKETDESK_ERR 1\n").await.unwrap();
+        });
+        assert!(matches!(
+            control_handshake(phone, "duplex", &identity).await,
+            Err(PocketdeskError::HandshakeFailed { .. })
+        ));
     }
 }

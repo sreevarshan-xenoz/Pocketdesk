@@ -58,7 +58,7 @@ Three things worth knowing before you pair a phone. [SECURITY.md](SECURITY.md) h
 | Your own relay | a machine the internet can reach | on the relay's machine: one port (plain, 3340), or 80 and 443 (HTTPS) |
 | Waking a sleeping computer from outside | Wake-on-LAN set up on the computer | yes, one UDP port to the computer; or none, waking through another always-on computer the phone can reach ([Wake from the phone](#kde-connect-integration)) |
 
-**Over the internet path, only the session crosses:** the picture, sound, input and the phone's mic. The clipboard, files, the remote file browser, notifications both ways and texts use the control channel, which needs the same network or Tailscale.
+**Over the internet path, everything but files crosses:** the session (picture, sound, input, the phone's mic), and, when the phone cannot reach the computer's control port, the control channel too: the clipboard (text), the phone's notifications, texts, battery and media, links both ways, and the computer's pushes. Only the phone that registered its key at home may use it, and nothing pairs over it. Files, the remote file browser's downloads and image clipboard still need the same network or Tailscale.
 
 Tailscale is not required. It carries everything, adds a second encrypted layer and closes the first-contact gap below, which is why it is the advice for networks you do not trust.
 
@@ -81,7 +81,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 | Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
 | Remote input | uinput (Wayland), XTEST (X11) | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
-| Clipboard, text and images (same network or Tailscale) | `wl-clipboard` (Wayland only) | Win32 clipboard |
+| Clipboard: text anywhere, images on the same network or Tailscale | `wl-clipboard` (Wayland only) | Win32 clipboard |
 | Files both ways, remote browsing (same network or Tailscale) | yes | yes |
 | Desktop sound on the phone | PipeWire | WASAPI loopback |
 | The phone's mic on the desktop | a PipeWire source, "Pocketdesk Mic" | needs a virtual audio cable (VB-CABLE) |
