@@ -802,6 +802,7 @@ impl StreamingServer {
         // at most `MAX_VIDEO_IN_FLIGHT` frames on the wire at once
         let telemetry_bytes_tx = telemetry.as_ref().map(|t| t.1.clone());
         let transport_cancel = cancel.clone();
+        let transport_fps = self.config.fps;
         let transport_span = tracing::info_span!("video_transport");
         tasks.spawn(async move {
             info!("Transport task started");
@@ -825,6 +826,11 @@ impl StreamingServer {
                     // the most recent keyframe so the client renders live
                     // frames instead of a stale backlog.
                     Some(first) = packet_rx.recv() => {
+                        // A round trip's worth of frames on the wire.
+                        in_flight.set_max(in_flight_window(
+                            transport_fps,
+                            conn_for_transport.stats().rtt,
+                        ));
                         let mut batch = vec![first];
                         while let Ok(next) = packet_rx.try_recv() {
                             batch.push(next);
@@ -1565,48 +1571,66 @@ async fn send_audio_packet(
     }
 }
 
-/// How many video frames may be on the wire, sent and not yet delivered,
-/// before the next waits. Without a bound, a slow link took every frame into
-/// the connection's send buffer (megabytes), where nothing could trim the
-/// stale ones and the phone waited behind them; a quarter-second of frames
-/// at 30 fps is enough not to throttle a healthy link's round trips.
+/// The fewest video frames that may be on the wire, sent and not yet
+/// delivered, before the next waits. Without a bound, a slow link took every
+/// frame into the connection's send buffer (megabytes), where nothing could
+/// trim the stale ones and the phone waited behind them.
 const MAX_VIDEO_IN_FLIGHT: usize = 8;
+/// The most, whatever the round trip measures.
+const MAX_IN_FLIGHT_CEILING: usize = 64;
 
-/// The video frames on the wire ([`MAX_VIDEO_IN_FLIGHT`]).
+/// How many frames to keep on the wire at `fps` over a path whose round
+/// trip is `rtt`: a frame counts as delivered about one round trip (plus
+/// the peer's ack delay) after it is sent, so a window of a round trip's
+/// frames does not throttle a healthy far link, and a slow one still fills
+/// it and waits.
+fn in_flight_window(fps: u32, rtt: Duration) -> usize {
+    let per_trip = (rtt + Duration::from_millis(50)).as_secs_f64() * f64::from(fps);
+    (per_trip.ceil() as usize).clamp(MAX_VIDEO_IN_FLIGHT, MAX_IN_FLIGHT_CEILING)
+}
+
+/// The video frames on the wire ([`in_flight_window`]).
 struct InFlight {
     max: usize,
-    pending: std::collections::VecDeque<Delivered>,
+    pending: Vec<Delivered>,
 }
 
 impl InFlight {
     fn new(max: usize) -> Self {
         Self {
             max: max.max(1),
-            pending: std::collections::VecDeque::new(),
+            pending: Vec::new(),
         }
     }
 
+    fn set_max(&mut self, max: usize) {
+        self.max = max.max(1);
+    }
+
     /// Wait for room for one more frame; false when `cancel` ended the wait.
+    /// Any frame delivered makes room, not only the oldest: one repairing a
+    /// lost packet must not hold up those behind it already delivered.
     async fn admit(&mut self, cancel: &CancellationToken) -> bool {
-        while self.pending.len() >= self.max {
-            // Waited on where it is, and removed only once delivered: a
-            // wait given up on must not lose count of a frame on the wire.
-            let Some(oldest) = self.pending.front_mut() else {
-                break;
-            };
-            tokio::select! {
-                biased;
-                _ = cancel.cancelled() => return false,
-                _ = oldest => {}
+        let max = self.max;
+        let pending = &mut self.pending;
+        let room = std::future::poll_fn(|cx| {
+            pending.retain_mut(|delivered| delivered.as_mut().poll(cx).is_pending());
+            if pending.len() < max {
+                std::task::Poll::Ready(())
+            } else {
+                std::task::Poll::Pending
             }
-            self.pending.pop_front();
+        });
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => false,
+            _ = room => true,
         }
-        !cancel.is_cancelled()
     }
 
     /// A frame just sent, delivered when `delivered` completes.
     fn push(&mut self, delivered: Delivered) {
-        self.pending.push_back(delivered);
+        self.pending.push(delivered);
     }
 }
 
@@ -1615,6 +1639,43 @@ mod tests {
     /// The transport keeps at most so many video frames on the wire: on a
     /// slow link the next waits for the oldest to be delivered, so frames
     /// queue where they can be trimmed, not inside the connection.
+    #[tokio::test]
+    async fn a_later_frame_delivered_makes_room_while_the_oldest_is_repaired() {
+        let cancel = CancellationToken::new();
+        let mut in_flight = InFlight::new(2);
+        let (_oldest_done, oldest) = tokio::sync::oneshot::channel::<()>();
+        let (later_done, later) = tokio::sync::oneshot::channel::<()>();
+        in_flight.push(Box::pin(async move {
+            let _ = oldest.await;
+        }));
+        in_flight.push(Box::pin(async move {
+            let _ = later.await;
+        }));
+        later_done.send(()).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), in_flight.admit(&cancel))
+                .await
+                .expect("room once any frame is delivered, not only the oldest")
+        );
+    }
+
+    #[test]
+    fn the_window_covers_a_round_trip_of_frames() {
+        // A LAN round trip: the floor.
+        assert_eq!(
+            in_flight_window(60, Duration::from_millis(5)),
+            MAX_VIDEO_IN_FLIGHT
+        );
+        // A relayed one: enough frames for the round trip plus the ack delay.
+        assert_eq!(in_flight_window(60, Duration::from_millis(250)), 18);
+        assert!(in_flight_window(30, Duration::from_millis(150)) >= 6);
+        // Never unbounded, whatever the measurement says.
+        assert_eq!(
+            in_flight_window(240, Duration::from_secs(10)),
+            MAX_IN_FLIGHT_CEILING
+        );
+    }
+
     #[tokio::test]
     async fn a_frame_waits_while_the_link_still_carries_the_last_ones() {
         let cancel = CancellationToken::new();
