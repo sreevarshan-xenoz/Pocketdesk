@@ -235,6 +235,13 @@ fun FileOffersEffect(address: String, controlPort: Int) {
                 for (i in 0 until list.length()) {
                     val offer = list.optJSONObject(i) ?: continue
                     val id = offer.optString("id").ifEmpty { continue }
+                    // A file of a folder whose place the phone may not make
+                    // is declined with the reason, never saved elsewhere.
+                    val refused = offer.optString("folderRefused")
+                    if (refused.isNotEmpty()) {
+                        withContext(Dispatchers.IO) { RustCore.declineOffer(address, controlPort, id, refused) }
+                        continue
+                    }
                     TransferService.receive(
                         context,
                         address,

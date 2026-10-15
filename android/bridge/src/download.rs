@@ -972,8 +972,14 @@ mod tests {
             serde_json::from_str(&crate::take_file_offers_json()).unwrap();
         assert_eq!(taken[0]["path"], serde_json::json!(["day 2", "a.jpg"]));
         assert_eq!(taken[0]["folder"], "Trip");
-        assert!(taken[1].get("path").is_none(), "an unsafe place is dropped");
-        assert_eq!(taken[1]["name"], "x");
+        assert!(
+            taken[1].get("path").is_none(),
+            "an unsafe place is never kept"
+        );
+        assert!(
+            taken[1]["folderRefused"].is_string(),
+            "and the offer is to be declined"
+        );
     }
 
     #[test]

@@ -272,12 +272,20 @@ pub(crate) fn queue_file_offer(body: &serde_json::Value) {
     {
         entry["source"] = serde_json::json!(source);
     }
-    // A file of a folder send (T6b), kept only when every name in its place
-    // is one the phone may make; else it arrives as a plain file.
-    if let Some(folder) = folder_part(body) {
-        entry["folderId"] = serde_json::json!(folder.0);
-        entry["folder"] = serde_json::json!(folder.1);
-        entry["path"] = serde_json::json!(folder.2);
+    // A file of a folder send (T6b): its place, when every name in it is one
+    // the phone may make. One that is not is refused, never saved flat or
+    // renamed: the app declines it with the reason.
+    if body.get("folderId").is_some() {
+        match folder_part(body) {
+            Some(folder) => {
+                entry["folderId"] = serde_json::json!(folder.0);
+                entry["folder"] = serde_json::json!(folder.1);
+                entry["path"] = serde_json::json!(folder.2);
+            }
+            None => {
+                entry["folderRefused"] = serde_json::json!("an unsafe place in a folder");
+            }
+        }
     }
     let mut q = PENDING_OFFERS.lock().unwrap_or_else(|e| e.into_inner());
     if q.iter().any(|o| o.get("id") == entry.get("id")) {
