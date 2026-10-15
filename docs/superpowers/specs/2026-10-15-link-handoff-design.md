@@ -22,12 +22,12 @@ T8 in the roadmap: KDE Connect's best-loved small features. Link handoff is the 
 
 ## Wire
 
-- Phone → computer: `kdeconnect.share.request` `{url}` (KDE Connect's own form), under the Links permission.
-- Computer → phone: the same packet type, pushed to a phone in a session.
+- Both ways: `kdeconnect.pocketdesk.link` `{url}`, under the Links permission. Not KDE Connect's `share.request {url}`: the permission gate goes by packet type, and `share.request` is already under Files, so a link riding it would need both.
+- The old `share.request {url}` branch on the desktop goes: no Pocketdesk phone sends it, and all it did was send a "URL Received" notification back to the phone that shared it.
 
 ## Tests
 
-- core: the URL check (schemes, length, credentials, whitespace); `share.request` with a `url` maps to Links.
+- core: the URL check (schemes, length, credentials, whitespace); `kdeconnect.pocketdesk.link` maps to Links.
 - server: a link is opened (through a fake opener), refused by the check, by the permission, by the setting (shown instead), and by the rate limit.
 - local API: `link` to a phone in a session queues the push; refusals with exit codes.
 - bridge: a pushed link is kept for the app; the phone's send.
