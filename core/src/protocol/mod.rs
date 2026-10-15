@@ -4,6 +4,7 @@ pub mod connection;
 pub mod kdeconnect;
 pub mod partials;
 pub mod permissions;
+pub mod relpath;
 pub mod transfer;
 pub mod v2;
 
