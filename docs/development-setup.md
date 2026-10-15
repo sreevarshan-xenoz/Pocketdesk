@@ -98,17 +98,28 @@ state (pairing, trust store, certs, logs) in `%LOCALAPPDATA%\pocketdesk\`.
 - `android/bridge` — Rust cdylib (`libpocketdesk_android_bridge.so`) loaded via JNI by
   `dev.pocketdesk.android.bridge.RustCore`.
 
-Full local build (verified working: SDK Platform 36/37, Build-Tools 36/37, NDK 29):
+Full local build (SDK Platform 37, Build-Tools 36/37, an NDK of r27 or later, cargo-ndk 4.1.2):
 
 ```bash
-# 1. Cross-compile the bridge into the app's jniLibs
-cd android/bridge
-cargo ndk -t arm64-v8a -o ../app/src/main/jniLibs build
+# 1. Cross-compile the bridge into the app's jniLibs (a stripped release
+#    build, as CI, releases and F-Droid make it)
+sh android/bridge/build-android.sh
+# On a Windows box whose default Rust is the GNU one:
+#   POCKETDESK_RUST_TOOLCHAIN=stable-x86_64-pc-windows-gnu sh android/bridge/build-android.sh
 
 # 2. Build the APK (picks the .so up automatically)
 cd android
 ./gradlew assembleDebug   # APK: app/build/outputs/apk/debug/app-debug.apk
 ```
+
+The script pins the Rust toolchain (`android/bridge/rust-toolchain-version`) and,
+for CI and F-Droid, the NDK (`android/bridge/ndk-version`, through
+`ANDROID_NDK_HOME`); without `ANDROID_NDK_HOME`, cargo-ndk takes the newest NDK it
+finds. It builds with `--locked`, one codegen unit, stripped symbols and the
+build's paths mapped away, so the library does not depend on the machine. For a
+quicker debug build while working on the bridge,
+`cd android/bridge && cargo ndk -t arm64-v8a -o ../app/src/main/jniLibs build`
+still works.
 
 Notes:
 
