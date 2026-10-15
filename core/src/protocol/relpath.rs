@@ -80,29 +80,6 @@ pub fn path_problem(path: &[String]) -> Option<String> {
     path.iter().find_map(|c| component_problem(c))
 }
 
-/// The paths of one folder transfer, refusing a second path that would
-/// name the same file on a computer that ignores case (Windows), so one
-/// file can never overwrite another of the same folder.
-#[derive(Debug, Default)]
-pub struct Seen {
-    folded: std::collections::HashSet<Vec<String>>,
-}
-
-impl Seen {
-    /// Take `path`, or say why not: a bad component, or a path already
-    /// taken by another file of this folder.
-    pub fn take(&mut self, path: &[String]) -> Result<(), String> {
-        if let Some(problem) = path_problem(path) {
-            return Err(problem);
-        }
-        let folded: Vec<String> = path.iter().map(|c| c.to_lowercase()).collect();
-        if !self.folded.insert(folded) {
-            return Err(format!("{} is already in this folder", path.join("/")));
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,14 +142,5 @@ mod tests {
         assert!(path_problem(&deep[..MAX_DEPTH]).is_none());
         assert!(component_problem(&"a".repeat(MAX_COMPONENT_BYTES + 1)).is_some());
         assert!(component_problem(&"a".repeat(MAX_COMPONENT_BYTES)).is_none());
-    }
-
-    #[test]
-    fn two_paths_that_differ_only_by_case_are_one_file() {
-        let mut seen = Seen::default();
-        assert!(seen.take(&path(&["Docs", "Report.pdf"])).is_ok());
-        assert!(seen.take(&path(&["docs", "report.PDF"])).is_err());
-        assert!(seen.take(&path(&["docs", "report (1).pdf"])).is_ok());
-        assert!(seen.take(&path(&["..", "x"])).is_err());
     }
 }
