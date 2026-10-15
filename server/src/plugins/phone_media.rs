@@ -129,7 +129,10 @@ pub async fn run_watcher() {
         let now = pocketdesk_core::local::pin::now_unix();
         for press in pocketdesk_core::local::phone_media::take_presses(&dir, now) {
             let clients = crate::state::clone_clients().await;
-            let allowed = crate::plugins::pair::permits(&press.device_id, PHONE_MEDIA);
+            // Paired too: the permissions of an id that is not paired are
+            // the defaults, and a phone just unpaired may still be connected.
+            let allowed = crate::plugins::pair::is_paired_device(&press.device_id)
+                && crate::plugins::pair::permits(&press.device_id, PHONE_MEDIA);
             if let Err(reason) = push(&press, &clients, allowed).await {
                 tracing::info!("A media press for {} not sent: {reason}", press.device_id);
             }
