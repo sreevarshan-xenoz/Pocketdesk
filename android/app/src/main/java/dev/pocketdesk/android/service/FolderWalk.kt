@@ -77,11 +77,21 @@ object FolderWalk {
             .take(1000)
             .firstOrNull { !taken(it) } ?: "$base (${System.currentTimeMillis()})"
 
+    /**
+     * The characters that change how a name reads without being seen
+     * (`kdeconnect::is_invisible_format` on the computer): bidi controls and
+     * zero-width ones.
+     */
+    private fun isInvisibleFormat(c: Char): Boolean =
+        c == '\u061C' || c in '\u200B'..'\u200F' || c in '\u202A'..'\u202E' ||
+            c in '\u2060'..'\u2069' || c == '\uFEFF'
+
     /** Whether the computer takes [name] as one name in a path. */
     fun sendable(name: String): Boolean {
         if (name.isEmpty() || name == "." || name == "..") return false
         if (name.toByteArray(Charsets.UTF_8).size > 255) return false
         if (name.any { it.isISOControl() || it in "/\\:<>\"|?*" }) return false
+        if (name.any(::isInvisibleFormat)) return false
         if (name.endsWith(" ") || name.endsWith(".")) return false
         val stem = name.substringBefore('.').trimEnd().uppercase()
         if (stem in setOf("CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$")) return false
