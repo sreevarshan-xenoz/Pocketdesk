@@ -462,4 +462,6 @@
     <string name="media_play">Play</string>
     <string name="media_pause">Pause</string>
     <string name="media_next">Next</string>
+    <string name="settings_phone_media">My media on the computer</string>
+    <string name="settings_phone_media_summary">During a session the computer shows what this phone plays, and can pause and skip it. Needs notification access</string>
 </resources>

@@ -9,6 +9,7 @@ mod api;
 mod download;
 mod links;
 mod logcat;
+mod media_presses;
 mod rates;
 mod session;
 
@@ -988,6 +989,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendLin
     let address = jstring_to_string(&mut env, &address);
     let url = jstring_to_string(&mut env, &url);
     let json = envelope_unit(RUNTIME.block_on(links::send_link(address, port as u16, url)));
+    to_jstring(&mut env, json)
+}
+
+/// Presses for the phone's player from the computer since the last call
+/// (T8d), as a JSON array of commands: `{"ok": "[...]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeMediaPresses(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(media_presses::take_json()));
     to_jstring(&mut env, json)
 }
 

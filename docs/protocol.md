@@ -191,6 +191,8 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 | Texts (SMS) | `kdeconnect.pocketdesk.sms_sent` | phone → desktop | `{id, ok, error}` | Texts | same |
 | Battery | `kdeconnect.battery.request` / `kdeconnect.battery` | phone → desktop / back | The desktop's charge, whether it is charging, `noBattery` | Always | `server/src/plugins/battery.rs` |
 | Phone battery | `kdeconnect.battery` | phone → desktop | The phone's own `{currentCharge, isCharging, thresholdEvent}`, sent during a session on its control link: at the start, on a change, and every 5 minutes (phone Settings "Share battery with the computer"). Taken only from a paired phone; kept in `phone_status.json`; a phone not charging at 15 % or less gets one low battery notification (`phone_battery_alerts`), again only after it was above 20 % and never twice in 10 minutes | Always | `server/src/plugins/phone_battery.rs`, `android/app/.../status/BatteryEffect.kt` |
+| Phone media | `kdeconnect.pocketdesk.phone_media` | phone → desktop | What the phone plays: `{title, artist, app, isPlaying, canPlayPause, canNext, canPrevious}`, or `{}` when nothing does. Sent during a session on its control link, on a change, while Pocketdesk is in front, with the phone's "My media on the computer" on (it needs notification access). Taken only from a paired phone; shown only while it is connected with Media on; text cut to one line of 200 characters | Media | `server/src/plugins/phone_media.rs`, `android/app/.../media/PhoneMediaEffect.kt` |
+| Phone media | `kdeconnect.pocketdesk.phone_media_control` | desktop → phone | `{command: playPause/next/previous}` from the desktop app's Sessions tab; sent only to a paired phone with Media on; the phone acts only with its setting on, on the session it reported, within 10 s | Media | same, `android/bridge/src/media_presses.rs` |
 | Monitors | `kdeconnect.pocketdesk.monitors` | both | Monitor list | Always | `server/src/plugins/monitors.rs` |
 | Windows | `kdeconnect.pocketdesk.windows` | both | Window list: address, **title**, class, pid, geometry | Always | `server/src/plugins/windows.rs`, `server/src/hyprland.rs` |
 | Workspace HUD | `kdeconnect.pocketdesk.hyprland.state`, `.hyprland.event` | desktop → phone | Workspaces, windows (with titles) and geometry. Pushed at registration and every 4 s, and on events | — | `server/src/hypr_events.rs`, `server/src/service.rs` |
@@ -381,6 +383,8 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/pending_approvals.json`, `approvals/` | Held sessions (device id, peer address) and the owner's answers | Default | `core/src/local/approval.rs` |
 | `<state>/received.json` | The last 50 received files: name, path, size, time, sending device | Default | `core/src/local/received.rs` |
 | `<state>/outbox/`, `sent.json` | Files the app sends to a phone, and their state | Default | `core/src/local/outbox.rs`, `sent.rs` |
+| `<state>/phone_media.json` | What each connected phone with Media on plays (title, artist, app). Listening history: written owner-only, at most every 2 s, emptied at start | Owner-only | `core/src/local/phone_media.rs`, `server/src/plugins/phone_media.rs` |
+| `<state>/phone_media_out/` | The desktop app's presses for a phone's player, one file each, taken within 10 s | Default | `core/src/local/phone_media.rs` |
 | `<state>/phone_status.json` | Each paired phone's last battery report: charge, charging, when it came. Written by the server at most every 5 s; a phone no longer paired is dropped | Default | `core/src/local/phone_status.rs`, `server/src/plugins/phone_battery.rs` |
 | `<state>/links_out/` | Links the app or `pocketdesk link` hands to a phone, one file each, taken within 60 s | Default | `core/src/local/links.rs` |
 | `<state>/sms.json`, `sms_outbox/` | Texts and replies (newest 1000 by default) | Owner-only | `core/src/local/sms.rs` |
@@ -424,6 +428,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | Transfer pace | 10 s to connect, 30 s idle, at least 32 KiB/s | `share.rs` |
 | Clipboard image | 32 MiB PNG, 40 megapixels | `core/src/protocol/clipboard.rs`, `server/src/platform/clip_image.rs` |
 | Phone notifications shown | 20 a minute by default (`notifications_per_minute`) | `core/src/local/config.rs` |
+| Phone media | 64 phones kept; text one line of 200 characters; 8 presses waiting on the phone, each for 10 s; checked every 2 s | `server/src/plugins/phone_media.rs`, `core/src/protocol/phone_media.rs`, `android/bridge/src/media_presses.rs` |
 | Links | 5 a minute per phone opened on the desktop; 2048 bytes; at most 16 waiting on the phone | `server/src/plugins/links.rs`, `core/src/protocol/link.rs`, `android/bridge/src/links.rs` |
 | Text replies from the phone | 5 a minute; at most 2000 characters | `android/app/.../notify/SmsReplyRule.kt`, `core/src/local/sms.rs` |
 | QUIC idle and keepalive | 45 s idle, 15 s keepalive | `core/src/streaming/transport.rs` |

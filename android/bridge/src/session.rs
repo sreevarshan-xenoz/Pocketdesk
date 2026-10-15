@@ -402,6 +402,7 @@ pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
     packet_type == crate::download::FILE_OFFER
         || packet_type == crate::download::FOLDER_FETCH_REPLY
         || packet_type == pocketdesk_core::protocol::link::LINK
+        || packet_type == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
 }
 
 /// Drain the queued offers as a JSON array.

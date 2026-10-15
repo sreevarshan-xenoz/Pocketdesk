@@ -26,6 +26,7 @@ object Prefs {
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_SHARE_BATTERY = "share_battery"
+    private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
@@ -124,6 +125,14 @@ object Prefs {
 
     fun setShareBattery(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_SHARE_BATTERY, enabled) }
+    }
+
+    /** Whether a session tells the computer what this phone plays and takes its presses (T8d). Off by default. */
+    fun phoneMediaOnComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_PHONE_MEDIA, false)
+
+    fun setPhoneMediaOnComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_PHONE_MEDIA, enabled) }
     }
 
     fun retryTransfers(ctx: Context): Boolean =

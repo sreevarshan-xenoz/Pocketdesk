@@ -29,10 +29,12 @@ pub enum Capability {
     Texts,
     /// Open a link on the other end (roadmap T8a).
     Links,
+    /// Show what the phone plays here, and control it from here (roadmap T8d).
+    Media,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 10] = [
+    pub const ALL: [Capability; 11] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -43,6 +45,7 @@ impl Capability {
         Capability::Notifications,
         Capability::Texts,
         Capability::Links,
+        Capability::Media,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -88,6 +91,7 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         "kdeconnect.notification" => Capability::Notifications,
         "kdeconnect.sms.messages" | "kdeconnect.pocketdesk.sms_sent" => Capability::Texts,
         crate::protocol::link::LINK => Capability::Links,
+        crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,
         _ => return None,
     })
 }
@@ -115,6 +119,8 @@ pub struct DevicePermissions {
     pub texts: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub links: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -133,6 +139,7 @@ impl DevicePermissions {
             Capability::Notifications => &mut self.notifications,
             Capability::Texts => &mut self.texts,
             Capability::Links => &mut self.links,
+            Capability::Media => &mut self.media,
         }
     }
 
@@ -148,6 +155,7 @@ impl DevicePermissions {
             Capability::Notifications => self.notifications,
             Capability::Texts => self.texts,
             Capability::Links => self.links,
+            Capability::Media => self.media,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -184,6 +192,18 @@ mod tests {
             capability_for("kdeconnect.pocketdesk.folder_fetch"),
             Some(Capability::Files)
         );
+    }
+
+    #[test]
+    fn the_phones_media_needs_the_media_permission_on_by_default() {
+        assert_eq!(
+            capability_for(crate::protocol::phone_media::PHONE_MEDIA),
+            Some(Capability::Media)
+        );
+        let mut permissions = DevicePermissions::default();
+        assert!(permissions.allows(Capability::Media));
+        permissions.set(Capability::Media, false);
+        assert!(!permissions.allows(Capability::Media));
     }
 
     #[test]

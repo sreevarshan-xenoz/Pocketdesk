@@ -27,6 +27,10 @@ pub const LINKS_DIR: &str = "links_out";
 pub const SENT_FILE: &str = "sent.json";
 /// Each phone's last battery report (T8b), written by the server.
 pub const PHONE_STATUS_FILE: &str = "phone_status.json";
+/// Each phone's last media report (T8d), written by the server.
+pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
+/// Presses for a phone's player (T8d), one file each, taken by the server.
+pub const PHONE_MEDIA_DIR: &str = "phone_media_out";
 pub const DEVICE_KEYS_FILE: &str = "device_keys.json";
 /// What the server measured about its internet path (N1): yes/no facts,
 /// never an address.
