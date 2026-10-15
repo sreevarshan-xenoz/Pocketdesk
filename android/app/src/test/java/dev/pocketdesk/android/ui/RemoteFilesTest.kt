@@ -1,6 +1,8 @@
 package dev.pocketdesk.android.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteFilesTest {
@@ -12,6 +14,14 @@ class RemoteFilesTest {
             listOf(entry("b.txt", false), entry("Zeta", true), entry("A.txt", false), entry("alpha", true)),
         )
         assertEquals(listOf("alpha", "Zeta", "A.txt", "b.txt"), sorted.map { it.name })
+    }
+
+    @Test
+    fun aFolderBelowHomeCanBeDownloadedWholeButHomeCannot() {
+        val docs = RemoteFolder("/home/me/Docs", parent = "/home/me", entries = emptyList(), error = null)
+        assertTrue(RemoteFiles.canDownloadWhole(docs))
+        assertFalse("home holds too much", RemoteFiles.canDownloadWhole(docs.copy(parent = null)))
+        assertFalse("a folder that did not load", RemoteFiles.canDownloadWhole(docs.copy(error = "denied")))
     }
 
     @Test

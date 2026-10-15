@@ -124,6 +124,10 @@ pub const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
 /// A download the desktop will not make, and why: `{key, reason}`, so the
 /// phone stops waiting at once instead of at its listener's timeout.
 pub const FETCH_REFUSED: &str = "kdeconnect.pocketdesk.file_fetch_refused";
+/// The phone asks for a whole folder from the remote browser: `{path}`.
+/// It is offered as the owner's folder sends are (`offers`), and always
+/// answered (`offers::FOLDER_FETCH_REPLY`).
+pub const FOLDER_FETCH: &str = "kdeconnect.pocketdesk.folder_fetch";
 
 /// Transfers running at once from one phone, so one phone cannot hold every
 /// slot and starve the others (R3). Two, not one: a phone sends its next
@@ -433,7 +437,12 @@ impl Plugin for SharePlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.share.request", FETCH, crate::offers::DECLINE]
+        &[
+            "kdeconnect.share.request",
+            FETCH,
+            FOLDER_FETCH,
+            crate::offers::DECLINE,
+        ]
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
@@ -441,12 +450,17 @@ impl Plugin for SharePlugin {
             "kdeconnect.share.request",
             FETCH_REFUSED,
             crate::offers::OFFER,
+            crate::offers::FOLDER_FETCH_REPLY,
         ]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         if packet.packet_type == FETCH {
             handle_fetch(packet, sender).await;
+            return Ok(());
+        }
+        if packet.packet_type == FOLDER_FETCH {
+            handle_folder_fetch(packet, sender).await;
             return Ok(());
         }
         if packet.packet_type == crate::offers::DECLINE {
@@ -617,6 +631,51 @@ impl Plugin for SharePlugin {
     }
 }
 
+/// Answer a packet the owner's permissions denied, when its sender waits for
+/// an answer: a folder request is told why, so the phone does not wait on
+/// silence. Every other denied packet stays unanswered.
+pub(crate) async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    if packet.packet_type != FOLDER_FETCH {
+        return;
+    }
+    let asked = packet
+        .body
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let refused = Err("Files is turned off for this phone on the computer".to_string());
+    crate::offers::answer_folder_request(sender, asked, &refused).await;
+}
+
+/// The phone asks for the folder at `path` below home, whole: held to the
+/// remote browser's rules, then offered to it as the owner's folder sends
+/// are. Always answered.
+async fn handle_folder_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    let asked = packet
+        .body
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    // Every file would be fetched by a download, so a phone the desktop
+    // cannot dial back is told now, not promised a folder that never comes.
+    let checked =
+        dial_back(sender).and_then(|_| crate::plugins::file_browse::resolve_folder(asked));
+    let refused = match checked {
+        Err(reason) => reason,
+        Ok((_, shown)) => match crate::state::state_dir() {
+            // Offered and answered there, or refused and answered there.
+            Ok(dir) => {
+                let _ =
+                    crate::offers::offer_folder_to(&dir, sender.device_id(), &shown, asked, sender)
+                        .await;
+                return;
+            }
+            Err(e) => format!("no state folder: {e}"),
+        },
+    };
+    crate::offers::answer_folder_request(sender, asked, &Err(refused)).await;
+}
+
 /// A download the phone asked for: check it, then send the file from a task
 /// of its own, or tell the phone why not.
 async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
@@ -690,13 +749,7 @@ fn plan_fetch(
         .and_then(|p| u16::try_from(p).ok())
         .filter(|p| *p != 0)
         .ok_or("no port to send to")?;
-    let ip = sender
-        .peer_addr()
-        .map(|a| a.ip())
-        .ok_or("downloads need the local network connection")?;
-    if !dialable(ip) {
-        return Err(format!("will not connect back to {ip}"));
-    }
+    let ip = dial_back(sender)?;
     // Taken before an offer is redeemed, so a busy desktop does not spend
     // one of the phone's tries.
     let slot = transfer_slots().take(sender.device_id())?;
@@ -705,6 +758,14 @@ fn plan_fetch(
         (path, size, None)
     } else if let Some(id) = body.get("offer").and_then(|v| v.as_str()) {
         let path = crate::offers::redeem(id, &phone_of(sender))?;
+        // A file of a folder the phone asked for is held to the browser's
+        // rules again now, not only when the folder was walked.
+        if let Some(within) = crate::offers::asked_within(id)
+            && let Err(reason) = crate::plugins::file_browse::still_within(&path, &within)
+        {
+            crate::offers::fail(id, reason.clone());
+            return Err(reason);
+        }
         let Some(size) = std::fs::metadata(&path)
             .ok()
             .filter(|m| m.is_file())
@@ -980,6 +1041,19 @@ pub(crate) fn is_transfer_key(key: &str) -> bool {
 /// (a loopback peer means a local proxy such as `adb reverse`, and the
 /// phone's port would name a service on this machine), and not an address
 /// that is no single host or is the link-local range (cloud metadata).
+/// The address a download to `sender` would be dialed at, or why there is
+/// none: the desktop dials the transport's peer, and only a real one.
+fn dial_back(sender: &dyn DeviceSender) -> std::result::Result<IpAddr, String> {
+    let ip = sender
+        .peer_addr()
+        .map(|a| a.ip())
+        .ok_or("downloads need the local network connection")?;
+    if !dialable(ip) {
+        return Err(format!("will not connect back to {ip}"));
+    }
+    Ok(ip)
+}
+
 pub(crate) fn dialable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -2223,6 +2297,66 @@ mod tests {
         assert!(refusal(&phone).is_some());
         let made: Vec<_> = std::fs::read_dir(&downloads).unwrap().flatten().collect();
         assert!(made.is_empty(), "{made:?}");
+    }
+
+    #[tokio::test]
+    async fn a_folder_is_not_promised_to_a_connection_the_desktop_cannot_dial() {
+        let plugin = SharePlugin::new();
+        let phone = Phone::at("127.0.0.1:51000");
+        // A folder that is not there: whatever the order of the checks, this
+        // test never offers a real folder or writes the real sent list.
+        let home = dirs::home_dir().unwrap();
+        let asked = home.join("pd-test-no-such-folder").display().to_string();
+        let packet =
+            NetworkPacket::new(FOLDER_FETCH).with_body(serde_json::json!({ "path": asked }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        let reply = phone.replies().pop().expect("an answer");
+        assert_eq!(reply.body["queued"], false);
+        assert!(
+            reply.body["reason"]
+                .as_str()
+                .unwrap()
+                .contains("connect back"),
+            "{}",
+            reply.body["reason"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_folder_request_the_permissions_deny_is_still_answered() {
+        let phone = Phone::at("192.0.2.7:51000");
+        let asked = NetworkPacket::new(FOLDER_FETCH).with_body(serde_json::json!({ "path": "x" }));
+        answer_denied(&asked, &phone).await;
+        let reply = phone
+            .replies()
+            .pop()
+            .expect("an answer, not 30 s of silence");
+        assert_eq!(reply.body["path"], "x");
+        assert_eq!(reply.body["queued"], false);
+        assert!(reply.body["reason"].as_str().unwrap().contains("Files"));
+        // Other denied packets stay unanswered, as before.
+        let other = NetworkPacket::new(FETCH).with_body(serde_json::json!({ "path": "x" }));
+        answer_denied(&other, &phone).await;
+        assert_eq!(phone.replies().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_folder_outside_home_is_refused_with_its_path() {
+        let plugin = SharePlugin::new();
+        assert!(
+            plugin.incoming_capabilities().contains(&FOLDER_FETCH),
+            "routed to this plugin"
+        );
+        let phone = Phone::at("192.0.2.7:51000");
+        let asked = std::env::temp_dir().display().to_string();
+        let packet =
+            NetworkPacket::new(FOLDER_FETCH).with_body(serde_json::json!({ "path": asked }));
+        plugin.handle_packet(&packet, &phone).await.unwrap();
+        let reply = phone.replies().pop().expect("an answer");
+        assert_eq!(reply.packet_type, crate::offers::FOLDER_FETCH_REPLY);
+        assert_eq!(reply.body["path"], asked.as_str());
+        assert_eq!(reply.body["queued"], false);
+        assert!(!reply.body["reason"].as_str().unwrap().is_empty());
     }
 
     #[tokio::test]

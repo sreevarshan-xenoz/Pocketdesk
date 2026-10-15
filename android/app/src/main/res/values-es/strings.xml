@@ -188,6 +188,10 @@
     <string name="transfer_folder_empty">No se pudo enviar nada de %1$s: está vacía o no se pudieron leer sus archivos</string>
     <string name="transfer_folder_stopped">Se dejó de enviar %1$s: el equipo dejó de responder. Sin enviar: %2$d</string>
     <string name="transfer_folder_partial">No se envió todo %1$s. Omitidos: %2$d (un nombre que el equipo no acepta, o por encima de sus límites)</string>
+    <string name="files_download_folder">Descargar esta carpeta</string>
+    <string name="files_download_folder_summary">En una carpeta nueva en Download/Pocketdesk, con sus carpetas</string>
+    <string name="files_download_folder_text">Todos sus archivos y los de sus carpetas van a una carpeta nueva en Download/Pocketdesk. Los archivos ocultos se omiten.</string>
+    <string name="files_download_folder_asked">Se pidió %1$s al equipo</string>
     <string name="files_send_folder">Enviar una carpeta a este equipo</string>
     <string name="files_send_folder_summary">Va a una carpeta nueva en sus Descargas</string>
     <string name="transfer_sending">Enviando %1$d de %2$d</string>

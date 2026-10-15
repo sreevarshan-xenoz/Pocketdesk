@@ -139,7 +139,7 @@ Minors left, with reason:
 - **Phone to computer:** the session's Files sheet has "Send a folder to this computer" (Android's folder picker). `FolderWalk` walks the tree (folders first, hidden entries left out, names the computer would refuse counted) and each file goes as a share with `folderId`, `folder` and `path`. The server puts every file of one send under one new `Downloads/<folder>` and checks the folder on disk stays inside it.
 - **Computer to phone:** a send request that names a folder is offered file by file, each offer carrying the same fields; the sent list has one row for the folder, ending when every file has. The phone saves each file under one new `Download/Pocketdesk/<folder>` at its path (checked again on the phone).
 - **Differences from the design:**
-  - "Download folder" from the remote browser is not built: the browser still downloads files one at a time;
+  - "Download folder" from the remote browser came after, as its own change (`2026-10-15-download-folder-design.md`);
   - one progress notification per file, with the folder named, not one for the whole folder;
   - on the phone, a folder already there is found among this app's own downloads only (Android shows an app only its own entries).
 - **Device-verified (A71 ↔ Windows, LAN):** a folder of three files in three levels each way, MD5s matching, the hidden file left out; the desktop's row "sent"; a second send landing in "Name (1)". That first computer → phone run wrote its own request with a 32-hex id, which hid the first Critical below.

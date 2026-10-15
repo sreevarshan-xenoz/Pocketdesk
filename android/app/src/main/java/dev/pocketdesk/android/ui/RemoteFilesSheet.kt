@@ -40,6 +40,9 @@ import dev.pocketdesk.android.service.TransferService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -85,6 +88,10 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
     var lastGood by remember { mutableStateOf<RemoteFolder?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<RemoteEntry?>(null) }
+    // T6b: a whole folder from the computer, asked for after a confirm; one
+    // request at a time.
+    var confirmFolder by remember { mutableStateOf<RemoteFolder?>(null) }
+    var asking by remember { mutableStateOf(false) }
     // T6b: a folder from the phone, picked with the system's folder picker.
     val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
         if (tree != null) TransferService.sendFolder(context, address, controlPort, tree)
@@ -135,6 +142,14 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                     headlineContent = { Text(stringResource(R.string.files_up)) },
                     leadingContent = { LlIcon(LlIcons.ArrowBack, null) },
                     modifier = Modifier.clickable { path = parent },
+                )
+            }
+            folder?.takeIf(RemoteFiles::canDownloadWhole)?.let { here ->
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.files_download_folder)) },
+                    supportingContent = { Text(stringResource(R.string.files_download_folder_summary)) },
+                    leadingContent = { LlIcon(LlIcons.Folder, null) },
+                    modifier = Modifier.clickable(enabled = !asking) { confirmFolder = here },
                 )
             }
             HorizontalDivider()
@@ -193,7 +208,44 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
             },
         )
     }
+
+    confirmFolder?.let { asked ->
+        val name = RemoteFiles.title(asked.path)
+        val askedText = stringResource(R.string.files_download_folder_asked, name)
+        AlertDialog(
+            onDismissRequest = { confirmFolder = null },
+            title = { Text(stringResource(R.string.files_download_title, name)) },
+            text = { Text(stringResource(R.string.files_download_folder_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmFolder = null
+                    asking = true
+                    val appContext = context.applicationContext
+                    folderRequests.launch {
+                        val answer = withContext(Dispatchers.IO) {
+                            RustCore.fetchFolder(address, controlPort, asked.path)
+                        }
+                        asking = false
+                        val message = answer.fold(
+                            { askedText },
+                            { it.message ?: it.toString() },
+                        )
+                        Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                    }
+                }) { Text(stringResource(R.string.files_download)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFolder = null }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
 }
+
+/**
+ * Folder requests outlive the sheet: the computer's answer (up to 30 s
+ * away) is still shown when the sheet was closed before it came.
+ */
+private val folderRequests = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
 @Composable
 private fun Message(text: String, error: Boolean) {

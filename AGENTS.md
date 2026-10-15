@@ -42,7 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
-- 2026-10-15: **T6b, folders both ways (branch `feat/send-folders`; spec as above, T6b as-built section).**
+- 2026-10-15: **"Download this folder" in the remote browser (branch `feat/download-folder`; spec `docs/superpowers/specs/2026-10-15-download-folder-design.md`, with an as-built section).**
+  - **How:** the phone sends `folder_fetch {path}`; the desktop holds it to the browser's rules and to a phone it can dial back, then offers it as the owner's folder sends are, answering first (`folder_fetch_reply`). Limits per phone: 2 of its own on the way, 10 asks a minute.
+  - **Fresh review (0 Critical, 2 Important, 7 Minor), fixed one commit each:** "queued" promised to an undialable connection, the answer lost behind the offers or taken by another waiter; plus a silent denial, a reservation that could leak, a file swapped after the walk, repeated asks, the walk's bound and thread, and the answer lost when the sheet closed.
+  - **Lesson:** a red-phase handler test reached the real state folder and wrote a row into the real `sent.json` (removed). Handler tests must name paths that do not exist, or use `POCKETDESK_STATE_DIR`.
+  - **Device-verified (A71 → Windows):** an 8-file, three-level folder, MD5s matching, hidden files left out. Owed: checklist §52.
+- 2026-10-15: **T6b, folders both ways (PR #51, merged; spec as above, T6b as-built section).**
   - **Paths:** `core::protocol::relpath` checks every name of a file's place in a folder; bad ones are refused, not repaired, and both ends check.
   - **Phone → computer:** "Send a folder to this computer" (Android's folder picker; `FolderWalk`, JVM-tested); each file is a share with `folderId`/`folder`/`path`, landing under one new `Downloads/<folder>`.
   - **Computer → phone:** the desktop app's "Choose folder…", a path or a drop; the server offers a folder file by file, with one sent-list row for it; the phone saves under one new `Download/Pocketdesk/<folder>`.

@@ -138,6 +138,65 @@ fn resolve_file_in(home: &Path, requested: &str) -> std::result::Result<(PathBuf
     Ok((real, metadata.len()))
 }
 
+/// The folder `requested` names below home, for a phone that asks for it
+/// whole (`share::FOLDER_FETCH`): its real path and the path as shown, by
+/// the browser's own rules. Home itself is refused: it holds too much to
+/// mean.
+pub(crate) fn resolve_folder(requested: &str) -> std::result::Result<(PathBuf, PathBuf), String> {
+    let home = dirs::home_dir().ok_or("this computer has no home folder")?;
+    resolve_folder_in(&home, requested)
+}
+
+fn resolve_folder_in(
+    home: &Path,
+    requested: &str,
+) -> std::result::Result<(PathBuf, PathBuf), String> {
+    let (real, shown) = resolve_in(home, requested).ok_or("not a folder in the home folder")?;
+    if home.canonicalize().is_ok_and(|h| h == real) {
+        return Err("not the whole home folder".to_string());
+    }
+    if !real.is_dir() {
+        return Err("not a folder".to_string());
+    }
+    Ok((real, shown))
+}
+
+/// Check again, as it is fetched, a file of a folder the phone asked for
+/// (`within`, its real root): still a regular file, not a link, inside the
+/// folder, with nothing hidden on the way and not the server's own. The
+/// folder was walked by these rules; this holds them at the moment the file
+/// is opened, in case something changed since.
+pub(crate) fn still_within(path: &Path, within: &Path) -> std::result::Result<(), String> {
+    still_within_with(path, within, &private_dirs())
+}
+
+fn still_within_with(
+    path: &Path,
+    within: &Path,
+    private: &[PathBuf],
+) -> std::result::Result<(), String> {
+    const GONE: &str = "the file is no longer where it was offered";
+    let meta = std::fs::symlink_metadata(path).map_err(|_| GONE)?;
+    if !meta.is_file() {
+        return Err(GONE.to_string());
+    }
+    let real = path.canonicalize().map_err(|_| GONE)?;
+    let rest = real.strip_prefix(within).map_err(|_| GONE)?;
+    let mut at = within.to_path_buf();
+    for part in rest.components() {
+        at.push(part);
+        let name = part.as_os_str().to_string_lossy();
+        let meta = std::fs::symlink_metadata(&at).map_err(|_| GONE)?;
+        if is_hidden(&name, &meta) {
+            return Err(GONE.to_string());
+        }
+    }
+    if private.iter().any(|p| real.starts_with(p)) {
+        return Err(GONE.to_string());
+    }
+    Ok(())
+}
+
 /// The reply to a request for `requested`, browsing inside `home`.
 fn browse_reply(home: &Path, requested: &str) -> serde_json::Value {
     let Some((real, shown)) = resolve_in(home, requested) else {
@@ -557,6 +616,54 @@ mod tests {
             );
         }
         assert!(resolve_file_in(&home, "").is_err(), "home is a folder");
+    }
+
+    #[test]
+    fn a_file_of_an_asked_folder_is_checked_again_when_fetched() {
+        let home = temp_home("still-within");
+        let root = home.join("docs");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::create_dir_all(root.join(".h")).unwrap();
+        std::fs::write(root.join("a").join("f.txt"), "f").unwrap();
+        std::fs::write(root.join(".h").join("f.txt"), "f").unwrap();
+        std::fs::write(home.join("outside.txt"), "o").unwrap();
+        let within = root.canonicalize().unwrap();
+        assert!(still_within_with(&root.join("a").join("f.txt"), &within, &[]).is_ok());
+        for bad in [
+            root.join(".h").join("f.txt"),
+            home.join("outside.txt"),
+            root.join("a").join("missing.txt"),
+        ] {
+            assert!(
+                still_within_with(&bad, &within, &[]).is_err(),
+                "{}",
+                bad.display()
+            );
+        }
+        let private = [root.join("a").canonicalize().unwrap()];
+        assert!(still_within_with(&root.join("a").join("f.txt"), &within, &private).is_err());
+    }
+
+    #[test]
+    fn only_a_real_folder_below_home_can_be_asked_for_whole() {
+        let home = temp_home("fetch-folder");
+        std::fs::write(home.join("a.txt"), "abc").unwrap();
+        std::fs::create_dir_all(home.join(".secret")).unwrap();
+        let docs = home.join("docs");
+        let (real, shown) = resolve_folder_in(&home, docs.to_str().unwrap()).unwrap();
+        assert_eq!(real, docs.canonicalize().unwrap());
+        assert_eq!(shown, docs);
+        for bad in [
+            String::new(),
+            "/".to_string(),
+            home.to_str().unwrap().to_string(),
+            home.join("a.txt").to_str().unwrap().to_string(),
+            home.join(".secret").to_str().unwrap().to_string(),
+            home.join("missing").to_str().unwrap().to_string(),
+            std::env::temp_dir().to_str().unwrap().to_string(),
+        ] {
+            assert!(resolve_folder_in(&home, &bad).is_err(), "{bad:?}");
+        }
     }
 
     #[cfg(unix)]

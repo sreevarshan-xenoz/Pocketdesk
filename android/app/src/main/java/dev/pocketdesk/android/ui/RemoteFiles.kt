@@ -42,6 +42,13 @@ object RemoteFiles {
         else -> lastGood.parent
     }
 
+    /**
+     * Whether "Download this folder" is offered for [folder] (T6b): any
+     * folder that loaded, except home itself, which holds too much to mean
+     * (the computer refuses it too).
+     */
+    fun canDownloadWhole(folder: RemoteFolder): Boolean = folder.parent != null && folder.error == null
+
     /** The folder's own name, whichever separator the computer uses. */
     fun title(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
 

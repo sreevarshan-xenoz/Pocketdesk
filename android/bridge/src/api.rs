@@ -629,7 +629,19 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
                                 {
                                     crate::queue_file_offer(&pkt.body);
                                 }
-                                let _ = packet_tx.send(trimmed);
+                                // The answer to a folder request (T6b),
+                                // kept by the path asked.
+                                if trimmed.contains("folder_fetch_reply")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == crate::download::FOLDER_FETCH_REPLY
+                                {
+                                    crate::latch_folder_reply(&pkt.body);
+                                }
+                                let latched = NetworkPacket::from_wire(&trimmed)
+                                    .is_ok_and(|p| crate::kept_from_pollers(&p.packet_type));
+                                if !latched {
+                                    let _ = packet_tx.send(trimmed);
+                                }
                             }
                             line.clear();
                         }
@@ -1111,6 +1123,22 @@ async fn query_peer(
         Some(body) => Ok(body),
         None => oneshot_request(address, port, request, reply_type, timeout).await,
     }
+}
+
+/// Send `packet` on the live control connection to `address`:`port` only,
+/// never a one-off one: what answers it arrives on the live one.
+pub(crate) async fn send_on_live(
+    address: &str,
+    port: u16,
+    packet: &NetworkPacket,
+) -> Result<(), String> {
+    let writer = live_writer_for(address, port)
+        .await
+        .ok_or("Not connected to this computer: open a session first")?;
+    TcpDeviceSender::from_arc(writer, address.to_string())
+        .send_packet(packet)
+        .await
+        .map_err(|e| format!("Could not ask the computer: {e}"))
 }
 
 /// Is the live control connection, made to `live`, the one to `address`:`port`?
