@@ -86,22 +86,57 @@ impl Plugin for AudioControlPlugin {
         })
         .await;
 
-        let body = match outcome {
-            Ok(Ok(v)) => v,
-            Ok(Err(e)) => {
-                tracing::warn!("audio-control: {action} failed: {e}");
-                json!({ "ok": false, "error": e })
-            }
-            Err(e) => json!({ "ok": false, "error": e.to_string() }),
-        };
+        let body = reply(&action, outcome.unwrap_or_else(|e| Err(e.to_string())));
         let response = NetworkPacket::new("kdeconnect.pocketdesk.audio").with_body(body);
         sender.send_packet(&response).await
     }
 }
 
+/// The reply to `action`: its outcome, `{ok: false, error}` when it failed,
+/// with `action` added so the phone can tell replies apart (the bridge
+/// matches a reply by its packet type alone).
+fn reply(
+    action: &str,
+    outcome: std::result::Result<serde_json::Value, String>,
+) -> serde_json::Value {
+    let mut body = match outcome {
+        Ok(body) => body,
+        Err(e) => {
+            // The Now playing card asks every 2 s: a computer with no
+            // player tool would otherwise warn as often.
+            if action == "media" {
+                tracing::debug!("audio-control: {action} failed: {e}");
+            } else {
+                tracing::warn!("audio-control: {action} failed: {e}");
+            }
+            json!({ "ok": false, "error": e })
+        }
+    };
+    if let Some(fields) = body.as_object_mut() {
+        fields.insert("action".to_string(), json!(action));
+    }
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every reply names the action it answers, so a phone that has
+    /// several audio requests out takes each reply for its own request.
+    #[test]
+    fn a_reply_names_its_action_whether_it_worked_or_not() {
+        let done = reply("media", Ok(json!({"ok": true, "playing": null})));
+        assert_eq!(
+            done,
+            json!({"ok": true, "playing": null, "action": "media"})
+        );
+        let failed = reply("mediaControl", Err("nothing is playing".to_string()));
+        assert_eq!(
+            failed,
+            json!({"ok": false, "error": "nothing is playing", "action": "mediaControl"})
+        );
+    }
 
     #[test]
     fn plugin_declares_audio_capability() {
