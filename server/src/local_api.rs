@@ -56,6 +56,7 @@ pub fn live_sessions(state_dir: &Path, now_unix: u64, running: bool) -> Vec<Mirr
 pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, String> {
     let live = live_sessions(state_dir, now_unix, running);
     let keys = device_keys::read(state_dir).unwrap_or_default();
+    let batteries = pocketdesk_core::local::phone_status::read(state_dir);
     let store = trust_store(state_dir)?;
     let devices: Vec<Value> = store
         .trusted_devices()
@@ -79,6 +80,8 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
                 "key_bound": bound.is_some_and(|k| k.tls.is_some()),
                 "internet_key_bound": bound.is_some_and(|k| k.iroh.is_some()),
                 "permissions": allowed,
+                // The phone's last battery report (T8b), or null.
+                "battery": batteries.get(&id),
             })
         })
         .collect();
@@ -673,6 +676,16 @@ mod tests {
             r#"{"updated_unix":100,"sessions":[{"device_id":"phone-a","peer":"192.0.2.7:1","transport":"lan","started_unix":90}]}"#,
         )
         .unwrap();
+        let mut batteries = std::collections::BTreeMap::new();
+        batteries.insert(
+            "phone-a".to_string(),
+            pocketdesk_core::local::phone_status::PhoneBattery {
+                charge: 54,
+                charging: true,
+                updated_unix: 95,
+            },
+        );
+        pocketdesk_core::local::phone_status::write(&dir, &batteries).unwrap();
         let listed = devices(&dir, 101, true).unwrap();
         assert_eq!(listed["api"], API);
         assert_eq!(listed["server_running"], true);
@@ -684,6 +697,11 @@ mod tests {
         assert_eq!(a["grant_remaining_secs"], Value::Null);
         assert_eq!(a["permissions"]["exec"], false, "off unless granted");
         assert_eq!(a["permissions"]["files"], true);
+        assert_eq!(
+            a["battery"],
+            json!({"charge": 54, "charging": true, "updated_unix": 95})
+        );
+        assert_eq!(b["battery"], Value::Null, "never reported");
         assert_eq!(b["in_session"], false);
         assert!(b["grant_remaining_secs"].as_u64().is_some_and(|s| s <= 60));
         // A server that is not running has no sessions, whatever its file says.

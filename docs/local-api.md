@@ -51,10 +51,11 @@ The paired phones.
               "key_bound": true, "internet_key_bound": true,
               "permissions": {"input": true, "clipboard": true, "files": true, "audio": true,
                               "mic": true, "power": true, "exec": false,
-                              "notifications": true, "texts": true}}]}
+                              "notifications": true, "texts": true},
+              "battery": {"charge": 54, "charging": false, "updated_unix": 1792069000}}]}
 ```
 
-`grant_remaining_secs` is null for a lasting pairing and counts down for one made with `pair --grant`. `key_bound` says the phone has proved its key on this network; `internet_key_bound`, from outside. Each permission is what the phone may do now, defaults included.
+`grant_remaining_secs` is null for a lasting pairing and counts down for one made with `pair --grant`. `key_bound` says the phone has proved its key on this network; `internet_key_bound`, from outside. Each permission is what the phone may do now, defaults included. `battery` is the phone's last report, sent during sessions (null if it never reported); `updated_unix` says how old it is.
 
 ### `pocketdesk sent --json` and `pocketdesk received --json`
 
