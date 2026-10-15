@@ -227,7 +227,7 @@ class SmsReplies(private val ctx: Context) {
         val now = SystemClock.elapsedRealtime()
         if (RustCore.controlPeer() == null && now - lastConnectMs >= 60_000L) {
             lastConnectMs = now
-            RustCore.connectToPeer(own.address, own.controlPort)
+            RustCore.connectToPeer(own.address, own.controlPort, HostStore.wanIdentity(ctx, own.address))
         }
         for (request in RustCore.takeSmsRequests()) {
             Log.i(TAG, "reply ${request.id} asked for by ${request.fromHost}")

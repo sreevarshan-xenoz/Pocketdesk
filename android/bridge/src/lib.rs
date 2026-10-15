@@ -196,11 +196,14 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     _class: JClass<'_>,
     address: JString<'_>,
     port: jint,
+    wan_identity: JString<'_>,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
+    // Empty: no internet road for this computer (T10a).
+    let wan_identity = Some(jstring_to_string(&mut env, &wan_identity)).filter(|s| !s.is_empty());
     let json = envelope(
         RUNTIME
-            .block_on(api::connect_to_peer(address, port as u16))
+            .block_on(api::connect_to_peer(address, port as u16, wan_identity))
             .map(|state| format!("{state:?}")),
     );
     to_jstring(&mut env, json)

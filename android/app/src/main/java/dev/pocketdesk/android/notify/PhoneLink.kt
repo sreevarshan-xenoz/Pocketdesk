@@ -36,12 +36,23 @@ object PhoneLink {
     fun sendNow(ctx: Context, packetType: String, body: JSONObject): Boolean {
         if (SystemClock.elapsedRealtime() < pausedUntilMs) return false
         val host = target(ctx) ?: return false
-        val sent =
+        val send = {
             if (packetType == "kdeconnect.notification") {
                 RustCore.sendNotification(host.address, host.controlPort, body.toString())
             } else {
                 RustCore.sendPhonePacket(host.address, host.controlPort, packetType, body.toString())
             }
+        }
+        var sent = send()
+        // Away from home, a one-off connection cannot reach the computer:
+        // open the control link, over the internet when it must (T10a), and
+        // send on it.
+        if (sent.isFailure && RustCore.controlPeer() == null) {
+            val wan = HostStore.wanIdentity(ctx, host.address)
+            if (wan != null && RustCore.connectToPeer(host.address, host.controlPort, wan).isSuccess) {
+                sent = send()
+            }
+        }
         return sent.onFailure {
             Log.d(TAG, "not sent to ${host.address}, pausing a minute: ${it.message}")
             pausedUntilMs = SystemClock.elapsedRealtime() + PAUSE_MS

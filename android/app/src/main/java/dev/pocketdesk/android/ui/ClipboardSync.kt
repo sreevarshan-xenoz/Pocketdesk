@@ -6,6 +6,7 @@ import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
+import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.bridge.RemoteClip
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +39,7 @@ fun ClipboardSyncEffect(
     LaunchedEffect(enabled, address, controlPort) {
         if (!enabled) return@LaunchedEffect
         withContext(Dispatchers.IO) {
-            RustCore.connectToPeer(address, controlPort)
+            RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
             var lastLocal = localClipboardText(context)
             var lastRemote: String? = null
             lastLocal?.let {
@@ -82,7 +83,7 @@ fun ClipboardSyncEffect(
                             lastRemote = local
                             images.textMoved()
                         } else {
-                            RustCore.connectToPeer(address, controlPort)
+                            RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
                         }
                     }
                 }
@@ -147,7 +148,7 @@ private fun sendLocalImage(
         images.moved(id)
         Outcome.Sent
     } else {
-        RustCore.connectToPeer(address, controlPort)
+        RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
         Outcome.Failed
     }
 }

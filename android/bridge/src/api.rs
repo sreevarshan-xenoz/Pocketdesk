@@ -1,7 +1,7 @@
 //! Client session API ported from the Flutter-era bridge (git 4bf3c73).
 //! Plain polling functions; JNI wrappers live in lib.rs.
 
-use pocketdesk_core::protocol::connection::ConnectionManager;
+use pocketdesk_core::protocol::connection::{ConnectionManager, ControlDuplex};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TcpDeviceSender};
 use pocketdesk_core::protocol::transfer::{self, Pace, TransferError};
 use pocketdesk_core::protocol::v2::{ALPN_V2, IdentityPacketV2, perform_v2_handshake};
@@ -457,8 +457,14 @@ pub async fn check_identity(address: String, port: u16) -> Result<String, String
     .to_string())
 }
 
-/// Connect to a peer
-pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionState, String> {
+/// Connect to a peer: TLS over TCP, and when that fails and the computer's
+/// WAN identity (`wan_identity`, the `kdeconnect.pocketdesk.endpoint` body
+/// cached at home) is known, over the internet road (T10a).
+pub async fn connect_to_peer(
+    address: String,
+    port: u16,
+    wan_identity: Option<String>,
+) -> Result<ConnectionState, String> {
     // Kotlin calls this from several poll loops (clipboard sync, quick
     // settings, retry paths) without coordinating. A second call while the
     // first connection is still up would tear down a working control session
@@ -499,7 +505,31 @@ pub async fn connect_to_peer(address: String, port: u16) -> Result<ConnectionSta
     use tracing::Instrument;
 
     let result = async move {
-        match conn_mgr.connect(&address, port, &identity).await {
+        let dialed: Result<ControlDuplex, _> =
+            match conn_mgr.connect(&address, port, &identity).await {
+                Ok(stream) => Ok(Box::new(stream)),
+                Err(home) => match wan_identity.as_deref().map(WanTarget::parse) {
+                    Some(Ok(target)) => {
+                        tracing::info!(
+                            error = %home,
+                            "No control link at home; trying the internet road"
+                        );
+                        match dial_internet_control(&target, &identity, &address, true).await {
+                            Ok(stream) => Ok(stream),
+                            Err(e) => {
+                                tracing::warn!("The internet road failed too: {e}");
+                                Err(home)
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!("Unusable WAN identity: {e}");
+                        Err(home)
+                    }
+                    None => Err(home),
+                },
+            };
+        match dialed {
             Ok(stream) => {
                 let (reader, writer) = tokio::io::split(stream);
                 let writer_arc = Arc::new(Mutex::new(writer));
@@ -1901,6 +1931,76 @@ pub async fn connect_streaming(
     .await
 }
 
+/// Where a computer is on the internet road: the parts of the
+/// `kdeconnect.pocketdesk.endpoint` body a dial needs.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WanTarget {
+    pub endpoint_id: String,
+    pub relay_urls: Vec<String>,
+    pub direct_addrs: Vec<String>,
+    /// The desktop publishes on the Mainline DHT (N3).
+    pub dht: bool,
+}
+
+impl WanTarget {
+    pub(crate) fn parse(identity_json: &str) -> Result<Self, String> {
+        let identity: serde_json::Value = serde_json::from_str(identity_json)
+            .map_err(|e| format!("Invalid WAN identity: {e}"))?;
+        let endpoint_id = identity["endpointId"]
+            .as_str()
+            .ok_or_else(|| "WAN identity missing endpointId".to_string())?
+            .to_string();
+        let read_list = |key: &str| -> Vec<String> {
+            identity[key]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        Ok(Self {
+            endpoint_id,
+            relay_urls: read_list("relayUrls"),
+            direct_addrs: read_list("directAddrs"),
+            dht: identity["dht"].as_bool() == Some(true),
+        })
+    }
+}
+
+/// The control channel over the internet road (T10a): dial the computer's
+/// iroh endpoint as this phone's own iroh key, open the one stream, and run
+/// the same handshake as at home. `use_relays` is false only in tests.
+pub(crate) async fn dial_internet_control(
+    target: &WanTarget,
+    identity: &pocketdesk_core::protocol::kdeconnect::DeviceIdentity,
+    address: &str,
+    use_relays: bool,
+) -> Result<ControlDuplex, String> {
+    let dht = if target.dht {
+        pocketdesk_core::streaming::dht_resolver().await.ok()
+    } else {
+        None
+    };
+    let stream = pocketdesk_core::streaming::IrohDial::dial_control(
+        &target.endpoint_id,
+        &target.relay_urls,
+        &target.direct_addrs,
+        use_relays,
+        Duration::from_secs(20),
+        device_wan_key(),
+        dht,
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))?;
+    let stream =
+        pocketdesk_core::protocol::connection::control_handshake(stream, address, identity)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(Box::new(stream))
+}
+
 /// Request remote screen streaming over the iroh WAN path.
 ///
 /// `identity_json` is the cached `kdeconnect.pocketdesk.endpoint` body learned
@@ -1915,23 +2015,12 @@ pub async fn connect_streaming_wan(
     monitor_index: Option<u32>,
     codec_caps: u8,
 ) -> Result<(), String> {
-    let identity: serde_json::Value =
-        serde_json::from_str(&identity_json).map_err(|e| format!("Invalid WAN identity: {e}"))?;
-    let endpoint_id = identity["endpointId"]
-        .as_str()
-        .ok_or_else(|| "WAN identity missing endpointId".to_string())?;
-    let read_list = |key: &str| -> Vec<String> {
-        identity[key]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    let relay_urls = read_list("relayUrls");
-    let direct_addrs = read_list("directAddrs");
+    let WanTarget {
+        endpoint_id,
+        relay_urls,
+        direct_addrs,
+        dht,
+    } = WanTarget::parse(&identity_json)?;
 
     // WAN sessions are keyed by the desktop address with a 0 port sentinel
     // (there is no TCP port on the iroh path).
@@ -1959,7 +2048,7 @@ pub async fn connect_streaming_wan(
     *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Connecting;
     // Built only now that a dial will happen: it resolves the DHT's bootstrap
     // nodes and binds a socket.
-    let dht = if identity["dht"].as_bool() == Some(true) {
+    let dht = if dht {
         match pocketdesk_core::streaming::dht_resolver().await {
             Ok(lookup) => Some(lookup),
             Err(e) => {
@@ -1977,7 +2066,7 @@ pub async fn connect_streaming_wan(
     );
 
     let dial = pocketdesk_core::streaming::IrohDial::dial(
-        endpoint_id,
+        &endpoint_id,
         &relay_urls,
         &direct_addrs,
         true,
@@ -4201,5 +4290,99 @@ mod teardown_tests {
             "closed although a clone lives on"
         );
         drop(lingering);
+    }
+}
+
+#[cfg(test)]
+mod internet_road_tests {
+    use super::*;
+    use pocketdesk_core::protocol::{ALPN_CONTROL, HANDSHAKE_HELLO, HANDSHAKE_OK};
+    use tokio::io::BufReader;
+
+    #[test]
+    fn a_wan_identity_names_the_dial() {
+        let target = WanTarget::parse(
+            r#"{"endpointId":"abc","relayUrls":["https://relay.example.org/"],"directAddrs":["192.0.2.7:4501"],"dht":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            target,
+            WanTarget {
+                endpoint_id: "abc".into(),
+                relay_urls: vec!["https://relay.example.org/".into()],
+                direct_addrs: vec!["192.0.2.7:4501".into()],
+                dht: true,
+            }
+        );
+        let bare = WanTarget::parse(r#"{"endpointId":"abc"}"#).unwrap();
+        assert!(bare.relay_urls.is_empty() && bare.direct_addrs.is_empty() && !bare.dht);
+        assert!(WanTarget::parse(r#"{"relayUrls":[]}"#).is_err());
+        assert!(WanTarget::parse("not json").is_err());
+    }
+
+    #[tokio::test]
+    async fn the_internet_road_runs_the_control_handshake() {
+        let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+        let desktop = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+            .alpns(vec![ALPN_CONTROL.to_vec()])
+            .relay_mode(iroh::RelayMode::Disabled)
+            .bind_addr(std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+            .unwrap()
+            .bind()
+            .await
+            .unwrap();
+        let direct = desktop
+            .bound_sockets()
+            .into_iter()
+            .map(|a| a.to_string())
+            .collect();
+        let serve = {
+            let desktop = desktop.clone();
+            tokio::spawn(async move {
+                let conn = desktop
+                    .accept()
+                    .await
+                    .unwrap()
+                    .accept()
+                    .unwrap()
+                    .await
+                    .unwrap();
+                let (mut send, recv) = conn.accept_bi().await.unwrap();
+                let mut recv = BufReader::new(recv);
+                let mut hello = String::new();
+                recv.read_line(&mut hello).await.unwrap();
+                assert_eq!(hello.trim(), HANDSHAKE_HELLO);
+                send.write_all(
+                    format!(
+                        "{HANDSHAKE_OK}
+{{\"type\":\"kdeconnect.identity\"}}
+"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+                let mut phone = String::new();
+                recv.read_line(&mut phone).await.unwrap();
+                phone
+            })
+        };
+        let target = WanTarget {
+            endpoint_id: desktop.id().to_string(),
+            relay_urls: vec![],
+            direct_addrs: direct,
+            dht: false,
+        };
+        let identity =
+            pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new("road-phone", "Road Phone");
+        let _stream = dial_internet_control(&target, &identity, "desktop", false)
+            .await
+            .expect("the internet road");
+        let phone = serve.await.unwrap();
+        assert!(
+            phone.contains("road-phone"),
+            "the phone's identity: {phone}"
+        );
+        desktop.close().await;
     }
 }

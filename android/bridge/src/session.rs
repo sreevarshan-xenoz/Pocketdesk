@@ -23,9 +23,10 @@ pub(crate) const MAX_FRAMES_PER_RECEIVE: usize = 16;
 /// Maximum number of audio packets to drain per `receive_audio` call.
 pub(crate) const MAX_AUDIO_PACKETS_PER_RECEIVE: usize = 32;
 
-/// The write half of a control connection (TLS over TCP, phase B).
+/// The write half of a control connection: TLS over TCP (phase B), or a
+/// stream over iroh (the internet road, T10a).
 pub(crate) type ControlWriter =
-    tokio::io::WriteHalf<pocketdesk_core::protocol::connection::ControlStream>;
+    tokio::io::WriteHalf<pocketdesk_core::protocol::connection::ControlDuplex>;
 
 /// Global handle for the active control connection writer.
 pub(crate) static CONTROL_WRITER: LazyLock<TokioMutex<Option<Arc<TokioMutex<ControlWriter>>>>> =
