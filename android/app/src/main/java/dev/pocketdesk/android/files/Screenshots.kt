@@ -87,6 +87,9 @@ class Screenshots(private val ctx: Context) {
 
     fun tick() {
         if (!ScreenshotPrefs.on(ctx) || !ScreenshotPrefs.granted(ctx)) {
+            // Access taken back turns it off: given back, it does not start
+            // again by itself with screenshots taken in between.
+            if (ScreenshotPrefs.on(ctx)) ScreenshotPrefs.setOn(ctx, false)
             stopWatching()
             return
         }
@@ -106,6 +109,8 @@ class Screenshots(private val ctx: Context) {
                 dirty = true
                 break
             }
+            // Turned off while earlier ones were sent: nothing more goes.
+            if (!ScreenshotPrefs.on(ctx)) break
             if (sent == ScreenshotRule.MAX_PER_TICK) {
                 dirty = true
                 break
