@@ -636,6 +636,7 @@ mod tests {
             transport: "lan".into(),
             started_unix: 1,
             driving,
+            control_only: false,
         }
     }
 

@@ -59,6 +59,7 @@ pub fn render_json(
             peer: s.peer.to_string(),
             transport: if s.lan { "lan" } else { "wan" }.to_string(),
             started_unix: s.started_unix,
+            control_only: !s.streamed.video,
         })
         .collect();
     shared::render_mirror(&sessions, crate::driving::is_shared(), linked, now_unix)
@@ -152,7 +153,12 @@ fn notify_session_started(session: &LiveSession) {
         Some(id) => id.clone(),
         None => session.peer.ip().to_string(),
     };
-    let summary = "Pocketdesk: a device is streaming this desktop";
+    // The phone as a remote (T10i) sees nothing; it only gives input.
+    let summary = if session.streamed.video {
+        "Pocketdesk: a device is streaming this desktop"
+    } else {
+        "Pocketdesk: a device is controlling this desktop (no screen)"
+    };
     let body = format!(
         "device {who} · {} · {peer}",
         if session.lan { "LAN" } else { "WAN" },
@@ -342,7 +348,8 @@ pub fn format_status_lines(raw: &str, now_unix: u64) -> Option<Vec<String>> {
                     .checked_sub(s.started_unix)
                     .map(|secs| format!("{secs}s"))
                     .unwrap_or_else(|| "?".into());
-                format!("{short}  {}  {}  up {age}", s.transport, s.peer)
+                let mode = if s.control_only { "  control only" } else { "" };
+                format!("{short}  {}  {}  up {age}{mode}", s.transport, s.peer)
             })
             .collect(),
     )
@@ -477,17 +484,21 @@ mod tests {
 
     #[test]
     fn json_roundtrips_through_status_formatter() {
-        let live = vec![
+        let mut live = vec![
             session(Some("abcdef0123456789"), true),
             session(None, false),
         ];
+        live[0].streamed.video = true;
         let json = render_json(&live, None, &[], 1_030);
         let lines = format_status_lines(&json, 1_030).expect("parseable");
         assert_eq!(lines.len(), 2);
         assert!(lines[0].starts_with("abcdef012345…"));
         assert!(lines[0].contains("lan") && lines[0].contains("up 30s"));
+        assert!(!lines[0].contains("control only"));
         assert!(lines[1].starts_with("<unannounced>"));
         assert!(lines[1].contains("wan"));
+        // The phone as a remote (T10i): no screen sent.
+        assert!(lines[1].ends_with("control only"));
         // The mirror is machine-readable: same-file garbage must not panic.
         assert!(format_status_lines("not json", 1).is_none());
         assert!(format_status_lines(r#"{"sessions":{}}"#, 1).is_none());
