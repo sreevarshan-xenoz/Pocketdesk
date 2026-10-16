@@ -239,6 +239,9 @@
 
     <!-- Monitor picker -->
     <string name="stream_monitor">மானிட்டரை ஸ்ட்ரீம் செய்</string>
+    <string name="add_phone_screen">இந்தத் தொலைபேசிக்கு ஒரு திரையைச் சேர்</string>
+    <string name="add_phone_screen_summary">இந்தத் தொலைபேசியின் வடிவில் ஒரு புதிய திரை, மற்றவற்றின் வலப்புறம், அமர்வு இருக்கும் வரை (Sway)</string>
+    <string name="add_phone_screen_failed">கணினியால் திரையைச் சேர்க்க முடியவில்லை</string>
     <string name="auto_primary">தானியங்கி — முதன்மை</string>
     <string name="malformed_monitors">சீர்கேடான மானிட்டர் பட்டியல்</string>
     <string name="monitor_query_failed">மானிட்டர் வினவல் தோல்வி</string>

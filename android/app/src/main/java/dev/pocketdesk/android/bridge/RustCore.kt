@@ -140,6 +140,7 @@ object RustCore {
     private external fun nativeVideoBytes(): Long
     private external fun nativeListRemoteFiles(address: String, port: Int, remotePath: String): String
     private external fun nativeGetMonitors(address: String, port: Int): String
+    private external fun nativeVirtualScreen(address: String, port: Int, action: String, width: Int, height: Int): String
     private external fun nativeGetBattery(address: String, port: Int): String
     private external fun nativeCheckSiren(): String
     private external fun nativeSendFindMyDevice(address: String, port: Int): String
@@ -734,6 +735,14 @@ object RustCore {
 
     fun listRemoteFiles(address: String, port: Int, remotePath: String): Result<String> =
         envelope(nativeListRemoteFiles(address, port, remotePath))
+
+    /** Ask the computer for a screen of this phone's shape (T10j): its answer as JSON, see [dev.pocketdesk.android.ui.PhoneScreen]. */
+    fun addScreen(address: String, port: Int, width: Int, height: Int): Result<String> =
+        envelope(nativeVirtualScreen(address, port, "add", width, height))
+
+    /** Take this phone's screen away again (T10j). */
+    fun removeScreen(address: String, port: Int): Result<String> =
+        envelope(nativeVirtualScreen(address, port, "remove", 0, 0))
 
     fun getMonitors(address: String, port: Int): Result<String> =
         envelope(nativeGetMonitors(address, port))

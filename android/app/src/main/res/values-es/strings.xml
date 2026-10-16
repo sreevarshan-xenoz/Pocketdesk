@@ -244,6 +244,9 @@
 
     <!-- Monitor picker -->
     <string name="stream_monitor">Transmitir un monitor</string>
+    <string name="add_phone_screen">Añadir una pantalla para este teléfono</string>
+    <string name="add_phone_screen_summary">Una pantalla nueva con la forma de este teléfono, a la derecha de las otras, mientras dure la sesión (Sway)</string>
+    <string name="add_phone_screen_failed">El equipo no pudo añadir una pantalla</string>
     <string name="auto_primary">Automático — principal</string>
     <string name="malformed_monitors">Lista de monitores malformada</string>
     <string name="monitor_query_failed">Error al consultar los monitores</string>
