@@ -47,6 +47,42 @@ pub(super) fn init_process() {
     }
 }
 
+/// Report an unhandled exception (an access violation, say) to the crash
+/// log before Windows ends the process, as it still does.
+pub(crate) fn install_exception_report() {
+    use windows::Win32::System::Diagnostics::Debug::{
+        EXCEPTION_POINTERS, SetUnhandledExceptionFilter,
+    };
+    unsafe extern "system" fn filter(info: *const EXCEPTION_POINTERS) -> i32 {
+        // SAFETY: Windows passes the exception being dispatched.
+        let what = unsafe { info.as_ref().and_then(|i| i.ExceptionRecord.as_ref()) }
+            .map(|record| {
+                let code = record.ExceptionCode.0 as u32;
+                let address = record.ExceptionAddress as usize;
+                // An access violation names the address it read or wrote.
+                let detail = if code == 0xC000_0005 && record.NumberParameters >= 2 {
+                    let verb = match record.ExceptionInformation[0] {
+                        0 => "reading",
+                        1 => "writing",
+                        8 => "executing",
+                        _ => "touching",
+                    };
+                    format!(" ({verb} {:#x})", record.ExceptionInformation[1])
+                } else {
+                    String::new()
+                };
+                format!("exception {code:#010x} at {address:#x}{detail}")
+            })
+            .unwrap_or_else(|| "an unhandled exception".to_string());
+        crate::crash_report::report(&what);
+        // EXCEPTION_CONTINUE_SEARCH: the process ends as it would have.
+        0
+    }
+    unsafe {
+        SetUnhandledExceptionFilter(Some(filter));
+    }
+}
+
 pub(super) fn detach_console() {
     let _ = unsafe { windows::Win32::System::Console::FreeConsole() };
 }

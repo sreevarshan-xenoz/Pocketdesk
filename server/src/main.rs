@@ -10,6 +10,10 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[tokio::main]
 async fn main() -> Result<()> {
     platform::init_process();
+    // A crash leaves a report in the state folder (crash.log).
+    if let Ok(dir) = state::state_dir() {
+        crash_report::install(&dir);
+    }
     // Started by a browser as the extension's host (ecosystem 1d): its own
     // arguments, which are no command of ours.
     let plain: Vec<String> = std::env::args().collect();
