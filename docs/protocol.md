@@ -315,10 +315,10 @@ The DHT publication is controlled by `dht_publish` (default `relay`) in `core/sr
 ### 4.3 Relays
 
 - **Which relays.**
-  - With `relay_urls` empty, the desktop uses iroh's default (n0) relays: `use1-1`, `usw1-1`, `euc1-1` and `aps1-1.relay.n0.iroh.link` over HTTPS. This comes from iroh 1.2 `defaults.rs` and `RelayMode::Default` in `server/src/iroh_endpoint.rs` `relay_mode`.
+  - With `relay_urls` empty, the desktop uses iroh's default (n0) relays: `use1-1`, `usw1-1`, `euc1-1` and `aps1-1.relay.n0.iroh.link` over HTTPS. This comes from iroh 1.3 `defaults.rs` and `RelayMode::Default` in `server/src/iroh_endpoint.rs` `relay_mode`.
   - Otherwise the desktop uses only your relays (`RelayMode::Custom`).
   - The phone uses n0's relays, or only the desktop's own when the desktop announces only those (`core/src/streaming/iroh_connection.rs`, `dial_relay_mode`).
-- **What iroh does with every relay** (iroh 1.2 defaults: `NetReportConfig::default()`, `RelayConfig::from(RelayUrl)`; `Endpoint::builder(Minimal)` does not change them):
+- **What iroh does with every relay** (iroh 1.3 defaults: `NetReportConfig::default()`, `RelayConfig::from(RelayUrl)`; `Endpoint::builder(Minimal)` does not change them):
   - It keeps a connection to its home relay over HTTPS (TCP 443 for n0).
   - It sends QUIC address discovery (QAD) probes to UDP 7842 (`DEFAULT_RELAY_QUIC_PORT`).
   - It sends an empty HTTPS GET to each relay as a latency probe.
@@ -330,7 +330,7 @@ The DHT publication is controlled by `dht_publish` (default `relay`) in `core/sr
   - Which ids talk to each other, when, and how much.
   - Not the content: the session runs end to end between the two iroh keys (`server/src/relay.rs` module doc).
 - **Your own relay.**
-  - `ServerConfig::default()` turns on no QUIC/QAD server and no metrics endpoint (`relay.rs`; iroh-relay 1.2 `ServerConfig`).
+  - `ServerConfig::default()` turns on no QUIC/QAD server and no metrics endpoint (`relay.rs`; iroh-relay 1.3 `ServerConfig`).
   - In HTTPS mode, the Let's Encrypt account and certificate keys are cached in `<state>/relay-acme` (owner-only folder). The `--email` contact is sent to Let's Encrypt.
   - It logs refused endpoint ids, shortened (`Allowlist::on_connect`).
 
@@ -339,7 +339,7 @@ The DHT publication is controlled by `dht_publish` (default `relay`) in `core/sr
 | Destination | When | What is sent | Source |
 |---|---|---|---|
 | n0 relays, or yours (§4.3) | Always while the server runs: the WAN endpoint cannot be turned off in config | iroh relay traffic and probes | `server/src/service.rs` (`spawn_wan_endpoint` is unconditional), `iroh_endpoint.rs` |
-| Home router (UPnP, NAT-PMP, PCP) | iroh's port mapper | A mapping request for the iroh UDP port | iroh 1.2 `endpoint.rs` (`portmapper_config` default) |
+| Home router (UPnP, NAT-PMP, PCP) | iroh's port mapper | A mapping request for the iroh UDP port | iroh 1.3 `endpoint.rs` (`portmapper_config` default) |
 | The MQTT broker in `mqtt_broker` | Only with `home_assistant = true` | Discovery configs naming this computer (its host name, the first 12 letters and digits of its device id), each paired phone by the first 8 of its id, and each task by name; retained states: the server's availability (also the last will), the number of sessions, a cast running, each phone's battery %, charging and whether it is connected; and each event's kind and phone, never its content (`events_detail` does not change it). The task commands are never sent | `server/src/home_assistant.rs` |
 | DHT bootstrap hosts and DHT nodes (§4.2) | Unless `dht_publish = "off"` | DHT traffic and the signed record | `core/src/streaming/dht.rs` |
 | DNS: the system resolver, and iroh's fallback tier | Resolving relay hosts and DHT bootstrap names | Those host names | `dht.rs` (`to_socket_addrs`). iroh-dns 1.3 keeps a deferred fallback tier of public resolvers, Cloudflare 1.1.1.1 among them (`FallbackMode`, `default_fallback_nameservers`) |

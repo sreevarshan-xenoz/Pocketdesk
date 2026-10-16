@@ -88,7 +88,7 @@ libc.workspace = true
 quinn.workspace = true
 
 # WAN QUIC streaming via iroh (behind the `wan` feature)
-iroh = { version = "1.2", optional = true }
+iroh = { version = "1.3", optional = true }
 # N3: the phone looks the desktop up by id on the Mainline DHT.
 iroh-mainline-address-lookup = { version = "0.6", optional = true }
 # Its DHT node, built with bootstrap addresses we resolve off the runtime.
