@@ -2024,7 +2024,7 @@ mod tests {
             Some("device-c1"),
             Some("phone-endpoint"),
             Some(CODEC_CAP_HEVC),
-            false,
+            super::super::client::SessionMode::Screen,
         )
         .await
         .expect("connect");
@@ -2071,7 +2071,7 @@ mod tests {
             Some("device-r1"),
             Some("phone-endpoint"),
             Some(CODEC_CAP_HEVC),
-            true,
+            super::super::client::SessionMode::InputOnly,
         )
         .await
         .expect("connect");

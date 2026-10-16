@@ -65,7 +65,7 @@ async fn an_input_only_session_carries_input_and_no_picture() {
         Some("remote-test"),
         None,
         None,
-        true,
+        pocketdesk_core::streaming::SessionMode::InputOnly,
     )
     .await
     .expect("client connect");

@@ -1905,6 +1905,15 @@ pub async fn list_remote_files(
     .await
 }
 
+/// The session mode a connect asks for (T10i).
+fn session_mode(input_only: bool) -> pocketdesk_core::streaming::SessionMode {
+    if input_only {
+        pocketdesk_core::streaming::SessionMode::InputOnly
+    } else {
+        pocketdesk_core::streaming::SessionMode::Screen
+    }
+}
+
 /// Request remote screen streaming.
 ///
 /// `monitor_index` selects which display to stream (0 = primary).
@@ -2003,7 +2012,7 @@ pub async fn connect_streaming(
         Some(&client_identity().device_id),
         iroh_id.as_deref(),
         Some(codec_caps),
-        input_only,
+        session_mode(input_only),
     )
     .await
     .map_err(|e| {
@@ -2229,7 +2238,7 @@ pub async fn connect_streaming_wan(
         Some(&client_identity().device_id),
         None,
         Some(codec_caps),
-        input_only,
+        session_mode(input_only),
     )
     .await;
 

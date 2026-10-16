@@ -1107,6 +1107,9 @@ pub const STREAM_KIND_AUDIO: u8 = 1;
 /// admitted (the gate and the owner's approval passed), so input sent from
 /// now on is injected. No payload.
 pub const STREAM_KIND_READY: u8 = 2;
+/// Server to client, on a cast session (T10k): send a keyframe now (a viewer
+/// joined or lost its way). No payload.
+pub const STREAM_KIND_CAST_KEYFRAME: u8 = 3;
 
 /// Packet header for streaming transport
 ///
