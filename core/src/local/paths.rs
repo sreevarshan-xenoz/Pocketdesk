@@ -68,6 +68,9 @@ fn missing(what: &str) -> io::Error {
 /// ports) and its own iroh identity; set `POCKETDESK_STATE_DIR` with it for
 /// its own pairings and device id.
 pub fn config_dir() -> io::Result<PathBuf> {
+    if let Some(dir) = CONFIG_DIR_OVERRIDE.get() {
+        return Ok(dir.clone());
+    }
     if let Some(dir) = dir_from_env(CONFIG_DIR_VAR, std::env::var_os(CONFIG_DIR_VAR)) {
         return dir;
     }
@@ -85,6 +88,16 @@ static STATE_DIR_OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::n
 /// pairings and keys.
 pub fn use_state_dir(dir: PathBuf) -> &'static std::path::Path {
     STATE_DIR_OVERRIDE.get_or_init(|| dir)
+}
+
+/// The config folder, set in-process as [`use_state_dir`] sets the state
+/// folder: for a test that must not read the owner's config (the idle
+/// harness). Set once, before anything reads the config.
+static CONFIG_DIR_OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Use `dir` as the config folder for the rest of this process.
+pub fn use_config_dir(dir: PathBuf) -> &'static std::path::Path {
+    CONFIG_DIR_OVERRIDE.get_or_init(|| dir)
 }
 
 /// `<state dir>/pocketdesk`, falling back to local data (`%LOCALAPPDATA%` on

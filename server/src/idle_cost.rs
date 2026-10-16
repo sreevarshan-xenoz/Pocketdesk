@@ -130,9 +130,11 @@ mod tests {
     #[test]
     #[ignore = "measures for minutes; run by hand, in release"]
     fn what_each_background_loop_costs_at_idle() {
-        let dir = pocketdesk_core::local::paths::use_state_dir(
-            std::env::temp_dir().join(format!("pd-idle-cost-{}", std::process::id())),
-        );
+        // Throwaway state and config: the Home Assistant and clipboard loops
+        // read the config, and must not act on the owner's.
+        let base = std::env::temp_dir().join(format!("pd-idle-cost-{}", std::process::id()));
+        let dir = pocketdesk_core::local::paths::use_state_dir(base.join("state"));
+        pocketdesk_core::local::paths::use_config_dir(base.join("config"));
         // As the server does, unless asked to measure the pollers alone.
         if std::env::var_os("POCKETDESK_IDLE_NO_WATCHER").is_none() {
             crate::inbox::start(dir);
