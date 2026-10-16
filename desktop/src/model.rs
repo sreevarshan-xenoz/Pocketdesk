@@ -26,6 +26,8 @@ pub struct Device {
     pub permissions: DevicePermissions,
     /// Its last battery report (T8b), if it ever sent one.
     pub battery: Option<pocketdesk_core::local::phone_status::PhoneBattery>,
+    /// Another of the owner's computers, paired as one (2f).
+    pub computer: bool,
 }
 
 /// Everything the window shows, read once per refresh.
@@ -86,6 +88,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                 takes_files: takes_files(&id),
                 permissions: store.permissions(&id),
                 battery: batteries.get(&id).copied(),
+                computer: store.is_computer(&id),
                 id,
             })
             .collect(),

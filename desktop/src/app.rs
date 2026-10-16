@@ -616,6 +616,7 @@ impl PocketdeskApp {
                 for device in &self.snapshot.devices {
                     ui.monospace(short(&device.id)).on_hover_text(&device.id);
                     ui.label(match device.grant_remaining {
+                        None if device.computer => "a computer".to_string(),
                         None => "permanent".to_string(),
                         Some(secs) => format!("{} left", human_duration(secs)),
                     });
