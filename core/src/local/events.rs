@@ -14,6 +14,20 @@ use serde_json::{Map, Value};
 
 use super::paths::EVENTS_FILE;
 
+/// Every kind of event, as `docs/local-api.md` lists them.
+pub const KINDS: &[&str] = &[
+    "session_started",
+    "session_ended",
+    "phone_linked",
+    "phone_unlinked",
+    "phone_battery",
+    "phone_battery_low",
+    "notification",
+    "text_received",
+    "file_received",
+    "link_received",
+];
+
 /// The log moves to `events.jsonl.1` at this size.
 pub const MAX_LOG: u64 = 1024 * 1024;
 

@@ -24,3 +24,18 @@ fn every_command_with_json_is_in_the_local_api_doc() {
         "commands with --json missing from docs/local-api.md: {missing:?}"
     );
 }
+
+#[test]
+fn every_event_kind_is_in_the_local_api_doc() {
+    let doc = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/local-api.md"))
+        .expect("docs/local-api.md");
+    let missing: Vec<&str> = pocketdesk_core::local::events::KINDS
+        .iter()
+        .copied()
+        .filter(|kind| !doc.contains(&format!("`{kind}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "event kinds missing from docs/local-api.md: {missing:?}"
+    );
+}

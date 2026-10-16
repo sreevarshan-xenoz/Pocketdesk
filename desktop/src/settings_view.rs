@@ -6,6 +6,7 @@ use eframe::egui::{self, Color32, RichText};
 use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
+use pocketdesk_core::local::events::{EventsDetail, KINDS};
 use pocketdesk_core::local::wake::WakeFacts;
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
@@ -17,6 +18,8 @@ pub struct SettingsForm {
     pub mic_device_text: String,
     /// The text box behind `relay_urls`: one per line, or comma separated.
     pub relay_urls_text: String,
+    /// The text box behind `[hooks]`: `kind = command`, one per line.
+    pub hooks_text: String,
     /// Saved since the server last read it.
     pub restart_needed: bool,
     /// The adapter a phone on this network would wake this computer
@@ -29,6 +32,7 @@ impl SettingsForm {
         Self {
             mic_device_text: config.mic_relay_device.clone().unwrap_or_default(),
             relay_urls_text: config.relay_urls.join("\n"),
+            hooks_text: hooks_text(&config.hooks),
             saved: config.clone(),
             edited: config,
             restart_needed: false,
@@ -47,6 +51,7 @@ impl SettingsForm {
             .filter(|url| !url.is_empty())
             .map(str::to_string)
             .collect();
+        self.edited.hooks = parse_hooks(&self.hooks_text).0;
     }
 
     pub fn dirty(&self) -> bool {
@@ -84,6 +89,9 @@ impl SettingsForm {
             if let Some(problem) = relay_url_problem(url) {
                 problems.push(format!("Relay: {problem}."));
             }
+        }
+        for problem in parse_hooks(&self.hooks_text).1 {
+            problems.push(format!("Hooks: {problem}."));
         }
         problems
     }
@@ -225,6 +233,45 @@ impl SettingsForm {
                     &mut e.phone_battery_alerts,
                     "a notification when a phone runs low",
                 );
+                ui.end_row();
+                ui.label("Event log");
+                ui.checkbox(
+                    &mut e.events,
+                    "keep a log of what happens, for `pocketdesk events` and scripts",
+                );
+                ui.end_row();
+                ui.label("");
+                let mut full = e.events_detail == EventsDetail::Full;
+                if ui
+                    .checkbox(
+                        &mut full,
+                        "details in events: notification and text content, file names, whole links",
+                    )
+                    .changed()
+                {
+                    e.events_detail = if full {
+                        EventsDetail::Full
+                    } else {
+                        EventsDetail::Metadata
+                    };
+                }
+                ui.end_row();
+                ui.label("Hooks");
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.hooks_text)
+                            .desired_rows(3)
+                            .hint_text("file_received = notify-send \"A file came\""),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "One per line: an event, \"=\", a command. It runs as you, with the event on stdin. Events: {}.",
+                            KINDS.join(", ")
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                });
                 ui.end_row();
                 ui.label("Messages history");
                 ui.add(
@@ -378,10 +425,72 @@ fn dht_label(mode: DhtPublish) -> &'static str {
     }
 }
 
+/// `[hooks]` as the text box shows it.
+fn hooks_text(hooks: &std::collections::BTreeMap<String, String>) -> String {
+    hooks
+        .iter()
+        .map(|(kind, command)| format!("{kind} = {command}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The hooks in the text box, and what is wrong with its lines.
+fn parse_hooks(text: &str) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
+    let mut hooks = std::collections::BTreeMap::new();
+    let mut problems = Vec::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let Some((kind, command)) = line.split_once('=') else {
+            problems.push(format!("\"{line}\" has no \"=\""));
+            continue;
+        };
+        let (kind, command) = (kind.trim(), command.trim());
+        if !KINDS.contains(&kind) {
+            problems.push(format!("there is no event \"{kind}\""));
+        } else if command.is_empty() {
+            problems.push(format!("{kind} has no command"));
+        } else if hooks
+            .insert(kind.to_string(), command.to_string())
+            .is_some()
+        {
+            problems.push(format!("{kind} is given twice"));
+        }
+    }
+    (hooks, problems)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pocketdesk_core::local::config::Config;
+
+    #[test]
+    fn hooks_are_one_event_and_command_per_line() {
+        let mut form = SettingsForm::from_config(Config::default());
+        form.hooks_text =
+            " file_received = notify-send \"a = b\" \n\nsession_started=echo hi".into();
+        form.apply_text_fields();
+        assert!(form.problems().is_empty(), "{:?}", form.problems());
+        assert_eq!(
+            form.edited.hooks.get("file_received").map(String::as_str),
+            Some("notify-send \"a = b\""),
+            "the command keeps its own equals signs"
+        );
+        assert_eq!(form.edited.hooks.len(), 2);
+        let back = SettingsForm::from_config(form.edited.clone());
+        assert_eq!(parse_hooks(&back.hooks_text).0, form.edited.hooks);
+        for bad in [
+            "no_such = x",
+            "file_received",
+            "file_received =",
+            "link_received = a\nlink_received = b",
+        ] {
+            form.hooks_text = bad.into();
+            assert!(
+                form.problems().iter().any(|p| p.starts_with("Hooks:")),
+                "{bad:?} passed"
+            );
+        }
+    }
 
     #[test]
     fn relays_are_read_one_per_line_or_comma_and_checked() {
