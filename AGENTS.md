@@ -42,6 +42,11 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-16: **T10f, input on wlroots without uinput (branch `feat/wlr-input`; spec `docs/superpowers/specs/2026-10-16-wlr-input-design.md`).**
+  - **How:** when uinput cannot be opened (root-only, the default on most distributions), the server injects through the compositor: `zwlr_virtual_pointer_v1` for the pointer and `zwp_virtual_keyboard_v1` with a `pc+us` keys keymap (`core::input::wlr_input`), before falling back to enigo. Found on the VM during F4, where input had done nothing.
+  - **Fresh review (0 Critical, 1 Important), fixed:** a compositor that went away left input dead for the server's life (now reopened); plus the socket never read, an unbounded connect, Shift left down by a failed key, and the spec.
+  - **Found on the VM re-check:** wlroots takes no modifier state from a virtual keyboard's keys, so shortcuts arrived without their modifiers; the keyboard now sends it. Re-checked: Ctrl+C and Shift+Left with their modifiers, and input back after Sway restarted.
+  - **Device-checked (A71 → Azure VM, Sway, uinput root-only):** pointer motion, a click, Enter and Esc through the keys keyboard, and text with capitals through F4's. Owed: checklist §71.
 - 2026-10-16: **A computer with no audio capture no longer ends every session at once (branch `fix/audio-ends-session`).** The session ends when the first of its tasks finishes, and the audio task returned at once without audio capture (no PipeWire, no output device) or an Opus encoder; it now waits for the session's end. Found while planning input-only sessions (T10i).
 - 2026-10-16: **T10h, new phone screenshots on the computer (branch `feat/phone-screenshots`; spec `docs/superpowers/specs/2026-10-16-phone-screenshots-design.md`).**
   - **How:** the phone's "New screenshots to the computer" (off; asks for photo access) watches MediaStore from the notification listener and sends each new screenshot (a `Screenshots` folder, at most 10 minutes old) to its own computer: as its clipboard image (N4) and as a share into Downloads, each with its own switch. No computer change.

@@ -10,4 +10,7 @@ pub mod keys;
 /// Typing any character through a Wayland virtual keyboard (roadmap F4).
 #[cfg(all(target_os = "linux", feature = "injection"))]
 pub mod vkeyboard;
+/// Pointer and keys on wlroots without uinput (T10f).
+#[cfg(all(target_os = "linux", feature = "injection"))]
+pub mod wlr_input;
 pub mod xkb_keymap;
