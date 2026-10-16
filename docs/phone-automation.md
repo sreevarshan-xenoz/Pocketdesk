@@ -86,5 +86,5 @@ Every extra is named `dev.pocketdesk.android.extra.<NAME>`. Each broadcast carri
 
 ### Example
 
-Tasker, profile *Event → System → Intent Received*: Action `dev.pocketdesk.android.event.FILE_RECEIVED`. The task gets the extras as variables (`%address`, `%mime`, `%size`), so *If %mime ~ image/\** can open the gallery. The same with `SESSION_ENDED` and *If %reason eq lost* can say "the computer went away".
+Tasker, profile *Event → System → Intent Received*: Action `dev.pocketdesk.android.event.FILE_RECEIVED`. The task gets each extra as a local variable named after it (Tasker's variable list in the task shows the exact names, which depend on its version), so a test of the `MIME` extra against `image/*` can open the gallery. The same with `SESSION_ENDED` and a test of `REASON` for `lost` can say "the computer went away". Not yet tried with Tasker itself (checklist §83).
 
