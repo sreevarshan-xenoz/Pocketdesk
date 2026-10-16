@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.ui
 
+import dev.pocketdesk.android.automation.PhoneEventBroadcast
+import dev.pocketdesk.android.automation.PhoneEvents
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,6 +46,7 @@ private data class Run(val task: Task, val id: String, val status: Status, val o
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var tasks by remember { mutableStateOf<List<Task>?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var run by remember { mutableStateOf<Run?>(null) }
@@ -69,7 +72,9 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
             RustCore.runTask(address, controlPort, started.task.name, started.id)
         }
         sent.exceptionOrNull()?.let {
-            run = started.copy(status = Status.NotSent(it.message ?: it.toString()))
+            val status = Status.NotSent(it.message ?: it.toString())
+            run = started.copy(status = status)
+            tellFinished(context, address, started.task.name, status)
             return@LaunchedEffect
         }
         val since = android.os.SystemClock.elapsedRealtime()
@@ -90,7 +95,10 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                 output = body?.optString("output").orEmpty(),
                 truncated = body?.optBoolean("truncated") == true,
             )
-            if (TaskRun.finished(status)) break
+            if (TaskRun.finished(status)) {
+                tellFinished(context, address, started.task.name, status)
+                break
+            }
             delay(1_000)
         }
     }
@@ -180,3 +188,8 @@ private fun statusText(status: Status): String =
         is Status.NotSent -> stringResource(R.string.tasks_not_sent, status.why)
         Status.NoAnswer -> stringResource(R.string.tasks_no_answer)
     }
+
+/** Ecosystem 1f: other apps hear a task started here end. */
+private fun tellFinished(context: android.content.Context, address: String, task: String, status: Status) {
+    PhoneEventBroadcast.send(context, PhoneEvents.Kind.TASK_FINISHED, address, TaskRun.told(status) + ("task" to task))
+}

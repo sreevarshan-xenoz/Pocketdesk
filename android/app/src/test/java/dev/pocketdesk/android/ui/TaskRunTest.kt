@@ -46,4 +46,13 @@ class TaskRunTest {
         assertTrue(TaskRun.finished(Status.Done(1)))
         assertTrue(TaskRun.finished(Status.Denied))
     }
+
+    @Test
+    fun aFinishedRunIsToldWithoutItsOutput() {
+        assertEquals(mapOf("state" to "done", "code" to 3, "timed_out" to false), TaskRun.told(Status.Done(3)))
+        assertEquals("refused", TaskRun.told(Status.Denied)["state"])
+        assertEquals("denied", TaskRun.told(Status.Denied)["reason"])
+        assertEquals(true, TaskRun.told(Status.StoppedAtDeadline)["timed_out"])
+        assertFalse(TaskRun.told(Status.NotSent("secret reason")).values.contains("secret reason"))
+    }
 }
