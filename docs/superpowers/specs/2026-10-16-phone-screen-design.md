@@ -18,3 +18,11 @@ Research item 8 (`docs/research/2026-10-15-what-makes-it-worth-using.md`): Deskr
 
 - **Rust:** the size, the new output's name and place, and the i3-IPC framing.
 - **Device (A71 → Azure VM, Sway):** the screen added and streamed at the phone's shape, a window moved onto it, and removed after the session.
+
+## As built
+
+- **Which output:** adds run one at a time and take exactly one new `HEADLESS-N`; only such outputs are ever unplugged, so a real monitor never is. Asked again, a phone gets its own screen back.
+- **Which index:** the capture matches an index by the origin xcap lists for it, else by its place among the outputs. The answer is the listed monitor at the new screen's origin (waited for up to 2 s, as XWayland learns of it late), else its place among Sway's outputs when the list is shorter; with neither, the screen is removed and the phone told.
+- **How long:** a phone counts while it has a session or a control link (a session moving onto the screen, waiting at the approval gate or reconnecting keeps its link), and a new screen is left alone for 60 s. Screens a stopped server left are taken over by the next one only in the same Sway (its socket path); a restarted Sway has none of them and may reuse their names.
+- **Limits:** at most 4 phone screens; a phone may always take its own back; the phone never keeps an added screen's index as the computer's default.
+- **Fresh review (0 Critical, 5 Important), fixed:** the output and index above, the sweep during a switch, a second add freezing the session, and the saved index; plus the start-up cleanup, the cap and a doc comment.
