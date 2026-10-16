@@ -677,11 +677,18 @@ impl KdeConnectService {
     }
 }
 
+/// The id a task start from Home Assistant goes by (ecosystem 1e), in
+/// place of a phone's: no device may take it, or a phone's start would read
+/// as Home Assistant's in the owner's prompt.
+pub const HOME_ASSISTANT_ID: &str = "home-assistant";
+
 /// Whether `id` can be a device id: 1 to 128 bytes, no control characters
-/// (it reaches logs, notifications and the owner's approval prompts). One
-/// rule for the control channel and the stream.
+/// (it reaches logs, notifications and the owner's approval prompts), and
+/// not one Pocketdesk keeps for itself. One rule for the control channel
+/// and the stream.
 pub fn valid_device_id(id: &str) -> bool {
     !id.is_empty()
+        && !id.eq_ignore_ascii_case(HOME_ASSISTANT_ID)
         && id.len() <= 128
         && !id.chars().any(|c| c.is_control() || is_invisible_format(c))
 }
@@ -709,6 +716,11 @@ mod tests {
         assert!(!valid_device_id(&"x".repeat(300)));
         assert!(!valid_device_id("phone\u{202E}evil"), "a bidi override");
         assert!(!valid_device_id("pho\u{200B}ne"), "a zero-width space");
+        assert!(
+            !valid_device_id("home-assistant"),
+            "kept for Home Assistant"
+        );
+        assert!(!valid_device_id("Home-Assistant"));
     }
 
     /// Two writers changing different devices at the same moment both land.

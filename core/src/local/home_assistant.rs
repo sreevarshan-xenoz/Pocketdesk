@@ -11,7 +11,8 @@ use super::paths::HOME_ASSISTANT_FILE;
 
 /// The device a task start from Home Assistant is held, logged and
 /// rate-limited as, in place of a phone's id.
-pub const HOME_ASSISTANT_DEVICE: &str = "home-assistant";
+/// No phone may take it (`valid_device_id` refuses it).
+pub const HOME_ASSISTANT_DEVICE: &str = crate::protocol::kdeconnect::HOME_ASSISTANT_ID;
 
 /// MQTT's own port.
 pub const DEFAULT_PORT: u16 = 1883;
