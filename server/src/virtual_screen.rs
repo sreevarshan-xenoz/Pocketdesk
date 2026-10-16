@@ -4,8 +4,8 @@
 //! index, and the session switches to it. Sway only, through its IPC
 //! (`create_output`, `output … mode --custom`, `output … unplug`); elsewhere
 //! the phone is told the computer cannot. An output lasts while its phone
-//! has a session, and one left by a server that stopped goes at the next
-//! start (`virtual_screens.json`).
+//! has a session or link, and those a server that stopped left are swept
+//! by the next one in the same Sway (`virtual_screens.json`).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -208,20 +208,33 @@ fn capture_index(name: &str, x: i32) -> Option<u32> {
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Made {
     phones: BTreeMap<String, Vec<String>>,
+    /// The Sway they were made in (its socket path, which holds its pid): a
+    /// restarted Sway has none of them, and may reuse their names.
+    #[serde(default)]
+    sway: Option<String>,
 }
 
 fn made() -> &'static Mutex<Made> {
     static MADE: Mutex<Made> = Mutex::new(Made {
         phones: BTreeMap::new(),
+        sway: None,
     });
     &MADE
+}
+
+fn this_sway() -> Option<String> {
+    std::env::var("SWAYSOCK").ok()
 }
 
 fn save(made: &Made) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
-    if let Ok(json) = serde_json::to_string(made) {
+    let made = Made {
+        phones: made.phones.clone(),
+        sway: this_sway(),
+    };
+    if let Ok(json) = serde_json::to_string(&made) {
         let tmp = dir.join(format!("{STATE_FILE}.tmp"));
         if pocketdesk_core::secure_fs::write_private(&tmp, json.as_bytes()).is_ok() {
             let _ = std::fs::rename(&tmp, dir.join(STATE_FILE));
@@ -253,7 +266,10 @@ pub fn configure(allowed: bool) {
     ALLOWED.store(allowed, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Remove the outputs a server that stopped left (at start).
+/// Take over the screens a server that stopped left (at start): in the
+/// same Sway they are this server's to sweep like any other (gone once their
+/// phone has none of a session or link); a restarted Sway has none of them
+/// and may have reused their names, so then they are only forgotten.
 pub fn clear_left_over() {
     let Ok(dir) = crate::state::state_dir() else {
         return;
@@ -265,10 +281,15 @@ pub fn clear_left_over() {
     else {
         return;
     };
-    for name in left.phones.values().flatten() {
-        remove(name);
+    if left.sway.is_some() && left.sway == this_sway() {
+        let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
+        for (phone, names) in left.phones {
+            made.phones.entry(phone).or_default().extend(names);
+        }
+        save(&made);
+    } else {
+        let _ = std::fs::remove_file(path);
     }
-    let _ = std::fs::remove_file(path);
 }
 
 /// Remove the outputs of phones with no session in `live` twice in a row
