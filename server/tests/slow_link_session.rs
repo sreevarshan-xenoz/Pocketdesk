@@ -38,10 +38,11 @@
 //! but the first cut spiralled, 675 to 348 to the 250 kbit/s floor in three
 //! ticks, as each starved tick while the old rate's frames drained read
 //! only the new, smaller ones; quiet minutes then probed back to 580 kbit/s.
-//! With a cut let to drain first (three ticks unjudged): one cut, to
-//! 1.06 Mbit/s, no spiral, worst 15.0 fps; the screen drew about 16 a
-//! second, so the transport never waited and quiet minutes probed above
-//! the link, which a busy screen would cut again within two ticks.
+//! With a cut let to drain first (three ticks unjudged): one cut, from
+//! the loss controller's 7.7 to 1.06 Mbit/s (the starved ticks read a
+//! little over the link), no spiral, worst 15.0 fps; the screen drew about
+//! 16 a second, so the transport never waited and quiet minutes probed
+//! above the link, which a busy screen would cut again within two ticks.
 //!
 //! Ignored, since it captures the real desktop:
 //!
