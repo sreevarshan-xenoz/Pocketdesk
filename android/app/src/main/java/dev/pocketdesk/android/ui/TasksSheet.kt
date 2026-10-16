@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.ui
 
+import dev.pocketdesk.android.automation.PhoneEventBroadcast
+import dev.pocketdesk.android.automation.PhoneEvents
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,10 +24,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.TaskRun.Status
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -44,6 +50,7 @@ private data class Run(val task: Task, val id: String, val status: Status, val o
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var tasks by remember { mutableStateOf<List<Task>?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var run by remember { mutableStateOf<Run?>(null) }
@@ -69,29 +76,44 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
             RustCore.runTask(address, controlPort, started.task.name, started.id)
         }
         sent.exceptionOrNull()?.let {
-            run = started.copy(status = Status.NotSent(it.message ?: it.toString()))
+            val status = Status.NotSent(it.message ?: it.toString())
+            run = started.copy(status = status)
+            tellFinished(context, address, started.task.name, status)
             return@LaunchedEffect
         }
         val since = android.os.SystemClock.elapsedRealtime()
-        while (isActive) {
-            val json = withContext(Dispatchers.IO) { RustCore.taskResult(started.id) }
-            val body = json.takeIf { it.isNotBlank() }?.let { runCatching { JSONObject(it) }.getOrNull() }
-            val answered =
-                TaskRun.status(
-                    state = body?.optString("state")?.takeIf { it.isNotEmpty() },
-                    code = body?.takeIf { it.has("code") && !it.isNull("code") }?.optInt("code"),
-                    timedOut = body?.optBoolean("timed_out") == true,
-                    reason = body?.optString("reason")?.takeIf { it.isNotEmpty() },
-                    asks = started.task.asks,
+        var told = false
+        try {
+            while (isActive) {
+                val (status, body) = latest(started, since)
+                run = started.copy(
+                    status = status,
+                    output = body?.optString("output").orEmpty(),
+                    truncated = body?.optBoolean("truncated") == true,
                 )
-            val status = TaskRun.givenUp(answered, android.os.SystemClock.elapsedRealtime() - since)
-            run = started.copy(
-                status = status,
-                output = body?.optString("output").orEmpty(),
-                truncated = body?.optBoolean("truncated") == true,
-            )
-            if (TaskRun.finished(status)) break
-            delay(1_000)
+                if (TaskRun.finished(status)) {
+                    told = true
+                    tellFinished(context, address, started.task.name, status)
+                    break
+                }
+                delay(1_000)
+            }
+        } finally {
+            // The sheet closed before the run ended: other apps still hear
+            // how it ends (ecosystem 1f), followed from outside the sheet.
+            if (!told && Prefs.tellOtherApps(context)) {
+                val app = context.applicationContext
+                followers.launch {
+                    while (true) {
+                        val (status, _) = latest(started, since)
+                        if (TaskRun.finished(status)) {
+                            tellFinished(app, address, started.task.name, status)
+                            break
+                        }
+                        delay(1_000)
+                    }
+                }
+            }
         }
     }
 
@@ -180,3 +202,26 @@ private fun statusText(status: Status): String =
         is Status.NotSent -> stringResource(R.string.tasks_not_sent, status.why)
         Status.NoAnswer -> stringResource(R.string.tasks_no_answer)
     }
+
+/** Ecosystem 1f: other apps hear a task started here end. */
+private fun tellFinished(context: android.content.Context, address: String, task: String, status: Status) {
+    PhoneEventBroadcast.send(context, PhoneEvents.Kind.TASK_FINISHED, address, TaskRun.told(status) + ("task" to task))
+}
+
+/** Runs whose sheet closed, followed to their end for other apps (ecosystem 1f). */
+private val followers = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+/** The run's status from the computer's latest result, and that result. */
+private suspend fun latest(started: Run, since: Long): Pair<Status, JSONObject?> {
+    val json = withContext(Dispatchers.IO) { RustCore.taskResult(started.id) }
+    val body = json.takeIf { it.isNotBlank() }?.let { runCatching { JSONObject(it) }.getOrNull() }
+    val answered =
+        TaskRun.status(
+            state = body?.optString("state")?.takeIf { it.isNotEmpty() },
+            code = body?.takeIf { it.has("code") && !it.isNull("code") }?.optInt("code"),
+            timedOut = body?.optBoolean("timed_out") == true,
+            reason = body?.optString("reason")?.takeIf { it.isNotEmpty() },
+            asks = started.task.asks,
+        )
+    return TaskRun.givenUp(answered, android.os.SystemClock.elapsedRealtime() - since) to body
+}

@@ -40,4 +40,15 @@ object TransferSummary {
             else -> Outcome.Mixed(sent, saved)
         }
     }
+
+    /**
+     * How many files of a send failed (ecosystem 1f): of the [planned] ones
+     * (0 when it stopped before it knew), those not [sent], and at least one
+     * when it [threw] before sending any. [counted] is how many it got to.
+     */
+    fun failedOf(planned: Int, counted: Int, sent: Int, threw: Boolean): Int {
+        val total = maxOf(planned, counted)
+        val failed = (total - sent).coerceAtLeast(0)
+        return if (threw && sent == 0) maxOf(failed, 1) else failed
+    }
 }

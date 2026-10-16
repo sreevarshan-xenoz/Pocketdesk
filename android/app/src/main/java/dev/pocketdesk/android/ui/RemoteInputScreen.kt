@@ -1,5 +1,8 @@
 package dev.pocketdesk.android.ui
 
+import dev.pocketdesk.android.Prefs
+import dev.pocketdesk.android.automation.PhoneEventBroadcast
+import dev.pocketdesk.android.automation.SessionTell
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,6 +83,20 @@ fun RemoteInputScreen(
     var state by remember { mutableStateOf(State.Connecting) }
     var reason by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
+
+    // Ecosystem 1f: other apps hear the remote start and end.
+    val tell = remember(address) { SessionTell("remote") }
+    LaunchedEffect(state) {
+        val told = when (state) {
+            State.Ready -> tell.up(Prefs.tellOtherApps(context))
+            State.Down, State.TooOld -> tell.lost()
+            else -> null
+        }
+        told?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) }
+    }
+    DisposableEffect(tell) {
+        onDispose { tell.left()?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) } }
+    }
 
     LaunchedEffect(attempt) {
         state = State.Connecting

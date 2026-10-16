@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.ui
 
+import dev.pocketdesk.android.automation.PhoneEventBroadcast
+import dev.pocketdesk.android.automation.PhoneEvents
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -38,7 +40,11 @@ fun LinksEffect(address: String) {
             val links = withContext(Dispatchers.IO) { RustCore.takeLinks() }
             if (Prefs.linksFromComputer(context)) {
                 // The bridge checked them; checked again where they open.
-                links.filter { LinkRule.openable(it) }.forEach { postLink(context, address, it) }
+                links.filter { LinkRule.openable(it) }.forEach {
+                    postLink(context, address, it)
+                    // Ecosystem 1f: that a link came, not which.
+                    PhoneEventBroadcast.send(context, PhoneEvents.Kind.LINK_RECEIVED, address)
+                }
             }
             delay(1_000)
         }

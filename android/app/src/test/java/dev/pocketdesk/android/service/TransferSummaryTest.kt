@@ -45,4 +45,13 @@ class TransferSummaryTest {
             TransferSummary.of(sent = 0, sends = 0, saved = 0, receives = 1),
         )
     }
+
+    @Test
+    fun aSendCutShortCountsWhatItDidNotSendAsFailed() {
+        assertEquals("all went", 0, TransferSummary.failedOf(planned = 3, counted = 3, sent = 3, threw = false))
+        assertEquals("cut off after 3 of 20", 17, TransferSummary.failedOf(planned = 20, counted = 3, sent = 3, threw = false))
+        assertEquals("threw before it knew", 1, TransferSummary.failedOf(planned = 0, counted = 0, sent = 0, threw = true))
+        assertEquals("an empty folder", 1, TransferSummary.failedOf(planned = 0, counted = 1, sent = 0, threw = false))
+        assertEquals("one retried and failed", 1, TransferSummary.failedOf(planned = 2, counted = 2, sent = 1, threw = false))
+    }
 }

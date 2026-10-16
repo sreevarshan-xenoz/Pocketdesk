@@ -61,4 +61,20 @@ object TaskRun {
 
     /** Whether the run is over, so the app stops asking for its result. */
     fun finished(status: Status): Boolean = status !is Status.Waiting && status != Status.Running
+
+    /**
+     * How a finished run is told to other apps (ecosystem 1f): its state,
+     * and its code or why it was refused; never its output.
+     */
+    fun told(status: Status): Map<String, Any?> =
+        when (status) {
+            is Status.Done -> mapOf("state" to "done", "code" to status.code, "timed_out" to false)
+            Status.StoppedAtDeadline -> mapOf("state" to "done", "timed_out" to true)
+            Status.Denied -> mapOf("state" to "refused", "reason" to "denied")
+            Status.Busy -> mapOf("state" to "refused", "reason" to "busy")
+            Status.Unknown -> mapOf("state" to "refused", "reason" to "unknown")
+            is Status.NotSent -> mapOf("state" to "not_sent")
+            Status.NoAnswer -> mapOf("state" to "no_answer")
+            is Status.Waiting, Status.Running -> emptyMap()
+        }
 }

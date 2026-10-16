@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.service
 
+import dev.pocketdesk.android.automation.PhoneEventBroadcast
+import dev.pocketdesk.android.automation.PhoneEvents
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -70,6 +72,8 @@ class TransferService : Service() {
     // Only the worker thread touches these.
     private var sentTotal = 0
     private var sendCount = 0
+    /** The files the current send means to send, for FILES_SENT (ecosystem 1f). */
+    private var plannedSends = 0
     private var savedTotal = 0
     private var receiveCount = 0
     private var lastSaved: Uri? = null
@@ -144,6 +148,9 @@ class TransferService : Service() {
     /** Runs on [worker]; the last job queued reports everything done since. */
     private fun run(job: Job, startId: Int) {
         lastAddress = job.address
+        val (sentBefore, countBefore) = sentTotal to sendCount
+        plannedSends = 0
+        var threw = false
         try {
             when (job) {
                 is Job.Send -> sendAll(job)
@@ -151,14 +158,29 @@ class TransferService : Service() {
                 is Job.Receive -> receive(job)
             }
         } catch (t: Throwable) {
+            threw = true
             lastError = t.message ?: t.toString()
             Log.e(TAG, "transfer job failed", t)
         } finally {
+            if (job !is Job.Receive) {
+                // Ecosystem 1f: how this send went, without the names. Every
+                // file it meant to send and did not is failed, whatever
+                // stopped it (a throw, the service's time running out).
+                val sent = sentTotal - sentBefore
+                val failed = TransferSummary.failedOf(plannedSends, sendCount - countBefore, sent, threw)
+                PhoneEventBroadcast.send(
+                    this,
+                    PhoneEvents.Kind.FILES_SENT,
+                    job.address,
+                    mapOf("count" to sent, "failed" to failed),
+                )
+            }
             finishJob(startId)
         }
     }
 
     private fun sendAll(job: Job.Send) {
+        plannedSends = job.uris.size
         job.uris.forEachIndexed { index, uri ->
             val name = try {
                 displayName(uri)
@@ -178,6 +200,7 @@ class TransferService : Service() {
         val rootId = DocumentsContract.getTreeDocumentId(job.tree)
         val folder = documentName(job.tree, rootId) ?: "Folder"
         val plan = FolderWalk.plan(rootId) { children(job.tree, it) }
+        plannedSends = plan.files.size
         if (plan.files.isEmpty()) {
             // Nothing could be read or sent: a failure, not "0 sent".
             sendCount++
@@ -298,6 +321,14 @@ class TransferService : Service() {
         result.onSuccess { uri ->
             savedTotal++
             lastSaved = uri
+            // Ecosystem 1f: its type and size, never its name.
+            val mime = uri?.let { runCatching { contentResolver.getType(it) }.getOrNull() } ?: "application/octet-stream"
+            PhoneEventBroadcast.send(
+                this,
+                PhoneEvents.Kind.FILE_RECEIVED,
+                job.address,
+                mapOf("mime" to mime, "size" to job.size),
+            )
         }.onFailure {
             lastError = it.message
             Log.w(TAG, "receiving ${job.name} failed: $lastError")

@@ -1383,6 +1383,18 @@ Owed:
 - [ ] Home Assistant itself (its Mosquitto add-on): the entities on its device page, the Activity entity's history, a button press from its UI.
 - [ ] The desktop Settings section on screen (the switch, the fields, the status line), a broker with a password, and Linux.
 
+## 83. What the phone tells other apps (ecosystem 1f)
+
+A71 → this Windows box, debug builds, 2026-10-16, "Tell other apps what happens" on (set in the app's preferences through `run-as`):
+- [x] A screen session: `session_started` (`MODE=screen`); Back out of it: `session_ended` (`REASON=left`).
+- [x] `pocketdesk link` to the phone: `link_received`, with no link in it.
+- [x] `pocketdesk send --wait`: saved, and `file_received` with `MIME=text/plain`, `SIZE=16`, no file name.
+- [x] The switch off: a whole session told nothing.
+- [x] After the review fixes: `session_started` once the picture came, `session_ended` (`left`) on Back.
+
+Owed:
+- [ ] Tasker or MacroDroid receiving them (no automation app on the A71), a remote's events, a send's `FILES_SENT`, a task's `TASK_FINISHED`, a link lost (`REASON=lost`), and the Settings row on screen.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
