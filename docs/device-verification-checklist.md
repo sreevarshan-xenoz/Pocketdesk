@@ -1282,6 +1282,12 @@ Owed:
 - [ ] With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
 - [ ] Over the internet road.
 
+## 75. A second screen at the phone's shape (T10j)
+
+Owed (the VM run follows):
+- [ ] The screen added from the picker on Sway, streamed at the phone's shape, a window moved onto it, and removed after the session.
+- [ ] "Phones may add a screen" off: refused with its reason; on Windows and Hyprland: "only Sway can for now".
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
