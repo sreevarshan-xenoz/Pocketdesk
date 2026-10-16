@@ -103,11 +103,18 @@ pub fn handle(
         return err("Pocketdesk is not running on this computer.");
     }
     let now = pocketdesk_core::local::pin::now_unix();
-    let Some(phone) = crate::local_api::default_phone(state_dir, now, running) else {
+    let any_phone = crate::local_api::default_phone(state_dir, now, running);
+    let Some(phone) = any_phone else {
         return err("No phone is connected: open Pocketdesk on your phone.");
     };
     match request.get("send").and_then(Value::as_str) {
         Some("link") => {
+            // A link shows only in a session, on a phone with Links on.
+            let Some(phone) = crate::local_api::link_phone(state_dir, now, running) else {
+                return err(
+                    "A link reaches a phone in a session with Links on: connect from the                      phone first (an image goes without one).",
+                );
+            };
             let (out, code) = crate::local_api::link_in(state_dir, &phone, url, running);
             if code == 0 {
                 ok("Sent to your phone.")

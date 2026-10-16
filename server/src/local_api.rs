@@ -514,6 +514,17 @@ pub fn run_link(query: &str, url: &str, as_json: bool) -> i32 {
 
 /// The phone "Send to phone" sends to: of the paired phones files reach
 /// now, one in a session first, else the first linked (T10e).
+/// The phone a link goes to with no phone named: the first paired one in a
+/// session (only a session shows a link) with Links on.
+pub fn link_phone(state_dir: &Path, now_unix: u64, running: bool) -> Option<String> {
+    let store = trust_store(state_dir).ok()?;
+    let paired = store.trusted_devices();
+    live_sessions(state_dir, now_unix, running)
+        .into_iter()
+        .filter_map(|s| s.device_id)
+        .find(|id| paired.contains(id) && store.permissions(id).allows(Capability::Links))
+}
+
 pub fn default_phone(state_dir: &Path, now_unix: u64, running: bool) -> Option<String> {
     let mirror = live_mirror(state_dir, now_unix, running)?;
     let paired = trust_store(state_dir).ok()?.trusted_devices();
@@ -1103,6 +1114,40 @@ mod tests {
         );
         mirror(&[], linked);
         assert_eq!(default_phone(&dir, now, false), None, "no server");
+    }
+
+    #[test]
+    fn a_link_goes_to_a_paired_phone_in_a_session_with_links_on() {
+        let (dir, _) = send_setup("link-phone");
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("a71e00aa-0002").unwrap();
+        let mut off = store.permissions("5f1c9b3d-6e70");
+        off.links = Some(false);
+        store.set_permissions("5f1c9b3d-6e70", off).unwrap();
+        let mirror = |sessions: &[&str]| {
+            let sessions: Vec<Value> = sessions
+                .iter()
+                .map(|p| json!({ "device_id": p, "peer": "192.0.2.7:1", "transport": "lan", "started_unix": 1 }))
+                .collect();
+            std::fs::write(
+                dir.join(LIVE_FILE),
+                json!({ "updated_unix": pocketdesk_core::local::pin::now_unix(), "sessions": sessions, "linked": [{ "device_id": "a71e00aa-0002", "files": true }] }).to_string(),
+            )
+            .unwrap();
+        };
+        let now = pocketdesk_core::local::pin::now_unix();
+        mirror(&["stranger", "5f1c9b3d-6e70", "a71e00aa-0002"]);
+        assert_eq!(
+            link_phone(&dir, now, true).as_deref(),
+            Some("a71e00aa-0002"),
+            "not an unpaired phone, nor one with Links off"
+        );
+        mirror(&["5f1c9b3d-6e70"]);
+        assert_eq!(link_phone(&dir, now, true), None, "linked is not a session");
+        assert!(
+            default_phone(&dir, now, true).is_some(),
+            "an image could still go"
+        );
     }
 
     #[test]
