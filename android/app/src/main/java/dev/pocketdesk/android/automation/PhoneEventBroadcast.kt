@@ -29,8 +29,8 @@ object PhoneEventBroadcast {
         // No package: automation apps receive it with a receiver registered
         // at run time, which takes implicit broadcasts on every Android.
         runCatching { context.applicationContext.sendBroadcast(intent) }
+            // Metadata only, as the broadcast itself is.
+            .onSuccess { Log.d(TAG, "Told other apps: ${kind.event} ${event.extras}") }
             .onFailure { Log.w(TAG, "Could not tell other apps: ${it.message}") }
-        // Metadata only, as the broadcast itself is.
-        Log.d(TAG, "Told other apps: ${kind.event} ${event.extras}")
     }
 }
