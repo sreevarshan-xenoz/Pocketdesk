@@ -1,6 +1,6 @@
 # Two computers: pairing, a link, the clipboard and files (2f–2h)
 
-Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2f–2h (ecosystem phase 2, "any of my devices", gap 6). Status: design, written before the code.
+Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2f–2h (ecosystem phase 2, "any of my devices", gap 6). Status: 2f built (see "As built" at the end); 2g and 2h to come.
 
 ## Goal
 
@@ -69,3 +69,12 @@ Desktop only, in Settings → "Computers": the list with Forget, "Pair another c
 - A computer driving another's screen (a stream session between computers): held by "ask first" and not offered in the app.
 - The Explorer "Send to" menu for computers (T10e addresses phones).
 - More than two computers works by pairing each pair; there is no mesh (phase 4).
+
+## As built (2f)
+
+- **Where the knobs are.** Settings → Computers: paste the other's link and Pair, the last pairing's outcome, each paired computer with its link's state and Forget (`desktop/src/computers_view.rs`). The Pair tab has "Copy the link for another computer" (the link holds the PIN, so it is copied, never shown).
+- **Pairing** (`server/src/peer_computers.rs`): the pins the link's addresses had are put back when pairing fails, so a wrong link leaves nothing trusted. After the `wan_key`, A closes its side and reads B's to its end: B takes packets in order, so once it closes, A's key is registered and the link can be dialed at once.
+- **Forget** drops B's entry and the pins A set for it (only where the pin is still B's). It does not unpair A on B: `kdeconnect.pair` without a PIN does nothing on a computer, so B keeps A until its own owner removes it in the Devices tab (the app says so). B refusing the link then shows on A as "refused".
+- **A refused link** is tried again every 5 minutes rather than never, in case the refusal was a moment's race (a key not yet registered); one connection every 5 minutes to a computer that dropped this one.
+- **No event on A** for a pairing yet; B's Activity shows A as `phone_paired`, as for any device (the `kind: "computer"` metadata is still to do).
+- **Tests:** `peer_computers` unit tests (the pairing exchange on an in-memory stream, a refused code naming no key, the endpoint and fingerprint parsing, the refusal), `core::local::computers` (requests, the file), and `server/tests/two_computers.rs` (ignored: two real servers; a forged certificate and a wrong PIN pair nothing, the code pairs, B lists A as a computer with the profile and holds A's iroh key, the link comes up over iroh, Forget drops it).

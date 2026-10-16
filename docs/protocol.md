@@ -54,6 +54,8 @@ From `server/src/service.rs` (`handle_internet_control`, `serve_control`) and `a
 6. The connection is seeded as in step 7, without `wake_info`: it describes the adapter a phone reached at home, and an internet connection reached none.
 7. The connection has no address the desktop could dial, so transfers ride the connection itself (2c, `server/src/plugins/share.rs` `Route`, `service.rs` `IrohLink`). A share, download, offer or folder fetch whose request names **no** `port` is answered on a bidirectional stream the desktop opens on this connection, sent behind the control stream (QUIC priority −1 against 0). On it go the transfer key line and then the transfer of §1.4 step 4, with no TLS layer of ours: iroh proved both keys, and the phone's must be the iroh key it registered at home (`pair::may_transfer`). A request that names a port is refused ("nothing connects back by the internet road"). With `internet_files` off (desktop Settings "Files over the internet") every one is refused. Clipboard images take the same route (2e). The phone accepts those streams beside the control stream and hands each to the transfer its key names (2d, `android/bridge/src/link.rs`).
 
+**Between two computers (2f).** A computer paired with another (from the other's pairing link, in Settings → Computers) dials it on this road too, and always on it, from its own WAN endpoint (one key, one endpoint: two endpoints with the same key cannot both use a relay, 2b). The computer it dials admits it as it admits a phone here: a paired device whose registered iroh key, named by `wan_key` when it paired, is the one the connection proved. The dialing computer is the other's client: it takes the other's endpoint packets to keep its address current and ignores what is meant for phones (`server/src/peer_computers.rs`). Pairing itself never rides this road: it runs on the control port over TLS, the other's certificate pinned from the link for each of its addresses first.
+
 ### 1.3 The QUIC port (UDP 4716)
 
 - **Address check.** A QUIC attempt is counted only after it answers a Retry (`conn_budget::proven`). After that, the per-address and total budgets apply (§6).
@@ -180,7 +182,8 @@ Defaults: every permission is on except Exec (`Capability::default_allowed`).
 |---|---|---|---|---|---|
 | Identity | `kdeconnect.identity` | both | Device id, name, type, capability lists | Always (handshake) | `core/src/protocol/kdeconnect.rs`, `server/src/plugins/pair.rs` |
 | Pairing | `kdeconnect.pocketdesk.pair` | both | PIN request, `pairStatus` (`pinSent`, `pinReady`) | Always, also before pairing | `server/src/plugins/pair.rs` |
-| Pairing | `kdeconnect.pair` | both | The PIN; reply `{pair, serverId}` | Always, also before pairing | same |
+| Pairing | `kdeconnect.pair` | both | The PIN, and `computer: true` from another of the owner's computers (2f), which gives it a computer's narrow permissions (Clipboard, Files and Links, ask first; never with a guest code); reply `{pair, serverId}` | Always, also before pairing | same |
+| Pairing | `kdeconnect.pocketdesk.wan_key` | computer → computer | `{endpointId}`: the pairing computer's iroh id, sent once paired (2f). Registered as its iroh key only from a paired device on the home road whose TLS key is the bound one; otherwise ignored | Always (held to the bound key) | `server/src/plugins/pair.rs`, `server/src/peer_computers.rs` |
 | Input (KDE style) | `kdeconnect.mousepad.request`, `kdeconnect.presenter` | phone → desktop | Pointer and keys | Input | `server/src/plugins/input.rs` |
 | Input (KDE style) | `kdeconnect.mousepad.echo` | desktop → phone | Acknowledgement | — | same |
 | Clipboard text | `kdeconnect.clipboard`, `kdeconnect.clipboard.connect` | both (the phone polls in a session; the desktop replies with its clipboard text, or `{image:{id,size}}`; and with `clipboard_push` on, the desktop pushes new text, up to 256 KiB, to every live connection whose phone has Clipboard on, never back to the phone that set it, T10b) | Clipboard contents | Clipboard | `server/src/plugins/clipboard.rs`, `server/src/clipboard_push.rs` |
@@ -396,7 +399,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<config>/iroh_secret.key` | The desktop's iroh secret key | 0600, or an owner-only DACL | `server/src/iroh_endpoint.rs` |
 | `<state>/certs/identity.key` | The TLS private key | Owner-only | `core/src/streaming/transport.rs` |
 | `<state>/certs/identity.der` | The TLS certificate | Default | same |
-| `<state>/certs/known_peers.json` | Certificate pins (for `pocketdesk connect`) | Default | same (`update_pins`) |
+| `<state>/certs/known_peers.json` | Certificate pins (for `pocketdesk connect`, and the other computers this one paired with, 2f) | Default | same (`update_pins`) |
 | `<state>/device_id` | The desktop's device id | Default | `server/src/kde.rs` |
 | `<state>/pairing.pin` | The PIN, minting time, grant length | Owner-only | `core/src/local/pin.rs` |
 | `<state>/trusted_devices.json` (+ `.lock`) | Paired device ids, guest grants, per-device permissions | Default | `core/src/protocol/kdeconnect.rs` (`TrustStore`) |
@@ -412,6 +415,8 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/phone_media_out/` | The desktop app's presses for a phone's player, one file each, taken within 10 s | Default | `core/src/local/phone_media.rs` |
 | `<state>/phone_status.json` | Each paired phone's last battery report: charge, charging, when it came. Written by the server at most every 5 s; a phone no longer paired is dropped | Default | `core/src/local/phone_status.rs`, `server/src/plugins/phone_battery.rs` |
 | `<state>/links_out/` | Links the app or `pocketdesk link` hands to a phone, one file each, taken within 60 s | Default | `core/src/local/links.rs` |
+| `<state>/computers.json` | The other computers this one paired with (2f): id, name, addresses, control port, certificate fingerprint, iroh endpoint, when, and how each link is doing; and the last pairing's outcome. Written only by the server | Owner-only | `core/src/local/computers.rs` |
+| `<state>/computers_out/` | The desktop app's requests: pair with a pairing link (which holds a PIN), or forget a computer; one file each, taken within 120 s | Owner-only | same |
 | `<state>/sms.json`, `sms_outbox/` | Texts and replies (newest 1000 by default), with senders' contact names when the phone shares them; `sms_names` off forgets them at the next start | Owner-only | `core/src/local/sms.rs` |
 | `<state>/replies.log` | `<time>\t<notification id>\t<reply text>` for each notification reply | Default | `server/src/plugins/notification_reply.rs` |
 | `<state>/kick`, `kicks/`, `control/` | Requests from the app and CLI to end a session or hand control over | Default | `core/src/local/sessions.rs`, `paths.rs` |

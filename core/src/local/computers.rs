@@ -53,6 +53,9 @@ pub struct PairingOutcome {
     /// `paired`, or `failed: <why>`.
     pub outcome: String,
     pub unix: u64,
+    /// The request it answers ([`ComputerRequest::id`]).
+    #[serde(default)]
+    pub request: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,6 +284,7 @@ mod tests {
                 name: "Desk".to_string(),
                 outcome: "paired".to_string(),
                 unix: 100,
+                request: "a".to_string(),
             })
         })
         .unwrap();

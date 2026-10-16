@@ -381,6 +381,12 @@ pub async fn run(config: Config) -> Result<()> {
             None
         }
     };
+    // The owner's other computers (2f): pairing with one, and a link to
+    // each over this endpoint.
+    tokio::spawn(crate::peer_computers::run(
+        Arc::clone(&cert_manager),
+        wan_endpoint.clone(),
+    ));
     if let Some(endpoint) = wan_endpoint.as_ref() {
         // Relay URLs and direct addresses drift (relay reconnects, DHCP), and
         // the phone only ever dials its cached EndpointAddr — periodic
