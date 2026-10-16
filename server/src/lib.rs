@@ -11,6 +11,7 @@ pub mod cli;
 pub(crate) mod clipboard_push;
 pub mod config;
 pub mod conn_budget;
+pub mod crash_report;
 pub mod driving;
 pub mod events;
 pub mod home_assistant;
