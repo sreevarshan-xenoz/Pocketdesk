@@ -53,6 +53,28 @@ class ConnectionChecksTest {
     }
 
     @Test
+    fun `a computer on this phone's hotspot or tethering is named so`() {
+        assertEquals(Sharing.HOTSPOT, ConnectionChecks.sharingOf("swlan0"))
+        assertEquals(Sharing.HOTSPOT, ConnectionChecks.sharingOf("ap0"))
+        assertEquals(Sharing.USB, ConnectionChecks.sharingOf("rndis0"))
+        assertEquals(Sharing.USB, ConnectionChecks.sharingOf("ncm0"))
+        assertEquals(Sharing.BLUETOOTH, ConnectionChecks.sharingOf("bt-pan"))
+        assertEquals(null, ConnectionChecks.sharingOf("wlan0"))
+        assertEquals(null, ConnectionChecks.sharingOf("rmnet_data0"))
+        val hotspot = PhoneState(
+            link = Link.CELLULAR,
+            shared = listOf(Shared(Sharing.HOTSPOT, "192.168.43.1", 24)),
+        )
+        assertTrue("on_phone_hotspot" in codes(state = hotspot, address = "192.168.43.20"))
+        // Saved under its home address while it sits on the phone's hotspot.
+        val elsewhere = codes(state = hotspot, address = "192.168.1.20", probes = Probes(Tcp.TIMEOUT))
+        assertTrue("phone_sharing" in elsewhere)
+        assertFalse("on_mobile_home_address" in elsewhere)
+        // Reached anyway: nothing to say about the sharing.
+        assertFalse("phone_sharing" in codes(state = hotspot, address = "192.168.1.20"))
+    }
+
+    @Test
     fun `each way the computer can fail to answer has its own finding`() {
         val p = { tcp: Tcp -> Probes(tcp) }
         assertTrue("refused" in codes(probes = p(Tcp.REFUSED)))

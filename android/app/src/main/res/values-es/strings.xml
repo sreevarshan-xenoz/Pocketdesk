@@ -380,6 +380,9 @@
     <string name="doctor_vpn_captures">Tu VPN envía el tráfico de casa por el túnel.</string>
     <string name="doctor_vpn_captures_fix">Permite el acceso a la red local en la app de la VPN, o páusala.</string>
     <string name="doctor_same_network">Este teléfono y el equipo están en la misma red.</string>
+    <string name="doctor_on_phone_hotspot">El equipo está en el punto de acceso o el anclaje de este teléfono.</string>
+    <string name="doctor_phone_sharing">Este teléfono comparte su conexión (punto de acceso o anclaje) y el equipo no respondió en su dirección guardada.</string>
+    <string name="doctor_phone_sharing_fix">Un equipo conectado al punto de acceso de este teléfono, o anclado por cable, tiene allí otra dirección: búscalo en Equipos en esta red, o añádelo con esa dirección.</string>
     <string name="doctor_other_network">Este teléfono está en otra red distinta a la del equipo (¿Wi-Fi de invitados?).</string>
     <string name="doctor_other_network_fix">Conéctate al mismo Wi-Fi que el equipo.</string>
     <string name="doctor_network_unknown">Sin comprobar: no se conoce la dirección de red de este teléfono.</string>
