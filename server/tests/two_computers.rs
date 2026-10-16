@@ -259,6 +259,34 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
     send_and_receive(&a_state, &b_id, &b_state, &file(&a_state, "from-a.bin", 1));
     send_and_receive(&b_state, &a_id, &a_state, &file(&b_state, "from-b.bin", 2));
 
+    // A folder from B: five offers at once, which A fetches one at a time
+    // (B takes two transfers from one device at once and refuses the rest).
+    let folder = b_state.parent().unwrap().join("Trip");
+    std::fs::create_dir_all(&folder).unwrap();
+    for n in 0..5u8 {
+        std::fs::write(folder.join(format!("photo-{n}.bin")), vec![n; 300_000]).unwrap();
+    }
+    let asked =
+        outbox::request(&b_state, &a_id, folder.to_str().unwrap(), pin::now_unix()).unwrap();
+    let sent = wait_for(90, "the folder to end", || {
+        sent::read(&b_state)
+            .into_iter()
+            .find(|f| f.id == asked.id && f.state != SentState::Offered)
+            .map(|f| f.state)
+    });
+    assert_eq!(sent, SentState::Sent);
+    for n in 0..5u8 {
+        let arrived = downloads(&a_state)
+            .join("Trip")
+            .join(format!("photo-{n}.bin"));
+        assert_eq!(
+            std::fs::read(&arrived).unwrap(),
+            vec![n; 300_000],
+            "{}",
+            arrived.display()
+        );
+    }
+
     // A forgets B: its entry goes, and the link with it.
     computers::request(
         &a_state,

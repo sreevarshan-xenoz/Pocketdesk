@@ -573,12 +573,28 @@ fn refused(key: &str, reason: &str) {
     }
 }
 
-/// Whether a transfer's failure is worth a retry: not a refusal.
+/// Whether a transfer's failure is worth a retry: not a refusal, unless it
+/// was only that the other computer was busy with another of this one's.
 fn retried(reason: &str, attempt: usize) -> Option<Duration> {
-    if reason.starts_with("refused") {
+    let busy = ["still running", "busy"].iter().any(|b| reason.contains(b));
+    if reason.starts_with("refused") && !busy {
         return None;
     }
     RETRIES.get(attempt).map(|secs| Duration::from_secs(*secs))
+}
+
+/// One transfer at a time on each link: the other computer takes two from
+/// one device at once and refuses the rest, so a folder's 50 offers would
+/// otherwise mostly be refused.
+fn turn(device_id: &str) -> Arc<tokio::sync::Semaphore> {
+    static TURNS: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>> =
+        LazyLock::new(Default::default);
+    TURNS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(device_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)))
+        .clone()
 }
 
 /// Send the file at `path` to the computer `device_id` on the link (2h), as
@@ -598,6 +614,8 @@ pub(crate) async fn send_file(device_id: &str, path: &Path) -> Result<(), String
     let source = crate::offers::source_of(path, size);
     let mut attempt = 0;
     loop {
+        let turn = turn(device_id);
+        let _turn = turn.acquire().await.map_err(|e| e.to_string())?;
         let outgoing = live(device_id).ok_or("the computer is not linked now")?;
         let mut waiter = Waiter::new();
         let ask = NetworkPacket::new("kdeconnect.share.request")
@@ -628,6 +646,8 @@ pub(crate) async fn send_file(device_id: &str, path: &Path) -> Result<(), String
                     tracing::info!(
                         "Sending {name} to another computer failed ({reason}); again in {wait:?}"
                     );
+                    // Others go while this one waits.
+                    drop(_turn);
                     tokio::time::sleep(wait).await;
                     attempt += 1;
                 }
@@ -651,6 +671,10 @@ async fn fetch_offer(device_id: String, offer: serde_json::Value) {
         .to_string();
     let mut attempt = 0;
     loop {
+        let turn = turn(&device_id);
+        let Ok(_turn) = turn.acquire().await else {
+            return;
+        };
         let Some(outgoing) = live(&device_id) else {
             tracing::warn!("Not fetched {name} from another computer: the link went");
             return;
@@ -677,6 +701,8 @@ async fn fetch_offer(device_id: String, offer: serde_json::Value) {
                     tracing::info!(
                         "Fetching {name} from another computer failed ({reason}); again in {wait:?}"
                     );
+                    // Others go while this one waits.
+                    drop(_turn);
                     tokio::time::sleep(wait).await;
                     attempt += 1;
                 }
@@ -914,6 +940,27 @@ mod tests {
         assert_eq!(retried("reset", 2), Some(Duration::from_secs(45)));
         assert_eq!(retried("reset", 3), None, "three retries at most");
         assert_eq!(retried("refused: no room", 0), None);
+        assert_eq!(
+            retried("refused: this phone's last transfer is still running", 0),
+            Some(Duration::from_secs(5)),
+            "busy passes"
+        );
+    }
+
+    #[tokio::test]
+    async fn one_transfer_at_a_time_on_each_link() {
+        let first = turn("desk-one-at-a-time");
+        let held = first.clone().acquire_owned().await.unwrap();
+        assert!(
+            turn("desk-one-at-a-time").try_acquire().is_err(),
+            "the second waits"
+        );
+        assert!(
+            turn("another-desk").try_acquire().is_ok(),
+            "another link does not"
+        );
+        drop(held);
+        assert!(turn("desk-one-at-a-time").try_acquire().is_ok());
     }
 
     #[tokio::test]
