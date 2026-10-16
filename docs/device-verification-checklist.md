@@ -1333,6 +1333,15 @@ Owed:
 - [ ] A hook killed at 30 s, and the 33rd waiting hook skipped, on a real server.
 - [ ] Linux: `sh -c` hooks, and the log's mode (0600).
 
+## 79. The Activity Center (ecosystem 1b)
+
+A71 → this Windows box, LAN, debug server, 2026-10-16:
+- [x] A screen session, then "Remote" with the phone's Input off: the log held `session_started`, `phone_linked`, `session_ended`, `session_refused`, the `hook_ran` of a `session_refused` hook (exit 0) and `phone_unlinked`.
+
+Owed:
+- [ ] The Activity tab itself on screen (its rows, filters, Show in folder): a click posted to the window did not reach egui, and real input into this box's desktop is not used for tests.
+- [ ] Pairing and unpairing a phone showing as rows; a folder's Show in folder after it finished arriving.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

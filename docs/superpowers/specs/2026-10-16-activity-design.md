@@ -5,13 +5,13 @@ Part of the ecosystem plan (`docs/research/2026-10-16-ecosystem.md`, phase 1b, f
 ## What it does
 
 - **The desktop app's Activity tab.** One timeline, newest first, of the event log's last 500 events (the moved `events.jsonl.1` first, then the current one), kept current each second. Each row says when (how long ago), which phone (its short id) and what happened, in words:
-  - "Showing its screen", "Using the computer", "Used as a remote" (a session starting), "Session ended";
+  - "Showing its screen here", "Viewing this computer", "Using this computer as a remote" (a session starting, "over the internet" when it is), "Session ended";
   - "Connected", "Disconnected";
   - "Battery 54 %, charging", "Battery low: 13 %";
   - "Notification from Signal", "Text from Ann", "File received: 2.1 MB", "Folder arriving", "Link from example.org";
-  - "Session refused", "Paired", "Unpaired", "Hook for file_received ran (exit 0)".
+  - "Session refused", "Paired", "Unpaired", "Hook for file_received ran (exit 0)" (or "was stopped after 30 s", "could not run, or a signal ended it").
 - **Filters:** All, Sessions, Phones, Files and links, Messages, Hooks.
-- **Actions:** a received file or folder: "Show in folder" (Downloads); a link with its address (details on): "Open".
+- **Actions:** a received file or folder: "Show in folder", found by the event's `key` (a hash of where it was saved) in `received.json`. Links are not opened from here.
 - **When the log is off** (Settings "Event log"), the tab says so, with a button to Settings.
 
 ## New events
