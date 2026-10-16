@@ -195,11 +195,46 @@ impl DevicePermissions {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
+
+    /// What another of the owner's computers may do when it pairs (2f):
+    /// the clipboard, files and links, nothing else, and every screen
+    /// session held for the owner. The owner can change each, as for a
+    /// phone.
+    pub fn computer() -> Self {
+        let mut permissions = Self::default();
+        for capability in Capability::ALL {
+            permissions.set(
+                capability,
+                matches!(
+                    capability,
+                    Capability::Clipboard | Capability::Files | Capability::Links
+                ),
+            );
+        }
+        permissions.ask_first = true;
+        permissions
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_paired_computer_may_move_the_clipboard_files_and_links_only() {
+        let computer = DevicePermissions::computer();
+        for capability in Capability::ALL {
+            assert_eq!(
+                computer.allows(capability),
+                matches!(
+                    capability,
+                    Capability::Clipboard | Capability::Files | Capability::Links
+                ),
+                "{capability:?}"
+            );
+        }
+        assert!(computer.ask_first, "its screen sessions wait for the owner");
+    }
 
     #[test]
     fn downloading_from_the_desktop_needs_the_files_permission() {
