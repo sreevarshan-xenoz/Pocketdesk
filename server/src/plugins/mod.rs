@@ -17,6 +17,7 @@ pub mod privacy;
 pub mod share;
 pub mod siren;
 pub mod sms;
+pub mod tasks;
 pub mod wake_relay;
 pub mod windows;
 
@@ -58,5 +59,6 @@ pub fn register_all() -> PluginSet {
     registry.register(pair::PairPlugin);
     registry.register(sms::SmsPlugin);
     registry.register(links::LinksPlugin::default());
+    registry.register(tasks::TasksPlugin);
     registry
 }

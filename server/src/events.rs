@@ -35,7 +35,7 @@ static CONFIG: Mutex<Option<(Option<SystemTime>, Config)>> = Mutex::new(None);
 
 /// config.toml now: read again only once it changed, and the last good one
 /// kept while it does not read (a save half done, a hand edit gone wrong).
-fn current_config() -> Config {
+pub(crate) fn current_config() -> Config {
     let path = pocketdesk_core::local::paths::config_dir()
         .map(|dir| dir.join(pocketdesk_core::local::paths::CONFIG_FILE));
     let modified = path
