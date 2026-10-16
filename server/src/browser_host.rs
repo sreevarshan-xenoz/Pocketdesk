@@ -184,18 +184,60 @@ fn keep_image(dir: &Path, image: &Image) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-/// A file name for an image at `url` of `content_type`: the URL's last
-/// part when it is a usable name, else `image` with the type's extension.
-pub fn image_name(url: &str, content_type: &str) -> String {
-    let ext = match content_type.split(';').next().unwrap_or("").trim() {
+/// The extension for an image of `content_type`, for the types sent on:
+/// PNG, JPEG, GIF, WebP, AVIF and BMP. Others, SVG (which can carry script)
+/// among them, are not sent.
+pub fn image_extension(content_type: &str) -> Option<&'static str> {
+    let kind = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    Some(match kind.as_str() {
         "image/png" => "png",
+        "image/jpeg" | "image/jpg" | "image/pjpeg" => "jpg",
         "image/gif" => "gif",
         "image/webp" => "webp",
-        "image/svg+xml" => "svg",
         "image/avif" => "avif",
         "image/bmp" => "bmp",
-        _ => "jpg",
-    };
+        _ => return None,
+    })
+}
+
+/// `%XX` escapes decoded; a bad one is kept as written.
+fn percent_decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = bytes
+            .get(i + 1..i + 3)
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (bytes[i], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                i += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The longest name kept from a URL, in bytes (well under every file
+/// system's 255).
+const MAX_STEM: usize = 80;
+
+/// A file name for an image at `url` with extension `ext` (from
+/// [`image_extension`]): the URL's last part without its own extension,
+/// which the content type replaces, so a page cannot pass an `.apk` off as
+/// a picture; `image` when the URL has no usable name.
+pub fn image_name(url: &str, ext: &str) -> String {
     let last = url
         .split(['?', '#'])
         .next()
@@ -203,23 +245,45 @@ pub fn image_name(url: &str, content_type: &str) -> String {
         .rsplit('/')
         .next()
         .unwrap_or("");
-    let clean: String = last
+    let last = percent_decoded(last);
+    let stem = match last.rsplit_once('.') {
+        Some((stem, _)) => stem,
+        None => last.as_str(),
+    };
+    let mut clean = String::new();
+    for c in stem
         .chars()
         .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
-        .take(80)
-        .collect();
-    let clean = clean.trim_matches('.');
-    if clean.is_empty() {
-        format!("image.{ext}")
-    } else if clean.contains('.') {
-        clean.to_string()
-    } else {
-        format!("{clean}.{ext}")
+    {
+        if clean.len() + c.len_utf8() > MAX_STEM {
+            break;
+        }
+        clean.push(c);
     }
+    let clean = clean.trim_matches('.');
+    let stem = if clean.is_empty() {
+        "image".to_string()
+    } else if is_windows_device_name(clean) {
+        format!("_{clean}")
+    } else {
+        clean.to_string()
+    };
+    format!("{stem}.{ext}")
 }
 
-/// Download the image at `url`: `http(s)` only, at most [`MAX_IMAGE`], an
-/// image type, within [`FETCH_DEADLINE`].
+/// Whether `stem` is a name Windows keeps for a device (`CON`, `NUL`,
+/// `COM1`, …), which no file may have, whatever its extension.
+fn is_windows_device_name(stem: &str) -> bool {
+    let base = stem.split('.').next().unwrap_or("").to_ascii_uppercase();
+    matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((base.starts_with("COM") || base.starts_with("LPT"))
+            && base.len() == 4
+            && base.as_bytes()[3].is_ascii_digit()
+            && base.as_bytes()[3] != b'0')
+}
+
+/// Download the image at `url`: `http(s)` only, at most [`MAX_IMAGE`], one
+/// of [`image_extension`]'s types, within [`FETCH_DEADLINE`].
 pub fn fetch_image(url: &str) -> Result<Image, String> {
     // A thread of its own: this program's main already runs a runtime,
     // and one may not be started within another.
@@ -250,9 +314,12 @@ fn fetch_blocking(url: &str) -> Result<Image, String> {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
-        if !content_type.starts_with("image/") {
-            return Err("that is not an image".to_string());
-        }
+        let Some(ext) = image_extension(&content_type) else {
+            return Err(
+                "that is not a picture Pocketdesk sends (PNG, JPEG, GIF, WebP, AVIF or BMP)"
+                    .to_string(),
+            );
+        };
         if response
             .content_length()
             .is_some_and(|n| n as usize > MAX_IMAGE)
@@ -267,7 +334,7 @@ fn fetch_blocking(url: &str) -> Result<Image, String> {
             }
         }
         Ok(Image {
-            name: image_name(response.url().as_str(), &content_type),
+            name: image_name(response.url().as_str(), ext),
             bytes,
         })
     })
@@ -541,23 +608,59 @@ mod tests {
     }
 
     #[test]
+    fn only_pictures_are_sent_whatever_their_header_says() {
+        assert_eq!(image_extension("image/png"), Some("png"));
+        assert_eq!(image_extension("IMAGE/JPEG; charset=x"), Some("jpg"));
+        assert_eq!(image_extension("image/webp"), Some("webp"));
+        assert_eq!(
+            image_extension("image/svg+xml"),
+            None,
+            "SVG can carry script"
+        );
+        assert_eq!(image_extension("image/x-icon"), None);
+        assert_eq!(image_extension("text/html"), None);
+        assert_eq!(image_extension(""), None);
+    }
+
+    #[test]
     fn an_image_gets_a_name_of_its_own() {
         assert_eq!(
-            image_name("https://example.org/a/cat.png?x=1", "image/png"),
+            image_name("https://example.org/a/cat.png?x=1", "png"),
             "cat.png"
         );
         assert_eq!(
-            image_name("https://example.org/a/photo", "image/webp"),
+            image_name("https://example.org/a/photo", "webp"),
             "photo.webp"
         );
-        assert_eq!(image_name("https://example.org/", "image/gif"), "image.gif");
+        assert_eq!(image_name("https://example.org/", "gif"), "image.gif");
         assert_eq!(
-            image_name("https://example.org/..%2F..%2Fx", "image/png"),
-            "2F..2Fx"
+            image_name("https://example.org/a/update.apk", "png"),
+            "update.png",
+            "the content type decides the extension"
         );
-        assert!(
-            !image_name("https://example.org/a\\b<c>.png", "image/png").contains(['\\', '<', '>'])
+        assert_eq!(image_name("https://example.org/x.html", "jpg"), "x.jpg");
+        assert_eq!(
+            image_name("https://example.org/cat%20photo.png", "png"),
+            "catphoto.png",
+            "escapes are decoded before the name is cleaned"
         );
+        assert_eq!(
+            image_name("https://example.org/..%2F..%2Fx.png", "png"),
+            "x.png",
+            "a decoded slash is not a folder"
+        );
+        assert_eq!(image_name("https://example.org/CON.png", "png"), "_CON.png");
+        assert_eq!(
+            image_name("https://example.org/com1.gif", "gif"),
+            "_com1.gif"
+        );
+        assert_eq!(
+            image_name("https://example.org/COM0.gif", "gif"),
+            "COM0.gif"
+        );
+        let long = format!("https://example.org/{}.png", "\u{10348}".repeat(100));
+        assert!(image_name(&long, "png").len() <= MAX_STEM + 4);
+        assert!(!image_name("https://example.org/a\\b<c>.png", "png").contains(['\\', '<', '>']));
     }
 
     #[test]
