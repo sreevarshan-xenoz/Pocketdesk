@@ -109,6 +109,8 @@ impl Plugin for PhoneMediaPlugin {
             report,
             pocketdesk_core::local::pin::now_unix(),
         );
+        // Written out now, not at the inbox's next sweep (R6c).
+        crate::inbox::nudge(pocketdesk_core::local::paths::PHONE_MEDIA_DIR);
         Ok(())
     }
 }
@@ -125,7 +127,11 @@ pub async fn run_watcher() {
     REPORTS.lock().unwrap_or_else(|e| e.into_inner()).dirty = true;
     let mut last_write = tokio::time::Instant::now() - WRITE_EVERY;
     loop {
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        crate::inbox::wait(
+            pocketdesk_core::local::paths::PHONE_MEDIA_DIR,
+            Duration::from_millis(250),
+        )
+        .await;
         let now = pocketdesk_core::local::pin::now_unix();
         for press in pocketdesk_core::local::phone_media::take_presses(&dir, now) {
             let clients = crate::state::clone_clients().await;
@@ -138,7 +144,12 @@ pub async fn run_watcher() {
             }
         }
         if last_write.elapsed() < WRITE_EVERY {
-            continue;
+            // A report waiting is written once the throttle allows, not at
+            // the next wake, which may be a sweep away.
+            if !REPORTS.lock().unwrap_or_else(|e| e.into_inner()).dirty {
+                continue;
+            }
+            tokio::time::sleep(WRITE_EVERY.saturating_sub(last_write.elapsed())).await;
         }
         last_write = tokio::time::Instant::now();
         let connected: Vec<String> = crate::state::clone_clients()

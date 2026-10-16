@@ -348,10 +348,18 @@ pub async fn run_answers() {
     let _ = phone_notes::clear(&dir);
     // Answers for a phone not connected yet wait here, within their time.
     let mut waiting: Vec<AnswerRequest> = Vec::new();
-    let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        tick.tick().await;
+        // Answers still waiting for their phone are tried again each half
+        // second; otherwise only a new answer wakes this.
+        if waiting.is_empty() {
+            crate::inbox::wait(
+                pocketdesk_core::local::paths::NOTIFICATION_OUT_DIR,
+                std::time::Duration::from_millis(500),
+            )
+            .await;
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
         let now = unix_now();
         waiting.extend(phone_notes::take_all(&dir, now));
         if waiting.is_empty() {

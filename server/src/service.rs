@@ -93,6 +93,8 @@ pub async fn run(config: Config) -> Result<()> {
         discovery.run(Duration::from_secs(10)).await;
     });
 
+    // The inbox folders the app's requests land in, watched (R6c).
+    crate::inbox::start(&state_dir);
     // R4 D2: mirror live streaming sessions to the state dir, notify the
     // desktop when one starts, and consume `pocketdesk kick` requests.
     tokio::spawn(crate::live_sessions::run_watcher());

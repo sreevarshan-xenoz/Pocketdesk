@@ -87,10 +87,12 @@ pub async fn run_watcher() {
         return;
     };
     let _ = store::clear(&dir);
-    let mut tick = tokio::time::interval(Duration::from_millis(300));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        tick.tick().await;
+        crate::inbox::wait(
+            pocketdesk_core::local::paths::PHONE_FILES_DIR,
+            Duration::from_millis(300),
+        )
+        .await;
         let requests = store::take_all(&dir, unix_now());
         if requests.is_empty() {
             continue;

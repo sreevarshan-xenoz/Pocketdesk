@@ -130,9 +130,13 @@ mod tests {
     #[test]
     #[ignore = "measures for minutes; run by hand, in release"]
     fn what_each_background_loop_costs_at_idle() {
-        pocketdesk_core::local::paths::use_state_dir(
+        let dir = pocketdesk_core::local::paths::use_state_dir(
             std::env::temp_dir().join(format!("pd-idle-cost-{}", std::process::id())),
         );
+        // As the server does, unless asked to measure the pollers alone.
+        if std::env::var_os("POCKETDESK_IDLE_NO_WATCHER").is_none() {
+            crate::inbox::start(dir);
+        }
         let window = Duration::from_secs(
             std::env::var("POCKETDESK_IDLE_WINDOW_S")
                 .ok()
