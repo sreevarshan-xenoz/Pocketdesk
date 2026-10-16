@@ -716,10 +716,12 @@ fun RemoteScreen(
         }
     }
 
-    fun switchMonitor(index: Int) {
+    /** Stream screen [index]; [remember] keeps it as this computer's screen for next time. */
+    fun switchMonitor(index: Int, remember: Boolean = true) {
         showMonitorPicker = false
         if (index == monitorIndex) return
-        HostStore.saveMonitorIndex(context, address, index)
+        // An added screen (T10j) is gone after the session: never the default.
+        if (remember) HostStore.saveMonitorIndex(context, address, index)
         cropWindow = null
         cropScreen = null
         monitorIndex = index
@@ -1411,7 +1413,7 @@ fun RemoteScreen(
                             when (val a = PhoneScreen.parse(json)) {
                                 is PhoneScreen.Answer.Added -> {
                                     addedScreen = true
-                                    switchMonitor(a.index)
+                                    switchMonitor(a.index, remember = false)
                                 }
                                 is PhoneScreen.Answer.Refused -> sendTextNotice = a.reason.ifEmpty { screenFailed }
                             }
