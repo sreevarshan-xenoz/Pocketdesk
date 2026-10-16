@@ -82,6 +82,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
+import dev.pocketdesk.android.automation.PhoneEventBroadcast
+import dev.pocketdesk.android.automation.SessionTell
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.service.SessionForegroundService
@@ -301,6 +303,19 @@ fun RemoteScreen(
     // "wan_relayed" | "wan" | "none"), polled from the bridge while up.
     var linkState by remember { mutableStateOf("none") }
     val status = streamStatus
+    // Ecosystem 1f: other apps hear the session start and end.
+    val tell = remember(address) { SessionTell("screen") }
+    LaunchedEffect(status) {
+        val told = when (status) {
+            is StreamStatus.Up -> tell.up()
+            is StreamStatus.Down -> tell.lost()
+            else -> null
+        }
+        told?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) }
+    }
+    DisposableEffect(tell) {
+        onDispose { tell.left()?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) } }
+    }
     LaunchedEffect(status, awaitingPicture) {
         showAwaitHint = false
         if (status is StreamStatus.Up && awaitingPicture) {
