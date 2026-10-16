@@ -382,9 +382,9 @@
     <string name="doctor_vpn_captures">Your VPN sends home traffic into the tunnel.</string>
     <string name="doctor_vpn_captures_fix">Allow local network access in the VPN app, or pause it.</string>
     <string name="doctor_same_network">This phone and the computer are on the same network.</string>
-    <string name="doctor_on_phone_hotspot">The computer is on this phone\'s hotspot or tethering.</string>
-    <string name="doctor_phone_sharing">This phone shares its connection (a hotspot or tethering), and the computer did not answer at its saved address.</string>
-    <string name="doctor_phone_sharing_fix">A computer joined to this phone\'s hotspot, or tethered by cable, has another address there: look under Computers on this network, or add it by that address.</string>
+    <string name="doctor_on_phone_hotspot">The computer\'s address is on this phone\'s hotspot or USB tethering.</string>
+    <string name="doctor_phone_sharing">This phone is sharing its connection (hotspot or USB tethering).</string>
+    <string name="doctor_phone_sharing_fix">A computer joined to this phone\'s hotspot, or tethered by USB, has another address there: add it by that address, or look under On this network.</string>
     <string name="doctor_other_network">This phone is on a different network than the computer (guest Wi-Fi?).</string>
     <string name="doctor_other_network_fix">Join the same Wi-Fi as the computer.</string>
     <string name="doctor_network_unknown">Not checked: this phone\'s network address is unknown.</string>

@@ -1286,8 +1286,8 @@ Owed:
 
 JVM-tested only (the A71's build cannot start its hotspot from adb, and a computer joining it would mean changing this box's network). Owed:
 - [ ] A computer joined to the phone's hotspot, saved under that address: "on this phone's hotspot or tethering".
-- [ ] The same computer saved under its home address: "This phone shares its connection…" with the fix.
-- [ ] USB tethering (`rndis0`/`ncm0`) and Bluetooth tethering (`bt-pan`), and the interface names on other makers' phones.
+- [ ] The same computer saved under its home address: the network finding, with "This phone is sharing its connection" beside it.
+- [ ] USB tethering (`rndis0`/`ncm0`), and the interface names on other makers' phones (Pixel's hotspot may be `wlan1`, not read).
 
 ## Recording results
 

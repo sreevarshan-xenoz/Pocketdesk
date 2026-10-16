@@ -58,18 +58,27 @@ class ConnectionChecksTest {
         assertEquals(Sharing.HOTSPOT, ConnectionChecks.sharingOf("ap0"))
         assertEquals(Sharing.USB, ConnectionChecks.sharingOf("rndis0"))
         assertEquals(Sharing.USB, ConnectionChecks.sharingOf("ncm0"))
-        assertEquals(Sharing.BLUETOOTH, ConnectionChecks.sharingOf("bt-pan"))
+        assertEquals(null, ConnectionChecks.sharingOf("bt-pan"))
+        assertEquals(null, ConnectionChecks.sharingOf("p2p-wlan0-0"))
         assertEquals(null, ConnectionChecks.sharingOf("wlan0"))
         assertEquals(null, ConnectionChecks.sharingOf("rmnet_data0"))
         val hotspot = PhoneState(
             link = Link.CELLULAR,
             shared = listOf(Shared(Sharing.HOTSPOT, "192.168.43.1", 24)),
         )
-        assertTrue("on_phone_hotspot" in codes(state = hotspot, address = "192.168.43.20"))
-        // Saved under its home address while it sits on the phone's hotspot.
+        val onIt = ConnectionChecks.run(hotspot, "192.168.43.20", Probes(Tcp.OK), false)
+        assertEquals(Status.GOOD, finding("on_phone_hotspot", onIt).status)
+        val silent = ConnectionChecks.run(hotspot, "192.168.43.20", Probes(Tcp.TIMEOUT), false)
+        assertEquals(Status.INFO, finding("on_phone_hotspot", silent).status)
+        // Saved under its home address: the network finding stays, the note joins it.
         val elsewhere = codes(state = hotspot, address = "192.168.1.20", probes = Probes(Tcp.TIMEOUT))
         assertTrue("phone_sharing" in elsewhere)
-        assertFalse("on_mobile_home_address" in elsewhere)
+        assertTrue("on_mobile_home_address" in elsewhere)
+        val office = codes(
+            state = home.copy(lanPrefixes = listOf("10.0.0.0" to 24), shared = hotspot.shared),
+            probes = Probes(Tcp.TIMEOUT),
+        )
+        assertTrue("other_network" in office && "phone_sharing" in office)
         // Reached anyway: nothing to say about the sharing.
         assertFalse("phone_sharing" in codes(state = hotspot, address = "192.168.1.20"))
     }
