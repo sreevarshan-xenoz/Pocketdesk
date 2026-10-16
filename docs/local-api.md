@@ -52,7 +52,7 @@ The paired phones.
               "key_bound": true, "internet_key_bound": true,
               "permissions": {"input": true, "clipboard": true, "files": true, "audio": true,
                               "mic": true, "power": true, "exec": false,
-                              "notifications": true, "texts": true, "links": true, "media": true, "cast": true},
+                              "notifications": true, "texts": true, "links": true, "media": true, "cast": true, "tasks": true},
               "battery": {"charge": 54, "charging": false, "updated_unix": 1792069000},
               "media": {"title": "Song", "artist": "Artist", "app": "Spotify", "isPlaying": true,
                         "canPlayPause": true, "canNext": true, "canPrevious": true}}]}
@@ -106,6 +106,9 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `link_received` | `host` | `url` |
 | `session_refused` | — (not paired, denied by you, or without the permission it needs) | — |
 | `phone_paired`, `phone_unpaired` | — (however it was done: the PIN, the desktop app, `pocketdesk unpair`) | — |
+| `task_started` | `task` (its name) | — |
+| `task_finished` | `task`, `code` (its exit code, or null), `timed_out`; never its output | — |
+| `task_refused` | `task`, `reason` (`unknown`, `busy`, `denied`) | — |
 | `hook_ran` | `hook` (the event it ran for), `code` (its exit code, or null when it could not start or a signal ended it), `timed_out`. It cannot have a hook of its own (that would run at every hook's end) | — |
 
 By default an event says who, when and how much, never what. Settings "Details in events" (`events_detail = "full"`) adds the content. With "Event log" off (`events = false`) nothing is written, and `events` shows nothing. New kinds and fields may be added within `"api": 1`.

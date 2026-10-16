@@ -7,6 +7,9 @@ use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
 use pocketdesk_core::local::events::{EventsDetail, KINDS, hookable};
+use pocketdesk_core::local::tasks::{
+    DEFAULT_DEADLINE_SECS, MAX_DEADLINE_SECS, TaskSpec, name_problem,
+};
 use pocketdesk_core::local::wake::WakeFacts;
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
@@ -93,6 +96,7 @@ impl SettingsForm {
         for problem in parse_hooks(&self.hooks_text).1 {
             problems.push(format!("Hooks: {problem}."));
         }
+        problems.extend(task_problems(&self.edited.tasks));
         problems
     }
 
@@ -296,6 +300,53 @@ impl SettingsForm {
                     }
                 });
                 ui.end_row();
+                ui.label("Tasks");
+                ui.vertical(|ui| {
+                    let mut remove = None;
+                    for (i, task) in e.tasks.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut task.name)
+                                    .desired_width(110.0)
+                                    .hint_text("name"),
+                            );
+                            ui.add(
+                                egui::TextEdit::singleline(&mut task.command)
+                                    .desired_width(240.0)
+                                    .hint_text("command"),
+                            );
+                            ui.checkbox(&mut task.ask, "ask first");
+                            ui.add(
+                                egui::DragValue::new(&mut task.deadline_secs)
+                                    .range(1..=MAX_DEADLINE_SECS)
+                                    .suffix(" s"),
+                            )
+                            .on_hover_text("Stopped if still running after this.");
+                            if ui.small_button("Remove").clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = remove {
+                        e.tasks.remove(i);
+                    }
+                    if ui.button("Add task").clicked() {
+                        e.tasks.push(TaskSpec {
+                            name: String::new(),
+                            command: String::new(),
+                            ask: true,
+                            deadline_secs: DEFAULT_DEADLINE_SECS,
+                        });
+                    }
+                    ui.label(
+                        RichText::new(
+                            "A phone with \"Start my tasks\" sees the names (never the commands) and can start one. It runs as you; \"ask first\" waits for your yes here.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                });
+                ui.end_row();
                 ui.label("Messages history");
                 ui.add(
                     egui::DragValue::new(&mut e.sms_keep)
@@ -458,12 +509,31 @@ fn unknown_hook_kinds(hooks: &std::collections::BTreeMap<String, String>) -> Vec
         .collect()
 }
 
+/// What is wrong with the tasks, in words for the user.
+fn task_problems(tasks: &[TaskSpec]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for task in tasks {
+        if let Some(problem) = name_problem(&task.name) {
+            problems.push(format!("Tasks: {problem}."));
+        } else if !seen.insert(task.name.trim().to_string()) {
+            problems.push(format!("Tasks: two are named \"{}\".", task.name.trim()));
+        }
+        if task.command.trim().is_empty() {
+            problems.push(format!("Tasks: \"{}\" has no command.", task.name.trim()));
+        }
+    }
+    problems
+}
+
 /// Whether `a` and `b` differ only in what the server reads at each event.
 fn same_but_events(a: &Config, b: &Config) -> bool {
     let strip = |c: &Config| Config {
         events: true,
         events_detail: EventsDetail::Metadata,
         hooks: Default::default(),
+        // Tasks are read at each start, as events are.
+        tasks: Vec::new(),
         ..c.clone()
     };
     strip(a) == strip(b)
@@ -580,6 +650,31 @@ mod tests {
         assert!(problems.iter().any(|p| p.contains("1024")), "{problems:?}");
         assert!(
             problems.iter().any(|p| p.contains("different")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn tasks_need_a_name_of_their_own_and_a_command() {
+        let task = |name: &str, command: &str| TaskSpec {
+            name: name.into(),
+            command: command.into(),
+            ask: true,
+            deadline_secs: 60,
+        };
+        let mut form = SettingsForm::from_config(Config::default());
+        form.edited.tasks = vec![task("Back up", "backup.sh"), task("Build", "make")];
+        assert!(form.problems().is_empty());
+        form.edited.tasks.push(task("Back up", "other.sh"));
+        assert!(form.problems().iter().any(|p| p.contains("two are named")));
+        form.edited.tasks = vec![task("", "x"), task("Empty", " ")];
+        let problems = form.problems();
+        assert!(
+            problems.iter().any(|p| p.contains("needs a name")),
+            "{problems:?}"
+        );
+        assert!(
+            problems.iter().any(|p| p.contains("has no command")),
             "{problems:?}"
         );
     }

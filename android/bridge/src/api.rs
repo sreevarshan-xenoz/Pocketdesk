@@ -669,6 +669,14 @@ pub async fn connect_to_peer(
                                 {
                                     crate::queue_file_offer(&pkt.body);
                                 }
+                                // A task's result (ecosystem 1c), kept for
+                                // the app under its run's id.
+                                if trimmed.contains("task_result")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == crate::tasks::TASK_RESULT
+                                {
+                                    crate::tasks::receive(&pkt.body);
+                                }
                                 // A link the computer handed over (T8a),
                                 // kept for the app to show.
                                 if trimmed.contains("pocketdesk.link")
@@ -1302,7 +1310,7 @@ async fn oneshot_request(
 
 /// Request/reply for a desktop query: reuse the live control connection, and
 /// only open a short-lived one when there is nothing to reuse.
-async fn query_peer(
+pub(crate) async fn query_peer(
     address: &str,
     port: u16,
     request: &NetworkPacket,

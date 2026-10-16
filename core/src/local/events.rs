@@ -30,6 +30,9 @@ pub const KINDS: &[&str] = &[
     "phone_paired",
     "phone_unpaired",
     "hook_ran",
+    "task_started",
+    "task_finished",
+    "task_refused",
 ];
 
 /// Whether a hook may be set for `kind`: any event but `hook_ran`, whose

@@ -194,6 +194,7 @@ fun RemoteScreen(
     var showSendText by remember { mutableStateOf(false) }
     // F7b: the computer's files.
     var showFiles by remember { mutableStateOf(false) }
+    var showTasks by remember { mutableStateOf(false) }
     var sendTextNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(sendTextNotice) {
         sendTextNotice?.let {
@@ -1368,6 +1369,10 @@ fun RemoteScreen(
         RemoteFilesSheet(address = address, controlPort = controlPort, onDismiss = { showFiles = false })
     }
 
+    if (showTasks) {
+        TasksSheet(address = address, controlPort = controlPort, onDismiss = { showTasks = false })
+    }
+
     if (showSendText) {
         SendTextSheet(
             history = keyboard.sentTexts(),
@@ -1553,6 +1558,10 @@ fun RemoteScreen(
             onOpenFiles = {
                 showQuick = false
                 showFiles = true
+            },
+            onOpenTasks = {
+                showQuick = false
+                showTasks = true
             },
             micOn = mic != null,
             onSetMic = { if (it) startMicShare() else stopMicShare() },

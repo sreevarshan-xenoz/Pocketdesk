@@ -30,7 +30,7 @@ impl Filter {
         (Filter::Phones, "Phones"),
         (Filter::FilesAndLinks, "Files and links"),
         (Filter::Messages, "Messages"),
-        (Filter::Hooks, "Hooks"),
+        (Filter::Hooks, "Tasks and hooks"),
     ];
 
     fn admits(self, kind: &str) -> bool {
@@ -40,7 +40,7 @@ impl Filter {
             Filter::Phones => kind.starts_with("phone_"),
             Filter::FilesAndLinks => matches!(kind, "file_received" | "link_received"),
             Filter::Messages => matches!(kind, "notification" | "text_received"),
-            Filter::Hooks => kind == "hook_ran",
+            Filter::Hooks => kind == "hook_ran" || kind.starts_with("task_"),
         }
     }
 }
@@ -274,6 +274,28 @@ pub fn describe(event: &Event) -> String {
                 }
             }
         }
+        "task_started" => format!("Task \"{}\" started", text(event, "task").unwrap_or("?")),
+        "task_finished" => {
+            let task = text(event, "task").unwrap_or("?");
+            if flag("timed_out") {
+                format!("Task \"{task}\" was stopped at its deadline")
+            } else {
+                match number(event, "code") {
+                    Some(code) => format!("Task \"{task}\" finished (exit {code})"),
+                    None => format!("Task \"{task}\" could not run"),
+                }
+            }
+        }
+        "task_refused" => {
+            let task = text(event, "task").unwrap_or("?");
+            match text(event, "reason") {
+                Some("denied") => format!("Task \"{task}\" denied"),
+                Some("busy") => {
+                    format!("Task \"{task}\" refused: already running, or two tasks are")
+                }
+                _ => format!("Task \"{task}\" refused: no such task"),
+            }
+        }
         other => other.replace('_', " "),
     }
 }
@@ -360,6 +382,20 @@ mod tests {
             "Hook for x was stopped after 30 s"
         );
         assert_eq!(
+            describe(&event(
+                "task_finished",
+                json!({"task": "Back up", "code": 0, "timed_out": false})
+            )),
+            "Task \"Back up\" finished (exit 0)"
+        );
+        assert_eq!(
+            describe(&event(
+                "task_refused",
+                json!({"task": "Back up", "reason": "denied"})
+            )),
+            "Task \"Back up\" denied"
+        );
+        assert_eq!(
             describe(&event("a_future_event", json!({}))),
             "a future event"
         );
@@ -386,6 +422,7 @@ mod tests {
         assert!(Filter::FilesAndLinks.admits("link_received"));
         assert!(Filter::Messages.admits("notification"));
         assert!(Filter::Hooks.admits("hook_ran"));
+        assert!(Filter::Hooks.admits("task_finished"));
         assert!(Filter::All.admits("anything"));
     }
 

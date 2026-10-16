@@ -536,4 +536,26 @@
     <string name="cast_lost">se perdió la conexión</string>
     <string name="cast_not_allowed">no permite que este teléfono muestre su pantalla (Dispositivos, \"Mostrar su pantalla aquí\")</string>
     <string name="cast_not_shown_here">su Pocketdesk no puede mostrar la pantalla de un teléfono</string>
+
+    <!-- Ecosystem 1c: named tasks on the computer. -->
+    <string name="row_tasks">Tareas de este ordenador</string>
+    <string name="tasks_title">Tareas de este ordenador</string>
+    <string name="tasks_hint">Las que su dueño nombró en los Ajustes de Pocketdesk del ordenador. Cada una se ejecuta allí, como él.</string>
+    <string name="tasks_loading">Preguntando al ordenador…</string>
+    <string name="tasks_none">El ordenador aún no tiene tareas. Nómbralas en su app de Pocketdesk, Ajustes, Tareas.</string>
+    <string name="tasks_failed">No se pudo preguntar al ordenador: %1$s</string>
+    <string name="tasks_asks_first">Pregunta antes al dueño del ordenador</string>
+    <string name="tasks_run">Ejecutar</string>
+    <string name="tasks_sent">iniciando…</string>
+    <string name="tasks_waiting_owner">esperando a que el dueño del ordenador lo permita…</string>
+    <string name="tasks_running">ejecutándose…</string>
+    <string name="tasks_done">terminada (salida %1$d)</string>
+    <string name="tasks_no_code">terminó sin código de salida (no pudo iniciarse, o se detuvo)</string>
+    <string name="tasks_stopped">detenida en su límite de tiempo</string>
+    <string name="tasks_denied">denegada en el ordenador</string>
+    <string name="tasks_busy">no iniciada: ya se está ejecutando, o hay dos tareas en marcha</string>
+    <string name="tasks_unknown">no iniciada: el ordenador no tiene esa tarea</string>
+    <string name="tasks_output_cut">Solo se muestra el final de la salida.</string>
+    <string name="tasks_not_sent">no enviada: %1$s</string>
+    <string name="tasks_no_answer">sin respuesta: puede que este teléfono no tenga permiso para iniciar tareas (en el ordenador, Dispositivos, \"Iniciar mis tareas\")</string>
 </resources>

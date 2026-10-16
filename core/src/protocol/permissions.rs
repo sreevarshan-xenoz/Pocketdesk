@@ -33,10 +33,12 @@ pub enum Capability {
     Media,
     /// Show the phone's own screen here (T10k).
     Cast,
+    /// See this computer's named tasks and start them (ecosystem 1c).
+    Tasks,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 12] = [
+    pub const ALL: [Capability; 13] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -49,6 +51,7 @@ impl Capability {
         Capability::Links,
         Capability::Media,
         Capability::Cast,
+        Capability::Tasks,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -98,6 +101,7 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         | "kdeconnect.pocketdesk.privacy"
         | "kdeconnect.pocketdesk.wol" => Capability::Power,
         "kdeconnect.pocketdesk.exec" => Capability::Exec,
+        "kdeconnect.pocketdesk.tasks" | "kdeconnect.pocketdesk.task_run" => Capability::Tasks,
         "kdeconnect.notification"
         // Answers to the phone's notifications (T10c).
         | crate::protocol::notification_action::NOTIFICATION_REPLY
@@ -136,6 +140,8 @@ pub struct DevicePermissions {
     pub media: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cast: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tasks: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -156,6 +162,7 @@ impl DevicePermissions {
             Capability::Links => &mut self.links,
             Capability::Media => &mut self.media,
             Capability::Cast => &mut self.cast,
+            Capability::Tasks => &mut self.tasks,
         }
     }
 
@@ -173,6 +180,7 @@ impl DevicePermissions {
             Capability::Links => self.links,
             Capability::Media => self.media,
             Capability::Cast => self.cast,
+            Capability::Tasks => self.tasks,
         };
         value.unwrap_or(capability.default_allowed())
     }

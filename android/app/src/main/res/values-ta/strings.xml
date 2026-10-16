@@ -531,4 +531,26 @@
     <string name="cast_lost">இணைப்பு துண்டிக்கப்பட்டது</string>
     <string name="cast_not_allowed">இந்தத் தொலைபேசி அதன் திரையைக் காட்ட அது அனுமதிக்கவில்லை (சாதனங்கள், \"அதன் திரையை இங்கே காட்டு\")</string>
     <string name="cast_not_shown_here">அதன் Pocketdesk ஒரு தொலைபேசியின் திரையைக் காட்ட முடியாது</string>
+
+    <!-- Ecosystem 1c: named tasks on the computer. -->
+    <string name="row_tasks">இந்தக் கணினியின் பணிகள்</string>
+    <string name="tasks_title">இந்தக் கணினியின் பணிகள்</string>
+    <string name="tasks_hint">கணினியின் Pocketdesk அமைப்புகளில் அதன் உரிமையாளர் பெயரிட்டவை. ஒவ்வொன்றும் அங்கே, அவராக இயங்கும்.</string>
+    <string name="tasks_loading">கணினியிடம் கேட்கிறது…</string>
+    <string name="tasks_none">கணினியில் இன்னும் பணிகள் இல்லை. அதன் Pocketdesk செயலியில், அமைப்புகள், பணிகளில் பெயரிடுங்கள்.</string>
+    <string name="tasks_failed">கணினியிடம் கேட்க முடியவில்லை: %1$s</string>
+    <string name="tasks_asks_first">முதலில் கணினியின் உரிமையாளரிடம் கேட்கும்</string>
+    <string name="tasks_run">இயக்கு</string>
+    <string name="tasks_sent">தொடங்குகிறது…</string>
+    <string name="tasks_waiting_owner">கணினியின் உரிமையாளர் அனுமதிக்கக் காத்திருக்கிறது…</string>
+    <string name="tasks_running">இயங்குகிறது…</string>
+    <string name="tasks_done">முடிந்தது (வெளியேற்றம் %1$d)</string>
+    <string name="tasks_no_code">வெளியேற்றக் குறியீடு இல்லாமல் முடிந்தது (தொடங்க முடியவில்லை, அல்லது நிறுத்தப்பட்டது)</string>
+    <string name="tasks_stopped">அதன் கால எல்லையில் நிறுத்தப்பட்டது</string>
+    <string name="tasks_denied">கணினியில் மறுக்கப்பட்டது</string>
+    <string name="tasks_busy">தொடங்கவில்லை: ஏற்கனவே இயங்குகிறது, அல்லது இரண்டு பணிகள் இயங்குகின்றன</string>
+    <string name="tasks_unknown">தொடங்கவில்லை: கணினியில் அந்தப் பணி இல்லை</string>
+    <string name="tasks_output_cut">வெளியீட்டின் முடிவு மட்டுமே காட்டப்படுகிறது.</string>
+    <string name="tasks_not_sent">அனுப்பப்படவில்லை: %1$s</string>
+    <string name="tasks_no_answer">பதில் இல்லை: இந்தத் தொலைபேசி பணிகளைத் தொடங்க அனுமதிக்கப்படாமல் இருக்கலாம் (கணினியில், சாதனங்கள், \"என் பணிகளைத் தொடங்கு\")</string>
 </resources>

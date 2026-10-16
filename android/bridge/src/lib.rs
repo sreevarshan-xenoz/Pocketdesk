@@ -16,6 +16,7 @@ mod notification_answers;
 mod phone_file_requests;
 mod rates;
 mod session;
+mod tasks;
 
 pub(crate) use session::*;
 
@@ -1167,6 +1168,48 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendLin
     let address = jstring_to_string(&mut env, &address);
     let url = jstring_to_string(&mut env, &url);
     let json = envelope_unit(RUNTIME.block_on(links::send_link(address, port as u16, url)));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's named tasks (ecosystem 1c): `{"ok": "{\"tasks\": [...]}"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeListTasks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope(RUNTIME.block_on(tasks::list_tasks(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
+/// Start the computer's task `name` as run `id` (ecosystem 1c).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRunTask(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    name: JString<'_>,
+    id: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let name = jstring_to_string(&mut env, &name);
+    let id = jstring_to_string(&mut env, &id);
+    let json = envelope_unit(RUNTIME.block_on(tasks::run_task(address, port as u16, name, id)));
+    to_jstring(&mut env, json)
+}
+
+/// Run `id`'s latest result as JSON, or empty while none came (ecosystem 1c).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTaskResult(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    id: JString<'_>,
+) -> jstring {
+    let id = jstring_to_string(&mut env, &id);
+    let json = tasks::result_json(&id);
     to_jstring(&mut env, json)
 }
 

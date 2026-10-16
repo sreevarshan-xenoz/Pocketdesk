@@ -3,7 +3,19 @@ use pocketdesk_core::error::Result;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use serde_json::json;
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::process::Command;
+
+/// A command still running after this is stopped (ecosystem 1c).
+const DEADLINE: Duration = Duration::from_secs(60);
+/// The most of each of stdout and stderr sent back: its end.
+const MAX_OUTPUT: usize = 32 * 1024;
+
+/// Run `cmd` to its end or `deadline`, keeping the last [`MAX_OUTPUT`]
+/// bytes of its stdout and of its stderr as they come.
+async fn run(cmd: &str, deadline: Duration) -> std::io::Result<crate::plugins::tasks::Captured> {
+    crate::plugins::tasks::run_capped(shell(cmd), deadline, MAX_OUTPUT).await
+}
 
 /// Remote command execution plugin.
 ///
@@ -75,19 +87,25 @@ impl Plugin for ExecPlugin {
             if let Some(cmd) = command {
                 tracing::info!("Executing remote command: {}", cmd);
 
-                let output = shell(cmd).output().await;
-
-                match output {
-                    Ok(out) => {
-                        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                        let exit_code = out.status.code().unwrap_or(-1);
-
+                match run(cmd, DEADLINE).await {
+                    Ok(out) if !out.timed_out => {
+                        let exit_code = out.status.and_then(|s| s.code()).unwrap_or(-1);
                         let response =
                             NetworkPacket::new("kdeconnect.pocketdesk.exec").with_body(json!({
-                                "stdout": stdout,
-                                "stderr": stderr,
+                                "stdout": String::from_utf8_lossy(&out.stdout),
+                                "stderr": String::from_utf8_lossy(&out.stderr),
                                 "exit_code": exit_code,
+                                "truncated": out.cut,
+                            }));
+                        sender.send_packet(&response).await?;
+                    }
+                    Ok(out) => {
+                        let response =
+                            NetworkPacket::new("kdeconnect.pocketdesk.exec").with_body(json!({
+                                "stdout": String::from_utf8_lossy(&out.stdout),
+                                "stderr": format!("Stopped after {} s", DEADLINE.as_secs()),
+                                "exit_code": -1,
+                                "timed_out": true,
                             }));
                         sender.send_packet(&response).await?;
                     }
@@ -104,6 +122,31 @@ impl Plugin for ExecPlugin {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_command_past_its_deadline_is_stopped() {
+        let slow = if cfg!(windows) {
+            "ping -n 30 127.0.0.1 > NUL"
+        } else {
+            "sleep 30"
+        };
+        let started = std::time::Instant::now();
+        assert!(
+            run(slow, Duration::from_millis(500))
+                .await
+                .unwrap()
+                .timed_out
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let quick = run("echo hi", Duration::from_secs(10)).await.unwrap();
+        assert!(!quick.timed_out);
+        assert!(String::from_utf8_lossy(&quick.stdout).contains("hi"));
     }
 }
 

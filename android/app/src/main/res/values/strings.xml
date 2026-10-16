@@ -538,4 +538,26 @@
     <string name="cast_lost">the connection was lost</string>
     <string name="cast_not_allowed">it does not allow this phone to show its screen (Devices, \"Show its screen here\")</string>
     <string name="cast_not_shown_here">its Pocketdesk cannot show a phone\'s screen</string>
+
+    <!-- Ecosystem 1c: named tasks on the computer. -->
+    <string name="row_tasks">Tasks on this computer</string>
+    <string name="tasks_title">Tasks on this computer</string>
+    <string name="tasks_hint">What its owner named in Pocketdesk\'s Settings on the computer. Each runs there, as them.</string>
+    <string name="tasks_loading">Asking the computer…</string>
+    <string name="tasks_none">The computer has no tasks yet. Name some in its Pocketdesk app, Settings, Tasks.</string>
+    <string name="tasks_failed">Could not ask the computer: %1$s</string>
+    <string name="tasks_asks_first">Asks the computer\'s owner first</string>
+    <string name="tasks_run">Run</string>
+    <string name="tasks_sent">starting…</string>
+    <string name="tasks_waiting_owner">waiting for the computer\'s owner to allow it…</string>
+    <string name="tasks_running">running…</string>
+    <string name="tasks_done">done (exit %1$d)</string>
+    <string name="tasks_no_code">ended without an exit code (it could not start, or was stopped)</string>
+    <string name="tasks_stopped">stopped at its deadline</string>
+    <string name="tasks_denied">denied on the computer</string>
+    <string name="tasks_busy">not started: it is already running, or two tasks are</string>
+    <string name="tasks_unknown">not started: the computer has no such task</string>
+    <string name="tasks_output_cut">Only the end of the output is shown.</string>
+    <string name="tasks_not_sent">not sent: %1$s</string>
+    <string name="tasks_no_answer">no answer: this phone may not be allowed to start tasks (on the computer, Devices, \"Start my tasks\")</string>
 </resources>

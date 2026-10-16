@@ -84,6 +84,9 @@ object RustCore {
     ): Int
     private external fun nativeCastKeyframeWanted(): Boolean
     private external fun nativeCastState(): String
+    private external fun nativeListTasks(address: String, port: Int): String
+    private external fun nativeRunTask(address: String, port: Int, name: String, id: String): String
+    private external fun nativeTaskResult(id: String): String
     private external fun nativeStopCast()
     private external fun nativeReconnectStreaming(
         address: String,
@@ -474,6 +477,16 @@ object RustCore {
 
     /** End the phone's session if it is a cast, and no other session the person opened since. */
     fun stopCast() = nativeStopCast()
+
+    /** The computer's named tasks (ecosystem 1c): `{"tasks": [{"name", "ask"}]}`. */
+    fun listTasks(address: String, port: Int): Result<String> = envelope(nativeListTasks(address, port))
+
+    /** Start the computer's task [name] as run [id]; its results come to [taskResult]. */
+    fun runTask(address: String, port: Int, name: String, id: String): Result<Unit> =
+        envelope(nativeRunTask(address, port, name, id)).map { }
+
+    /** Run [id]'s latest result as JSON, or empty while none came. */
+    fun taskResult(id: String): String = nativeTaskResult(id)
 
     /** The connected desktop's cached iroh WAN identity, or null if none announced. */
     fun getWanIdentity(): String? = runCatching {

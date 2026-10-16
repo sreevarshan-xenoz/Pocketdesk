@@ -13,6 +13,9 @@ pub const LIVE_FILE: &str = "live_sessions.json";
 pub const CAST_FILE: &str = "cast.json";
 /// What Pocketdesk did, one event per line (ecosystem phase 1a).
 pub const EVENTS_FILE: &str = "events.jsonl";
+/// Task starts held for the owner (ecosystem 1c), and the owner's answers.
+pub const TASK_REQUESTS_FILE: &str = "task_requests.json";
+pub const TASK_ANSWERS_DIR: &str = "task_answers";
 pub const KICK_FILE: &str = "kick";
 /// One kick request per file (roadmap N7).
 pub const KICKS_DIR: &str = "kicks";
