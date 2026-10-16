@@ -1310,6 +1310,7 @@ A71 (Android 16) → this Windows box, LAN, debug builds, 2026-10-16:
 - [x] "Show its screen here" off for the phone: refused, and the phone's notification said "it does not allow this phone to show its screen".
 - [x] Closing the window mid-cast: it stayed closed, ffmpeg stopped, and the cast went on.
 - [x] `pocketdesk kick all`: the phone's cast service and its projection ended.
+- [x] After the review fixes (cast-only state and stop, frames on the wire bounded): a cast shown again; then the computer's card tapped mid-cast opened a screen session, the cast ended quietly (no failure notification, `cast.json` gone), and the new session stayed live.
 
 Owed:
 - [ ] The latency against a stopwatch, and over the internet road (WAN, relayed and direct).
