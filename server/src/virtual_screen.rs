@@ -61,12 +61,25 @@ pub struct Rect {
     pub height: i32,
 }
 
-/// The output `create_output` added: in `after`, not in `before`.
+/// Whether `name` is an output Sway makes with `create_output` (its
+/// headless backend): never a real monitor's connector, so nothing here can
+/// unplug one.
+pub fn is_virtual(name: &str) -> bool {
+    name.strip_prefix("HEADLESS-")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The output `create_output` added: the one virtual output in `after` and
+/// not in `before`; `None` when there is not exactly one (a monitor plugged
+/// in at the same moment is never taken for it).
 pub fn new_output(before: &[Output], after: &[Output]) -> Option<String> {
-    after
+    let mut new = after
         .iter()
-        .find(|o| !before.iter().any(|b| b.name == o.name))
-        .map(|o| o.name.clone())
+        .filter(|o| !before.iter().any(|b| b.name == o.name));
+    match (new.next(), new.next()) {
+        (Some(o), None) if is_virtual(&o.name) => Some(o.name.clone()),
+        _ => None,
+    }
 }
 
 /// Where a new screen goes: right of every other output.
@@ -139,26 +152,55 @@ fn run(command: &str) -> std::io::Result<()> {
     }
 }
 
-/// Make an output of `width`×`height` right of the others; its name.
-fn create(width: u32, height: u32) -> std::io::Result<String> {
+/// One add at a time: two at once could each take the other's new output.
+static CREATING: Mutex<()> = Mutex::new(());
+
+/// Make an output of `width`×`height` right of the others; its name and
+/// where it went.
+fn create(width: u32, height: u32) -> std::io::Result<(String, i32)> {
+    let _one = CREATING.lock().unwrap_or_else(|e| e.into_inner());
     let before = outputs()?;
     run("create_output")?;
     let after = outputs()?;
     let name = new_output(&before, &after)
-        .ok_or_else(|| std::io::Error::other("Sway made no new output"))?;
+        .ok_or_else(|| std::io::Error::other("Sway made no single new output"))?;
     let x = right_edge(&before);
     if let Err(e) = run(&format!(
         "output {name} mode --custom {width}x{height} pos {x} 0"
     )) {
-        let _ = run(&format!("output {name} unplug"));
+        remove(&name);
         return Err(e);
     }
-    Ok(name)
+    Ok((name, x))
 }
 
 fn remove(name: &str) {
+    if !is_virtual(name) {
+        tracing::warn!("Not removing {name}: not a screen Pocketdesk makes");
+        return;
+    }
     if let Err(e) = run(&format!("output {name} unplug")) {
         tracing::warn!("Could not remove the screen {name}: {e}");
+    }
+}
+
+/// The monitor index a session asks for to capture the output `name`, placed
+/// at (`x`, 0): as the capture picks one (`capture_screencopy::pick_output`),
+/// the listed monitor at that origin, else the output's place among Sway's
+/// when the list is shorter. Waits up to 2 s for the list to show it;
+/// `None` when no index would reach it.
+fn capture_index(name: &str, x: i32) -> Option<u32> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let listed = crate::plugins::monitors::origins();
+        if let Some(i) = listed.iter().position(|&(mx, my)| mx == x && my == 0) {
+            return Some(i as u32);
+        }
+        if std::time::Instant::now() >= deadline {
+            let place = outputs().ok()?.iter().position(|o| o.name == name)?;
+            return (place >= listed.len()).then_some(place as u32);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
 }
 
@@ -321,8 +363,11 @@ fn answer(phone: &str, action: &str, width: u32, height: u32) -> serde_json::Val
             };
             old.iter().for_each(|n| remove(n));
             match create(w, h) {
-                Ok(name) => {
-                    let index = crate::plugins::monitors::index_of(&name);
+                Ok((name, x)) => {
+                    let Some(index) = capture_index(&name, x) else {
+                        remove(&name);
+                        return json!({ "error": "The computer made a screen but cannot stream it (its monitor list does not show it)" });
+                    };
                     {
                         let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
                         made.phones.insert(phone.to_string(), vec![name.clone()]);
@@ -365,6 +410,31 @@ mod tests {
             "at least the minimum"
         );
         assert_eq!(screen_size(0, 2400), None);
+    }
+
+    #[test]
+    fn only_screens_sway_makes_are_taken_or_removed() {
+        assert!(is_virtual("HEADLESS-2"));
+        assert!(!is_virtual("HEADLESS-"));
+        assert!(!is_virtual("DP-1"));
+        assert!(!is_virtual("eDP-1"));
+        let before = vec![output("HEADLESS-1", 0, 1280)];
+        let plugged = vec![
+            output("HEADLESS-1", 0, 1280),
+            output("HEADLESS-2", 1280, 1920),
+            output("DP-1", 3200, 1920),
+        ];
+        assert_eq!(
+            new_output(&before, &plugged),
+            None,
+            "two new: neither is taken"
+        );
+        let real = vec![output("HEADLESS-1", 0, 1280), output("DP-1", 1280, 1920)];
+        assert_eq!(
+            new_output(&before, &real),
+            None,
+            "a real monitor is never taken"
+        );
     }
 
     #[test]

@@ -37,15 +37,16 @@ impl Plugin for MonitorsPlugin {
     }
 }
 
-/// The monitor index of the output `name` (a screen just added, T10j), or
-/// the last index when it is not listed by that name.
-pub(crate) fn index_of(name: &str) -> u32 {
-    let monitors = enumerate_monitors();
-    monitors
-        .iter()
-        .find(|m| m.name == name)
-        .or(monitors.last())
-        .map_or(0, |m| m.index)
+/// Each listed monitor's origin, in index order: what the capture matches a
+/// monitor index against (`capture_screencopy::monitor_rect_physical`).
+pub(crate) fn origins() -> Vec<(i32, i32)> {
+    xcap::Monitor::all()
+        .map(|all| {
+            all.iter()
+                .map(|m| (m.x().unwrap_or(i32::MIN), m.y().unwrap_or(i32::MIN)))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Enumerate monitors on the current display server using xrandr (X11) or
