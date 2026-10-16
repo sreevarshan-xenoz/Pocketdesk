@@ -457,9 +457,10 @@ pub(crate) struct StreamingHandle {
     /// The monitor this session captures (`None`: the desktop's choice). A
     /// connect for another monitor is a new session, not this one.
     pub(crate) monitor_index: Option<u32>,
-    /// The phone as a remote (T10i): no picture or sound. A connect of the
-    /// other kind is a new session.
-    pub(crate) input_only: bool,
+    /// What the session is for: the computer's screen, the phone as a remote
+    /// (T10i) or the phone's own screen (T10k). A connect of another kind is
+    /// a new session.
+    pub(crate) mode: pocketdesk_core::streaming::SessionMode,
     /// Token that can be used to cancel the receive loop.
     pub(crate) cancel: tokio_util::sync::CancellationToken,
     /// JoinHandle of the background `client.start()` task.

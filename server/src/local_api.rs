@@ -38,6 +38,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::Texts => "texts",
         Capability::Links => "links",
         Capability::Media => "media",
+        Capability::Cast => "cast",
     }
 }
 
@@ -128,6 +129,7 @@ pub fn status(state_dir: &Path, now_unix: u64, running: bool) -> Value {
                 "started_unix": s.started_unix,
                 "driving": s.driving,
                 "control_only": s.control_only,
+                "cast": s.cast,
             })
         })
         .collect();

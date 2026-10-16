@@ -6,6 +6,7 @@
 //! server is running and needs no socket of its own. Everything here is plain std + serde.
 
 pub mod approval;
+pub mod cast;
 pub mod config;
 pub mod device_keys;
 pub mod diagnostics;

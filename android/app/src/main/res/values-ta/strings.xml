@@ -515,4 +515,20 @@
     <string name="remote_key_page_down">அடுத்த பக்கம்</string>
     <string name="remote_key_left">இடது</string>
     <string name="remote_key_right">வலது</string>
+
+    <!-- T10k: this phone's screen on the computer. -->
+    <string name="cast_button">திரையைக் காட்டு</string>
+    <string name="cast_channel">கணினியில் இந்தத் தொலைபேசியின் திரை</string>
+    <string name="cast_connecting">%1$s உடன் இணைக்கிறது…</string>
+    <string name="cast_waiting">%1$s அனுமதிக்கக் காத்திருக்கிறது…</string>
+    <string name="cast_showing">இந்தத் தொலைபேசியின் திரை %1$s இல் காட்டப்படுகிறது</string>
+    <string name="cast_stop">நிறுத்து</string>
+    <string name="cast_stopped">இந்தத் தொலைபேசியின் திரை இனி காட்டப்படவில்லை</string>
+    <string name="cast_failed">%1$s இல் திரையைக் காட்ட முடியவில்லை: %2$s</string>
+    <string name="cast_too_old">%1$s இல் உள்ள Pocketdesk இந்தத் தொலைபேசியின் திரையைக் காட்ட மிகப் பழையது. அதைப் புதுப்பிக்கவும்.</string>
+    <string name="cast_no_consent">திரையைப் பகிர Android அனுமதிக்கவில்லை.</string>
+    <string name="cast_no_answer">அது பதிலளிக்கவில்லை</string>
+    <string name="cast_lost">இணைப்பு துண்டிக்கப்பட்டது</string>
+    <string name="cast_not_allowed">இந்தத் தொலைபேசி அதன் திரையைக் காட்ட அது அனுமதிக்கவில்லை (சாதனங்கள், \"அதன் திரையை இங்கே காட்டு\")</string>
+    <string name="cast_not_shown_here">அதன் Pocketdesk ஒரு தொலைபேசியின் திரையைக் காட்ட முடியாது</string>
 </resources>

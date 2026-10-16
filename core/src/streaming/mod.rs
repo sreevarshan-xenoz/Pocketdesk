@@ -5,12 +5,14 @@
 
 pub mod audio;
 pub mod bitrate;
+pub mod cast;
 pub mod chaos;
 pub mod client;
 pub mod connection;
 #[cfg(feature = "wan")]
 pub mod dht;
 pub mod encoder_detect;
+pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
 pub mod iroh_connection;
@@ -70,6 +72,7 @@ pub use capture_backend::CaptureBackend;
 pub use capture_x11::{check_x11_availability, start_x11_capture};
 pub use client::DEFAULT_STREAMING_PORT;
 pub use client::RemoteFlags;
+pub use client::SessionMode;
 pub use client::StreamingClient;
 /// Entry point for a client-side measurement source that is not the
 /// [`StreamingClient`] itself (the Android decoder): see

@@ -72,6 +72,19 @@ object RustCore {
     private external fun nativeConnectRemote(address: String, port: Int): String
     private external fun nativeConnectRemoteWan(address: String, identityJson: String): String
     private external fun nativeRemoteState(): String
+    private external fun nativeConnectCast(address: String, port: Int): String
+    private external fun nativeConnectCastWan(address: String, identityJson: String): String
+    private external fun nativeCastConfig(width: Int, height: Int): Int
+    private external fun nativeCastFrame(
+        buffer: java.nio.ByteBuffer,
+        offset: Int,
+        size: Int,
+        keyframe: Boolean,
+        seq: Long,
+    ): Int
+    private external fun nativeCastKeyframeWanted(): Boolean
+    private external fun nativeCastState(): String
+    private external fun nativeStopCast()
     private external fun nativeReconnectStreaming(
         address: String,
         port: Int,
@@ -431,6 +444,36 @@ object RustCore {
 
     /** The remote session's state as the bridge reports it: `{"state": none | waiting | ready | tooOld}`. */
     fun remoteState(): String = nativeRemoteState()
+
+    /** Show this phone's screen on the computer at [address] (T10k): a cast session on the LAN. */
+    fun connectCast(address: String, port: Int): Result<Unit> = envelope(nativeConnectCast(address, port)).map { }
+
+    /** [connectCast] over the iroh WAN path, with the desktop's cached endpoint identity. */
+    fun connectCastWan(address: String, identityJson: String): Result<Unit> =
+        envelope(nativeConnectCastWan(address, identityJson)).map { }
+
+    /**
+     * The cast's encoder (re)started at [width]×[height]; waits up to 2 s for
+     * room. [dev.pocketdesk.android.cast.CastPlan.QUEUED], FULL or NO_CAST.
+     */
+    fun castConfig(width: Int, height: Int): Int = nativeCastConfig(width, height)
+
+    /**
+     * One access unit, [size] bytes at [offset] of a direct [buffer], copied
+     * before this returns; never waits. QUEUED, FULL (dropped: send a
+     * keyframe) or NO_CAST.
+     */
+    fun castFrame(buffer: java.nio.ByteBuffer, offset: Int, size: Int, keyframe: Boolean, seq: Long): Int =
+        nativeCastFrame(buffer, offset, size, keyframe, seq)
+
+    /** Whether the computer asked the cast for a keyframe since the last look. */
+    fun castKeyframeWanted(): Boolean = nativeCastKeyframeWanted()
+
+    /** The cast session's state, as [remoteState]'s, but `none` while the phone's session is not a cast. */
+    fun castState(): String = nativeCastState()
+
+    /** End the phone's session if it is a cast, and no other session the person opened since. */
+    fun stopCast() = nativeStopCast()
 
     /** The connected desktop's cached iroh WAN identity, or null if none announced. */
     fun getWanIdentity(): String? = runCatching {

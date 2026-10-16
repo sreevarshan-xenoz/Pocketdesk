@@ -49,6 +49,41 @@ pub const SESSION_MODE_MARKER: [u8; 2] = [0xFB, 0x00];
 /// is admitted with a [`super::transport::STREAM_KIND_READY`] stream.
 pub const SESSION_MODE_INPUT_ONLY: u8 = 1;
 
+/// [`SESSION_MODE_MARKER`] mode: the phone's own screen on the computer
+/// (T10k). The phone sends its screen ([`super::cast`]); the computer sends
+/// nothing back but its ready stream and keyframe requests
+/// ([`super::transport::STREAM_KIND_CAST_KEYFRAME`]).
+pub const SESSION_MODE_CAST: u8 = 2;
+
+/// What a session is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SessionMode {
+    /// The computer's screen on the phone.
+    #[default]
+    Screen,
+    /// The phone as a remote: input, no picture (T10i).
+    InputOnly,
+    /// The phone's screen on the computer (T10k).
+    Cast,
+}
+
+impl SessionMode {
+    /// The byte the mode stream carries; `None` for [`SessionMode::Screen`],
+    /// which sends none.
+    pub fn wire(self) -> Option<u8> {
+        match self {
+            SessionMode::Screen => None,
+            SessionMode::InputOnly => Some(SESSION_MODE_INPUT_ONLY),
+            SessionMode::Cast => Some(SESSION_MODE_CAST),
+        }
+    }
+
+    /// Whether the computer sends this session a picture and sound.
+    pub fn gets_picture(self) -> bool {
+        self == SessionMode::Screen
+    }
+}
+
 /// `CODEC_CAPS_MARKER` bit 0: the client can decode H.265/HEVC Annex-B.
 /// H.264 is assumed for every client; future bits cover AV1 etc.
 pub const CODEC_CAP_HEVC: u8 = 0b0000_0001;
@@ -202,11 +237,16 @@ pub struct StreamingClient {
     remote: RemoteFlags,
 }
 
-/// An input-only session's state (T10i), shared with the receive loop.
+/// The state of a session that gets no picture (T10i, T10k), shared with
+/// the receive loop.
 #[derive(Debug, Clone, Default)]
 pub struct RemoteFlags {
-    /// The session is input only: no picture or sound is expected.
+    /// The session gets no picture or sound: a remote or a cast.
     pub input_only: bool,
+    /// The session is a cast (T10k).
+    pub cast: bool,
+    /// The computer asked the cast for a keyframe; the sender takes it.
+    pub keyframe_wanted: Arc<std::sync::atomic::AtomicBool>,
     /// The computer admitted it (its ready stream came).
     pub ready: Arc<std::sync::atomic::AtomicBool>,
     /// The computer sent a picture or sound anyway: it does not know
@@ -261,7 +301,8 @@ impl StreamingClient {
     /// `device_id` is announced in-band so the server can apply its pairing gate.
     /// `codec_caps` (R4 C1, see [`CODEC_CAP_HEVC`]) advertises the client's
     /// decodable set; `None` (older callers) means H.264-only. With
-    /// `input_only` (T10i) the session carries input and no picture or sound.
+    /// `mode` says what the session is for: the computer's screen, the phone
+    /// as a remote (T10i) or the phone's own screen (T10k).
     /// Returns the client and receiver channels for consuming video frames and audio packets.
     pub async fn connect(
         addr: &str,
@@ -270,7 +311,7 @@ impl StreamingClient {
         device_id: Option<&str>,
         iroh_id: Option<&str>,
         codec_caps: Option<u8>,
-        input_only: bool,
+        mode: SessionMode,
     ) -> Result<(
         Self,
         mpsc::Receiver<EncodedPacket>,
@@ -316,7 +357,7 @@ impl StreamingClient {
                 device_id,
                 iroh_id,
                 codec_caps,
-                input_only,
+                mode,
                 session_id,
             )
             .await;
@@ -337,7 +378,7 @@ impl StreamingClient {
         device_id: Option<&str>,
         iroh_id: Option<&str>,
         codec_caps: Option<u8>,
-        input_only: bool,
+        mode: SessionMode,
     ) -> (
         Self,
         mpsc::Receiver<EncodedPacket>,
@@ -349,7 +390,7 @@ impl StreamingClient {
             device_id,
             iroh_id,
             codec_caps,
-            input_only,
+            mode,
             uuid::Uuid::new_v4().to_string(),
         )
         .await
@@ -361,13 +402,14 @@ impl StreamingClient {
         device_id: Option<&str>,
         iroh_id: Option<&str>,
         codec_caps: Option<u8>,
-        input_only: bool,
+        mode: SessionMode,
         session_id: String,
     ) -> (
         Self,
         mpsc::Receiver<EncodedPacket>,
         mpsc::Receiver<AudioPacket>,
     ) {
+        let input_only = !mode.gets_picture();
         let channel_capacity = 8;
         let (frame_tx, frame_rx) = mpsc::channel(channel_capacity);
         let (audio_tx, audio_rx) = mpsc::channel(channel_capacity);
@@ -442,15 +484,11 @@ impl StreamingClient {
             }
         }
 
-        // The phone as a remote (T10i): say so, and send no codec caps.
-        if input_only {
+        // A remote (T10i) or a cast (T10k): say so, and send no codec caps.
+        if let Some(wire) = mode.wire() {
             match connection.open_uni().await {
                 Ok(mut mode_stream) => {
-                    let buf = [
-                        SESSION_MODE_MARKER[0],
-                        SESSION_MODE_MARKER[1],
-                        SESSION_MODE_INPUT_ONLY,
-                    ];
+                    let buf = [SESSION_MODE_MARKER[0], SESSION_MODE_MARKER[1], wire];
                     if let Err(e) = mode_stream.write_all(&buf).await {
                         warn!(error = %e, "Failed to send the session mode");
                     }
@@ -493,6 +531,7 @@ impl StreamingClient {
             video_bytes: Arc::default(),
             remote: RemoteFlags {
                 input_only,
+                cast: mode == SessionMode::Cast,
                 ..Default::default()
             },
         };
@@ -671,6 +710,8 @@ enum AudioDelivery {
 enum RemoteStream {
     /// The input-only session was admitted.
     Ready,
+    /// The computer asks the cast for a keyframe (T10k).
+    KeyframeWanted,
     /// A picture or sound on an input-only session: the computer does not
     /// know the mode.
     TooOld,
@@ -681,6 +722,8 @@ enum RemoteStream {
 fn remote_stream(kind: u8, input_only: bool) -> RemoteStream {
     if kind == transport::STREAM_KIND_READY {
         RemoteStream::Ready
+    } else if input_only && kind == transport::STREAM_KIND_CAST_KEYFRAME {
+        RemoteStream::KeyframeWanted
     } else if input_only {
         RemoteStream::TooOld
     } else {
@@ -710,6 +753,19 @@ mod remote_tests {
             remote_stream(transport::STREAM_KIND_VIDEO, false),
             RemoteStream::Media
         );
+        assert_eq!(
+            remote_stream(transport::STREAM_KIND_CAST_KEYFRAME, true),
+            RemoteStream::KeyframeWanted
+        );
+    }
+
+    #[test]
+    fn each_mode_says_itself_and_whether_it_gets_a_picture() {
+        assert_eq!(SessionMode::Screen.wire(), None);
+        assert_eq!(SessionMode::InputOnly.wire(), Some(SESSION_MODE_INPUT_ONLY));
+        assert_eq!(SessionMode::Cast.wire(), Some(SESSION_MODE_CAST));
+        assert!(SessionMode::Screen.gets_picture());
+        assert!(!SessionMode::Cast.gets_picture());
     }
 
     #[test]
@@ -815,6 +871,12 @@ async fn recv_with_cancel(
                             RemoteStream::Ready => {
                                 remote.ready.store(true, std::sync::atomic::Ordering::Release);
                                 info!("The computer admitted the input-only session");
+                                continue;
+                            }
+                            RemoteStream::KeyframeWanted => {
+                                remote
+                                    .keyframe_wanted
+                                    .store(true, std::sync::atomic::Ordering::Release);
                                 continue;
                             }
                             RemoteStream::TooOld => {

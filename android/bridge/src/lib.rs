@@ -6,6 +6,7 @@
 //! polls; there is no callback channel yet.
 
 mod api;
+mod cast;
 mod clipboard_push;
 mod download;
 mod links;
@@ -432,7 +433,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         port as u16,
         monitor,
         codec_caps as u8,
-        false,
+        pocketdesk_core::streaming::SessionMode::Screen,
     )));
     to_jstring(&mut env, json)
 }
@@ -461,7 +462,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         identity,
         monitor,
         codec_caps as u8,
-        false,
+        pocketdesk_core::streaming::SessionMode::Screen,
     )));
     to_jstring(&mut env, json)
 }
@@ -481,7 +482,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         port as u16,
         None,
         0,
-        true,
+        pocketdesk_core::streaming::SessionMode::InputOnly,
     )));
     to_jstring(&mut env, json)
 }
@@ -497,10 +498,131 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let identity = jstring_to_string(&mut env, &identity_json);
-    let json = envelope_unit(
-        RUNTIME.block_on(api::connect_streaming_wan(address, identity, None, 0, true)),
-    );
+    let json = envelope_unit(RUNTIME.block_on(api::connect_streaming_wan(
+        address,
+        identity,
+        None,
+        0,
+        pocketdesk_core::streaming::SessionMode::InputOnly,
+    )));
     to_jstring(&mut env, json)
+}
+
+/// Show this phone's screen on the computer (T10k): a cast session to
+/// `address:port` on the LAN. Its config and frames go through
+/// `nativeCastConfig` / `nativeCastFrame`; its state is `nativeCastState`'s.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectCast(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope_unit(RUNTIME.block_on(api::connect_streaming(
+        address,
+        port as u16,
+        None,
+        0,
+        pocketdesk_core::streaming::SessionMode::Cast,
+    )));
+    to_jstring(&mut env, json)
+}
+
+/// [`Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectCast`] over
+/// the iroh WAN path, with the desktop's cached endpoint identity.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectCastWan(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    identity_json: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let identity = jstring_to_string(&mut env, &identity_json);
+    let json = envelope_unit(RUNTIME.block_on(api::connect_streaming_wan(
+        address,
+        identity,
+        None,
+        0,
+        pocketdesk_core::streaming::SessionMode::Cast,
+    )));
+    to_jstring(&mut env, json)
+}
+
+/// The cast's encoder (re)started at `width`×`height` (T10k): 0 queued, 1
+/// the link is behind (try again), 2 no cast session.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastConfig(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    width: jint,
+    height: jint,
+) -> jint {
+    let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {
+        return cast::NO_CAST;
+    };
+    RUNTIME.block_on(cast::config(width, height))
+}
+
+/// One access unit of the cast (T10k), `size` bytes at `offset` of a direct
+/// buffer (MediaCodec's output), copied before this returns: 0 queued, 1
+/// dropped as the link is behind (send a keyframe), 2 no cast session.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastFrame(
+    env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    buffer: jni::objects::JByteBuffer<'_>,
+    offset: jint,
+    size: jint,
+    keyframe: jboolean,
+    seq: jlong,
+) -> jint {
+    let (Ok(offset), Ok(size)) = (usize::try_from(offset), usize::try_from(size)) else {
+        return cast::NO_CAST;
+    };
+    let (Ok(address), Ok(capacity)) = (
+        env.get_direct_buffer_address(&buffer),
+        env.get_direct_buffer_capacity(&buffer),
+    ) else {
+        return cast::NO_CAST;
+    };
+    if address.is_null() || offset.checked_add(size).is_none_or(|end| end > capacity) {
+        return cast::NO_CAST;
+    }
+    // SAFETY: the buffer is direct, `offset + size` is within its capacity,
+    // and the caller keeps it alive and unchanged until this returns.
+    let access_unit = unsafe { std::slice::from_raw_parts(address.add(offset), size) };
+    cast::frame(keyframe != 0, seq as u64, access_unit)
+}
+
+/// The cast session's state (T10k), as `nativeRemoteState`'s, but `none`
+/// while the phone's session is not a cast.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastState(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = api::cast_state();
+    to_jstring(&mut env, json)
+}
+
+/// End the phone's session if it is a cast, and no other (T10k).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStopCast(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) {
+    RUNTIME.block_on(api::stop_cast());
+}
+
+/// Whether the computer asked the cast for a keyframe since the last look.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastKeyframeWanted(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jboolean {
+    jboolean::from(cast::keyframe_wanted())
 }
 
 /// The remote session's state (T10i): `{"state": "none" | "waiting" |

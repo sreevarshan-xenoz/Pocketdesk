@@ -31,10 +31,12 @@ pub enum Capability {
     Links,
     /// Show what the phone plays here, and control it from here (roadmap T8d).
     Media,
+    /// Show the phone's own screen here (T10k).
+    Cast,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 11] = [
+    pub const ALL: [Capability; 12] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -46,6 +48,7 @@ impl Capability {
         Capability::Texts,
         Capability::Links,
         Capability::Media,
+        Capability::Cast,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -131,6 +134,8 @@ pub struct DevicePermissions {
     pub links: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cast: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -150,6 +155,7 @@ impl DevicePermissions {
             Capability::Texts => &mut self.texts,
             Capability::Links => &mut self.links,
             Capability::Media => &mut self.media,
+            Capability::Cast => &mut self.cast,
         }
     }
 
@@ -166,6 +172,7 @@ impl DevicePermissions {
             Capability::Texts => self.texts,
             Capability::Links => self.links,
             Capability::Media => self.media,
+            Capability::Cast => self.cast,
         };
         value.unwrap_or(capability.default_allowed())
     }

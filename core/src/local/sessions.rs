@@ -42,6 +42,9 @@ pub struct MirrorSession {
     /// The phone is a remote: input only, no screen sent (T10i).
     #[serde(default)]
     pub control_only: bool,
+    /// The phone shows its own screen here (T10k).
+    #[serde(default)]
+    pub cast: bool,
 }
 
 /// A phone with a control link to the server, in a session or not (T10d).
@@ -252,6 +255,7 @@ mod tests {
                 started_unix: 1,
                 driving: false,
                 control_only: false,
+                cast: false,
             }],
             false,
             &[
@@ -286,6 +290,7 @@ mod tests {
                 started_unix: 7,
                 driving: true,
                 control_only: false,
+                cast: true,
             }],
             true,
             &[],
@@ -299,6 +304,7 @@ mod tests {
             (mirror.sessions[0].id, mirror.sessions[0].driving),
             (3, true)
         );
+        assert!(mirror.sessions[0].cast, "a cast reads back as one");
     }
 
     #[test]

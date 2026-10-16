@@ -83,7 +83,7 @@ async fn a_live_session_records_every_measured_stage() {
         Some("loopback-test"),
         None,
         None,
-        false,
+        pocketdesk_core::streaming::SessionMode::Screen,
     )
     .await
     .expect("client connect");

@@ -520,4 +520,20 @@
     <string name="remote_key_page_down">Avanzar página</string>
     <string name="remote_key_left">Izquierda</string>
     <string name="remote_key_right">Derecha</string>
+
+    <!-- T10k: this phone's screen on the computer. -->
+    <string name="cast_button">Mostrar pantalla</string>
+    <string name="cast_channel">La pantalla de este teléfono en un ordenador</string>
+    <string name="cast_connecting">Conectando con %1$s…</string>
+    <string name="cast_waiting">Esperando a que %1$s lo permita…</string>
+    <string name="cast_showing">La pantalla de este teléfono se muestra en %1$s</string>
+    <string name="cast_stop">Detener</string>
+    <string name="cast_stopped">La pantalla de este teléfono ya no se muestra</string>
+    <string name="cast_failed">No se pudo mostrar la pantalla en %1$s: %2$s</string>
+    <string name="cast_too_old">Pocketdesk en %1$s es demasiado antiguo para mostrar la pantalla de este teléfono. Actualízalo.</string>
+    <string name="cast_no_consent">Android no permitió compartir la pantalla.</string>
+    <string name="cast_no_answer">no respondió</string>
+    <string name="cast_lost">se perdió la conexión</string>
+    <string name="cast_not_allowed">no permite que este teléfono muestre su pantalla (Dispositivos, \"Mostrar su pantalla aquí\")</string>
+    <string name="cast_not_shown_here">su Pocketdesk no puede mostrar la pantalla de un teléfono</string>
 </resources>

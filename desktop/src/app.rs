@@ -23,7 +23,7 @@ const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 11] = [
+const PERMISSIONS: [(Capability, &str, &str); 12] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -78,6 +78,11 @@ const PERMISSIONS: [(Capability, &str, &str); 11] = [
         Capability::Media,
         "Show and control its media here",
         "What the phone plays (title, artist, app) shows in Sessions, with Play/Pause and skip.",
+    ),
+    (
+        Capability::Cast,
+        "Show its screen here",
+        "The phone can show its own screen in a window here, when its owner starts it on the phone.",
     ),
 ];
 
@@ -137,6 +142,8 @@ pub struct PocketdeskApp {
     phone_files: crate::phone_files_view::PhoneFilesView,
     /// Whether "Send to phone" is in the file manager, as last read (T10e).
     send_menu_installed: Option<bool>,
+    /// The window showing a phone's screen (T10k), started on the first pass.
+    cast: Option<crate::cast_view::CastView>,
 }
 
 impl PocketdeskApp {
@@ -166,6 +173,7 @@ impl PocketdeskApp {
             notes: Default::default(),
             phone_files: Default::default(),
             send_menu_installed: None,
+            cast: None,
         }
     }
 
@@ -590,6 +598,13 @@ impl PocketdeskApp {
         let now = now_unix();
         let mut end = None;
         let mut give = None;
+        let mut show_cast = false;
+        // A cast whose window the owner closed (T10k).
+        let cast_closed = self
+            .cast
+            .as_ref()
+            .and_then(|c| c.showing())
+            .is_some_and(|(_, closed)| closed);
         let count = self.snapshot.sessions.len();
         egui::Grid::new("sessions")
             .num_columns(5)
@@ -606,7 +621,9 @@ impl PocketdeskApp {
                         "{} · {}{}",
                         session.transport.to_uppercase(),
                         session.peer,
-                        if session.control_only {
+                        if session.cast {
+                            " · showing its screen"
+                        } else if session.control_only {
                             " · control only"
                         } else {
                             ""
@@ -637,9 +654,14 @@ impl PocketdeskApp {
                             ui.label("");
                         }
                     }
-                    if ui.button("End").clicked() {
-                        end = Some(session.clone());
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("End").clicked() {
+                            end = Some(session.clone());
+                        }
+                        if session.cast && cast_closed && ui.button("Show screen").clicked() {
+                            show_cast = true;
+                        }
+                    });
                     ui.end_row();
                 }
             });
@@ -690,6 +712,9 @@ impl PocketdeskApp {
                     Err(e) => e,
                 },
             );
+        }
+        if show_cast && let Some(cast) = &self.cast {
+            cast.reopen();
         }
         if let Some(session) = end {
             self.end_session(&session);
@@ -1056,6 +1081,9 @@ impl eframe::App for PocketdeskApp {
             self.refresh();
             self.raise_for_approvals(ctx);
         }
+        self.cast
+            .get_or_insert_with(|| crate::cast_view::CastView::new(ctx, self.state_dir.clone()))
+            .show(ctx);
         ctx.request_repaint_after(REFRESH);
     }
 

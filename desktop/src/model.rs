@@ -637,6 +637,7 @@ mod tests {
             started_unix: 1,
             driving,
             control_only: false,
+            cast: false,
         }
     }
 

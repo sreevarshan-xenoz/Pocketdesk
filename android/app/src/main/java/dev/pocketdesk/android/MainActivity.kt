@@ -163,6 +163,19 @@ class MainActivity : ComponentActivity() {
             // Denied is non-fatal: the service still runs, just without a visible notification.
         }
 
+    /** The computer a cast waits for Android's consent to (T10k). */
+    private var castTo: HostStore.Host? = null
+
+    private val castConsent =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val host = castTo ?: return@registerForActivityResult
+            castTo = null
+            val data = result.data
+            if (result.resultCode == RESULT_OK && data != null) {
+                dev.pocketdesk.android.cast.CastService.start(this, host.address, host.port, result.resultCode, data)
+            }
+        }
+
     private val requestLocalNetworkPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (!granted) {
@@ -349,6 +362,15 @@ class MainActivity : ComponentActivity() {
                                             maybeRequestNotificationPermission()
                                             sessionKey =
                                                 "${host.address}|${host.port}|${host.controlPort}|$REMOTE_MODE"
+                                        },
+                                        onCast = { host ->
+                                            HostStore.save(this@MainActivity, host)
+                                            maybeRequestNotificationPermission()
+                                            castTo = host
+                                            castConsent.launch(
+                                                getSystemService(android.media.projection.MediaProjectionManager::class.java)
+                                                    .createScreenCaptureIntent(),
+                                            )
                                         },
                                         onConnectFound = { host ->
                                             // Not saved until it pairs: an mDNS

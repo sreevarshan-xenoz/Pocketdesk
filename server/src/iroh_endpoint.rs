@@ -528,6 +528,8 @@ pub struct WanSettings {
     pub allow_hevc: bool,
     pub capture_backend: pocketdesk_core::streaming::CaptureBackend,
     pub mic_relay_device: Option<String>,
+    /// Where phones' casts go (T10k); `None` refuses them.
+    pub cast: Option<tokio::sync::mpsc::Sender<pocketdesk_core::streaming::cast::CastEvent>>,
     /// Your own relays (N2); empty uses n0's.
     pub relay_urls: Vec<String>,
     /// What the Mainline DHT record holds (N3).
@@ -564,6 +566,7 @@ pub async fn spawn_wan_endpoint(
         allow_hevc,
         capture_backend,
         mic_relay_device,
+        cast,
         relay_urls,
         dht_publish,
         control,
@@ -631,6 +634,7 @@ pub async fn spawn_wan_endpoint(
             let input_tx = input_tx.clone();
             let cert_manager = Arc::clone(&cert_manager);
             let mic_relay_device = mic_relay_device.clone();
+            let cast = cast.clone();
             let control = control.clone();
             tokio::spawn(async move {
                 let conn = match incoming.accept() {
@@ -660,6 +664,9 @@ pub async fn spawn_wan_endpoint(
                 let (mic_tx, mic_rx) = tokio::sync::mpsc::channel(64);
                 tokio::spawn(crate::mic_relay::run_mic_relay(mic_rx, mic_relay_device));
                 streaming_server.set_mic_channel(mic_tx);
+                if let Some(cast) = cast {
+                    streaming_server.set_cast_channel(cast);
+                }
                 streaming_server.set_session_telemetry(true);
                 streaming_server.set_hevc_allowed(allow_hevc);
                 streaming_server.set_capture_backend(capture_backend);
