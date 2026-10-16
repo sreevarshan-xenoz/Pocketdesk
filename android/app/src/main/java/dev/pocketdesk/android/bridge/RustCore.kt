@@ -35,6 +35,7 @@ object RustCore {
     private external fun nativeGetClipboardState(address: String, port: Int): String
     private external fun nativeSendNotification(address: String, port: Int, body: String): String
     private external fun nativeSendPhonePacket(address: String, port: Int, packetType: String, body: String): String
+    private external fun nativeSendPhonePacketOnLink(address: String, port: Int, packetType: String, body: String): String
     private external fun nativeTakeSmsRequests(): String
     private external fun nativeControlPeer(): String
     private external fun nativeSendClipboardImage(address: String, port: Int, path: String): String
@@ -275,6 +276,10 @@ object RustCore {
         envelope(nativeSendNotification(address, port, body)).map { }
 
     /** Send the phone's texts or a reply's result to the desktop (N5b). */
+    /** [sendPhonePacket] only over the control link already up to that computer: never a connection of its own. */
+    fun sendPhonePacketOnLink(address: String, port: Int, packetType: String, body: String): Result<Unit> =
+        envelope(nativeSendPhonePacketOnLink(address, port, packetType, body)).map { }
+
     fun sendPhonePacket(address: String, port: Int, packetType: String, body: String): Result<Unit> =
         envelope(nativeSendPhonePacket(address, port, packetType, body)).map { }
 

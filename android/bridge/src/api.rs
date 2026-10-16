@@ -1063,20 +1063,41 @@ pub async fn send_phone_packet(
     packet_type: String,
     body: String,
 ) -> Result<(), String> {
+    let packet = phone_packet(packet_type, &body)?;
+    push_packet(&address, port, &packet).await
+}
+
+/// [`send_phone_packet`] only over the control link already up to that
+/// computer, never a connection of its own, within a few seconds: for what
+/// the background sends because some other feature keeps the link (the
+/// battery), which must not dial when the link has just gone.
+pub async fn send_phone_packet_on_link(
+    address: String,
+    port: u16,
+    packet_type: String,
+    body: String,
+) -> Result<(), String> {
+    let packet = phone_packet(packet_type, &body)?;
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        send_on_live(&address, port, &packet),
+    )
+    .await
+    .map_err(|_| "The computer did not take it in time".to_string())?
+}
+
+/// A packet the phone may send of itself ([`PHONE_PACKETS`]), with a body
+/// that is a JSON object.
+fn phone_packet(packet_type: String, body: &str) -> Result<NetworkPacket, String> {
     if !PHONE_PACKETS.contains(&packet_type.as_str()) {
         return Err(format!("{packet_type} is not sent this way"));
     }
     let body: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| format!("Invalid {packet_type}: {e}"))?;
+        serde_json::from_str(body).map_err(|e| format!("Invalid {packet_type}: {e}"))?;
     if !body.is_object() {
         return Err(format!("Invalid {packet_type}: not an object"));
     }
-    push_packet(
-        &address,
-        port,
-        &NetworkPacket::new(packet_type).with_body(body),
-    )
-    .await
+    Ok(NetworkPacket::new(packet_type).with_body(body))
 }
 
 /// Reply to a desktop notification (R3 Tier-2 #11c) over the control

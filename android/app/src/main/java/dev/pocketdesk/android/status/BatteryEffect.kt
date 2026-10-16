@@ -21,7 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-private const val BATTERY = "kdeconnect.battery"
+internal const val BATTERY = "kdeconnect.battery"
 private const val CHECK_MS = 15_000L
 
 /**
@@ -45,7 +45,7 @@ fun BatteryEffect(address: String, controlPort: Int) {
                 val linked = withContext(Dispatchers.IO) {
                     !ControlLink.needsConnect(RustCore.controlPeer(), address, controlPort)
                 }
-                val now = if (linked && Prefs.shareBattery(context)) read(context) else null
+                val now = if (linked && Prefs.shareBattery(context)) readBattery(context) else null
                 val nowMs = SystemClock.elapsedRealtime()
                 if (now != null && BatteryRule.shouldSend(last, lastMs, now, nowMs)) {
                     val sent = withContext(Dispatchers.IO) {
@@ -65,7 +65,7 @@ fun BatteryEffect(address: String, controlPort: Int) {
 }
 
 /** The battery now, from the sticky broadcast (no receiver is kept). */
-private fun read(context: Context): BatteryRule.Report? {
+internal fun readBattery(context: Context): BatteryRule.Report? {
     val intent: Intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         ?: return null
     val low = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
