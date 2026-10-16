@@ -1356,6 +1356,17 @@ Owed:
 - [ ] "Start my tasks" off: the phone gives up with "no answer" after 20 s.
 - [ ] Linux (`sh -c`), a long output's end on the phone, and two phones at once.
 
+## 81. Send from the browser (ecosystem 1d)
+
+This Windows box and the A71, debug builds, 2026-10-16:
+- [x] `pocketdesk browser-host --install`: registered with Chrome, Chromium, Edge, Brave, Vivaldi and Firefox (HKCU keys naming the manifests; the Chromium manifest allows only `chrome-extension://abojofjjnpcmejhdonndlegfaolfkcif/`); `--remove` took the keys and files away.
+- [x] The host driven as a browser drives it (`pocketdesk.exe chrome-extension://…/` and framed JSON), with a session on the A71: a link answered "Sent to your phone" and showed in the phone's notification; an image (an SVG behind a redirect) arrived in `Download/Pocketdesk`, its MD5 matching the site's; `localhost` and an unknown request refused.
+- [x] Found and fixed: images kept in the state folder were never sent (the server does not send its own folder's files); they wait in the temp folder now.
+
+Owed:
+- [ ] The extension itself loaded in Brave or Chrome and in Firefox (unpacked), and its menus and notifications.
+- [ ] Linux registration (`~/.config/<browser>/NativeMessagingHosts`, `~/.mozilla/native-messaging-hosts`) and the desktop Settings switch.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
