@@ -106,8 +106,13 @@ impl Drop for Waiter {
 /// link: the live control connection is to it, by the internet road, and
 /// files may go that way.
 pub(crate) async fn ready(address: &str, port: u16) -> bool {
-    INTERNET_FILES.load(Ordering::Relaxed)
-        && crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst)
+    INTERNET_FILES.load(Ordering::Relaxed) && by_internet(address, port).await
+}
+
+/// Whether the live control connection is to `address`, `port`, by the
+/// internet road.
+async fn by_internet(address: &str, port: u16) -> bool {
+    crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst)
         && (*crate::CONTROL_PEER)
             .lock()
             .await
@@ -118,7 +123,14 @@ pub(crate) async fn ready(address: &str, port: u16) -> bool {
 /// What a computer from before 2c answers a request without a port; the
 /// phone says what it means.
 pub(crate) fn too_old(reason: &str) -> bool {
-    reason.contains("no usable port") || reason.contains("no port to send to")
+    // A share, a download, a clipboard image.
+    [
+        "no usable port",
+        "no port to send to",
+        "no port to connect to",
+    ]
+    .iter()
+    .any(|old| reason.contains(old))
 }
 
 /// Where the computer's connection for one transfer comes from.
@@ -136,6 +148,11 @@ impl Arrival {
     pub(crate) async fn new(address: &str, port: u16, key: &str) -> Result<Self, String> {
         if ready(address, port).await {
             return Ok(Self::Link(Waiter::for_key(key)));
+        }
+        // Linked by the internet road but with the switch off: nothing else
+        // can reach that computer, so say why now.
+        if !INTERNET_FILES.load(Ordering::Relaxed) && by_internet(address, port).await {
+            return Err("Files over the internet are off in this phone's Settings".to_string());
         }
         tokio::net::TcpListener::bind("0.0.0.0:0")
             .await
@@ -235,6 +252,7 @@ mod tests {
     fn a_computer_from_before_2c_is_known_by_its_refusal() {
         assert!(too_old("no usable port"));
         assert!(too_old("no port to send to"));
+        assert!(too_old("no port to connect to"));
         assert!(!too_old("the phone may not send files"));
     }
 }

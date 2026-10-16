@@ -1734,7 +1734,10 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
 /// internet road, which names no port, as if it had none to use.
 pub(crate) fn refusal_text(what: &str, reason: &str, by_link: bool) -> String {
     if by_link && crate::link::too_old(reason) {
-        "This computer is too old for files over the internet: update Pocketdesk on it".to_string()
+        // Worded as a refusal: the phone's retry rule takes it as final.
+        format!(
+            "The computer refused the {what}: it is too old for files over the internet; update Pocketdesk on it"
+        )
     } else {
         format!("The computer refused the {what}: {reason}")
     }
