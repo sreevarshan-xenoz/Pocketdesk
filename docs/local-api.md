@@ -97,7 +97,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 |---|---|---|
 | `session_started` | `session_id`, `transport` (`lan`/`wan`), `mode` (`screen`, `remote`, `cast`) | — |
 | `session_ended` | `session_id` | — |
-| `phone_linked`, `phone_unlinked` | — | — |
+| `phone_linked`, `phone_unlinked` | — (any connection the phone holds to this computer, a brief one for a single send included) | — |
 | `phone_battery` | `charge`, `charging` | — |
 | `phone_battery_low` | `charge` | — |
 | `notification` | `app` | `title`, `text` |
@@ -114,7 +114,9 @@ By default an event says who, when and how much, never what. Settings "Details i
 file_received = "notify-send 'A file came from the phone'"
 ```
 
-At most 4 hooks run at once and up to 32 more wait their turn (past that one is skipped, and logged); each is stopped after 30 s, and none opens a window. A hook runs even with "Event log" off.
+At most 4 hooks run at once and up to 32 more wait their turn (past that one is skipped, and logged); each is stopped after 30 s (programs it started in the background may outlive it), and none opens a window. A hook runs even with "Event log" off.
+
+**Read the event from stdin, and treat its fields as untrusted text:** a phone chooses a notification's app name and text, a file's name, a link. On Windows never write `%POCKETDESK_EVENT%` into the command line: cmd expands it before it parses `&`, `|` and quotes, so a field could run commands. On Unix, `"$POCKETDESK_EVENT"` in double quotes is safe.
 
 ## Acting
 
