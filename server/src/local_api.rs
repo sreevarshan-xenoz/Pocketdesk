@@ -38,6 +38,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::Texts => "texts",
         Capability::Links => "links",
         Capability::Media => "media",
+        Capability::Cast => "cast",
     }
 }
 
