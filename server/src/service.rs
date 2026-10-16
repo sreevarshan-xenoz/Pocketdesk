@@ -184,6 +184,14 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::spawn(crate::clipboard_push::run());
     }
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
+    // KDE Connect devices (3a): told where this computer is while the app
+    // looks for them.
+    crate::kdeconnect_compat::configure(config.kdeconnect_compat);
+    if config.kdeconnect_compat {
+        tokio::spawn(crate::kdeconnect_compat::discovery::run(
+            config.control_port,
+        ));
+    }
     crate::wake_info::configure(config.wake_announce, config.wake_port);
     crate::driving::configure(config.input_control, config.input_idle_secs);
     crate::plugins::share::configure(config.transfer_keep_hours);
@@ -1040,6 +1048,11 @@ async fn handle_connection_with_kde(
             .context("failed to read incoming handshake")?;
         if peeked == 0 {
             tracing::info!("Connection closed by peer before handshake");
+            return Ok(());
+        }
+        // A KDE Connect device's connection packet (3a).
+        if first[0] == b'{' && crate::kdeconnect_compat::enabled() {
+            crate::kdeconnect_compat::serve(stream).await;
             return Ok(());
         }
         if first[0] != pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD {

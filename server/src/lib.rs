@@ -26,6 +26,7 @@ mod input_sendinput;
 pub mod install_windows;
 pub mod iroh_endpoint;
 pub mod kde;
+pub mod kdeconnect_compat;
 pub mod live_sessions;
 pub mod local_api;
 pub mod media;

@@ -5272,6 +5272,7 @@ dependencies = [
  "pocketdesk-core",
  "quinn",
  "rand 0.8.6",
+ "rcgen",
  "reqwest 0.12.28",
  "ring",
  "rumqttc",
@@ -5290,6 +5291,7 @@ dependencies = [
  "windows 0.62.2",
  "windows-core 0.62.2",
  "windows-future 0.3.2",
+ "x509-parser",
  "xcap",
  "zbus",
 ]

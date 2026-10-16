@@ -55,6 +55,10 @@ ring = "0.17"
 tokio-util.workspace = true
 # The control channel runs inside TLS (phase B).
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+# A KDE Connect device's certificate names its id, and this computer has one
+# of its own for them (3a).
+x509-parser = "0.18"
+rcgen.workspace = true
 
 # UUID for persistent device ID
 uuid.workspace = true
