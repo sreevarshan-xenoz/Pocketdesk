@@ -62,6 +62,7 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     onConnect: (HostStore.Host) -> Unit,
     onRemote: (HostStore.Host) -> Unit,
+    onCast: (HostStore.Host) -> Unit,
     onConnectFound: (HostStore.Host) -> Unit,
     onAdd: () -> Unit,
     onScan: () -> Unit,
@@ -256,6 +257,7 @@ fun HomeScreen(
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
                         onRemote = { onRemote(host) },
+                        onCast = { onCast(host) },
                         onConnect = {
                             if (!Prefs.offerWake(context)) {
                                 onConnect(host)
@@ -487,6 +489,7 @@ private fun HostCard(
     hasWake: Boolean,
     onConnect: () -> Unit,
     onRemote: () -> Unit,
+    onCast: () -> Unit,
     onWake: () -> Unit,
     onWakeSettings: () -> Unit,
     onCheck: () -> Unit,
@@ -540,6 +543,10 @@ private fun HostCard(
                 // The phone as a remote (T10i): trackpad and keys, no picture.
                 TextButton(onClick = onRemote) {
                     Text(stringResource(R.string.remote_button), style = MaterialTheme.typography.labelMedium)
+                }
+                // This phone's screen on the computer (T10k).
+                TextButton(onClick = onCast) {
+                    Text(stringResource(R.string.cast_button), style = MaterialTheme.typography.labelMedium)
                 }
                 if (hasWake) {
                     TextButton(onClick = onWake) {

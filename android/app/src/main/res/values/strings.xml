@@ -522,4 +522,20 @@
     <string name="remote_key_page_down">Page down</string>
     <string name="remote_key_left">Left</string>
     <string name="remote_key_right">Right</string>
+
+    <!-- T10k: this phone's screen on the computer. -->
+    <string name="cast_button">Show screen</string>
+    <string name="cast_channel">This phone\'s screen on a computer</string>
+    <string name="cast_connecting">Connecting to %1$s…</string>
+    <string name="cast_waiting">Waiting for %1$s to allow it…</string>
+    <string name="cast_showing">This phone\'s screen is shown on %1$s</string>
+    <string name="cast_stop">Stop</string>
+    <string name="cast_stopped">This phone\'s screen is no longer shown</string>
+    <string name="cast_failed">Could not show the screen on %1$s: %2$s</string>
+    <string name="cast_too_old">Pocketdesk on %1$s is too old to show this phone\'s screen. Update it.</string>
+    <string name="cast_no_consent">Android did not allow the screen to be shared.</string>
+    <string name="cast_no_answer">it did not answer</string>
+    <string name="cast_lost">the connection was lost</string>
+    <string name="cast_not_allowed">it does not allow this phone to show its screen (Devices, \"Show its screen here\")</string>
+    <string name="cast_not_shown_here">its Pocketdesk cannot show a phone\'s screen</string>
 </resources>
