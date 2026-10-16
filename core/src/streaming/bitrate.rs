@@ -173,6 +173,9 @@ struct DeliveryState {
     ceiling: u32,
     /// Starved ticks in a row.
     starved: u32,
+    /// Starved ticks still to pass unjudged after a cut, while what the old
+    /// rate queued drains.
+    settle: u32,
     /// Clean ticks that used most of the ceiling, since the last climb or
     /// starved tick.
     clean: u32,
@@ -187,6 +190,7 @@ impl DeliveryState {
     const INERT: Self = Self {
         ceiling: u32::MAX,
         starved: 0,
+        settle: 0,
         clean: 0,
         quiet: 0,
         link: None,
@@ -202,6 +206,14 @@ const UNBLOCKED_SHARE: f64 = 0.1;
 
 /// Starved ticks in a row before a cut: one is a keyframe's burst.
 const STARVED_TICKS: u32 = 2;
+
+/// Starved ticks not judged after a cut. Until what the old rate queued is
+/// delivered (up to a round trip's frames, seconds of video on a slow
+/// link), the transport still waits while it sends only the new, smaller
+/// frames, which would read as a link slower than the last cut and cut
+/// again, down to the floor (the slow-link test did, 675 to 250 kbit/s on
+/// a 1 Mbit/s link).
+const SETTLE_TICKS: u32 = 3;
 
 /// Clean ticks before each step back up.
 const CLEAN_TICKS: u32 = 3;
@@ -290,6 +302,14 @@ fn next_delivery(
 ) -> DeliveryState {
     let base = state.ceiling.min(configured);
     if blocked_share >= BLOCKED_SHARE {
+        if state.settle > 0 {
+            return DeliveryState {
+                settle: state.settle - 1,
+                clean: 0,
+                quiet: 0,
+                ..state
+            };
+        }
         let starved = state.starved + 1;
         let held = DeliveryState {
             starved,
@@ -303,14 +323,18 @@ fn next_delivery(
         let link = (delivered_bps as u32).max(DELIVERY_FLOOR_BPS);
         let through =
             ((delivered_bps * DELIVERY_MARGIN) as u32).clamp(DELIVERY_FLOOR_BPS.min(base), base);
-        let ceiling = if (through as f64) > base as f64 * DEAD_BAND {
-            state.ceiling.min(base)
-        } else {
-            through
-        };
+        if (through as f64) > base as f64 * DEAD_BAND {
+            return DeliveryState {
+                ceiling: state.ceiling.min(base),
+                link: Some(link),
+                ..held
+            };
+        }
         return DeliveryState {
-            ceiling,
+            ceiling: through,
             link: Some(link),
+            starved: 0,
+            settle: SETTLE_TICKS,
             ..held
         };
     }
@@ -319,6 +343,7 @@ fn next_delivery(
     }
     let mut next = DeliveryState {
         starved: 0,
+        settle: 0,
         ..state
     };
     if blocked_share > UNBLOCKED_SHARE {
@@ -431,18 +456,48 @@ mod tests {
             850_000,
             "just under the 1 Mbit/s that got through"
         );
+        for _ in 0..SETTLE_TICKS + 1 {
+            tick(&mut d, &mut waited, &mut sent, 0.8, 600_000);
+            assert_eq!(d.ceiling(), 850_000, "the old rate's queue drains first");
+        }
         tick(&mut d, &mut waited, &mut sent, 0.8, 600_000);
         assert_eq!(
             d.ceiling(),
             510_000,
-            "still waiting: down to what gets through now"
+            "still waiting once drained: down to what gets through now"
         );
-        tick(&mut d, &mut waited, &mut sent, 0.8, 580_000);
+        for _ in 0..SETTLE_TICKS + 2 {
+            tick(&mut d, &mut waited, &mut sent, 0.8, 580_000);
+        }
         assert_eq!(
             d.ceiling(),
             510_000,
             "a cut within a tenth is not worth a rebuild"
         );
+    }
+
+    #[test]
+    fn a_cut_lets_the_old_rate_drain_before_it_judges_the_link_again() {
+        // The slow-link test: 1 Mbit/s, cut from 6.4 Mbit/s. While the old
+        // frames drain the transport waits, sending only the new ones.
+        let (mut d, mut waited, mut sent) = cut_at(8_000_000, 800_000);
+        assert_eq!(d.ceiling(), 680_000);
+        for _ in 0..SETTLE_TICKS {
+            tick(&mut d, &mut waited, &mut sent, 0.9, 400_000);
+        }
+        assert_eq!(d.ceiling(), 680_000, "not cut to the drain's 340 kbit/s");
+        for _ in 0..5 {
+            tick(&mut d, &mut waited, &mut sent, 0.0, 600_000);
+        }
+        assert_eq!(
+            d.ceiling(),
+            760_000,
+            "drained, it climbs to just under the 800 kbit/s the link carried"
+        );
+        // A starved tick after a clear one is judged at once (two in a row).
+        tick(&mut d, &mut waited, &mut sent, 0.9, 500_000);
+        tick(&mut d, &mut waited, &mut sent, 0.9, 500_000);
+        assert_eq!(d.ceiling(), 425_000);
     }
 
     #[test]

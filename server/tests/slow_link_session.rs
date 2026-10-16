@@ -33,6 +33,16 @@
 //! the queue and no more changes, 18-20 fps delivered (what the screen
 //! drew); worst 10 s window 10.5 fps.
 //!
+//! After the R6f review (the ceiling stays under what the link last
+//! carried, a held frame instead of a dropped one): 300 s, worst 12.9 fps,
+//! but the first cut spiralled, 675 to 348 to the 250 kbit/s floor in three
+//! ticks, as each starved tick while the old rate's frames drained read
+//! only the new, smaller ones; quiet minutes then probed back to 580 kbit/s.
+//! With a cut let to drain first (three ticks unjudged): one cut, to
+//! 1.06 Mbit/s, no spiral, worst 15.0 fps; the screen drew about 16 a
+//! second, so the transport never waited and quiet minutes probed above
+//! the link, which a busy screen would cut again within two ticks.
+//!
 //! Ignored, since it captures the real desktop:
 //!
 //! ```text
