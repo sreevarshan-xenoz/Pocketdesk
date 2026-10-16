@@ -158,7 +158,11 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
         }
         cli::Commands::List { json } => service::list_peers(json).await,
         cli::Commands::Watch { interval } => service::watch_peers(interval).await,
-        cli::Commands::Capabilities { json, markdown } => {
+        cli::Commands::Capabilities { packets: true, .. } => {
+            print!("{}", packets::render_markdown());
+            Ok(())
+        }
+        cli::Commands::Capabilities { json, markdown, .. } => {
             service::print_capabilities(json, markdown).await
         }
         cli::Commands::Connect { peer, port } => {

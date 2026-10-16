@@ -462,7 +462,7 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 | `pocketdesk unpair [device-id]` | Remove a paired device from the trust store (all if omitted) |
 | `pocketdesk sessions [--count N] [--json]` | Show recorded streaming-session outcomes (LAN/WAN-punched/WAN-relayed tally + recent log tail); each line carries the transport's own numbers — packets/bytes lost, datagrams sent, path changes, seconds rode a relay, peak congestion window, discovered path MTU (read off the path the session actually rides, on both transports) — and the p50/p90/p95/p99/max tails for the whole chain: `rtt_*`/`enc_*` measured on the desktop, `dec_*`/`rnd_*`/`e2e_*` reported back by the device doing the decoding, plus its reading of the path as `phone_rtt`/`phone_lost`; `--json` emits the retained per-session records as JSON lines for tooling and benchmark comparison |
 | `pocketdesk bench [--target software\|vaapi] [--baseline PATH] [--record PATH]` | Run the pinned 720p encode clip on this machine; with `--baseline`, exit non-zero if a percentile regressed past `--tolerance-pct` (exit 3 means no baseline matches this host, which is a skip, not a pass) |
-| `pocketdesk capabilities [--json\|--markdown]` | Show the negotiated protocol versions, transports, capture backends and codecs this build actually speaks, plus its KDE Connect capability sets |
+| `pocketdesk capabilities [--json\|--markdown\|--packets]` | Show the negotiated protocol versions, transports, capture backends and codecs this build actually speaks, plus its KDE Connect capability sets; `--packets`, the control packet catalogue |
 | `pocketdesk kick <id\|prefix\|peer-ip\|all>` | Drop a live streaming session (R4 D2) |
 | `pocketdesk relay [--port 3340] [--hostname NAME --email ADDR] [--allow ID]... [--allow-paired] [--open]` | Run your own relay for phones away from home (see *Away From Home*) |
 | `pocketdesk relay-ids` | Print this desktop's and its paired phones' WAN ids, for `--allow` on a relay elsewhere |
@@ -488,11 +488,19 @@ and a version bump appears in the report the moment it appears in the code.
 pocketdesk capabilities              # human listing
 pocketdesk capabilities --json       # for scripts
 pocketdesk capabilities --markdown   # the source of docs/capabilities.md
+pocketdesk capabilities --packets    # the source of docs/packets.md
 ```
 
 [`docs/capabilities.md`](docs/capabilities.md) is that Markdown output, committed,
 and `server/tests/capabilities_doc.rs` fails when it stops matching the build —
-regenerate it in the same commit as the constant you changed.
+regenerate it in the same commit as the constant you changed. The same holds for
+[`docs/packets.md`](docs/packets.md), every control packet, the plugin that takes it
+and the permission that gates it (`server/tests/packets_doc.rs`); regenerate it from a POSIX shell, as PowerShell 5.1's `>` writes UTF-16.
+
+**Writing your own client?** [`docs/protocol-spec.md`](docs/protocol-spec.md) is the
+contract (framing, handshake, standing, how a client learns what a computer offers),
+and [`docs/protocol-vectors/control-v1.json`](docs/protocol-vectors/control-v1.json)
+holds conversations CI replays against the real handler; replay them against yours.
 
 ### The Encoder Benchmark Is Pinned, Not Improvised
 

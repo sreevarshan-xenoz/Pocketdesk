@@ -16,7 +16,7 @@ pub fn build_default_service() -> Result<KdeConnectService> {
     // Single source of truth for plugin registration — same list as plugins::register_all()
     service.registry = plugins::register_all();
 
-    let (incoming, outgoing) = service.registry.capability_sets();
+    let (incoming, outgoing) = plugins::announced(&service.registry);
 
     let mut identity = host_identity();
     identity.incoming_capabilities = incoming;

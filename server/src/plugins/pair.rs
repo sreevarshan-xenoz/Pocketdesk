@@ -587,8 +587,9 @@ impl Plugin for PairPlugin {
         ]
     }
 
+    // What it answers with: the identity announces it (ecosystem 1g).
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &[]
+        &["kdeconnect.pair", "kdeconnect.pocketdesk.pair"]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {

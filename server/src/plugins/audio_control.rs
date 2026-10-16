@@ -53,8 +53,9 @@ impl Plugin for AudioControlPlugin {
         &["kdeconnect.pocketdesk.audio"]
     }
 
+    // What it answers with: the identity announces it (ecosystem 1g).
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &[]
+        &["kdeconnect.pocketdesk.audio"]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
