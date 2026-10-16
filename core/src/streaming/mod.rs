@@ -5,6 +5,7 @@
 
 pub mod audio;
 pub mod bitrate;
+pub mod cast;
 pub mod chaos;
 pub mod client;
 pub mod connection;
