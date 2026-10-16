@@ -418,11 +418,13 @@ impl Default for SharePlugin {
 }
 
 /// Where received files go: Downloads, else home; or
-/// `POCKETDESK_DOWNLOAD_DIR`, for tests that run two servers on one
-/// machine (2h), which would share its real Downloads.
+/// `POCKETDESK_DOWNLOAD_DIR` (an absolute path), for tests that run two
+/// servers on one machine (2h), which would share its real Downloads. The
+/// server warns at start when it is set.
 pub(crate) fn download_dir() -> Option<PathBuf> {
     std::env::var_os("POCKETDESK_DOWNLOAD_DIR")
         .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
         .or_else(dirs::download_dir)
         .or_else(dirs::home_dir)
 }

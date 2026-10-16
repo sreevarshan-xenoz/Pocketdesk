@@ -286,11 +286,13 @@ fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
     share::io_error("clipboard", e)
 }
 
-/// A file that stands in for the clipboard (`POCKETDESK_CLIPBOARD_FILE`):
-/// for tests that run two servers on one machine, which share its real
-/// one (2g).
+/// A file that stands in for the clipboard (`POCKETDESK_CLIPBOARD_FILE`, an
+/// absolute path): for tests that run two servers on one machine, which
+/// share its real one (2g). The server warns at start when it is set.
 pub(crate) fn stand_in() -> Option<std::path::PathBuf> {
-    std::env::var_os("POCKETDESK_CLIPBOARD_FILE").map(std::path::PathBuf::from)
+    std::env::var_os("POCKETDESK_CLIPBOARD_FILE")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
 }
 
 /// Whether `text` is a pairing link (`pocketdesk://pair?...`), which the
@@ -314,7 +316,9 @@ pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
 /// Set the clipboard's text.
 pub(crate) async fn set_clipboard(content: &str) -> Result<()> {
     if let Some(path) = stand_in() {
-        return std::fs::write(path, content).map_err(|e| share::io_error("clipboard", e));
+        // Clipboard text: owner-only, as the real one is.
+        return pocketdesk_core::secure_fs::write_private(&path, content.as_bytes())
+            .map_err(|e| share::io_error("clipboard", e));
     }
     set_system_clipboard(content).await
 }

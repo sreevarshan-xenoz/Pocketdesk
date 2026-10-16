@@ -95,6 +95,17 @@ pub async fn run(config: Config) -> Result<()> {
 
     // The inbox folders the app's requests land in, watched (R6c).
     crate::inbox::start(&state_dir);
+    // Test seams (2g, 2h): said, so one left set by mistake is noticed.
+    for seam in ["POCKETDESK_CLIPBOARD_FILE", "POCKETDESK_DOWNLOAD_DIR"] {
+        if let Some(value) = std::env::var_os(seam) {
+            let path = std::path::Path::new(&value);
+            if path.is_absolute() {
+                tracing::warn!("{seam} is set: {} stands in (a test seam)", path.display());
+            } else {
+                tracing::warn!("{seam} is not an absolute path; ignored");
+            }
+        }
+    }
     // R4 D2: mirror live streaming sessions to the state dir, notify the
     // desktop when one starts, and consume `pocketdesk kick` requests.
     tokio::spawn(crate::live_sessions::run_watcher());
