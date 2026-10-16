@@ -3,7 +3,10 @@
 //! negotiation three times, never under a debugger, so nothing said where.
 //! Now a panic, and on Windows an access violation or any other unhandled
 //! exception, appends what happened and a backtrace to `<state>/crash.log`
-//! (owner's folder), and the process ends as it would have.
+//! (owner's folder), and the process ends as it would have. On Windows the
+//! first few faults of a run are also reported as they are raised, with the
+//! module they are in, since one in a process already exiting never reaches
+//! the unhandled-exception filter.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
