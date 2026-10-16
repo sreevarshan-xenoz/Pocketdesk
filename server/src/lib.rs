@@ -5,6 +5,7 @@
 pub mod approvals;
 pub mod audio_control;
 pub mod bench;
+pub mod cast_relay;
 pub mod cli;
 pub(crate) mod clipboard_push;
 pub mod config;

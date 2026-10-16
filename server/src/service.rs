@@ -331,6 +331,14 @@ pub async fn run(config: Config) -> Result<()> {
     let (input_tx, mut input_rx) =
         tokio::sync::broadcast::channel::<pocketdesk_core::streaming::SessionInput>(16);
     let streaming_config = config.video_quality.to_streaming_config();
+    // T10k: phones' casts are handed to the desktop app through one relay.
+    let cast_tx = match crate::state::state_dir() {
+        Ok(dir) => Some(crate::cast_relay::spawn(dir)),
+        Err(e) => {
+            tracing::warn!("No cast relay, phones' screens cannot be shown: {e:#}");
+            None
+        }
+    };
 
     // R1 stage 3: WAN (iroh) endpoint alongside the quinn LAN listener.
     // A bind failure (no network, relays unreachable) must not take the LAN
@@ -347,6 +355,7 @@ pub async fn run(config: Config) -> Result<()> {
             allow_hevc: config.allow_hevc,
             capture_backend: config.capture_backend,
             mic_relay_device: config.mic_relay_device.clone(),
+            cast: cast_tx.clone(),
             relay_urls: config.relay_urls.clone(),
             dht_publish: config.dht_publish,
             control: Some(internet_control_tx),
@@ -575,6 +584,7 @@ pub async fn run(config: Config) -> Result<()> {
                     let allow_hevc = config.allow_hevc;
                     let capture_backend = config.capture_backend;
                     let mic_relay_device = config.mic_relay_device.clone();
+                    let cast_tx = cast_tx.clone();
 
                     tokio::spawn(async move {
                         let _slot = slot;
@@ -614,6 +624,9 @@ pub async fn run(config: Config) -> Result<()> {
                                     mic_relay_device,
                                 ));
                                 streaming_server.set_mic_channel(mic_tx);
+                                if let Some(cast_tx) = cast_tx {
+                                    streaming_server.set_cast_channel(cast_tx);
+                                }
                                 streaming_server.set_session_telemetry(true);
                                 streaming_server.set_hevc_allowed(allow_hevc);
                                 streaming_server.set_capture_backend(capture_backend);
