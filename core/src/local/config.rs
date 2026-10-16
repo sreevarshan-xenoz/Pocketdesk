@@ -41,6 +41,11 @@ pub struct Config {
     /// phone's "Full quality" turns it off for its session.
     #[serde(default = "default_true")]
     pub slow_link_frame_rate: bool,
+    /// Move files with a phone linked by the internet road (2c), on a
+    /// stream of its own control connection. On by default: it shows relays
+    /// nothing a session there does not (sizes and timing, never content).
+    #[serde(default = "default_true")]
+    pub internet_files: bool,
     /// Capture backend selection (R4 B3). `"auto"` (default) detects the
     /// display server and falls back (screencopy → portal on Wayland, X11 on
     /// bare X11). `"screencopy"`, `"portal"` or `"x11"` pins the pipeline —
@@ -231,6 +236,7 @@ impl Default for Config {
             pairing_required: true,
             allow_hevc: false,
             slow_link_frame_rate: true,
+            internet_files: true,
             capture_backend: CaptureBackend::Auto,
             mic_relay_device: None,
             lan_discovery: true,
@@ -404,6 +410,7 @@ impl Config {
         "pairing_required",
         "allow_hevc",
         "slow_link_frame_rate",
+        "internet_files",
         "capture_backend",
         "mic_relay_device",
         "lan_discovery",
@@ -695,6 +702,17 @@ phone_battery = \"x\"
         let back = Config::load_from(&path).unwrap();
         assert!(!back.wake_announce);
         assert_eq!(back.wake_port, 40009);
+    }
+
+    #[test]
+    fn files_cross_the_internet_road_by_default_and_the_choice_saves() {
+        assert!(Config::default().internet_files);
+        let path = temp("internet-files");
+        let mut config = Config::load_from(&path).unwrap();
+        assert!(config.internet_files, "a file without the key");
+        config.internet_files = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().internet_files);
     }
 
     #[test]

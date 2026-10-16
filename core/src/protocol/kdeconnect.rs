@@ -177,7 +177,26 @@ pub trait DeviceSender: Send + Sync {
         None
     }
 
+    /// Streams on this connection itself, when its road can open them (the
+    /// internet road, 2c): a transfer then rides one, where on the home
+    /// network the computer dials the phone back. `None` on TCP.
+    fn link_streams(&self) -> Option<Arc<dyn OpenLinkStream>> {
+        None
+    }
+
     async fn send_packet(&self, packet: &NetworkPacket) -> Result<()>;
+}
+
+/// A byte stream a transfer runs over.
+pub trait TransferIo: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> TransferIo for T {}
+
+/// Opens a stream on a connection for one transfer (2c): the computer opens
+/// it and starts with the transfer's key line, as it does on a connection it
+/// dials, then the same resumable transfer runs on it.
+#[async_trait::async_trait]
+pub trait OpenLinkStream: Send + Sync {
+    async fn open(&self) -> std::io::Result<Box<dyn TransferIo>>;
 }
 
 /// Concrete sender that wraps the per-connection TCP write half.
@@ -187,6 +206,7 @@ pub struct TcpDeviceSender<W> {
     connection_id: String,
     peer: Option<std::net::SocketAddr>,
     peer_key: Option<crate::streaming::PeerKey>,
+    link: Option<Arc<dyn OpenLinkStream>>,
 }
 
 impl<W> Clone for TcpDeviceSender<W> {
@@ -197,6 +217,7 @@ impl<W> Clone for TcpDeviceSender<W> {
             connection_id: self.connection_id.clone(),
             peer: self.peer,
             peer_key: self.peer_key.clone(),
+            link: self.link.clone(),
         }
     }
 }
@@ -212,6 +233,7 @@ where
             connection_id: uuid::Uuid::new_v4().to_string(),
             peer: None,
             peer_key: None,
+            link: None,
         }
     }
 
@@ -222,6 +244,7 @@ where
             connection_id: uuid::Uuid::new_v4().to_string(),
             peer: None,
             peer_key: None,
+            link: None,
         }
     }
 
@@ -241,6 +264,12 @@ where
         self.connection_id = id;
         self
     }
+
+    /// Streams this connection can open for transfers (the internet road).
+    pub fn with_link_streams(mut self, link: Option<Arc<dyn OpenLinkStream>>) -> Self {
+        self.link = link;
+        self
+    }
 }
 
 #[async_trait::async_trait]
@@ -258,6 +287,10 @@ where
 
     fn peer_addr(&self) -> Option<std::net::SocketAddr> {
         self.peer
+    }
+
+    fn link_streams(&self) -> Option<Arc<dyn OpenLinkStream>> {
+        self.link.clone()
     }
 
     fn peer_key(&self) -> Option<crate::streaming::PeerKey> {
