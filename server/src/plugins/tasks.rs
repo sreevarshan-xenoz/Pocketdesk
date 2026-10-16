@@ -62,6 +62,15 @@ pub(crate) fn listing(specs: &[TaskSpec]) -> Value {
     json!({ "tasks": tasks })
 }
 
+/// The names of the tasks a phone may start (Home Assistant's buttons).
+pub(crate) fn offered_names(specs: &[TaskSpec]) -> Vec<String> {
+    specs
+        .iter()
+        .filter(|t| offered(t))
+        .map(|t| t.name.clone())
+        .collect()
+}
+
 /// The task a phone names, if it is one it may start.
 fn find<'a>(specs: &'a [TaskSpec], name: &str) -> Option<&'a TaskSpec> {
     specs.iter().find(|t| t.name == name && offered(t))

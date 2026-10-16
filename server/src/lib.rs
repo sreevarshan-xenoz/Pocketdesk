@@ -13,6 +13,7 @@ pub mod config;
 pub mod conn_budget;
 pub mod driving;
 pub mod events;
+pub mod home_assistant;
 pub mod hypr_events;
 pub mod hyprland;
 pub mod input_injector;
