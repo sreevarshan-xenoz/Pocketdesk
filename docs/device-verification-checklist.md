@@ -1151,7 +1151,7 @@ Owed:
 - [ ] Unpairing on the desktop ends the internet link's packets at once.
 - [ ] A file offer to a phone on the internet link fails as "not reachable", not stuck.
 - [ ] The phone's battery over an hour with the link up in the background (iroh's 5 s heartbeat).
-- [ ] A session riding a relay (no direct path) with the control link up at the same time: both use the phone's one iroh key from two endpoints, and a relay may route to only one of them.
+- [ ] A session riding a relay (no direct path) with the control link up at the same time. Founded: two endpoints with one key cannot share a relay (`server/tests/one_key_two_endpoints.rs`); since 2b both ride one endpoint. Owed on the VM, relayed (checklist §85).
 
 ## 65. The clipboard outside a session (T10b)
 

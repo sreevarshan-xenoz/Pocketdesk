@@ -819,6 +819,16 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendWin
     to_jstring(&mut env, json)
 }
 
+/// The phone's default network changed (2b review): tell the live iroh
+/// dialing endpoints, which Android gives no such event.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeNetworkChanged(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) {
+    RUNTIME.spawn(pocketdesk_core::streaming::network_changed());
+}
+
 /// Toggle server-enforced view-only mode (R4 D1): while enabled the server
 /// drops all injected input from this session; video keeps flowing.
 #[unsafe(no_mangle)]

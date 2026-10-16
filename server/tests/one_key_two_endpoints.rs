@@ -126,7 +126,7 @@ async fn two_endpoints_with_their_own_keys_both_stay_connected() {
 }
 
 #[tokio::test]
-#[ignore = "red until 2b: two endpoints with one key cannot share a relay"]
+#[ignore = "documents the relay rule 2b works around: two endpoints with one key cannot share a relay"]
 async fn two_endpoints_with_one_key_on_one_relay_both_stay_connected() {
     let seen = two_dialers(true, 30).await;
     println!("one key: (connected, pings lost in 30 s) {seen:?}");
