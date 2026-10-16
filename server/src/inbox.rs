@@ -124,11 +124,17 @@ pub fn watching() -> bool {
 /// Wait until `folder` may hold something new: a change in it, or
 /// [`SWEEP`]; or, with no watcher, `unwatched` (the consumer's old poll).
 pub async fn wait(folder: &'static str, unwatched: Duration) {
+    wait_at_most(folder, SWEEP, unwatched).await;
+}
+
+/// [`wait`], but for no longer than `most`: for a consumer that also has a
+/// deadline of its own.
+pub async fn wait_at_most(folder: &'static str, most: Duration, unwatched: Duration) {
     if watching() {
         let wake = wake_for(folder);
-        let _ = tokio::time::timeout(SWEEP, wake.notified()).await;
+        let _ = tokio::time::timeout(most, wake.notified()).await;
     } else {
-        tokio::time::sleep(unwatched).await;
+        tokio::time::sleep(unwatched.min(most)).await;
     }
 }
 
@@ -163,6 +169,32 @@ mod tests {
             assert!(!changed(CONTROL_DIR), "seen, so not again");
         } else {
             assert!(changed(CONTROL_DIR), "no watcher: always look");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_wait_with_a_deadline_ends_at_it_or_at_a_change() {
+        let start = tokio::time::Instant::now();
+        let most = Duration::from_millis(200);
+        wait_at_most(PHONE_FILES_DIR, most, most).await;
+        let took = start.elapsed();
+        assert!(
+            took >= Duration::from_millis(190) && took < Duration::from_secs(2),
+            "{took:?}"
+        );
+        nudge(PHONE_FILES_DIR);
+        let start = tokio::time::Instant::now();
+        wait_at_most(
+            PHONE_FILES_DIR,
+            Duration::from_secs(3),
+            Duration::from_secs(3),
+        )
+        .await;
+        if watching() {
+            assert!(
+                start.elapsed() < Duration::from_millis(500),
+                "the change ends it"
+            );
         }
     }
 
