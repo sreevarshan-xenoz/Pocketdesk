@@ -152,6 +152,10 @@ pub struct PocketdeskApp {
     cast: Option<crate::cast_view::CastView>,
     /// The Activity tab (ecosystem 1b).
     activity: crate::activity_view::ActivityView,
+    /// Task starts waiting for the owner's answer (ecosystem 1c).
+    task_requests: Vec<pocketdesk_core::local::tasks::TaskRequest>,
+    /// Those already brought to the owner's attention.
+    raised_tasks: Vec<String>,
 }
 
 impl PocketdeskApp {
@@ -183,6 +187,8 @@ impl PocketdeskApp {
             send_menu_installed: None,
             cast: None,
             activity: Default::default(),
+            task_requests: Vec::new(),
+            raised_tasks: Vec::new(),
         }
     }
 
@@ -275,6 +281,8 @@ impl PocketdeskApp {
 
     fn refresh(&mut self) {
         self.snapshot = model::snapshot(&self.state_dir, now_unix());
+        self.task_requests =
+            pocketdesk_core::local::tasks::read_requests(&self.state_dir, now_unix());
         self.config = Config::load().ok();
         if self.tab == Tab::Logs {
             self.log = model::log_tail(&self.state_dir, 400);
@@ -319,6 +327,60 @@ impl PocketdeskApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         self.raised_approvals = ids;
+    }
+
+    /// A phone's task start that asks first: show the window, even from the
+    /// tray, as a held session does (ecosystem 1c).
+    fn raise_for_tasks(&mut self, ctx: &egui::Context) {
+        let ids: Vec<String> = self.task_requests.iter().map(|r| r.id.clone()).collect();
+        if ids.iter().any(|id| !self.raised_tasks.contains(id)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        self.raised_tasks = ids;
+    }
+
+    fn task_prompt(&mut self, ui: &mut egui::Ui) {
+        use pocketdesk_core::local::tasks::{self, TaskVerdict};
+        let Some(request) = self.task_requests.first().cloned() else {
+            return;
+        };
+        let mut verdict = None;
+        egui::Window::new("A phone wants to run a task")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ui.ctx(), |ui| {
+                ui.label(RichText::new(&request.task).strong());
+                ui.horizontal(|ui| {
+                    ui.label("Phone");
+                    ui.monospace(short(&request.device_id))
+                        .on_hover_text(&request.device_id);
+                });
+                ui.label(
+                    RichText::new(format!(
+                        "Denied in {}s if you do nothing.",
+                        request.remaining(now_unix())
+                    ))
+                    .color(MUTED),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Allow").clicked() {
+                        verdict = Some(TaskVerdict::Allow);
+                    }
+                    if ui.button("Deny").clicked() {
+                        verdict = Some(TaskVerdict::Deny);
+                    }
+                });
+            });
+        if let Some(verdict) = verdict {
+            if let Err(e) = tasks::answer(&self.state_dir, &request.id, verdict, now_unix()) {
+                self.notice = Some(format!("Could not answer the task: {e}"));
+            }
+            self.task_requests.retain(|r| r.id != request.id);
+        }
     }
 
     fn approval_prompt(&mut self, ui: &mut egui::Ui) {
@@ -1095,6 +1157,7 @@ impl eframe::App for PocketdeskApp {
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
             self.refresh();
             self.raise_for_approvals(ctx);
+            self.raise_for_tasks(ctx);
         }
         self.cast
             .get_or_insert_with(|| crate::cast_view::CastView::new(ctx, self.state_dir.clone()))
@@ -1175,6 +1238,7 @@ impl eframe::App for PocketdeskApp {
             Tab::Logs => self.logs_tab(ui),
         });
         self.approval_prompt(ui);
+        self.task_prompt(ui);
     }
 }
 
