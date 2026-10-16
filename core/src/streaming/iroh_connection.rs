@@ -233,7 +233,42 @@ pub struct IrohDial {
 struct DialEndpoint {
     endpoint: Endpoint,
     /// Dials under way on it: while any is, the DHT lookup stays attached.
-    pending: std::sync::atomic::AtomicUsize,
+    /// The count and the lookup's add and clear change under this lock.
+    pending: std::sync::Mutex<usize>,
+}
+
+impl DialEndpoint {
+    /// A dial starts on this endpoint, looking the computer up on the DHT
+    /// too when `dht` is given.
+    fn begin(&self, dht: Option<DhtAddressLookup>) -> PendingDial<'_> {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        *pending += 1;
+        if let Some(dht) = dht
+            && let Ok(lookup) = self.endpoint.address_lookup()
+        {
+            lookup.add(dht);
+        }
+        PendingDial { on: self }
+    }
+}
+
+/// A dial under way on a [`DialEndpoint`]. The last one to end, however it
+/// ends (connected, failed, or dropped mid-way), takes the DHT lookup off:
+/// left in place, its node would keep up a routing table for the session.
+struct PendingDial<'a> {
+    on: &'a DialEndpoint,
+}
+
+impl Drop for PendingDial<'_> {
+    fn drop(&mut self) {
+        let mut pending = self.on.pending.lock().unwrap_or_else(|e| e.into_inner());
+        *pending = pending.saturating_sub(1);
+        if *pending == 0
+            && let Ok(lookup) = self.on.endpoint.address_lookup()
+        {
+            lookup.clear();
+        }
+    }
 }
 
 impl Drop for DialEndpoint {
@@ -250,16 +285,17 @@ impl Drop for DialEndpoint {
 }
 
 /// What two dials must have alike to share an endpoint: the device key
-/// they dial as, and the relays they use.
+/// they dial as (by its public half: the secret stays out of the map), and
+/// the relays they use.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct DialKey {
-    key: [u8; 32],
+    id: String,
     relays: String,
 }
 
 /// The shared dialing endpoints, by [`DialKey`]; an entry whose last dial
-/// has closed is gone. A dial without a device key gets an endpoint of its
-/// own (iroh makes a throwaway key), as before.
+/// has closed is dead and pruned at the next dial. A dial without a device
+/// key gets an endpoint of its own (iroh makes a throwaway key), as before.
 static DIAL_ENDPOINTS: std::sync::LazyLock<
     tokio::sync::Mutex<std::collections::HashMap<DialKey, std::sync::Weak<DialEndpoint>>>,
 > = std::sync::LazyLock::new(Default::default);
@@ -311,14 +347,14 @@ async fn dial_endpoint(
             .context("iroh client endpoint bind failed")?;
         Ok::<_, anyhow::Error>(std::sync::Arc::new(DialEndpoint {
             endpoint,
-            pending: std::sync::atomic::AtomicUsize::new(0),
+            pending: std::sync::Mutex::new(0),
         }))
     };
     let Some(key) = device_key else {
         return bind(None).await;
     };
     let wanted = DialKey {
-        key: key.to_bytes(),
+        id: key.public().to_string(),
         relays: relay_set_name(relay_urls, use_relays),
     };
     // Held while a new endpoint binds, so two dials at once make one.
@@ -332,6 +368,24 @@ async fn dial_endpoint(
     let shared = bind(Some(key)).await?;
     endpoints.insert(wanted, std::sync::Arc::downgrade(&shared));
     Ok(shared)
+}
+
+/// Tell every live dialing endpoint that this device's network changed (2b
+/// review): Android gives iroh no such events, and a shared endpoint
+/// outlives the network it was made on, keeping its old paths and DNS
+/// servers (a fresh endpoint per dial used to hide that). iroh then checks
+/// the interfaces and, on a real change, rebinds, finds its relay again and
+/// re-reads DNS. Harmless when nothing changed.
+pub async fn network_changed() {
+    let live: Vec<std::sync::Arc<DialEndpoint>> = DIAL_ENDPOINTS
+        .lock()
+        .await
+        .values()
+        .filter_map(std::sync::Weak::upgrade)
+        .collect();
+    for shared in live {
+        shared.endpoint.network_change().await;
+    }
 }
 
 /// The relays the dialing end uses for itself. A desktop that announces only
@@ -453,24 +507,11 @@ impl IrohDial {
             addr = addr.with_ip_addr(a);
         }
 
-        use std::sync::atomic::Ordering;
         let shared = dial_endpoint(device_key, &relay_urls, use_relays).await?;
-        let endpoint = &shared.endpoint;
-        shared.pending.fetch_add(1, Ordering::SeqCst);
-        if let Some(dht) = dht
-            && let Ok(lookup) = endpoint.address_lookup()
-        {
-            lookup.add(dht);
-        }
-        let connected = tokio::time::timeout(timeout, endpoint.connect(addr, &alpn)).await;
-        // Dialed: the DHT has done its job. Left in place, its node would keep
-        // up a routing table for the whole session; another dial still under
-        // way on this endpoint keeps it until it is done too.
-        if shared.pending.fetch_sub(1, Ordering::SeqCst) == 1
-            && let Ok(lookup) = endpoint.address_lookup()
-        {
-            lookup.clear();
-        }
+        let connected = {
+            let _dialing = shared.begin(dht);
+            tokio::time::timeout(timeout, shared.endpoint.connect(addr, &alpn)).await
+        };
         let raw = connected
             .context("iroh dial timed out")?
             .context("iroh dial failed")?;
@@ -500,7 +541,8 @@ impl IrohDial {
 }
 
 /// The control channel's stream over iroh (T10a), holding the dial whose
-/// endpoint carries it. Dropped, it closes the connection and the endpoint.
+/// endpoint carries it. Dropped, it closes the connection, and the endpoint
+/// when no other dial shares it.
 pub struct IrohControlStream {
     io: tokio::io::Join<RecvStream, SendStream>,
     dial: Option<IrohDial>,
