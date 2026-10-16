@@ -297,9 +297,13 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 }
                 ctx.request_repaint_of(viewport_id());
             }
-            Message::Frame { keyframe, data, .. } => {
+            Message::Frame {
+                keyframe,
+                seq,
+                data,
+            } => {
                 let Some(d) = decoder.as_mut() else { continue };
-                match gate.admit(keyframe) {
+                match gate.admit(keyframe, seq) {
                     Admit::Feed => {}
                     Admit::Skip => continue,
                     Admit::SkipAndAsk => {
@@ -329,7 +333,7 @@ fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(P
     })
 }
 
-/// What to do with a frame after a decoder (re)started.
+/// What to do with a frame after a decoder (re)started, or after a gap.
 #[derive(Debug, PartialEq, Eq)]
 enum Admit {
     Feed,
@@ -339,15 +343,25 @@ enum Admit {
 }
 
 /// A decoder starts from a keyframe: deltas before one would only draw
-/// garbage.
+/// garbage. So does one after a gap in the sequence (a frame dropped on
+/// the way, by the phone or the relay), until the next keyframe.
 #[derive(Debug, Default)]
 struct KeyGate {
     fed: bool,
     asked: bool,
+    last_seq: Option<u64>,
 }
 
 impl KeyGate {
-    fn admit(&mut self, keyframe: bool) -> Admit {
+    fn admit(&mut self, keyframe: bool, seq: u64) -> Admit {
+        let gap = self
+            .last_seq
+            .is_some_and(|last| seq > last.saturating_add(1));
+        self.last_seq = Some(seq);
+        if gap && !keyframe {
+            self.fed = false;
+            self.asked = false;
+        }
         if keyframe || self.fed {
             self.fed = true;
             return Admit::Feed;
@@ -487,10 +501,29 @@ mod tests {
     #[test]
     fn a_decoder_starts_from_a_keyframe_and_asks_for_one_once() {
         let mut gate = KeyGate::default();
-        assert_eq!(gate.admit(false), Admit::SkipAndAsk);
-        assert_eq!(gate.admit(false), Admit::Skip);
-        assert_eq!(gate.admit(true), Admit::Feed);
-        assert_eq!(gate.admit(false), Admit::Feed, "deltas after it are fed");
+        assert_eq!(gate.admit(false, 3), Admit::SkipAndAsk);
+        assert_eq!(gate.admit(false, 4), Admit::Skip);
+        assert_eq!(gate.admit(true, 5), Admit::Feed);
+        assert_eq!(gate.admit(false, 6), Admit::Feed, "deltas after it are fed");
+    }
+
+    #[test]
+    fn a_gap_in_the_frames_waits_for_the_next_keyframe() {
+        let mut gate = KeyGate::default();
+        assert_eq!(gate.admit(true, 0), Admit::Feed);
+        assert_eq!(gate.admit(false, 1), Admit::Feed);
+        assert_eq!(
+            gate.admit(false, 3),
+            Admit::SkipAndAsk,
+            "frame 2 was dropped"
+        );
+        assert_eq!(gate.admit(false, 4), Admit::Skip);
+        assert_eq!(
+            gate.admit(true, 9),
+            Admit::Feed,
+            "a keyframe after a gap is fed"
+        );
+        assert_eq!(gate.admit(false, 10), Admit::Feed);
     }
 
     #[test]
