@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.ui
 
+import dev.pocketdesk.android.R
+
 /**
  * The phone as a remote (T10i): the state of an input-only session, as the
  * bridge reports it, and the keys its rows send. Pure, for JVM tests.
@@ -45,26 +47,29 @@ object RemoteSession {
             else -> current
         }
 
-    /** A key on the remote's rows: its label and the Android key code the bridge maps. */
-    data class Key(val label: String, val keyCode: Int)
+    /**
+     * A key on the remote's rows: its label, the Android key code the bridge
+     * maps, and what a screen reader says for a symbol label (0: the label).
+     */
+    data class Key(val label: String, val keyCode: Int, val spoken: Int = 0)
 
     /** Media: Previous, Play/Pause, Next, and the volume. */
     val media =
         listOf(
-            Key("⏮", 88), // KEYCODE_MEDIA_PREVIOUS
-            Key("⏯", 85), // KEYCODE_MEDIA_PLAY_PAUSE
-            Key("⏭", 87), // KEYCODE_MEDIA_NEXT
-            Key("Vol −", 25), // KEYCODE_VOLUME_DOWN
-            Key("Vol +", 24), // KEYCODE_VOLUME_UP
+            Key("⏮", 88, R.string.remote_key_previous), // KEYCODE_MEDIA_PREVIOUS
+            Key("⏯", 85, R.string.remote_key_play_pause), // KEYCODE_MEDIA_PLAY_PAUSE
+            Key("⏭", 87, R.string.remote_key_next), // KEYCODE_MEDIA_NEXT
+            Key("Vol −", 25, R.string.remote_key_volume_down), // KEYCODE_VOLUME_DOWN
+            Key("Vol +", 24, R.string.remote_key_volume_up), // KEYCODE_VOLUME_UP
         )
 
     /** A presenter's keys: slides back and on, start the show, end it, blank the screen. */
     val presenter =
         listOf(
-            Key("PgUp", 92), // KEYCODE_PAGE_UP
-            Key("PgDn", 93), // KEYCODE_PAGE_DOWN
-            Key("◀", 21), // KEYCODE_DPAD_LEFT
-            Key("▶", 22), // KEYCODE_DPAD_RIGHT
+            Key("PgUp", 92, R.string.remote_key_page_up), // KEYCODE_PAGE_UP
+            Key("PgDn", 93, R.string.remote_key_page_down), // KEYCODE_PAGE_DOWN
+            Key("◀", 21, R.string.remote_key_left), // KEYCODE_DPAD_LEFT
+            Key("▶", 22, R.string.remote_key_right), // KEYCODE_DPAD_RIGHT
             Key("F5", 135), // KEYCODE_F5
             Key("Esc", 111), // KEYCODE_ESCAPE
             Key("B", 30), // KEYCODE_B

@@ -500,4 +500,13 @@
     <string name="remote_down">ரிமோட் நின்றது: %1$s</string>
     <string name="remote_no_reason">கணினி பதிலளிக்கவில்லை</string>
     <string name="remote_retry">மீண்டும் முயல்</string>
+    <string name="remote_key_previous">முந்தையது</string>
+    <string name="remote_key_play_pause">இயக்கு அல்லது நிறுத்து</string>
+    <string name="remote_key_next">அடுத்தது</string>
+    <string name="remote_key_volume_down">ஒலி குறை</string>
+    <string name="remote_key_volume_up">ஒலி கூட்டு</string>
+    <string name="remote_key_page_up">முந்தைய பக்கம்</string>
+    <string name="remote_key_page_down">அடுத்த பக்கம்</string>
+    <string name="remote_key_left">இடது</string>
+    <string name="remote_key_right">வலது</string>
 </resources>

@@ -505,4 +505,13 @@
     <string name="remote_down">El mando se detuvo: %1$s</string>
     <string name="remote_no_reason">el equipo no respondió</string>
     <string name="remote_retry">Reintentar</string>
+    <string name="remote_key_previous">Anterior</string>
+    <string name="remote_key_play_pause">Reproducir o pausar</string>
+    <string name="remote_key_next">Siguiente</string>
+    <string name="remote_key_volume_down">Bajar volumen</string>
+    <string name="remote_key_volume_up">Subir volumen</string>
+    <string name="remote_key_page_up">Retroceder página</string>
+    <string name="remote_key_page_down">Avanzar página</string>
+    <string name="remote_key_left">Izquierda</string>
+    <string name="remote_key_right">Derecha</string>
 </resources>

@@ -37,6 +37,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -262,7 +264,11 @@ private fun KeyRow(keys: List<RemoteSession.Key>, onTap: (Int) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         keys.forEach { key ->
-            FilledTonalButton(onClick = { onTap(key.keyCode) }) { Text(key.label) }
+            val spoken = if (key.spoken != 0) stringResource(key.spoken) else key.label
+            FilledTonalButton(
+                onClick = { onTap(key.keyCode) },
+                modifier = Modifier.semantics { contentDescription = spoken },
+            ) { Text(key.label) }
         }
     }
 }

@@ -507,4 +507,13 @@
     <string name="remote_down">The remote stopped: %1$s</string>
     <string name="remote_no_reason">the computer did not answer</string>
     <string name="remote_retry">Retry</string>
+    <string name="remote_key_previous">Previous</string>
+    <string name="remote_key_play_pause">Play or pause</string>
+    <string name="remote_key_next">Next</string>
+    <string name="remote_key_volume_down">Volume down</string>
+    <string name="remote_key_volume_up">Volume up</string>
+    <string name="remote_key_page_up">Page up</string>
+    <string name="remote_key_page_down">Page down</string>
+    <string name="remote_key_left">Left</string>
+    <string name="remote_key_right">Right</string>
 </resources>
