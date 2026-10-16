@@ -870,9 +870,18 @@ pub(crate) fn reach(
     sender: &dyn DeviceSender,
     port: Option<u16>,
 ) -> std::result::Result<Reach, String> {
+    reach_with(sender, port, crate::events::current_config().internet_files)
+}
+
+/// [`reach`] with `internet_files` given.
+fn reach_with(
+    sender: &dyn DeviceSender,
+    port: Option<u16>,
+    internet_files: bool,
+) -> std::result::Result<Reach, String> {
     match (sender.link_streams(), port) {
         (Some(link), None) => {
-            if !crate::events::current_config().internet_files {
+            if !internet_files {
                 return Err("files over the internet road are off on this computer".to_string());
             }
             Ok(Reach::Link(link))
@@ -2311,16 +2320,26 @@ mod tests {
             "phone".into(),
         )
         .with_peer(Some("192.0.2.20:40000".parse().unwrap()));
-        if crate::events::current_config().internet_files {
-            assert!(matches!(reach(&internet, None), Ok(Reach::Link(_))));
-        }
+        assert!(matches!(
+            reach_with(&internet, None, true),
+            Ok(Reach::Link(_))
+        ));
         assert!(
-            reach(&internet, Some(5000)).is_err(),
+            reach_with(&internet, None, false)
+                .err()
+                .is_some_and(|e| e.contains("are off")),
+            "the switch off says so"
+        );
+        assert!(
+            reach_with(&internet, Some(5000), true).is_err(),
             "nothing dials back by the internet road"
         );
-        assert!(matches!(reach(&home, Some(5000)), Ok(Reach::Dial(_, 5000))));
+        assert!(matches!(
+            reach_with(&home, Some(5000), true),
+            Ok(Reach::Dial(_, 5000))
+        ));
         assert!(
-            reach(&home, None).is_err(),
+            reach_with(&home, None, true).is_err(),
             "at home a request names its port"
         );
     }

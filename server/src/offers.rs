@@ -1093,7 +1093,19 @@ fn phone_for(
     if !allowed {
         return Err("files are off for this phone");
     }
-    target_for(&request.device_id, clients).ok_or("phone not connected")
+    match target_for(&request.device_id, clients) {
+        Some(target) => Ok(target),
+        // Connected, but only by the internet road with files off there.
+        None if clients
+            .iter()
+            .any(|c| c.device_id() == request.device_id && c.link_streams().is_some()) =>
+        {
+            Err(
+                "files over the internet are off on this computer (Settings), and the phone is away",
+            )
+        }
+        None => Err("phone not connected"),
+    }
 }
 
 /// `sent.json` is read, changed and replaced; one writer at a time.
