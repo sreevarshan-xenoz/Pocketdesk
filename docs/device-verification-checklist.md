@@ -1286,7 +1286,7 @@ Owed:
 
 On the Azure VM (headless Sway, no XWayland) from the A71 over the internet, 2026-10-16:
 - [x] "Add a screen for this phone" in the picker: Sway made HEADLESS-3 at 1080x2400 right of the desktop, the session switched to index 1 and encoded 1080x2400, and a window moved onto it.
-- [x] Found and fixed: Sway moved the desktop's own output (x 0 to 2360) when the screen was added; each output is now pinned first.
+- [x] Found and fixed: Sway moved the desktop's own output (x 0 to 2360) when the screen was added; each output is now pinned first. Re-checked: the desktop's output stayed at x 0, the new screen right of it, streamed at 1080x2400.
 - [x] After the phone left, the server removed the screen and its record; the window went back to the desktop's output.
 
 Owed:
