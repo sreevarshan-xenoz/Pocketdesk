@@ -22,14 +22,14 @@ Pairing is started on one computer, **A**, with the other's pairing link; the ot
 4. Paired, A sends `kdeconnect.pocketdesk.wan_key {endpointId}`, A's server iroh id. B registers it as A's iroh key only from a paired device on the home road whose TLS key is the bound one (the same trust as a phone's `[0xFC,0x00]` stream marker, `docs/protocol.md` §2.3); anything else is ignored.
 5. A records B in owner-only `<state>/computers.json`: id, name, addresses, ports, fingerprint, iroh endpoint, `paired_unix`, and the last outcome (`paired`, or `failed: <why>`), which the app shows. B's Activity tab gets `phone_paired` for A, with `kind: "computer"` in its metadata.
 
-Unpairing: from A ("Forget"), A drops the pin and the entry and sends `kdeconnect.pair {pair: false}`; from B, the Devices tab's Remove, as for a phone (A's link is then refused and A shows it).
+Unpairing: from A ("Forget"), A drops the pin and the entry; B keeps A until B's owner removes it in B's Devices tab, as for a phone (A's link is then refused and A shows it). A pairing without a PIN does nothing on B, so A cannot unpair itself there.
 
 ## The link (2f)
 
 Pairing runs over TLS on B's control port (nothing pairs on the internet road). After that, `peer_computers` keeps one link per paired computer, and it **always rides iroh**: A dials B's iroh endpoint (from the link, kept current by B's endpoint packet on the link) with `pocketdesk-control/1`. On a LAN iroh finds the direct path, so nothing is lost at home, and one kind of link carries everything: the control packets, the clipboard, and file streams B opens (2c's route). B admits it as it admits a phone on that road: a paired device whose registered iroh key is the one the connection proved.
 
 - A dials **from its own WAN endpoint** (the one the server already runs, `iroh_endpoint.rs`). Not a new endpoint: it would hold the same key, and two endpoints with one key cannot both use a relay (2b's red test).
-- Backoff 2 s to 60 s; a refused link (unpaired on B) is not retried until the owner pairs again.
+- Backoff 2 s to 60 s (a link that closes within 30 s of coming up counts as a failure); a refused link (unpaired on B) is tried again every 5 minutes, and at once when the owner pairs again.
 - **What A takes from B on the link:** only `kdeconnect.clipboard` (2g) and `file_offer` (2h), and the streams B opens for files. B's other pushes (the HUD, the endpoint, wake info, control) are for phones; A keeps B's endpoint from the endpoint packet and ignores the rest.
 
 ## The clipboard (2g)
@@ -92,3 +92,17 @@ Desktop only, in Settings → "Computers": the list with Forget, "Pair another c
 - **On A,** the streams B opens are read for their key line (5 s) and handed to the transfer waiting for that key (30 s); a stream for no transfer is dropped. B's refusal of a transfer (`file_fetch_refused`) ends its wait at once.
 - **Not yet:** a folder from A to B (refused with a reason; B's folders to A work), and "broken and continued" between two computers is the phone's resumable code, not checked by a two-computer test.
 - `POCKETDESK_DOWNLOAD_DIR` stands in for Downloads, so `two_computers.rs` sends a 3 MB file each way between two servers on one machine and compares the bytes.
+
+## As built (the review, 2026-10-17)
+
+A fresh review of 2f–2h (0 Critical, 5 Important), fixed one commit each:
+
+- Files between computers go one at a time per link: the other computer takes two from one device at once and refused the rest, and every refusal had been final, so a folder from B to A lost most of its files. A "still running" refusal is retried; `two_computers.rs` sends a 5-file folder.
+- The packets `wan_key`, `file_fetch` and `file_offer_declined` that a computer sends as another's client are kept off the phones' announcement (the packets test had failed on them).
+- Pairing again starts the link over at once (it had kept a stale state, or slept out a refusal's 5 minutes).
+- A copied pairing link (it holds the PIN) reads as no text for the clipboard push, the computers' clipboard and a phone's request: it had reached every connected phone, a guest's included.
+- With `computer_clipboard` off, every clipboard packet from a computer is dropped (its request for this clipboard and the image packets had still worked).
+
+Minors fixed: `wan_key` only from a computer; a link's id held to the device-id rule and never a paired device's, its name cleaned; the endpoint B pushes while pairing kept, and an endpoint packet naming another key not taken; links kept through an unreadable `computers.json`, reset to "connecting" at start, and backed off when they close quickly; the test seams absolute-only, warned at start, the stand-in clipboard owner-only; two computers of one name never guessed between; "Send link" refuses a computer; "Files over the internet" applies on both sides; the Devices tab marks computers.
+
+Known, not fixed: a computer from before 2f ignores `computer: true` and pairs A with a phone's default permissions (Input and Power among them), and ignores `wan_key`, so no link comes up; update both computers before pairing them. "Forget" does not unpair on the other side (above). A folder from A to B is refused with a reason.
