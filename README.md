@@ -58,7 +58,7 @@ Three things worth knowing before you pair a phone. [SECURITY.md](SECURITY.md) h
 | Your own relay | a machine the internet can reach | on the relay's machine: one port (plain, 3340), or 80 and 443 (HTTPS) |
 | Waking a sleeping computer from outside | Wake-on-LAN set up on the computer | yes, one UDP port to the computer; or none, waking through another always-on computer the phone can reach ([Wake from the phone](#kde-connect-integration)) |
 
-**Over the internet path, everything but image clipboard crosses:** the session (picture, sound, input, the phone's mic), and, when the phone cannot reach the computer's control port, the control channel too: the clipboard (text), the phone's notifications, texts, battery and media, links both ways, the computer's pushes, and files both ways with the remote file browser's downloads. Files ride the control link itself, so nothing dials the phone back across its router; "Files over the internet" in both Settings turns that off (on by default). Through n0's public relays a large file may be slow; a direct path or your own relay is faster, and a broken file continues where it stopped. Only the phone that registered its key at home may use it, and nothing pairs over it. Image clipboard still needs the same network or Tailscale.
+**Over the internet path, everything crosses:** the session (picture, sound, input, the phone's mic), and, when the phone cannot reach the computer's control port, the control channel too: the clipboard (text and images), the phone's notifications, texts, battery and media, links both ways, the computer's pushes, and files both ways with the remote file browser's downloads. Files ride the control link itself, so nothing dials the phone back across its router; "Files over the internet" in both Settings turns that off (on by default). Through n0's public relays a large file may be slow; a direct path or your own relay is faster, and a broken file continues where it stopped. Only the phone that registered its key at home may use it, and nothing pairs over it.
 
 Tailscale is not required. It carries everything, adds a second encrypted layer and closes the first-contact gap below, which is why it is the advice for networks you do not trust.
 
@@ -81,7 +81,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 | Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
 | Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
-| Clipboard: text anywhere, images on the same network or Tailscale | `wl-clipboard` (Wayland only) | Win32 clipboard |
+| Clipboard: text and images, anywhere | `wl-clipboard` (Wayland only) | Win32 clipboard |
 | Files both ways, remote browsing (anywhere) | yes | yes |
 | Desktop sound on the phone | PipeWire | WASAPI loopback |
 | The phone's mic on the desktop | a PipeWire source, "Pocketdesk Mic" | needs a virtual audio cable (VB-CABLE) |

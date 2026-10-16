@@ -1431,6 +1431,7 @@ The A71 against this Windows box, 2026-10-17, debug builds of the branches, inpu
 - [x] 2c/2d, phone → computer: a 50 MB share, in Downloads in 11 s, MD5 matching.
 - [x] A 150 MB offer broken by 15 s without Wi-Fi: the phone's retries continued it ("The phone had 27869840 of 157286400 bytes; sent the rest"), MD5 matching; the iroh control connection itself survived the drop.
 - [ ] The remote file browser's download and a folder fetch over the internet road.
+- [ ] 2e: a screenshot copied on the computer lands on the phone's clipboard over the internet link (and phone → computer, when an app on the phone can copy an image).
 - [ ] A real WAN (the VM): 500 MB resumed with TCP 1716 unreachable.
 - [ ] The too-old message against a computer from before 2c.
 - [ ] Both Settings switches off: a send refused at once, with the reason.
