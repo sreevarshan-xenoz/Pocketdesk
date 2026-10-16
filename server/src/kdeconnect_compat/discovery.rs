@@ -1,7 +1,9 @@
 //! This computer's identity, broadcast on UDP 1716 for KDE Connect devices
-//! to find it (3a): while the desktop app looks for them (it asks in
-//! `kdeconnect_find`), every 2 s, and once after the network changes. A
-//! device that hears it dials the control port.
+//! to find it (3a): once each time the desktop app asks (`kdeconnect_find`),
+//! and once after the network changes. A device that hears it dials the
+//! control port; it dials again at every broadcast, dropping its link for
+//! the new one, so the broadcast is not repeated while the app looks (the
+//! device checks found a link churned every 2 s that way).
 
 use std::time::Duration;
 
@@ -10,7 +12,7 @@ use pocketdesk_core::local::kdeconnect;
 /// KDE Connect's discovery port.
 pub const UDP_PORT: u16 = 1716;
 
-/// How often the loop looks, and broadcasts while asked to.
+/// How often the loop looks for a request.
 const TICK: Duration = Duration::from_secs(2);
 
 /// How often, in ticks, the network is looked at for a change: reading
@@ -25,12 +27,16 @@ pub async fn run(control_port: u16) {
     let mut addresses = local_addresses();
     let mut said = false;
     let mut ticks = 0u32;
+    let mut last_ask = None;
     loop {
         tokio::time::sleep(TICK).await;
         if !super::enabled() {
             continue;
         }
         let now = pocketdesk_core::local::pin::now_unix();
+        let asked = kdeconnect::find_until(&dir, now);
+        let new_ask = asked.is_some() && asked != last_ask;
+        last_ask = asked;
         ticks = ticks.wrapping_add(1);
         let moved = ticks.is_multiple_of(NETWORK_EVERY) && {
             let current = local_addresses();
@@ -38,7 +44,7 @@ pub async fn run(control_port: u16) {
             addresses = current;
             moved
         };
-        if !(moved || kdeconnect::finding(&dir, now)) {
+        if !(moved || new_ask) {
             continue;
         }
         if let Err(e) = broadcast(control_port).await

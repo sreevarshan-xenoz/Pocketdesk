@@ -71,10 +71,17 @@ pub fn ask_to_find(state_dir: &Path, now_unix: u64, secs: u64) -> io::Result<()>
 /// Whether the app asks the server to look now: until a time not past and
 /// not further off than [`MAX_FIND_SECS`].
 pub fn finding(state_dir: &Path, now_unix: u64) -> bool {
+    find_until(state_dir, now_unix).is_some()
+}
+
+/// Until when the app asks the server to look, while it does: each press
+/// of "Find" names a new time, which is how the server tells one request
+/// from the next.
+pub fn find_until(state_dir: &Path, now_unix: u64) -> Option<u64> {
     std::fs::read_to_string(state_dir.join(KDECONNECT_FIND_FILE))
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .is_some_and(|until| until >= now_unix && until - now_unix <= MAX_FIND_SECS)
+        .filter(|until| *until >= now_unix && until - now_unix <= MAX_FIND_SECS)
 }
 
 #[cfg(test)]
