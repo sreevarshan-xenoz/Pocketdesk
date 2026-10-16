@@ -1228,6 +1228,21 @@ Owed:
 - [ ] A folder of more than 2000 entries; a file renamed between list and fetch.
 - [ ] A second computer asking: nothing answered.
 
+## 71. Input on wlroots without uinput (T10f)
+
+On the Azure VM (headless Sway, `/dev/uinput` root-only) from the A71 over the internet, 2026-10-16:
+- [x] The server log: "Input injector: using the compositor's virtual pointer and keyboard".
+- [x] Trackpad motion and a tap reached `wev` as pointer motion and a left press and release.
+- [x] "Hi PD!" typed (capitals and `!`, through F4's per-character keyboard), and Enter and Esc from the shortcut bar (through the new keys keyboard).
+
+Owed:
+- [ ] Hyprland, river, labwc and Wayfire.
+- [ ] Direct touch (absolute moves), scrolling, right and middle clicks, and a two-output layout.
+- [x] After the review fixes: Ctrl+C and Shift+Left arrived with their modifiers (`wev`: depressed Control, then Shift; before the fix there was no modifiers event, so Ctrl+C was a plain "c").
+- [x] Sway restarted under the running server: the next input reopened the virtual devices ("are back") and moved the pointer.
+- [ ] Super+N, and the text fallback typed as keys.
+- [ ] Privacy mode where `/dev/input` is root-only too: the local keyboard is likely not blocked.
+
 ## 72. New phone screenshots on the computer (T10h)
 
 On the A71 against this box, 2026-10-16:

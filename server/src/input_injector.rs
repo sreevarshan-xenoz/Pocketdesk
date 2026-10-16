@@ -204,6 +204,10 @@ enum InputBackend {
     /// uinput (universal, kernel-level)
     #[cfg(target_os = "linux")]
     Uinput(Mutex<UinputState>),
+    /// wlroots' virtual pointer and keyboard, where uinput cannot be opened
+    /// (T10f)
+    #[cfg(target_os = "linux")]
+    Wlr(pocketdesk_core::input::wlr_input::WlrInput),
 }
 
 /// Kernel-level backend state: the keyboard/mouse device plus an
@@ -339,6 +343,8 @@ impl Drop for InputInjector {
             InputBackend::Enigo(_) => "enigo",
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(_) => "uinput",
+            #[cfg(target_os = "linux")]
+            InputBackend::Wlr(_) => "wlroots virtual pointer and keyboard",
             #[cfg(windows)]
             InputBackend::SendInput(_) => "sendinput",
         };
@@ -375,7 +381,24 @@ impl InputInjector {
             match Self::new_uinput() {
                 Ok(inj) => return Ok(inj),
                 Err(e) => {
-                    warn!(error = %e, "uinput unavailable under Wayland, falling back to enigo (XWayland-only injection)");
+                    // wlroots compositors take input from any client of the
+                    // session (T10f): no uinput rights needed.
+                    match pocketdesk_core::input::wlr_input::WlrInput::connect() {
+                        Ok(wlr) => {
+                            info!(
+                                "Input injector: using the compositor's virtual pointer and keyboard (uinput: {e})"
+                            );
+                            return Ok(Self {
+                                backend: InputBackend::Wlr(wlr),
+                                gamepad_buttons: 0,
+                                vkeyboard: VkState::Untried,
+                            });
+                        }
+                        Err(wlr) => warn!(
+                            error = %e,
+                            "uinput unavailable under Wayland, and no virtual pointer ({wlr:?}): falling back to enigo (XWayland-only injection)"
+                        ),
+                    }
                 }
             }
         }
@@ -448,6 +471,8 @@ impl InputInjector {
                 Ok(())
             }
             #[cfg(target_os = "linux")]
+            InputBackend::Wlr(wlr) => wlr.motion(dx, dy).context("virtual pointer move"),
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -480,6 +505,10 @@ impl InputInjector {
                 Ok(())
             }
             #[cfg(target_os = "linux")]
+            InputBackend::Wlr(wlr) => wlr
+                .motion_absolute(x_norm, y_norm)
+                .context("virtual pointer absolute move"),
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -510,6 +539,10 @@ impl InputInjector {
                 }
                 Ok(())
             }
+            #[cfg(target_os = "linux")]
+            InputBackend::Wlr(wlr) => wlr
+                .button(button.as_evdev_key().0, pressed)
+                .context("virtual pointer button"),
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
@@ -542,6 +575,8 @@ impl InputInjector {
                 Ok(())
             }
             #[cfg(target_os = "linux")]
+            InputBackend::Wlr(wlr) => wlr.scroll(x, y).context("virtual pointer scroll"),
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -567,6 +602,8 @@ impl InputInjector {
         match &mut self.backend {
             #[cfg(windows)]
             InputBackend::SendInput(backend) => backend.key(code, pressed),
+            #[cfg(target_os = "linux")]
+            InputBackend::Wlr(wlr) => wlr.key(code, pressed).context("virtual keyboard key"),
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
@@ -610,6 +647,11 @@ impl InputInjector {
                 Ok(())
             }
             #[cfg(target_os = "linux")]
+            InputBackend::Wlr(wlr) => match key_to_evdev(key) {
+                KeyCode::KEY_UNKNOWN => Ok(()),
+                code => wlr.key(code.0, pressed).context("virtual keyboard key"),
+            },
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let evdev_key = key_to_evdev(key);
@@ -634,6 +676,39 @@ impl InputInjector {
                 Ok(())
             }
             #[cfg(target_os = "linux")]
+            InputBackend::Wlr(wlr) => {
+                let rest = match self.vkeyboard.ready().map(|vk| vk.type_text(text)) {
+                    Some(Ok(())) => return Ok(()),
+                    Some(Err((sent, e))) => {
+                        warn!("Virtual keyboard failed, typing the rest as keys: {e}");
+                        self.vkeyboard = VkState::retry_later();
+                        untyped_rest(text, sent)
+                    }
+                    None => text.to_string(),
+                };
+                let shift = KeyCode::KEY_LEFTSHIFT.0;
+                for ch in rest.chars() {
+                    let Some((code, shifted)) = char_to_key(ch) else {
+                        debug!("Cannot type character as a key: {ch:?}");
+                        continue;
+                    };
+                    if shifted {
+                        wlr.key(shift, true)?;
+                    }
+                    let typed = wlr.key(code, true).and_then(|()| wlr.key(code, false));
+                    // Shift goes up even when the key failed, or what comes
+                    // next arrives shifted.
+                    if shifted {
+                        let released = wlr.key(shift, false);
+                        typed?;
+                        released?;
+                    } else {
+                        typed?;
+                    }
+                }
+                Ok(())
+            }
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 // Any character, whatever the layout, where the compositor
                 // offers a virtual keyboard (wlroots: Sway, Hyprland; F4).
@@ -646,14 +721,7 @@ impl InputInjector {
                             // as keys, and the keyboard is tried again later.
                             warn!("Virtual keyboard failed, typing the rest as keys: {e}");
                             self.vkeyboard = VkState::retry_later();
-                            rest = std::borrow::Cow::Owned(
-                                text.chars()
-                                    .filter(|&c| {
-                                        pocketdesk_core::input::xkb_keymap::keysym_name(c).is_some()
-                                    })
-                                    .skip(sent)
-                                    .collect(),
-                            );
+                            rest = std::borrow::Cow::Owned(untyped_rest(text, sent));
                         }
                     }
                 }
@@ -1126,6 +1194,16 @@ fn key_to_evdev(key: Key) -> KeyCode {
             .unwrap_or(KeyCode::KEY_UNKNOWN),
         _ => KeyCode::KEY_UNKNOWN,
     }
+}
+
+/// What of `text` is left after the virtual keyboard sent `sent` of its
+/// typable characters (F4): typed as keys instead, never twice.
+#[cfg(target_os = "linux")]
+fn untyped_rest(text: &str, sent: usize) -> String {
+    text.chars()
+        .filter(|&c| pocketdesk_core::input::xkb_keymap::keysym_name(c).is_some())
+        .skip(sent)
+        .collect()
 }
 
 /// The key and whether Shift is held, on a US layout, for `ch`: capitals and
