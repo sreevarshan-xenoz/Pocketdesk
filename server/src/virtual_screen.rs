@@ -382,12 +382,30 @@ fn answer(phone: &str, action: &str, width: u32, height: u32) -> serde_json::Val
             if std::env::var_os("SWAYSOCK").is_none() {
                 return json!({ "error": "This computer cannot add a screen: only Sway can for now" });
             }
-            // One screen per phone: a second ask replaces the first.
-            let old = {
-                let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
-                made.phones.remove(phone).unwrap_or_default()
-            };
-            old.iter().for_each(|n| remove(n));
+            // One screen per phone: asked again, it is the same one (the
+            // session may be showing it; replacing it would freeze that).
+            let existing = made()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .phones
+                .get(phone)
+                .and_then(|names| names.first().cloned());
+            if let Some(name) = existing {
+                let place = outputs()
+                    .ok()
+                    .and_then(|all| all.into_iter().find(|o| o.name == name));
+                if let Some(output) = place
+                    && let Some(index) = capture_index(&name, output.rect.x)
+                {
+                    return json!({ "name": name, "index": index, "width": output.rect.width, "height": output.rect.height });
+                }
+                // Gone from Sway meanwhile: forget it and make another.
+                made()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .phones
+                    .remove(phone);
+            }
             match create(w, h) {
                 Ok((name, x)) => {
                     let Some(index) = capture_index(&name, x) else {
