@@ -126,7 +126,11 @@ pub async fn run_watcher() {
         return;
     };
     loop {
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        crate::inbox::wait(
+            pocketdesk_core::local::paths::LINKS_DIR,
+            Duration::from_millis(250),
+        )
+        .await;
         let now = pocketdesk_core::local::pin::now_unix();
         for request in pocketdesk_core::local::links::take_all(&dir, now) {
             let clients = crate::state::clone_clients().await;

@@ -47,40 +47,254 @@ pub(super) fn init_process() {
     }
 }
 
+/// Every module this process has had loaded, as last seen: base, size and
+/// file name. A fault executing an address in no module now loaded (code
+/// unloaded under a callback) is named from here.
+static MODULES: std::sync::Mutex<Vec<(usize, usize, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// Note the modules loaded now. One seen before stays listed, unless a
+/// module now loaded overlaps it (its range was reused).
+fn remember_modules() {
+    use windows::Win32::Foundation::HMODULE;
+    use windows::Win32::System::ProcessStatus::{
+        EnumProcessModules, GetModuleFileNameExW, GetModuleInformation, MODULEINFO,
+    };
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    let mut handles = vec![HMODULE::default(); 1024];
+    let mut needed = 0u32;
+    // SAFETY: a buffer of HMODULEs and its size in bytes.
+    let listed = unsafe {
+        EnumProcessModules(
+            GetCurrentProcess(),
+            handles.as_mut_ptr(),
+            (handles.len() * std::mem::size_of::<HMODULE>()) as u32,
+            &mut needed,
+        )
+    };
+    if listed.is_err() {
+        return;
+    }
+    let count = (needed as usize / std::mem::size_of::<HMODULE>()).min(handles.len());
+    let mut seen = Vec::with_capacity(count);
+    for &module in &handles[..count] {
+        let mut info = MODULEINFO::default();
+        // SAFETY: a module of this process and a MODULEINFO to fill.
+        if unsafe {
+            GetModuleInformation(
+                GetCurrentProcess(),
+                module,
+                &mut info,
+                std::mem::size_of::<MODULEINFO>() as u32,
+            )
+        }
+        .is_err()
+        {
+            continue;
+        }
+        let mut name = [0u16; 260];
+        // SAFETY: the same module, and a buffer for its path.
+        let len =
+            unsafe { GetModuleFileNameExW(Some(GetCurrentProcess()), Some(module), &mut name) };
+        let path = String::from_utf16_lossy(&name[..len as usize]);
+        let file = path.rsplit('\\').next().unwrap_or(&path).to_string();
+        seen.push((info.lpBaseOfDll as usize, info.SizeOfImage as usize, file));
+    }
+    if let Ok(mut modules) = MODULES.lock() {
+        modules.retain(|old| {
+            seen.contains(old)
+                || !seen
+                    .iter()
+                    .any(|new| old.0 < new.0 + new.1 && new.0 < old.0 + old.1)
+        });
+        for module in seen {
+            if !modules.contains(&module) {
+                modules.push(module);
+            }
+        }
+    }
+}
+
+/// Write where `address` is: `name+offset` of the module last seen there.
+/// Never blocks and never allocates (it runs while an exception is
+/// dispatched, maybe on a thread holding the heap or loader lock).
+fn write_place(out: &mut impl std::io::Write, address: usize) {
+    let Ok(modules) = MODULES.try_lock() else {
+        let _ = write!(out, "{address:#x} (modules busy)");
+        return;
+    };
+    match modules
+        .iter()
+        .find(|(base, size, _)| (*base..base + size).contains(&address))
+    {
+        Some((base, _, name)) => {
+            let _ = write!(out, "{address:#x} in {name}+{:#x}", address - base);
+        }
+        None => {
+            let _ = write!(out, "{address:#x} in no module seen loaded");
+        }
+    }
+}
+
+/// What the memory at `address` is now: free (nothing mapped: code since
+/// unloaded), part of a loaded image, or other.
+fn mapping(address: usize) -> &'static str {
+    use windows::Win32::System::Memory::{
+        MEM_FREE, MEM_IMAGE, MEMORY_BASIC_INFORMATION, VirtualQuery,
+    };
+    let mut info = MEMORY_BASIC_INFORMATION::default();
+    // SAFETY: a query of this process's own address space into a local.
+    let filled = unsafe {
+        VirtualQuery(
+            Some(address as *const _),
+            &mut info,
+            std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+        )
+    };
+    if filled == 0 || info.State == MEM_FREE {
+        "unmapped"
+    } else if info.Type == MEM_IMAGE {
+        "image"
+    } else {
+        "not an image"
+    }
+}
+
+/// The exception in words: its code, where and what is there now, and for
+/// an access violation what was read, written or executed. Allocates
+/// nothing.
+fn describe(
+    out: &mut impl std::io::Write,
+    record: &windows::Win32::System::Diagnostics::Debug::EXCEPTION_RECORD,
+) {
+    let code = record.ExceptionCode.0 as u32;
+    let address = record.ExceptionAddress as usize;
+    let _ = write!(out, "exception {code:#010x} at ");
+    write_place(out, address);
+    let _ = write!(out, " ({})", mapping(address));
+    if code == 0xC000_0005 && record.NumberParameters >= 2 {
+        let verb = match record.ExceptionInformation[0] {
+            0 => "reading",
+            1 => "writing",
+            8 => "executing",
+            _ => "touching",
+        };
+        let _ = write!(out, " ({verb} {:#x})", record.ExceptionInformation[1]);
+    }
+}
+
+/// The crash log, opened at start for the first-chance reports, which may
+/// not open files.
+static FIRST_CHANCE_LOG: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
+
 /// Report an unhandled exception (an access violation, say) to the crash
-/// log before Windows ends the process, as it still does.
+/// log before Windows ends the process, as it still does; and the first
+/// few faults of a run as they are raised, which also catches those that
+/// end a process already exiting.
 pub(crate) fn install_exception_report() {
     use windows::Win32::System::Diagnostics::Debug::{
-        EXCEPTION_POINTERS, SetUnhandledExceptionFilter,
+        AddVectoredExceptionHandler, EXCEPTION_POINTERS, RtlCaptureStackBackTrace,
+        SetUnhandledExceptionFilter,
     };
+
     unsafe extern "system" fn filter(info: *const EXCEPTION_POINTERS) -> i32 {
         // SAFETY: Windows passes the exception being dispatched.
         let what = unsafe { info.as_ref().and_then(|i| i.ExceptionRecord.as_ref()) }
             .map(|record| {
-                let code = record.ExceptionCode.0 as u32;
-                let address = record.ExceptionAddress as usize;
-                // An access violation names the address it read or wrote.
-                let detail = if code == 0xC000_0005 && record.NumberParameters >= 2 {
-                    let verb = match record.ExceptionInformation[0] {
-                        0 => "reading",
-                        1 => "writing",
-                        8 => "executing",
-                        _ => "touching",
-                    };
-                    format!(" ({verb} {:#x})", record.ExceptionInformation[1])
-                } else {
-                    String::new()
-                };
-                format!("exception {code:#010x} at {address:#x}{detail}")
+                let mut line = Vec::new();
+                describe(&mut line, record);
+                String::from_utf8_lossy(&line).into_owned()
             })
             .unwrap_or_else(|| "an unhandled exception".to_string());
         crate::crash_report::report(&what);
         // EXCEPTION_CONTINUE_SEARCH: the process ends as it would have.
         0
     }
+
+    /// First-chance faults: an access violation as the process exits (a
+    /// thread still running while the runtime is torn down) never reaches
+    /// the unhandled-exception filter, so the server's exit 139 left no
+    /// report (reliability pass, 2026-10-16). Every exception passes here
+    /// first. Reported, at most three a run: an illegal instruction, heap
+    /// corruption, and an access violation executing, or at an address
+    /// outside any loaded image (code unloaded under a thread); not one
+    /// reading or writing inside loaded code, which drivers raise and
+    /// handle as they probe. The report allocates nothing and takes no
+    /// lock that can wait: the line and the raw return addresses go
+    /// straight to the log opened at start. Each exception is passed on
+    /// unchanged.
+    unsafe extern "system" fn first_chance(info: *mut EXCEPTION_POINTERS) -> i32 {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static REPORTED: AtomicU32 = AtomicU32::new(0);
+        // SAFETY: Windows passes the exception being dispatched.
+        let Some(record) = (unsafe { info.as_ref().and_then(|i| i.ExceptionRecord.as_ref()) })
+        else {
+            return 0;
+        };
+        let code = record.ExceptionCode.0 as u32;
+        let address = record.ExceptionAddress as usize;
+        let executing = record.NumberParameters >= 1 && record.ExceptionInformation[0] == 8;
+        let report = match code {
+            0xC000_001D | 0xC000_0374 => true,
+            0xC000_0005 => executing || mapping(address) != "image",
+            _ => false,
+        };
+        if !report || REPORTED.fetch_add(1, Ordering::Relaxed) >= 3 {
+            return 0;
+        }
+        let Some(mut log) = FIRST_CHANCE_LOG.get() else {
+            return 0;
+        };
+        let mut buf = [0u8; 4096];
+        let mut out = std::io::Cursor::new(&mut buf[..]);
+        let unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = write!(
+            out,
+            "=== pocketdesk {} at unix {unix}: first-chance ",
+            env!("CARGO_PKG_VERSION")
+        );
+        describe(&mut out, record);
+        let _ = writeln!(out, " (it may yet have been handled)");
+        let mut frames = [std::ptr::null_mut(); 24];
+        // SAFETY: a buffer of frame pointers on this thread's stack.
+        let depth = unsafe { RtlCaptureStackBackTrace(0, &mut frames, None) } as usize;
+        for &frame in &frames[..depth.min(frames.len())] {
+            let _ = write!(out, "  ");
+            write_place(&mut out, frame as usize);
+            let _ = writeln!(out);
+        }
+        let len = out.position() as usize;
+        let _ = log.write_all(&buf[..len]);
+        // EXCEPTION_CONTINUE_SEARCH: handled, or not, as it would have been.
+        0
+    }
+
+    if let Some(path) = crate::crash_report::log_path()
+        && let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+    {
+        let _ = FIRST_CHANCE_LOG.set(file);
+    }
     unsafe {
         SetUnhandledExceptionFilter(Some(filter));
+        AddVectoredExceptionHandler(1, Some(first_chance));
     }
+    // Modules come and go with sessions (capture, audio, encoders): note
+    // them now and every 30 s, so a fault in one since unloaded is named.
+    remember_modules();
+    let _ = std::thread::Builder::new()
+        .name("module-watch".into())
+        .spawn(|| {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                remember_modules();
+            }
+        });
 }
 
 pub(super) fn detach_console() {
@@ -331,6 +545,46 @@ pub(super) fn force_stop(pid: u32) -> std::io::Result<bool> {
 mod tests {
     use super::*;
     use windows::Win32::UI::HiDpi::{AreDpiAwarenessContextsEqual, GetThreadDpiAwarenessContext};
+
+    #[test]
+    fn a_fault_is_described_with_its_module_and_what_is_there() {
+        use windows::Win32::Foundation::NTSTATUS;
+        use windows::Win32::System::Diagnostics::Debug::EXCEPTION_RECORD;
+        remember_modules();
+        let here = a_fault_is_described_with_its_module_and_what_is_there as *const () as usize;
+        let mut record = EXCEPTION_RECORD {
+            ExceptionCode: NTSTATUS(0xC000_0005_u32 as i32),
+            ExceptionAddress: here as *mut _,
+            NumberParameters: 2,
+            ..Default::default()
+        };
+        record.ExceptionInformation[0] = 8;
+        record.ExceptionInformation[1] = here;
+        let mut out = Vec::new();
+        describe(&mut out, &record);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.starts_with("exception 0xc0000005 at "), "{text}");
+        assert!(
+            text.contains(".exe+0x"),
+            "named by this test's module: {text}"
+        );
+        assert!(text.contains("(image)"), "{text}");
+        assert!(text.contains("(executing "), "{text}");
+    }
+
+    #[test]
+    fn memory_given_back_reads_as_unmapped() {
+        use windows::Win32::System::Memory::{
+            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
+        };
+        // SAFETY: one page of this process's own, given back below.
+        let page = unsafe { VirtualAlloc(None, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE) };
+        assert!(!page.is_null());
+        assert_eq!(mapping(page as usize), "not an image");
+        // SAFETY: the page just allocated, released whole.
+        unsafe { VirtualFree(page, 0, MEM_RELEASE) }.unwrap();
+        assert_eq!(mapping(page as usize), "unmapped");
+    }
 
     /// The phone toasts in the Action Center, by tag.
     fn phone_tags_in_history() -> Vec<String> {

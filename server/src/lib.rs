@@ -17,6 +17,8 @@ pub mod events;
 pub mod home_assistant;
 pub mod hypr_events;
 pub mod hyprland;
+mod idle_cost;
+pub mod inbox;
 pub mod input_injector;
 #[cfg(windows)]
 mod input_sendinput;

@@ -77,6 +77,7 @@ pub fn start_wgc_capture(
     if !GraphicsCaptureSession::IsSupported().unwrap_or(false) {
         bail!("Windows.Graphics.Capture is not supported on this Windows build");
     }
+    pin_capture_library();
     let (ready_tx, ready_rx) = std_mpsc::channel::<Result<()>>();
     let thread_config = config.clone();
     let thread_cancel = cancel.clone();
@@ -112,6 +113,40 @@ pub fn start_wgc_capture(
             bail!("WGC produced no frame within {FIRST_FRAME_TIMEOUT:?}")
         }
     }
+}
+
+/// Keep `GraphicsCapture.dll` loaded for the rest of the process's life.
+///
+/// About one server stop in eight during a session died with an access
+/// violation executing inside this DLL after it had been unloaded, most
+/// likely a closed session finishing on the DLL's own threads after COM
+/// let it go (no capture object left). A reconnect closing the old session
+/// may meet the same race. A pinned module is never unloaded; the process
+/// exits with it.
+fn pin_capture_library() {
+    static PINNED: std::sync::Once = std::sync::Once::new();
+    PINNED.call_once(|| {
+        use windows::Win32::System::LibraryLoader::{
+            GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW,
+        };
+        use windows::core::w;
+        // `IsSupported` has loaded it. Only a module already loaded is
+        // pinned, so nothing is searched for by name.
+        let mut module = HMODULE::default();
+        // SAFETY: a constant, NUL-terminated module name and a handle to
+        // fill; a pinned handle is never freed.
+        let pinned = unsafe {
+            GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_PIN,
+                w!("GraphicsCapture.dll"),
+                &mut module,
+            )
+        };
+        match pinned {
+            Ok(()) => debug!("GraphicsCapture.dll pinned"),
+            Err(e) => warn!("Could not pin GraphicsCapture.dll: {e}"),
+        }
+    });
 }
 
 /// What is being captured right now.

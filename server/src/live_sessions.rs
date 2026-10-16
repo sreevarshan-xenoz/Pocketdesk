@@ -191,12 +191,15 @@ fn may_judge_pairing(read: bool, unread_ticks: &mut u32) -> bool {
     read || *unread_ticks >= UNREADABLE_TICKS
 }
 
+/// The mirror is written at least this often: its readers take one older
+/// than 5 s for a server that has stopped, and its stamp is a whole second
+/// taken at the top of a tick that may run long, so 2 s leaves them 3 s.
+const MIRROR_HEARTBEAT: Duration = Duration::from_secs(2);
 /// Daemon task: mirror the registry, ring the consent notification, and
 /// consume kick requests. Runs for the process lifetime.
 pub async fn run_watcher() {
     let mut unread_ticks = 0;
     let mut prev_ids: Vec<u64> = Vec::new();
-    let mut prev_json = String::new();
     // What the last look saw, for the event log (ecosystem 1a).
     let mut seen_sessions: Vec<(u64, Option<String>)> = Vec::new();
     let mut seen_linked: Vec<String> = Vec::new();
@@ -209,8 +212,19 @@ pub async fn run_watcher() {
     // What the phones were last told about who drives (roadmap N7).
     let mut told: Option<Told> = None;
     let mut told_at = std::time::Instant::now();
+    // The mirror is written when it changes, and at least every
+    // MIRROR_HEARTBEAT so its readers (5 s freshness) see the server alive;
+    // the kick and control folders are read when the watcher saw them
+    // change, and every inbox SWEEP anyway (R6c).
+    let mut prev_content = String::new();
+    let mut last_write = std::time::Instant::now() - MIRROR_HEARTBEAT;
+    let mut last_sweep = std::time::Instant::now();
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
+        let sweep = last_sweep.elapsed() >= crate::inbox::SWEEP;
+        if sweep {
+            last_sweep = std::time::Instant::now();
+        }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -218,7 +232,9 @@ pub async fn run_watcher() {
 
         // 1. Kick requests (consume-then-act: a crash can't replay a kick),
         //    every one since the last tick.
-        if let Ok(dir) = crate::state::state_dir() {
+        if let Ok(dir) = crate::state::state_dir()
+            && (crate::inbox::changed(pocketdesk_core::local::paths::KICKS_DIR) || sweep)
+        {
             for target in shared::take_kicks(&dir, now) {
                 let kicked = pocketdesk_core::streaming::sessions::kick(&target);
                 if kicked.is_empty() {
@@ -286,7 +302,9 @@ pub async fn run_watcher() {
         let live_ids: Vec<u64> = live.iter().map(|s| s.id).collect();
 
         // N7: the desktop app hands control to a session.
-        if let Ok(dir) = crate::state::state_dir() {
+        if let Ok(dir) = crate::state::state_dir()
+            && (crate::inbox::changed(pocketdesk_core::local::paths::CONTROL_DIR) || sweep)
+        {
             for session in shared::take_control_requests(&dir, now) {
                 if live_ids.contains(&session) && crate::driving::give(session) {
                     tracing::info!(session, "Input control handed over by the desktop");
@@ -345,12 +363,15 @@ pub async fn run_watcher() {
             }
             seen_paired = Some(paired);
         }
-        let json = render_json(&live, driver, &linked, now);
-        if json != prev_json {
+        // What it says, without the time it was written.
+        let content = render_json(&live, driver, &linked, 0);
+        if content != prev_content || last_write.elapsed() >= MIRROR_HEARTBEAT {
+            let json = render_json(&live, driver, &linked, now);
             if let Err(e) = write_live_json(&json) {
                 tracing::warn!(error = %e, "Failed to mirror live sessions file");
             } else {
-                prev_json = json;
+                prev_content = content;
+                last_write = std::time::Instant::now();
             }
         }
     }

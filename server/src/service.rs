@@ -93,6 +93,8 @@ pub async fn run(config: Config) -> Result<()> {
         discovery.run(Duration::from_secs(10)).await;
     });
 
+    // The inbox folders the app's requests land in, watched (R6c).
+    crate::inbox::start(&state_dir);
     // R4 D2: mirror live streaming sessions to the state dir, notify the
     // desktop when one starts, and consume `pocketdesk kick` requests.
     tokio::spawn(crate::live_sessions::run_watcher());
@@ -2360,43 +2362,74 @@ mod vector_tests {
         let addr = real_port().await;
         // A phone paired in the throwaway state folder, whose id a stranger
         // names after its own handshake.
-        let mut store = pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
-            crate::state::trust_store_path().unwrap(),
-        )
-        .unwrap();
-        store.trust_device("vector-paired-phone").unwrap();
+        let pair = || {
+            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
+                crate::state::trust_store_path().unwrap(),
+            )
+            .unwrap()
+            .trust_device("vector-paired-phone")
+            .unwrap();
+        };
         let request = serde_json::json!({
             "type": "kdeconnect.pocketdesk.monitors",
             "body": { "request": true }
         });
-        // The control: the paired phone itself is answered.
-        let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
-        write_line(&mut paired, &request.to_string()).await;
-        // Its seed pushes come first; then the answer.
+        // The control: the paired phone itself is answered. The lib tests
+        // share one throwaway state folder, so another may rewrite the trust
+        // store meanwhile: pair again and retry before calling it a failure.
         let mut answered = false;
-        for _ in 0..10 {
-            match read_line(&mut paired, 5000).await {
-                Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
-                    answered = true;
-                    break;
+        for _ in 0..3 {
+            pair();
+            let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
+            write_line(&mut paired, &request.to_string()).await;
+            // Its seed pushes come first; then the answer.
+            for _ in 0..10 {
+                match read_line(&mut paired, 5000).await {
+                    Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
+                        answered = true;
+                        break;
+                    }
+                    Some(line) if line != CLOSED => continue,
+                    _ => break,
                 }
-                Some(line) if line != CLOSED => continue,
-                _ => break,
+            }
+            if answered {
+                break;
             }
         }
         assert!(answered, "the paired phone is answered");
-        let mut stream = open(addr, true, true).await;
         let identity = serde_json::json!({
             "type": "kdeconnect.identity",
             "body": { "deviceId": "vector-paired-phone", "deviceName": "Borrowed" }
         });
-        write_line(&mut stream, &identity.to_string()).await;
-        write_line(&mut stream, &request.to_string()).await;
-        assert_eq!(
-            read_line(&mut stream, 1000).await,
-            None,
-            "still the stranger it opened as: a paired phone's request would be answered"
-        );
+        // The stranger's silence counts only while the phone it names stayed
+        // paired throughout: otherwise it would be unanswered for the wrong
+        // reason, so try again.
+        let still_paired = || {
+            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
+                crate::state::trust_store_path().unwrap(),
+            )
+            .unwrap()
+            .is_trusted("vector-paired-phone")
+        };
+        let mut judged = false;
+        for _ in 0..3 {
+            pair();
+            let mut stream = open(addr, true, true).await;
+            write_line(&mut stream, &identity.to_string()).await;
+            write_line(&mut stream, &request.to_string()).await;
+            let reply = read_line(&mut stream, 1000).await;
+            if !still_paired() {
+                continue;
+            }
+            assert_eq!(
+                reply, None,
+                "still the stranger it opened as: a paired phone's request would be answered"
+            );
+            judged = true;
+            break;
+        }
+        assert!(judged, "the phone stayed paired through none of the tries");
     }
 
     #[tokio::test]

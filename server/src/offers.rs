@@ -484,7 +484,7 @@ pub async fn run_watcher() {
         return;
     };
     loop {
-        tokio::time::sleep(POLL).await;
+        crate::inbox::wait(pocketdesk_core::local::paths::OUTBOX_DIR, POLL).await;
         for id in sweep_at(Instant::now()) {
             tracing::info!("Offer {id} expired before the phone took it");
             end_offer(&dir, &id, Err(EXPIRED.to_string()));

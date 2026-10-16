@@ -109,6 +109,8 @@ impl Plugin for PhoneMediaPlugin {
             report,
             pocketdesk_core::local::pin::now_unix(),
         );
+        // Written out now, not at the inbox's next sweep (R6c).
+        crate::inbox::nudge(pocketdesk_core::local::paths::PHONE_MEDIA_DIR);
         Ok(())
     }
 }
@@ -125,7 +127,22 @@ pub async fn run_watcher() {
     REPORTS.lock().unwrap_or_else(|e| e.into_inner()).dirty = true;
     let mut last_write = tokio::time::Instant::now() - WRITE_EVERY;
     loop {
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        // Wait for a press, or, with a report waiting, for the throttle to
+        // allow it; a press is sent at once either way.
+        let dirty = REPORTS.lock().unwrap_or_else(|e| e.into_inner()).dirty;
+        let throttled = WRITE_EVERY.saturating_sub(last_write.elapsed());
+        if !dirty || !throttled.is_zero() {
+            crate::inbox::wait_at_most(
+                pocketdesk_core::local::paths::PHONE_MEDIA_DIR,
+                if dirty {
+                    throttled
+                } else {
+                    crate::inbox::SWEEP
+                },
+                Duration::from_millis(250),
+            )
+            .await;
+        }
         let now = pocketdesk_core::local::pin::now_unix();
         for press in pocketdesk_core::local::phone_media::take_presses(&dir, now) {
             let clients = crate::state::clone_clients().await;
@@ -137,6 +154,8 @@ pub async fn run_watcher() {
                 tracing::info!("A media press for {} not sent: {reason}", press.device_id);
             }
         }
+        // A report waiting is written once the throttle allows (the wait
+        // above ends then), not at the next sweep.
         if last_write.elapsed() < WRITE_EVERY {
             continue;
         }

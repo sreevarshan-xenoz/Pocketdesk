@@ -59,6 +59,25 @@ The config file, and so the ports, stay where they are:
 POCKETDESK_STATE_DIR="$HOME/.local/state/pocketdesk-test" cargo run --bin pocketdesk -- start
 ```
 
+`POCKETDESK_CONFIG_DIR` (also absolute) moves the config folder: `config.toml`
+and the iroh identity (`iroh_secret.key`). With both set, a **second server**
+runs beside the installed one, for measurements and two-computer tests, without
+touching it: give it other ports and keep it off the network's list.
+
+```bash
+mkdir -p "$HOME/pd-second/config" "$HOME/pd-second/state"
+printf 'control_port = 1816
+streaming_port = 4816
+lan_discovery = false
+' > "$HOME/pd-second/config/config.toml"
+export POCKETDESK_CONFIG_DIR="$HOME/pd-second/config" POCKETDESK_STATE_DIR="$HOME/pd-second/state"
+cargo run --bin pocketdesk -- start      # its own device id, iroh id and pairings
+cargo run --bin pocketdesk -- stop       # with the same variables: stops only this one
+```
+
+Its notifications (a PIN, a session) show on your desktop like the installed
+server's; tell them apart by the port in its log.
+
 The server's tests point the state folder at a throwaway one
 (`core::local::paths::use_state_dir`), so they never read or change your
 real pairings.

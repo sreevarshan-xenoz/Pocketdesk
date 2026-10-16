@@ -1412,9 +1412,12 @@ The A71 against this Windows box, LAN, the release build of `main` at 0461632, i
 - [x] One stream on a Wi-Fi return after PR #96.
 - [x] The Linux host (Azure VM, over the internet): a 19-minute session at 1.33 % of one core, 3 Wi-Fi drops back in 10–13 s, a server restart back in about 12 s, idle 0.25 %. Found there: the example config stopped the server, VAAPI chosen with no GPU (PR #95), and files to a phone on the internet road never arrive (phase 2).
 
+- [x] What doubled the idle cost on Windows (R6b): the folder pollers and the mirror's rewrite each second led the harness's ranking. After R6c's watcher the whole idle server is at 0.53 % of one core (35 MB), 570 s after a 30 s settle (1.35 % in R6).
+- [x] A crash (exit 139) stopping the server 35 s into a session: about one round in 7 to 10, inside an unloaded GraphicsCapture.dll. With the library pinned, 30 rounds and no crash, then 10 on the reviewed build. Owed: whether the crashes after a reconnected session's setup were the same.
+
 Owed:
-- [ ] What doubled the idle cost on Windows (next phase, R6b–R6c).
 - [ ] A download that waits for the network (next phase, R6i).
+- [ ] The idle cost on Linux after R6c (the VM), and with R6d's clipboard watch.
 
 ## Recording results
 
