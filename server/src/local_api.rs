@@ -95,6 +95,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::Links => "links",
         Capability::Media => "media",
         Capability::Cast => "cast",
+        Capability::Tasks => "tasks",
     }
 }
 

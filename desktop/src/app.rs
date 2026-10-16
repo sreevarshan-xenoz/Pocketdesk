@@ -23,7 +23,7 @@ const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
 const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 12] = [
+const PERMISSIONS: [(Capability, &str, &str); 13] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -83,6 +83,11 @@ const PERMISSIONS: [(Capability, &str, &str); 12] = [
         Capability::Cast,
         "Show its screen here",
         "The phone can show its own screen in a window here, when its owner starts it on the phone.",
+    ),
+    (
+        Capability::Tasks,
+        "Start my tasks",
+        "The phone can list the tasks named in Settings and start them (each one may ask you first).",
     ),
 ];
 
