@@ -53,7 +53,7 @@ pub struct MirrorSession {
 pub struct LinkedPhone {
     pub device_id: String,
     /// Files can reach it: its link has an address the server can dial
-    /// back (not one over the internet).
+    /// back, or came by the internet road with `internet_files` on (2c).
     pub files: bool,
 }
 
@@ -73,7 +73,7 @@ pub struct LiveMirror {
 
 impl LiveMirror {
     /// Whether a file can be offered to `device_id` now: it is in a
-    /// session, or linked with an address the server can dial back.
+    /// session, or linked where files reach it ([`LinkedPhone::files`]).
     pub fn files_reach(&self, device_id: &str) -> bool {
         self.sessions
             .iter()

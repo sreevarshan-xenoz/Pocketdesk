@@ -35,7 +35,7 @@ List the files sent to phones, newest first, and how each went
 List the files received from phones, newest first
 .TP
 .B send \fIPHONE\fR \fIPATH\fR [\-\-wait \fISECONDS\fR] [\-\-json]
-Send a file or a folder to a paired phone connected on this network, as the desktop app's
+Send a file or a folder to a connected paired phone (at home, or by the internet path), as the desktop app's
 Files tab does.
 .I PHONE
 is a device id or 6 or more of its first characters. Exit codes: 0 done,
@@ -44,7 +44,7 @@ is a device id or 6 or more of its first characters. Exit codes: 0 done,
 ran out.
 .TP
 .B send\-to\-phone \fIPATH\fR...
-Send files or folders to the phone connected on this network (one in a
+Send files or folders to the connected phone (one in a
 session first), and say how it went in a desktop notification too: what the
 file manager's "Send to phone" runs. Exit codes: 0 queued, 1 failed, 2
 nothing chosen, 3 no server running.

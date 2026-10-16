@@ -167,7 +167,7 @@ pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<Stri
         None => targets
             .first()
             .map(|d| d.id.clone())
-            .ok_or_else(|| "No phone is connected on this network to send to.".to_string()),
+            .ok_or_else(|| "No phone is connected where files can reach it.".to_string()),
     }
 }
 

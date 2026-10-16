@@ -587,7 +587,8 @@ pub fn send_to_phone_in(
     let now = pocketdesk_core::local::pin::now_unix();
     let Some(phone) = default_phone(state_dir, now, true) else {
         return not_sent(
-            "No phone is connected on this network: open Pocketdesk on your phone.".to_string(),
+            "No phone is connected where files can reach it: open Pocketdesk on your phone."
+                .to_string(),
             exit::FAILED,
         );
     };
