@@ -85,6 +85,8 @@ These are real gaps in the current design. Plan around them.
 
 14. **With "New screenshots to the computer" on (roadmap T10h), every screenshot taken on the phone goes to its computer**, whatever it shows: onto the computer's clipboard and into its Downloads. On the computer it is then in the clipboard's history (Windows' Win+V, and its cloud clipboard if that is on) and in Downloads. Only to the phone's own computer, only images in a folder named `Screenshots` (an app that drops other images there sends them too), at most 10 minutes old; the computer's Clipboard and Files permissions gate each half. It is off by default.
 
+15. **A phone's cast shows everything on its screen on the computer** (roadmap T10k), notifications and codes included, to whoever sees the computer's screen, while the phone's owner casts it. Android asks for consent each time, and its status bar shows that the screen is shared. The computer hands the picture from the server to the desktop app over loopback TCP, behind a token only its owner can read (`cast.json`); any program running as that owner can read the token, and so watch the cast. The Cast permission ("Show its screen here", on by default) refuses it per phone.
+
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
 ## Using it safely today

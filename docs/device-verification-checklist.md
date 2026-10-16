@@ -1299,6 +1299,24 @@ JVM-tested only (the A71's build cannot start its hotspot from adb, and a comput
 - [ ] The same computer saved under its home address: the network finding, with "This phone is sharing its connection" beside it.
 - [ ] USB tethering (`rndis0`/`ncm0`), and the interface names on other makers' phones (Pixel's hotspot may be `wlan1`, not read).
 
+## 77. This phone's screen on the computer (T10k)
+
+A71 (Android 16) → this Windows box, LAN, debug builds, 2026-10-16:
+- [x] "Show screen" on the saved computer; Android's consent ("Share entire screen"); the server admitted the cast, the relay handed it to the desktop app, and a window at the phone's shape (864x1920 encoded) showed the phone live: Home, then Settings, sharp once settled.
+- [x] Found: the A71's encoder refuses the Baseline profile; the fallback to its default profile works (and now logs one line).
+- [x] Turned to landscape: a new 1920x864 encoder, the window turned to landscape; turned back, back to portrait.
+- [x] A Home press reached the window within about a second (sampled every 260 ms; not a stopwatch measurement). ffmpeg used about 6 % of one core and 115 MB on a mostly still screen.
+- [x] "Stop sharing" from the status bar's chip: the session, the relay's cast, `cast.json` and ffmpeg all ended, and the window closed.
+- [x] "Show its screen here" off for the phone: refused, and the phone's notification said "it does not allow this phone to show its screen".
+- [x] Closing the window mid-cast: it stayed closed, ffmpeg stopped, and the cast went on.
+- [x] `pocketdesk kick all`: the phone's cast service and its projection ended.
+
+Owed:
+- [ ] The latency against a stopwatch, and over the internet road (WAN, relayed and direct).
+- [ ] The notification's Stop (the A71 showed only the redacted notification in the shade while locked), and Sessions' "Show screen" after the window was closed.
+- [ ] "Share one app" instead of the entire screen; a phone call or a secure screen (banking apps black out); a long cast's heat and battery.
+- [ ] The Linux desktop app (Wayland and X11), and a computer without `ffmpeg` (the window says so).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
