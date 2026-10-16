@@ -90,6 +90,17 @@ impl Computer {
         format!("{}/event", self.base())
     }
 
+    /// This computer's discovery configs, to find ones left behind by an
+    /// earlier run.
+    pub fn own_configs(&self) -> String {
+        format!("{DISCOVERY}/+/pocketdesk_{}/+/config", self.id)
+    }
+
+    /// Its phones' state topics, likewise.
+    pub fn own_phone_states(&self) -> String {
+        format!("{}/phone/#", self.base())
+    }
+
     /// The task buttons' command topics, `…/task/<object>/run`.
     pub fn task_commands(&self) -> String {
         format!("{}/task/+/run", self.base())
@@ -341,6 +352,24 @@ pub fn is_press(retained: bool, payload: &[u8]) -> bool {
     !retained && payload == b"PRESS"
 }
 
+/// Whether a retained message the broker hands back on connect is one of
+/// this computer's that is no longer wanted: an entity removed while the
+/// bridge was away (a phone unpaired, a task deleted, a restart between),
+/// which an empty retained message clears.
+pub fn left_behind(
+    computer: &Computer,
+    wanted: &BTreeMap<String, String>,
+    topic: &str,
+    retained: bool,
+    payload: &[u8],
+) -> bool {
+    let ours = (topic.starts_with(&format!("{DISCOVERY}/"))
+        && topic.contains(&format!("/pocketdesk_{}/", computer.id))
+        && topic.ends_with("/config"))
+        || topic.starts_with(&format!("{}/phone/", computer.base()));
+    ours && retained && !payload.is_empty() && !wanted.contains_key(topic)
+}
+
 /// The task a command topic presses, among `snapshot`'s.
 pub fn pressed_task(computer: &Computer, snapshot: &Snapshot, topic: &str) -> Option<String> {
     let prefix = format!("{}/task/", computer.base());
@@ -530,11 +559,21 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                     sent.clear();
                     let _ = client.try_publish(computer.availability(), QoS::AtLeastOnce, true, "online");
                     let _ = client.try_subscribe(computer.task_commands(), QoS::AtLeastOnce);
+                    // The broker answers these with what it kept: entities
+                    // gone since are cleared as they come.
+                    let _ = client.try_subscribe(computer.own_configs(), QoS::AtLeastOnce);
+                    let _ = client.try_subscribe(computer.own_phone_states(), QoS::AtLeastOnce);
                     let config = crate::events::current_config();
                     snapshot = read_snapshot(state_dir, &config);
                     publish(&client, &computer, &snapshot, &mut sent);
                 }
                 Some(Ok(Event::Incoming(Packet::Publish(message)))) => {
+                    let wanted = messages(&computer, &snapshot);
+                    if left_behind(&computer, &wanted, &message.topic, message.retain, &message.payload) {
+                        tracing::debug!(topic = %message.topic, "Home Assistant: clearing an entity left behind");
+                        let _ = client.try_publish(message.topic.clone(), QoS::AtLeastOnce, true, "");
+                        continue;
+                    }
                     if !is_press(message.retain, &message.payload) {
                         continue;
                     }
@@ -785,6 +824,51 @@ mod tests {
         assert_eq!(
             pressed_task(&c, &s, "pocketdesk/1a2b3c4d5e6f/sessions"),
             None
+        );
+    }
+
+    #[test]
+    fn what_an_earlier_run_left_is_cleared_and_nothing_else() {
+        let c = computer();
+        let wanted = messages(&c, &snapshot());
+        let gone = "homeassistant/sensor/pocketdesk_1a2b3c4d5e6f/0badf00d_battery/config";
+        assert!(left_behind(&c, &wanted, gone, true, b"{}"));
+        assert!(left_behind(
+            &c,
+            &wanted,
+            "pocketdesk/1a2b3c4d5e6f/phone/0badf00d/connected",
+            true,
+            b"ON"
+        ));
+        let kept = "homeassistant/sensor/pocketdesk_1a2b3c4d5e6f/5f1c9b3d_battery/config";
+        assert!(!left_behind(&c, &wanted, kept, true, b"{}"), "still wanted");
+        assert!(
+            !left_behind(&c, &wanted, gone, false, b"{}"),
+            "a live echo, not what was kept"
+        );
+        assert!(
+            !left_behind(&c, &wanted, gone, true, b""),
+            "already cleared"
+        );
+        assert!(
+            !left_behind(
+                &c,
+                &wanted,
+                "homeassistant/sensor/pocketdesk_ffffffffffff/x/config",
+                true,
+                b"{}"
+            ),
+            "another computer's"
+        );
+        assert!(
+            !left_behind(
+                &c,
+                &wanted,
+                "pocketdesk/1a2b3c4d5e6f/task/task_x/run",
+                true,
+                b"PRESS"
+            ),
+            "not an entity"
         );
     }
 
