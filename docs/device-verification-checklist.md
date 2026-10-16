@@ -1408,10 +1408,13 @@ The A71 against this Windows box, LAN, the release build of `main` at 0461632, i
 - [x] Seen: two streams opened on a Wi-Fi return (both encoded for about 4 s).
 - [x] Seen: a 1 Mbit/s Wi-Fi link (after many toggles) made the session reconnect every 30–60 s and a 150 MB download fail.
 
+- [x] A 150 MB transfer broken by a 15 s Wi-Fi drop on a healthy link: stopped at 109 MB when the phone's Wi-Fi took about 60 s to rejoin and its retries ran out; sent again, it continued from there, MD5 matching.
+- [x] One stream on a Wi-Fi return after PR #96.
+- [x] The Linux host (Azure VM, over the internet): a 19-minute session at 1.33 % of one core, 3 Wi-Fi drops back in 10–13 s, a server restart back in about 12 s, idle 0.25 %. Found there: the example config stopped the server, VAAPI chosen with no GPU (PR #95), and files to a phone on the internet road never arrive (phase 2).
+
 Owed:
-- [ ] A 150 MB transfer broken by a Wi-Fi drop on a healthy link, after PR #94 (the run was stopped when the computer ran low on memory).
-- [ ] The same pass on the Linux host (the Azure VM).
-- [ ] What doubled the idle cost.
+- [ ] What doubled the idle cost on Windows (next phase, R6b–R6c).
+- [ ] A download that waits for the network (next phase, R6i).
 
 ## Recording results
 

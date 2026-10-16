@@ -123,8 +123,24 @@ Run on 2026-10-16: the A71 against this Windows box, on the LAN, with the releas
 - **A crash with no trace.** Once, after a Wi-Fi drop, the server died with exit 139 (an access violation) as the reconnected session started, the third time this has been seen after codec negotiation (2026-10-12 twice). It did not come back in 11 more reconnects, three under gdb. A crash now leaves its backtrace in `<state>/crash.log` (PR #93), so the next one says where.
 - **The control link lagged the stream** by 18 s after a server restart and by more than 50 s after a Wi-Fi drop: the session looked live while "Send to phone" failed with "phone not connected" and no push arrived. The link is now dialed at once whenever the stream comes up (PR #94); re-checked, it was back 4 s after the stream, and a file sent then arrived, MD5 matching.
 
+**On the Linux host** (an Azure B2ats_v2 VM, no GPU, headless Sway, the release workflow's build of the same `main`; the A71 over the internet on the direct road to its public address):
+
+| | Result |
+|---|---|
+| A 19-minute session (software H.264, a mostly still 720p screen, `video_quality = "low"`) | 1.33 % of one core; RSS 119 → 129 MB; the phone 130–133 MB |
+| The phone's Wi-Fi off for 30 s, 3 times | Back 10–13 s after the Wi-Fi each time |
+| The server restarted (20 s down) | Back within about 12 s of the server starting |
+| Idle, no phone, after the session | 0.25 % of one core (Windows: 1.35 %), RSS 128–130 MB |
+
+**A broken transfer, on a healthy link** (Windows): 108 MB of 150 arrived in 10 s, then the Wi-Fi went off for 15 s. The phone's Wi-Fi took about 60 s to rejoin this time, and its three retries (5, 15, 45 s) all met "Network is unreachable", so the download stopped at 109 MB. Sent again, it continued from there: done in 6 s, MD5 matching. The retries should wait for the network (next phase, R6i).
+
+**More found and fixed:**
+- **Two streams on a Wi-Fi return.** Both the reconnect and the network callback started one, so the computer captured and encoded two sessions for about 4 s. The callback now leaves a connect under way to finish (PR #96); re-checked: one stream.
+- **The example config stopped the server** (found on the VM): `config.toml.example` and README spell `video_quality = "balanced"`, which the server refused ("unknown variant"); it now reads lowercase, and a test holds the example to the server (PR #95).
+- **VAAPI was picked where it cannot run** (found on the VM): FFmpeg lists it whenever it was built with it, so Windows reported it, and a Windows PC without NVENC would have chosen it over AMF, Quick Sync and Media Foundation and ended on software. VAAPI now counts only on Linux with a render node (PR #95).
+
 **Found, not fixed yet:**
-- **Two streams on a Wi-Fi return.** Both the reconnect and the network callback start one, so the computer captured and encoded two sessions for about 4 s, until it saw the phone close the extra one.
-- **Idle cost doubled** since 2026-10-14, as watchers that poll once a second were added (clipboard, links, phone files and media, texts, offers, notification answers, the Home Assistant switch). Not yet attributed.
+- **Files from the computer to a phone on the internet road never arrive:** the computer dials the phone back, and the home router's NAT drops it, so a send waits its 10 minutes and fails with "the phone did not take it in time". This is the gap phase 2's transfers on the internet road close; until then the computer could say so at once.
+- **Idle cost doubled on Windows** since 2026-10-14, as watchers that poll every 250 ms to 2 s were added (links, phone files and media, texts, offers, notification answers, approvals, the clipboard, the Home Assistant switch); the same build on Linux idles at 0.25 %, so the file system's cost on Windows (Defender's filter) is the likely part. Not yet attributed (next phase, R6b–R6c).
 - **A 1 Mbit/s link.** After many Wi-Fi toggles the phone's receive rate fell to 1 Mbit/s (2.4 GHz, a strong signal); the session then reconnected every 30–60 s, since the bitrate controller's floor is 1 Mbit/s, the whole link, and a 150 MB download got 6.4 MB in six minutes before giving up. A re-join restored 150 Mbit/s.
 
