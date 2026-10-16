@@ -1256,6 +1256,16 @@ Owed:
 - [ ] Android 14+'s "selected photos only" answer, and Android 12 and older.
 - [ ] Away from home (the internet road), and the Linux host.
 
+## 74. The phone's battery without a session
+
+On the A71 against this box, 2026-10-16, with "Computer's clipboard in the background" keeping a link and no session:
+- [x] `dumpsys battery set level 12` (unplugged): `phone_status.json` said 12, and the computer warned "battery low (12 %)".
+- [x] With no session listed at all, level 9 reached `phone_status.json`.
+
+Owed:
+- [ ] With only folders, answers or files keeping the link; with none on, nothing sent and no connection made.
+- [ ] Over the internet road.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
