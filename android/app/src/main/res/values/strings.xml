@@ -246,6 +246,9 @@
 
     <!-- Monitor picker -->
     <string name="stream_monitor">Stream a monitor</string>
+    <string name="add_phone_screen">Add a screen for this phone</string>
+    <string name="add_phone_screen_summary">A new screen of this phone\'s shape, right of the others, while the session lasts (Sway)</string>
+    <string name="add_phone_screen_failed">The computer could not add a screen</string>
     <string name="auto_primary">Auto — primary</string>
     <string name="malformed_monitors">Malformed monitor list</string>
     <string name="monitor_query_failed">Monitor query failed</string>

@@ -64,6 +64,8 @@ video_quality = "balanced"
 # browser, or, false, shown as a notification. Each phone's Links
 # permission (desktop app, Devices) still applies.
 # open_links = true
+# Let a phone with Input add a screen of its own shape (Sway only).
+# virtual_screens = true
 
 # A notification when a phone in a session reports a low battery (15 % or
 # less, not charging).

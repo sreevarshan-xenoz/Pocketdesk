@@ -705,10 +705,23 @@ fun RemoteScreen(
         }
     }
 
-    fun switchMonitor(index: Int) {
+    // A second screen at this phone's shape (T10j): asked for from the
+    // screen picker, taken away when the session goes.
+    var addedScreen by remember { mutableStateOf(false) }
+    val windowPx = LocalWindowInfo.current.containerSize
+    val screenFailed = stringResource(R.string.add_phone_screen_failed)
+    DisposableEffect(address, controlPort) {
+        onDispose {
+            if (addedScreen) Thread { RustCore.removeScreen(address, controlPort) }.start()
+        }
+    }
+
+    /** Stream screen [index]; [remember] keeps it as this computer's screen for next time. */
+    fun switchMonitor(index: Int, remember: Boolean = true) {
         showMonitorPicker = false
         if (index == monitorIndex) return
-        HostStore.saveMonitorIndex(context, address, index)
+        // An added screen (T10j) is gone after the session: never the default.
+        if (remember) HostStore.saveMonitorIndex(context, address, index)
         cropWindow = null
         cropScreen = null
         monitorIndex = index
@@ -1387,6 +1400,27 @@ fun RemoteScreen(
             onPick = { index ->
                 haptics.tap()
                 switchMonitor(index)
+            },
+            onAddScreen = {
+                haptics.tap()
+                showMonitorPicker = false
+                scope.launch {
+                    val answer = withContext(Dispatchers.IO) {
+                        RustCore.addScreen(address, controlPort, windowPx.width, windowPx.height)
+                    }
+                    answer.fold(
+                        onSuccess = { json ->
+                            when (val a = PhoneScreen.parse(json)) {
+                                is PhoneScreen.Answer.Added -> {
+                                    addedScreen = true
+                                    switchMonitor(a.index, remember = false)
+                                }
+                                is PhoneScreen.Answer.Refused -> sendTextNotice = a.reason.ifEmpty { screenFailed }
+                            }
+                        },
+                        onFailure = { sendTextNotice = it.message ?: screenFailed },
+                    )
+                }
             },
         )
     }
