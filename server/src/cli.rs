@@ -208,7 +208,7 @@ pub enum Commands {
         #[arg(long)]
         markdown: bool,
         /// Emit the control channel's packet catalogue (docs/packets.md)
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["json", "markdown"])]
         packets: bool,
     },
     /// Connect to a peer and perform a basic control-channel handshake
