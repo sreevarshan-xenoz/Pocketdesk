@@ -118,6 +118,8 @@ class CastService : Service() {
         val manager = getSystemService(MediaProjectionManager::class.java)
         val taken = data?.let { runCatching { manager.getMediaProjection(resultCode, it) }.getOrNull() }
         if (address.isEmpty() || taken == null) {
+            // A projection taken for no computer is given back at once.
+            runCatching { taken?.stop() }
             fail(getString(R.string.cast_no_consent))
             return START_NOT_STICKY
         }
