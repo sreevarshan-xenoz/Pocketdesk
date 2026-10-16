@@ -144,6 +144,8 @@ pub struct PocketdeskApp {
     messages: crate::messages_view::MessagesView,
     /// The Notifications tab (T10c).
     notes: crate::notes_view::NotesView,
+    /// Settings → Computers (2f).
+    computers: crate::computers_view::ComputersView,
     /// The Phone tab (T10g).
     phone_files: crate::phone_files_view::PhoneFilesView,
     /// Whether "Send to phone" is in the file manager, as last read (T10e).
@@ -189,6 +191,7 @@ impl PocketdeskApp {
             diagnostics: Default::default(),
             messages: Default::default(),
             notes: Default::default(),
+            computers: Default::default(),
             phone_files: Default::default(),
             send_menu_installed: None,
             browser_registered: None,
@@ -863,6 +866,8 @@ impl PocketdeskApp {
         }
         self.send_menu_setting(ui);
         self.browser_setting(ui);
+        self.computers
+            .show(ui, &self.state_dir, self.snapshot.running, now_unix());
     }
 
     /// "Send from the browser" (ecosystem 1d): the extension's host,
