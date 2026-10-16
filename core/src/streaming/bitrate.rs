@@ -281,6 +281,43 @@ fn next_delivery_ceiling(
     }
 }
 
+/// The frame rates a slow link steps down through (R6f).
+const SLOW_LINK_RATES: [u32; 3] = [60, 30, 15];
+
+/// Bits a frame needs to stay readable: 1 Mbit/s at 60 fps.
+const BITS_PER_FRAME: u32 = 1_000_000 / 60;
+
+/// Stepping back up needs this much more than the step's need, so a rate
+/// on the line does not rebuild the encoder back and forth.
+const STEP_UP_HEADROOM: f64 = 1.25;
+
+/// The frame rate for a session whose encoder may use `effective_bps`
+/// (R6f): the highest of the session's own rate and the slow-link steps (30,
+/// 15) that leaves each frame [`BITS_PER_FRAME`], since for desktop content
+/// fewer, sharper frames read better than many blurred ones (as WebRTC's
+/// screen sharing keeps resolution and drops frames). From `current_fps` it
+/// steps down at once and back up only with [`STEP_UP_HEADROOM`]. Never above
+/// `configured_fps`.
+pub fn slow_link_fps(configured_fps: u32, current_fps: u32, effective_bps: u32) -> u32 {
+    let need = |fps: u32| u64::from(BITS_PER_FRAME) * u64::from(fps);
+    let mut candidates = std::iter::once(configured_fps)
+        .chain(SLOW_LINK_RATES.into_iter().filter(|&r| r < configured_fps));
+    let affordable = candidates
+        .find(|&fps| u64::from(effective_bps) >= need(fps))
+        .unwrap_or_else(|| configured_fps.min(SLOW_LINK_RATES[2]));
+    if affordable > current_fps {
+        // Up only with room to spare; otherwise stay.
+        let roomy = (u64::from(effective_bps) as f64) >= need(affordable) as f64 * STEP_UP_HEADROOM;
+        if roomy {
+            affordable
+        } else {
+            current_fps.min(configured_fps)
+        }
+    } else {
+        affordable
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +428,46 @@ mod tests {
             8_000_000,
             "never above the configured rate"
         );
+    }
+
+    #[test]
+    fn a_rate_the_frames_can_have_keeps_the_sessions_frame_rate() {
+        assert_eq!(slow_link_fps(60, 60, 8_000_000), 60);
+        assert_eq!(slow_link_fps(60, 60, 1_000_000), 60, "exactly the need");
+        assert_eq!(
+            slow_link_fps(30, 30, 8_000_000),
+            30,
+            "never above the session's"
+        );
+    }
+
+    #[test]
+    fn a_starved_rate_steps_the_frame_rate_down() {
+        assert_eq!(slow_link_fps(60, 60, 850_000), 30);
+        assert_eq!(slow_link_fps(60, 30, 400_000), 15);
+        assert_eq!(slow_link_fps(60, 60, 250_000), 15, "down at once, past 30");
+        assert_eq!(slow_link_fps(60, 15, 100_000), 15, "15 is the lowest step");
+        assert_eq!(
+            slow_link_fps(24, 24, 300_000),
+            15,
+            "a session below 30 steps to 15"
+        );
+    }
+
+    #[test]
+    fn the_frame_rate_climbs_back_only_with_room() {
+        assert_eq!(
+            slow_link_fps(60, 30, 1_000_000),
+            30,
+            "60's need, but no room yet"
+        );
+        assert_eq!(slow_link_fps(60, 30, 1_250_000), 60);
+        assert_eq!(
+            slow_link_fps(60, 15, 600_000),
+            15,
+            "30's need is 500k: no room"
+        );
+        assert_eq!(slow_link_fps(60, 15, 700_000), 30);
     }
 
     #[test]

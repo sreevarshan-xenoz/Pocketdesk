@@ -28,6 +28,10 @@
 //! With R6f's delivery ceiling (the transport's waits cap the rate), the
 //! clean 1 Mbit/s link held 300 s at 12-24 fps (worst 10 s, 9.7), with 14
 //! rate changes; the encoder overshot the lowest targets at 2560x1080.
+//! With the frame rate stepping down too (60, 30, 15, then back to 30): it
+//! settled within 100 s at 30 fps and about 480 kbit/s, nothing more lost at
+//! the queue and no more changes, 18-20 fps delivered (what the screen
+//! drew); worst 10 s window 10.5 fps.
 //!
 //! Ignored, since it captures the real desktop:
 //!
