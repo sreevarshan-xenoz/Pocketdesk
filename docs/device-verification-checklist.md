@@ -1419,6 +1419,7 @@ Owed:
 - [ ] The A71's reconnects on a slow link, reproduced: the VM with `tc qdisc add dev eth0 root tbf rate 1mbit burst 32kbit latency 400ms`, 10 minutes with no reconnect, then climbing back once it is removed (R6f).
 - [ ] A download that waits for the network (next phase, R6i).
 - [ ] The idle cost on Linux after R6c (the VM), and with R6d's clipboard watch.
+- [ ] R6d on the VM (Sway) with a phone linked: `pgrep -c wl-paste` stays at 1 over a minute, `wl-copy` text reaches the phone within 2 s, and the watcher ends when the phone unlinks.
 
 ## 85. iroh 1.3, one endpoint per computer, files over the internet road (2a–2d)
 

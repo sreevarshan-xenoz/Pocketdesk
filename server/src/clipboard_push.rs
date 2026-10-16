@@ -23,7 +23,8 @@ use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
 pub(crate) const MAX_PUSH: usize = 256 * 1024;
 
 /// How often the clipboard is looked at while a phone could receive it. On
-/// Windows a look costs a sequence number; elsewhere it runs `wl-paste`.
+/// Windows a look costs a sequence number; elsewhere it costs a flag set by
+/// one `wl-paste --watch` (R6d), or runs `wl-paste` where that cannot run.
 #[cfg(windows)]
 const TICK: Duration = Duration::from_secs(1);
 #[cfg(not(windows))]
@@ -171,12 +172,75 @@ pub(crate) fn packet(text: &str) -> NetworkPacket {
     NetworkPacket::new("kdeconnect.clipboard").with_body(serde_json::json!({ "content": text }))
 }
 
+/// One `wl-paste --watch` while a phone could receive the clipboard (R6d):
+/// it runs `echo` at each change, so a line on its output says the
+/// clipboard changed, and the loop reads it only then, instead of spawning
+/// `wl-paste` every tick.
+#[cfg(not(windows))]
+struct ChangeWatch {
+    child: tokio::process::Child,
+    changed: Arc<AtomicBool>,
+}
+
+/// After a watcher could not start or ended, how long the loop reads every
+/// tick before it tries one again (a compositor restarting, or an old
+/// `wl-clipboard` without `--watch`).
+#[cfg(not(windows))]
+const WATCH_RETRY: Duration = Duration::from_secs(60);
+
+#[cfg(not(windows))]
+impl ChangeWatch {
+    fn start() -> std::io::Result<Self> {
+        Self::start_with("wl-paste", &["--watch", "echo"])
+    }
+
+    fn start_with(program: &str, args: &[&str]) -> std::io::Result<Self> {
+        let mut child = tokio::process::Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| std::io::Error::other("no output to read"))?;
+        // What is there when it starts is read once.
+        let changed = Arc::new(AtomicBool::new(true));
+        let flag = Arc::clone(&changed);
+        tokio::spawn(async move {
+            use tokio::io::AsyncBufReadExt;
+            let mut lines = tokio::io::BufReader::new(stdout).lines();
+            while let Ok(Some(_)) = lines.next_line().await {
+                flag.store(true, Ordering::Relaxed);
+            }
+        });
+        Ok(Self { child, changed })
+    }
+
+    /// Whether the clipboard changed since the last look; `None` once the
+    /// watcher has ended.
+    fn take_change(&mut self) -> Option<bool> {
+        match self.child.try_wait() {
+            Ok(None) => Some(self.changed.swap(false, Ordering::Relaxed)),
+            _ => None,
+        }
+    }
+}
+
 /// Watch the clipboard while any connection could receive it, and push
 /// what changes. Runs for the server's life when `clipboard_push` is on.
 pub(crate) async fn run() {
     let mut watch = Watch::default();
     #[cfg(windows)]
     let mut sequence = None;
+    #[cfg(not(windows))]
+    let mut change_watch: Option<ChangeWatch> = None;
+    #[cfg(not(windows))]
+    let mut watch_again_at: Option<tokio::time::Instant> = None;
+    #[cfg(not(windows))]
+    let mut said = false;
     let mut tick = tokio::time::interval(TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -190,6 +254,11 @@ pub(crate) async fn run() {
             #[cfg(windows)]
             {
                 sequence = None;
+            }
+            // No one to tell: the watcher ends with the last of them.
+            #[cfg(not(windows))]
+            {
+                change_watch = None;
             }
             continue;
         }
@@ -216,6 +285,36 @@ pub(crate) async fn run() {
         }
         #[cfg(not(windows))]
         {
+            let may_watch = crate::plugins::clipboard::stand_in().is_none()
+                && watch_again_at.is_none_or(|at| tokio::time::Instant::now() >= at);
+            if change_watch.is_none() && may_watch {
+                match ChangeWatch::start() {
+                    Ok(started) => change_watch = Some(started),
+                    Err(e) => {
+                        if !std::mem::replace(&mut said, true) {
+                            tracing::info!(
+                                "No wl-paste --watch ({e}): the clipboard is read every 2 s"
+                            );
+                        }
+                        watch_again_at = Some(tokio::time::Instant::now() + WATCH_RETRY);
+                    }
+                }
+            }
+            if let Some(watcher) = change_watch.as_mut() {
+                match watcher.take_change() {
+                    Some(false) => continue,
+                    Some(true) => {}
+                    None => {
+                        if !std::mem::replace(&mut said, true) {
+                            tracing::info!(
+                                "wl-paste --watch ended: the clipboard is read every 2 s for a while"
+                            );
+                        }
+                        change_watch = None;
+                        watch_again_at = Some(tokio::time::Instant::now() + WATCH_RETRY);
+                    }
+                }
+            }
             let text = crate::plugins::clipboard::read_text().await.ok().flatten();
             push_change(&mut watch, text, clients, linked).await;
         }
@@ -254,6 +353,19 @@ async fn push_change(
 mod tests {
     use super::*;
     use pocketdesk_core::protocol::kdeconnect::TcpDeviceSender;
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_watcher_says_a_change_once_and_none_once_it_ends() {
+        // Two changes, then it stays: `sh` stands in for `wl-paste --watch`.
+        let mut watcher = ChangeWatch::start_with("sh", &["-c", "echo; echo; sleep 5"]).unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(watcher.take_change(), Some(true));
+        assert_eq!(watcher.take_change(), Some(false), "said once");
+        let mut ended = ChangeWatch::start_with("sh", &["-c", "exit 1"]).unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(ended.take_change(), None, "an old wl-paste without --watch");
+    }
 
     #[test]
     fn a_copy_is_not_sent_back_to_the_device_it_came_from() {
