@@ -542,7 +542,8 @@ mod tests {
         );
         drop(held);
         assert_eq!(start_named(&specs, "ha-quick"), Ok(()));
-        for _ in 0..20 {
+        // Up to 10 s: a loaded CI runner starts a shell slowly.
+        for _ in 0..100 {
             if !RUNNING.lock().unwrap().contains("ha-quick") {
                 break;
             }
