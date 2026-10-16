@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::audio::{AudioConfig, AudioEncoder as AudioOpusEncoder};
 use super::audio_capture;
-use super::bitrate::LossCeiling;
+use super::bitrate::{DeliveryCeiling, LossCeiling};
 use super::capture;
 use super::connection::{Connection, QuinnConnection, SharedConnection};
 use super::encoder::VideoEncoder;
@@ -629,6 +629,11 @@ impl StreamingServer {
             Some(session)
         };
 
+        // What the video transport waited for delivery (microseconds) and got
+        // onto the link (bytes), for the arbiter's delivery ceiling (R6f).
+        let delivery_waited_us = std::sync::Arc::new(AtomicU64::new(0));
+        let delivery_bytes = std::sync::Arc::new(AtomicU64::new(0));
+
         // Clone connection for use across multiple tasks
         let conn_for_transport = connection.clone();
         let conn_for_monitor = connection.clone();
@@ -967,6 +972,8 @@ impl StreamingServer {
             // Task 3: Packet transport — sends packets over QUIC (newest-only),
             // at most `MAX_VIDEO_IN_FLIGHT` frames on the wire at once
             let telemetry_bytes_tx = telemetry.as_ref().map(|t| t.1.clone());
+            let transport_waited_us = delivery_waited_us.clone();
+            let transport_bytes = delivery_bytes.clone();
             let transport_cancel = cancel.clone();
             let transport_fps = self.config.fps;
             let transport_span = tracing::info_span!("video_transport");
@@ -1035,7 +1042,10 @@ impl StreamingServer {
 
                             // A slow link holds the next frame here, in the
                             // queue the next batch trims, not in the
-                            // connection's send buffer.
+                            // connection's send buffer. How long it is held,
+                            // with the writes below, is the delivery ceiling's
+                            // signal (R6f).
+                            let send_started = Instant::now();
                             if !in_flight.admit(&transport_cancel).await {
                                 connection_closed = true;
                                 packets_dropped += 1;
@@ -1078,6 +1088,11 @@ impl StreamingServer {
 
                                     packets_sent += 1;
                                     bytes_sent += data_len as u64;
+                                    transport_waited_us.fetch_add(
+                                        send_started.elapsed().as_micros() as u64,
+                                        Ordering::Relaxed,
+                                    );
+                                    transport_bytes.fetch_add(data_len as u64, Ordering::Relaxed);
                                     if let Some(counter) = &telemetry_bytes_tx {
                                         counter.fetch_add(data_len as u64, Ordering::Relaxed);
                                     }
@@ -1419,6 +1434,7 @@ impl StreamingServer {
         //                 .min(relay_cap)        // 2 Mbit/s while relayed
         //                 .min(preset_ceil)      // HUD profile, relative to native
         //                 .min(loss_cap)         // 20 % off per congested tick
+        //                 .min(delivery_cap)     // under what a slow link carried
         //
         // Unlike the other two, `loss_cap` has memory: it is a controller
         // reading the transport's counters once per tick, and it walks back up
@@ -1436,10 +1452,13 @@ impl StreamingServer {
             let arb_cancel = cancel.clone();
             let arb_full_quality = self.full_quality.clone();
             let arb_preset = self.preset.clone();
+            let (arb_waited_us, arb_bytes) = (delivery_waited_us.clone(), delivery_bytes.clone());
             tasks.spawn(async move {
                 // Seed with the configured rate; the first tick reconciles.
                 let mut applied = configured_bitrate;
                 let mut loss = LossCeiling::new(configured_bitrate);
+                let mut delivery = DeliveryCeiling::new(configured_bitrate);
+                let mut last_tick = Instant::now();
                 loop {
                     tokio::select! {
                         _ = arb_cancel.cancelled() => break,
@@ -1448,6 +1467,12 @@ impl StreamingServer {
                     let stats = arb_conn.stats();
                     loss.sample(stats.lost_packets, stats.datagrams_sent);
                     let loss_cap = loss.ceiling();
+                    delivery.sample(
+                        arb_waited_us.load(Ordering::Relaxed),
+                        arb_bytes.load(Ordering::Relaxed),
+                        std::mem::replace(&mut last_tick, Instant::now()).elapsed(),
+                    );
+                    let delivery_cap = delivery.ceiling();
                     let relayed = stats.relayed && !arb_full_quality.load(Ordering::Relaxed);
                     let relay_cap = if relayed {
                         RELAY_BITRATE_CAP_BPS
@@ -1459,7 +1484,8 @@ impl StreamingServer {
                     let effective = configured_bitrate
                         .min(relay_cap)
                         .min(preset_ceil)
-                        .min(loss_cap);
+                        .min(loss_cap)
+                        .min(delivery_cap);
                     if effective == applied {
                         continue;
                     }
@@ -1469,6 +1495,7 @@ impl StreamingServer {
                         relayed,
                         preset = arb_preset.load(Ordering::Relaxed),
                         loss_cap = (loss_cap != u32::MAX).then_some(loss_cap),
+                        delivery_cap = (delivery_cap != u32::MAX).then_some(delivery_cap),
                         "Encoder bitrate target changed"
                     );
                     let _ = arb_bitrate_tx.send(effective);

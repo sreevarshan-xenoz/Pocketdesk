@@ -136,9 +136,262 @@ fn next_loss_ceiling(configured: u32, ceiling: u32, sent: u64, lost: u64) -> u32
     }
 }
 
+/// Delivery-driven bitrate ceiling (R6f): what the link actually carried.
+///
+/// On a slow hop that loses little at random, QUIC's congestion control
+/// keeps the router's queue from overflowing, so [`LossCeiling`] sees almost
+/// nothing: R6e's 1 Mbit/s link lost 89 datagrams in 5 minutes while the
+/// encoder ran at 6.4-8 Mbit/s and the transport threw away what could not
+/// leave (5-12 frames a second reached the phone). The transport knows,
+/// though: it waits for its frames to be delivered before it sends more
+/// (`super::in_flight`), and a link that is the limit keeps it waiting.
+///
+/// Each arbiter tick reads how long the video transport waited, and how many
+/// video bytes it got onto the link. Waiting for most of a tick, twice in a
+/// row (one keyframe can fill one), means the link is the limit, and the
+/// rate that got through is the link's: the ceiling goes just under it.
+/// Three ticks in a row that used most of the ceiling with the transport
+/// hardly waiting let it climb back, a quarter a step, until it is above the
+/// configured rate and inert again. A tick that sent far less (a still
+/// desktop) says nothing about the link, so it holds: climbing then would
+/// only meet the next motion with a rate the link cannot carry (the first
+/// version did, on R6e's test). Each change rebuilds the encoder, which
+/// starts on a keyframe, so steps are few.
+pub struct DeliveryCeiling {
+    configured: u32,
+    ceiling: u32,
+    starved: u32,
+    clean: u32,
+    prev_blocked_us: u64,
+    prev_bytes: u64,
+    primed: bool,
+}
+
+/// The transport waited for delivery this share of a tick, or more: the
+/// link is the limit.
+const BLOCKED_SHARE: f64 = 0.5;
+
+/// Waiting this share of a tick or less: the link has room.
+const UNBLOCKED_SHARE: f64 = 0.1;
+
+/// Starved ticks in a row before a cut: one is a keyframe's burst.
+const STARVED_TICKS: u32 = 2;
+
+/// Clean ticks in a row before each step back up.
+const CLEAN_TICKS: u32 = 3;
+
+/// A clean tick counts only when it sent at least this share of the
+/// ceiling: one that sent less shows nothing about the link's room.
+const USED_SHARE: f64 = 0.7;
+
+/// Each step back up.
+const DELIVERY_RECOVER_FACTOR: f64 = 1.25;
+
+/// The ceiling's share of what got through: room for sound, headers and the
+/// link's own wobble.
+const DELIVERY_MARGIN: f64 = 0.85;
+
+/// The lowest rate this goes to. Under [`LOSS_BITRATE_FLOOR_BPS`] the picture
+/// is coarse, but a moving coarse picture beats a frozen sharp one on a link
+/// that carries no more (R6f lowers the frame rate too, which keeps it
+/// readable).
+pub const DELIVERY_FLOOR_BPS: u32 = 250_000;
+
+impl DeliveryCeiling {
+    pub fn new(configured_bps: u32) -> Self {
+        Self {
+            configured: configured_bps,
+            ceiling: u32::MAX,
+            starved: 0,
+            clean: 0,
+            prev_blocked_us: 0,
+            prev_bytes: 0,
+            primed: false,
+        }
+    }
+
+    /// Fold one tick of the transport's cumulative counters: microseconds
+    /// spent waiting for delivery, and video bytes sent, over `tick`.
+    pub fn sample(&mut self, blocked_us: u64, bytes_sent: u64, tick: std::time::Duration) {
+        let blocked = blocked_us.saturating_sub(self.prev_blocked_us);
+        let bytes = bytes_sent.saturating_sub(self.prev_bytes);
+        self.prev_blocked_us = blocked_us;
+        self.prev_bytes = bytes_sent;
+        if !std::mem::replace(&mut self.primed, true) {
+            return;
+        }
+        let secs = tick.as_secs_f64().max(0.001);
+        let share = (blocked as f64 / 1e6 / secs).min(1.0);
+        let delivered_bps = bytes as f64 * 8.0 / secs;
+        (self.ceiling, self.starved, self.clean) = next_delivery_ceiling(
+            self.configured,
+            self.ceiling,
+            self.starved,
+            self.clean,
+            share,
+            delivered_bps,
+        );
+    }
+
+    /// The ceiling to fold into the arbiter's `min` chain; [`u32::MAX`] when
+    /// the link has never been the limit, or has room again.
+    pub fn ceiling(&self) -> u32 {
+        self.ceiling
+    }
+}
+
+/// One tick of [`DeliveryCeiling::sample`], pure: the new ceiling and the
+/// starved and clean streaks.
+fn next_delivery_ceiling(
+    configured: u32,
+    ceiling: u32,
+    starved: u32,
+    clean: u32,
+    blocked_share: f64,
+    delivered_bps: f64,
+) -> (u32, u32, u32) {
+    let base = ceiling.min(configured);
+    if blocked_share >= BLOCKED_SHARE {
+        let starved = starved + 1;
+        if starved < STARVED_TICKS {
+            return (ceiling, starved, 0);
+        }
+        let through = (delivered_bps * DELIVERY_MARGIN) as u32;
+        return (
+            through.clamp(DELIVERY_FLOOR_BPS.min(base), base),
+            starved,
+            0,
+        );
+    }
+    if blocked_share > UNBLOCKED_SHARE
+        || ceiling == u32::MAX
+        || delivered_bps < base as f64 * USED_SHARE
+    {
+        return (ceiling, 0, 0);
+    }
+    let clean = clean + 1;
+    if clean < CLEAN_TICKS {
+        return (ceiling, 0, clean);
+    }
+    let climbing = (base as f64 * DELIVERY_RECOVER_FACTOR) as u32;
+    if climbing >= configured {
+        (u32::MAX, 0, 0)
+    } else {
+        (climbing, 0, 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TICK: std::time::Duration = std::time::Duration::from_secs(2);
+
+    /// One tick of a transport that waited `share` of it and sent `bps`.
+    fn tick(d: &mut DeliveryCeiling, waited: &mut u64, sent: &mut u64, share: f64, bps: u64) {
+        *waited += (share * 2e6) as u64;
+        *sent += bps * 2 / 8;
+        d.sample(*waited, *sent, TICK);
+    }
+
+    #[test]
+    fn a_link_that_keeps_the_transport_waiting_caps_the_rate_under_what_got_through() {
+        let mut d = DeliveryCeiling::new(8_000_000);
+        let (mut waited, mut sent) = (0, 0);
+        d.sample(0, 0, TICK); // the baseline
+        tick(&mut d, &mut waited, &mut sent, 0.9, 1_000_000);
+        assert_eq!(
+            d.ceiling(),
+            u32::MAX,
+            "one starved tick is a keyframe's burst"
+        );
+        tick(&mut d, &mut waited, &mut sent, 0.9, 1_000_000);
+        assert_eq!(
+            d.ceiling(),
+            850_000,
+            "just under the 1 Mbit/s that got through"
+        );
+        tick(&mut d, &mut waited, &mut sent, 0.8, 600_000);
+        assert_eq!(
+            d.ceiling(),
+            510_000,
+            "still waiting: down to what gets through now"
+        );
+    }
+
+    #[test]
+    fn a_still_desktop_sending_little_is_not_starved() {
+        let mut d = DeliveryCeiling::new(8_000_000);
+        let (mut waited, mut sent) = (0, 0);
+        d.sample(0, 0, TICK);
+        for _ in 0..10 {
+            tick(&mut d, &mut waited, &mut sent, 0.0, 50_000);
+        }
+        assert_eq!(d.ceiling(), u32::MAX);
+    }
+
+    #[test]
+    fn the_rate_climbs_back_once_the_link_carries_the_ceiling_with_room() {
+        let mut d = DeliveryCeiling::new(1_000_000);
+        let (mut waited, mut sent) = (0, 0);
+        d.sample(0, 0, TICK);
+        for _ in 0..2 {
+            tick(&mut d, &mut waited, &mut sent, 1.0, 600_000);
+        }
+        assert_eq!(d.ceiling(), 510_000);
+        for _ in 0..2 {
+            tick(&mut d, &mut waited, &mut sent, 0.0, 450_000);
+        }
+        assert_eq!(d.ceiling(), 510_000, "two clean ticks are not enough");
+        tick(&mut d, &mut waited, &mut sent, 0.0, 450_000);
+        assert_eq!(d.ceiling(), 637_500, "the third steps it up a quarter");
+        for _ in 0..30 {
+            let using = (d.ceiling() as f64 * 0.8) as u64;
+            tick(&mut d, &mut waited, &mut sent, 0.0, using.min(900_000));
+        }
+        assert_eq!(
+            d.ceiling(),
+            u32::MAX,
+            "inert again above the configured rate"
+        );
+    }
+
+    #[test]
+    fn a_still_desktop_after_a_cut_holds_the_ceiling() {
+        let mut d = DeliveryCeiling::new(8_000_000);
+        let (mut waited, mut sent) = (0, 0);
+        d.sample(0, 0, TICK);
+        for _ in 0..2 {
+            tick(&mut d, &mut waited, &mut sent, 1.0, 1_000_000);
+        }
+        assert_eq!(d.ceiling(), 850_000);
+        for _ in 0..20 {
+            tick(&mut d, &mut waited, &mut sent, 0.0, 100_000);
+        }
+        assert_eq!(
+            d.ceiling(),
+            850_000,
+            "sending little shows nothing of the link's room"
+        );
+    }
+
+    #[test]
+    fn a_starved_link_stops_at_the_floor_and_a_wobble_holds() {
+        assert_eq!(
+            next_delivery_ceiling(8_000_000, 900_000, 2, 0, 1.0, 10_000.0).0,
+            DELIVERY_FLOOR_BPS
+        );
+        assert_eq!(
+            next_delivery_ceiling(8_000_000, 900_000, 0, 2, 0.3, 500_000.0),
+            (900_000, 0, 0),
+            "between the thresholds nothing moves, and the streaks start over"
+        );
+        assert_eq!(
+            next_delivery_ceiling(8_000_000, u32::MAX, 1, 0, 0.9, 20_000_000.0).0,
+            8_000_000,
+            "never above the configured rate"
+        );
+    }
 
     #[test]
     fn loss_starts_disengaged() {
