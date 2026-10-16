@@ -567,6 +567,8 @@ impl LinkAcceptor {
     /// The next stream, or `None` once the connection is gone.
     pub async fn accept(&self) -> Option<Box<dyn crate::protocol::kdeconnect::TransferIo>> {
         let (send, recv) = self.0.accept_bi().await.ok()?;
+        // Behind the control stream (priority 0), as on the computer's side.
+        let _ = send.set_priority(-1);
         Some(Box::new(tokio::io::join(recv, send)))
     }
 }
