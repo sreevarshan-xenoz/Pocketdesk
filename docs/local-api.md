@@ -102,7 +102,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `phone_battery_low` | `charge` | — |
 | `notification` | `app` | `title`, `text` |
 | `text_received` | — | `from`, `body` |
-| `file_received` | `size`, and `folder: true` for each file of a folder | `name` (`folder/file` for a folder's) |
+| `file_received` | `size`; or `folder: true`, once, as a folder starts arriving | `name` (`folder/` for a folder) |
 | `link_received` | `host` | `url` |
 
 By default an event says who, when and how much, never what. Settings "Details in events" (`events_detail = "full"`) adds the content. With "Event log" off (`events = false`) nothing is written, and `events` shows nothing. New kinds and fields may be added within `"api": 1`.
@@ -114,7 +114,7 @@ By default an event says who, when and how much, never what. Settings "Details i
 file_received = "notify-send 'A file came from the phone'"
 ```
 
-At most 4 hooks run at once, each is stopped after 30 s, and none opens a window. A hook runs even with "Event log" off.
+At most 4 hooks run at once and up to 32 more wait their turn (past that one is skipped, and logged); each is stopped after 30 s, and none opens a window. A hook runs even with "Event log" off.
 
 ## Acting
 

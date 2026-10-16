@@ -998,13 +998,16 @@ fn received_in(
                 from: from.to_string(),
             };
             let added = received::add_to_folder(state_dir, entry);
-            // A folder's files are one event each: a script may want them all.
-            crate::events::emit(
-                "file_received",
-                Some(from),
-                serde_json::json!({ "size": size, "folder": true }),
-                serde_json::json!({ "name": format!("{folder}/{}", name_of(path)) }),
-            );
+            // A folder is one event, as it is one notification: a folder of
+            // a thousand files would otherwise be a thousand hooks.
+            if matches!(added, Ok(true)) {
+                crate::events::emit(
+                    "file_received",
+                    Some(from),
+                    serde_json::json!({ "folder": true }),
+                    serde_json::json!({ "name": format!("{folder}/") }),
+                );
+            }
             match added {
                 Ok(true) => Some((
                     "Pocketdesk: folder arriving",

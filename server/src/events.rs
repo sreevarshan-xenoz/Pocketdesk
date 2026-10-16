@@ -2,28 +2,98 @@
 //! appended to the owner-only log other programs read (`pocketdesk events`,
 //! `core::local::events`), and runs the command the owner set for its kind
 //! in `[hooks]`, through the system shell, with the event's JSON on stdin and
-//! in `POCKETDESK_EVENT`. config.toml is read at each event, so a change in
-//! Settings applies at once.
+//! in `POCKETDESK_EVENT`. config.toml is read again whenever it changed, so
+//! a change in Settings applies at once.
 
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use pocketdesk_core::local::config::Config;
 use pocketdesk_core::local::events::{self, Event};
 use serde_json::Value;
 
-/// Hooks running at once, at most; another is skipped (and logged).
+/// Hooks running at once, at most.
 const MAX_HOOKS: usize = 4;
+/// Hooks waiting for one of those; past this, a hook is skipped (and logged).
+const HOOK_QUEUE: usize = 32;
 /// A hook still running after this is killed.
 const HOOK_DEADLINE: Duration = Duration::from_secs(30);
 
-static RUNNING: AtomicUsize = AtomicUsize::new(0);
 /// One writer at a time appends to the log.
 static WRITE: Mutex<()> = Mutex::new(());
+
+/// config.toml as last read, and when it was last changed.
+static CONFIG: Mutex<Option<(Option<SystemTime>, Config)>> = Mutex::new(None);
+
+/// config.toml now: read again only once it changed, and the last good one
+/// kept while it does not read (a save half done, a hand edit gone wrong).
+fn current_config() -> Config {
+    let path = pocketdesk_core::local::paths::config_dir()
+        .map(|dir| dir.join(pocketdesk_core::local::paths::CONFIG_FILE));
+    let modified = path
+        .as_ref()
+        .ok()
+        .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+    let mut cached = CONFIG.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((when, config)) = cached.as_ref()
+        && *when == modified
+    {
+        return config.clone();
+    }
+    let read = match &path {
+        Ok(path) => Config::load_from(path),
+        Err(_) => Ok(Config::default()),
+    };
+    match read {
+        Ok(config) => {
+            *cached = Some((modified, config.clone()));
+            config
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "config.toml did not read; events go by the last good one");
+            cached
+                .as_ref()
+                .map(|(_, config)| config.clone())
+                .unwrap_or_default()
+        }
+    }
+}
+
+/// A hook to run: its kind, its command line, the event's JSON.
+type Job = (String, String, String);
+
+/// The queue hooks wait in, and the [`MAX_HOOKS`] threads that run them.
+static HOOKS: LazyLock<SyncSender<Job>> = LazyLock::new(|| {
+    let (tx, rx) = sync_channel::<Job>(HOOK_QUEUE);
+    let rx = Arc::new(Mutex::new(rx));
+    for _ in 0..MAX_HOOKS {
+        let rx = rx.clone();
+        let _ = std::thread::Builder::new()
+            .name("event-hook".into())
+            .spawn(move || run_hooks(&rx));
+    }
+    tx
+});
+
+fn run_hooks(rx: &Mutex<Receiver<Job>>) {
+    loop {
+        let job = rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
+        let Ok((kind, command, json)) = job else {
+            return;
+        };
+        match run_hook(&command, &json, HOOK_DEADLINE) {
+            Ok(HookEnd::Exited(code)) => tracing::info!(kind, ?code, "Hook ran"),
+            Ok(HookEnd::TimedOut) => {
+                tracing::warn!(kind, "Hook killed after {}s", HOOK_DEADLINE.as_secs());
+            }
+            Err(e) => tracing::warn!(kind, error = %e, "Hook could not run"),
+        }
+    }
+}
 
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
@@ -42,7 +112,7 @@ pub fn emit(kind: &str, device_id: Option<&str>, meta: Value, content: Value) {
     let Ok(state_dir) = crate::state::state_dir() else {
         return;
     };
-    let config = Config::load().unwrap_or_default();
+    let config = current_config();
     emit_to(
         &state_dir,
         &config,
@@ -81,28 +151,12 @@ pub(crate) fn emit_to(
     Some(event)
 }
 
-/// Run `command` for `event` on a thread of its own, unless 4 already run.
+/// Queue `command` for `event`: run by one of [`MAX_HOOKS`] threads, or
+/// skipped when [`HOOK_QUEUE`] already wait.
 fn start_hook(kind: &str, command: &str, event: &Event) {
-    if RUNNING.fetch_add(1, Ordering::SeqCst) >= MAX_HOOKS {
-        RUNNING.fetch_sub(1, Ordering::SeqCst);
-        tracing::warn!(kind, "A hook was skipped: {MAX_HOOKS} are already running");
-        return;
-    }
-    let (kind, command, json) = (kind.to_string(), command.to_string(), event.to_line());
-    let spawned = std::thread::Builder::new()
-        .name("event-hook".into())
-        .spawn(move || {
-            match run_hook(&command, &json, HOOK_DEADLINE) {
-                Ok(HookEnd::Exited(code)) => tracing::info!(kind, ?code, "Hook ran"),
-                Ok(HookEnd::TimedOut) => {
-                    tracing::warn!(kind, "Hook killed after {}s", HOOK_DEADLINE.as_secs());
-                }
-                Err(e) => tracing::warn!(kind, error = %e, "Hook could not run"),
-            }
-            RUNNING.fetch_sub(1, Ordering::SeqCst);
-        });
-    if spawned.is_err() {
-        RUNNING.fetch_sub(1, Ordering::SeqCst);
+    let job = (kind.to_string(), command.to_string(), event.to_line());
+    if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) = HOOKS.try_send(job) {
+        tracing::warn!(kind, "A hook was skipped: {HOOK_QUEUE} are already waiting");
     }
 }
 
@@ -148,12 +202,17 @@ pub(crate) fn run_hook(command: &str, json: &str, deadline: Duration) -> io::Res
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        // A hook that does not read its stdin is no failure.
-        let _ = stdin.write_all(json.as_bytes());
-        let _ = stdin.write_all(b"\n");
-    }
     let started = Instant::now();
+    if let Some(mut stdin) = child.stdin.take() {
+        // From a thread of its own: a hook that never reads a long event
+        // would block the write, and the deadline with it. A hook that does
+        // not read its stdin is no failure.
+        let json = json.to_string();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(json.as_bytes());
+            let _ = stdin.write_all(b"\n");
+        });
+    }
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(HookEnd::Exited(status.code()));
@@ -337,6 +396,54 @@ mod tests {
             HookEnd::Exited(Some(0))
         );
         assert_eq!(std::fs::read_to_string(&out).unwrap().trim(), "ok");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hook that never reads its stdin is still held to its deadline,
+    /// however long the event (a pipe holds only a few KiB).
+    #[test]
+    fn a_hook_that_ignores_a_long_event_is_still_killed_in_time() {
+        let slow = if cfg!(windows) {
+            "ping -n 30 127.0.0.1 > NUL"
+        } else {
+            "sleep 30"
+        };
+        let long = format!("{{\"text\":\"{}\"}}", "x".repeat(256 * 1024));
+        let started = Instant::now();
+        assert_eq!(
+            run_hook(slow, &long, Duration::from_millis(500)).unwrap(),
+            HookEnd::TimedOut
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn many_hooks_at_once_wait_their_turn_instead_of_being_skipped() {
+        let dir = temp("queue");
+        let mut config = Config {
+            events: false,
+            ..Config::default()
+        };
+        let marker = |i: usize| dir.join(format!("hook-{i}.txt"));
+        for i in 0..12 {
+            config
+                .hooks
+                .insert("link_received".into(), copy_stdin_to(&marker(i)));
+            emit_to(
+                &dir,
+                &config,
+                "link_received",
+                None,
+                json!({"host": "example.org"}),
+                json!({}),
+                i as u64,
+            );
+        }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while (0..12).any(|i| std::fs::metadata(marker(i)).map(|m| m.len()).unwrap_or(0) == 0) {
+            assert!(Instant::now() < deadline, "not every hook ran");
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

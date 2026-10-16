@@ -6,7 +6,7 @@ Part of the ecosystem plan (`docs/research/2026-10-16-ecosystem.md`, phase 1). O
 
 - **The event log.** The server appends one JSON object per line to `<state>/events.jsonl`, owner-only, for each event below. At 1 MiB the file moves to `events.jsonl.1` (one kept). Nothing is written with Settings "Event log" off (`events = false`).
 - **`pocketdesk events [--json] [--since-start]`** prints each new event as it is written, until stopped. It prints a line per event (`--json`: the object, with `"api": 1`). It reads only the owner's own file, like the rest of the local API, with no listener. `--since-start` prints the events already in the log first.
-- **Hooks.** In config.toml, `[hooks]` maps an event kind to a command line, e.g. `file_received = "notify-send 'got a file'"`. The server runs it through the system shell (`sh -c`, `cmd /C`) with the event's JSON on stdin and in `POCKETDESK_EVENT`. It runs it detached: at most 4 at once (more are skipped and logged), each killed after 30 s, and its exit code is logged. No window opens on Windows. The desktop app's Settings lists the hooks and edits them.
+- **Hooks.** In config.toml, `[hooks]` maps an event kind to a command line, e.g. `file_received = "notify-send 'got a file'"`. The server runs it through the system shell (`sh -c`, `cmd /S /C`) with the event's JSON on stdin and in `POCKETDESK_EVENT`. It runs it detached: at most 4 at once, up to 32 more waiting (past that skipped and logged), each killed after 30 s, and its exit code is logged. No window opens on Windows. The desktop app's Settings lists the hooks and edits them.
 - **Detail.** By default an event carries metadata only. Settings "Details in events" (`events_detail = "full"`) adds the content: notification title and text, a text's sender and body, a file's name, a link's address. Hooks see the same detail as the log.
 
 ## Events (v1)
@@ -22,7 +22,7 @@ Each event is `{"at": <unix s>, "event": <kind>, "device_id": <phone or null>, .
 | `phone_battery_low` | `charge` (when the low warning fires) | — |
 | `notification` | `app` | `title`, `text` |
 | `text_received` | — | `from`, `body` |
-| `file_received` | `size`, `folder: true` for each file of a folder | `name` |
+| `file_received` | `size`; or `folder: true`, once, as a folder starts arriving | `name` |
 | `link_received` | `host` | `url` |
 
 A new kind or field is added, never renamed or removed, within `"api": 1`.
