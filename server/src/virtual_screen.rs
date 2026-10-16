@@ -85,6 +85,17 @@ pub fn new_output(before: &[Output], after: &[Output]) -> Option<String> {
     }
 }
 
+/// The commands that pin each output where it is now. Sway arranges outputs
+/// with no position of their own, so adding a screen moved the others
+/// (found on the VM: the desktop's own output went from x 0 to 2360).
+pub fn pin_commands(outputs: &[Output]) -> Vec<String> {
+    outputs
+        .iter()
+        .filter(|o| o.rect.width > 0 && o.rect.height > 0)
+        .map(|o| format!("output {} pos {} {}", o.name, o.rect.x, o.rect.y))
+        .collect()
+}
+
 /// Where a new screen goes: right of every other output.
 pub fn right_edge(outputs: &[Output]) -> i32 {
     outputs
@@ -163,6 +174,9 @@ static CREATING: Mutex<()> = Mutex::new(());
 fn create(width: u32, height: u32) -> std::io::Result<(String, i32)> {
     let _one = CREATING.lock().unwrap_or_else(|e| e.into_inner());
     let before = outputs()?;
+    for pin in pin_commands(&before) {
+        run(&pin)?;
+    }
     run("create_output")?;
     let after = outputs()?;
     let name = new_output(&before, &after)
@@ -536,6 +550,20 @@ mod tests {
             3200
         );
         assert_eq!(right_edge(&[]), 0);
+    }
+
+    #[test]
+    fn the_outputs_there_are_pinned_where_they_are() {
+        let mut off = output("HEADLESS-9", 0, 0);
+        off.rect.height = 0;
+        assert_eq!(
+            pin_commands(&[
+                output("HEADLESS-1", 0, 1280),
+                output("DP-1", 1280, 1920),
+                off
+            ]),
+            ["output HEADLESS-1 pos 0 0", "output DP-1 pos 1280 0"]
+        );
     }
 
     #[test]
