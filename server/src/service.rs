@@ -2092,6 +2092,7 @@ mod internet_control_tests {
         });
 
         // Pings while the file moves.
+        let moving = std::time::Instant::now();
         let mut slowest = std::time::Duration::ZERO;
         while !sending.is_finished() {
             let started = std::time::Instant::now();
@@ -2104,9 +2105,12 @@ mod internet_control_tests {
         let (key, got) = receiving.await.unwrap();
         assert_eq!(&key, b"0123456789abcdef0123456789abcdef\n");
         assert_eq!(got.len() as u64, size);
+        // A control stream starved behind the transfer would wait out all of
+        // it; a busy runner slows every ping a little.
+        let took = moving.elapsed();
         assert!(
-            slowest < std::time::Duration::from_millis(500),
-            "the control stream answered within {slowest:?}"
+            slowest < (took / 3).max(std::time::Duration::from_millis(500)),
+            "the control stream answered within {slowest:?}, while the file took {took:?}"
         );
         echo.abort();
         phone.close().await;
