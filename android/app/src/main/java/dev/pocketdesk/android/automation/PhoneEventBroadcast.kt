@@ -30,6 +30,7 @@ object PhoneEventBroadcast {
         // at run time, which takes implicit broadcasts on every Android.
         runCatching { context.applicationContext.sendBroadcast(intent) }
             .onFailure { Log.w(TAG, "Could not tell other apps: ${it.message}") }
-        Log.d(TAG, "Told other apps: ${kind.event}")
+        // Metadata only, as the broadcast itself is.
+        Log.d(TAG, "Told other apps: ${kind.event} ${event.extras}")
     }
 }
