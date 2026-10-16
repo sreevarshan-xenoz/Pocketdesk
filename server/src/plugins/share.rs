@@ -417,10 +417,20 @@ impl Default for SharePlugin {
     }
 }
 
+/// Where received files go: Downloads, else home; or
+/// `POCKETDESK_DOWNLOAD_DIR`, for tests that run two servers on one
+/// machine (2h), which would share its real Downloads.
+pub(crate) fn download_dir() -> Option<PathBuf> {
+    std::env::var_os("POCKETDESK_DOWNLOAD_DIR")
+        .map(PathBuf::from)
+        .or_else(dirs::download_dir)
+        .or_else(dirs::home_dir)
+}
+
 impl SharePlugin {
     pub fn new() -> Self {
         Self {
-            download_dir: dirs::download_dir().or_else(dirs::home_dir),
+            download_dir: download_dir(),
         }
     }
 
@@ -797,6 +807,9 @@ pub(crate) enum Route {
     /// A stream on the phone's own control connection, by the internet road
     /// (2c): iroh proved both keys, and nothing dials back across a NAT.
     Link(std::sync::Arc<dyn OpenLinkStream>),
+    /// A stream another of the owner's computers opened on this one's link
+    /// to it (2h), its key line already read: that end presented the key.
+    Arrived(std::sync::Mutex<Option<Box<dyn TransferIo>>>),
 }
 
 impl std::fmt::Display for Route {
@@ -804,6 +817,7 @@ impl std::fmt::Display for Route {
         match self {
             Self::Dial { to, .. } => write!(f, "{to}"),
             Self::Link(_) => f.write_str("the phone's link by the internet road"),
+            Self::Arrived(_) => f.write_str("the link to the other computer"),
         }
     }
 }
@@ -816,9 +830,25 @@ impl Route {
         Self::Dial { to, tls }
     }
 
-    /// Open the transfer's stream: the first thing written on it is the key.
+    /// The stream another computer opened for a transfer (2h).
+    pub(crate) fn arrived(stream: Box<dyn TransferIo>) -> Self {
+        Self::Arrived(std::sync::Mutex::new(Some(stream)))
+    }
+
+    /// Whether this end presents the key: it does on a stream it opened.
+    fn presents_key(&self) -> bool {
+        !matches!(self, Self::Arrived(_))
+    }
+
+    /// Open the transfer's stream: the first thing written on it is the key,
+    /// by whichever end opened it.
     async fn open(&self) -> Result<Box<dyn TransferIo>> {
         match self {
+            Self::Arrived(stream) => stream
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+                .ok_or_else(|| io_error("open", "the stream was used")),
             Self::Dial { to, tls } => Ok(Box::new(dial_transfer(*to, tls.clone()).await?)),
             Self::Link(link) => tokio::time::timeout(CONNECT_TIMEOUT, link.open())
                 .await
@@ -995,7 +1025,9 @@ pub(crate) async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
     size: u64,
 ) -> Result<u64> {
     let mut stream = route.open().await?;
-    present_key(&mut stream, key).await?;
+    if route.presents_key() {
+        present_key(&mut stream, key).await?;
+    }
     let from = transfer::send(reader, size, &mut stream, Pace::DEFAULT, |_| {})
         .await
         .map_err(|e| io_error("send", e))?;
@@ -1379,7 +1411,9 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
             return Err(e);
         }
     };
-    present_key(&mut stream, key).await?;
+    if route.presents_key() {
+        present_key(&mut stream, key).await?;
+    }
     tracing::info!("Receiving {name} from {route} ({size} bytes)");
     let outcome = transfer::receive(
         &mut stream,
@@ -1446,6 +1480,57 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
             Err(io_error("receive", e))
         }
     }
+}
+
+/// Receive a file another of the owner's computers offered this one (2h),
+/// on the stream it opened on this computer's link to it, as a phone's
+/// share is received: into Downloads (a folder send's file under its own
+/// new folder), continuing what an earlier attempt left, and announced.
+/// `offer` is the offer's body (`name`, `size`, `source`, and a folder
+/// send's `folderId`, `folder`, `path`).
+pub(crate) async fn receive_offered(
+    stream: Box<dyn TransferIo>,
+    from: &str,
+    offer: &serde_json::Value,
+) -> Result<PathBuf> {
+    let name = safe_file_name(offer.get("name").and_then(|v| v.as_str()).unwrap_or(""));
+    let size = offer.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+    let source = offer
+        .get("source")
+        .and_then(|v| v.as_str())
+        .filter(|s| pocketdesk_core::protocol::partials::valid_source(s))
+        .map(str::to_string);
+    let dir = download_dir().ok_or_else(|| io_error("receive", "no downloads or home folder"))?;
+    let store =
+        partials().ok_or_else(|| io_error("receive", "no state folder for the transfer"))?;
+    let (dir, name, top) = match folder_of(offer) {
+        None => (dir, name, None),
+        Some((folder_id, folder, path)) => {
+            let (dir, name) = folder_tops()
+                .place(&dir, from, &folder_id, &folder, &path)
+                .map_err(|reason| io_error("receive", reason))?;
+            let top = folder_tops().top(from, &folder_id);
+            (dir, name, top)
+        }
+    };
+    let announced = from.to_string();
+    receive_file(
+        Route::arrived(stream),
+        "",
+        Incoming {
+            dir: &dir,
+            name: &name,
+            size,
+            device: from,
+            source: source.as_deref(),
+            store: &store,
+            limits: partial_limits(),
+            on_saved: Box::new(move |path: &Path| {
+                on_received(path, size, &announced, top.as_deref())
+            }),
+        },
+    )
+    .await
 }
 
 /// Move the finished `part` into `dir` under a name like `name` that no

@@ -1,10 +1,12 @@
-//! Two computers pair, keep a link (2f) and share the clipboard (2g), as
+//! Two computers pair, keep a link (2f), share the clipboard (2g) and send
+//! each other files (2h), as
 //! two real servers side by side (R6a's seams: each with its own config and
 //! state folders and ports). B mints a code as its Pair tab does; A is
 //! asked to pair with B's pairing link as the desktop app asks, through
 //! `computers_out/`. Each has a file for a clipboard
-//! (`POCKETDESK_CLIPBOARD_FILE`): two servers on one machine would share
-//! its real one.
+//! (`POCKETDESK_CLIPBOARD_FILE`) and a folder for Downloads
+//! (`POCKETDESK_DOWNLOAD_DIR`): two servers on one machine would share its
+//! real ones.
 //!
 //! Ignored: it starts two real servers, which reach iroh's relays. Run it
 //! with `cargo test -p pocketdesk-server --test two_computers -- --ignored`.
@@ -15,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::computers::{self, ComputerAsk, ComputersFile};
 use pocketdesk_core::local::pair_link::PairLink;
-use pocketdesk_core::local::{device_keys, identity, pin};
+use pocketdesk_core::local::sent::{self, SentState};
+use pocketdesk_core::local::{device_keys, identity, outbox, pin};
 use pocketdesk_core::protocol::kdeconnect::TrustStore;
 use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
 
@@ -43,6 +46,7 @@ fn pocketdesk(config: &Path, state: &Path) -> Command {
         .env("POCKETDESK_CONFIG_DIR", config)
         .env("POCKETDESK_STATE_DIR", state)
         .env("POCKETDESK_CLIPBOARD_FILE", clipboard(state))
+        .env("POCKETDESK_DOWNLOAD_DIR", downloads(state))
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     command
@@ -51,6 +55,31 @@ fn pocketdesk(config: &Path, state: &Path) -> Command {
 /// The file that stands in for a server's clipboard.
 fn clipboard(state: &Path) -> PathBuf {
     state.parent().unwrap().join("clipboard.txt")
+}
+
+/// The folder that stands in for a server's Downloads.
+fn downloads(state: &Path) -> PathBuf {
+    state.parent().unwrap().join("downloads")
+}
+
+/// Ask `from`'s server to send `file` to `to` as its desktop app asks, and
+/// wait for it to arrive whole in `to_state`'s Downloads.
+fn send_and_receive(from: &Path, to: &str, to_state: &Path, file: &Path) {
+    let asked = outbox::request(from, to, file.to_str().unwrap(), pin::now_unix()).unwrap();
+    let sent = wait_for(60, "the send to end", || {
+        sent::read(from)
+            .into_iter()
+            .find(|f| f.id == asked.id && f.state != SentState::Offered)
+            .map(|f| f.state)
+    });
+    assert_eq!(sent, SentState::Sent);
+    let arrived = downloads(to_state).join(file.file_name().unwrap());
+    assert_eq!(
+        std::fs::read(&arrived).unwrap(),
+        std::fs::read(file).unwrap(),
+        "{} arrived whole",
+        arrived.display()
+    );
 }
 
 /// Wait for `state`'s clipboard to hold `text`.
@@ -216,6 +245,19 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
     clipboard_holds(&b_state, "copied on A", "A's copy on B");
     std::fs::write(clipboard(&b_state), "copied on B").unwrap();
     clipboard_holds(&a_state, "copied on B", "B's copy on A");
+
+    // Files both ways (2h): A shares on the link, B offers and A fetches.
+    let file = |state: &Path, name: &str, seed: u8| {
+        let path = state.parent().unwrap().join(name);
+        let bytes: Vec<u8> = (0..3 * 1024 * 1024u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8 ^ seed)
+            .collect();
+        std::fs::write(&path, bytes).unwrap();
+        path
+    };
+    let b_id = link.device_id.clone();
+    send_and_receive(&a_state, &b_id, &b_state, &file(&a_state, "from-a.bin", 1));
+    send_and_receive(&b_state, &a_id, &a_state, &file(&b_state, "from-b.bin", 2));
 
     // A forgets B: its entry goes, and the link with it.
     computers::request(

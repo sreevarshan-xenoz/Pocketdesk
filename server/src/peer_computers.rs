@@ -8,7 +8,9 @@
 //! rides iroh, dialed from this server's own WAN endpoint (a second
 //! endpoint with the same key could not use a relay, 2b): direct at home,
 //! direct or relayed from anywhere. On it this computer is the other's
-//! client, as a phone is.
+//! client, as a phone is: it shares files as a phone shares them and
+//! fetches what the other offers it (2h), on streams the other opens on the
+//! link.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,7 +21,7 @@ use pocketdesk_core::local::computers::{self, ComputerAsk, PairingOutcome, PeerC
 use pocketdesk_core::local::pair_link::PairLink;
 use pocketdesk_core::local::paths::COMPUTERS_DIR;
 use pocketdesk_core::protocol::connection::ConnectionManager;
-use pocketdesk_core::protocol::kdeconnect::{DeviceIdentity, NetworkPacket};
+use pocketdesk_core::protocol::kdeconnect::{DeviceIdentity, NetworkPacket, TransferIo};
 use pocketdesk_core::streaming::transport::CertManager;
 use pocketdesk_core::streaming::transport::peer_label_for_address;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
@@ -44,6 +46,16 @@ const POLL: Duration = Duration::from_secs(1);
 
 /// The longest packet line taken from the other computer.
 const MAX_LINE: u64 = 4 * 1024 * 1024;
+
+/// A stream's key line, 32 hex digits and a newline, must come this soon.
+const KEY_WAIT: Duration = Duration::from_secs(5);
+
+/// How long a transfer waits for the other computer to open its stream.
+const STREAM_WAIT: Duration = Duration::from_secs(30);
+
+/// Seconds before each retry of a file that broke off: the other computer
+/// keeps what arrived, so a retry continues it (as a phone's, T6a).
+const RETRIES: [u64; 3] = [5, 15, 45];
 
 /// The server's side: take the app's requests and keep a link to each
 /// paired computer, for the server's life.
@@ -96,6 +108,29 @@ impl LinkedComputer {
             tracing::debug!(device_id = %self.device_id, "Not sent: the link is busy or gone");
         }
     }
+}
+
+/// The way to send on the link to `device_id`, while it is up.
+fn live(device_id: &str) -> Option<mpsc::Sender<NetworkPacket>> {
+    LIVE.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .cloned()
+}
+
+/// Whether the link to `device_id` is up now.
+pub(crate) fn is_linked(device_id: &str) -> bool {
+    live(device_id).is_some()
+}
+
+/// Whether `device_id` is a computer this one paired with.
+pub(crate) fn is_paired(device_id: &str) -> bool {
+    crate::state::state_dir().is_ok_and(|dir| {
+        computers::read(&dir)
+            .computers
+            .iter()
+            .any(|c| c.device_id == device_id)
+    })
 }
 
 /// The computers this one keeps a link to that are up now, for the
@@ -453,6 +488,216 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
     }
 }
 
+/// What a transfer waiting for its stream gets: the stream, or why none
+/// will come.
+type Arrival = Result<Box<dyn TransferIo>, String>;
+
+/// The transfers waiting for the other computer's stream, by key.
+static WAITERS: LazyLock<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Arrival>>>> =
+    LazyLock::new(Default::default);
+
+/// A transfer waiting for its stream on a link, under a key of its own.
+/// Dropped, it stops waiting.
+struct Waiter {
+    key: String,
+    arrival: tokio::sync::oneshot::Receiver<Arrival>,
+}
+
+impl Waiter {
+    /// Wait from now, so a fast answer is not missed: before the request
+    /// goes out.
+    fn new() -> Self {
+        let key = uuid::Uuid::new_v4().simple().to_string();
+        let (tx, arrival) = tokio::sync::oneshot::channel();
+        WAITERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.clone(), tx);
+        Self { key, arrival }
+    }
+
+    /// The stream, its key line read; or why it will not come.
+    async fn arrived(&mut self) -> Arrival {
+        match tokio::time::timeout(STREAM_WAIT, &mut self.arrival).await {
+            Ok(Ok(arrival)) => arrival,
+            Ok(Err(_)) => Err("the link closed".to_string()),
+            Err(_) => Err("the other computer did not answer in time".to_string()),
+        }
+    }
+}
+
+impl Drop for Waiter {
+    fn drop(&mut self) {
+        WAITERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.key);
+    }
+}
+
+/// Read `stream`'s key line and hand it to the transfer it names; drop one
+/// with no key in time, or a key nothing waits for.
+async fn hand_over(mut stream: Box<dyn TransferIo>) {
+    use tokio::io::AsyncReadExt;
+    let mut line = [0u8; 33];
+    match tokio::time::timeout(KEY_WAIT, stream.read_exact(&mut line)).await {
+        Ok(Ok(_)) if line[32] == b'\n' => {}
+        _ => {
+            tracing::warn!("Another computer's stream came without a key line; dropped");
+            return;
+        }
+    }
+    let Ok(key) = std::str::from_utf8(&line[..32]) else {
+        return;
+    };
+    let waiter = WAITERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(key);
+    match waiter {
+        Some(waiter) => {
+            let _ = waiter.send(Ok(stream));
+        }
+        None => tracing::warn!("Another computer's stream for no transfer waiting; dropped"),
+    }
+}
+
+/// The other computer refused the transfer `key` is for.
+fn refused(key: &str, reason: &str) {
+    let waiter = WAITERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(key);
+    if let Some(waiter) = waiter {
+        let _ = waiter.send(Err(format!("refused: {reason}")));
+    }
+}
+
+/// Whether a transfer's failure is worth a retry: not a refusal.
+fn retried(reason: &str, attempt: usize) -> Option<Duration> {
+    if reason.starts_with("refused") {
+        return None;
+    }
+    RETRIES.get(attempt).map(|secs| Duration::from_secs(*secs))
+}
+
+/// Send the file at `path` to the computer `device_id` on the link (2h), as
+/// a phone shares one: it opens a stream for it and keeps it in its
+/// Downloads. A file that breaks off is sent again (continuing) up to 3
+/// times.
+pub(crate) async fn send_file(device_id: &str, path: &Path) -> Result<(), String> {
+    let size = std::fs::metadata(path)
+        .ok()
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .ok_or("not a file")?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or("no file name")?;
+    let source = crate::offers::source_of(path, size);
+    let mut attempt = 0;
+    loop {
+        let outgoing = live(device_id).ok_or("the computer is not linked now")?;
+        let mut waiter = Waiter::new();
+        let ask = NetworkPacket::new("kdeconnect.share.request")
+            .with_body(serde_json::json!({
+                "filename": name,
+                "sourceId": source,
+                "payloadTransferInfo": {"key": waiter.key},
+            }))
+            .with_payload_size(size);
+        if outgoing.send(ask).await.is_err() {
+            return Err("the link closed".to_string());
+        }
+        let outcome = match waiter.arrived().await {
+            Ok(stream) => crate::plugins::share::send_file_to(
+                crate::plugins::share::Route::arrived(stream),
+                &waiter.key,
+                path,
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+            Err(reason) => Err(reason),
+        };
+        match outcome {
+            Ok(()) => return Ok(()),
+            Err(reason) => match retried(&reason, attempt) {
+                Some(wait) => {
+                    tracing::info!(
+                        "Sending {name} to another computer failed ({reason}); again in {wait:?}"
+                    );
+                    tokio::time::sleep(wait).await;
+                    attempt += 1;
+                }
+                None => return Err(reason),
+            },
+        }
+    }
+}
+
+/// Fetch a file the computer `device_id` offered this one (2h), as a phone
+/// fetches an offer, into Downloads. One that breaks off is fetched again
+/// (continuing) up to 3 times.
+async fn fetch_offer(device_id: String, offer: serde_json::Value) {
+    let Some(id) = offer.get("id").and_then(|v| v.as_str()).map(str::to_string) else {
+        return;
+    };
+    let name = offer
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("a file")
+        .to_string();
+    let mut attempt = 0;
+    loop {
+        let Some(outgoing) = live(&device_id) else {
+            tracing::warn!("Not fetched {name} from another computer: the link went");
+            return;
+        };
+        let mut waiter = Waiter::new();
+        let ask = NetworkPacket::new(crate::plugins::share::FETCH)
+            .with_body(serde_json::json!({"offer": id, "key": waiter.key}));
+        if outgoing.send(ask).await.is_err() {
+            return;
+        }
+        let outcome = match waiter.arrived().await {
+            Ok(stream) => crate::plugins::share::receive_offered(stream, &device_id, &offer)
+                .await
+                .map_err(|e| e.to_string()),
+            Err(reason) => Err(reason),
+        };
+        match outcome {
+            Ok(path) => {
+                tracing::info!("Received {} from another computer", path.display());
+                return;
+            }
+            Err(reason) => match retried(&reason, attempt) {
+                Some(wait) => {
+                    tracing::info!(
+                        "Fetching {name} from another computer failed ({reason}); again in {wait:?}"
+                    );
+                    tokio::time::sleep(wait).await;
+                    attempt += 1;
+                }
+                None => {
+                    tracing::warn!("Not fetched {name} from another computer: {reason}");
+                    return;
+                }
+            },
+        }
+    }
+}
+
+/// Stops a task when dropped.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// One link, until it ends.
 async fn run_link(
     dir: &Path,
@@ -473,6 +718,8 @@ async fn run_link(
         Ok(stream) => stream,
         Err(e) => return LinkEnd::Failed(format!("{e:#}")),
     };
+    // The streams the other computer opens for files (2h).
+    let acceptor = stream.link_acceptor();
     let stream = match tokio::time::timeout(
         LINK_DIAL,
         pocketdesk_core::protocol::connection::internet_control_handshake(
@@ -492,6 +739,13 @@ async fn run_link(
     set_link(dir, &computer.device_id, "linked");
     let (outgoing_tx, mut outgoing) = mpsc::channel(32);
     let _live = LiveLink::new(&computer.device_id, outgoing_tx);
+    let _accepting = acceptor.map(|acceptor| {
+        AbortOnDrop(tokio::spawn(async move {
+            while let Some(stream) = acceptor.accept().await {
+                tokio::spawn(hand_over(stream));
+            }
+        }))
+    });
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
     loop {
@@ -510,9 +764,23 @@ async fn run_link(
 }
 
 /// What this computer takes from another on the link: its endpoint, kept
-/// current, and its clipboard while it is shared (2g). The rest it pushes
-/// to any client (the HUD, wake info, control) is for phones.
+/// current, its clipboard while it is shared (2g), and the files it offers
+/// and its refusals of a transfer (2h). The rest it pushes to any client
+/// (the HUD, wake info, control) is for phones.
 async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
+    if packet.packet_type == crate::offers::OFFER {
+        tokio::spawn(fetch_offer(device_id.to_string(), packet.body.clone()));
+        return;
+    }
+    if packet.packet_type == crate::plugins::share::FETCH_REFUSED {
+        if let (Some(key), reason) = (
+            packet.body.get("key").and_then(|v| v.as_str()),
+            packet.body.get("reason").and_then(|v| v.as_str()),
+        ) {
+            refused(key, reason.unwrap_or("no reason given"));
+        }
+        return;
+    }
     if packet.packet_type == "kdeconnect.clipboard" {
         let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) else {
             return;
@@ -638,6 +906,45 @@ mod tests {
             None
         );
         assert_eq!(WanTarget::parse(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn a_transfer_is_tried_again_unless_it_was_refused() {
+        assert_eq!(retried("timed out", 0), Some(Duration::from_secs(5)));
+        assert_eq!(retried("reset", 2), Some(Duration::from_secs(45)));
+        assert_eq!(retried("reset", 3), None, "three retries at most");
+        assert_eq!(retried("refused: no room", 0), None);
+    }
+
+    #[tokio::test]
+    async fn a_stream_goes_to_the_transfer_its_key_names_and_a_refusal_ends_one() {
+        let mut waiter = Waiter::new();
+        let (mut theirs, ours) = tokio::io::duplex(1024);
+        tokio::spawn(hand_over(Box::new(ours)));
+        use tokio::io::AsyncWriteExt;
+        theirs
+            .write_all(format!("{}\nbytes", waiter.key).as_bytes())
+            .await
+            .unwrap();
+        let mut stream = waiter.arrived().await.unwrap();
+        let mut rest = [0u8; 5];
+        use tokio::io::AsyncReadExt;
+        stream.read_exact(&mut rest).await.unwrap();
+        assert_eq!(
+            &rest, b"bytes",
+            "the key line is read, the rest is the transfer's"
+        );
+
+        let mut refused_one = Waiter::new();
+        refused(&refused_one.key, "no room");
+        assert_eq!(
+            refused_one.arrived().await.err().unwrap(),
+            "refused: no room"
+        );
+        assert!(
+            !WAITERS.lock().unwrap().contains_key(&refused_one.key),
+            "nothing left waiting"
+        );
     }
 
     #[test]

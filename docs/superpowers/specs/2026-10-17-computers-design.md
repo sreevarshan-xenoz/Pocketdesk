@@ -1,6 +1,6 @@
 # Two computers: pairing, a link, the clipboard and files (2f–2h)
 
-Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2f–2h (ecosystem phase 2, "any of my devices", gap 6). Status: 2f and 2g built (see "As built" at the end); 2h to come.
+Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2f–2h (ecosystem phase 2, "any of my devices", gap 6). Status: built (see "As built" at the end).
 
 ## Goal
 
@@ -84,3 +84,11 @@ Desktop only, in Settings → "Computers": the list with Forget, "Pair another c
 - `computer_clipboard` (desktop Settings "Clipboard with my computers", off) starts the clipboard watcher even with "Clipboard to phones" off. The watcher pushes a change to the connections whose device is a computer only while it is on, and to phones only while `clipboard_push` is, each with the Clipboard permission; and to the computers this one links to (`peer_computers::linked`). A computer's `kdeconnect.clipboard` is applied only while it is on here, on either side.
 - The echo guard is T10b's: the device a copy came from is noted, and the change it causes is not sent back to it.
 - `POCKETDESK_CLIPBOARD_FILE` stands in for the clipboard (read and written as a file, and read each tick on Windows, which has no sequence for it), so `two_computers.rs` checks a copy each way between two servers on one machine, which would otherwise share its real clipboard.
+
+## As built (2h)
+
+- **A → B:** the Files tab (targets now include the linked computers, by name) and `pocketdesk send <computer> <file>` (by id, prefix or name) queue an outbox request as for a phone; for a paired computer the server sends it on the link as a share request without a port, under a key of its own, and B answers on a stream it opens on the link, as for a phone by the internet road. The sent list says `sent` once B saved it. A break is tried again 3 times (5, 15, 45 s), continuing (the request carries the file's source id); a refusal is final.
+- **B → A:** B's Files tab offers to A as to a phone (A is B's client); A fetches each offer at once without a port, and B opens a stream on the link. A receives it as a phone's share is received: into Downloads (a folder send's files under their own new folder), resumable, announced, in the received list.
+- **On A,** the streams B opens are read for their key line (5 s) and handed to the transfer waiting for that key (30 s); a stream for no transfer is dropped. B's refusal of a transfer (`file_fetch_refused`) ends its wait at once.
+- **Not yet:** a folder from A to B (refused with a reason; B's folders to A work), and "broken and continued" between two computers is the phone's resumable code, not checked by a two-computer test.
+- `POCKETDESK_DOWNLOAD_DIR` stands in for Downloads, so `two_computers.rs` sends a 3 MB file each way between two servers on one machine and compares the bytes.
