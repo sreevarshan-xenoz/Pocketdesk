@@ -337,6 +337,8 @@ fn fetch_blocking(url: &str) -> Result<Image, String> {
     runtime.block_on(async {
         let client = reqwest::Client::builder()
             .timeout(FETCH_DEADLINE)
+            // Many sites refuse a request that names no program.
+            .user_agent(concat!("Pocketdesk/", env!("CARGO_PKG_VERSION")))
             .redirect(reqwest::redirect::Policy::custom(redirect_rule))
             .build()
             .map_err(|e| e.to_string())?;
