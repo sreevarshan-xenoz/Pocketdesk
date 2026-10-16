@@ -148,23 +148,49 @@ fn next_loss_ceiling(configured: u32, ceiling: u32, sent: u64, lost: u64) -> u32
 ///
 /// Each arbiter tick reads how long the video transport waited, and how many
 /// video bytes it got onto the link. Waiting for most of a tick, twice in a
-/// row (one keyframe can fill one), means the link is the limit, and the
-/// rate that got through is the link's: the ceiling goes just under it.
-/// Three ticks in a row that used most of the ceiling with the transport
-/// hardly waiting let it climb back, a quarter a step, until it is above the
-/// configured rate and inert again. A tick that sent far less (a still
-/// desktop) says nothing about the link, so it holds: climbing then would
-/// only meet the next motion with a rate the link cannot carry (the first
-/// version did, on R6e's test). Each change rebuilds the encoder, which
-/// starts on a keyframe, so steps are few.
+/// row (one keyframe can fill one), means the link is the limit: the ceiling
+/// goes just under what got through (unless that is within a tenth of where
+/// it is, which would only rebuild the encoder), and what got through is
+/// remembered as the link's rate. Climbing back needs three ticks that used
+/// most of the ceiling with the transport hardly waiting, a quarter a step,
+/// and stops just under the remembered rate, so a steady slow link is not
+/// probed into a sawtooth of over-full queues. A minute with the transport
+/// never kept waiting, busy or still, raises the remembered rate and the
+/// ceiling one step: that is how a link that got better is found, and a
+/// still desktop does not hold a low ceiling for good. Each change rebuilds
+/// the encoder, which starts on a keyframe, so steps are few.
 pub struct DeliveryCeiling {
     configured: u32,
-    ceiling: u32,
-    starved: u32,
-    clean: u32,
+    state: DeliveryState,
     prev_blocked_us: u64,
     prev_bytes: u64,
     primed: bool,
+}
+
+/// [`DeliveryCeiling`]'s memory between ticks.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DeliveryState {
+    ceiling: u32,
+    /// Starved ticks in a row.
+    starved: u32,
+    /// Clean ticks that used most of the ceiling, since the last climb or
+    /// starved tick.
+    clean: u32,
+    /// Ticks the transport was not kept waiting, since the last probe or
+    /// starved tick.
+    quiet: u32,
+    /// What the link carried when it last starved, bits a second.
+    link: Option<u32>,
+}
+
+impl DeliveryState {
+    const INERT: Self = Self {
+        ceiling: u32::MAX,
+        starved: 0,
+        clean: 0,
+        quiet: 0,
+        link: None,
+    };
 }
 
 /// The transport waited for delivery this share of a tick, or more: the
@@ -177,15 +203,25 @@ const UNBLOCKED_SHARE: f64 = 0.1;
 /// Starved ticks in a row before a cut: one is a keyframe's burst.
 const STARVED_TICKS: u32 = 2;
 
-/// Clean ticks in a row before each step back up.
+/// Clean ticks before each step back up.
 const CLEAN_TICKS: u32 = 3;
 
-/// A clean tick counts only when it sent at least this share of the
-/// ceiling: one that sent less shows nothing about the link's room.
+/// A clean tick counts toward a climb only when it sent at least this share
+/// of the ceiling: one that sent less shows nothing about the link's room.
 const USED_SHARE: f64 = 0.7;
 
-/// Each step back up.
+/// Ticks without waiting (a minute at 2 s ticks) before a probe above the
+/// remembered rate.
+const QUIET_TICKS: u32 = 30;
+
+/// Each step back up, and each probe of the remembered rate.
 const DELIVERY_RECOVER_FACTOR: f64 = 1.25;
+
+/// A climb stops this far under the remembered rate.
+const UNDER_THE_LINK: f64 = 0.95;
+
+/// A cut to within this share of the ceiling is not worth a rebuild.
+const DEAD_BAND: f64 = 0.9;
 
 /// The ceiling's share of what got through: room for sound, headers and the
 /// link's own wobble.
@@ -201,9 +237,7 @@ impl DeliveryCeiling {
     pub fn new(configured_bps: u32) -> Self {
         Self {
             configured: configured_bps,
-            ceiling: u32::MAX,
-            starved: 0,
-            clean: 0,
+            state: DeliveryState::INERT,
             prev_blocked_us: 0,
             prev_bytes: 0,
             primed: false,
@@ -223,62 +257,95 @@ impl DeliveryCeiling {
         let secs = tick.as_secs_f64().max(0.001);
         let share = (blocked as f64 / 1e6 / secs).min(1.0);
         let delivered_bps = bytes as f64 * 8.0 / secs;
-        (self.ceiling, self.starved, self.clean) = next_delivery_ceiling(
-            self.configured,
-            self.ceiling,
-            self.starved,
-            self.clean,
-            share,
-            delivered_bps,
-        );
+        self.state = next_delivery(self.configured, self.state, share, delivered_bps);
     }
 
     /// The ceiling to fold into the arbiter's `min` chain; [`u32::MAX`] when
     /// the link has never been the limit, or has room again.
     pub fn ceiling(&self) -> u32 {
-        self.ceiling
+        self.state.ceiling
     }
 }
 
-/// One tick of [`DeliveryCeiling::sample`], pure: the new ceiling and the
-/// starved and clean streaks.
-fn next_delivery_ceiling(
+/// One step up from `base`, capped under the remembered link rate; inert
+/// once it reaches the configured rate.
+fn climb(configured: u32, base: u32, link: Option<u32>) -> u32 {
+    let mut up = (base as f64 * DELIVERY_RECOVER_FACTOR) as u32;
+    if let Some(link) = link {
+        up = up.min((link as f64 * UNDER_THE_LINK) as u32);
+    }
+    if up >= configured {
+        u32::MAX
+    } else {
+        up.max(base)
+    }
+}
+
+/// One tick of [`DeliveryCeiling::sample`], pure.
+fn next_delivery(
     configured: u32,
-    ceiling: u32,
-    starved: u32,
-    clean: u32,
+    state: DeliveryState,
     blocked_share: f64,
     delivered_bps: f64,
-) -> (u32, u32, u32) {
-    let base = ceiling.min(configured);
+) -> DeliveryState {
+    let base = state.ceiling.min(configured);
     if blocked_share >= BLOCKED_SHARE {
-        let starved = starved + 1;
-        if starved < STARVED_TICKS {
-            return (ceiling, starved, 0);
-        }
-        let through = (delivered_bps * DELIVERY_MARGIN) as u32;
-        return (
-            through.clamp(DELIVERY_FLOOR_BPS.min(base), base),
+        let starved = state.starved + 1;
+        let held = DeliveryState {
             starved,
-            0,
-        );
+            clean: 0,
+            quiet: 0,
+            ..state
+        };
+        if starved < STARVED_TICKS {
+            return held;
+        }
+        let link = (delivered_bps as u32).max(DELIVERY_FLOOR_BPS);
+        let through =
+            ((delivered_bps * DELIVERY_MARGIN) as u32).clamp(DELIVERY_FLOOR_BPS.min(base), base);
+        let ceiling = if (through as f64) > base as f64 * DEAD_BAND {
+            state.ceiling.min(base)
+        } else {
+            through
+        };
+        return DeliveryState {
+            ceiling,
+            link: Some(link),
+            ..held
+        };
     }
-    if blocked_share > UNBLOCKED_SHARE
-        || ceiling == u32::MAX
-        || delivered_bps < base as f64 * USED_SHARE
-    {
-        return (ceiling, 0, 0);
+    if state.ceiling == u32::MAX {
+        return DeliveryState::INERT;
     }
-    let clean = clean + 1;
-    if clean < CLEAN_TICKS {
-        return (ceiling, 0, clean);
+    let mut next = DeliveryState {
+        starved: 0,
+        ..state
+    };
+    if blocked_share > UNBLOCKED_SHARE {
+        // Neither starved nor clear: hold, counting nothing.
+        next.clean = 0;
+        return next;
     }
-    let climbing = (base as f64 * DELIVERY_RECOVER_FACTOR) as u32;
-    if climbing >= configured {
-        (u32::MAX, 0, 0)
-    } else {
-        (climbing, 0, 0)
+    next.quiet += 1;
+    if delivered_bps >= base as f64 * USED_SHARE {
+        next.clean += 1;
     }
+    if next.quiet >= QUIET_TICKS {
+        // A minute without waiting: try above what the link carried.
+        next.link = next
+            .link
+            .map(|link| (link as f64 * DELIVERY_RECOVER_FACTOR) as u32);
+        next.ceiling = climb(configured, base, next.link);
+        next.quiet = 0;
+        next.clean = 0;
+    } else if next.clean >= CLEAN_TICKS {
+        next.ceiling = climb(configured, base, next.link);
+        next.clean = 0;
+    }
+    if next.ceiling == u32::MAX {
+        return DeliveryState::INERT;
+    }
+    next
 }
 
 /// The frame rates a slow link steps down through (R6f).
@@ -300,22 +367,27 @@ const STEP_UP_HEADROOM: f64 = 1.25;
 /// `configured_fps`.
 pub fn slow_link_fps(configured_fps: u32, current_fps: u32, effective_bps: u32) -> u32 {
     let need = |fps: u32| u64::from(BITS_PER_FRAME) * u64::from(fps);
-    let mut candidates = std::iter::once(configured_fps)
-        .chain(SLOW_LINK_RATES.into_iter().filter(|&r| r < configured_fps));
-    let affordable = candidates
-        .find(|&fps| u64::from(effective_bps) >= need(fps))
-        .unwrap_or_else(|| configured_fps.min(SLOW_LINK_RATES[2]));
-    if affordable > current_fps {
-        // Up only with room to spare; otherwise stay.
-        let roomy = (u64::from(effective_bps) as f64) >= need(affordable) as f64 * STEP_UP_HEADROOM;
-        if roomy {
-            affordable
-        } else {
-            current_fps.min(configured_fps)
-        }
-    } else {
-        affordable
+    let rate = u64::from(effective_bps) as f64;
+    let steps: Vec<u32> = std::iter::once(configured_fps)
+        .chain(SLOW_LINK_RATES.into_iter().filter(|&r| r < configured_fps))
+        .collect();
+    let lowest = configured_fps.min(SLOW_LINK_RATES[2]);
+    let affordable = steps
+        .iter()
+        .copied()
+        .find(|&fps| rate >= need(fps) as f64)
+        .unwrap_or(lowest);
+    let current = current_fps.min(configured_fps);
+    if affordable <= current {
+        return affordable;
     }
+    // Up only to a step with room to spare: the highest such, else stay.
+    steps
+        .iter()
+        .copied()
+        .filter(|&fps| fps > current)
+        .find(|&fps| rate >= need(fps) as f64 * STEP_UP_HEADROOM)
+        .unwrap_or(current)
 }
 
 #[cfg(test)]
@@ -329,6 +401,17 @@ mod tests {
         *waited += (share * 2e6) as u64;
         *sent += bps * 2 / 8;
         d.sample(*waited, *sent, TICK);
+    }
+
+    /// A ceiling primed and cut by two starved ticks at `bps`.
+    fn cut_at(configured: u32, bps: u64) -> (DeliveryCeiling, u64, u64) {
+        let mut d = DeliveryCeiling::new(configured);
+        let (mut waited, mut sent) = (0, 0);
+        d.sample(0, 0, TICK);
+        for _ in 0..2 {
+            tick(&mut d, &mut waited, &mut sent, 1.0, bps);
+        }
+        (d, waited, sent)
     }
 
     #[test]
@@ -354,6 +437,12 @@ mod tests {
             510_000,
             "still waiting: down to what gets through now"
         );
+        tick(&mut d, &mut waited, &mut sent, 0.8, 580_000);
+        assert_eq!(
+            d.ceiling(),
+            510_000,
+            "a cut within a tenth is not worth a rebuild"
+        );
     }
 
     #[test]
@@ -361,46 +450,27 @@ mod tests {
         let mut d = DeliveryCeiling::new(8_000_000);
         let (mut waited, mut sent) = (0, 0);
         d.sample(0, 0, TICK);
-        for _ in 0..10 {
+        for _ in 0..100 {
             tick(&mut d, &mut waited, &mut sent, 0.0, 50_000);
         }
         assert_eq!(d.ceiling(), u32::MAX);
     }
 
     #[test]
-    fn the_rate_climbs_back_once_the_link_carries_the_ceiling_with_room() {
-        let mut d = DeliveryCeiling::new(1_000_000);
-        let (mut waited, mut sent) = (0, 0);
-        d.sample(0, 0, TICK);
-        for _ in 0..2 {
-            tick(&mut d, &mut waited, &mut sent, 1.0, 600_000);
+    fn a_steady_slow_link_is_not_probed_into_a_sawtooth() {
+        // 1 Mbit/s, content that fills whatever it is given.
+        let (mut d, mut waited, mut sent) = cut_at(8_000_000, 1_000_000);
+        assert_eq!(d.ceiling(), 850_000);
+        for _ in 0..20 {
+            let using = u64::from(d.ceiling()) * 9 / 10;
+            tick(&mut d, &mut waited, &mut sent, 0.0, using);
         }
-        assert_eq!(d.ceiling(), 510_000);
-        for _ in 0..2 {
-            tick(&mut d, &mut waited, &mut sent, 0.0, 450_000);
-        }
-        assert_eq!(d.ceiling(), 510_000, "two clean ticks are not enough");
-        tick(&mut d, &mut waited, &mut sent, 0.0, 450_000);
-        assert_eq!(d.ceiling(), 637_500, "the third steps it up a quarter");
-        for _ in 0..30 {
-            let using = (d.ceiling() as f64 * 0.8) as u64;
-            tick(&mut d, &mut waited, &mut sent, 0.0, using.min(900_000));
-        }
-        assert_eq!(
-            d.ceiling(),
-            u32::MAX,
-            "inert again above the configured rate"
-        );
+        assert_eq!(d.ceiling(), 950_000, "up, but only to just under the link");
     }
 
     #[test]
-    fn a_still_desktop_after_a_cut_holds_the_ceiling() {
-        let mut d = DeliveryCeiling::new(8_000_000);
-        let (mut waited, mut sent) = (0, 0);
-        d.sample(0, 0, TICK);
-        for _ in 0..2 {
-            tick(&mut d, &mut waited, &mut sent, 1.0, 1_000_000);
-        }
+    fn a_still_desktop_after_a_cut_holds_then_probes_after_a_minute() {
+        let (mut d, mut waited, mut sent) = cut_at(8_000_000, 1_000_000);
         assert_eq!(d.ceiling(), 850_000);
         for _ in 0..20 {
             tick(&mut d, &mut waited, &mut sent, 0.0, 100_000);
@@ -410,21 +480,50 @@ mod tests {
             850_000,
             "sending little shows nothing of the link's room"
         );
+        for _ in 0..10 {
+            tick(&mut d, &mut waited, &mut sent, 0.0, 100_000);
+        }
+        assert_eq!(
+            d.ceiling(),
+            1_062_500,
+            "a quiet minute probes one step above what the link carried"
+        );
+    }
+
+    #[test]
+    fn a_link_that_got_better_is_found_and_the_ceiling_goes_inert() {
+        let (mut d, mut waited, mut sent) = cut_at(2_000_000, 600_000);
+        assert_eq!(d.ceiling(), 510_000);
+        for _ in 0..400 {
+            let using = u64::from(d.ceiling()).min(10_000_000) * 8 / 10;
+            tick(&mut d, &mut waited, &mut sent, 0.0, using);
+        }
+        assert_eq!(
+            d.ceiling(),
+            u32::MAX,
+            "inert again above the configured rate"
+        );
     }
 
     #[test]
     fn a_starved_link_stops_at_the_floor_and_a_wobble_holds() {
+        let state = |ceiling, starved| DeliveryState {
+            ceiling,
+            starved,
+            ..DeliveryState::INERT
+        };
         assert_eq!(
-            next_delivery_ceiling(8_000_000, 900_000, 2, 0, 1.0, 10_000.0).0,
+            next_delivery(8_000_000, state(900_000, 2), 1.0, 10_000.0).ceiling,
             DELIVERY_FLOOR_BPS
         );
+        let wobble = next_delivery(8_000_000, state(900_000, 0), 0.3, 500_000.0);
         assert_eq!(
-            next_delivery_ceiling(8_000_000, 900_000, 0, 2, 0.3, 500_000.0),
+            (wobble.ceiling, wobble.clean, wobble.quiet),
             (900_000, 0, 0),
-            "between the thresholds nothing moves, and the streaks start over"
+            "between the thresholds nothing moves or counts"
         );
         assert_eq!(
-            next_delivery_ceiling(8_000_000, u32::MAX, 1, 0, 0.9, 20_000_000.0).0,
+            next_delivery(8_000_000, state(u32::MAX, 1), 0.9, 20_000_000.0).ceiling,
             8_000_000,
             "never above the configured rate"
         );
@@ -468,6 +567,11 @@ mod tests {
             "30's need is 500k: no room"
         );
         assert_eq!(slow_link_fps(60, 15, 700_000), 30);
+        assert_eq!(
+            slow_link_fps(60, 15, 1_100_000),
+            30,
+            "60 is affordable but has no room; 30 has"
+        );
     }
 
     #[test]
