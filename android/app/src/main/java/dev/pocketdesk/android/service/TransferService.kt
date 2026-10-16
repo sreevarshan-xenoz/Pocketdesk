@@ -147,9 +147,16 @@ class TransferService : Service() {
         return if (uris.isEmpty()) null else Job.Send(address, port, uris)
     }
 
+    /**
+     * Seconds the running job has waited for a network (R6i), shared by its
+     * files so a folder send waits 3 minutes in all, not 3 per file.
+     */
+    private var waitedOffline = 0L
+
     /** Runs on [worker]; the last job queued reports everything done since. */
     private fun run(job: Job, startId: Int) {
         lastAddress = job.address
+        waitedOffline = 0L
         val (sentBefore, countBefore) = sentTotal to sendCount
         plannedSends = 0
         var threw = false
@@ -249,10 +256,9 @@ class TransferService : Service() {
         // arrived, so each retry continues where the last one stopped. With
         // no network it first waits for one (R6i).
         var attempt = 1
-        var waitedOffline = 0L
         retry@ while (result.isFailure) {
             val error = result.exceptionOrNull()
-            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.fits(this, address), waitedOffline)) {
+            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this), waitedOffline)) {
                 is TransferRetry.Next.Stop -> {
                     if (next.noNetwork) result = Result.failure(java.io.IOException(getString(R.string.transfer_no_network)))
                     break@retry
@@ -261,7 +267,7 @@ class TransferService : Service() {
                     Log.i(TAG, "sending $name failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_waiting_network), name, 0))
                     val started = SystemClock.elapsedRealtime()
-                    val back = NetworkWait.await(this, address, next.seconds)
+                    val back = NetworkWait.await(this, next.seconds)
                     waitedOffline += (SystemClock.elapsedRealtime() - started + 999) / 1000
                     if (!back) continue@retry
                 }
@@ -329,10 +335,9 @@ class TransferService : Service() {
         // A broken download goes again a few times, continuing what it kept;
         // with no network it first waits for one (R6i).
         var attempt = 1
-        var waitedOffline = 0L
         retry@ while (result.isFailure) {
             val error = result.exceptionOrNull()
-            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.fits(this, job.address), waitedOffline)) {
+            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this), waitedOffline)) {
                 is TransferRetry.Next.Stop -> {
                     if (next.noNetwork) result = Result.failure(java.io.IOException(getString(R.string.transfer_no_network)))
                     break@retry
@@ -341,7 +346,7 @@ class TransferService : Service() {
                     Log.i(TAG, "receiving ${job.name} failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_waiting_network), job.name, 0))
                     val started = SystemClock.elapsedRealtime()
-                    val back = NetworkWait.await(this, job.address, next.seconds)
+                    val back = NetworkWait.await(this, next.seconds)
                     waitedOffline += (SystemClock.elapsedRealtime() - started + 999) / 1000
                     if (!back) continue@retry
                 }

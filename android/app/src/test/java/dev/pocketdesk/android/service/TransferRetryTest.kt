@@ -108,17 +108,17 @@ class TransferRetryTest {
         // retries (5, 15, 45 s) met no network.
         assertEquals(
             TransferRetry.Next.WhenOnline(180),
-            TransferRetry.next(1, reset, enabled = true, networkFits = false, waitedOfflineSeconds = 0),
+            TransferRetry.next(1, reset, enabled = true, hasNetwork = false, waitedOfflineSeconds = 0),
         )
         assertEquals(
             "what is left of the three minutes",
             TransferRetry.Next.WhenOnline(60),
-            TransferRetry.next(3, reset, enabled = true, networkFits = false, waitedOfflineSeconds = 120),
+            TransferRetry.next(3, reset, enabled = true, hasNetwork = false, waitedOfflineSeconds = 120),
         )
         assertEquals(
             "with the network back it is retry number one again, not a used one",
             TransferRetry.Next.After(5),
-            TransferRetry.next(1, reset, enabled = true, networkFits = true, waitedOfflineSeconds = 90),
+            TransferRetry.next(1, reset, enabled = true, hasNetwork = true, waitedOfflineSeconds = 90),
         )
     }
 
@@ -127,7 +127,7 @@ class TransferRetryTest {
         val reset = java.io.IOException("Network is unreachable (os error 101)")
         assertEquals(
             TransferRetry.Next.Stop(noNetwork = true),
-            TransferRetry.next(2, reset, enabled = true, networkFits = false, waitedOfflineSeconds = 180),
+            TransferRetry.next(2, reset, enabled = true, hasNetwork = false, waitedOfflineSeconds = 180),
         )
     }
 
@@ -139,31 +139,42 @@ class TransferRetryTest {
                 1,
                 TransferRetry.Refusal("No room for photo.jpg"),
                 enabled = true,
-                networkFits = false,
+                hasNetwork = false,
                 waitedOfflineSeconds = 0,
             ),
         )
         assertEquals(
             TransferRetry.Next.Stop(noNetwork = false),
-            TransferRetry.next(1, java.io.IOException("reset"), enabled = false, networkFits = false, waitedOfflineSeconds = 0),
+            TransferRetry.next(1, java.io.IOException("reset"), enabled = false, hasNetwork = false, waitedOfflineSeconds = 0),
         )
         assertEquals(
             TransferRetry.Next.Stop(noNetwork = false),
-            TransferRetry.next(4, java.io.IOException("reset"), enabled = true, networkFits = true, waitedOfflineSeconds = 0),
+            TransferRetry.next(4, java.io.IOException("reset"), enabled = true, hasNetwork = true, waitedOfflineSeconds = 0),
         )
     }
 
     @Test
-    fun aComputerAtHomeNeedsTheHomeNetworkNotMobileData() {
-        for (address in listOf("192.168.1.20", "10.0.0.5", "172.16.4.2", "169.254.3.3", "desk.local")) {
-            assertFalse(address, TransferRetry.networkFits(address, anyNetwork = true, localNetwork = false))
-            assertTrue(address, TransferRetry.networkFits(address, anyNetwork = true, localNetwork = true))
-        }
-        // A tailnet or public address works over any network.
-        for (address in listOf("100.101.102.103", "203.0.113.7", "desk.example.org", "2001:db8::1")) {
-            assertTrue(address, TransferRetry.networkFits(address, anyNetwork = true, localNetwork = false))
-            assertFalse(address, TransferRetry.networkFits(address, anyNetwork = false, localNetwork = false))
-        }
+    fun anyCarrierNetworkWillDoButAVpnAloneOrASuspendedOneWillNot() {
+        fun seen(vpn: Boolean = false, carrier: Boolean = true, suspended: Boolean = false) =
+            TransferRetry.SeenNetwork(vpn, carrier, suspended)
+        // Mobile data alone: a computer at home is reached by the internet road (2c).
+        assertTrue(TransferRetry.hasNetwork(listOf(seen()), sharing = false))
+        assertFalse("nothing at all", TransferRetry.hasNetwork(emptyList(), sharing = false))
+        assertFalse("a VPN left over from a lost network", TransferRetry.hasNetwork(listOf(seen(vpn = true)), sharing = false))
+        assertFalse("mobile data during a call", TransferRetry.hasNetwork(listOf(seen(suspended = true)), sharing = false))
+        assertFalse("a network with no carrier", TransferRetry.hasNetwork(listOf(seen(carrier = false)), sharing = false))
+        assertTrue("the Wi-Fi under a VPN", TransferRetry.hasNetwork(listOf(seen(vpn = true), seen()), sharing = false))
+        assertTrue("this phone's hotspot, a computer on it", TransferRetry.hasNetwork(emptyList(), sharing = true))
+    }
+
+    @Test
+    fun aJobsSecondFileDoesNotWaitAgainOnceTheBudgetIsSpent() {
+        val reset = java.io.IOException("Network is unreachable (os error 101)")
+        // A folder's first file waited the 3 minutes; the next gives up at once.
+        assertEquals(
+            TransferRetry.Next.Stop(noNetwork = true),
+            TransferRetry.next(1, reset, enabled = true, hasNetwork = false, waitedOfflineSeconds = 181),
+        )
     }
 
     @Test

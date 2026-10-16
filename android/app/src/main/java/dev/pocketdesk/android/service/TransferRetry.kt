@@ -1,8 +1,5 @@
 package dev.pocketdesk.android.service
 
-import dev.pocketdesk.android.doctor.AddressKind
-import dev.pocketdesk.android.doctor.ConnectionChecks
-
 /**
  * When a failed file is sent again (T6a). A retry continues where the last
  * attempt stopped, since the computer keeps what arrived, so retrying is
@@ -31,8 +28,9 @@ object TransferRetry {
         if (error is Refusal) null else delayBefore(attempt, error?.message, enabled)
 
     /**
-     * How long a transfer waits, in all, for the network it needs (R6i): a
-     * phone's Wi-Fi can take a minute to rejoin, longer than the retries.
+     * How long one job (a share, a folder, a download) waits, in all, for a
+     * network (R6i): a phone's Wi-Fi can take a minute to rejoin, longer
+     * than the retries. Once spent, its other files do not wait again.
      */
     const val NETWORK_WAIT_SECONDS = 180L
 
@@ -50,41 +48,46 @@ object TransferRetry {
 
     /**
      * After attempt [attempt] failed with [error]: when the phone has no
-     * network the transfer can use ([networkFits]), it waits for one, up to
-     * [NETWORK_WAIT_SECONDS] in all ([waitedOfflineSeconds] so far), without
-     * spending a retry; otherwise it retries as [delayAfter] says.
+     * network at all ([hasNetwork]), it waits for one, up to
+     * [NETWORK_WAIT_SECONDS] in all for the job ([waitedOfflineSeconds] so
+     * far), without spending a retry; otherwise it retries as [delayAfter]
+     * says.
      */
     fun next(
         attempt: Int,
         error: Throwable?,
         enabled: Boolean,
-        networkFits: Boolean,
+        hasNetwork: Boolean,
         waitedOfflineSeconds: Long,
     ): Next {
         val final = error is Refusal || error?.message?.let(::isFinal) == true
         if (!enabled || final) return Next.Stop(noNetwork = false)
-        if (!networkFits) {
+        if (!hasNetwork) {
             val left = NETWORK_WAIT_SECONDS - waitedOfflineSeconds
             return if (left > 0) Next.WhenOnline(left) else Next.Stop(noNetwork = true)
         }
         return delayAfter(attempt, error, enabled)?.let { Next.After(it) } ?: Next.Stop(noNetwork = false)
     }
 
+    /** One of the phone's networks, as [hasNetwork] reads it. */
+    data class SeenNetwork(
+        /** A VPN, which rides another network and is none by itself. */
+        val vpn: Boolean,
+        /** Wi-Fi, Ethernet or mobile data. */
+        val carrier: Boolean,
+        /** Up but carrying nothing (a mobile network during a call). */
+        val suspended: Boolean,
+    )
+
     /**
-     * Whether the phone has a network a transfer with the computer at
-     * [address] can use: one at home (a private, link-local or `.local`
-     * address) needs a local network ([localNetwork]: Wi-Fi, Ethernet, or
-     * this phone's own hotspot or tethering), not mobile data; one on a
-     * tailnet or the internet needs [anyNetwork].
+     * Whether the phone has a network a transfer may use (R6i): Wi-Fi,
+     * Ethernet or mobile data that is not suspended, or its own hotspot or
+     * tethering ([sharing]), which a computer may be on. Mobile data counts
+     * even for a computer at home, since files reach it by the internet
+     * road too (2c); whether that road is there is the retries' to find.
      */
-    fun networkFits(address: String, anyNetwork: Boolean, localNetwork: Boolean): Boolean {
-        val local = when (ConnectionChecks.kindOf(address)) {
-            AddressKind.PRIVATE_V4, AddressKind.LINK_LOCAL -> true
-            AddressKind.HOSTNAME -> address.lowercase().trimEnd('.').endsWith(".local")
-            else -> false
-        }
-        return if (local) localNetwork else anyNetwork
-    }
+    fun hasNetwork(networks: List<SeenNetwork>, sharing: Boolean): Boolean =
+        sharing || networks.any { !it.vpn && it.carrier && !it.suspended }
 
     /**
      * Whether a folder send goes on (T6b). It stops once [GIVE_UP_AFTER]
