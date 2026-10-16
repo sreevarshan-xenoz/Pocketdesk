@@ -1264,8 +1264,10 @@ On the A71 against this box, 2026-10-16:
 - [x] A trackpad drag moved the computer's pointer; Exit ended the session on the computer.
 - [x] Against a computer without T10i (the VM's older build): the remote did not hang once its session ended (found and fixed: the server never closed a finished session's connection; the phone now also gives up after 45 s).
 
+On the Azure VM (headless Sway, uinput root-only) from the A71 over the internet, after the review fixes:
+- [x] Admitted with no capture; into `wev`: Page Down, Right, F5, B, Play/Pause and Volume Up from the rows, "Hi PD" from the keyboard, trackpad motion and a tap as a left click.
+
 Owed:
-- [ ] Keys, media keys and presenter keys into a scratch window (see the VM run).
 - [ ] The owner's approval prompt ("Ask before each session") before ready.
 - [ ] Over the internet road, and a phone driving while another has a picture session (driving rules).
 
