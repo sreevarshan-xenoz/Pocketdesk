@@ -252,6 +252,15 @@ async fn pair_with(
     if link.device_id == me.device_id {
         return Err("that is this computer's own pairing link".to_string());
     }
+    if !pocketdesk_core::protocol::kdeconnect::valid_device_id(&link.device_id) {
+        return Err("the link's computer id is not a valid one".to_string());
+    }
+    // One id, one device: a computer by a paired phone's id would take that
+    // phone's sends.
+    if crate::plugins::pair::is_paired_device(&link.device_id) {
+        return Err("the link's id is one of this computer's paired devices".to_string());
+    }
+    let name = shown_name(&link.name);
     let labels: Vec<String> = link
         .addresses
         .iter()
@@ -277,19 +286,21 @@ async fn pair_with(
             };
         }
     }
-    paired?;
+    // Its endpoint as it said once paired, else as the link said.
+    let pushed = paired?;
     let now = pocketdesk_core::local::pin::now_unix();
     let computer = PeerComputer {
         device_id: link.device_id.clone(),
-        name: link.name.clone(),
+        name,
         addresses: link.addresses.clone(),
         control_port: link.control_port,
         fingerprint: fingerprint.to_ascii_lowercase(),
-        endpoint: link
-            .endpoint
-            .as_deref()
-            .and_then(|raw| serde_json::from_str(raw).ok())
-            .filter(|body| WanTarget::parse(body).is_some()),
+        endpoint: pushed.or_else(|| {
+            link.endpoint
+                .as_deref()
+                .and_then(|raw| serde_json::from_str(raw).ok())
+                .filter(|body| WanTarget::parse(body).is_some())
+        }),
         paired_unix: now,
         link: "connecting".to_string(),
         link_unix: now,
@@ -309,7 +320,7 @@ async fn dial_and_pair(
     link: &PairLink,
     me: &DeviceIdentity,
     wan: Option<&iroh::Endpoint>,
-) -> Result<(), String> {
+) -> Result<Option<serde_json::Value>, String> {
     let manager = ConnectionManager::new(Duration::from_secs(8), certs.control_client_config());
     let mut last = String::new();
     for address in &link.addresses {
@@ -337,11 +348,24 @@ fn is_pin_mismatch(error: &str) -> bool {
 }
 
 /// Pair on a control connection: the PIN, as a computer, then this
-/// computer's iroh key once paired.
-async fn pair_on<S>(stream: S, pin: &str, wan_key: Option<String>) -> Result<(), String>
+/// computer's iroh key once paired. The other's endpoint, when it pushed
+/// one meanwhile.
+async fn pair_on<S>(
+    stream: S,
+    pin: &str,
+    wan_key: Option<String>,
+) -> Result<Option<serde_json::Value>, String>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let mut endpoint = None;
+    let mut keep_endpoint = |packet: &NetworkPacket| {
+        if packet.packet_type == crate::iroh_endpoint::ENDPOINT_PACKET
+            && WanTarget::parse(&packet.body).is_some()
+        {
+            endpoint = Some(packet.body.clone());
+        }
+    };
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
     let ask = NetworkPacket::new("kdeconnect.pair")
@@ -355,7 +379,8 @@ where
                         return Ok(paired);
                     }
                 }
-                Some(_) => {} // what it pushes to any client
+                // What it pushes to any client.
+                Some(packet) => keep_endpoint(&packet),
                 None => return Err("it closed the connection".to_string()),
             }
         }
@@ -375,10 +400,30 @@ where
     // the link may be dialed.
     let _ = writer.shutdown().await;
     let _ = tokio::time::timeout(Duration::from_secs(5), async {
-        while let Ok(Some(_)) = read_packet(&mut reader).await {}
+        while let Ok(Some(packet)) = read_packet(&mut reader).await {
+            keep_endpoint(&packet);
+        }
     })
     .await;
-    Ok(())
+    Ok(endpoint)
+}
+
+/// A computer's name as the link gives it, fit to show: no control or
+/// invisible characters, at most 64 of them, else "Computer".
+fn shown_name(name: &str) -> String {
+    let shown: String = name
+        .chars()
+        .filter(|c| {
+            !c.is_control() && !pocketdesk_core::protocol::kdeconnect::is_invisible_format(*c)
+        })
+        .take(64)
+        .collect();
+    let shown = shown.trim();
+    if shown.is_empty() {
+        "Computer".to_string()
+    } else {
+        shown.to_string()
+    }
 }
 
 /// Forget a computer: its entry and the pins for its addresses. It keeps
@@ -831,12 +876,26 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         return;
     }
     if packet.packet_type == crate::iroh_endpoint::ENDPOINT_PACKET
-        && WanTarget::parse(&packet.body).is_some()
+        && let Some(target) = WanTarget::parse(&packet.body)
     {
+        // Its addresses and relays move; its key does not: one naming
+        // another key is not taken.
         let body = packet.body.clone();
         let _ = computers::update(dir, |file| {
             if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
-                c.endpoint = Some(body);
+                let same_key = c
+                    .endpoint
+                    .as_ref()
+                    .and_then(WanTarget::parse)
+                    .is_none_or(|known| known.endpoint_id == target.endpoint_id);
+                if same_key {
+                    c.endpoint = Some(body);
+                } else {
+                    tracing::warn!(
+                        device_id,
+                        "Another computer's endpoint named another key; not taken"
+                    );
+                }
             }
         });
     }
@@ -1004,6 +1063,37 @@ mod tests {
     }
 
     #[test]
+    fn a_computers_name_is_shown_without_what_hides_or_misleads() {
+        assert_eq!(shown_name("Desk"), "Desk");
+        assert_eq!(shown_name("in\u{202E}fdp.exe"), "infdp.exe");
+        assert_eq!(shown_name("  \n "), "Computer");
+        assert_eq!(shown_name(&"x".repeat(100)).len(), 64);
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_it_pushes_while_pairing_is_kept() {
+        let id = iroh::SecretKey::generate().public().to_string();
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let pushed_id = id.clone();
+        let other = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(theirs);
+            let mut reader = BufReader::new(reader);
+            read_packet(&mut reader).await.unwrap().unwrap();
+            let answer = NetworkPacket::new("kdeconnect.pair")
+                .with_body(serde_json::json!({"pair": true, "serverId": "b"}));
+            send(&mut writer, &answer).await.unwrap();
+            let endpoint = NetworkPacket::new(crate::iroh_endpoint::ENDPOINT_PACKET).with_body(
+                serde_json::json!({"endpointId": pushed_id, "relayUrls": [], "directAddrs": []}),
+            );
+            send(&mut writer, &endpoint).await.unwrap();
+            while read_packet(&mut reader).await.unwrap().is_some() {}
+        });
+        let pushed = pair_on(ours, "123456", None).await.unwrap();
+        other.await.unwrap();
+        assert_eq!(pushed.unwrap()["endpointId"], id);
+    }
+
+    #[test]
     fn the_internet_roads_refusal_is_told_from_a_failure() {
         let refused = format!(
             "handshake failed with Desk: {}",
@@ -1042,8 +1132,9 @@ mod tests {
                 "then closed"
             );
         });
-        pair_on(ours, "123456", Some("e".repeat(64))).await.unwrap();
+        let pushed = pair_on(ours, "123456", Some("e".repeat(64))).await.unwrap();
         other.await.unwrap();
+        assert_eq!(pushed, None, "no endpoint pushed in this one");
     }
 
     #[tokio::test]

@@ -665,6 +665,7 @@ fn register_wan_key(device_id: &str, packet: &NetworkPacket, sender: &dyn Device
         device_id,
         sender.peer_key().as_ref(),
         is_paired_device(device_id),
+        is_computer_device(device_id),
         endpoint,
     ) {
         Ok(()) => tracing::info!(device_id, "Registered the device's WAN key"),
@@ -672,19 +673,24 @@ fn register_wan_key(device_id: &str, packet: &NetworkPacket, sender: &dyn Device
     }
 }
 
-/// Register `endpoint` as `device_id`'s iroh key: only from a paired device
-/// on the home road, whose TLS key is the one bound to it (the trust the
-/// stream marker `[0xFC,0x00]` has, `docs/protocol.md` §2.3).
+/// Register `endpoint` as `device_id`'s iroh key: only from a paired
+/// computer on the home road, whose TLS key is the one bound to it (the
+/// trust the stream marker `[0xFC,0x00]` has, `docs/protocol.md` §2.3). A
+/// phone registers its key through a session the owner allowed, as before.
 fn register_wan_key_in(
     dir: &std::path::Path,
     device_id: &str,
     key: Option<&pocketdesk_core::streaming::PeerKey>,
     paired: bool,
+    computer: bool,
     endpoint: &str,
 ) -> std::result::Result<(), String> {
     use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
     if !paired {
         return Err("not paired".to_string());
+    }
+    if !computer {
+        return Err("only another computer names its key this way".to_string());
     }
     let Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) = key else {
         return Err("only on the home network".to_string());
@@ -1191,11 +1197,11 @@ mod tests {
         let tls = PeerKey::Tls([4; 32]);
         let endpoint = "e".repeat(64);
         assert!(
-            register_wan_key_in(&dir, "phone", Some(&tls), false, &endpoint).is_err(),
+            register_wan_key_in(&dir, "phone", Some(&tls), false, true, &endpoint).is_err(),
             "unpaired"
         );
         assert!(
-            register_wan_key_in(&dir, "phone", Some(&tls), true, &endpoint).is_err(),
+            register_wan_key_in(&dir, "phone", Some(&tls), true, true, &endpoint).is_err(),
             "no TLS key bound yet"
         );
         assert!(allowed(&dir, &claim(Some(tls.clone()), None)));
@@ -1205,17 +1211,25 @@ mod tests {
                 "phone",
                 Some(&PeerKey::Iroh("f".repeat(64))),
                 true,
+                true,
                 &endpoint
             )
             .is_err(),
             "not by the internet road"
         );
         assert!(
-            register_wan_key_in(&dir, "phone", Some(&PeerKey::Tls([5; 32])), true, &endpoint)
-                .is_err(),
+            register_wan_key_in(
+                &dir,
+                "phone",
+                Some(&PeerKey::Tls([5; 32])),
+                true,
+                true,
+                &endpoint
+            )
+            .is_err(),
             "another TLS key"
         );
-        register_wan_key_in(&dir, "phone", Some(&tls), true, &endpoint).unwrap();
+        register_wan_key_in(&dir, "phone", Some(&tls), true, true, &endpoint).unwrap();
         assert!(matches!(
             device_keys::check(&dir, "phone", Slot::Iroh, Some(&endpoint)),
             Verdict::Matches
