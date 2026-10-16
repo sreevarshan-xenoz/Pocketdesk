@@ -9,12 +9,12 @@ Part of the ecosystem plan (`docs/research/2026-10-16-ecosystem.md`, phase 1: "t
 
   | Action (`dev.pocketdesk.android.event.…`) | When |
   |---|---|
-  | `SESSION_STARTED` | A session's first frame arrived (or an input-only session was admitted). |
-  | `SESSION_ENDED` | A session closed, for any reason (`reason`: `left`, `lost`, `refused`). |
+  | `SESSION_STARTED` | A screen session's link is up (`mode` `screen`), or a remote was admitted (`remote`). |
+  | `SESSION_ENDED` | It ended (`reason`: `left`, the screen was left; `lost`, the link went down). |
   | `FILE_RECEIVED` | A file from the computer was saved in Downloads. |
   | `FILES_SENT` | A share or folder to the computer finished (`count`, `failed`). |
   | `LINK_RECEIVED` | A link from the computer arrived. |
-  | `TASK_FINISHED` | A task started from this phone ended (`task`, `code`, `timed_out`) or was refused (`reason`). |
+  | `TASK_FINISHED` | A task started from this phone ended (`task`, `state`, and `code` and `timed_out`, or `reason`). |
 
 - **Extras on each:**
   - `dev.pocketdesk.android.extra.ADDRESS`: the computer's saved address, as `docs/phone-automation.md` uses it, so an automation can answer the same computer;
@@ -36,4 +36,4 @@ The computer's events relayed to the phone (they need a session or link, and the
 - **Kotlin:**
   - `PhoneEvents` (pure, JVM-tested): the action and extras for each event, the switch off sending nothing, no content field in any event;
   - the emit sites call it.
-- **Device (A71):** a test receiver app is not at hand, so the check is `adb shell am monitor`… no: `adb logcat` with a debug log of each broadcast, plus `dumpsys activity broadcasts` history for the actions, during a session start and end, an offer saved and a link.
+- **Device (A71):** no automation app is installed, and Android keeps no history of a broadcast no app received, so the debug log (`adb logcat -s PhoneEvents`, the kind and its extras) is the check, during a session start and end, an offer saved and a link, and with the switch off.

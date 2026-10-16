@@ -66,3 +66,25 @@ adb shell am start -n dev.pocketdesk.android/.ShareActivity \
   --es android.intent.extra.TEXT "hello" \
   --es dev.pocketdesk.android.extra.ADDRESS 192.168.1.20
 ```
+
+## What Pocketdesk tells other apps
+
+With **Settings → Tell other apps what happens** on (off by default), Pocketdesk sends an Android broadcast for each of these. An automation app reacts to it with an "Intent Received" event (Tasker) or trigger (MacroDroid, Automate) for the action.
+
+| Action | When | Extras besides the address and kind |
+|---|---|---|
+| `dev.pocketdesk.android.event.SESSION_STARTED` | A screen session's link is up, or a remote was admitted | `MODE`: `screen` or `remote` |
+| `dev.pocketdesk.android.event.SESSION_ENDED` | It ended | `REASON`: `left` (you left it) or `lost` (the link went down) |
+| `dev.pocketdesk.android.event.FILE_RECEIVED` | A file from the computer is in Downloads | `MIME`, `SIZE` (bytes) |
+| `dev.pocketdesk.android.event.FILES_SENT` | A share or folder to the computer finished | `COUNT` (sent), `FAILED` |
+| `dev.pocketdesk.android.event.LINK_RECEIVED` | A link from the computer was shown | none |
+| `dev.pocketdesk.android.event.TASK_FINISHED` | A task started from this phone ended | `TASK` (its name), `STATE` (`done`, `refused`, `not_sent`, `no_answer`), and `CODE`, `TIMED_OUT` or `REASON` |
+
+Every extra is named `dev.pocketdesk.android.extra.<NAME>`. Each broadcast carries `dev.pocketdesk.android.extra.ADDRESS`, the computer's saved address, which the intents above take back, and `dev.pocketdesk.android.extra.EVENT`, the kind in lowercase (`session_started`…).
+
+**Any app on the phone can receive these**, as with any broadcast that names no app: an automation app cannot hold a permission of Pocketdesk's. So they say only that something happened and with which computer: never a file's name, a link, a task's output or a notification. `adb logcat -s PhoneEvents` shows each one as it is sent.
+
+### Example
+
+Tasker, profile *Event → System → Intent Received*: Action `dev.pocketdesk.android.event.FILE_RECEIVED`. The task gets the extras as variables (`%address`, `%mime`, `%size`), so *If %mime ~ image/\** can open the gallery. The same with `SESSION_ENDED` and *If %reason eq lost* can say "the computer went away".
+
