@@ -32,6 +32,12 @@ pub const KINDS: &[&str] = &[
     "hook_ran",
 ];
 
+/// Whether a hook may be set for `kind`: any event but `hook_ran`, whose
+/// hook would run at every hook's end, its own included.
+pub fn hookable(kind: &str) -> bool {
+    KINDS.contains(&kind) && kind != "hook_ran"
+}
+
 /// The log moves to `events.jsonl.1` at this size.
 pub const MAX_LOG: u64 = 1024 * 1024;
 

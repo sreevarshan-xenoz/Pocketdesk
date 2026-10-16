@@ -6,7 +6,7 @@ use eframe::egui::{self, Color32, RichText};
 use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
-use pocketdesk_core::local::events::{EventsDetail, KINDS};
+use pocketdesk_core::local::events::{EventsDetail, KINDS, hookable};
 use pocketdesk_core::local::wake::WakeFacts;
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
@@ -270,7 +270,12 @@ impl SettingsForm {
                     ui.label(
                         RichText::new(format!(
                             "One per line: an event, \"=\", a command. It runs as you, with the event on stdin. Events: {}.",
-                            KINDS.join(", ")
+                            KINDS
+                                .iter()
+                                .copied()
+                                .filter(|k| hookable(k))
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ))
                         .small()
                         .weak(),
@@ -449,7 +454,7 @@ fn unknown_hook_kinds(hooks: &std::collections::BTreeMap<String, String>) -> Vec
     hooks
         .keys()
         .map(String::as_str)
-        .filter(|kind| !KINDS.contains(kind))
+        .filter(|kind| !hookable(kind))
         .collect()
 }
 
@@ -525,6 +530,10 @@ mod tests {
             unknown_hook_kinds(&form.edited.hooks),
             vec!["a_newer_event"]
         );
+        // A hook's own report has none: said as never run.
+        form.hooks_text = "hook_ran = echo".into();
+        form.apply_text_fields();
+        assert_eq!(unknown_hook_kinds(&form.edited.hooks), vec!["hook_ran"]);
         for bad in [
             "= x",
             "file_received",
