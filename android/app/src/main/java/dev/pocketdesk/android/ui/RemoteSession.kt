@@ -34,8 +34,10 @@ object RemoteSession {
      */
     fun next(current: State, remote: String, closedReason: String?): State =
         when {
-            closedReason != null -> State.Down
+            // First: the phone closes a session it finds too old, so a
+            // closed reason follows it at once and must not hide it.
             remote == "tooOld" -> State.TooOld
+            closedReason != null -> State.Down
             remote == "ready" -> State.Ready
             remote == "waiting" -> if (current == State.Ready) State.Ready else State.Waiting
             // No session any more: it went away under us.

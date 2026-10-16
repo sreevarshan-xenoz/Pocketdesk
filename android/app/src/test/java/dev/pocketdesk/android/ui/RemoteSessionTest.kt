@@ -26,6 +26,8 @@ class RemoteSessionTest {
     @Test
     fun `a computer that streams anyway is too old`() {
         assertEquals(State.TooOld, RemoteSession.next(State.Waiting, "tooOld", null))
+        // The phone closed it for that: the closed reason follows and must not hide why.
+        assertEquals(State.TooOld, RemoteSession.next(State.Waiting, "tooOld", "input-only session not known here"))
     }
 
     @Test
