@@ -4,9 +4,10 @@
 //! Now a panic, and on Windows an access violation or any other unhandled
 //! exception, appends what happened and a backtrace to `<state>/crash.log`
 //! (owner's folder), and the process ends as it would have. On Windows the
-//! first few faults of a run are also reported as they are raised, with the
-//! module they are in, since one in a process already exiting never reaches
-//! the unhandled-exception filter.
+//! first few faults of a run that execute, or touch memory outside loaded
+//! code, are also reported as they are raised, with the module they are in
+//! and their raw return addresses, since one in a process already exiting
+//! never reaches the unhandled-exception filter.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -51,6 +52,11 @@ fn now_unix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// Where reports go, once [`install`] has run.
+pub fn log_path() -> Option<&'static Path> {
+    LOG.get().map(PathBuf::as_path)
 }
 
 /// Write a report for `what` now, with this thread's backtrace.
