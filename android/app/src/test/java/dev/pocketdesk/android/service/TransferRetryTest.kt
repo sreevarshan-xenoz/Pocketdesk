@@ -43,6 +43,16 @@ class TransferRetryTest {
     }
 
     @Test
+    fun aDownloadAskedByTheInternetRoadIsTriedAgainOnceHomeIsBack() {
+        // R6i's device run: after the Wi-Fi came back, the request went by a
+        // link the internet road had brought back first.
+        assertEquals(
+            5L,
+            TransferRetry.delayBefore(1, "The computer refused the download: downloads need the local network connection", enabled = true),
+        )
+    }
+
+    @Test
     fun aComputerThatIsNotListeningIsTriedAgain() {
         // The network's "connection refused" is not the computer saying no.
         for (error in listOf(
