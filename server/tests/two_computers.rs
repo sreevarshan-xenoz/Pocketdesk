@@ -287,6 +287,19 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
         );
     }
 
+    // Pairing again (a fresh code) starts the link over, and it says so.
+    let again = pin::mint_value();
+    pin::write(&b_state, &again, pin::now_unix(), None).unwrap();
+    let outcome = pair(
+        &a_state,
+        &pairing_link(&b_state, b_control, b_control + 1, &again),
+    );
+    assert_eq!(outcome, "paired");
+    wait_for(30, "the link after pairing again", || {
+        let file = computers::read(&a_state);
+        (file.computers.first()?.link == "linked").then_some(())
+    });
+
     // A forgets B: its entry goes, and the link with it.
     computers::request(
         &a_state,

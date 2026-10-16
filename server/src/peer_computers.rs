@@ -68,7 +68,14 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
         for request in computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             match request.ask {
                 ComputerAsk::Pair { link } => {
-                    pair(&dir, &cert_manager, wan.as_ref(), &link, &request.id).await
+                    // Paired again: the link starts over now, not after the
+                    // back-off a refused or broken one was sleeping out.
+                    if let Some(paired) =
+                        pair(&dir, &cert_manager, wan.as_ref(), &link, &request.id).await
+                        && let Some(stale) = links.remove(&paired)
+                    {
+                        stale.task.abort();
+                    }
                 }
                 ComputerAsk::Forget { device_id } => {
                     if let Some(link) = links.remove(&device_id) {
@@ -192,25 +199,26 @@ fn keep_links(dir: &Path, wan: &iroh::Endpoint, links: &mut HashMap<String, Link
     }
 }
 
-/// Pair with the computer whose pairing link `uri` is, and say how it went.
+/// Pair with the computer whose pairing link `uri` is, and say how it went;
+/// its id once paired.
 async fn pair(
     dir: &Path,
     certs: &CertManager,
     wan: Option<&iroh::Endpoint>,
     uri: &str,
     request: &str,
-) {
+) -> Option<String> {
     let name = PairLink::from_uri(uri)
         .map(|link| link.name)
         .unwrap_or_default();
-    let outcome = match pair_with(dir, certs, wan, uri).await {
+    let (outcome, paired) = match pair_with(dir, certs, wan, uri).await {
         Ok(computer) => {
             tracing::info!(device_id = %computer.device_id, "Paired with another computer");
-            "paired".to_string()
+            ("paired".to_string(), Some(computer.device_id))
         }
         Err(why) => {
             tracing::warn!("Pairing with another computer failed: {why}");
-            format!("failed: {why}")
+            (format!("failed: {why}"), None)
         }
     };
     let saved = computers::update(dir, |file| {
@@ -224,6 +232,7 @@ async fn pair(
     if let Err(e) = saved {
         tracing::warn!("Could not record the pairing's outcome: {e}");
     }
+    paired
 }
 
 /// Pair as [`pair`] says, and record the computer.
