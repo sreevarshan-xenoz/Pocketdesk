@@ -2657,14 +2657,83 @@ pub async fn reconnect_streaming(
 /// the computer admitted it, `{"tooOld"}` when it streamed to it anyway,
 /// `{"none"}` with no input-only session.
 pub fn remote_state() -> String {
+    let state = state_name(crate::session::REMOTE.lock().unwrap().as_ref(), false);
+    format!("{{\"state\":\"{state}\"}}")
+}
+
+/// [`remote_state`] of a cast session only (T10k): `none` while the phone's
+/// session is anything else, so a cast never takes a remote or a screen
+/// session the person opened since for its own.
+pub fn cast_state() -> String {
+    let state = state_name(crate::session::REMOTE.lock().unwrap().as_ref(), true);
+    format!("{{\"state\":\"{state}\"}}")
+}
+
+/// The state of an input-only session's `flags`; with `cast`, only of a cast.
+fn state_name(flags: Option<&pocketdesk_core::streaming::RemoteFlags>, cast: bool) -> &'static str {
     use std::sync::atomic::Ordering;
-    let state = match &*crate::session::REMOTE.lock().unwrap() {
+    match flags {
         None => "none",
+        Some(r) if cast && !r.cast => "none",
         Some(r) if r.too_old.load(Ordering::Acquire) => "tooOld",
         Some(r) if r.ready.load(Ordering::Acquire) => "ready",
         Some(_) => "waiting",
+    }
+}
+
+/// End the phone's session if it is a cast (T10k), and nothing else: a
+/// cast that ended because the person opened another session must not
+/// stop that one.
+pub async fn stop_cast() {
+    let handle = {
+        let mut guard = (*STREAMING_HANDLE).lock().await;
+        if guard
+            .as_ref()
+            .is_some_and(|h| h.mode == pocketdesk_core::streaming::SessionMode::Cast)
+        {
+            guard.take()
+        } else {
+            None
+        }
     };
-    format!("{{\"state\":\"{state}\"}}")
+    if let Some(handle) = handle {
+        teardown_streaming_handle(handle).await;
+        STREAMING_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+        *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Disconnected;
+        tracing::info!("Cast session stopped");
+    }
+}
+
+#[cfg(test)]
+mod cast_state_tests {
+    use super::state_name;
+    use pocketdesk_core::streaming::RemoteFlags;
+
+    #[test]
+    fn a_cast_sees_only_a_cast_session() {
+        let remote = RemoteFlags {
+            input_only: true,
+            ..Default::default()
+        };
+        remote
+            .ready
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert_eq!(state_name(Some(&remote), false), "ready");
+        assert_eq!(
+            state_name(Some(&remote), true),
+            "none",
+            "a remote is not the cast"
+        );
+        let cast = RemoteFlags {
+            input_only: true,
+            cast: true,
+            ..Default::default()
+        };
+        assert_eq!(state_name(Some(&cast), true), "waiting");
+        cast.ready.store(true, std::sync::atomic::Ordering::Release);
+        assert_eq!(state_name(Some(&cast), true), "ready");
+        assert_eq!(state_name(None, true), "none");
+    }
 }
 
 /// Stop the v2 multiplexed connection and clear its handle.

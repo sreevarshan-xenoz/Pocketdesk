@@ -510,7 +510,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
 
 /// Show this phone's screen on the computer (T10k): a cast session to
 /// `address:port` on the LAN. Its config and frames go through
-/// `nativeCastConfig` / `nativeCastFrame`; its state is `nativeRemoteState`'s.
+/// `nativeCastConfig` / `nativeCastFrame`; its state is `nativeCastState`'s.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectCast(
     mut env: JNIEnv<'_>,
@@ -594,6 +594,26 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastFra
     // and the caller keeps it alive and unchanged until this returns.
     let access_unit = unsafe { std::slice::from_raw_parts(address.add(offset), size) };
     cast::frame(keyframe != 0, seq as u64, access_unit)
+}
+
+/// The cast session's state (T10k), as `nativeRemoteState`'s, but `none`
+/// while the phone's session is not a cast.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastState(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = api::cast_state();
+    to_jstring(&mut env, json)
+}
+
+/// End the phone's session if it is a cast, and no other (T10k).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStopCast(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) {
+    RUNTIME.block_on(api::stop_cast());
 }
 
 /// Whether the computer asked the cast for a keyframe since the last look.

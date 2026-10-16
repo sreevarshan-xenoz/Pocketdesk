@@ -83,6 +83,8 @@ object RustCore {
         seq: Long,
     ): Int
     private external fun nativeCastKeyframeWanted(): Boolean
+    private external fun nativeCastState(): String
+    private external fun nativeStopCast()
     private external fun nativeReconnectStreaming(
         address: String,
         port: Int,
@@ -466,6 +468,12 @@ object RustCore {
 
     /** Whether the computer asked the cast for a keyframe since the last look. */
     fun castKeyframeWanted(): Boolean = nativeCastKeyframeWanted()
+
+    /** The cast session's state, as [remoteState]'s, but `none` while the phone's session is not a cast. */
+    fun castState(): String = nativeCastState()
+
+    /** End the phone's session if it is a cast, and no other session the person opened since. */
+    fun stopCast() = nativeStopCast()
 
     /** The connected desktop's cached iroh WAN identity, or null if none announced. */
     fun getWanIdentity(): String? = runCatching {

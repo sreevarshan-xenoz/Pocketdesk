@@ -152,7 +152,11 @@ class CastService : Service() {
         var showing = false
         while (!finished) {
             val closed = RustCore.streamClosedReason
-            state = RemoteSession.next(state, RemoteSession.parse(RustCore.remoteState()), closed)
+            // Only the cast's own session: another the person opened since
+            // ends the cast, quietly, and is left alone.
+            val cast = RemoteSession.parse(RustCore.castState())
+            val replaced = cast == "none" && state != State.Connecting
+            state = RemoteSession.next(state, cast, closed.takeUnless { replaced })
             if (state == State.Waiting && SystemClock.elapsedRealtime() - since > WAIT_MS) {
                 fail(getString(R.string.cast_failed, address, getString(R.string.cast_no_answer)))
                 return
@@ -160,6 +164,7 @@ class CastService : Service() {
             when (state) {
                 State.TooOld -> return fail(getString(R.string.cast_too_old, address))
                 State.Down -> {
+                    if (replaced) return finish()
                     if (!showing || closed != null && closed != "session ended") {
                         return fail(getString(R.string.cast_failed, address, reasonText(closed)))
                     }
@@ -268,7 +273,7 @@ class CastService : Service() {
             Thread {
                 coding?.release()
                 runCatching { taken?.stop() }
-                runCatching { RustCore.stopStreaming() }
+                runCatching { RustCore.stopCast() }
             }.start()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
