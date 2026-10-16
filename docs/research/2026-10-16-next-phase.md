@@ -8,6 +8,7 @@ Written 2026-10-16 from `main` at 035ddf0 (branch `fix/one-stream-on-wifi-return
 - **Phase 3 is a bridge, never a dependency.** Pocketdesk stays its own computer server and apps; it also talks to devices that run KDE Connect (the KDE Connect app, GSConnect, Valent). The bridge is **on by default**, with "Work with KDE Connect devices" in both Settings to turn it off (3a–3c below say "behind an off switch"; read that as on by default with the switch). It comes after phase 2.
 - **KDE Connect may be installed on the A71** for 3a–3c's device checks, and removed after.
 - **R6h is done** (A71 → Windows and A71 → the Azure VM, 2026-10-16; `docs/superpowers/specs/2026-10-14-phase-r-reliability.md` §R6). It added one item, **R6i**, below, and confirmed what 2c–2d are for: a file sent from the computer to a phone on the internet road is offered and never arrives, with the reason given only after 10 minutes.
+- **R6a–R6c are done** (branch `feat/config-dir-override`): the second server, the idle harness, and the folder watcher, which brought the idle server to 0.59 % of one core. **R6g's crash is found and fixed** on the same branch: execution inside an unloaded GraphicsCapture.dll, now pinned (30 stop-during-session rounds clean). R6g's overlapping-session stress test is still to write.
 
 ### R6i: a download waits for the network, not a fixed 65 s
 
