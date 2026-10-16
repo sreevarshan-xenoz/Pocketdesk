@@ -200,6 +200,9 @@ pub async fn run_watcher() {
     // What the last look saw, for the event log (ecosystem 1a).
     let mut seen_sessions: Vec<(u64, Option<String>)> = Vec::new();
     let mut seen_linked: Vec<String> = Vec::new();
+    // The paired phones as last read; unknown until the first read, which
+    // is no change (a restart pairs no one).
+    let mut seen_paired: Option<Vec<String>> = None;
     // What the phones were last told about who drives (roadmap N7).
     let mut told: Option<Told> = None;
     let mut told_at = std::time::Instant::now();
@@ -314,6 +317,23 @@ pub async fn run_watcher() {
         }
         seen_sessions = live.iter().map(|s| (s.id, s.device_id.clone())).collect();
         seen_linked = linked.iter().map(|l| l.device_id.clone()).collect();
+        // Paired or unpaired, however it was done: the PIN, the desktop app,
+        // `pocketdesk unpair` (ecosystem 1b). An unreadable store is no change.
+        if let Some(paired) = crate::state::trust_store_path().ok().and_then(|path| {
+            pocketdesk_core::protocol::kdeconnect::TrustStore::read(path)
+                .ok()
+                .map(|store| store.trusted_devices())
+        }) {
+            for (kind, device) in pairing_changes(seen_paired.as_deref(), &paired) {
+                crate::events::emit(
+                    kind,
+                    Some(&device),
+                    serde_json::json!({}),
+                    serde_json::json!({}),
+                );
+            }
+            seen_paired = Some(paired);
+        }
         let json = render_json(&live, driver, &linked, now);
         if json != prev_json {
             if let Err(e) = write_live_json(&json) {
@@ -382,6 +402,23 @@ fn changes(
         }
     }
     out
+}
+
+/// The phones paired or unpaired since the last read (`None`: the first,
+/// which changes nothing).
+fn pairing_changes(seen: Option<&[String]>, paired: &[String]) -> Vec<(&'static str, String)> {
+    let Some(seen) = seen else {
+        return Vec::new();
+    };
+    let added = paired
+        .iter()
+        .filter(|id| !seen.contains(id))
+        .map(|id| ("phone_paired", id.clone()));
+    let removed = seen
+        .iter()
+        .filter(|id| !paired.contains(id))
+        .map(|id| ("phone_unpaired", id.clone()));
+    added.chain(removed).collect()
 }
 
 /// Each phone with a control link, and whether files can reach it: its link
@@ -628,6 +665,22 @@ mod tests {
             changes(&seen[..1], &[], &[], &[])
                 .iter()
                 .all(|(k, _, _)| *k == "session_ended")
+        );
+    }
+
+    #[test]
+    fn pairings_that_came_or_went_are_events_but_not_at_start() {
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(
+            pairing_changes(None, &ids(&["a", "b"])).is_empty(),
+            "a restart pairs no one"
+        );
+        assert_eq!(
+            pairing_changes(Some(&ids(&["a", "b"])), &ids(&["b", "c"])),
+            vec![
+                ("phone_paired", "c".to_string()),
+                ("phone_unpaired", "a".to_string())
+            ]
         );
     }
 }

@@ -18,7 +18,7 @@ Part of the ecosystem plan (`docs/research/2026-10-16-ecosystem.md`, phase 1b, f
 
 | Kind | Fields | From |
 |---|---|---|
-| `session_refused` | `transport` | the session record the server keeps for every refused session (not paired, denied, no permission) |
+| `session_refused` | — | the session record the server keeps for every refused session (not paired, denied, no permission) |
 | `phone_paired`, `phone_unpaired` | — | the live-session watcher, comparing the trusted phones each second, however the change was made (the PIN, the desktop app, `pocketdesk unpair`) |
 | `hook_ran` | `hook` (the kind it ran for), `code` (exit code, or null when it was killed or failed to start), `timed_out` | the hook runner; never runs a hook of its own (a `hook_ran` hook would loop) |
 
