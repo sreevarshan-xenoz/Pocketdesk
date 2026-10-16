@@ -1905,28 +1905,20 @@ pub async fn list_remote_files(
     .await
 }
 
-/// The session mode a connect asks for (T10i).
-fn session_mode(input_only: bool) -> pocketdesk_core::streaming::SessionMode {
-    if input_only {
-        pocketdesk_core::streaming::SessionMode::InputOnly
-    } else {
-        pocketdesk_core::streaming::SessionMode::Screen
-    }
-}
-
 /// Request remote screen streaming.
 ///
 /// `monitor_index` selects which display to stream (0 = primary).
 /// Pass `None` to use the default monitor.
 /// `codec_caps` advertises the decodable video codecs to the server
 /// (R4 C1: bit 0 = HEVC; H.264 is assumed). 0 keeps a plain H.264 session.
-/// `input_only` makes it the phone as a remote (T10i): no picture or sound.
+/// `mode` says what it is for: the computer's screen, the phone as a remote
+/// (T10i), or the phone's own screen shown there (T10k).
 pub async fn connect_streaming(
     address: String,
     port: u16,
     monitor_index: Option<u32>,
     codec_caps: u8,
-    input_only: bool,
+    mode: pocketdesk_core::streaming::SessionMode,
 ) -> Result<(), String> {
     // If the control port (1716) is passed, automatically switch to the default streaming port (4716).
     // In a real KDE Connect implementation, this would be negotiated or discovery-based.
@@ -1946,7 +1938,7 @@ pub async fn connect_streaming(
             if handle.address == address
                 && handle.port == streaming_port
                 && handle.monitor_index == monitor_index
-                && handle.input_only == input_only
+                && handle.mode == mode
                 // One the computer closed (a refusal) is not active: a
                 // retry must dial again, not keep the dead session.
                 && handle.connection.close_reason().is_none()
@@ -2012,7 +2004,7 @@ pub async fn connect_streaming(
         Some(&client_identity().device_id),
         iroh_id.as_deref(),
         Some(codec_caps),
-        session_mode(input_only),
+        mode,
     )
     .await
     .map_err(|e| {
@@ -2155,7 +2147,7 @@ pub async fn connect_streaming_wan(
     identity_json: String,
     monitor_index: Option<u32>,
     codec_caps: u8,
-    input_only: bool,
+    mode: pocketdesk_core::streaming::SessionMode,
 ) -> Result<(), String> {
     let WanTarget {
         endpoint_id,
@@ -2172,7 +2164,7 @@ pub async fn connect_streaming_wan(
             if handle.address == address
                 && handle.port == 0
                 && handle.monitor_index == monitor_index
-                && handle.input_only == input_only
+                && handle.mode == mode
                 // One the computer closed (a refusal) is not active: a
                 // retry must dial again, not keep the dead session.
                 && handle.connection.close_reason().is_none()
@@ -2238,7 +2230,7 @@ pub async fn connect_streaming_wan(
         Some(&client_identity().device_id),
         None,
         Some(codec_caps),
-        session_mode(input_only),
+        mode,
     )
     .await;
 
@@ -2285,6 +2277,7 @@ const STOPPED_BY_PHONE: &[u8] = b"stopped by the phone";
 
 async fn teardown_streaming_handle(handle: StreamingHandle) {
     crate::session::REMOTE.lock().unwrap().take();
+    crate::cast::stop();
     VIDEO_RX.lock().await.take();
     AUDIO_RX.lock().await.take();
     // Closed on the wire, so the desktop ends the session at once. Waiting
@@ -2350,6 +2343,13 @@ async fn install_streaming(
     let video_bytes = client.video_bytes();
     let remote = client.remote();
     let input_only = remote.input_only;
+    let mode = if remote.cast {
+        pocketdesk_core::streaming::SessionMode::Cast
+    } else if input_only {
+        pocketdesk_core::streaming::SessionMode::InputOnly
+    } else {
+        pocketdesk_core::streaming::SessionMode::Screen
+    };
     let task = tokio::spawn(async move {
         client.start().await;
         tracing::info!("Streaming client start loop exited");
@@ -2443,11 +2443,14 @@ async fn install_streaming(
     *AUDIO_RX.lock().await = Some(audio_rx);
     *crate::VIDEO_BYTES.lock().unwrap_or_else(|e| e.into_inner()) = Some(video_bytes);
     *crate::session::REMOTE.lock().unwrap() = input_only.then_some(remote);
+    if mode == pocketdesk_core::streaming::SessionMode::Cast {
+        crate::cast::start(connection.clone(), client_cancel.clone());
+    }
     *handle = Some(StreamingHandle {
         address: address.clone(),
         port,
         monitor_index,
-        input_only,
+        mode,
         cancel: client_cancel,
         task,
         rtt_task,
@@ -2640,7 +2643,14 @@ pub async fn reconnect_streaming(
     tokio::time::sleep(next_retry).await;
 
     // Delegate to idempotent connect_streaming
-    connect_streaming(address, port, monitor_index, codec_caps, false).await
+    connect_streaming(
+        address,
+        port,
+        monitor_index,
+        codec_caps,
+        pocketdesk_core::streaming::SessionMode::Screen,
+    )
+    .await
 }
 
 /// The phone-as-a-remote session's state (T10i), as JSON: `{"ready"}` once
@@ -4466,7 +4476,7 @@ mod teardown_tests {
             address: "192.0.2.10".into(),
             port: 4716,
             monitor_index: None,
-            input_only: false,
+            mode: pocketdesk_core::streaming::SessionMode::Screen,
             cancel: tokio_util::sync::CancellationToken::new(),
             task: tokio::spawn(async {}),
             rtt_task: tokio::spawn(async {}),
