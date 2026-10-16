@@ -129,18 +129,21 @@ impl Plugin for ClipboardPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
+        // Another computer (2f) has the clipboard, text or image, read or
+        // set, only while this one shares it with its computers (2g).
+        if !crate::clipboard_push::with_computers()
+            && crate::plugins::pair::is_computer_device(sender.device_id())
+        {
+            tracing::debug!(
+                "Another computer's {}, with the clipboard not shared here; ignored",
+                packet.packet_type
+            );
+            return Ok(());
+        }
         match packet.packet_type.as_str() {
             "kdeconnect.clipboard" => {
                 // Remote clipboard update - set local clipboard
                 if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
-                    // Another computer's copy, only while this one shares
-                    // with its computers too (2g).
-                    if !crate::clipboard_push::with_computers()
-                        && crate::plugins::pair::is_computer_device(sender.device_id())
-                    {
-                        tracing::debug!("Another computer's clipboard, not shared here; ignored");
-                        return Ok(());
-                    }
                     // Not pushed back to the phone it came from (T10b).
                     crate::clipboard_push::note_from_phone(sender.device_id(), content);
                     if let Err(e) = set_clipboard(content).await {
