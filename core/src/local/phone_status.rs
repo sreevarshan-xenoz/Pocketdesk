@@ -54,6 +54,19 @@ struct StatusFile {
     batteries: BTreeMap<String, PhoneBattery>,
 }
 
+/// Each phone's last battery report, by device id; empty when there is no
+/// file, `None` when there is one that does not read (a reader that shows
+/// them keeps what it had rather than showing none).
+pub fn try_read(state_dir: &Path) -> Option<BTreeMap<String, PhoneBattery>> {
+    match std::fs::read_to_string(state_dir.join(PHONE_STATUS_FILE)) {
+        Ok(raw) => serde_json::from_str::<StatusFile>(&raw)
+            .ok()
+            .map(|file| file.batteries),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Some(BTreeMap::new()),
+        Err(_) => None,
+    }
+}
+
 /// Each phone's last battery report, by device id. A missing or unreadable
 /// file is empty.
 pub fn read(state_dir: &Path) -> BTreeMap<String, PhoneBattery> {

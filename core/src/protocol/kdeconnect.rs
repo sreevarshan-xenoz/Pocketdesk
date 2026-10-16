@@ -574,6 +574,13 @@ impl TrustStore {
         self.persist()
     }
 
+    /// The devices paired for good, without the time-boxed guest grants.
+    pub fn paired_devices(&self) -> Vec<String> {
+        let mut values: Vec<String> = self.trusted_device_ids.iter().cloned().collect();
+        values.sort();
+        values
+    }
+
     pub fn trusted_devices(&self) -> Vec<String> {
         let mut values: Vec<String> = self.trusted_device_ids.iter().cloned().collect();
         values.extend(self.grants.keys().cloned());

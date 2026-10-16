@@ -380,19 +380,36 @@ pub fn pressed_task(computer: &Computer, snapshot: &Snapshot, topic: &str) -> Op
         .map(|(_, name)| name)
 }
 
-/// The snapshot from the state folder and `config`.
-fn read_snapshot(state_dir: &Path, config: &Config) -> Snapshot {
+/// The snapshot from the state folder and `config`. A trust store or
+/// battery file that does not read (being replaced, held by a scanner)
+/// keeps `previous`'s phones and batteries: one failed read must not
+/// remove every phone's entities from Home Assistant.
+fn read_snapshot(state_dir: &Path, config: &Config, previous: &Snapshot) -> Snapshot {
     use pocketdesk_core::local::paths::{LIVE_FILE, TRUST_FILE};
     let mirror = std::fs::read_to_string(state_dir.join(LIVE_FILE))
         .ok()
         .and_then(|raw| pocketdesk_core::local::sessions::parse_mirror(&raw))
         // One left by an earlier run is not this one's sessions.
         .filter(|m| m.is_fresh(pocketdesk_core::local::pin::now_unix()));
+    // Paired for good: a guest's time-boxed grant is not a phone of this
+    // computer's.
     let paired =
         pocketdesk_core::protocol::kdeconnect::TrustStore::read(state_dir.join(TRUST_FILE))
-            .map(|store| store.trusted_devices())
-            .unwrap_or_default();
-    let batteries = phone_status::read(state_dir);
+            .map(|store| store.paired_devices())
+            .unwrap_or_else(|_| {
+                previous
+                    .phones
+                    .iter()
+                    .map(|p| p.device_id.clone())
+                    .collect()
+            });
+    let batteries = phone_status::try_read(state_dir).unwrap_or_else(|| {
+        previous
+            .phones
+            .iter()
+            .filter_map(|p| p.battery.map(|b| (p.device_id.clone(), b)))
+            .collect()
+    });
     let (sessions, cast, connected) = match &mirror {
         Some(m) => (
             m.sessions.len(),
@@ -564,7 +581,7 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                     let _ = client.try_subscribe(computer.own_configs(), QoS::AtLeastOnce);
                     let _ = client.try_subscribe(computer.own_phone_states(), QoS::AtLeastOnce);
                     let config = crate::events::current_config();
-                    snapshot = read_snapshot(state_dir, &config);
+                    snapshot = read_snapshot(state_dir, &config, &snapshot);
                     publish(&client, &computer, &snapshot, &mut sent);
                 }
                 Some(Ok(Event::Incoming(Packet::Publish(message)))) => {
@@ -611,7 +628,7 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                 }
                 let new_events = tail.poll();
                 if up {
-                    snapshot = read_snapshot(state_dir, &config);
+                    snapshot = read_snapshot(state_dir, &config, &snapshot);
                     publish(&client, &computer, &snapshot, &mut sent);
                     for event in &new_events {
                         let _ = client.try_publish(computer.events(), QoS::AtMostOnce, false, activity(event));
@@ -870,6 +887,32 @@ mod tests {
             ),
             "not an entity"
         );
+    }
+
+    #[test]
+    fn a_failed_read_keeps_the_phones_and_guests_are_not_phones() {
+        use pocketdesk_core::local::paths::{PHONE_STATUS_FILE, TRUST_FILE};
+        let dir = std::env::temp_dir().join(format!("pd-ha-snapshot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store =
+            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(dir.join(TRUST_FILE))
+                .unwrap();
+        store.trust_device("5f1c9b3d-6e70").unwrap();
+        store
+            .trust_device_with_ttl("a71e00aa-0002", Duration::from_secs(900))
+            .unwrap();
+        let config = Config::default();
+        let first = read_snapshot(&dir, &config, &Snapshot::default());
+        assert_eq!(first.phones.len(), 1, "the guest is not listed");
+        assert_eq!(first.phones[0].device_id, "5f1c9b3d-6e70");
+        let previous = snapshot();
+        std::fs::write(dir.join(TRUST_FILE), "not json").unwrap();
+        std::fs::write(dir.join(PHONE_STATUS_FILE), "not json").unwrap();
+        let kept = read_snapshot(&dir, &config, &previous);
+        assert_eq!(kept.phones.len(), previous.phones.len(), "kept, not wiped");
+        assert_eq!(kept.phones[0].battery, previous.phones[0].battery);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
