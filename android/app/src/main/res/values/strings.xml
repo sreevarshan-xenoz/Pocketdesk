@@ -43,6 +43,8 @@
     <string name="share_choosing_off">Other apps may not choose a computer: turn it on in Pocketdesk\'s Settings</string>
     <string name="settings_retry_transfers">Retry failed files</string>
     <string name="settings_retry_transfers_summary">A file that stops part way is sent again up to 3 times, continuing where it stopped</string>
+    <string name="settings_internet_files">Files over the internet</string>
+    <string name="settings_internet_files_summary">Send and receive files with a computer reached from away, on the same link. The computer may turn this off too</string>
     <string name="reconnecting_in">Reconnecting in %1$d s…</string>
     <string name="reconnect_gave_up">Stopped trying after 10 minutes.</string>
     <string name="settings_reveal_pin">Show PIN by default</string>
@@ -490,7 +492,7 @@
     <string name="offer_waiting_title">The computer sends a file</string>
     <string name="offer_save">Save</string>
     <string name="settings_files_background">Files from the computer in the background</string>
-    <string name="settings_files_background_summary">What the computer sends arrives in Downloads without a session, on this network. It needs notification access, which keeps the connection</string>
+    <string name="settings_files_background_summary">What the computer sends arrives in Downloads without a session, at home or, with Files over the internet, from away. It needs notification access, which keeps the connection</string>
     <string name="settings_phone_folders">Folders the computer may open</string>
     <string name="settings_phone_folders_summary">The computer\'s Phone tab can list these folders and copy their files to itself. Nothing else on the phone is reachable. While any folder is shared it stays connected to the computer, using notification access</string>
     <string name="phone_folders_empty">None yet: the computer cannot open anything on this phone. Add a folder to let its Phone tab list it and copy files from it</string>

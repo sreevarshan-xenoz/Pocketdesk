@@ -142,6 +142,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.retryTransfers(context),
             ) { Prefs.setRetryTransfers(context, it) }
             boolRow(
+                LlIcons.Wifi,
+                stringResource(R.string.settings_internet_files),
+                stringResource(R.string.settings_internet_files_summary),
+                Prefs.internetFiles(context),
+            ) {
+                Prefs.setInternetFiles(context, it)
+                RustCore.setInternetFiles(it)
+            }
+            boolRow(
                 LlIcons.Pin,
                 stringResource(R.string.settings_others_choose),
                 stringResource(R.string.settings_others_choose_summary),

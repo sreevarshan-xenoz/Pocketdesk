@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
+    private const val KEY_INTERNET_FILES = "internet_files"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
@@ -201,6 +202,18 @@ object Prefs {
 
     fun setRetryTransfers(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_RETRY_TRANSFERS, enabled) }
+        bump()
+    }
+
+    /**
+     * Whether files move with a computer this phone reaches by the internet
+     * road, on that link (2d). On by default, as on the computer.
+     */
+    fun internetFiles(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_INTERNET_FILES, true)
+
+    fun setInternetFiles(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_INTERNET_FILES, enabled) }
         bump()
     }
 
