@@ -2398,19 +2398,38 @@ mod vector_tests {
             }
         }
         assert!(answered, "the paired phone is answered");
-        pair();
-        let mut stream = open(addr, true, true).await;
         let identity = serde_json::json!({
             "type": "kdeconnect.identity",
             "body": { "deviceId": "vector-paired-phone", "deviceName": "Borrowed" }
         });
-        write_line(&mut stream, &identity.to_string()).await;
-        write_line(&mut stream, &request.to_string()).await;
-        assert_eq!(
-            read_line(&mut stream, 1000).await,
-            None,
-            "still the stranger it opened as: a paired phone's request would be answered"
-        );
+        // The stranger's silence counts only while the phone it names stayed
+        // paired throughout: otherwise it would be unanswered for the wrong
+        // reason, so try again.
+        let still_paired = || {
+            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
+                crate::state::trust_store_path().unwrap(),
+            )
+            .unwrap()
+            .is_trusted("vector-paired-phone")
+        };
+        let mut judged = false;
+        for _ in 0..3 {
+            pair();
+            let mut stream = open(addr, true, true).await;
+            write_line(&mut stream, &identity.to_string()).await;
+            write_line(&mut stream, &request.to_string()).await;
+            let reply = read_line(&mut stream, 1000).await;
+            if !still_paired() {
+                continue;
+            }
+            assert_eq!(
+                reply, None,
+                "still the stranger it opened as: a paired phone's request would be answered"
+            );
+            judged = true;
+            break;
+        }
+        assert!(judged, "the phone stayed paired through none of the tries");
     }
 
     #[tokio::test]
