@@ -444,6 +444,7 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 | `pocketdesk send <phone> <path> [--wait SECONDS]` | Send a file or folder to a phone, as the desktop app's Files tab does; the exit code says how it went |
 | `pocketdesk sent` / `received [--count N] [--json]` | The Files tab's two lists |
 | `pocketdesk link <phone> <url>` | Hand a web link to a phone; it waits there as a notification that opens it |
+| `pocketdesk events [--since-start]` | Print what happens as it happens: sessions, phones linking, batteries, notifications, texts, files and links (the event log); `[hooks]` in config.toml, or Settings, runs a command for each |
 | `pocketdesk send-to-phone <paths…>` | Send files to the phone connected on this network (what "Send to phone" in the file manager runs) |
 | `pocketdesk send-menu [--remove]` | Add "Send to phone" to Explorer's Send To menu, or to Nautilus, Nemo and Dolphin (`install` adds it on Windows) |
 | `pocketdesk list` | List available peers on tailnet |
@@ -461,7 +462,7 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 | `pocketdesk install [--elevated]` | *Windows:* register the logon task, start it, and open the firewall ports |
 | `pocketdesk uninstall` | *Windows:* remove the logon task, firewall rules and notification identity |
 
-For scripts, `status`, `devices`, `sent`, `received`, `send`, `link`, `kick`, `pair`, `unpair`, `list` and `relay-ids` take `--json`: one object per run carrying `"api": 1`, failures included, with documented exit codes (`sessions`, `capabilities` and `bench` keep their own JSON formats). `docs/local-api.md` is the contract. There is no listener behind it: it is this program, run as you, over your own state folder. On the phone, automation apps such as Tasker can connect, wake, and send text or files to a saved computer with intents (`docs/phone-automation.md`).
+For scripts, `status`, `devices`, `sent`, `received`, `send`, `link`, `kick`, `pair`, `unpair`, `list` and `relay-ids` take `--json`: one object per run carrying `"api": 1`, failures included, with documented exit codes, and `events --json` prints one such object per event as it happens. Events say who, when and how much, never what, unless Settings "details in events" is on (`sessions`, `capabilities` and `bench` keep their own JSON formats). `docs/local-api.md` is the contract. There is no listener behind it: it is this program, run as you, over your own state folder. On the phone, automation apps such as Tasker can connect, wake, and send text or files to a saved computer with intents (`docs/phone-automation.md`).
 
 ### Capabilities Are Generated, Not Written
 
