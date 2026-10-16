@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use super::paths::HOME_ASSISTANT_FILE;
 
+/// The device a task start from Home Assistant is held, logged and
+/// rate-limited as, in place of a phone's id.
+pub const HOME_ASSISTANT_DEVICE: &str = "home-assistant";
+
 /// MQTT's own port.
 pub const DEFAULT_PORT: u16 = 1883;
 

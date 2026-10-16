@@ -13,6 +13,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::error::Result;
+use pocketdesk_core::local::home_assistant::HOME_ASSISTANT_DEVICE;
 use pocketdesk_core::local::tasks::{self, TaskRequest, TaskSpec, TaskVerdict};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use serde_json::{Value, json};
@@ -255,8 +256,9 @@ pub fn clear_left_over() {
     }
 }
 
-/// Hold `task`'s start for the owner; their answer, or a deny after a minute.
-async fn ask_owner(device_id: &str, task: &str) -> TaskVerdict {
+/// Hold `task`'s start for the owner; their answer, or a deny after a
+/// minute. `asker` is who asked, as the prompt says it ("a phone").
+async fn ask_owner(device_id: &str, task: &str, asker: &str) -> TaskVerdict {
     let Ok(dir) = crate::state::state_dir() else {
         return TaskVerdict::Deny;
     };
@@ -277,7 +279,7 @@ async fn ask_owner(device_id: &str, task: &str) -> TaskVerdict {
         held.push(request.clone());
         write_held(&held);
     }
-    let summary = format!("Pocketdesk: a phone wants to run \"{task}\"");
+    let summary = format!("Pocketdesk: {asker} wants to run \"{task}\"");
     std::thread::spawn(move || {
         crate::platform::notify(
             &summary,
@@ -327,6 +329,113 @@ fn log_refused(device: &str, specs: &[TaskSpec], name: &str, reason: &str) {
     );
 }
 
+/// Where a run's states go: the phone connection that asked, or nowhere
+/// but the event log (a start from Home Assistant, ecosystem 1e).
+enum Reply {
+    Phone { connection: String, id: String },
+    Nowhere,
+}
+
+impl Reply {
+    /// Who asked, as the owner's prompt says it.
+    fn asker(&self) -> &'static str {
+        match self {
+            Self::Phone { .. } => "a phone",
+            Self::Nowhere => "Home Assistant",
+        }
+    }
+
+    async fn send(&self, device: &str, body: Value) {
+        if let Self::Phone { connection, id } = self {
+            send_to(device, connection, &result(id, body)).await;
+        }
+    }
+}
+
+/// Start the task named `name` for Home Assistant (ecosystem 1e), as a
+/// phone's start: the same limits, and one that asks first waits for the
+/// owner. Why not, when it does not start.
+pub fn start_for_home_assistant(name: &str) -> std::result::Result<(), &'static str> {
+    start_named(&crate::events::current_config().tasks, name)
+}
+
+/// [`start_for_home_assistant`] among `specs`.
+fn start_named(specs: &[TaskSpec], name: &str) -> std::result::Result<(), &'static str> {
+    let device = HOME_ASSISTANT_DEVICE.to_string();
+    if !within_rate(&device, Instant::now()) {
+        return Err("too many starts");
+    }
+    let Some(spec) = find(specs, name).cloned() else {
+        log_refused(&device, specs, name, "unknown");
+        return Err("unknown");
+    };
+    let Some(held) = claim(&spec.name) else {
+        log_refused(&device, specs, name, "busy");
+        return Err("busy");
+    };
+    tokio::spawn(run_claimed(spec, device, held, Reply::Nowhere));
+    Ok(())
+}
+
+/// Run `spec`, whose place is `held`, for `device`: the owner's answer
+/// first when it asks, then the command; each state to `reply`, and logged.
+async fn run_claimed(spec: TaskSpec, device: String, held: Claim, reply: Reply) {
+    let _held = held;
+    if spec.ask && ask_owner(&device, &spec.name, reply.asker()).await == TaskVerdict::Deny {
+        crate::events::emit(
+            "task_refused",
+            Some(&device),
+            json!({ "task": spec.name, "reason": "denied" }),
+            json!({}),
+        );
+        reply
+            .send(&device, json!({ "state": "refused", "reason": "denied" }))
+            .await;
+        return;
+    }
+    crate::events::emit(
+        "task_started",
+        Some(&device),
+        json!({ "task": spec.name }),
+        json!({}),
+    );
+    reply.send(&device, json!({ "state": "running" })).await;
+    let body = match run(&spec.command, spec.deadline()).await {
+        Ok(ran) => {
+            crate::events::emit(
+                "task_finished",
+                Some(&device),
+                json!({ "task": spec.name, "code": ran.code, "timed_out": ran.timed_out }),
+                json!({}),
+            );
+            json!({
+                "state": "done",
+                "code": ran.code,
+                "output": ran.output,
+                "truncated": ran.truncated,
+                "timed_out": ran.timed_out,
+            })
+        }
+        Err(e) => {
+            tracing::warn!(task = %spec.name, "A task could not start: {e}");
+            crate::events::emit(
+                "task_finished",
+                Some(&device),
+                json!({ "task": spec.name, "code": null, "timed_out": false }),
+                json!({}),
+            );
+            json!({
+                "state": "done",
+                "code": null,
+                "output": format!("Could not start: {e}"),
+                "truncated": false,
+                "timed_out": false,
+            })
+        }
+    };
+    reply.send(&device, body).await;
+}
+
 #[derive(Debug, Default)]
 pub struct TasksPlugin;
 
@@ -372,66 +481,11 @@ impl Plugin for TasksPlugin {
                     sender.send_packet(&refused(id, "busy")).await?;
                     return Ok(());
                 };
-                let (id, connection) = (id.to_string(), sender.connection_id().to_string());
-                tokio::spawn(async move {
-                    let _held = held;
-                    if spec.ask && ask_owner(&device, &spec.name).await == TaskVerdict::Deny {
-                        crate::events::emit(
-                            "task_refused",
-                            Some(&device),
-                            json!({ "task": spec.name, "reason": "denied" }),
-                            json!({}),
-                        );
-                        send_to(&device, &connection, &refused(&id, "denied")).await;
-                        return;
-                    }
-                    crate::events::emit(
-                        "task_started",
-                        Some(&device),
-                        json!({ "task": spec.name }),
-                        json!({}),
-                    );
-                    send_to(
-                        &device,
-                        &connection,
-                        &result(&id, json!({ "state": "running" })),
-                    )
-                    .await;
-                    let body = match run(&spec.command, spec.deadline()).await {
-                        Ok(ran) => {
-                            crate::events::emit(
-                                "task_finished",
-                                Some(&device),
-                                json!({ "task": spec.name, "code": ran.code, "timed_out": ran.timed_out }),
-                                json!({}),
-                            );
-                            json!({
-                                "state": "done",
-                                "code": ran.code,
-                                "output": ran.output,
-                                "truncated": ran.truncated,
-                                "timed_out": ran.timed_out,
-                            })
-                        }
-                        Err(e) => {
-                            tracing::warn!(task = %spec.name, "A task could not start: {e}");
-                            crate::events::emit(
-                                "task_finished",
-                                Some(&device),
-                                json!({ "task": spec.name, "code": null, "timed_out": false }),
-                                json!({}),
-                            );
-                            json!({
-                                "state": "done",
-                                "code": null,
-                                "output": format!("Could not start: {e}"),
-                                "truncated": false,
-                                "timed_out": false,
-                            })
-                        }
-                    };
-                    send_to(&device, &connection, &result(&id, body)).await;
-                });
+                let reply = Reply::Phone {
+                    connection: sender.connection_id().to_string(),
+                    id: id.to_string(),
+                };
+                tokio::spawn(run_claimed(spec, device, held, reply));
             }
             _ => {}
         }
@@ -450,6 +504,50 @@ mod tests {
             ask: true,
             deadline_secs: 60,
         }
+    }
+
+    /// Held by the tests that count the running tasks, which are shared.
+    static RUNNING_TESTS: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn home_assistant_starts_a_task_as_a_phone_would() {
+        let _alone = RUNNING_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(home_assistant_starts());
+    }
+
+    async fn home_assistant_starts() {
+        let specs = [TaskSpec {
+            ask: false,
+            ..spec("ha-quick", if cfg!(windows) { "exit 0" } else { "true" })
+        }];
+        assert_eq!(start_named(&specs, "not-one"), Err("unknown"));
+        let held = claim("ha-quick").unwrap();
+        assert_eq!(
+            start_named(&specs, "ha-quick"),
+            Err("busy"),
+            "one of each at once"
+        );
+        drop(held);
+        assert_eq!(start_named(&specs, "ha-quick"), Ok(()));
+        for _ in 0..20 {
+            if !RUNNING.lock().unwrap().contains("ha-quick") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(
+            !RUNNING.lock().unwrap().contains("ha-quick"),
+            "it ran and ended"
+        );
+        // Three starts above counted; seven more fill the minute.
+        for _ in 0..7 {
+            let _ = start_named(&specs, "not-one");
+        }
+        assert_eq!(start_named(&specs, "ha-quick"), Err("too many starts"));
     }
 
     #[test]
@@ -486,6 +584,7 @@ mod tests {
 
     #[test]
     fn one_run_of_a_task_and_two_tasks_at_once_given_back_when_dropped() {
+        let _alone = RUNNING_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         // Names of their own, so other tests running alongside do not count.
         let a = claim("t-a").expect("free");
         assert!(claim("t-a").is_none(), "already running");

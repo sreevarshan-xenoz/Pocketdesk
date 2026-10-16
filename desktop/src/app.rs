@@ -361,17 +361,28 @@ impl PocketdeskApp {
             return;
         };
         let mut verdict = None;
-        egui::Window::new("A phone wants to run a task")
+        let from_home_assistant =
+            request.device_id == pocketdesk_core::local::home_assistant::HOME_ASSISTANT_DEVICE;
+        let title = if from_home_assistant {
+            "Home Assistant wants to run a task"
+        } else {
+            "A phone wants to run a task"
+        };
+        egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ui.ctx(), |ui| {
                 ui.label(RichText::new(&request.task).strong());
-                ui.horizontal(|ui| {
-                    ui.label("Phone");
-                    ui.monospace(short(&request.device_id))
-                        .on_hover_text(&request.device_id);
-                });
+                if from_home_assistant {
+                    ui.label("Asked from a button in Home Assistant.");
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label("Phone");
+                        ui.monospace(short(&request.device_id))
+                            .on_hover_text(&request.device_id);
+                    });
+                }
                 ui.label(
                     RichText::new(format!(
                         "Denied in {}s if you do nothing.",

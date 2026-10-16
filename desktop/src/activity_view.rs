@@ -173,9 +173,12 @@ fn ago(now: u64, at: u64) -> String {
     }
 }
 
-/// The phone, by the first characters of its id.
+/// The phone, by the first characters of its id; Home Assistant by name.
 fn phone(event: &Event) -> String {
     match &event.device_id {
+        Some(id) if id == pocketdesk_core::local::home_assistant::HOME_ASSISTANT_DEVICE => {
+            "Home Assistant".to_string()
+        }
         Some(id) if id.chars().count() > 8 => id.chars().take(8).collect(),
         Some(id) => id.clone(),
         None => String::new(),
