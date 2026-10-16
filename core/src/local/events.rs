@@ -111,8 +111,12 @@ pub fn append(state_dir: &Path, event: &Event) -> io::Result<()> {
     let line = event.to_line() + "\n";
     match std::fs::metadata(&path) {
         Ok(meta) if meta.len() + line.len() as u64 > MAX_LOG => {
-            std::fs::rename(&path, rotated_path(state_dir))?;
-            crate::secure_fs::write_private(&path, b"")?;
+            // Another program holding the log open (on Windows, without
+            // sharing deletes) stops the move: the event is still kept,
+            // and the move is tried again on the next one.
+            if std::fs::rename(&path, rotated_path(state_dir)).is_ok() {
+                crate::secure_fs::write_private(&path, b"")?;
+            }
         }
         Ok(_) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -129,69 +133,102 @@ pub fn append(state_dir: &Path, event: &Event) -> io::Result<()> {
 #[derive(Debug)]
 pub struct Tail {
     path: PathBuf,
+    rotated: PathBuf,
     offset: u64,
     partial: String,
+    /// The first line of the log being read: a log whose first line is
+    /// another is a new one, the old having moved to `.1`.
+    head: Option<String>,
+}
+
+/// The first whole line of `path`, if it has one.
+fn first_line(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut line = String::new();
+    io::BufReader::new(file).read_line(&mut line).ok()?;
+    line.ends_with('\n').then_some(line)
 }
 
 impl Tail {
-    /// From the end of the log now: only events written from here on.
-    pub fn at_end(state_dir: &Path) -> Self {
+    fn new(state_dir: &Path, offset: u64) -> Self {
         let path = log_path(state_dir);
-        let offset = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         Self {
+            head: first_line(&path),
+            rotated: rotated_path(state_dir),
             path,
             offset,
             partial: String::new(),
         }
     }
 
+    /// From the end of the log now: only events written from here on.
+    pub fn at_end(state_dir: &Path) -> Self {
+        let offset = std::fs::metadata(log_path(state_dir))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        Self::new(state_dir, offset)
+    }
+
     /// From the start of the log: the events already in it first.
     pub fn from_start(state_dir: &Path) -> Self {
-        Self {
-            path: log_path(state_dir),
-            offset: 0,
-            partial: String::new(),
-        }
+        Self::new(state_dir, 0)
     }
 
     /// The whole events appended since the last poll; a line not yet
     /// finished waits for the next. Lines that are not events are skipped.
-    /// A rotation is seen when the new log is shorter than what was read,
-    /// so one poll every second or so misses nothing at the log's pace.
+    /// After a rotation the old log's rest is read from `.1` first; two
+    /// rotations between polls (2 MiB of events) lose the first's rest.
     pub fn poll(&mut self) -> Vec<Event> {
-        let Ok(mut file) = std::fs::File::open(&self.path) else {
-            return Vec::new();
-        };
-        let len = file.metadata().map(|m| m.len()).unwrap_or(0);
-        if len < self.offset {
-            // Rotated (or emptied): the new file is read from its start.
+        let mut events = Vec::new();
+        let len = std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
+        let head = first_line(&self.path);
+        let rotated = len < self.offset || (self.head.is_some() && head != self.head);
+        if rotated {
+            if self.head.is_some() && first_line(&self.rotated) == self.head {
+                events.extend(read_lines(
+                    &self.rotated,
+                    &mut self.offset,
+                    &mut self.partial,
+                ));
+            }
             self.offset = 0;
             self.partial.clear();
         }
-        if file.seek(SeekFrom::Start(self.offset)).is_err() {
-            return Vec::new();
-        }
-        let mut events = Vec::new();
-        let mut reader = io::BufReader::new(file);
-        loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    self.offset += n as u64;
-                    if !line.ends_with('\n') {
-                        self.partial.push_str(&line);
-                        break;
-                    }
-                    let whole = std::mem::take(&mut self.partial) + line.trim_end();
-                    if let Ok(event) = serde_json::from_str::<Event>(&whole) {
-                        events.push(event);
-                    }
+        self.head = head;
+        events.extend(read_lines(&self.path, &mut self.offset, &mut self.partial));
+        events
+    }
+}
+
+/// The whole events in `path` from `offset`, moving it past them; a
+/// line not yet finished is kept in `partial`.
+fn read_lines(path: &Path, offset: &mut u64, partial: &mut String) -> Vec<Event> {
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    if file.seek(SeekFrom::Start(*offset)).is_err() {
+        return Vec::new();
+    }
+    let mut events = Vec::new();
+    let mut reader = io::BufReader::new(file);
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                *offset += n as u64;
+                if !line.ends_with('\n') {
+                    partial.push_str(&line);
+                    break;
+                }
+                let whole = std::mem::take(partial) + line.trim_end();
+                if let Ok(event) = serde_json::from_str::<Event>(&whole) {
+                    events.push(event);
                 }
             }
         }
-        events
     }
+    events
 }
 
 #[cfg(test)]
@@ -278,6 +315,57 @@ mod tests {
             .unwrap();
         writeln!(file, "{rest}").unwrap();
         assert_eq!(tail.poll().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn events_written_just_before_a_rotation_are_read_from_the_old_log() {
+        let dir = temp("straddle");
+        let big = Event::new(
+            "notification",
+            None,
+            1,
+            json!({"app": "y".repeat(4096)}),
+            json!({}),
+            EventsDetail::Metadata,
+        );
+        let per_log = (MAX_LOG / (big.to_line().len() as u64 + 1)) as usize;
+        let mut tail = Tail::at_end(&dir);
+        for _ in 0..per_log - 3 {
+            append(&dir, &big).unwrap();
+        }
+        assert_eq!(tail.poll().len(), per_log - 3);
+        // Three more fill the log, and the next rotates it, all between
+        // two polls.
+        for _ in 0..4 {
+            append(&dir, &big).unwrap();
+        }
+        assert!(rotated_path(&dir).exists());
+        assert_eq!(
+            tail.poll().len(),
+            4,
+            "the three in the old log and the one in the new"
+        );
+        // The new log grows past the old offset unread: still a new log.
+        for _ in 0..per_log / 2 {
+            append(&dir, &big).unwrap();
+        }
+        assert_eq!(tail.poll().len(), per_log / 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rotation_that_fails_still_keeps_the_event() {
+        let dir = temp("blocked");
+        // A directory where the rotated log goes: the rename fails.
+        std::fs::create_dir_all(rotated_path(&dir)).unwrap();
+        std::fs::create_dir_all(rotated_path(&dir).join("x")).unwrap();
+        let line_len = file_event(EventsDetail::Metadata).to_line().len() as u64 + 1;
+        std::fs::write(log_path(&dir), "x".repeat((MAX_LOG - 1) as usize) + "\n").unwrap();
+        let mut tail = Tail::at_end(&dir);
+        append(&dir, &file_event(EventsDetail::Metadata)).unwrap();
+        assert_eq!(tail.poll().len(), 1, "kept in the full log");
+        assert!(std::fs::metadata(log_path(&dir)).unwrap().len() >= MAX_LOG + line_len - 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
