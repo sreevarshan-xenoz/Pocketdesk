@@ -262,6 +262,12 @@ impl SettingsForm {
                     "send what I copy to connected phones (those with Clipboard on)",
                 );
                 ui.end_row();
+                ui.label("KDE Connect devices");
+                ui.checkbox(
+                    &mut e.kdeconnect_compat,
+                    "work with devices that run KDE Connect (pairing asks you first)",
+                );
+                ui.end_row();
                 ui.label("Clipboard with my computers");
                 ui.checkbox(
                     &mut e.computer_clipboard,

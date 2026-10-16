@@ -8,6 +8,7 @@ mod activity_view;
 mod app;
 mod cast_view;
 mod computers_view;
+mod kdeconnect_view;
 mod diagnostics_view;
 mod icon;
 mod messages_view;

@@ -146,6 +146,8 @@ pub struct PocketdeskApp {
     notes: crate::notes_view::NotesView,
     /// Settings → Computers (2f).
     computers: crate::computers_view::ComputersView,
+    /// Settings → KDE Connect devices (3a).
+    kdeconnect: crate::kdeconnect_view::KdeConnectView,
     /// The Phone tab (T10g).
     phone_files: crate::phone_files_view::PhoneFilesView,
     /// Whether "Send to phone" is in the file manager, as last read (T10e).
@@ -192,6 +194,7 @@ impl PocketdeskApp {
             messages: Default::default(),
             notes: Default::default(),
             computers: Default::default(),
+            kdeconnect: Default::default(),
             phone_files: Default::default(),
             send_menu_installed: None,
             browser_registered: None,
@@ -869,6 +872,13 @@ impl PocketdeskApp {
         self.browser_setting(ui);
         self.computers
             .show(ui, &self.state_dir, self.snapshot.running, now_unix());
+        let compat_on = matches!(&self.settings, Some(Ok(form)) if form.edited.kdeconnect_compat);
+        self.kdeconnect.show(
+            ui,
+            &self.state_dir,
+            self.snapshot.running && compat_on,
+            now_unix(),
+        );
     }
 
     /// "Send from the browser" (ecosystem 1d): the extension's host,
