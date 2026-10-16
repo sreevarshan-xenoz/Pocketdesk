@@ -24,7 +24,12 @@ capture = [
     "wayland-portal",
 ]
 encode = ["dep:ffmpeg-sidecar", "dep:ffmpeg-next"]
-injection = ["dep:evdev", "dep:wayland-client", "dep:wayland-protocols-misc"]
+injection = [
+    "dep:evdev",
+    "dep:wayland-client",
+    "dep:wayland-protocols-misc",
+    "dep:wayland-protocols-wlr",
+]
 wayland-portal = ["ashpd?/screencast"]
 x11-capture = ["dep:xcap"]
 
