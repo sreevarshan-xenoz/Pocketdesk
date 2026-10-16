@@ -22,11 +22,18 @@ class BackgroundBattery(private val ctx: Context) {
     fun tick() {
         if (!Prefs.shareBattery(ctx)) return
         val own = PhoneLink.target(ctx) ?: return
-        if (RustCore.controlPeer() != (own.address to own.controlPort)) return
+        if (RustCore.controlPeer() != (own.address to own.controlPort)) {
+            // A new link is told again at once: the computer may have restarted.
+            last = null
+            return
+        }
+        // A session's own BatteryEffect reports it.
+        if (RustCore.isStreamingActive) return
         val now = readBattery(ctx) ?: return
         val nowMs = SystemClock.elapsedRealtime()
         if (!BatteryRule.shouldSend(last, lastMs, now, nowMs)) return
-        val sent = RustCore.sendPhonePacket(own.address, own.controlPort, BATTERY, BatteryRule.body(now))
+        // On the link alone: if it has just gone, nothing is dialed for this.
+        val sent = RustCore.sendPhonePacketOnLink(own.address, own.controlPort, BATTERY, BatteryRule.body(now))
         if (sent.isSuccess) {
             last = now
             lastMs = nowMs

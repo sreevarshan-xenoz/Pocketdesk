@@ -1281,6 +1281,29 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeSms
 }
 
 /// Send the phone's texts or a reply's result to the desktop (N5b).
+/// Send a packet the phone may send of itself, only over the control link
+/// already up to that computer (never a connection of its own).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendPhonePacketOnLink(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    packet_type: JString<'_>,
+    body: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let packet_type = jstring_to_string(&mut env, &packet_type);
+    let body = jstring_to_string(&mut env, &body);
+    let json = envelope_unit(RUNTIME.block_on(api::send_phone_packet_on_link(
+        address,
+        port as u16,
+        packet_type,
+        body,
+    )));
+    to_jstring(&mut env, json)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendPhonePacket(
     mut env: JNIEnv<'_>,
