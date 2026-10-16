@@ -548,6 +548,29 @@ pub struct IrohControlStream {
     dial: Option<IrohDial>,
 }
 
+impl IrohControlStream {
+    /// The streams the computer opens on this connection for transfers
+    /// (2c, 2d), to be accepted beside the control stream.
+    pub fn link_acceptor(&self) -> Option<LinkAcceptor> {
+        self.dial
+            .as_ref()
+            .map(|dial| LinkAcceptor(dial.raw.clone()))
+    }
+}
+
+/// Accepts the streams a computer opens on an internet control connection,
+/// one per transfer (2c, 2d).
+#[derive(Clone)]
+pub struct LinkAcceptor(iroh::endpoint::Connection);
+
+impl LinkAcceptor {
+    /// The next stream, or `None` once the connection is gone.
+    pub async fn accept(&self) -> Option<Box<dyn crate::protocol::kdeconnect::TransferIo>> {
+        let (send, recv) = self.0.accept_bi().await.ok()?;
+        Some(Box::new(tokio::io::join(recv, send)))
+    }
+}
+
 impl tokio::io::AsyncRead for IrohControlStream {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
