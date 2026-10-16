@@ -38,6 +38,25 @@ fn pocketdesk(config: &Path, state: &Path) -> Command {
     command
 }
 
+/// Stops the servers and removes their folders however the test ends, so a
+/// failed run leaves no server on the ports for the next one to find.
+struct Cleanup {
+    servers: Vec<std::process::Child>,
+    folders: Vec<PathBuf>,
+}
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        for server in &mut self.servers {
+            let _ = server.kill();
+            let _ = server.wait();
+        }
+        for folder in &self.folders {
+            let _ = std::fs::remove_dir_all(folder);
+        }
+    }
+}
+
 fn wait_for_port(port: u16) {
     let start = Instant::now();
     while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
@@ -52,16 +71,25 @@ fn wait_for_port(port: u16) {
 #[test]
 #[ignore = "starts two real servers, which reach iroh's relays"]
 fn two_servers_run_side_by_side_and_stop_apart() {
+    for port in [18716, 18816] {
+        assert!(
+            std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
+            "something already listens on {port}"
+        );
+    }
     let (a_config, a_state) = folders("a", 18716, 18717);
     let (b_config, b_state) = folders("b", 18816, 18817);
-    let mut a = pocketdesk(&a_config, &a_state)
-        .arg("start")
-        .spawn()
-        .unwrap();
-    let mut b = pocketdesk(&b_config, &b_state)
-        .arg("start")
-        .spawn()
-        .unwrap();
+    let mut run = Cleanup {
+        servers: Vec::new(),
+        folders: vec![
+            a_config.parent().unwrap().to_path_buf(),
+            b_config.parent().unwrap().to_path_buf(),
+        ],
+    };
+    for (config, state) in [(&a_config, &a_state), (&b_config, &b_state)] {
+        run.servers
+            .push(pocketdesk(config, state).arg("start").spawn().unwrap());
+    }
     wait_for_port(18716);
     wait_for_port(18816);
 
@@ -76,16 +104,19 @@ fn two_servers_run_side_by_side_and_stop_apart() {
         .unwrap();
     assert!(stopped.success());
     let start = Instant::now();
-    while b.try_wait().unwrap().is_none() {
+    while run.servers[1].try_wait().unwrap().is_none() {
         assert!(
             start.elapsed() < Duration::from_secs(20),
             "the second server did not stop"
         );
         std::thread::sleep(Duration::from_millis(200));
     }
-    assert!(a.try_wait().unwrap().is_none(), "the first one still runs");
+    assert!(
+        run.servers[0].try_wait().unwrap().is_none(),
+        "the first one still runs"
+    );
     assert!(std::net::TcpStream::connect(("127.0.0.1", 18716)).is_ok());
 
     let _ = pocketdesk(&a_config, &a_state).arg("stop").status();
-    let _ = a.wait();
+    let _ = run.servers[0].wait();
 }
