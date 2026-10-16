@@ -1395,6 +1395,24 @@ A71 → this Windows box, debug builds, 2026-10-16, "Tell other apps what happen
 Owed:
 - [ ] Tasker or MacroDroid receiving them (no automation app on the A71), a remote's events, a send's `FILES_SENT`, a task's `TASK_FINISHED`, a link lost (`REASON=lost`), and the Settings row on screen.
 
+## 84. The reliability pass before ecosystem phase 2 (R6)
+
+The A71 against this Windows box, LAN, the release build of `main` at 0461632, input off, 2026-10-16. The samplers log the server's CPU, memory, threads and handles each minute, and the phone app's memory and temperature (`dumpsys meminfo`, `dumpsys battery`); the phone was on USB power.
+
+- [x] Idle, no phone: 1.35 % of one core over 570 s (0.68 % on 2026-10-14), private 9–10 MB.
+- [x] An hour with one session from start to end: 5.3 % of one core on average, private 82 → 87 MB with two one-minute spikes, handles flat; the phone flat.
+- [x] Wi-Fi off 30 s, 11 times: back by itself 7–15 s after the Wi-Fi each time.
+- [x] **Once, the server crashed** (exit 139) as a reconnected session started; not again in 11 more. A crash now leaves `crash.log` (PR #93).
+- [x] The server stopped for 20 s: back 10 s after it listened, no tap.
+- [x] **The control link lagged the stream** (18 s, over 50 s), so a file sent then failed "phone not connected". Fixed (PR #94): the link 4 s after the stream, a 1 MB file sent and saved, MD5 matching.
+- [x] Seen: two streams opened on a Wi-Fi return (both encoded for about 4 s).
+- [x] Seen: a 1 Mbit/s Wi-Fi link (after many toggles) made the session reconnect every 30–60 s and a 150 MB download fail.
+
+Owed:
+- [ ] A 150 MB transfer broken by a Wi-Fi drop on a healthy link, after PR #94 (the run was stopped when the computer ran low on memory).
+- [ ] The same pass on the Linux host (the Azure VM).
+- [ ] What doubled the idle cost.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
