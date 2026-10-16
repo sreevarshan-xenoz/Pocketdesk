@@ -472,6 +472,7 @@ impl IrohDial {
         };
         Ok(IrohControlStream {
             io: tokio::io::join(recv, send),
+            conn: dial.raw.clone(),
             dial: Some(dial),
         })
     }
@@ -488,24 +489,7 @@ impl IrohDial {
         dht: Option<DhtAddressLookup>,
     ) -> Result<Self> {
         let alpn = alpn.to_vec();
-        let id: iroh::EndpointId = endpoint_id.parse().context("invalid iroh EndpointId")?;
-        let relay_urls = relay_urls
-            .iter()
-            .map(|url| {
-                url.parse::<iroh::RelayUrl>()
-                    .with_context(|| format!("invalid relay url: {url}"))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let mut addr = EndpointAddr::new(id);
-        for url in &relay_urls {
-            addr = addr.with_relay_url(url.clone());
-        }
-        for a in direct_addrs {
-            let a: SocketAddr = a
-                .parse()
-                .with_context(|| format!("invalid direct address: {a}"))?;
-            addr = addr.with_ip_addr(a);
-        }
+        let (addr, relay_urls) = endpoint_addr(endpoint_id, relay_urls, direct_addrs)?;
 
         let shared = dial_endpoint(device_key, &relay_urls, use_relays).await?;
         let connected = {
@@ -540,11 +524,40 @@ impl IrohDial {
     }
 }
 
-/// The control channel's stream over iroh (T10a), holding the dial whose
-/// endpoint carries it. Dropped, it closes the connection, and the endpoint
-/// when no other dial shares it.
+/// An iroh address from an announced identity's parts, and its relays.
+fn endpoint_addr(
+    endpoint_id: &str,
+    relay_urls: &[String],
+    direct_addrs: &[String],
+) -> Result<(EndpointAddr, Vec<iroh::RelayUrl>)> {
+    let id: iroh::EndpointId = endpoint_id.parse().context("invalid iroh EndpointId")?;
+    let relay_urls = relay_urls
+        .iter()
+        .map(|url| {
+            url.parse::<iroh::RelayUrl>()
+                .with_context(|| format!("invalid relay url: {url}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut addr = EndpointAddr::new(id);
+    for url in &relay_urls {
+        addr = addr.with_relay_url(url.clone());
+    }
+    for a in direct_addrs {
+        let a: SocketAddr = a
+            .parse()
+            .with_context(|| format!("invalid direct address: {a}"))?;
+        addr = addr.with_ip_addr(a);
+    }
+    Ok((addr, relay_urls))
+}
+
+/// The control channel's stream over iroh (T10a), on its connection, and
+/// the dial whose endpoint carries it when it has one of its own. Dropped,
+/// it closes the connection, and that endpoint when no other dial shares
+/// it.
 pub struct IrohControlStream {
     io: tokio::io::Join<RecvStream, SendStream>,
+    conn: iroh::endpoint::Connection,
     dial: Option<IrohDial>,
 }
 
@@ -552,9 +565,43 @@ impl IrohControlStream {
     /// The streams the computer opens on this connection for transfers
     /// (2c, 2d), to be accepted beside the control stream.
     pub fn link_acceptor(&self) -> Option<LinkAcceptor> {
-        self.dial
-            .as_ref()
-            .map(|dial| LinkAcceptor(dial.raw.clone()))
+        Some(LinkAcceptor(self.conn.clone()))
+    }
+
+    /// Dial the control channel from `endpoint`, one this process already
+    /// runs (2f: a computer's link to another rides its own WAN endpoint;
+    /// a second endpoint with the same key could not use a relay, 2b).
+    pub async fn dial_from(
+        endpoint: &iroh::Endpoint,
+        endpoint_id: &str,
+        relay_urls: &[String],
+        direct_addrs: &[String],
+        timeout: Duration,
+    ) -> Result<Self> {
+        let (addr, _) = endpoint_addr(endpoint_id, relay_urls, direct_addrs)?;
+        let conn = tokio::time::timeout(
+            timeout,
+            endpoint.connect(addr, crate::protocol::ALPN_CONTROL),
+        )
+        .await
+        .context("iroh dial timed out")?
+        .context("iroh dial failed")?;
+        let (send, recv) = match tokio::time::timeout(timeout, conn.open_bi()).await {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(e)) => {
+                conn.close(iroh::endpoint::VarInt::from_u32(0), b"no stream");
+                return Err(anyhow::anyhow!("no control stream: {e}"));
+            }
+            Err(_) => {
+                conn.close(iroh::endpoint::VarInt::from_u32(0), b"no stream");
+                anyhow::bail!("no control stream in time");
+            }
+        };
+        Ok(Self {
+            io: tokio::io::join(recv, send),
+            conn,
+            dial: None,
+        })
     }
 }
 
@@ -610,11 +657,17 @@ impl tokio::io::AsyncWrite for IrohControlStream {
 impl Drop for IrohControlStream {
     fn drop(&mut self) {
         // iroh logs an error for an endpoint dropped while live: close it,
-        // where a runtime is there to run the close.
-        if let Some(dial) = self.dial.take()
-            && let Ok(runtime) = tokio::runtime::Handle::try_current()
-        {
-            runtime.spawn(dial.close());
+        // where a runtime is there to run the close. A stream on an
+        // endpoint it does not own closes only its connection.
+        match self.dial.take() {
+            Some(dial) => {
+                if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                    runtime.spawn(dial.close());
+                }
+            }
+            None => self
+                .conn
+                .close(iroh::endpoint::VarInt::from_u32(0), b"link end"),
         }
     }
 }
