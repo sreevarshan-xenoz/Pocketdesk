@@ -95,4 +95,4 @@ video_quality = "balanced"
 # home_assistant = true
 # mqtt_broker = "mqtt://homeassistant.local:1883"
 # mqtt_user = "pocketdesk"
-# mqtt_password = "a password of your broker's, not this one"
+# mqtt_password = ""   # the broker's password, when it asks for one
