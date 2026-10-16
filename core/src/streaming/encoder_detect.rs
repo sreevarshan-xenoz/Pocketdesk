@@ -169,6 +169,17 @@ pub fn probe_encoders() -> AvailableEncoders {
         }
     }
 
+    // FFmpeg lists VAAPI whenever it was built with it, Windows builds and
+    // GPU-less machines included. It can only run on Linux with a render
+    // node; elsewhere, Auto picking it skipped every working rung after it
+    // (AMF, Quick Sync, Media Foundation) for software.
+    if available.vaapi && !vaapi_usable(cfg!(target_os = "linux"), render_node_count()) {
+        available.vaapi = false;
+        info!(
+            "VAAPI compiled into FFmpeg but this machine has no VA render node; not selecting VAAPI (Auto)"
+        );
+    }
+
     if nvenc_listed {
         // FFmpeg was *built* with NVENC, but the driver may predate this
         // FFmpeg's NVENC API level (e.g. 580.x vs FFmpeg 9's API-13), in which
@@ -241,6 +252,23 @@ fn encoder_runtime_ok(encoder: &str) -> bool {
         Ok(output) => output.status.success(),
         Err(_) => false,
     }
+}
+
+/// Whether VAAPI can run here: on Linux, with a render node to open.
+fn vaapi_usable(linux: bool, render_nodes: usize) -> bool {
+    linux && render_nodes > 0
+}
+
+/// How many `/dev/dri/renderD*` nodes exist.
+fn render_node_count() -> usize {
+    std::fs::read_dir("/dev/dri")
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with("renderD"))
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 /// Resolve the `HardwareEncoder` selection to the actual encoder to use,
@@ -370,6 +398,14 @@ mod tests {
             resolve_encoder(HardwareEncoder::Auto, &available),
             HardwareEncoder::Nvenc
         );
+    }
+
+    #[test]
+    fn vaapi_runs_only_on_linux_with_a_render_node() {
+        assert!(vaapi_usable(true, 1));
+        assert!(!vaapi_usable(true, 0), "a GPU-less Linux machine");
+        assert!(!vaapi_usable(false, 0), "Windows, whatever FFmpeg lists");
+        assert!(!vaapi_usable(false, 2));
     }
 
     #[test]
