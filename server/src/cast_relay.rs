@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use pocketdesk_core::local::cast::{self as wire, CastFile, Message, TOKEN_LEN};
 use pocketdesk_core::local::paths::CAST_FILE;
-use pocketdesk_core::streaming::cast::{CastEvent, CastPayload};
+use pocketdesk_core::streaming::cast::{CastChain, CastEvent, CastPayload};
 use rand::RngCore;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -25,6 +25,8 @@ const TOKEN_WAIT: Duration = Duration::from_secs(2);
 /// Messages waiting for a slow viewer; past this, frames are dropped and the
 /// phone is asked for a keyframe.
 const VIEWER_QUEUE: usize = 32;
+/// Connections that have not sent the token yet, at most; more are closed.
+const PENDING_VIEWERS: usize = 4;
 
 /// Start the relay; the server's cast sessions send it what they receive.
 pub fn spawn(state_dir: PathBuf) -> mpsc::Sender<CastEvent> {
@@ -44,6 +46,8 @@ struct Cast {
     want: mpsc::Sender<()>,
     token: [u8; TOKEN_LEN],
     config: Option<(u16, u16)>,
+    /// Paces the keyframe asks a slow viewer makes.
+    asks: CastChain,
 }
 
 struct Viewer {
@@ -65,6 +69,7 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
     let mut cast: Option<Cast> = None;
     let mut viewer: Option<Viewer> = None;
     let (joined_tx, mut joined_rx) = mpsc::channel::<(u64, TcpStream)>(4);
+    let pending = std::sync::Arc::new(tokio::sync::Semaphore::new(PENDING_VIEWERS));
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
     loop {
         tokio::select! {
@@ -85,12 +90,19 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                             tracing::warn!(error = %e, "Could not say where the cast is");
                         }
                         tracing::info!(session_id, "A phone's screen can be shown");
-                        cast = Some(Cast { session_id, want: want_keyframe, token, config: None });
+                        cast = Some(Cast {
+                            session_id,
+                            want: want_keyframe,
+                            token,
+                            config: None,
+                            asks: CastChain::default(),
+                        });
                     }
                     CastEvent::Payload { session_id, payload } => {
                         let Some(current) = cast.as_mut().filter(|c| c.session_id == session_id) else {
                             continue;
                         };
+                        let is_config = matches!(payload, CastPayload::Config { .. });
                         let message = match payload {
                             CastPayload::Config { width, height } => {
                                 current.config = Some((width, height));
@@ -103,8 +115,15 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                         if let Some(v) = viewer.as_ref().filter(|v| v.session_id == session_id)
                             && v.tx.try_send(message).is_err()
                         {
-                            // A frame lost to a slow viewer breaks its chain.
-                            let _ = current.want.try_send(());
+                            if is_config {
+                                // A viewer that missed a new size would decode
+                                // at the old one: it is dropped, and rejoins
+                                // with the config.
+                                viewer = None;
+                            } else if current.asks.lost(std::time::Instant::now()) {
+                                // A frame lost to a slow viewer breaks its chain.
+                                let _ = current.want.try_send(());
+                            }
                         }
                     }
                     CastEvent::End { session_id } => {
@@ -116,9 +135,16 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
             }
             accepted = listener.accept() => {
                 let Ok((stream, _)) = accepted else { continue };
-                // Nothing to show: the connection is simply closed.
-                if let Some(c) = &cast {
-                    tokio::spawn(authenticate(stream, c.token, c.session_id, joined_tx.clone()));
+                // Nothing to show, or too many waiting to say the token:
+                // the connection is simply closed.
+                if let Some(c) = &cast
+                    && let Ok(slot) = pending.clone().try_acquire_owned()
+                {
+                    let (token, session_id, joined) = (c.token, c.session_id, joined_tx.clone());
+                    tokio::spawn(async move {
+                        authenticate(stream, token, session_id, joined).await;
+                        drop(slot);
+                    });
                 }
             }
             Some((session_id, stream)) = joined_rx.recv() => {
