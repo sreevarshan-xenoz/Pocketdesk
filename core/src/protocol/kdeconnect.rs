@@ -320,6 +320,24 @@ impl PluginRegistry {
         self.plugins.insert(plugin_name, plugin_arc);
     }
 
+    /// Each plugin's name and the packet types it takes and sends, sorted by
+    /// name (the packet catalogue, ecosystem 1g).
+    pub fn describe(&self) -> Vec<(String, &'static [&'static str], &'static [&'static str])> {
+        let mut plugins: Vec<_> = self
+            .plugins
+            .iter()
+            .map(|(name, plugin)| {
+                (
+                    name.clone(),
+                    plugin.incoming_capabilities(),
+                    plugin.outgoing_capabilities(),
+                )
+            })
+            .collect();
+        plugins.sort_by(|a, b| a.0.cmp(&b.0));
+        plugins
+    }
+
     pub fn plugin_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.plugins.keys().cloned().collect();
         names.sort();

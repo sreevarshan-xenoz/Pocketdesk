@@ -207,6 +207,9 @@ pub enum Commands {
         /// Emit the Markdown block that docs/capabilities.md is generated from
         #[arg(long)]
         markdown: bool,
+        /// Emit the control channel's packet catalogue (docs/packets.md)
+        #[arg(long)]
+        packets: bool,
     },
     /// Connect to a peer and perform a basic control-channel handshake
     Connect {
