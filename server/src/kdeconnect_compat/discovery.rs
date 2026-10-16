@@ -13,6 +13,10 @@ pub const UDP_PORT: u16 = 1716;
 /// How often the loop looks, and broadcasts while asked to.
 const TICK: Duration = Duration::from_secs(2);
 
+/// How often, in ticks, the network is looked at for a change: reading
+/// the interfaces costs more than reading the request (R6's idle cost).
+const NETWORK_EVERY: u32 = 5;
+
 /// Broadcast as the module says, for the server's life.
 pub async fn run(control_port: u16) {
     let Ok(dir) = crate::state::state_dir() else {
@@ -20,15 +24,20 @@ pub async fn run(control_port: u16) {
     };
     let mut addresses = local_addresses();
     let mut said = false;
+    let mut ticks = 0u32;
     loop {
         tokio::time::sleep(TICK).await;
         if !super::enabled() {
             continue;
         }
         let now = pocketdesk_core::local::pin::now_unix();
-        let current = local_addresses();
-        let moved = current != addresses;
-        addresses = current;
+        ticks = ticks.wrapping_add(1);
+        let moved = ticks.is_multiple_of(NETWORK_EVERY) && {
+            let current = local_addresses();
+            let moved = current != addresses;
+            addresses = current;
+            moved
+        };
         if !(moved || kdeconnect::finding(&dir, now)) {
             continue;
         }
