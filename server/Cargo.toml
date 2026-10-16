@@ -80,6 +80,9 @@ windows-future = "0.3"
 rustls.workspace = true
 # A local Mainline DHT for the N3 publishing test (no internet).
 n0-mainline = "0.7"
+# The browser extension's id from its key (ecosystem 1d); versions core uses.
+sha2 = "0.10"
+base64 = "0.22"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # `dup2` in the uinput rebuild test, to fault a live device's descriptor.
