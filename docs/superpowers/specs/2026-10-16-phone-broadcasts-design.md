@@ -34,6 +34,14 @@ The computer's events relayed to the phone (they need a session or link, and the
 ## Checks
 
 - **Kotlin:**
-  - `PhoneEvents` (pure, JVM-tested): the action and extras for each event, the switch off sending nothing, no content field in any event;
+  - `PhoneEvents` (pure, JVM-tested): the action and extras for each event, no content field in any event; `SessionTell` (once each, no end without a start); `TransferSummary.failedOf`; `TaskRun.told`. The switch off sending nothing is in `PhoneEventBroadcast.send`, checked on the device;
   - the emit sites call it.
 - **Device (A71):** no automation app is installed, and Android keeps no history of a broadcast no app received, so the debug log (`adb logcat -s PhoneEvents`, the kind and its extras) is the check, during a session start and end, an offer saved and a link, and with the switch off.
+
+## As built
+
+- **A session is started** once its first picture arrives (a computer that asks first holds it), a remote once admitted; a session not told started (the switch was off) is not told ended.
+- **A task's end** is told even after its sheet closed: the run is followed from outside the sheet, to its end or until it is given up (`no_answer`).
+- **FILES_SENT's `failed`** is the files the send meant to send and did not, a send cut short or one that threw included (`TransferSummary.failedOf`).
+- **Review (0 Critical, 2 Important), fixed:** a closed sheet lost the task's end, and a cut-short send reported none failed; plus the start before approval, a lone end, the log line, the Settings wording, and the docs (spoofing, a folder's many `FILE_RECEIVED`, the declared size, where links are told, `no_answer`).
+

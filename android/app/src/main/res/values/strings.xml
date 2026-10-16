@@ -37,7 +37,7 @@
     <string name="settings_others_choose">Let other apps choose a computer</string>
     <string name="settings_others_choose_summary">An automation app (Tasker and the like) may name which saved computer its share goes to. Off: shares go to the last computer used</string>
     <string name="settings_tell_other_apps">Tell other apps what happens</string>
-    <string name="settings_tell_other_apps_summary">Automation apps (Tasker and the like) hear when a session starts or ends, a file or link arrives, files finish sending, or a task ends. Any app may listen, so only the computer\'s address and the kind are told: no file names, links or task output</string>
+    <string name="settings_tell_other_apps_summary">Automation apps (Tasker and the like) hear when a session starts or ends, a file or link arrives, files finish sending, or a task ends. Any app may listen, so they hear only which computer, what kind, and a few facts (a file\'s type and size, a task\'s name and exit code): no file names, links or task output</string>
     <string name="share_not_content">Only files another app shares can be sent, not a path to one</string>
     <string name="share_not_saved">No saved computer has that address</string>
     <string name="share_choosing_off">Other apps may not choose a computer: turn it on in Pocketdesk\'s Settings</string>

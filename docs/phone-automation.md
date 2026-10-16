@@ -73,16 +73,18 @@ With **Settings → Tell other apps what happens** on (off by default), Pocketde
 
 | Action | When | Extras besides the address and kind |
 |---|---|---|
-| `dev.pocketdesk.android.event.SESSION_STARTED` | A screen session's link is up, or a remote was admitted | `MODE`: `screen` or `remote` |
-| `dev.pocketdesk.android.event.SESSION_ENDED` | It ended | `REASON`: `left` (you left it) or `lost` (the link went down) |
-| `dev.pocketdesk.android.event.FILE_RECEIVED` | A file from the computer is in Downloads | `MIME`, `SIZE` (bytes) |
-| `dev.pocketdesk.android.event.FILES_SENT` | A share or folder to the computer finished | `COUNT` (sent), `FAILED` |
-| `dev.pocketdesk.android.event.LINK_RECEIVED` | A link from the computer was shown | none |
-| `dev.pocketdesk.android.event.TASK_FINISHED` | A task started from this phone ended | `TASK` (its name), `STATE` (`done`, `refused`, `not_sent`, `no_answer`), and `CODE`, `TIMED_OUT` or `REASON` |
+| `dev.pocketdesk.android.event.SESSION_STARTED` | A screen session's first picture arrived (after the owner allowed it, on a computer that asks), or a remote was admitted | `MODE`: `screen` or `remote` |
+| `dev.pocketdesk.android.event.SESSION_ENDED` | It ended | `REASON`: `left` (you left it) or `lost` (the link went down, or the computer ended it) |
+| `dev.pocketdesk.android.event.FILE_RECEIVED` | A file from the computer is in Downloads; one per file of a folder | `MIME`, `SIZE` (bytes, as the computer gave it) |
+| `dev.pocketdesk.android.event.FILES_SENT` | A share or folder to the computer finished | `COUNT` (sent), `FAILED` (meant to be sent and not) |
+| `dev.pocketdesk.android.event.LINK_RECEIVED` | A link from the computer was shown during a screen session, with "Links from the computer" on | none |
+| `dev.pocketdesk.android.event.TASK_FINISHED` | A task started from this phone ended, even after its sheet closed | `TASK` (its name), `STATE` (`done`, `refused`, `not_sent`, `no_answer`), and `CODE`, `TIMED_OUT` or `REASON` |
 
 Every extra is named `dev.pocketdesk.android.extra.<NAME>`. Each broadcast carries `dev.pocketdesk.android.extra.ADDRESS`, the computer's saved address, which the intents above take back, and `dev.pocketdesk.android.extra.EVENT`, the kind in lowercase (`session_started`…).
 
-**Any app on the phone can receive these**, as with any broadcast that names no app: an automation app cannot hold a permission of Pocketdesk's. So they say only that something happened and with which computer: never a file's name, a link, a task's output or a notification. `adb logcat -s PhoneEvents` shows each one as it is sent.
+**Any app on the phone can receive these**, as with any broadcast that names no app: an automation app cannot hold a permission of Pocketdesk's. So they say only what happened, with which computer, and the facts in the table: never a file's name, a link, a task's output or a notification. **Any app can also send them**, so an automation must not take one as proof (a forged `TASK_FINISHED` with `CODE` 0 is possible). `adb logcat -s PhoneEvents` shows each one Pocketdesk sends.
+
+Also worth knowing: `no_answer` means the phone stopped waiting (75 s for a task that asks first, else 20 s), not that the task never ran; a session the app is swiped away from, or that the phone kills, may get no `SESSION_ENDED`; and turning the switch off mid-session tells nothing more, its end included.
 
 ### Example
 
