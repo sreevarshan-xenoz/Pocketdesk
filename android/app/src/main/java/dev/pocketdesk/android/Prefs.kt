@@ -24,6 +24,7 @@ object Prefs {
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
+    private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
@@ -113,6 +114,17 @@ object Prefs {
 
     fun setOthersChooseComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_OTHERS_CHOOSE_COMPUTER, enabled) }
+    }
+
+    /**
+     * Whether sessions, files, links and tasks are told to other apps as
+     * broadcasts (ecosystem 1f). Off by default: any app may receive them.
+     */
+    fun tellOtherApps(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_TELL_OTHER_APPS, false)
+
+    fun setTellOtherApps(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_TELL_OTHER_APPS, enabled) }
     }
 
     /** Whether a link the computer hands over is shown as a notification (T8a). On by default. */

@@ -148,6 +148,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.othersChooseComputer(context),
             ) { Prefs.setOthersChooseComputer(context, it) }
             boolRow(
+                LlIcons.Pin,
+                stringResource(R.string.settings_tell_other_apps),
+                stringResource(R.string.settings_tell_other_apps_summary),
+                Prefs.tellOtherApps(context),
+            ) { Prefs.setTellOtherApps(context, it) }
+            boolRow(
                 LlIcons.Wifi,
                 stringResource(R.string.settings_links_from_computer),
                 stringResource(R.string.settings_links_from_computer_summary),
