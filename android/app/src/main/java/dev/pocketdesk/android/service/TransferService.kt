@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.service
 
+import dev.pocketdesk.android.automation.PhoneEventBroadcast
+import dev.pocketdesk.android.automation.PhoneEvents
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -144,6 +146,7 @@ class TransferService : Service() {
     /** Runs on [worker]; the last job queued reports everything done since. */
     private fun run(job: Job, startId: Int) {
         lastAddress = job.address
+        val (sentBefore, countBefore) = sentTotal to sendCount
         try {
             when (job) {
                 is Job.Send -> sendAll(job)
@@ -154,6 +157,16 @@ class TransferService : Service() {
             lastError = t.message ?: t.toString()
             Log.e(TAG, "transfer job failed", t)
         } finally {
+            if (job !is Job.Receive) {
+                // Ecosystem 1f: how this send went, without the names.
+                val sent = sentTotal - sentBefore
+                PhoneEventBroadcast.send(
+                    this,
+                    PhoneEvents.Kind.FILES_SENT,
+                    job.address,
+                    mapOf("count" to sent, "failed" to (sendCount - countBefore - sent).coerceAtLeast(0)),
+                )
+            }
             finishJob(startId)
         }
     }
@@ -298,6 +311,14 @@ class TransferService : Service() {
         result.onSuccess { uri ->
             savedTotal++
             lastSaved = uri
+            // Ecosystem 1f: its type and size, never its name.
+            val mime = uri?.let { runCatching { contentResolver.getType(it) }.getOrNull() } ?: "application/octet-stream"
+            PhoneEventBroadcast.send(
+                this,
+                PhoneEvents.Kind.FILE_RECEIVED,
+                job.address,
+                mapOf("mime" to mime, "size" to job.size),
+            )
         }.onFailure {
             lastError = it.message
             Log.w(TAG, "receiving ${job.name} failed: $lastError")
