@@ -117,26 +117,25 @@ pub fn start_wgc_capture(
 
 /// Keep `GraphicsCapture.dll` loaded for the rest of the process's life.
 ///
-/// COM may unload it once no capture object is left (a session closed, the
-/// capture thread gone), but a closed session still finishes on the DLL's
-/// own worker threads, which then run code that is no longer there: about
-/// one server stop in eight, and some reconnects, died that way with an
-/// access violation executing inside the unloaded DLL. A pinned module is
-/// never unloaded; the process exits with it.
+/// About one server stop in eight during a session died with an access
+/// violation executing inside this DLL after it had been unloaded, most
+/// likely a closed session finishing on the DLL's own threads after COM
+/// let it go (no capture object left). A reconnect closing the old session
+/// may meet the same race. A pinned module is never unloaded; the process
+/// exits with it.
 fn pin_capture_library() {
     static PINNED: std::sync::Once = std::sync::Once::new();
     PINNED.call_once(|| {
         use windows::Win32::System::LibraryLoader::{
-            GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, LoadLibraryW,
+            GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW,
         };
         use windows::core::w;
-        // `IsSupported` has loaded it; load it here anyway in case a later
-        // Windows moves the class elsewhere (then this only fails, quietly).
-        // SAFETY: a constant, NUL-terminated module name; the handle is not
-        // freed, and pinning is what is wanted.
+        // `IsSupported` has loaded it. Only a module already loaded is
+        // pinned, so nothing is searched for by name.
+        let mut module = HMODULE::default();
+        // SAFETY: a constant, NUL-terminated module name and a handle to
+        // fill; a pinned handle is never freed.
         let pinned = unsafe {
-            let _ = LoadLibraryW(w!("GraphicsCapture.dll"));
-            let mut module = HMODULE::default();
             GetModuleHandleExW(
                 GET_MODULE_HANDLE_EX_FLAG_PIN,
                 w!("GraphicsCapture.dll"),
