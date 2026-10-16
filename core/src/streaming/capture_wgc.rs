@@ -77,6 +77,7 @@ pub fn start_wgc_capture(
     if !GraphicsCaptureSession::IsSupported().unwrap_or(false) {
         bail!("Windows.Graphics.Capture is not supported on this Windows build");
     }
+    pin_capture_library();
     let (ready_tx, ready_rx) = std_mpsc::channel::<Result<()>>();
     let thread_config = config.clone();
     let thread_cancel = cancel.clone();
@@ -112,6 +113,41 @@ pub fn start_wgc_capture(
             bail!("WGC produced no frame within {FIRST_FRAME_TIMEOUT:?}")
         }
     }
+}
+
+/// Keep `GraphicsCapture.dll` loaded for the rest of the process's life.
+///
+/// COM may unload it once no capture object is left (a session closed, the
+/// capture thread gone), but a closed session still finishes on the DLL's
+/// own worker threads, which then run code that is no longer there: about
+/// one server stop in eight, and some reconnects, died that way with an
+/// access violation executing inside the unloaded DLL. A pinned module is
+/// never unloaded; the process exits with it.
+fn pin_capture_library() {
+    static PINNED: std::sync::Once = std::sync::Once::new();
+    PINNED.call_once(|| {
+        use windows::Win32::System::LibraryLoader::{
+            GET_MODULE_HANDLE_EX_FLAG_PIN, GetModuleHandleExW, LoadLibraryW,
+        };
+        use windows::core::w;
+        // `IsSupported` has loaded it; load it here anyway in case a later
+        // Windows moves the class elsewhere (then this only fails, quietly).
+        // SAFETY: a constant, NUL-terminated module name; the handle is not
+        // freed, and pinning is what is wanted.
+        let pinned = unsafe {
+            let _ = LoadLibraryW(w!("GraphicsCapture.dll"));
+            let mut module = HMODULE::default();
+            GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_PIN,
+                w!("GraphicsCapture.dll"),
+                &mut module,
+            )
+        };
+        match pinned {
+            Ok(()) => debug!("GraphicsCapture.dll pinned"),
+            Err(e) => warn!("Could not pin GraphicsCapture.dll: {e}"),
+        }
+    });
 }
 
 /// What is being captured right now.
