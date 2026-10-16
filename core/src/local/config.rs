@@ -103,6 +103,10 @@ pub struct Config {
     /// ways (2g). Off by default: the content crosses machines.
     #[serde(default)]
     pub computer_clipboard: bool,
+    /// Work with KDE Connect devices (3a–3c): on by default (the owner's
+    /// decision); off, a connection opening with `{` is refused as before.
+    #[serde(default = "default_true")]
+    pub kdeconnect_compat: bool,
     /// A notification when a phone in a session reports a low battery
     /// (roadmap T8b).
     #[serde(default = "default_true")]
@@ -255,6 +259,7 @@ impl Default for Config {
             virtual_screens: true,
             clipboard_push: true,
             computer_clipboard: false,
+            kdeconnect_compat: true,
             phone_battery_alerts: true,
             wake_announce: true,
             wake_port: 0,
@@ -428,6 +433,7 @@ impl Config {
         "virtual_screens",
         "clipboard_push",
         "computer_clipboard",
+        "kdeconnect_compat",
         "phone_battery_alerts",
         "sms_keep",
         "sms_names",
@@ -764,6 +770,7 @@ phone_battery = \"x\"
             !Config::default().computer_clipboard,
             "the clipboard crosses to other computers only when asked (2g)"
         );
+        assert!(Config::default().kdeconnect_compat, "on by default (3a)");
     }
 
     #[test]
