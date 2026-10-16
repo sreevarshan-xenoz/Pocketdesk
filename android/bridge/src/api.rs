@@ -2797,9 +2797,6 @@ pub fn forget_trusted_peer(label: String) -> bool {
     }
 }
 
-/// Get detailed list of monitors available on the remote server.
-///
-/// F2: Multi-monitor support — returns an error if the desktop does not answer.
 /// Ask the computer for a screen of this phone's shape (T10j), or to take
 /// it away: `action` is `add` (with `width`×`height`) or `remove`. The
 /// computer's answer: `{name, index, width, height}`, `{removed}` or `{error}`.
@@ -2822,6 +2819,9 @@ pub async fn virtual_screen(
     .await
 }
 
+/// Get detailed list of monitors available on the remote server.
+///
+/// F2: Multi-monitor support — returns an error if the desktop does not answer.
 pub async fn get_monitors(address: String, port: u16) -> Result<Vec<MonitorInfoDto>, String> {
     let request =
         NetworkPacket::new("kdeconnect.pocketdesk.monitors").with_body(serde_json::json!({}));
