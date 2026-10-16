@@ -39,6 +39,9 @@ pub struct MirrorSession {
     /// This session's phone drives (roadmap N7).
     #[serde(default)]
     pub driving: bool,
+    /// The phone is a remote: input only, no screen sent (T10i).
+    #[serde(default)]
+    pub control_only: bool,
 }
 
 /// A phone with a control link to the server, in a session or not (T10d).
@@ -248,6 +251,7 @@ mod tests {
                 transport: "lan".into(),
                 started_unix: 1,
                 driving: false,
+                control_only: false,
             }],
             false,
             &[
@@ -281,6 +285,7 @@ mod tests {
                 transport: "wan".into(),
                 started_unix: 7,
                 driving: true,
+                control_only: false,
             }],
             true,
             &[],

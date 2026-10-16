@@ -69,6 +69,9 @@ object RustCore {
         codecCaps: Int,
     ): String
     private external fun nativeGetWanIdentity(): String
+    private external fun nativeConnectRemote(address: String, port: Int): String
+    private external fun nativeConnectRemoteWan(address: String, identityJson: String): String
+    private external fun nativeRemoteState(): String
     private external fun nativeReconnectStreaming(
         address: String,
         port: Int,
@@ -417,6 +420,16 @@ object RustCore {
      */
     fun connectStreamingWan(address: String, identityJson: String, monitorIndex: Int = -1): Result<Unit> =
         envelope(nativeConnectStreamingWan(address, identityJson, monitorIndex, videoCodecCaps())).map { }
+
+    /** Connect the phone as a remote (T10i): input only, no picture or sound. */
+    fun connectRemote(address: String, port: Int): Result<Unit> = envelope(nativeConnectRemote(address, port)).map { }
+
+    /** [connectRemote] over the iroh WAN path, with the desktop's cached endpoint identity. */
+    fun connectRemoteWan(address: String, identityJson: String): Result<Unit> =
+        envelope(nativeConnectRemoteWan(address, identityJson)).map { }
+
+    /** The remote session's state as the bridge reports it: `{"state": none | waiting | ready | tooOld}`. */
+    fun remoteState(): String = nativeRemoteState()
 
     /** The connected desktop's cached iroh WAN identity, or null if none announced. */
     fun getWanIdentity(): String? = runCatching {

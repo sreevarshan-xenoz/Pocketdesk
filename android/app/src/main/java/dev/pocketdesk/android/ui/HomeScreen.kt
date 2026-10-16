@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.ui
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -59,6 +61,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun HomeScreen(
     onConnect: (HostStore.Host) -> Unit,
+    onRemote: (HostStore.Host) -> Unit,
     onConnectFound: (HostStore.Host) -> Unit,
     onAdd: () -> Unit,
     onScan: () -> Unit,
@@ -252,6 +255,7 @@ fun HomeScreen(
                         isAuto = autoConnect && host == hosts.first(),
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
+                        onRemote = { onRemote(host) },
                         onConnect = {
                             if (!Prefs.offerWake(context)) {
                                 onConnect(host)
@@ -473,6 +477,7 @@ private fun FoundCard(computer: FoundComputer, onConnect: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HostCard(
     host: HostStore.Host,
@@ -481,6 +486,7 @@ private fun HostCard(
     paired: Boolean,
     hasWake: Boolean,
     onConnect: () -> Unit,
+    onRemote: () -> Unit,
     onWake: () -> Unit,
     onWakeSettings: () -> Unit,
     onCheck: () -> Unit,
@@ -525,12 +531,16 @@ private fun HostCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(
+            FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 2.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
+                // The phone as a remote (T10i): trackpad and keys, no picture.
+                TextButton(onClick = onRemote) {
+                    Text(stringResource(R.string.remote_button), style = MaterialTheme.typography.labelMedium)
+                }
                 if (hasWake) {
                     TextButton(onClick = onWake) {
                         Text(stringResource(R.string.wake), style = MaterialTheme.typography.labelMedium)

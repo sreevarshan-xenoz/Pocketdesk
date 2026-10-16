@@ -67,6 +67,22 @@ pub struct SessionClaim {
 struct ClientClaim {
     device_id: Option<String>,
     iroh_id: Option<String>,
+    /// The phone as a remote: no screen, no sound (T10i).
+    input_only: bool,
+}
+
+/// Whether an input-only session (T10i) drops `packet`: it is about a
+/// picture or a sound the session does not have.
+fn about_the_stream(packet: &InputPacket) -> bool {
+    matches!(
+        packet,
+        InputPacket::MouseMoveAbs { .. }
+            | InputPacket::RequestKeyframe
+            | InputPacket::WindowCrop { .. }
+            | InputPacket::FullQuality { .. }
+            | InputPacket::QualityPreset { .. }
+            | InputPacket::Mic { .. }
+    )
 }
 
 /// Where a whole-monitor session's absolute pointer input has to land.
@@ -350,6 +366,8 @@ impl StreamingServer {
         // Read optional client config streams before starting the pipeline.
         let claim = read_client_config(&connection, &mut self.config, self.hevc_allowed).await;
         let device_id = claim.device_id.clone();
+        // The phone as a remote (T10i): no capture, encode, video or sound.
+        let input_only = claim.input_only;
 
         // R4 A2 session telemetry: a shared recorder observes the connection
         // on a slow poll and an RAII guard emits the outcome report when the
@@ -397,8 +415,22 @@ impl StreamingServer {
         // Without input, the session is view-only whatever the phone asks:
         // the phone's own view-only switch can tighten this, never lift it.
         let force_view_only = !permissions.allows(Capability::Input);
-        let allow_mic = permissions.allows(Capability::Mic);
-        let allow_audio = permissions.allows(Capability::Audio);
+        let allow_mic = permissions.allows(Capability::Mic) && !input_only;
+        let allow_audio = permissions.allows(Capability::Audio) && !input_only;
+        // A remote that may not give input has nothing to do.
+        if input_only && force_view_only {
+            warn!(
+                device_id = device_id.as_deref().unwrap_or("<none announced>"),
+                "Input-only session refused: the device may not give input"
+            );
+            if let Some(guard) = &_telemetry_guard {
+                guard.record(SessionOutcome::Rejected);
+            }
+            connection.close(0u32, b"input not allowed");
+            return Err(anyhow::anyhow!(
+                "input-only session refused: the device may not give input"
+            ));
+        }
         if force_view_only || !allow_mic || !allow_audio {
             info!(
                 force_view_only,
@@ -417,8 +449,30 @@ impl StreamingServer {
                 input: !force_view_only,
                 audio: allow_audio,
                 mic: allow_mic,
+                video: !input_only,
             },
         );
+        // An input-only session says it was admitted, so the phone shows its
+        // controls only now: taps made while the owner decided are not
+        // queued and injected at once later.
+        if input_only {
+            match connection.open_uni().await {
+                Ok(mut ready) => {
+                    let header = super::transport::PacketHeader {
+                        sequence: 0,
+                        stream_kind: super::transport::STREAM_KIND_READY,
+                        is_keyframe: false,
+                        timestamp_us: 0,
+                    };
+                    if let Err(e) = ready.write_all(&header.as_bytes()).await {
+                        warn!(error = %e, "Could not say the input-only session is ready");
+                    }
+                    let _ = ready.finish();
+                }
+                Err(e) => warn!(error = %e, "Could not say the input-only session is ready"),
+            }
+            info!("Input-only session: no capture, encode or sound");
+        }
         // Input is tagged with this session, so the server can tell which
         // phone drives when several are connected (roadmap N7).
         let live_id = _live_session.id();
@@ -452,48 +506,55 @@ impl StreamingServer {
         let capture_config = self.config.clone();
         let _capture_bitrate_rx = self.bitrate_watcher();
         let capture_cancel = cancel.clone();
-        let capture_session = capture::start_capture_auto(
-            capture_config,
-            frame_tx,
-            capture_cancel,
-            window_rx.clone(),
-            window_mode.clone(),
-            self.capture_backend,
-        )
-        .await
-        .context("Failed to start screen capture")?;
-
-        info!("Screen capture session started");
+        // An input-only session (T10i) captures nothing.
+        let capture_session = if input_only {
+            None
+        } else {
+            let session = capture::start_capture_auto(
+                capture_config,
+                frame_tx,
+                capture_cancel,
+                window_rx.clone(),
+                window_mode.clone(),
+                self.capture_backend,
+            )
+            .await
+            .context("Failed to start screen capture")?;
+            info!("Screen capture session started");
+            Some(session)
+        };
 
         // Clone connection for use across multiple tasks
         let conn_for_transport = connection.clone();
         let conn_for_monitor = connection.clone();
         let _conn_for_audio = connection.clone();
 
-        // Task 2: Video encoding
-        // Clone config for encoder (bitrate will be updated via watch channel)
-        let mut encoder_config = self.config.clone();
-        let mut encoder_bitrate_rx = self.bitrate_watcher();
+        // Tasks 2 and 3, the picture: none on an input-only session (T10i).
+        if !input_only {
+            // Task 2: Video encoding
+            // Clone config for encoder (bitrate will be updated via watch channel)
+            let mut encoder_config = self.config.clone();
+            let mut encoder_bitrate_rx = self.bitrate_watcher();
 
-        // Update encoder config with current bitrate
-        encoder_config.bitrate_bps = *encoder_bitrate_rx.borrow();
+            // Update encoder config with current bitrate
+            encoder_config.bitrate_bps = *encoder_bitrate_rx.borrow();
 
-        let mut encoder =
-            VideoEncoder::new(encoder_config).context("Failed to create video encoder")?;
-        // R4 C2: the rung we actually landed on after any startup fallback.
-        // Resolution rebuilds clone this (not `base_config`) so a session
-        // that fell back to hardware→software at startup doesn't oscillate
-        // back through the failing hardware probe on every window crop.
-        let mut encoder_preferred = encoder.config().clone();
-        let encode_crop_rx = crop_rx.clone();
-        let encode_window_rx = window_rx.clone();
-        let encode_window_mode = window_mode.clone();
+            let mut encoder =
+                VideoEncoder::new(encoder_config).context("Failed to create video encoder")?;
+            // R4 C2: the rung we actually landed on after any startup fallback.
+            // Resolution rebuilds clone this (not `base_config`) so a session
+            // that fell back to hardware→software at startup doesn't oscillate
+            // back through the failing hardware probe on every window crop.
+            let mut encoder_preferred = encoder.config().clone();
+            let encode_crop_rx = crop_rx.clone();
+            let encode_window_rx = window_rx.clone();
+            let encode_window_mode = window_mode.clone();
 
-        // Spawn encoding task — reads frames, produces packets
-        let encode_cancel = cancel.clone();
-        let encode_recorder = telemetry.as_ref().map(|t| t.0.clone());
-        let encode_span = tracing::info_span!("video_encode");
-        tasks.spawn(async move {
+            // Spawn encoding task — reads frames, produces packets
+            let encode_cancel = cancel.clone();
+            let encode_recorder = telemetry.as_ref().map(|t| t.0.clone());
+            let encode_span = tracing::info_span!("video_encode");
+            tasks.spawn(async move {
             info!("Encoding task started");
             let mut packets_encoded = 0u64;
             let mut frames_dropped = 0u64;
@@ -798,13 +859,13 @@ impl StreamingServer {
             );
         }.instrument(encode_span));
 
-        // Task 3: Packet transport — sends packets over QUIC (newest-only),
-        // at most `MAX_VIDEO_IN_FLIGHT` frames on the wire at once
-        let telemetry_bytes_tx = telemetry.as_ref().map(|t| t.1.clone());
-        let transport_cancel = cancel.clone();
-        let transport_fps = self.config.fps;
-        let transport_span = tracing::info_span!("video_transport");
-        tasks.spawn(async move {
+            // Task 3: Packet transport — sends packets over QUIC (newest-only),
+            // at most `MAX_VIDEO_IN_FLIGHT` frames on the wire at once
+            let telemetry_bytes_tx = telemetry.as_ref().map(|t| t.1.clone());
+            let transport_cancel = cancel.clone();
+            let transport_fps = self.config.fps;
+            let transport_span = tracing::info_span!("video_transport");
+            tasks.spawn(async move {
             info!("Transport task started");
             let mut packets_sent = 0u64;
             let mut bytes_sent = 0u64;
@@ -950,6 +1011,7 @@ impl StreamingServer {
                 "Transport task complete"
             );
         }.instrument(transport_span));
+        }
 
         // Task 4: Monitor connection state and handle input streams from client
         let monitor_cancel = cancel.clone();
@@ -1030,6 +1092,11 @@ impl StreamingServer {
                                                     monitor_recorder.as_deref(),
                                                     &packet,
                                                 ) {
+                                                    continue;
+                                                }
+                                                // No picture or sound to steer,
+                                                // and no picture to point at.
+                                                if input_only && about_the_stream(&packet) {
                                                     continue;
                                                 }
                                                 // IDR requests are control-plane:
@@ -1163,11 +1230,14 @@ impl StreamingServer {
             let audio_cancel = cancel.clone();
             let audio_conn = connection.clone();
             tasks.spawn(
-                async move {
-                    if let Err(e) = run_audio_pipeline(audio_conn, audio_cancel).await {
-                        error!(error = %e, "Audio pipeline failed");
-                    }
-                }
+                until_cancelled(
+                    async move {
+                        if let Err(e) = run_audio_pipeline(audio_conn, audio_cancel.clone()).await {
+                            error!(error = %e, "Audio pipeline failed");
+                        }
+                    },
+                    cancel.clone(),
+                )
                 .instrument(tracing::info_span!("audio_pipeline")),
             );
         }
@@ -1209,7 +1279,8 @@ impl StreamingServer {
         // relay term is inert on quinn (LAN / Tailscale never report a
         // relayed path) and on iroh before punching, so this task runs for
         // every transport — that is what lets a LAN session pick a preset.
-        {
+        // An input-only session (T10i) has no encoder to steer.
+        if !input_only {
             let arb_conn = connection.clone();
             let arb_bitrate_tx = self.bitrate_tx.clone();
             let configured_bitrate = self.config.bitrate_bps;
@@ -1283,6 +1354,11 @@ impl StreamingServer {
             tasks_drained = cleanup_count,
             "Streaming pipeline shut down complete"
         );
+        // Said on the wire, so the phone learns at once that the session is
+        // over: a clone of the connection held elsewhere kept it open on the
+        // phone's own keep-alives, and a remote (T10i) has no frames whose
+        // absence would tell it.
+        connection.close(0u32, b"session ended");
 
         match result {
             Some(Ok(_)) => Ok(()),
@@ -1356,6 +1432,7 @@ async fn read_client_config(
 ) -> ClientClaim {
     use super::client::{
         CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER, MONITOR_CONFIG_MARKER,
+        SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER,
     };
 
     let mut claim = ClientClaim::default();
@@ -1430,6 +1507,13 @@ async fn read_client_config(
                 codec = config.codec.display_name(),
                 "Client codec caps negotiated"
             );
+        } else if marker == SESSION_MODE_MARKER {
+            let mut mode = [0u8; 1];
+            if !read_with_timeout(&mut *stream, &mut mode).await {
+                break;
+            }
+            claim.input_only = mode[0] == SESSION_MODE_INPUT_ONLY;
+            info!(mode = mode[0], "Client session mode");
         } else {
             debug!("Unknown config marker: {:02X?}", &marker);
         }
@@ -1447,6 +1531,15 @@ fn negotiate_codec(caps: u8, hevc_allowed: bool, current: VideoCodec) -> Option<
     } else {
         None
     }
+}
+
+/// Run `task`, then wait for `cancel`: a task whose ending must not end the
+/// session (the first task of the session's set to finish ends it). Audio
+/// ends at once on a computer with no audio capture, and the session then
+/// went with it.
+async fn until_cancelled(task: impl std::future::Future<Output = ()>, cancel: CancellationToken) {
+    task.await;
+    cancel.cancelled().await;
 }
 
 /// `read_exact` bounded by a short timeout; false on timeout or error.
@@ -1477,12 +1570,12 @@ async fn run_audio_pipeline(connection: SharedConnection, cancel: CancellationTo
     let mut encoder =
         AudioOpusEncoder::new(audio_config).context("Failed to create Opus encoder")?;
 
-    // Try PipeWire audio loopback capture.
-    // The session MUST stay alive for the whole audio task: its Drop
-    // cancels the (shared) pipeline token, so dropping it here would tear
-    // down capture+encode+transport the instant the session started.
+    // Try PipeWire audio loopback capture. The capture session's Drop
+    // cancels the token it holds, so it gets a child of the pipeline's:
+    // capture that stops (no PipeWire daemon: it "starts", then its thread
+    // fails) ends the sound, never the session's picture and input.
     let (pcm_tx, mut pcm_rx) = mpsc::channel::<audio_capture::PcmBuffer>(8);
-    let pw_cancel = cancel.clone();
+    let pw_cancel = cancel.child_token();
     let _pw_session =
         match audio_capture::start_audio_capture(48000, 2, 20, pcm_tx, pw_cancel).await {
             Ok(session) => {
@@ -1707,6 +1800,21 @@ mod tests {
     }
 
     use super::*;
+
+    #[tokio::test]
+    async fn an_audio_task_that_ends_at_once_does_not_end_the_session() {
+        let cancel = CancellationToken::new();
+        let mut tasks = JoinSet::new();
+        // No audio capture: the audio task's own work ends at once.
+        tasks.spawn(until_cancelled(async {}, cancel.clone()));
+        let early = tokio::time::timeout(Duration::from_millis(100), tasks.join_next()).await;
+        assert!(
+            early.is_err(),
+            "the session's task set must not end with audio"
+        );
+        cancel.cancel();
+        assert!(tasks.join_next().await.is_some());
+    }
     use crate::streaming::{EncoderPreset, H264Profile, HardwareEncoder, VideoCodec};
 
     /// R2: a session whose client stopped reporting is ended, but a few
@@ -1916,6 +2024,7 @@ mod tests {
             Some("device-c1"),
             Some("phone-endpoint"),
             Some(CODEC_CAP_HEVC),
+            false,
         )
         .await
         .expect("connect");
@@ -1932,6 +2041,59 @@ mod tests {
         );
         assert_eq!(config.monitor_index, 2);
         assert_eq!(config.codec, VideoCodec::H265);
+        assert!(!claim.input_only);
+    }
+
+    /// T10i: a remote says it is input only, and sends neither a monitor
+    /// nor codec caps (there is no picture).
+    #[tokio::test]
+    async fn an_input_only_client_says_so_and_asks_for_no_picture() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::{CODEC_CAP_HEVC, StreamingClient};
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+
+        let (client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            Some(2),
+            Some("device-r1"),
+            Some("phone-endpoint"),
+            Some(CODEC_CAP_HEVC),
+            true,
+        )
+        .await
+        .expect("connect");
+        assert!(client.remote().input_only);
+
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.input_only);
+        assert_eq!(claim.device_id.as_deref(), Some("device-r1"));
+        assert_eq!(config.monitor_index, 0, "no monitor asked for");
+        assert_eq!(config.codec, VideoCodec::H264, "no codec caps sent");
+    }
+
+    #[test]
+    fn an_input_only_session_drops_what_is_about_the_picture() {
+        assert!(about_the_stream(&InputPacket::MouseMoveAbs {
+            x_norm: 1,
+            y_norm: 1
+        }));
+        assert!(about_the_stream(&InputPacket::RequestKeyframe));
+        assert!(!about_the_stream(&InputPacket::MouseMove { dx: 1, dy: 1 }));
     }
 
     #[test]

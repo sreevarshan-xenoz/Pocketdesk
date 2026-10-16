@@ -35,11 +35,12 @@ Whether the server runs, the phones in a session now, and how phones reach this 
  "server": {"running": true, "pid": 4242},
  "pocketdesk_version": "0.2.0",
  "sessions": [{"session_id": 7, "device_id": "0d7c3a52-…", "peer": "192.0.2.7:51234",
-               "transport": "lan", "started_unix": 1792050000, "driving": true}],
+               "transport": "lan", "started_unix": 1792050000, "driving": true,
+               "control_only": false}],
  "endpoint": {"…": "what the server announces for the internet path, or null"}}
 ```
 
-`sessions` is empty and `endpoint` null when no server runs. `pocketdesk_version` is this program's: a server started before an upgrade may still be an older one. `transport` is `lan` or `wan`. `driving` says which phone has the keyboard and pointer when several are connected.
+`sessions` is empty and `endpoint` null when no server runs. `pocketdesk_version` is this program's: a server started before an upgrade may still be an older one. `transport` is `lan` or `wan`. `driving` says which phone has the keyboard and pointer when several are connected. `control_only` is a phone used as a remote: input only, no screen sent.
 
 ### `pocketdesk devices --json`
 

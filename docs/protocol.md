@@ -228,8 +228,9 @@ Every `kdeconnect.pocketdesk.*` packet carries `"llVersion": 1` (`kdeconnect.rs`
 | `[0xFE,0x00]` + len + UTF-8 | Phone device id | Which paired device this is (judged against the proved key) |
 | `[0xFC,0x00]` + len + UTF-8 | Phone iroh endpoint id | Registers the WAN key from a LAN session |
 | `[0xFD,0x00]` + u8 | Codec capability bits (bit 0 = HEVC) | Codec negotiation |
+| `[0xFB,0x00]` + u8 | Session mode (`1` = input only) | The phone as a remote (T10i): no capture, encode, video or sound; refused without the Input permission; taps at a place in a picture, crops, keyframe and quality requests and mic frames are dropped |
 
-**Media from the desktop.** Each video frame or audio packet travels on its own uni-stream. It starts with an 18-byte header: sequence u64, kind (`0` video, `1` audio), keyframe flag and timestamp u64 (`core/src/streaming/transport.rs`, `PacketHeader`).
+**Media from the desktop.** Each video frame or audio packet travels on its own uni-stream. It starts with an 18-byte header: sequence u64, kind (`0` video, `1` audio), keyframe flag and timestamp u64 (`core/src/streaming/transport.rs`, `PacketHeader`). An input-only session gets one stream of kind `2` (ready, no payload) once it is admitted; a phone that gets video on one closes it (the computer is too old for the mode). A session's connection is closed (`session ended`) when its pipeline ends.
 
 - Video is H.264, or HEVC when `allow_hevc` is set and the phone says it can decode it (`docs/capabilities.md`).
 - Desktop sound is Opus at 48 kHz, stereo, 64 kbit/s. It is not sent when the Audio permission is off (`core/src/streaming/streamer.rs`).
