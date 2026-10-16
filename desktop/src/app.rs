@@ -156,6 +156,9 @@ pub struct PocketdeskApp {
     task_requests: Vec<pocketdesk_core::local::tasks::TaskRequest>,
     /// Those already brought to the owner's attention.
     raised_tasks: Vec<String>,
+    /// Those answered here, until the server takes them off its list (it
+    /// looks every half second; the list could show one again before).
+    answered_tasks: Vec<String>,
 }
 
 impl PocketdeskApp {
@@ -189,6 +192,7 @@ impl PocketdeskApp {
             activity: Default::default(),
             task_requests: Vec::new(),
             raised_tasks: Vec::new(),
+            answered_tasks: Vec::new(),
         }
     }
 
@@ -281,8 +285,13 @@ impl PocketdeskApp {
 
     fn refresh(&mut self) {
         self.snapshot = model::snapshot(&self.state_dir, now_unix());
-        self.task_requests =
-            pocketdesk_core::local::tasks::read_requests(&self.state_dir, now_unix());
+        let requests = pocketdesk_core::local::tasks::read_requests(&self.state_dir, now_unix());
+        self.answered_tasks
+            .retain(|id| requests.iter().any(|r| &r.id == id));
+        self.task_requests = requests
+            .into_iter()
+            .filter(|r| !self.answered_tasks.contains(&r.id))
+            .collect();
         self.config = Config::load().ok();
         if self.tab == Tab::Logs {
             self.log = model::log_tail(&self.state_dir, 400);
@@ -380,6 +389,7 @@ impl PocketdeskApp {
                 self.notice = Some(format!("Could not answer the task: {e}"));
             }
             self.task_requests.retain(|r| r.id != request.id);
+            self.answered_tasks.push(request.id.clone());
         }
     }
 
