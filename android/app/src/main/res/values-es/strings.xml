@@ -495,4 +495,14 @@
     <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
     <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>
     <string name="screenshots_save">Guardarlas en Descargas del equipo</string>
+    <string name="remote_button">Mando</string>
+    <string name="remote_title">Mando · %1$s</string>
+    <string name="remote_keyboard">Teclado</string>
+    <string name="remote_exit">Salir</string>
+    <string name="remote_connecting">Conectando…</string>
+    <string name="remote_waiting">Esperando a que el equipo lo permita…</string>
+    <string name="remote_too_old">El Pocketdesk de este equipo es demasiado antiguo para el mando: actualízalo, o abre una sesión.</string>
+    <string name="remote_down">El mando se detuvo: %1$s</string>
+    <string name="remote_no_reason">el equipo no respondió</string>
+    <string name="remote_retry">Reintentar</string>
 </resources>

@@ -497,4 +497,14 @@
     <string name="screenshots_needs_photos">Needs access to all photos: allow it in Android\'s settings for Pocketdesk</string>
     <string name="screenshots_clipboard">Put on the computer\'s clipboard</string>
     <string name="screenshots_save">Save in the computer\'s Downloads</string>
+    <string name="remote_button">Remote</string>
+    <string name="remote_title">Remote · %1$s</string>
+    <string name="remote_keyboard">Keyboard</string>
+    <string name="remote_exit">Exit</string>
+    <string name="remote_connecting">Connecting…</string>
+    <string name="remote_waiting">Waiting for the computer to allow it…</string>
+    <string name="remote_too_old">This computer\'s Pocketdesk is too old for the remote: update it, or open a session instead.</string>
+    <string name="remote_down">The remote stopped: %1$s</string>
+    <string name="remote_no_reason">the computer did not answer</string>
+    <string name="remote_retry">Retry</string>
 </resources>

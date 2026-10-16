@@ -490,4 +490,14 @@
     <string name="screenshots_needs_photos">எல்லாப் படங்களுக்குமான அணுகல் தேவை: Android அமைப்புகளில் Pocketdesk-க்கு அனுமதிக்கவும்</string>
     <string name="screenshots_clipboard">கணினியின் கிளிப்போர்டில் வை</string>
     <string name="screenshots_save">கணினியின் Downloads-இல் சேமி</string>
+    <string name="remote_button">ரிமோட்</string>
+    <string name="remote_title">ரிமோட் · %1$s</string>
+    <string name="remote_keyboard">விசைப்பலகை</string>
+    <string name="remote_exit">வெளியேறு</string>
+    <string name="remote_connecting">இணைக்கிறது…</string>
+    <string name="remote_waiting">கணினி அனுமதிக்கக் காத்திருக்கிறது…</string>
+    <string name="remote_too_old">இந்தக் கணினியின் Pocketdesk ரிமோட்டுக்குப் பழையது: அதைப் புதுப்பிக்கவும், அல்லது ஒரு அமர்வைத் திறக்கவும்.</string>
+    <string name="remote_down">ரிமோட் நின்றது: %1$s</string>
+    <string name="remote_no_reason">கணினி பதிலளிக்கவில்லை</string>
+    <string name="remote_retry">மீண்டும் முயல்</string>
 </resources>
