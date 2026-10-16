@@ -229,6 +229,23 @@ fn save(made: &Made) {
     }
 }
 
+/// When each phone's screen was added: a screen is left alone for
+/// [`GRACE`] while its session moves onto it.
+fn added_at() -> &'static Mutex<BTreeMap<String, std::time::Instant>> {
+    static ADDED: Mutex<BTreeMap<String, std::time::Instant>> = Mutex::new(BTreeMap::new());
+    &ADDED
+}
+
+const GRACE: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn recently_added(phone: &str) -> bool {
+    added_at()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(phone)
+        .is_some_and(|at| at.elapsed() < GRACE)
+}
+
 /// `virtual_screens` from the config, set at start.
 static ALLOWED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
@@ -262,16 +279,25 @@ pub async fn run_sweeper() {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
         tick.tick().await;
-        let live: Vec<String> = pocketdesk_core::streaming::sessions::list()
+        // A phone counts while it has a session or a control link: a
+        // session switching to the new screen, waiting at the approval gate
+        // or reconnecting has its link the whole time.
+        let mut live: Vec<String> = pocketdesk_core::streaming::sessions::list()
             .into_iter()
             .filter_map(|s| s.device_id)
             .collect();
+        live.extend(
+            crate::state::clone_clients()
+                .await
+                .iter()
+                .map(|c| c.device_id().to_string()),
+        );
         let gone: Vec<(String, Vec<String>)> = {
             let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
             let phones: Vec<String> = made.phones.keys().cloned().collect();
             let mut gone = Vec::new();
             for phone in phones {
-                if live.contains(&phone) {
+                if live.contains(&phone) || recently_added(&phone) {
                     missing.remove(&phone);
                     continue;
                 }
@@ -373,6 +399,10 @@ fn answer(phone: &str, action: &str, width: u32, height: u32) -> serde_json::Val
                         made.phones.insert(phone.to_string(), vec![name.clone()]);
                         save(&made);
                     }
+                    added_at()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(phone.to_string(), std::time::Instant::now());
                     tracing::info!("Added a {w}x{h} screen {name} for a phone");
                     json!({ "name": name, "index": index, "width": w, "height": h })
                 }
