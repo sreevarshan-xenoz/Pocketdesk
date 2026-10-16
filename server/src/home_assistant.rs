@@ -334,6 +334,13 @@ pub fn activity(event: &pocketdesk_core::local::events::Event) -> String {
     .to_string()
 }
 
+/// Whether a message on a task's command topic is a press: what Home
+/// Assistant sends (`PRESS`), live. A retained one would press again at
+/// every connect, and an empty one is someone clearing a retained message.
+pub fn is_press(retained: bool, payload: &[u8]) -> bool {
+    !retained && payload == b"PRESS"
+}
+
 /// The task a command topic presses, among `snapshot`'s.
 pub fn pressed_task(computer: &Computer, snapshot: &Snapshot, topic: &str) -> Option<String> {
     let prefix = format!("{}/task/", computer.base());
@@ -528,6 +535,9 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                     publish(&client, &computer, &snapshot, &mut sent);
                 }
                 Some(Ok(Event::Incoming(Packet::Publish(message)))) => {
+                    if !is_press(message.retain, &message.payload) {
+                        continue;
+                    }
                     if let Some(task) = pressed_task(&computer, &snapshot, &message.topic) {
                         match crate::plugins::tasks::start_for_home_assistant(&task) {
                             Ok(()) => tracing::info!(task = %task, "Home Assistant started a task"),
@@ -776,6 +786,18 @@ mod tests {
             pressed_task(&c, &s, "pocketdesk/1a2b3c4d5e6f/sessions"),
             None
         );
+    }
+
+    #[test]
+    fn only_a_live_press_starts_a_task() {
+        assert!(is_press(false, b"PRESS"));
+        assert!(
+            !is_press(true, b"PRESS"),
+            "a retained press would fire at every connect"
+        );
+        assert!(!is_press(false, b""), "clearing a retained message");
+        assert!(!is_press(false, b"press"));
+        assert!(!is_press(false, b"rm -rf /"));
     }
 
     #[test]
