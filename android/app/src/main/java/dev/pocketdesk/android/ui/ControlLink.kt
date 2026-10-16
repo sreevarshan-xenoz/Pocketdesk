@@ -42,13 +42,15 @@ object ControlLink {
  * and the phone's queries. Without it, a dropped network left the session
  * reconnecting its stream while every query went over a throwaway connection
  * and no push arrived until the session ended. It runs while the app is
- * started (picture-in-picture included), not in the background.
+ * started (picture-in-picture included), not in the background. A new
+ * [streamUps] (the session's stream came up again) starts it over: it checks
+ * at once, its backoff forgotten.
  */
 @Composable
-fun ControlLinkEffect(address: String, controlPort: Int) {
+fun ControlLinkEffect(address: String, controlPort: Int, streamUps: Int = 0) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
-    LaunchedEffect(address, controlPort, lifecycleOwner) {
+    LaunchedEffect(address, controlPort, lifecycleOwner, streamUps) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             withContext(Dispatchers.IO) {
                 var failures = 0

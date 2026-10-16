@@ -787,7 +787,14 @@ fun RemoteScreen(
         mode = if (mode == InputMode.DirectTouch) InputMode.Trackpad else InputMode.DirectTouch
     }
 
-    ControlLinkEffect(address, controlPort)
+    // Each time the stream comes up, the control link is dialed at once:
+    // its backoff grew while the computer was away, and without it a
+    // session that looks live cannot take a file or a push.
+    var streamUps by remember(address) { mutableIntStateOf(0) }
+    LaunchedEffect(streamStatus is StreamStatus.Up) {
+        if (streamStatus is StreamStatus.Up) streamUps++
+    }
+    ControlLinkEffect(address, controlPort, streamUps)
     ClipboardSyncEffect(address, controlPort, enabled = clipboardSync)
     SirenWatcher(context)
     DesktopNotificationRelay(address = address, controlPort = controlPort)
