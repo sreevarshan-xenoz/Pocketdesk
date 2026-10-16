@@ -19,7 +19,8 @@ pub const CHROMIUM_EXTENSION_ID: &str = "abojofjjnpcmejhdonndlegfaolfkcif";
 /// The extension's id in Firefox (`browser_specific_settings.gecko.id`).
 pub const FIREFOX_EXTENSION_ID: &str = "pocketdesk@pocketdesk.dev";
 
-/// The longest message either way (the browsers' own limit to a host is 1 MiB).
+/// The longest message either way (the browsers' own limit from a host is
+/// 1 MiB; ours to it is far more, but no request of ours comes near).
 const MAX_MESSAGE: usize = 1024 * 1024;
 /// The largest image sent on.
 const MAX_IMAGE: usize = 32 * 1024 * 1024;
@@ -370,11 +371,20 @@ fn fetch_blocking(url: &str) -> Result<Image, String> {
 
 /// Serve the browser until it closes the pipe. The exit code.
 pub fn run() -> i32 {
-    let Ok(dir) = crate::state::state_dir() else {
-        return 1;
-    };
     let mut stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            // Said before any request is read: the browser takes the first
+            // message as the answer.
+            let _ = write_message(
+                &mut stdout,
+                &err(format!("Pocketdesk could not find its folder ({e:#})")),
+            );
+            return 1;
+        }
+    };
     loop {
         let request = match read_message(&mut stdin) {
             Ok(Some(request)) => request,

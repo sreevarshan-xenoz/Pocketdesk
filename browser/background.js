@@ -46,14 +46,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     tell("This one lives only in the page: save it, then send the file.");
     return;
   }
+  let answer;
   try {
-    const answer = await chrome.runtime.sendNativeMessage(HOST, asked);
-    tell(answer.ok || answer.error || "No answer from Pocketdesk.");
+    answer = await chrome.runtime.sendNativeMessage(HOST, asked);
   } catch (e) {
-    tell(
-      "Pocketdesk is not set up for this browser: run `pocketdesk browser-host --install` " +
-        "(or Settings, \"Send from the browser\", in the Pocketdesk app). " +
-        String((e && e.message) || e),
-    );
+    const why = String((e && e.message) || e);
+    // Chromium: "Specified native messaging host not found."; Firefox:
+    // "No such native application …". Anything else: the host ran and failed.
+    if (/not found|no such native application/i.test(why)) {
+      tell(
+        "Pocketdesk is not set up for this browser: run `pocketdesk browser-host --install` " +
+          '(or Settings, "Send from the browser", in the Pocketdesk app).',
+      );
+    } else {
+      tell("Pocketdesk could not answer: " + why);
+    }
+    return;
   }
+  tell((answer && (answer.ok || answer.error)) || "No answer from Pocketdesk.");
 });
