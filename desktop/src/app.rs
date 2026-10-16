@@ -250,6 +250,9 @@ impl PocketdeskApp {
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
         }
+        if tab == Tab::Activity && self.tab != Tab::Activity {
+            self.activity.reopen();
+        }
         if tab == Tab::Settings {
             // Read again on each visit: it may have changed outside the app.
             self.send_menu_installed = None;
@@ -1129,7 +1132,7 @@ impl eframe::App for PocketdeskApp {
             Tab::Status => self.status_tab(ui),
             Tab::Activity => {
                 let log_on = self.config.as_ref().is_none_or(|c| c.events);
-                match self.activity.show(ui, &self.state_dir, log_on, now_unix()) {
+                match self.activity.show(ui, log_on, now_unix()) {
                     Some(crate::activity_view::Action::ShowFile(path)) => {
                         if let Err(e) = crate::reveal::show_in_folder(&path) {
                             self.notice = Some(format!("Could not show the file: {e}"));

@@ -59,6 +59,10 @@ pub struct ActivityView {
     /// Oldest first, at most [`KEEP`].
     events: Vec<Event>,
     tail: Option<Tail>,
+    /// The first read after the history, which may repeat its last events.
+    fresh: bool,
+    /// `received.json`, as last read, for Show in folder.
+    received: Vec<pocketdesk_core::local::received::ReceivedFile>,
     filter: Filter,
 }
 
@@ -67,24 +71,38 @@ impl ActivityView {
     /// time).
     pub fn refresh(&mut self, state_dir: &Path) {
         match &mut self.tail {
-            Some(tail) => self.events.extend(tail.poll()),
+            Some(tail) => {
+                let new = tail.poll();
+                if std::mem::take(&mut self.fresh) {
+                    // Written between the tail's start and the history's
+                    // read: already shown.
+                    let recent = self.events.len().saturating_sub(new.len());
+                    let shown = self.events[recent..].to_vec();
+                    self.events
+                        .extend(new.into_iter().filter(|e| !shown.contains(e)));
+                } else {
+                    self.events.extend(new);
+                }
+            }
             None => {
                 self.tail = Some(Tail::at_end(state_dir));
                 self.events = events::history(state_dir, KEEP);
+                self.fresh = true;
             }
         }
         let extra = self.events.len().saturating_sub(KEEP);
         self.events.drain(..extra);
+        self.received = pocketdesk_core::local::received::read(state_dir);
+    }
+
+    /// Opened again: read the history afresh (a tail kept while another tab
+    /// was open could have missed two rotations).
+    pub fn reopen(&mut self) {
+        self.tail = None;
     }
 
     /// Draw the tab; what the person asked for, if anything.
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        state_dir: &Path,
-        log_on: bool,
-        now_unix: u64,
-    ) -> Option<Action> {
+    pub fn show(&mut self, ui: &mut egui::Ui, log_on: bool, now_unix: u64) -> Option<Action> {
         let mut action = None;
         if !log_on {
             ui.horizontal(|ui| {
@@ -113,7 +131,7 @@ impl ActivityView {
             ui.label("Nothing yet. Sessions, phones, files, links, notifications and hooks show here as they happen.");
             return action;
         }
-        let received = pocketdesk_core::local::received::read(state_dir);
+        let received = &self.received;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -126,11 +144,13 @@ impl ActivityView {
                             ui.label(RichText::new(ago(now_unix, event.at)).weak());
                             ui.monospace(phone(event));
                             ui.label(describe(event));
-                            match file_path(event, &received) {
-                                Some(path) if ui.small_button("Show in folder").clicked() => {
-                                    action = Some(Action::ShowFile(path));
+                            match file_path(event, received) {
+                                Some(path) => {
+                                    if ui.small_button("Show in folder").clicked() {
+                                        action = Some(Action::ShowFile(path));
+                                    }
                                 }
-                                _ => {
+                                None => {
                                     ui.label("");
                                 }
                             }
@@ -250,7 +270,7 @@ pub fn describe(event: &Event) -> String {
             } else {
                 match number(event, "code") {
                     Some(code) => format!("Hook for {hook} ran (exit {code})"),
-                    None => format!("Hook for {hook} could not run"),
+                    None => format!("Hook for {hook} could not run, or a signal ended it"),
                 }
             }
         }
@@ -463,5 +483,36 @@ mod tests {
             "a clock behind is not the future"
         );
         assert_eq!(ago(90_000, 0), "1 d ago");
+    }
+
+    #[test]
+    fn opening_the_tab_shows_each_event_once() {
+        let dir = std::env::temp_dir().join(format!("pd-activity-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ended = |at: u64| {
+            Event::new(
+                "session_ended",
+                None,
+                at,
+                json!({}),
+                json!({}),
+                EventsDetail::Metadata,
+            )
+        };
+        events::append(&dir, &ended(1)).unwrap();
+        // The tail starts, then an event lands, then the history is read.
+        let tail = Tail::at_end(&dir);
+        events::append(&dir, &ended(2)).unwrap();
+        let mut view = ActivityView {
+            tail: Some(tail),
+            events: events::history(&dir, KEEP),
+            fresh: true,
+            ..Default::default()
+        };
+        view.refresh(&dir);
+        let ats: Vec<u64> = view.events.iter().map(|e| e.at).collect();
+        assert_eq!(ats, vec![1, 2]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
