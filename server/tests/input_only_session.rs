@@ -98,6 +98,14 @@ async fn an_input_only_session_carries_input_and_no_picture() {
         matches!(packet, InputPacket::MouseMove { dx: 5, dy: -3 }),
         "the relative move, not the absolute one: {packet:?}"
     );
+    // The two travel on streams of their own: the absolute tap could have
+    // come second. It never comes.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), input_rx.recv())
+            .await
+            .is_err(),
+        "a tap at a place in a picture is dropped"
+    );
 
     // No picture and no sound.
     assert!(
