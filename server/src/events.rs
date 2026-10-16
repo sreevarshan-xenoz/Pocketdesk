@@ -116,8 +116,8 @@ pub(crate) enum HookEnd {
 }
 
 /// The system shell for `command`, as the exec plugin's: `sh -c` on Unix;
-/// on Windows the real `System32\cmd.exe /C` (never found on `PATH`), the
-/// line passed verbatim, with no console window.
+/// on Windows the real `System32\cmd.exe /S /C "line"` (never found on
+/// `PATH`), the line kept as typed, with no console window.
 fn shell(command: &str) -> std::process::Command {
     #[cfg(windows)]
     {
@@ -125,8 +125,9 @@ fn shell(command: &str) -> std::process::Command {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut shell = std::process::Command::new(crate::platform::system32("cmd.exe"));
         shell
-            .arg("/C")
-            .raw_arg(command)
+            // `/S` and the outer quotes: cmd strips just those, so a line
+            // that starts with a quoted program and quotes more keeps them.
+            .raw_arg(format!("/S /C \"{command}\""))
             .creation_flags(CREATE_NO_WINDOW);
         shell
     }
@@ -316,6 +317,26 @@ mod tests {
                 .exists(),
             "no log with it off"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hook naming a quoted program, with quoted arguments, runs as typed:
+    /// cmd's own rule would strip its first and last quote.
+    #[cfg(windows)]
+    #[test]
+    fn a_hook_starting_with_a_quoted_program_runs_as_typed() {
+        let dir = temp("quoted");
+        let out = dir.join("quoted out.txt");
+        let line = format!(
+            "\"{}\" /C echo ok> \"{}\"",
+            crate::platform::system32("cmd.exe").display(),
+            out.display()
+        );
+        assert_eq!(
+            run_hook(&line, "{}", Duration::from_secs(10)).unwrap(),
+            HookEnd::Exited(Some(0))
+        );
+        assert_eq!(std::fs::read_to_string(&out).unwrap().trim(), "ok");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
