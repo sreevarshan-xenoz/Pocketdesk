@@ -1917,6 +1917,9 @@ pub async fn connect_streaming(
                 && handle.port == streaming_port
                 && handle.monitor_index == monitor_index
                 && handle.input_only == input_only
+                // One the computer closed (a refusal) is not active: a
+                // retry must dial again, not keep the dead session.
+                && handle.connection.close_reason().is_none()
             {
                 tracing::info!("Session already active for {addr}, skipping connect");
                 return Ok(());
@@ -2140,6 +2143,9 @@ pub async fn connect_streaming_wan(
                 && handle.port == 0
                 && handle.monitor_index == monitor_index
                 && handle.input_only == input_only
+                // One the computer closed (a refusal) is not active: a
+                // retry must dial again, not keep the dead session.
+                && handle.connection.close_reason().is_none()
             {
                 tracing::info!("WAN session already active for {address}, skipping connect");
                 return Ok(());
