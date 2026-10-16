@@ -37,7 +37,7 @@ class CastEncoder(
         } catch (e: Exception) {
             // An encoder without the Baseline profile: its default, still
             // without B-frames where the platform can say so.
-            Log.i(TAG, "Baseline refused, using the encoder's default profile", e)
+            Log.i(TAG, "Baseline refused (${e.message}), using the encoder's default profile")
             codec.reset()
             configure(baseline = false)
         }
