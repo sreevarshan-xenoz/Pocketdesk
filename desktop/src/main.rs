@@ -4,6 +4,7 @@
 //! works whether or not the server is running and opens no port of its own.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod activity_view;
 mod app;
 mod cast_view;
 mod diagnostics_view;

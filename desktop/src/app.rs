@@ -89,6 +89,7 @@ const PERMISSIONS: [(Capability, &str, &str); 12] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Status,
+    Activity,
     Pair,
     Devices,
     Sessions,
@@ -144,6 +145,8 @@ pub struct PocketdeskApp {
     send_menu_installed: Option<bool>,
     /// The window showing a phone's screen (T10k), started on the first pass.
     cast: Option<crate::cast_view::CastView>,
+    /// The Activity tab (ecosystem 1b).
+    activity: crate::activity_view::ActivityView,
 }
 
 impl PocketdeskApp {
@@ -174,6 +177,7 @@ impl PocketdeskApp {
             phone_files: Default::default(),
             send_menu_installed: None,
             cast: None,
+            activity: Default::default(),
         }
     }
 
@@ -266,6 +270,9 @@ impl PocketdeskApp {
         self.config = Config::load().ok();
         if self.tab == Tab::Logs {
             self.log = model::log_tail(&self.state_dir, 400);
+        }
+        if self.tab == Tab::Activity {
+            self.activity.refresh(&self.state_dir);
         }
         self.refreshed = Some(Instant::now());
     }
@@ -1096,6 +1103,7 @@ impl eframe::App for PocketdeskApp {
                 ui.add_space(12.0);
                 for (tab, label) in [
                     (Tab::Status, "Status"),
+                    (Tab::Activity, "Activity"),
                     (Tab::Pair, "Pair"),
                     (Tab::Devices, "Devices"),
                     (Tab::Sessions, "Sessions"),
@@ -1119,6 +1127,20 @@ impl eframe::App for PocketdeskApp {
         });
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Status => self.status_tab(ui),
+            Tab::Activity => {
+                let log_on = self.config.as_ref().is_none_or(|c| c.events);
+                match self.activity.show(ui, &self.state_dir, log_on, now_unix()) {
+                    Some(crate::activity_view::Action::ShowFile(path)) => {
+                        if let Err(e) = crate::reveal::show_in_folder(&path) {
+                            self.notice = Some(format!("Could not show the file: {e}"));
+                        }
+                    }
+                    Some(crate::activity_view::Action::OpenSettings) => {
+                        self.switch_to(Tab::Settings)
+                    }
+                    None => {}
+                }
+            }
             Tab::Pair => self.pair.show(
                 ui,
                 &self.state_dir,
