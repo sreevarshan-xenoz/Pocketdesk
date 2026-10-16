@@ -1570,12 +1570,12 @@ async fn run_audio_pipeline(connection: SharedConnection, cancel: CancellationTo
     let mut encoder =
         AudioOpusEncoder::new(audio_config).context("Failed to create Opus encoder")?;
 
-    // Try PipeWire audio loopback capture.
-    // The session MUST stay alive for the whole audio task: its Drop
-    // cancels the (shared) pipeline token, so dropping it here would tear
-    // down capture+encode+transport the instant the session started.
+    // Try PipeWire audio loopback capture. The capture session's Drop
+    // cancels the token it holds, so it gets a child of the pipeline's:
+    // capture that stops (no PipeWire daemon: it "starts", then its thread
+    // fails) ends the sound, never the session's picture and input.
     let (pcm_tx, mut pcm_rx) = mpsc::channel::<audio_capture::PcmBuffer>(8);
-    let pw_cancel = cancel.clone();
+    let pw_cancel = cancel.child_token();
     let _pw_session =
         match audio_capture::start_audio_capture(48000, 2, 20, pcm_tx, pw_cancel).await {
             Ok(session) => {
