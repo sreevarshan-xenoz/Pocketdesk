@@ -203,6 +203,9 @@ pub async fn run_watcher() {
     // The paired phones as last read; unknown until the first read, which
     // is no change (a restart pairs no one).
     let mut seen_paired: Option<Vec<String>> = None;
+    // When the trust store was last changed, as last read: it is read again
+    // only once that moves.
+    let mut seen_trust_change: Option<std::time::SystemTime> = None;
     // What the phones were last told about who drives (roadmap N7).
     let mut told: Option<Told> = None;
     let mut told_at = std::time::Instant::now();
@@ -319,11 +322,19 @@ pub async fn run_watcher() {
         seen_linked = linked.iter().map(|l| l.device_id.clone()).collect();
         // Paired or unpaired, however it was done: the PIN, the desktop app,
         // `pocketdesk unpair` (ecosystem 1b). An unreadable store is no change.
-        if let Some(paired) = crate::state::trust_store_path().ok().and_then(|path| {
-            pocketdesk_core::protocol::kdeconnect::TrustStore::read(path)
-                .ok()
-                .map(|store| store.trusted_devices())
-        }) {
+        let trust_path = crate::state::trust_store_path().ok();
+        let trust_change = trust_path
+            .as_ref()
+            .and_then(|path| std::fs::metadata(path).and_then(|m| m.modified()).ok());
+        let changed = seen_paired.is_none() || trust_change != seen_trust_change;
+        if changed
+            && let Some(paired) = trust_path.and_then(|path| {
+                pocketdesk_core::protocol::kdeconnect::TrustStore::read(path)
+                    .ok()
+                    .map(|store| store.trusted_devices())
+            })
+        {
+            seen_trust_change = trust_change;
             for (kind, device) in pairing_changes(seen_paired.as_deref(), &paired) {
                 crate::events::emit(
                     kind,
