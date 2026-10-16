@@ -18,8 +18,9 @@ impl Plugin for MonitorsPlugin {
         &["kdeconnect.pocketdesk.monitors"]
     }
 
+    // What it answers with: the identity announces it (ecosystem 1g).
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &[]
+        &["kdeconnect.pocketdesk.monitors"]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {

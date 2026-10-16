@@ -29,8 +29,9 @@ impl Plugin for WakeRelayPlugin {
         &["kdeconnect.pocketdesk.wol"]
     }
 
+    // What it answers with: the identity announces it (ecosystem 1g).
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &[]
+        &["kdeconnect.pocketdesk.wol"]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
