@@ -1,6 +1,6 @@
 # Maintainer: sreevarshan <sreevarshan@example.com>
 pkgname=pocketdesk
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Remote desktop solution over Tailscale with KDE Connect integration"
 arch=('x86_64')

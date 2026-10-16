@@ -33,7 +33,7 @@ Whether the server runs, the phones in a session now, and how phones reach this 
 ```json
 {"api": 1,
  "server": {"running": true, "pid": 4242},
- "pocketdesk_version": "0.2.0",
+ "pocketdesk_version": "0.3.0",
  "sessions": [{"session_id": 7, "device_id": "0d7c3a52-…", "peer": "192.0.2.7:51234",
                "transport": "lan", "started_unix": 1792050000, "driving": true,
                "control_only": false}],
