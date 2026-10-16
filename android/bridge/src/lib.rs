@@ -1130,6 +1130,29 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeListRem
     to_jstring(&mut env, json)
 }
 
+/// A screen of this phone's shape on the computer (T10j): `add` or `remove`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeVirtualScreen(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    action: JString<'_>,
+    width: jint,
+    height: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let action = jstring_to_string(&mut env, &action);
+    let json = envelope(RUNTIME.block_on(api::virtual_screen(
+        address,
+        port as u16,
+        action,
+        width.max(0) as u32,
+        height.max(0) as u32,
+    )));
+    to_jstring(&mut env, json)
+}
+
 /// Enumerate remote monitors: `{"ok": [MonitorInfoDto, ...]}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetMonitors(
