@@ -31,8 +31,11 @@ pub struct Streamed {
     pub audio: bool,
     /// The phone's mic is played.
     pub mic: bool,
-    /// The screen is sent; false for the phone as a remote (T10i).
+    /// The screen is sent; false for the phone as a remote (T10i) and for a
+    /// cast.
     pub video: bool,
+    /// The phone shows its own screen here (T10k).
+    pub cast: bool,
 }
 
 /// One currently-live streaming session, safe to render or serialize.

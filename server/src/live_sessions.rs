@@ -59,7 +59,8 @@ pub fn render_json(
             peer: s.peer.to_string(),
             transport: if s.lan { "lan" } else { "wan" }.to_string(),
             started_unix: s.started_unix,
-            control_only: !s.streamed.video,
+            control_only: !s.streamed.video && !s.streamed.cast,
+            cast: s.streamed.cast,
         })
         .collect();
     shared::render_mirror(&sessions, crate::driving::is_shared(), linked, now_unix)
@@ -154,7 +155,9 @@ fn notify_session_started(session: &LiveSession) {
         None => session.peer.ip().to_string(),
     };
     // The phone as a remote (T10i) sees nothing; it only gives input.
-    let summary = if session.streamed.video {
+    let summary = if session.streamed.cast {
+        "Pocketdesk: a phone is showing its screen here"
+    } else if session.streamed.video {
         "Pocketdesk: a device is streaming this desktop"
     } else {
         "Pocketdesk: a device is controlling this desktop (no screen)"
@@ -348,7 +351,13 @@ pub fn format_status_lines(raw: &str, now_unix: u64) -> Option<Vec<String>> {
                     .checked_sub(s.started_unix)
                     .map(|secs| format!("{secs}s"))
                     .unwrap_or_else(|| "?".into());
-                let mode = if s.control_only { "  control only" } else { "" };
+                let mode = if s.cast {
+                    "  showing its screen"
+                } else if s.control_only {
+                    "  control only"
+                } else {
+                    ""
+                };
                 format!("{short}  {}  {}  up {age}{mode}", s.transport, s.peer)
             })
             .collect(),
@@ -431,6 +440,7 @@ mod tests {
             audio: true,
             mic: true,
             video: true,
+            cast: false,
         };
         let view_only = Streamed {
             input: false,
@@ -487,11 +497,13 @@ mod tests {
         let mut live = vec![
             session(Some("abcdef0123456789"), true),
             session(None, false),
+            session(Some("casting"), true),
         ];
         live[0].streamed.video = true;
+        live[2].streamed.cast = true;
         let json = render_json(&live, None, &[], 1_030);
         let lines = format_status_lines(&json, 1_030).expect("parseable");
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 3);
         assert!(lines[0].starts_with("abcdef012345…"));
         assert!(lines[0].contains("lan") && lines[0].contains("up 30s"));
         assert!(!lines[0].contains("control only"));
@@ -499,6 +511,9 @@ mod tests {
         assert!(lines[1].contains("wan"));
         // The phone as a remote (T10i): no screen sent.
         assert!(lines[1].ends_with("control only"));
+        // A cast (T10k): the phone's screen shown here, not a remote.
+        assert!(lines[2].ends_with("showing its screen"));
+        assert!(!lines[2].contains("control only"));
         // The mirror is machine-readable: same-file garbage must not panic.
         assert!(format_status_lines("not json", 1).is_none());
         assert!(format_status_lines(r#"{"sessions":{}}"#, 1).is_none());

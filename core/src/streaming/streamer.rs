@@ -509,6 +509,7 @@ impl StreamingServer {
                 audio: allow_audio,
                 mic: allow_mic,
                 video: !input_only,
+                cast,
             },
         );
         // An input-only session says it was admitted, so the phone shows its

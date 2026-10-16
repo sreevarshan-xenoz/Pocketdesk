@@ -129,6 +129,7 @@ pub fn status(state_dir: &Path, now_unix: u64, running: bool) -> Value {
                 "started_unix": s.started_unix,
                 "driving": s.driving,
                 "control_only": s.control_only,
+                "cast": s.cast,
             })
         })
         .collect();

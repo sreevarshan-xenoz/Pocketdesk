@@ -611,7 +611,9 @@ impl PocketdeskApp {
                         "{} · {}{}",
                         session.transport.to_uppercase(),
                         session.peer,
-                        if session.control_only {
+                        if session.cast {
+                            " · showing its screen"
+                        } else if session.control_only {
                             " · control only"
                         } else {
                             ""
