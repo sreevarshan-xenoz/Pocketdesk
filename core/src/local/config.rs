@@ -513,6 +513,52 @@ mod tests {
     }
 
     #[test]
+    fn the_example_config_reads_as_it_ships() {
+        // README says to copy it; a value it spells that the server refuses
+        // stops the server at start.
+        let example = concat!(env!("CARGO_MANIFEST_DIR"), "/../config.toml.example");
+        let config = Config::load_from(std::path::Path::new(example))
+            .unwrap_or_else(|e| panic!("config.toml.example does not read: {e}"));
+        assert_eq!(config.video_quality, VideoQualityPreset::Balanced);
+    }
+
+    #[test]
+    fn video_quality_reads_in_either_case_and_saves_in_lowercase() {
+        let path = temp("video-quality");
+        for (text, want) in [
+            ("low", VideoQualityPreset::Low),
+            ("Low", VideoQualityPreset::Low),
+            ("balanced", VideoQualityPreset::Balanced),
+            ("High", VideoQualityPreset::High),
+        ] {
+            std::fs::write(
+                &path,
+                format!(
+                    "video_quality = \"{text}\"
+"
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                Config::load_from(&path).unwrap().video_quality,
+                want,
+                "{text}"
+            );
+        }
+        let config = Config {
+            video_quality: VideoQualityPreset::High,
+            ..Config::default()
+        };
+        std::fs::write(&path, "").unwrap();
+        config.save_to(&path).unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("video_quality = \"high\"")
+        );
+    }
+
+    #[test]
     fn home_assistant_is_off_by_default_and_its_keys_read_back() {
         let path = temp("home-assistant");
         assert!(!Config::default().home_assistant);
