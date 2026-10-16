@@ -20,8 +20,15 @@ pub const MAX_CAST_STREAM: usize = 2 * 1024 * 1024;
 /// What one cast stream carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CastPayload {
-    Config { width: u16, height: u16 },
-    Frame { keyframe: bool, seq: u64, data: Vec<u8> },
+    Config {
+        width: u16,
+        height: u16,
+    },
+    Frame {
+        keyframe: bool,
+        seq: u64,
+        data: Vec<u8>,
+    },
 }
 
 /// The stream the phone sends for a config.
