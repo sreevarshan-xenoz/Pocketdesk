@@ -22,6 +22,11 @@ video_quality = "balanced"
 # has a working HEVC encoder (libx265 or a hardware hevc path).
 # allow_hevc = false
 
+# On a link too slow for the session's frame rate, step it down (60, 30, 15)
+# so each frame keeps enough bits to stay readable, and back up once the
+# link has room (R6f). A phone's "Full quality" turns it off for its session.
+# slow_link_frame_rate = true
+
 # Announce this computer on the local network (mDNS), so the phone app lists
 # it under "On this network". Turn off to stay unlisted, e.g. on public Wi-Fi.
 # lan_discovery = true
