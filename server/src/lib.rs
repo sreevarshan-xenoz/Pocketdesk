@@ -39,6 +39,7 @@ pub mod service;
 pub mod session_telemetry;
 pub mod state;
 pub mod v2_multiplexer;
+pub mod virtual_screen;
 pub mod wake_info;
 #[cfg(windows)]
 pub mod windows_desktop;

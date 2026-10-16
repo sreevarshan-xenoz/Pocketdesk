@@ -37,6 +37,18 @@ impl Plugin for MonitorsPlugin {
     }
 }
 
+/// Each listed monitor's origin, in index order: what the capture matches a
+/// monitor index against (`capture_screencopy::monitor_rect_physical`).
+pub(crate) fn origins() -> Vec<(i32, i32)> {
+    xcap::Monitor::all()
+        .map(|all| {
+            all.iter()
+                .map(|m| (m.x().unwrap_or(i32::MIN), m.y().unwrap_or(i32::MIN)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Enumerate monitors on the current display server using xrandr (X11) or
 /// xcap (cross-platform fallback).
 fn enumerate_monitors() -> Vec<MonitorInfo> {

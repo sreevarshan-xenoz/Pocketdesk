@@ -68,6 +68,7 @@ fun MonitorPickerSheet(
     selected: Int,
     onDismiss: () -> Unit,
     onPick: (Int) -> Unit,
+    onAddScreen: (() -> Unit)? = null,
 ) {
     var monitors by remember { mutableStateOf<List<DesktopMonitor>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -104,6 +105,19 @@ fun MonitorPickerSheet(
                 trailingContent = { RadioButton(selected = selected == -1, onClick = { onPick(-1) }) },
                 modifier = Modifier.clickable { onPick(-1) },
             )
+            // A second screen at this phone's shape (T10j).
+            if (onAddScreen != null) {
+                ListItem(
+                    headlineContent = {
+                        Text(stringResource(R.string.add_phone_screen), style = MaterialTheme.typography.bodyLarge)
+                    },
+                    supportingContent = {
+                        Text(stringResource(R.string.add_phone_screen_summary), style = MaterialTheme.typography.bodySmall)
+                    },
+                    leadingContent = { LlIcon(LlIcons.Desktop, null) },
+                    modifier = Modifier.clickable { onAddScreen() },
+                )
+            }
             HorizontalDivider()
             when {
                 error != null ->

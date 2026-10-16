@@ -71,7 +71,10 @@ impl Capability {
 /// ringing this desk. Waking another machine through this one is Power.
 pub fn capability_for(packet_type: &str) -> Option<Capability> {
     Some(match packet_type {
-        "kdeconnect.mousepad.request" | "kdeconnect.presenter" => Capability::Input,
+        // A second screen (T10j) changes the desktop's layout: Input.
+        "kdeconnect.mousepad.request"
+        | "kdeconnect.presenter"
+        | "kdeconnect.pocketdesk.virtual_screen" => Capability::Input,
         "kdeconnect.clipboard"
         | "kdeconnect.clipboard.connect"
         | "kdeconnect.pocketdesk.clipboard_image"
@@ -289,6 +292,10 @@ mod tests {
             ("kdeconnect.pair", None),
             ("kdeconnect.battery.request", None),
             ("kdeconnect.pocketdesk.monitors", None),
+            (
+                "kdeconnect.pocketdesk.virtual_screen",
+                Some(Capability::Input),
+            ),
         ];
         for (packet_type, capability) in cases {
             assert_eq!(capability_for(packet_type), capability, "{packet_type}");

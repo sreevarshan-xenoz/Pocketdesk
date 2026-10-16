@@ -1282,6 +1282,16 @@ Owed:
 - [ ] With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
 - [ ] Over the internet road.
 
+## 75. A second screen at the phone's shape (T10j)
+
+On the Azure VM (headless Sway, no XWayland) from the A71 over the internet, 2026-10-16:
+- [x] "Add a screen for this phone" in the picker: Sway made HEADLESS-3 at 1080x2400 right of the desktop, the session switched to index 1 and encoded 1080x2400, and a window moved onto it.
+- [x] Found and fixed: Sway moved the desktop's own output (x 0 to 2360) when the screen was added; each output is now pinned first. Re-checked: the desktop's output stayed at x 0, the new screen right of it, streamed at 1080x2400.
+- [x] After the phone left, the server removed the screen and its record; the window went back to the desktop's output.
+
+Owed:
+- [ ] "Phones may add a screen" off: refused with its reason; on Windows and Hyprland: "only Sway can for now".
+
 ## 76. Hotspot and tethering in Check connection
 
 JVM-tested only (the A71's build cannot start its hotspot from adb, and a computer joining it would mean changing this box's network). Owed:

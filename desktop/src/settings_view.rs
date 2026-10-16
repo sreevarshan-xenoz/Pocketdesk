@@ -208,6 +208,12 @@ impl SettingsForm {
                     "send what I copy to connected phones (those with Clipboard on)",
                 );
                 ui.end_row();
+                ui.label("Phones may add a screen");
+                ui.checkbox(
+                    &mut e.virtual_screens,
+                    "a phone with Input can add a screen of its own shape (Sway)",
+                );
+                ui.end_row();
                 ui.label("Links from phones");
                 ui.checkbox(
                     &mut e.open_links,
