@@ -293,6 +293,34 @@ pub fn fetch_image(url: &str) -> Result<Image, String> {
         .map_err(|_| "the download failed".to_string())?
 }
 
+/// Follow at most 5 redirects, each held to the same rule as the address
+/// the browser gave, so a site cannot bounce the download to `localhost`.
+fn redirect_rule(attempt: reqwest::redirect::Attempt) -> reqwest::redirect::Action {
+    match redirect_problem(attempt.previous().len(), attempt.url().as_str()) {
+        Some(problem) => attempt.error(problem),
+        None => attempt.follow(),
+    }
+}
+
+/// An error with its causes, so a refused redirect says why.
+fn why(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    text
+}
+
+/// Why a redirect to `url`, after `followed` others, is not followed.
+fn redirect_problem(followed: usize, url: &str) -> Option<String> {
+    if followed >= 5 {
+        return Some("too many redirects".to_string());
+    }
+    pocketdesk_core::protocol::link::link_problem(url).map(|p| format!("a redirect: {p}"))
+}
+
 fn fetch_blocking(url: &str) -> Result<Image, String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -301,10 +329,10 @@ fn fetch_blocking(url: &str) -> Result<Image, String> {
     runtime.block_on(async {
         let client = reqwest::Client::builder()
             .timeout(FETCH_DEADLINE)
-            .redirect(reqwest::redirect::Policy::limited(5))
+            .redirect(reqwest::redirect::Policy::custom(redirect_rule))
             .build()
             .map_err(|e| e.to_string())?;
-        let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
+        let mut response = client.get(url).send().await.map_err(|e| why(&e))?;
         if !response.status().is_success() {
             return Err(format!("the site answered {}", response.status()));
         }
@@ -661,6 +689,15 @@ mod tests {
         let long = format!("https://example.org/{}.png", "\u{10348}".repeat(100));
         assert!(image_name(&long, "png").len() <= MAX_STEM + 4);
         assert!(!image_name("https://example.org/a\\b<c>.png", "png").contains(['\\', '<', '>']));
+    }
+
+    #[test]
+    fn a_redirect_is_held_to_the_same_rule() {
+        assert_eq!(redirect_problem(0, "https://example.org/cat.png"), None);
+        assert!(redirect_problem(0, "http://127.0.0.1:8080/x.png").is_some());
+        assert!(redirect_problem(1, "http://localhost/x.png").is_some());
+        assert!(redirect_problem(0, "file:///etc/passwd").is_some());
+        assert!(redirect_problem(5, "https://example.org/cat.png").is_some());
     }
 
     #[test]
