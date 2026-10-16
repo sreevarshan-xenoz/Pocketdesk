@@ -17,7 +17,14 @@ It talks only to the Pocketdesk program on this computer, through the browser's 
 
 ## Which phone
 
-- **Links** go to the phone in a session with this computer, since a link is shown on the phone during a session.
+- **Links** go to the first phone in a session with this computer whose Links permission is on, since a link is shown on the phone during a session.
 - **Images** go to the phone files reach now: the one in a session first, else one connected at home, as "Send to phone" in the file manager picks.
 
 Pocketdesk downloads the image itself, never more than 32 MB. Each phone's Links and Files permissions apply, as for any link or file.
+
+## Limits
+
+- **Snap and Flatpak browsers** read their hosts from other folders and may not start a program outside their sandbox, so the extension cannot reach Pocketdesk from them. Use a browser installed from your distribution's packages, or the vendor's own package.
+- **If Pocketdesk moves** (a new folder, or a package that installs it elsewhere), run `pocketdesk browser-host --install` again: the registration names the program's path.
+- **Images are downloaded by Pocketdesk, not the browser**, without your cookies: one behind a login or a site's hotlink protection fails with what the site answered (403, say). Save it and send the file instead. Only PNG, JPEG, GIF, WebP, AVIF and BMP are sent, named for their type.
+- **On Windows** the host is registered for every browser it knows, installed or not, so one installed later finds it too.

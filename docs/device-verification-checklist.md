@@ -1361,11 +1361,12 @@ Owed:
 This Windows box and the A71, debug builds, 2026-10-16:
 - [x] `pocketdesk browser-host --install`: registered with Chrome, Chromium, Edge, Brave, Vivaldi and Firefox (HKCU keys naming the manifests; the Chromium manifest allows only `chrome-extension://abojofjjnpcmejhdonndlegfaolfkcif/`); `--remove` took the keys and files away.
 - [x] The host driven as a browser drives it (`pocketdesk.exe chrome-extension://…/` and framed JSON), with a session on the A71: a link answered "Sent to your phone" and showed in the phone's notification; an image (an SVG behind a redirect) arrived in `Download/Pocketdesk`, its MD5 matching the site's; `localhost` and an unknown request refused.
-- [x] Found and fixed: images kept in the state folder were never sent (the server does not send its own folder's files); they wait in the temp folder now.
+- [x] Found and fixed: images kept in the state folder were never sent (the server does not send its own folder's files); they wait in a folder of the user's own now.
+- [x] After the review fixes, again through the host with a session on the A71: a PNG from Wikimedia arrived in `Download/Pocketdesk`, MD5 matching (it had answered 403 until the download named itself with a User-Agent); an SVG refused as not a picture Pocketdesk sends; a redirect to `127.0.0.1` refused with why; a link sent.
 
 Owed:
 - [ ] The extension itself loaded in Brave or Chrome and in Firefox (unpacked), and its menus and notifications.
-- [ ] Linux registration (`~/.config/<browser>/NativeMessagingHosts`, `~/.mozilla/native-messaging-hosts`) and the desktop Settings switch.
+- [ ] Linux registration (`~/.config/<browser>/NativeMessagingHosts`, `~/.mozilla/native-messaging-hosts`), images waiting in `~/.cache/pocketdesk-browser`, and the desktop Settings switch.
 
 ## Recording results
 
