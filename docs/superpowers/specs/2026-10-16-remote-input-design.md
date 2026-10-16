@@ -25,3 +25,9 @@ Research item 12 (`docs/research/2026-10-15-what-makes-it-worth-using.md`): KDE 
 - **Rust:** the mode marker over loopback; an input-only pipeline over loopback (input arrives, no video or audio stream, the ready stream does, closing the client ends it); a video stream on an input-only client marks it legacy; the mirror's `video_off`.
 - **Kotlin:** the screen's key rows map to the contract.
 - **Device (A71 → Windows, Input off for safety, then a scratch window):** a remote session with no video in the server log and Task Manager's GPU idle; ready after the owner's approval; the Sessions tab's "control only"; keys and a trackpad move with Input on, into a scratch Notepad only.
+
+## As built
+
+- **The bridge** reports the remote's state as `{"state": none | waiting | ready | tooOld}` (`nativeRemoteState`); `RemoteSession` (JVM-tested) turns it, and the closed reason, into the screen's states.
+- **Found on the A71, fixed:** Retry after a refusal reused the refused session (a closed session no longer counts as connected); a session whose pipeline ended was never closed, so a remote waited forever (the server now closes it; the phone also gives up after 45 s).
+- **Not done:** the approval prompt still says the phone wants to stream; the remote has no Mute (not in the key contract).
