@@ -122,7 +122,7 @@ pub fn handle(
                 Ok(image) => image,
                 Err(why) => return err(format!("Not sent: {why}")),
             };
-            let path = match keep_image(&images_dir(), &image) {
+            let path = match images_dir().and_then(|dir| keep_image(&dir, &image)) {
                 Ok(path) => path,
                 Err(e) => return err(format!("Not sent: could not keep it ({e})")),
             };
@@ -139,16 +139,32 @@ pub fn handle(
     }
 }
 
-/// Where downloaded images wait for the phone: the system's temporary
-/// folder, never the state folder, whose files the server never sends.
-fn images_dir() -> PathBuf {
-    std::env::temp_dir().join("pocketdesk-browser")
+/// Where downloaded images wait for the phone: a folder of this user's own
+/// (the cache folder on Linux, never the shared `/tmp`, where another user
+/// could make it first; the per-user temporary folder on Windows), and
+/// never the state folder, whose files the server never sends.
+fn images_dir() -> io::Result<PathBuf> {
+    #[cfg(windows)]
+    let base = std::env::temp_dir();
+    #[cfg(not(windows))]
+    let base = dirs::cache_dir().ok_or_else(|| io::Error::other("no cache folder"))?;
+    Ok(base.join("pocketdesk-browser"))
 }
 
 /// Keep `image` in its own owner-only folder under `dir`, so the phone gets
-/// it under its own name; ones older than a day go first.
+/// it under its own name; ones older than a day go first. `dir` must be a
+/// real folder: a link is never followed, made private or emptied.
 fn keep_image(dir: &Path, image: &Image) -> io::Result<PathBuf> {
     let dir = dir.to_path_buf();
+    match std::fs::symlink_metadata(&dir) {
+        Ok(meta) if !meta.file_type().is_dir() => {
+            return Err(io::Error::other(format!(
+                "{} is not a folder of its own",
+                dir.display()
+            )));
+        }
+        _ => {}
+    }
     pocketdesk_core::secure_fs::create_private_dir(&dir)?;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -576,14 +592,47 @@ mod tests {
         )
         .unwrap();
         assert!(path.starts_with(&dir));
-        let state = pocketdesk_core::local::paths::state_dir().unwrap();
-        assert!(
-            !images_dir().starts_with(&state),
-            "the server never sends its state folder's files"
-        );
         assert_eq!(path.file_name().unwrap(), "cat.png");
         assert_eq!(std::fs::read(&path).unwrap(), vec![1, 2, 3]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&dir), 0o700);
+            assert_eq!(mode(&path), 0o600);
+        }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn images_never_wait_in_the_shared_temporary_folder_on_linux() {
+        let dir = images_dir().unwrap();
+        #[cfg(not(windows))]
+        assert!(!dir.starts_with("/tmp"), "{}", dir.display());
+        assert!(dir.ends_with("pocketdesk-browser"));
+    }
+
+    #[test]
+    fn a_file_where_the_folder_should_be_is_left_alone() {
+        let base = temp("not-a-folder");
+        let dir = base.join("pocketdesk-browser");
+        std::fs::write(&dir, b"someone else's").unwrap();
+        let image = Image {
+            bytes: vec![1],
+            name: "cat.png".into(),
+        };
+        assert!(keep_image(&dir, &image).is_err());
+        assert_eq!(std::fs::read(&dir).unwrap(), b"someone else's");
+        #[cfg(unix)]
+        {
+            let target = base.join("victim");
+            std::fs::create_dir_all(target.join("old")).unwrap();
+            let link = base.join("linked");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(keep_image(&link, &image).is_err(), "a link is not followed");
+            assert!(target.join("old").exists());
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

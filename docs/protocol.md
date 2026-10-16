@@ -411,7 +411,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/sms.json`, `sms_outbox/` | Texts and replies (newest 1000 by default), with senders' contact names when the phone shares them; `sms_names` off forgets them at the next start | Owner-only | `core/src/local/sms.rs` |
 | `<state>/replies.log` | `<time>\t<notification id>\t<reply text>` for each notification reply | Default | `server/src/plugins/notification_reply.rs` |
 | `<state>/kick`, `kicks/`, `control/` | Requests from the app and CLI to end a session or hand control over | Default | `core/src/local/sessions.rs`, `paths.rs` |
-| Temp folder `pocketdesk-browser/` | Images from the browser waiting for the phone (a day at most) | Owner-only | `server/src/browser_host.rs` |
+| `pocketdesk-browser/` in the cache folder (Linux, `~/.cache`) or the temporary folder (Windows, per user) | Images from the browser waiting for the phone (a day at most) | Owner-only | `server/src/browser_host.rs` |
 | `<config>/browser/` | The extension host's manifests (Windows) and `registered.json`, the browsers it was registered with | Default | `server/src/browser_host.rs` |
 | `<state>/task_requests.json`, `task_answers/` | Task starts waiting for your Allow / Deny (task, phone, time), and your answers; a minute each | Owner-only | `core/src/local/tasks.rs` |
 | `<state>/events.jsonl` (+ `.1`) | What happened, one JSON object per line (ecosystem 1a): sessions, phones linking, batteries, notifications, texts, files and links. Metadata only by default; the content too with `events_detail = "full"`. 1 MiB, then moved to `.1` (one kept). Off with `events = false` | Owner-only | `core/src/local/events.rs`, `server/src/events.rs` |
