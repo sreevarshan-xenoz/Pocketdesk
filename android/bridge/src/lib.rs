@@ -9,6 +9,7 @@ mod api;
 mod cast;
 mod clipboard_push;
 mod download;
+mod link;
 mod links;
 mod logcat;
 mod media_presses;
@@ -839,6 +840,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetView
 ) -> jstring {
     let json = envelope_unit(RUNTIME.block_on(api::send_view_only(enabled != 0)));
     to_jstring(&mut env, json)
+}
+
+/// The phone's Settings "Files over the internet" (2d): whether a transfer
+/// with a computer linked by the internet road rides that link.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetInternetFiles(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    enabled: jboolean,
+) {
+    link::INTERNET_FILES.store(enabled != 0, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Toggle the R4 A3 full-quality override: opt out of the server's
