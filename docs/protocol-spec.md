@@ -30,7 +30,7 @@ A phone reaches a computer:
   - the stream with `pocketdesk-stream`.
 
   Both ends are proved by their iroh keys. The computer's endpoint id and relays reach a phone in `kdeconnect.pocketdesk.endpoint` at home.
-- **File and clipboard-image bytes** go on a connection the computer dials to the phone, TLS 1.3 with ALPN `pocketdesk-transfer/2`. Each side accepts exactly one certificate: the pinned one (`docs/protocol.md` §1.4). It is not available on the iroh road.
+- **File and clipboard-image bytes** go on a connection the computer dials to the phone, TLS 1.3 with ALPN `pocketdesk-transfer/2`. Each side accepts exactly one certificate: the pinned one (`docs/protocol.md` §1.4). On the iroh road a phone asks without a port, and the computer opens a bidirectional stream on the phone's control connection instead: the transfer key line, then the same transfer, with no TLS layer of ours, since iroh proved both keys (`docs/protocol.md` §1.2a step 7). A request naming a port there is refused, as is one naming none at home.
 
 ## 3. The control channel
 

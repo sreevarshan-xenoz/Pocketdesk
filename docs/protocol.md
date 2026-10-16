@@ -52,7 +52,7 @@ From `server/src/service.rs` (`handle_internet_control`, `serve_control`) and `a
 4. Then the phone's id is held to the iroh key the connection proved (`pair::internet_standing`): the device must be paired, and its registered iroh key must be that key. Admitted, the desktop sends its `kdeconnect.identity`, which is the phone's sign that the link is up. Anything else (unpaired, no iroh key registered, another key, no key) gets `POCKETDESK_ERR 1 refused` and the connection closes, with one log line; the phone counts that as a failed connect and backs off. Nothing binds by first use, with `pairing_required` on or off.
 5. Packets follow as in §1.2 step 6, with standing re-read per packet against the same rule. Pairing packets are dropped: nothing pairs, or pairs again, on this road.
 6. The connection is seeded as in step 7, without `wake_info`: it describes the adapter a phone reached at home, and an internet connection reached none.
-7. The connection has no address the desktop could dial, so the transfers that dial the phone back (file offers and shares, folder fetches, image clipboard) are refused with their usual answers.
+7. The connection has no address the desktop could dial, so transfers ride the connection itself (2c, `server/src/plugins/share.rs` `Route`, `service.rs` `IrohLink`). A share, download, offer or folder fetch whose request names **no** `port` is answered on a bidirectional stream the desktop opens on this connection, sent behind the control stream (QUIC priority −1 against 0). On it go the transfer key line and then the transfer of §1.4 step 4, with no TLS layer of ours: iroh proved both keys, and the phone's must be the iroh key it registered at home (`pair::may_transfer`). A request that names a port is refused ("nothing connects back by the internet road"). With `internet_files` off (desktop Settings "Files over the internet") every one is refused. Image clipboard still dials back, so it is refused here (2e). The phone's half, accepting those streams and asking without a port, is 2d.
 
 ### 1.3 The QUIC port (UDP 4716)
 
@@ -68,7 +68,7 @@ From `server/src/service.rs` (`handle_internet_control`, `serve_control`) and `a
 
 ### 1.4 File and clipboard-image transfers
 
-The flow is the same for a phone-to-desktop share, a desktop-to-phone download or offer, and clipboard images in either direction:
+The flow is the same for a phone-to-desktop share, a desktop-to-phone download or offer, and clipboard images in either direction. On the internet road a stream on the phone's own connection replaces steps 1–3 (§1.2a step 7):
 
 1. **The phone listens.** It binds `0.0.0.0:0` TCP and sends a control packet with `{port, key}`. The key is a UUIDv4 in simple form: 32 hex characters, 122 random bits (`uuid::Uuid::new_v4().simple()`). Sources: `android/bridge/src/api.rs`, `android/bridge/src/download.rs`.
 2. **The desktop dials back.** It dials the IP address the control connection came from, never an address the phone names, and never loopback or link-local addresses (`server/src/plugins/share.rs`, `dialable`, `sender.peer_addr()`). A request that arrives on a channel with no peer address (v2) is refused.

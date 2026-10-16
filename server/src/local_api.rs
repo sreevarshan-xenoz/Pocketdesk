@@ -350,15 +350,16 @@ pub fn send_in(
         Ok(id) => id,
         Err(reason) => return refused(exit::BAD_ARGUMENTS, reason),
     };
-    // An offer reaches only a phone connected at home (in a session, or
-    // holding a control link, T10d): say so now, not after queueing a send
-    // the server can only fail.
+    // An offer reaches only a phone files can reach (in a session, or
+    // holding a control link at home, T10d, or by the internet road with
+    // `internet_files` on, 2c): say so now, not after queueing a send the
+    // server can only fail.
     let now = pocketdesk_core::local::pin::now_unix();
     if !live_mirror(state_dir, now, true).is_some_and(|m| m.files_reach(&device_id)) {
         return refused(
             exit::FAILED,
             format!(
-                "{device_id} is not connected on this network: open Pocketdesk on the phone first"
+                "{device_id} is not connected where files can reach it: open Pocketdesk on the phone first"
             ),
         );
     }
@@ -1068,7 +1069,7 @@ mod tests {
         assert_eq!(code, exit::DONE, "linked at home, no session: {out}");
         linked(false);
         let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
-        assert_eq!(code, exit::FAILED, "linked over the internet only: {out}");
+        assert_eq!(code, exit::FAILED, "a link files cannot reach: {out}");
     }
 
     #[test]
@@ -1110,7 +1111,7 @@ mod tests {
         assert_eq!(
             default_phone(&dir, now, true),
             None,
-            "linked only over the internet"
+            "linked where files cannot reach it"
         );
         mirror(&[], linked);
         assert_eq!(default_phone(&dir, now, false), None, "no server");
