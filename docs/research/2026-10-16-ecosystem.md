@@ -65,6 +65,30 @@ Labels:
 - GitHub Sponsors;
 - later, an optional hosted relay, with self-hosting always free.
 
+## A second opinion, checked against the repo (2026-10-16)
+
+The owner had ChatGPT review the public repository and propose its own plan. Each suggestion, checked against the tree:
+
+| Suggestion | What the repo has | Taken? |
+|---|---|---|
+| Reliability and security first (Phase R) | R1–R5 ran on 2026-10-14; device checks are still owed per feature (checklist §§ 43–77) | **Yes:** a reliability pass before phase 2 (below) |
+| An Activity Center: one timeline of transfers, sessions, pairing, notifications, automation, on the computer and the phone | The pieces live in separate files and tabs (`received.json`, `sent.json`, sessions, `streaming_sessions.jsonl`); phase 1a's event log is the shared model it needs | **Yes:** phase 1b, the desktop app's Activity tab over the event log, then the phone's |
+| Connection Doctor on Android | Exists since T1 (`android/.../doctor/`, `ConnectionDoctorSheet.kt`), with "Copy report"; the desktop has Diagnostics (F10) | Already done |
+| A local automation engine with rules | Phase 1a's hooks are the first, smaller step: a command per event kind | Hooks first; rules only if hooks prove too little |
+| Named tasks the phone can start, with output and exit code back, timeouts, output limits, approval | **Found a real gap:** the Exec plugin runs *any* command a phone with Exec sends (off by default), with no timeout and no output limit | **Yes:** phase 1c, named tasks; and the old exec gets a deadline and an output cap |
+| A capability registry with versioned negotiation | The identity packet lists each side's packet types; `llVersion`, the session mode marker (an old computer is detected as "too old"), `capabilities.rs` | Folded into phase 1g (the spec): write down how a client learns what a computer offers |
+| Be honest that "no account" is not "no third-party infrastructure" | README "Before you start" and SECURITY.md already say what relays and the DHT see | Already done |
+| No cloud accounts, no plugin marketplace, no folder sync (use Syncthing), no embedded AI agent | Matches "Not doing" | Agreed |
+
+### The plan's phase 1, updated
+
+1. **1a, events and hooks:** the event log, `pocketdesk watch`, `[hooks]` (in progress).
+2. **1b, the Activity Center:** a desktop app tab over the event log (sessions, transfers, links, notifications, hooks run, refusals), then the phone's.
+3. **1c, named tasks:** commands the owner names on the computer (Settings), which a phone with a new Tasks permission can start and see run: output (capped), exit code, a deadline, and an ask-first option. They show in the Activity Center. The raw Exec plugin gets the same deadline and cap.
+4. **1d, the browser extension**, then **1e, the Home Assistant bridge**, then **1f, Android broadcasts**.
+5. **1g, the protocol spec and test vectors,** including how capabilities are advertised and negotiated.
+6. **A reliability pass before phase 2:** a long session, recovery after a network change, an interrupted transfer, and idle cost, re-run on current `main` on the A71 against Windows and the Azure VM, with the results in the checklist.
+
 ## Not doing
 
 - **Accounts or cloud sync.** They throw away the one advantage.
