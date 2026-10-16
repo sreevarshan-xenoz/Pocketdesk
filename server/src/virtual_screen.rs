@@ -21,6 +21,9 @@ pub const MAX_SIDE: u32 = 2560;
 /// The shortest side a screen gets.
 pub const MIN_SIDE: u32 = 320;
 
+/// Phone screens the computer holds at once, at most.
+const MAX_SCREENS: usize = 4;
+
 /// The file the outputs made are listed in, so a restart removes them.
 const STATE_FILE: &str = "virtual_screens.json";
 
@@ -382,7 +385,8 @@ impl Plugin for VirtualScreenPlugin {
 /// What a phone's request comes to: `{name, index}`, `{removed}` or `{error}`.
 fn answer(phone: &str, action: &str, width: u32, height: u32) -> serde_json::Value {
     use serde_json::json;
-    if !ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+    // Taking one's own screen back is always allowed.
+    if action == "add" && !ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
         return json!({ "error": "This computer does not let phones add a screen (Settings, \"Phones may add a screen\")" });
     }
     match action {
@@ -426,6 +430,17 @@ fn answer(phone: &str, action: &str, width: u32, height: u32) -> serde_json::Val
                     .unwrap_or_else(|e| e.into_inner())
                     .phones
                     .remove(phone);
+            }
+            // A few at most, whatever ids phones announce.
+            let held = made()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .phones
+                .values()
+                .map(Vec::len)
+                .sum::<usize>();
+            if held >= MAX_SCREENS {
+                return json!({ "error": "The computer has as many phone screens as it takes" });
             }
             match create(w, h) {
                 Ok((name, x)) => {
