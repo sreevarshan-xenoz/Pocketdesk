@@ -35,7 +35,7 @@
     <string name="share_not_saved">Ningún equipo guardado tiene esa dirección</string>
     <string name="share_choosing_off">Otras apps no pueden elegir un equipo: actívalo en los Ajustes de Pocketdesk</string>
     <string name="settings_retry_transfers">Reintentar archivos fallidos</string>
-    <string name="settings_retry_transfers_summary">Un archivo que se corta a mitad se vuelve a enviar hasta 3 veces, desde donde se detuvo</string>
+    <string name="settings_retry_transfers_summary">Un archivo que se corta a mitad se vuelve a enviar hasta 3 veces, desde donde se detuvo; sin red, antes espera hasta 3 minutos a que vuelva</string>
     <string name="settings_internet_files">Archivos por internet</string>
     <string name="settings_internet_files_summary">Envía y recibe archivos con un equipo al que llegas desde fuera, por el mismo enlace. El equipo también puede desactivarlo</string>
     <string name="reconnecting_in">Reconectando en %1$d s…</string>
@@ -193,6 +193,8 @@
     <string name="channel_transfers">Transferencias de archivos</string>
     <string name="channel_transfers_desc">Progreso de los archivos enviados a tu ordenador y desde él</string>
     <string name="transfer_retrying">Reintentando (%1$d de 3)</string>
+    <string name="transfer_waiting_network">Esperando a la red</string>
+    <string name="transfer_no_network">Sin red durante 3 minutos</string>
     <string name="transfer_sending_folder">Enviando la carpeta %1$s: %2$d de %3$d</string>
     <string name="transfer_folder_empty">No se pudo enviar nada de %1$s: está vacía o no se pudieron leer sus archivos</string>
     <string name="transfer_folder_stopped">Se dejó de enviar %1$s: el equipo dejó de responder. Sin enviar: %2$d</string>

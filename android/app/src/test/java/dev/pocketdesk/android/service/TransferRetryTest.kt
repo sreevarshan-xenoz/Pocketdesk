@@ -92,6 +92,71 @@ class TransferRetryTest {
     }
 
     @Test
+    fun aFailureWithNoNetworkWaitsForOneWithoutUsingARetry() {
+        val reset = java.io.IOException("Network is unreachable (os error 101)")
+        // R6i: the A71's Wi-Fi took about 60 s to rejoin, and all three
+        // retries (5, 15, 45 s) met no network.
+        assertEquals(
+            TransferRetry.Next.WhenOnline(180),
+            TransferRetry.next(1, reset, enabled = true, networkFits = false, waitedOfflineSeconds = 0),
+        )
+        assertEquals(
+            "what is left of the three minutes",
+            TransferRetry.Next.WhenOnline(60),
+            TransferRetry.next(3, reset, enabled = true, networkFits = false, waitedOfflineSeconds = 120),
+        )
+        assertEquals(
+            "with the network back it is retry number one again, not a used one",
+            TransferRetry.Next.After(5),
+            TransferRetry.next(1, reset, enabled = true, networkFits = true, waitedOfflineSeconds = 90),
+        )
+    }
+
+    @Test
+    fun aPhoneWhoseNetworkNeverComesBackGivesUpAndSaysSo() {
+        val reset = java.io.IOException("Network is unreachable (os error 101)")
+        assertEquals(
+            TransferRetry.Next.Stop(noNetwork = true),
+            TransferRetry.next(2, reset, enabled = true, networkFits = false, waitedOfflineSeconds = 180),
+        )
+    }
+
+    @Test
+    fun aRefusalIsFinalEvenWithNoNetworkAndOffMeansOff() {
+        assertEquals(
+            TransferRetry.Next.Stop(noNetwork = false),
+            TransferRetry.next(
+                1,
+                TransferRetry.Refusal("No room for photo.jpg"),
+                enabled = true,
+                networkFits = false,
+                waitedOfflineSeconds = 0,
+            ),
+        )
+        assertEquals(
+            TransferRetry.Next.Stop(noNetwork = false),
+            TransferRetry.next(1, java.io.IOException("reset"), enabled = false, networkFits = false, waitedOfflineSeconds = 0),
+        )
+        assertEquals(
+            TransferRetry.Next.Stop(noNetwork = false),
+            TransferRetry.next(4, java.io.IOException("reset"), enabled = true, networkFits = true, waitedOfflineSeconds = 0),
+        )
+    }
+
+    @Test
+    fun aComputerAtHomeNeedsTheHomeNetworkNotMobileData() {
+        for (address in listOf("192.168.1.20", "10.0.0.5", "172.16.4.2", "169.254.3.3", "desk.local")) {
+            assertFalse(address, TransferRetry.networkFits(address, anyNetwork = true, localNetwork = false))
+            assertTrue(address, TransferRetry.networkFits(address, anyNetwork = true, localNetwork = true))
+        }
+        // A tailnet or public address works over any network.
+        for (address in listOf("100.101.102.103", "203.0.113.7", "desk.example.org", "2001:db8::1")) {
+            assertTrue(address, TransferRetry.networkFits(address, anyNetwork = true, localNetwork = false))
+            assertFalse(address, TransferRetry.networkFits(address, anyNetwork = false, localNetwork = false))
+        }
+    }
+
+    @Test
     fun aSourceIdIsStableAndChangesWithTheFile() {
         val id = SourceId.of("content://media/external/video/1", 300, 1_700_000_000_000)
         assertEquals(32, id.length)

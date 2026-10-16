@@ -42,7 +42,7 @@
     <string name="share_not_saved">No saved computer has that address</string>
     <string name="share_choosing_off">Other apps may not choose a computer: turn it on in Pocketdesk\'s Settings</string>
     <string name="settings_retry_transfers">Retry failed files</string>
-    <string name="settings_retry_transfers_summary">A file that stops part way is sent again up to 3 times, continuing where it stopped</string>
+    <string name="settings_retry_transfers_summary">A file that stops part way is sent again up to 3 times, continuing where it stopped; with no network it first waits up to 3 minutes for one</string>
     <string name="settings_internet_files">Files over the internet</string>
     <string name="settings_internet_files_summary">Send and receive files with a computer reached from away, on the same link. The computer may turn this off too</string>
     <string name="reconnecting_in">Reconnecting in %1$d s…</string>
@@ -198,6 +198,8 @@
     <string name="channel_transfers">File transfers</string>
     <string name="channel_transfers_desc">Progress of files sent to and from your computer</string>
     <string name="transfer_retrying">Trying again (%1$d of 3)</string>
+    <string name="transfer_waiting_network">Waiting for the network</string>
+    <string name="transfer_no_network">No network for 3 minutes</string>
     <string name="transfer_sending_folder">Sending folder %1$s: %2$d of %3$d</string>
     <string name="transfer_folder_empty">Nothing in %1$s could be sent: it is empty, or its files could not be read</string>
     <string name="transfer_folder_stopped">Stopped sending %1$s: the computer stopped answering. Not sent: %2$d</string>

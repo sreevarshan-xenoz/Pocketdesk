@@ -1,5 +1,8 @@
 package dev.pocketdesk.android.service
 
+import dev.pocketdesk.android.doctor.AddressKind
+import dev.pocketdesk.android.doctor.ConnectionChecks
+
 /**
  * When a failed file is sent again (T6a). A retry continues where the last
  * attempt stopped, since the computer keeps what arrived, so retrying is
@@ -26,6 +29,62 @@ object TransferRetry {
     /** [delayBefore] for a failure [error]: a [Refusal] is final, whatever it says. */
     fun delayAfter(attempt: Int, error: Throwable?, enabled: Boolean): Long? =
         if (error is Refusal) null else delayBefore(attempt, error?.message, enabled)
+
+    /**
+     * How long a transfer waits, in all, for the network it needs (R6i): a
+     * phone's Wi-Fi can take a minute to rejoin, longer than the retries.
+     */
+    const val NETWORK_WAIT_SECONDS = 180L
+
+    /** What a transfer does after a failed attempt. */
+    sealed interface Next {
+        /** Try again in [seconds], as the next retry. */
+        data class After(val seconds: Long) : Next
+
+        /** Wait up to [seconds] for the network, then try again; the wait uses no retry. */
+        data class WhenOnline(val seconds: Long) : Next
+
+        /** Stop; [noNetwork] when it was the network that never came back. */
+        data class Stop(val noNetwork: Boolean) : Next
+    }
+
+    /**
+     * After attempt [attempt] failed with [error]: when the phone has no
+     * network the transfer can use ([networkFits]), it waits for one, up to
+     * [NETWORK_WAIT_SECONDS] in all ([waitedOfflineSeconds] so far), without
+     * spending a retry; otherwise it retries as [delayAfter] says.
+     */
+    fun next(
+        attempt: Int,
+        error: Throwable?,
+        enabled: Boolean,
+        networkFits: Boolean,
+        waitedOfflineSeconds: Long,
+    ): Next {
+        val final = error is Refusal || error?.message?.let(::isFinal) == true
+        if (!enabled || final) return Next.Stop(noNetwork = false)
+        if (!networkFits) {
+            val left = NETWORK_WAIT_SECONDS - waitedOfflineSeconds
+            return if (left > 0) Next.WhenOnline(left) else Next.Stop(noNetwork = true)
+        }
+        return delayAfter(attempt, error, enabled)?.let { Next.After(it) } ?: Next.Stop(noNetwork = false)
+    }
+
+    /**
+     * Whether the phone has a network a transfer with the computer at
+     * [address] can use: one at home (a private, link-local or `.local`
+     * address) needs a local network ([localNetwork]: Wi-Fi, Ethernet, or
+     * this phone's own hotspot or tethering), not mobile data; one on a
+     * tailnet or the internet needs [anyNetwork].
+     */
+    fun networkFits(address: String, anyNetwork: Boolean, localNetwork: Boolean): Boolean {
+        val local = when (ConnectionChecks.kindOf(address)) {
+            AddressKind.PRIVATE_V4, AddressKind.LINK_LOCAL -> true
+            AddressKind.HOSTNAME -> address.lowercase().trimEnd('.').endsWith(".local")
+            else -> false
+        }
+        return if (local) localNetwork else anyNetwork
+    }
 
     /**
      * Whether a folder send goes on (T6b). It stops once [GIVE_UP_AFTER]

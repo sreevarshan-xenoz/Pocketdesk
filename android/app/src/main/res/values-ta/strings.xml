@@ -35,7 +35,7 @@
     <string name="share_not_saved">அந்த முகவரியுடன் சேமித்த கணினி இல்லை</string>
     <string name="share_choosing_off">பிற செயலிகள் கணினியைத் தேர்ந்தெடுக்க முடியாது: Pocketdesk அமைப்புகளில் இதை இயக்கவும்</string>
     <string name="settings_retry_transfers">தோல்வியுற்ற கோப்புகளை மீண்டும் அனுப்பு</string>
-    <string name="settings_retry_transfers_summary">பாதியில் நின்ற கோப்பு நின்ற இடத்திலிருந்து 3 முறை வரை மீண்டும் அனுப்பப்படும்</string>
+    <string name="settings_retry_transfers_summary">பாதியில் நின்ற கோப்பு நின்ற இடத்திலிருந்து 3 முறை வரை மீண்டும் அனுப்பப்படும்; நெட்வொர்க் இல்லையெனில் முதலில் 3 நிமிடம் வரை காத்திருக்கும்</string>
     <string name="settings_internet_files">இணையம் வழியே கோப்புகள்</string>
     <string name="settings_internet_files_summary">வெளியிலிருந்து அணுகும் கணினியுடன் அதே இணைப்பில் கோப்புகளை அனுப்பி பெறுக. கணினியும் இதை அணைக்கலாம்</string>
     <string name="reconnecting_in">%1$d வினாடிகளில் மீண்டும் இணைகிறது…</string>
@@ -191,6 +191,8 @@
     <string name="channel_transfers">கோப்புப் பரிமாற்றங்கள்</string>
     <string name="channel_transfers_desc">உங்கள் கணினிக்கும் அதிலிருந்தும் அனுப்பிய கோப்புகளின் முன்னேற்றம்</string>
     <string name="transfer_retrying">மீண்டும் முயல்கிறது (3 இல் %1$d)</string>
+    <string name="transfer_waiting_network">நெட்வொர்க்குக்காகக் காத்திருக்கிறது</string>
+    <string name="transfer_no_network">3 நிமிடங்களாக நெட்வொர்க் இல்லை</string>
     <string name="transfer_sending_folder">%1$s கோப்புறை அனுப்பப்படுகிறது: %3$d இல் %2$d</string>
     <string name="transfer_folder_empty">%1$s இலிருந்து எதையும் அனுப்ப முடியவில்லை: அது காலியாக உள்ளது, அல்லது அதன் கோப்புகளைப் படிக்க முடியவில்லை</string>
     <string name="transfer_folder_stopped">%1$s அனுப்புவது நிறுத்தப்பட்டது: கணினி பதிலளிப்பதை நிறுத்தியது. அனுப்பப்படாதவை: %2$d</string>
