@@ -1276,6 +1276,7 @@ Owed:
 On the A71 against this box, 2026-10-16, with "Computer's clipboard in the background" keeping a link and no session:
 - [x] `dumpsys battery set level 12` (unplugged): `phone_status.json` said 12, and the computer warned "battery low (12 %)".
 - [x] With no session listed at all, level 9 reached `phone_status.json`.
+- [x] After the review fix (the live link only): with no session listed, 13 % reached `phone_status.json` and was warned about.
 
 Owed:
 - [ ] With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
