@@ -1342,6 +1342,20 @@ Owed:
 - [ ] The Activity tab itself on screen (its rows, filters, Show in folder): a click posted to the window did not reach egui, and real input into this box's desktop is not used for tests.
 - [ ] Pairing and unpairing a phone showing as rows; a folder's Show in folder after it finished arriving.
 
+## 80. Named tasks (ecosystem 1c)
+
+A71 → this Windows box, LAN, debug server, 2026-10-16, three tasks in config.toml:
+- [x] Quick Settings, "Tasks on this computer": the three names, "Asked" marked as asking first; no command line on the phone.
+- [x] "Say hello": "done (exit 0)" with its output on the phone; `task_started` / `task_finished` in the event log.
+- [x] "Asked": "waiting for the computer's owner to allow it…", held in `task_requests.json`; allowed through `task_answers/` as the desktop app writes it; then "done (exit 0)" with its output.
+- [x] "Slow" (`deadline_secs = 3`): "stopped at its deadline"; `task_finished` with `timed_out`.
+- [x] After the review fixes: "Say hello" again over the live link, and "Slow" stopped at its deadline with what it wrote before it (its first lines) kept and shown on the phone.
+
+Owed:
+- [ ] The desktop app's Allow / Deny prompt itself (clicked, not written), Deny on the phone, and the Settings task editor.
+- [ ] "Start my tasks" off: the phone gives up with "no answer" after 20 s.
+- [ ] Linux (`sh -c`), a long output's end on the phone, and two phones at once.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
