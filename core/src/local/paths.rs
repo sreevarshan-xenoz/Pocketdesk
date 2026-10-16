@@ -31,6 +31,10 @@ pub const RECEIVED_FILE: &str = "received.json";
 pub const OUTBOX_DIR: &str = "outbox";
 /// Links the desktop app or the local API asks the server to hand to a phone (T8a).
 pub const LINKS_DIR: &str = "links_out";
+/// The owner's other computers this one paired with (2f), owner-only.
+pub const COMPUTERS_FILE: &str = "computers.json";
+/// The desktop app's requests about them, one file each.
+pub const COMPUTERS_DIR: &str = "computers_out";
 pub const SENT_FILE: &str = "sent.json";
 /// How the bridge to Home Assistant's MQTT broker stands (ecosystem 1e).
 pub const HOME_ASSISTANT_FILE: &str = "home_assistant.json";
