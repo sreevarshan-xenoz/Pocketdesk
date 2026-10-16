@@ -66,7 +66,16 @@ pub fn start(state_dir: &Path) {
     WATCHER.get_or_init(|| {
         use notify::Watcher;
         let mut watcher = notify::recommended_watcher(|event: notify::Result<notify::Event>| {
-            let Ok(event) = event else { return };
+            // An error, or events lost (a full buffer on Windows): every
+            // consumer looks now rather than at its next sweep.
+            let event = match event {
+                Ok(event) if !event.need_rescan() && !event.paths.is_empty() => event,
+                Ok(_) => return nudge_all(),
+                Err(e) => {
+                    tracing::debug!("Folder watcher: {e}");
+                    return nudge_all();
+                }
+            };
             for path in &event.paths {
                 if let Some(folder) = folder_of(path) {
                     nudge(folder);
@@ -91,6 +100,16 @@ pub fn start(state_dir: &Path) {
         tracing::debug!("Watching {} inbox folders", FOLDERS.len());
         Some(watcher)
     });
+    // Each consumer's first look is now, not a sweep away: requests left
+    // while the server was stopped, and files that start empty.
+    static FIRST: std::sync::Once = std::sync::Once::new();
+    FIRST.call_once(nudge_all);
+}
+
+fn nudge_all() {
+    for folder in FOLDERS {
+        nudge(folder);
+    }
 }
 
 /// Wake `folder`'s consumer as if a file had appeared in it: for something
@@ -163,33 +182,32 @@ mod tests {
 
     #[test]
     fn a_nudge_is_seen_once() {
-        nudge(CONTROL_DIR);
+        // A name no consumer has, so no other test's nudge reaches it.
+        const FOLDER: &str = "test_seen_once";
+        nudge(FOLDER);
         if watching() {
-            assert!(changed(CONTROL_DIR));
-            assert!(!changed(CONTROL_DIR), "seen, so not again");
+            assert!(changed(FOLDER));
+            assert!(!changed(FOLDER), "seen, so not again");
         } else {
-            assert!(changed(CONTROL_DIR), "no watcher: always look");
+            assert!(changed(FOLDER), "no watcher: always look");
         }
     }
 
     #[tokio::test]
     async fn a_wait_with_a_deadline_ends_at_it_or_at_a_change() {
+        // A name no consumer has, so no other test's nudge ends the wait.
+        const FOLDER: &str = "test_deadline";
         let start = tokio::time::Instant::now();
         let most = Duration::from_millis(200);
-        wait_at_most(PHONE_FILES_DIR, most, most).await;
+        wait_at_most(FOLDER, most, most).await;
         let took = start.elapsed();
         assert!(
             took >= Duration::from_millis(190) && took < Duration::from_secs(2),
             "{took:?}"
         );
-        nudge(PHONE_FILES_DIR);
+        nudge(FOLDER);
         let start = tokio::time::Instant::now();
-        wait_at_most(
-            PHONE_FILES_DIR,
-            Duration::from_secs(3),
-            Duration::from_secs(3),
-        )
-        .await;
+        wait_at_most(FOLDER, Duration::from_secs(3), Duration::from_secs(3)).await;
         if watching() {
             assert!(
                 start.elapsed() < Duration::from_millis(500),
