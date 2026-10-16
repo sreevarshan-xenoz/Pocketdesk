@@ -1,6 +1,6 @@
 # Working with KDE Connect devices (3a–3c)
 
-Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2.2 (the protocol's facts, with sources) and §3a–3c. Status: design, written before the code.
+Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2.2 (the protocol's facts, with sources) and §3a–3c. Status: 3a built (see "As built" at the end); 3b and 3c to come.
 
 ## Goal
 
@@ -75,3 +75,12 @@ On the A71 with KDE Connect from F-Droid, on a Wi-Fi it trusts, against this Win
 ## Not in this design
 
 GSConnect, Valent, KDE Connect on a desktop, and iOS are not checkable here (no GNOME machine on the phone's network, no iPhone). Sending files to a KDE device, mDNS discovery (`_kdeconnect._udp`, off by default in KDE Connect Android since 1.34), and plugins beyond 3c.
+
+## As built (3a)
+
+- **Broadcasting is once per Find, not every 2 s while looking.** On the A71, KDE Connect dialed in again at every broadcast and dropped its link for the new one, so a minute of looking churned the link every 2 s. The identity now goes out when the desktop app asks (each press names a new time) and once after a network change; the network is looked at every 10 s (R6's idle cost), and `idle_cost.rs` measures the loop.
+- **Only limited broadcast** (`255.255.255.255`), not each interface's directed broadcast; on Windows it leaves by the default interface.
+- **Dialing a broadcaster is not built:** UDP 1716 is not listened on, so a device that opens KDE Connect after the Find minute is found only by pressing Find again.
+- **The device's name** is the one its identity inside TLS gives (the A71's connection packet said its model, the identity "Galaxy A71").
+- **Tests:** a fake v8 device over TLS 1.2 (the handshake, the CVE case, a certificate naming another id, a pin, an old or misaddressed identity, slow and long lines), the identity made once with its subject, the 42-link cap, the seen list and the Find request; the Pocketdesk road's TLS 1.2 refusal was already held by `the_control_channel_refuses_tls_1_2`.
+- **Device-checked** (checklist §87): the A71's KDE Connect dialed in after a Find, the handshake held, and it listed this computer.

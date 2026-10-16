@@ -1448,6 +1448,16 @@ Two real servers on this box passed `server/tests/two_computers.rs` (2026-10-17)
 - [ ] A folder from B to A lands under one new folder; a folder from A to B is refused with its reason.
 - [ ] Forget on A: the link goes, and B's Devices tab still lists A until removed there; after that, a pairing again works.
 
+## 87. KDE Connect devices (3a)
+
+The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box (port 1720), 2026-10-17:
+
+- [x] "Find" in the desktop app (the request file, as the app writes it): the phone dialed in, the v8 handshake completed over TLS, and the phone listed this computer under Available devices; one link, held.
+- [x] Found on the way: a broadcast every 2 s while looking made KDE Connect dial again at each one and drop its link; now once per Find.
+- [ ] The desktop app's Find button and list on screen.
+- [ ] A device that broadcasts first (this computer dialing it): not built (the receive half waits).
+- [ ] Linux, with `kdeconnectd` holding UDP 1716.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
