@@ -65,10 +65,18 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
     val current = run
     LaunchedEffect(current?.id) {
         val started = current ?: return@LaunchedEffect
+        val sent = withContext(Dispatchers.IO) {
+            RustCore.runTask(address, controlPort, started.task.name, started.id)
+        }
+        sent.exceptionOrNull()?.let {
+            run = started.copy(status = Status.NotSent(it.message ?: it.toString()))
+            return@LaunchedEffect
+        }
+        val since = android.os.SystemClock.elapsedRealtime()
         while (isActive) {
             val json = withContext(Dispatchers.IO) { RustCore.taskResult(started.id) }
             val body = json.takeIf { it.isNotBlank() }?.let { runCatching { JSONObject(it) }.getOrNull() }
-            val status =
+            val answered =
                 TaskRun.status(
                     state = body?.optString("state")?.takeIf { it.isNotEmpty() },
                     code = body?.takeIf { it.has("code") && !it.isNull("code") }?.optInt("code"),
@@ -76,6 +84,7 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                     reason = body?.optString("reason")?.takeIf { it.isNotEmpty() },
                     asks = started.task.asks,
                 )
+            val status = TaskRun.givenUp(answered, android.os.SystemClock.elapsedRealtime() - since)
             run = started.copy(
                 status = status,
                 output = body?.optString("output").orEmpty(),
@@ -117,9 +126,9 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                                 androidx.compose.material3.TextButton(
                                     enabled = run?.let { TaskRun.finished(it.status) } ?: true,
                                     onClick = {
+                                        // Sent by the run's own effect, which then follows it.
                                         val id = java.util.UUID.randomUUID().toString()
                                         run = Run(task, id, Status.Waiting(task.asks), "", false)
-                                        Thread { RustCore.runTask(address, controlPort, task.name, id) }.start()
                                     },
                                 ) { Text(stringResource(R.string.tasks_run)) }
                             },
@@ -168,4 +177,6 @@ private fun statusText(status: Status): String =
         Status.Denied -> stringResource(R.string.tasks_denied)
         Status.Busy -> stringResource(R.string.tasks_busy)
         Status.Unknown -> stringResource(R.string.tasks_unknown)
+        is Status.NotSent -> stringResource(R.string.tasks_not_sent, status.why)
+        Status.NoAnswer -> stringResource(R.string.tasks_no_answer)
     }

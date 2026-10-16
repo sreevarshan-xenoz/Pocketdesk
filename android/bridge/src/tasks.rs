@@ -52,11 +52,13 @@ pub async fn list_tasks(address: String, port: u16) -> Result<String, String> {
         .map(|body| body.to_string())
 }
 
-/// Start task `name` as run `id`; its results come to [`result_json`].
+/// Start task `name` as run `id`; its results come to [`result_json`]. Only
+/// on the live control link, whose reader takes the results: a one-off
+/// connection would start the task and lose every one of them.
 pub async fn run_task(address: String, port: u16, name: String, id: String) -> Result<(), String> {
     let packet =
         NetworkPacket::new(TASK_RUN).with_body(serde_json::json!({ "name": name, "id": id }));
-    crate::api::push_packet(&address, port, &packet).await
+    crate::api::send_on_live(&address, port, &packet).await
 }
 
 #[cfg(test)]

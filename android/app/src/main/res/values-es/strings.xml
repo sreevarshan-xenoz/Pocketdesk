@@ -556,4 +556,6 @@
     <string name="tasks_busy">no iniciada: ya se está ejecutando, o hay dos tareas en marcha</string>
     <string name="tasks_unknown">no iniciada: el ordenador no tiene esa tarea</string>
     <string name="tasks_output_cut">Solo se muestra el final de la salida.</string>
+    <string name="tasks_not_sent">no enviada: %1$s</string>
+    <string name="tasks_no_answer">sin respuesta: puede que este teléfono no tenga permiso para iniciar tareas (en el ordenador, Dispositivos, \"Iniciar mis tareas\")</string>
 </resources>

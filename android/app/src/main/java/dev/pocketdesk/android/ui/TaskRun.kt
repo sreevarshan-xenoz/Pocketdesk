@@ -23,7 +23,23 @@ object TaskRun {
 
         /** The computer has no such task (any more). */
         data object Unknown : Status
+
+        /** The start never left the phone: why. */
+        data class NotSent(val why: String) : Status
+
+        /**
+         * Nothing came back in time: the computer may not let this phone
+         * start tasks (it drops such a start without a word), or went away.
+         */
+        data object NoAnswer : Status
     }
+
+    /** How long a start may wait for its first answer: the owner's minute when it asks first. */
+    fun answerWithinMs(asks: Boolean): Long = if (asks) 75_000 else 20_000
+
+    /** [status], or [Status.NoAnswer] once a start still waiting has waited [waitedMs] too long. */
+    fun givenUp(status: Status, waitedMs: Long): Status =
+        if (status is Status.Waiting && waitedMs > answerWithinMs(status.asks)) Status.NoAnswer else status
 
     /**
      * The run's status from the result's fields ([state] null while no

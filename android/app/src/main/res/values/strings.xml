@@ -558,4 +558,6 @@
     <string name="tasks_busy">not started: it is already running, or two tasks are</string>
     <string name="tasks_unknown">not started: the computer has no such task</string>
     <string name="tasks_output_cut">Only the end of the output is shown.</string>
+    <string name="tasks_not_sent">not sent: %1$s</string>
+    <string name="tasks_no_answer">no answer: this phone may not be allowed to start tasks (on the computer, Devices, \"Start my tasks\")</string>
 </resources>

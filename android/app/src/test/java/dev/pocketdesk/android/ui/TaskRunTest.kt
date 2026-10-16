@@ -29,6 +29,17 @@ class TaskRunTest {
     }
 
     @Test
+    fun aStartNothingAnswersIsGivenUp() {
+        val asking = Status.Waiting(asks = true)
+        assertEquals(asking, TaskRun.givenUp(asking, 60_000))
+        assertEquals(Status.NoAnswer, TaskRun.givenUp(asking, 76_000))
+        assertEquals(Status.NoAnswer, TaskRun.givenUp(Status.Waiting(asks = false), 21_000))
+        assertEquals("a run is never given up", Status.Running, TaskRun.givenUp(Status.Running, 999_000))
+        assertTrue(TaskRun.finished(Status.NoAnswer))
+        assertTrue(TaskRun.finished(Status.NotSent("no link")))
+    }
+
+    @Test
     fun onlyAnEndedRunIsFinished() {
         assertFalse(TaskRun.finished(Status.Waiting(asks = true)))
         assertFalse(TaskRun.finished(Status.Running))
