@@ -9,6 +9,8 @@ pub const PID_FILE: &str = "server.pid";
 pub const PIN_FILE: &str = "pairing.pin";
 pub const TRUST_FILE: &str = "trusted_devices.json";
 pub const LIVE_FILE: &str = "live_sessions.json";
+/// The phone's cast the server holds now, for the desktop app (T10k).
+pub const CAST_FILE: &str = "cast.json";
 pub const KICK_FILE: &str = "kick";
 /// One kick request per file (roadmap N7).
 pub const KICKS_DIR: &str = "kicks";
