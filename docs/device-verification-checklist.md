@@ -1420,6 +1420,21 @@ Owed:
 - [ ] A download that waits for the network (next phase, R6i).
 - [ ] The idle cost on Linux after R6c (the VM), and with R6d's clipboard watch.
 
+## 85. iroh 1.3, one endpoint per computer, files over the internet road (2a–2d)
+
+The A71 against this Windows box, 2026-10-17, debug builds of the branches, input off. "The internet road" here: the phone's saved control and stream ports pointed at closed ones (the §64 method), so only iroh reaches the computer (a direct path on this LAN).
+
+- [x] 2a, iroh 1.3: a WAN session and an internet control link came up ("Handling a control connection over the internet", the session's transport `wan`), 60 s.
+- [x] 2b, red test: two relay-only endpoints with one key on one relay: the first never connects (30 of 30 pings lost), the second does; two with their own keys both answer every ping. The shared endpoint is unit-tested (one endpoint for a session and a control dial with one key, closed with the last).
+- [ ] 2b on a relayed path: A71 → the VM with direct UDP from home dropped, session and control link both up 10 minutes ("WAN · relayed").
+- [x] 2c/2d, computer → phone: a 50 MB file over the internet link, saved, MD5 matching.
+- [x] 2c/2d, phone → computer: a 50 MB share, in Downloads in 11 s, MD5 matching.
+- [x] A 150 MB offer broken by 15 s without Wi-Fi: the phone's retries continued it ("The phone had 27869840 of 157286400 bytes; sent the rest"), MD5 matching; the iroh control connection itself survived the drop.
+- [ ] The remote file browser's download and a folder fetch over the internet road.
+- [ ] A real WAN (the VM): 500 MB resumed with TCP 1716 unreachable.
+- [ ] The too-old message against a computer from before 2c.
+- [ ] Both Settings switches off: a send refused at once, with the reason.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
