@@ -586,14 +586,23 @@ impl StreamingServer {
         if cast {
             let ask_conn = connection.clone();
             let mut want_rx = cast_want_rx;
-            tasks.spawn(until_cancelled(
-                async move {
-                    while want_rx.recv().await.is_some() {
-                        send_cast_keyframe_ask(&ask_conn).await;
+            let ask_cancel = cancel.clone();
+            // It ends with the session, never before it: the relay holds a
+            // sender for as long as it likes, and dropping it ends nothing.
+            tasks.spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = ask_cancel.cancelled() => break,
+                        want = want_rx.recv() => match want {
+                            Some(()) => send_cast_keyframe_ask(&ask_conn).await,
+                            None => {
+                                ask_cancel.cancelled().await;
+                                break;
+                            }
+                        },
                     }
-                },
-                cancel.clone(),
-            ));
+                }
+            });
         }
 
         // Task 1: Screen capture (runs on dedicated OS thread internally)
