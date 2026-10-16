@@ -5096,7 +5096,7 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-android-bridge"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5117,7 +5117,7 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "ashpd",
@@ -5167,7 +5167,7 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "eframe",
  "pocketdesk-core",
@@ -5179,7 +5179,7 @@ dependencies = [
 
 [[package]]
 name = "pocketdesk-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
