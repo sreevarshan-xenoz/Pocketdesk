@@ -93,7 +93,7 @@ pub fn read(state_dir: &Path) -> ComputersFile {
 }
 
 /// [`read`], but a file that is there and does not read is an error.
-fn try_read(state_dir: &Path) -> io::Result<ComputersFile> {
+pub fn try_read(state_dir: &Path) -> io::Result<ComputersFile> {
     match std::fs::read_to_string(state_dir.join(COMPUTERS_FILE)) {
         Ok(raw) => {
             serde_json::from_str(&raw).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))

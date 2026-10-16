@@ -64,6 +64,15 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
         return;
     };
     let mut links: HashMap<String, Link> = HashMap::new();
+    // What an earlier run said of its links is not this run's.
+    let restarted = computers::update(&dir, |file| {
+        for computer in &mut file.computers {
+            computer.link = "connecting".to_string();
+        }
+    });
+    if let Err(e) = restarted {
+        tracing::debug!("Could not reset the links' state: {e}");
+    }
     loop {
         for request in computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             match request.ask {
@@ -176,13 +185,13 @@ impl Drop for LiveLink {
     }
 }
 
-/// A link for every paired computer, and none for one forgotten.
+/// A link for every paired computer, and none for one forgotten. A file
+/// that does not read leaves the links as they are.
 fn keep_links(dir: &Path, wan: &iroh::Endpoint, links: &mut HashMap<String, Link>) {
-    let paired: Vec<String> = computers::read(dir)
-        .computers
-        .into_iter()
-        .map(|c| c.device_id)
-        .collect();
+    let Ok(file) = computers::try_read(dir) else {
+        return;
+    };
+    let paired: Vec<String> = file.computers.into_iter().map(|c| c.device_id).collect();
     links.retain(|id, link| {
         let keep = paired.contains(id) && !link.task.is_finished();
         if !keep {
@@ -487,11 +496,15 @@ impl WanTarget {
     }
 }
 
+/// A link that lasts at least this long before it closes is redialed at
+/// once; one that closes sooner (admitted, then dropped) backs off.
+const STEADY: Duration = Duration::from_secs(30);
+
 /// How a link ended.
 #[derive(Debug, PartialEq, Eq)]
 enum LinkEnd {
-    /// It was up and closed.
-    Closed,
+    /// It was up, for how long, and closed.
+    Closed(Duration),
     /// The other computer would not admit this one.
     Refused,
     /// It never came up.
@@ -517,10 +530,16 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
         };
         let end = run_link(&dir, &wan, &computer, &target, &me).await;
         let wait = match &end {
-            LinkEnd::Closed => {
+            LinkEnd::Closed(lasted) => {
                 set_link(&dir, &device_id, "away: the link closed");
-                backoff = BACKOFF_FIRST;
-                backoff
+                if *lasted >= STEADY {
+                    backoff = BACKOFF_FIRST;
+                    backoff
+                } else {
+                    let wait = backoff;
+                    backoff = (backoff * 2).min(BACKOFF_MOST);
+                    wait
+                }
             }
             LinkEnd::Refused => {
                 tracing::warn!(
@@ -817,6 +836,7 @@ async fn run_link(
     };
     tracing::info!(device_id = %computer.device_id, "Linked to another computer");
     set_link(dir, &computer.device_id, "linked");
+    let linked_at = std::time::Instant::now();
     let (outgoing_tx, mut outgoing) = mpsc::channel(32);
     let _live = LiveLink::new(&computer.device_id, outgoing_tx);
     let _accepting = acceptor.map(|acceptor| {
@@ -832,11 +852,11 @@ async fn run_link(
         tokio::select! {
             packet = read_packet(&mut reader) => match packet {
                 Ok(Some(packet)) => take(dir, &computer.device_id, &packet).await,
-                Ok(None) | Err(_) => return LinkEnd::Closed,
+                Ok(None) | Err(_) => return LinkEnd::Closed(linked_at.elapsed()),
             },
             Some(packet) = outgoing.recv() => {
                 if send(&mut writer, &packet).await.is_err() {
-                    return LinkEnd::Closed;
+                    return LinkEnd::Closed(linked_at.elapsed());
                 }
             }
         }
