@@ -103,6 +103,10 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::phone_media::run_watcher());
     // The desktop app's requests to browse the phones' storage (T10g).
     tokio::spawn(crate::plugins::phone_files::run_watcher());
+    // A phone's own screen (T10j): those a stopped server left go, and
+    // each goes once its phone has no session.
+    tokio::task::spawn_blocking(crate::virtual_screen::clear_left_over);
+    tokio::spawn(crate::virtual_screen::run_sweeper());
     tokio::spawn(crate::plugins::sms::run_watcher());
 
     // Prepare shared state for v2 multiplexer and v1 streaming.
@@ -154,6 +158,7 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::warn!("Could not forget the contact names kept with texts: {e}");
     }
     crate::plugins::links::configure(config.open_links);
+    crate::virtual_screen::configure(config.virtual_screens);
     // The desktop app's answers to the phones' notifications (T10c).
     tokio::spawn(crate::plugins::notification::run_answers());
     // The clipboard to connected phones as it changes (T10b).

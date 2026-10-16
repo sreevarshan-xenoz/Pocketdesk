@@ -37,6 +37,17 @@ impl Plugin for MonitorsPlugin {
     }
 }
 
+/// The monitor index of the output `name` (a screen just added, T10j), or
+/// the last index when it is not listed by that name.
+pub(crate) fn index_of(name: &str) -> u32 {
+    let monitors = enumerate_monitors();
+    monitors
+        .iter()
+        .find(|m| m.name == name)
+        .or(monitors.last())
+        .map_or(0, |m| m.index)
+}
+
 /// Enumerate monitors on the current display server using xrandr (X11) or
 /// xcap (cross-platform fallback).
 fn enumerate_monitors() -> Vec<MonitorInfo> {

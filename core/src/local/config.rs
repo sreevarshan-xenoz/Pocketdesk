@@ -82,6 +82,9 @@ pub struct Config {
     /// off, it is shown as a notification instead.
     #[serde(default = "default_true")]
     pub open_links: bool,
+    /// Let a phone with Input add a screen of its own shape (T10j, Sway).
+    #[serde(default = "default_true")]
+    pub virtual_screens: bool,
     /// Send what is copied on this computer to connected phones with the
     /// Clipboard permission, as it changes (T10b).
     #[serde(default = "default_true")]
@@ -206,6 +209,7 @@ impl Default for Config {
             sms_keep: default_sms_keep(),
             sms_names: true,
             open_links: true,
+            virtual_screens: true,
             clipboard_push: true,
             phone_battery_alerts: true,
             wake_announce: true,
@@ -367,6 +371,7 @@ impl Config {
         "notifications_per_minute",
         "sms_notify",
         "open_links",
+        "virtual_screens",
         "clipboard_push",
         "phone_battery_alerts",
         "sms_keep",
