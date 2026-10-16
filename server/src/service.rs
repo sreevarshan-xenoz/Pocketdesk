@@ -2362,31 +2362,43 @@ mod vector_tests {
         let addr = real_port().await;
         // A phone paired in the throwaway state folder, whose id a stranger
         // names after its own handshake.
-        let mut store = pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
-            crate::state::trust_store_path().unwrap(),
-        )
-        .unwrap();
-        store.trust_device("vector-paired-phone").unwrap();
+        let pair = || {
+            pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
+                crate::state::trust_store_path().unwrap(),
+            )
+            .unwrap()
+            .trust_device("vector-paired-phone")
+            .unwrap();
+        };
         let request = serde_json::json!({
             "type": "kdeconnect.pocketdesk.monitors",
             "body": { "request": true }
         });
-        // The control: the paired phone itself is answered.
-        let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
-        write_line(&mut paired, &request.to_string()).await;
-        // Its seed pushes come first; then the answer.
+        // The control: the paired phone itself is answered. The lib tests
+        // share one throwaway state folder, so another may rewrite the trust
+        // store meanwhile: pair again and retry before calling it a failure.
         let mut answered = false;
-        for _ in 0..10 {
-            match read_line(&mut paired, 5000).await {
-                Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
-                    answered = true;
-                    break;
+        for _ in 0..3 {
+            pair();
+            let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
+            write_line(&mut paired, &request.to_string()).await;
+            // Its seed pushes come first; then the answer.
+            for _ in 0..10 {
+                match read_line(&mut paired, 5000).await {
+                    Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
+                        answered = true;
+                        break;
+                    }
+                    Some(line) if line != CLOSED => continue,
+                    _ => break,
                 }
-                Some(line) if line != CLOSED => continue,
-                _ => break,
+            }
+            if answered {
+                break;
             }
         }
         assert!(answered, "the paired phone is answered");
+        pair();
         let mut stream = open(addr, true, true).await;
         let identity = serde_json::json!({
             "type": "kdeconnect.identity",
