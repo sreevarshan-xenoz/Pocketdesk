@@ -89,6 +89,9 @@ struct Reports {
     batteries: BTreeMap<String, PhoneBattery>,
     dirty: bool,
     watch: LowBatteryWatch,
+    /// Whether the last report taken fell low (warned or not, as the
+    /// setting says), for the event log.
+    last_low: bool,
 }
 
 impl Reports {
@@ -146,6 +149,7 @@ impl Reports {
         );
         self.dirty = true;
         let warn = self.watch.report(device, report, now);
+        self.last_low = warn;
         (alerts && warn).then(|| {
             let short: String = device.chars().take(8).collect();
             format!("Phone {short}: battery low ({} %)", report.charge)
@@ -190,13 +194,38 @@ impl Plugin for PhoneBatteryPlugin {
             tracing::debug!("A battery report from {} was not read", sender.device_id());
             return Ok(());
         };
-        let warning = REPORTS.lock().unwrap_or_else(|e| e.into_inner()).take(
-            sender.device_id(),
-            &report,
-            ALERTS.load(Ordering::Relaxed),
-            pocketdesk_core::local::pin::now_unix(),
-            Instant::now(),
-        );
+        let (warning, changed, low) = {
+            let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
+            let before = reports
+                .batteries
+                .get(sender.device_id())
+                .map(|b| (b.charge, b.charging));
+            let warning = reports.take(
+                sender.device_id(),
+                &report,
+                ALERTS.load(Ordering::Relaxed),
+                pocketdesk_core::local::pin::now_unix(),
+                Instant::now(),
+            );
+            let changed = before != Some((report.charge, report.charging));
+            (warning, changed, reports.last_low)
+        };
+        if changed {
+            crate::events::emit(
+                "phone_battery",
+                Some(sender.device_id()),
+                serde_json::json!({ "charge": report.charge, "charging": report.charging }),
+                serde_json::json!({}),
+            );
+        }
+        if low {
+            crate::events::emit(
+                "phone_battery_low",
+                Some(sender.device_id()),
+                serde_json::json!({ "charge": report.charge }),
+                serde_json::json!({}),
+            );
+        }
         if let Some(warning) = warning {
             tracing::info!("{warning}");
             std::thread::spawn(move || {

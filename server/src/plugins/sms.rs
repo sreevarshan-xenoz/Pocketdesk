@@ -155,6 +155,18 @@ impl Plugin for SmsPlugin {
                         tracing::warn!("Could not keep texts: {e}");
                     }
                 }
+                for (address, body, _, name) in &texts {
+                    let from = match name {
+                        Some(name) => format!("{name} ({address})"),
+                        None => address.clone(),
+                    };
+                    crate::events::emit(
+                        "text_received",
+                        Some(&phone),
+                        serde_json::json!({}),
+                        serde_json::json!({ "from": from, "body": body }),
+                    );
+                }
                 if NOTIFY.load(Ordering::Relaxed) {
                     // The phone's notification limit holds for texts too.
                     for (address, body, _, name) in texts {

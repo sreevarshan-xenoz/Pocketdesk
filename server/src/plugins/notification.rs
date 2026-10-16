@@ -245,6 +245,14 @@ impl Plugin for NotificationPlugin {
                 if !admitted {
                     return Ok(());
                 }
+                // What is shown, as shown: a notification the phone hides
+                // stays hidden in the log too.
+                crate::events::emit(
+                    "notification",
+                    Some(sender.device_id()),
+                    serde_json::json!({ "app": app }),
+                    serde_json::json!({ "title": title, "text": text }),
+                );
                 // One that offers buttons or a reply is kept for the desktop
                 // app to answer (T10c).
                 if let Some(note) = note

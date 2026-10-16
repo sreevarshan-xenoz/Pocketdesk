@@ -33,7 +33,12 @@ fn now_unix() -> u64 {
 }
 
 /// Record an event of `kind`: `meta` always, `content` only at full detail.
+/// Unit tests of the handlers that call it never reach the user's own log;
+/// [`emit_to`] is what they test.
 pub fn emit(kind: &str, device_id: Option<&str>, meta: Value, content: Value) {
+    if cfg!(test) {
+        return;
+    }
     let Ok(state_dir) = crate::state::state_dir() else {
         return;
     };

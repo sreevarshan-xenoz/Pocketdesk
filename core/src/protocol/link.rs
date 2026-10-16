@@ -51,6 +51,26 @@ pub fn link_problem(url: &str) -> Option<String> {
     None
 }
 
+/// The host of a link [`link_problem`] accepts (lowercase, port left out),
+/// as the event log names it without the rest of the address.
+pub fn link_host(url: &str) -> Option<String> {
+    let lower = url.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = match authority.rsplit_once(':') {
+        Some((host, port))
+            if port.chars().all(|c| c.is_ascii_digit())
+                && (!host.starts_with('[') || host.ends_with(']')) =>
+        {
+            host
+        }
+        _ => authority,
+    };
+    (!host.is_empty()).then(|| host.to_string())
+}
+
 /// Whether a browser would take `host` (lowercase) for its own machine:
 /// `localhost` and its subdomains, 127/8, 0.0.0.0, `::1`, `::`, in any
 /// spelling a browser reads as one of those. A host a browser rewrites
@@ -165,5 +185,18 @@ mod tests {
         ] {
             assert_eq!(link_problem(fine), None, "{fine}");
         }
+    }
+
+    #[test]
+    fn a_links_host_is_named_without_the_rest() {
+        assert_eq!(
+            link_host("https://Example.org:8443/a?b#c").as_deref(),
+            Some("example.org")
+        );
+        assert_eq!(
+            link_host("http://[2001:db8::1]/x").as_deref(),
+            Some("[2001:db8::1]")
+        );
+        assert_eq!(link_host("ftp://example.org"), None);
     }
 }

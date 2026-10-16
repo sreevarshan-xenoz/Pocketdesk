@@ -22,7 +22,7 @@ Each event is `{"at": <unix s>, "event": <kind>, "device_id": <phone or null>, .
 | `phone_battery_low` | `charge` (when the low warning fires) | — |
 | `notification` | `app` | `title`, `text` |
 | `text_received` | — | `from`, `body` |
-| `file_received` | `size` | `name` |
+| `file_received` | `size`, `folder: true` for each file of a folder | `name` |
 | `link_received` | `host` | `url` |
 
 A new kind or field is added, never renamed or removed, within `"api": 1`.
