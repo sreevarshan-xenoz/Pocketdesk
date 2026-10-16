@@ -258,8 +258,8 @@ pub fn describe(event: &Event) -> String {
     }
 }
 
-/// The file a `file_received` event was, from the received list: the one
-/// of its size kept within a few seconds of it.
+/// The file or folder a `file_received` event was, from the received
+/// list: the row whose saved path has the event's key.
 fn file_path(
     event: &Event,
     received: &[pocketdesk_core::local::received::ReceivedFile],
@@ -267,19 +267,10 @@ fn file_path(
     if event.event != "file_received" {
         return None;
     }
-    let folder = event.fields.get("folder").and_then(Value::as_bool) == Some(true);
-    let size = number(event, "size");
+    let key = text(event, "key")?;
     received
         .iter()
-        .find(|r| {
-            r.received_unix.abs_diff(event.at) <= 5
-                && r.from == event.device_id.clone().unwrap_or_default()
-                && if folder {
-                    r.name.ends_with('/')
-                } else {
-                    Some(r.size as i64) == size && !r.name.ends_with('/')
-                }
-        })
+        .find(|r| pocketdesk_core::local::received::path_key(&r.path) == key)
         .map(|r| PathBuf::from(&r.path))
 }
 
@@ -387,30 +378,37 @@ mod tests {
             received_unix: at,
             from: "0123456789ab".into(),
         };
+        let key = pocketdesk_core::local::received::path_key;
+        // Two files of one size at once, and a folder that went on arriving
+        // long after it started: each found by its own key.
         let received = vec![
-            row("other.bin", 5, 100),
-            row("a.txt", 900, 102),
-            row("Photos/", 0, 100),
+            row("a.txt", 900, 100),
+            row("b.txt", 900, 100),
+            row("Photos/", 0, 400),
         ];
-        let file = event("file_received", json!({"size": 900}));
-        assert_eq!(file_path(&file, &received), Some(PathBuf::from("/d/a.txt")));
-        let folder = event("file_received", json!({"folder": true}));
+        let file = event(
+            "file_received",
+            json!({"size": 900, "key": key("/d/b.txt")}),
+        );
+        assert_eq!(file_path(&file, &received), Some(PathBuf::from("/d/b.txt")));
+        let folder = event(
+            "file_received",
+            json!({"folder": true, "key": key("/d/Photos/")}),
+        );
         assert_eq!(
             file_path(&folder, &received),
             Some(PathBuf::from("/d/Photos/"))
         );
-        let late = Event::new(
+        let gone = event(
             "file_received",
-            Some("0123456789ab"),
-            200,
-            json!({"size": 900}),
-            json!({}),
-            EventsDetail::Metadata,
+            json!({"size": 900, "key": key("/d/gone.txt")}),
         );
+        assert_eq!(file_path(&gone, &received), None, "no longer in the list");
+        let old = event("file_received", json!({"size": 900}));
         assert_eq!(
-            file_path(&late, &received),
+            file_path(&old, &received),
             None,
-            "not one from long before"
+            "an event from before keys"
         );
     }
 
