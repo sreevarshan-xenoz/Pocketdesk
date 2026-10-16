@@ -1,7 +1,8 @@
 //! The live-session mirror and kick requests.
 //!
 //! The server mirrors its live streaming sessions to
-//! `<state>/live_sessions.json` every second (atomically), and ends sessions
+//! `<state>/live_sessions.json` (atomically) when they change and at least
+//! every 2 s, and ends sessions
 //! named in kick requests: one file each in `<state>/kicks/`
 //! (`<target>\n<unix-secs>\n`), so two quick requests are both seen, or the
 //! single `<state>/kick` an older CLI writes. The CLI's `status` and
@@ -20,8 +21,8 @@ use super::paths::{CONTROL_DIR, KICK_FILE, KICKS_DIR};
 /// meant it for a session that is no longer (or not yet) live.
 pub const KICK_TTL_SECS: u64 = 60;
 
-/// The mirror is rewritten every second; one older than this was left by a
-/// server that is no longer running.
+/// The mirror is rewritten at least every 2 s; one older than this was left
+/// by a server that is no longer running.
 const FRESH_SECS: u64 = 5;
 
 /// One live streaming session as mirrored.

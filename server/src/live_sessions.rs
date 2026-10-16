@@ -192,8 +192,9 @@ fn may_judge_pairing(read: bool, unread_ticks: &mut u32) -> bool {
 }
 
 /// The mirror is written at least this often: its readers take one older
-/// than 5 s for a server that has stopped.
-const MIRROR_HEARTBEAT: Duration = Duration::from_secs(4);
+/// than 5 s for a server that has stopped, and its stamp is a whole second
+/// taken at the top of a tick that may run long, so 2 s leaves them 3 s.
+const MIRROR_HEARTBEAT: Duration = Duration::from_secs(2);
 /// Daemon task: mirror the registry, ring the consent notification, and
 /// consume kick requests. Runs for the process lifetime.
 pub async fn run_watcher() {
