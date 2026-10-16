@@ -16,7 +16,7 @@ Part of the ecosystem plan (`docs/research/2026-10-16-ecosystem.md`, phase 1). T
 - **Protocol:** native messaging framing: a u32 length in native byte order, then UTF-8 JSON, at most 1 MiB in and out.
 - **Requests:**
   - `{"send": "link", "url"}` → `{"ok": "sent to <phone>"}` or `{"error"}`;
-  - `{"send": "image", "url"}` → the host downloads it with a cap of 32 MiB, `http(s)` only, never the computer's own loopback, a 20 s deadline, the name taken from the URL or the content type. It saves it to `<state>/browser_out/` (owner-only) and queues it through the outbox. `{"ok": "sent to <phone>"}` once it is queued.
+  - `{"send": "image", "url"}` → the host downloads it with a cap of 32 MiB, `http(s)` only, never the computer's own loopback, a 20 s deadline, the name taken from the URL or the content type. It saves it to the temporary folder's `pocketdesk-browser/` (owner-only; never the state folder, whose files the server does not send) and queues it through the outbox. `{"ok": "sent to <phone>"}` once it is queued.
 - **Registration:**
   - Chromium (Chrome, Edge, Brave, Chromium, Vivaldi) by `allowed_origins` naming the extension's fixed id (a `key` in `manifest.json`);
   - Firefox by `allowed_extensions` naming `pocketdesk@pocketdesk.dev`;

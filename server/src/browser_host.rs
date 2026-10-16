@@ -122,7 +122,7 @@ pub fn handle(
                 Ok(image) => image,
                 Err(why) => return err(format!("Not sent: {why}")),
             };
-            let path = match keep_image(state_dir, &image) {
+            let path = match keep_image(&images_dir(), &image) {
                 Ok(path) => path,
                 Err(e) => return err(format!("Not sent: could not keep it ({e})")),
             };
@@ -139,15 +139,16 @@ pub fn handle(
     }
 }
 
-/// Where downloaded images wait for the phone.
-fn images_dir(state_dir: &Path) -> PathBuf {
-    state_dir.join("browser_out")
+/// Where downloaded images wait for the phone: the system's temporary
+/// folder, never the state folder, whose files the server never sends.
+fn images_dir() -> PathBuf {
+    std::env::temp_dir().join("pocketdesk-browser")
 }
 
-/// Keep `image` in its own owner-only folder under [`images_dir`], so the
-/// phone gets it under its own name; ones older than a day go first.
-fn keep_image(state_dir: &Path, image: &Image) -> io::Result<PathBuf> {
-    let dir = images_dir(state_dir);
+/// Keep `image` in its own owner-only folder under `dir`, so the phone gets
+/// it under its own name; ones older than a day go first.
+fn keep_image(dir: &Path, image: &Image) -> io::Result<PathBuf> {
+    let dir = dir.to_path_buf();
     pocketdesk_core::secure_fs::create_private_dir(&dir)?;
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -574,7 +575,12 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(path.starts_with(images_dir(&dir)));
+        assert!(path.starts_with(&dir));
+        let state = pocketdesk_core::local::paths::state_dir().unwrap();
+        assert!(
+            !images_dir().starts_with(&state),
+            "the server never sends its state folder's files"
+        );
         assert_eq!(path.file_name().unwrap(), "cat.png");
         assert_eq!(std::fs::read(&path).unwrap(), vec![1, 2, 3]);
         let _ = std::fs::remove_dir_all(&dir);
