@@ -1282,6 +1282,13 @@ Owed:
 - [ ] With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
 - [ ] Over the internet road.
 
+## 76. Hotspot and tethering in Check connection
+
+JVM-tested only (the A71's build cannot start its hotspot from adb, and a computer joining it would mean changing this box's network). Owed:
+- [ ] A computer joined to the phone's hotspot, saved under that address: "on this phone's hotspot or tethering".
+- [ ] The same computer saved under its home address: "This phone shares its connection…" with the fix.
+- [ ] USB tethering (`rndis0`/`ncm0`) and Bluetooth tethering (`bt-pan`), and the interface names on other makers' phones.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
