@@ -22,6 +22,9 @@ const DISCOVERY: &str = "homeassistant";
 const TICK: Duration = Duration::from_secs(2);
 /// A broker away is tried again after this.
 const RETRY: Duration = Duration::from_secs(5);
+/// A broker that refused the connection (a wrong password, say) is asked
+/// again only after this, so it does not ban the computer for trying.
+const REFUSED_RETRY: Duration = Duration::from_secs(60);
 /// Requests the client may queue for the connection.
 const QUEUE: usize = 256;
 
@@ -557,17 +560,25 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
     let poller = tokio::spawn(async move {
         loop {
             let event = events.poll().await;
-            let failed = event.is_err();
-            if to_bridge
-                .send(event.map_err(|e| e.to_string()))
-                .await
-                .is_err()
-            {
+            let wait = match &event {
+                Ok(_) => None,
+                Err(rumqttc::ConnectionError::ConnectionRefused(_)) => Some(REFUSED_RETRY),
+                Err(_) => Some(RETRY),
+            };
+            let event = event.map_err(|e| match e {
+                rumqttc::ConnectionError::ConnectionRefused(code) => {
+                    format!(
+                        "the broker refused the connection ({code:?}): check the user and password"
+                    )
+                }
+                e => e.to_string(),
+            });
+            if to_bridge.send(event).await.is_err() {
                 return;
             }
-            if failed {
+            if let Some(wait) = wait {
                 // The next poll connects again.
-                tokio::time::sleep(RETRY).await;
+                tokio::time::sleep(wait).await;
             }
         }
     });
@@ -613,6 +624,21 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                             Ok(()) => tracing::info!(task = %task, "Home Assistant started a task"),
                             Err(why) => tracing::info!(task = %task, "Home Assistant's start was refused: {why}"),
                         }
+                    }
+                }
+                Some(Ok(Event::Incoming(Packet::SubAck(ack)))) => {
+                    if ack
+                        .return_codes
+                        .iter()
+                        .any(|c| matches!(c, rumqttc::SubscribeReasonCode::Failure))
+                    {
+                        tracing::warn!("Home Assistant: the broker refused a subscription; task buttons may not work");
+                        write_status(
+                            state_dir,
+                            last,
+                            true,
+                            Some("the broker refused a subscription, so task buttons may not work (its access rules?)".into()),
+                        );
                     }
                 }
                 Some(Ok(_)) => {}

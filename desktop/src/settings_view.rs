@@ -409,9 +409,10 @@ impl SettingsForm {
                         });
                     }
                     let note = match (&home_assistant, self.saved.home_assistant) {
-                        (Some(status), true) if status.connected => {
-                            "Connected to the broker.".to_string()
-                        }
+                        (Some(status), true) if status.connected => match &status.error {
+                            Some(why) => format!("Connected to the broker, but {why}."),
+                            None => "Connected to the broker.".to_string(),
+                        },
                         (Some(status), true) => format!(
                             "Not connected: {}",
                             status.error.as_deref().unwrap_or("trying")
