@@ -977,6 +977,12 @@ fn received_in(
             if let Err(e) = received::record(state_dir, entry) {
                 tracing::warn!("Could not record the received file: {e}");
             }
+            crate::events::emit(
+                "file_received",
+                Some(from),
+                serde_json::json!({ "size": size }),
+                serde_json::json!({ "name": name }),
+            );
             Some((
                 "Pocketdesk: file received",
                 format!("{name} ({}) is in {}.", human_size(size), parent_name(path)),
@@ -991,7 +997,18 @@ fn received_in(
                 received_unix: now,
                 from: from.to_string(),
             };
-            match received::add_to_folder(state_dir, entry) {
+            let added = received::add_to_folder(state_dir, entry);
+            // A folder is one event, as it is one notification: a folder of
+            // a thousand files would otherwise be a thousand hooks.
+            if matches!(added, Ok(true)) {
+                crate::events::emit(
+                    "file_received",
+                    Some(from),
+                    serde_json::json!({ "folder": true }),
+                    serde_json::json!({ "name": format!("{folder}/") }),
+                );
+            }
+            match added {
                 Ok(true) => Some((
                     "Pocketdesk: folder arriving",
                     format!("{folder} is arriving in {}.", parent_name(top)),

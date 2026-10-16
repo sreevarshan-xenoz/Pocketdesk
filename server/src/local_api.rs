@@ -24,6 +24,62 @@ pub fn versioned(mut value: Value) -> Value {
     value
 }
 
+/// Print each event as the server writes it, until stopped
+/// (`pocketdesk events`): one line per event, or one JSON object per line.
+pub fn watch(since_start: bool, as_json: bool) -> anyhow::Result<()> {
+    use pocketdesk_core::local::events::Tail;
+    use std::io::Write;
+    let dir = crate::state::state_dir()?;
+    let config = pocketdesk_core::local::config::Config::load().unwrap_or_default();
+    if !config.events && !as_json {
+        eprintln!(
+            "The event log is off (Settings, \"Event log\"): nothing will show until it is on."
+        );
+    }
+    let mut tail = if since_start {
+        Tail::from_start(&dir)
+    } else {
+        Tail::at_end(&dir)
+    };
+    let stdout = std::io::stdout();
+    loop {
+        for event in tail.poll() {
+            let mut out = stdout.lock();
+            // A reader that went away (a closed pipe) ends it.
+            if writeln!(out, "{}", watch_line(&event, as_json)).is_err() || out.flush().is_err() {
+                return Ok(());
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+/// One event as `pocketdesk events` prints it.
+pub fn watch_line(event: &pocketdesk_core::local::events::Event, as_json: bool) -> String {
+    if as_json {
+        return versioned(serde_json::to_value(event).unwrap_or_default()).to_string();
+    }
+    let secs = event.at % 86_400;
+    let mut line = format!(
+        "{:02}:{:02}:{:02}Z  {}",
+        secs / 3600,
+        secs / 60 % 60,
+        secs % 60,
+        event.event
+    );
+    if let Some(device) = &event.device_id {
+        let short: String = device.chars().take(12).collect();
+        line.push_str(&format!("  {short}"));
+    }
+    for (key, value) in &event.fields {
+        match value {
+            Value::String(text) => line.push_str(&format!("  {key}={text}")),
+            other => line.push_str(&format!("  {key}={other}")),
+        }
+    }
+    line
+}
+
 /// The name a capability goes by in the API.
 pub fn capability_name(capability: Capability) -> &'static str {
     match capability {
@@ -1372,5 +1428,27 @@ mod tests {
                 .unwrap_err()
                 .contains("starts with")
         );
+    }
+
+    #[test]
+    fn a_watched_event_reads_as_a_line_or_as_the_apis_json() {
+        let event = pocketdesk_core::local::events::Event::new(
+            "phone_battery",
+            Some("0123456789abcdef"),
+            3_661,
+            json!({"charge": 12, "charging": false}),
+            json!({}),
+            pocketdesk_core::local::events::EventsDetail::Metadata,
+        );
+        let line = watch_line(&event, false);
+        assert_eq!(
+            line,
+            "01:01:01Z  phone_battery  0123456789ab  charge=12  charging=false"
+        );
+        let object: Value = serde_json::from_str(&watch_line(&event, true)).unwrap();
+        assert_eq!(object["api"], 1);
+        assert_eq!(object["event"], "phone_battery");
+        assert_eq!(object["device_id"], "0123456789abcdef");
+        assert_eq!(object["charge"], 12);
     }
 }

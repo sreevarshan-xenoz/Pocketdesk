@@ -197,6 +197,9 @@ pub async fn run_watcher() {
     let mut unread_ticks = 0;
     let mut prev_ids: Vec<u64> = Vec::new();
     let mut prev_json = String::new();
+    // What the last look saw, for the event log (ecosystem 1a).
+    let mut seen_sessions: Vec<(u64, Option<String>)> = Vec::new();
+    let mut seen_linked: Vec<String> = Vec::new();
     // What the phones were last told about who drives (roadmap N7).
     let mut told: Option<Told> = None;
     let mut told_at = std::time::Instant::now();
@@ -306,6 +309,11 @@ pub async fn run_watcher() {
         // 3. Mirror for `pocketdesk status`, rewritten only on change. It
         //    also names the phones with a control link (T10d).
         let linked = linked_phones(&crate::state::clone_clients().await);
+        for (kind, device, meta) in changes(&seen_sessions, &live, &seen_linked, &linked) {
+            crate::events::emit(kind, device.as_deref(), meta, serde_json::json!({}));
+        }
+        seen_sessions = live.iter().map(|s| (s.id, s.device_id.clone())).collect();
+        seen_linked = linked.iter().map(|l| l.device_id.clone()).collect();
         let json = render_json(&live, driver, &linked, now);
         if json != prev_json {
             if let Err(e) = write_live_json(&json) {
@@ -315,6 +323,65 @@ pub async fn run_watcher() {
             }
         }
     }
+}
+
+/// The events between the last look (`seen_*`) and this one: sessions that
+/// started or ended, phones whose control link came up or went.
+fn changes(
+    seen_sessions: &[(u64, Option<String>)],
+    live: &[LiveSession],
+    seen_linked: &[String],
+    linked: &[shared::LinkedPhone],
+) -> Vec<(&'static str, Option<String>, serde_json::Value)> {
+    let mut out = Vec::new();
+    for s in live {
+        if !seen_sessions.iter().any(|(id, _)| *id == s.id) {
+            let mode = if s.streamed.cast {
+                "cast"
+            } else if s.streamed.video {
+                "screen"
+            } else {
+                "remote"
+            };
+            out.push((
+                "session_started",
+                s.device_id.clone(),
+                serde_json::json!({
+                    "session_id": s.id,
+                    "transport": if s.lan { "lan" } else { "wan" },
+                    "mode": mode,
+                }),
+            ));
+        }
+    }
+    for (id, device) in seen_sessions {
+        if !live.iter().any(|s| s.id == *id) {
+            out.push((
+                "session_ended",
+                device.clone(),
+                serde_json::json!({ "session_id": id }),
+            ));
+        }
+    }
+    for phone in linked {
+        if !seen_linked.contains(&phone.device_id) {
+            out.push((
+                "phone_linked",
+                Some(phone.device_id.clone()),
+                serde_json::json!({}),
+            ));
+        }
+    }
+    for device in seen_linked {
+        if !linked.iter().any(|l| &l.device_id == device) {
+            out.push((
+                "phone_unlinked",
+                Some(device.clone()),
+                serde_json::json!({}),
+            ));
+        }
+    }
+    out
 }
 
 /// Each phone with a control link, and whether files can reach it: its link
@@ -517,5 +584,50 @@ mod tests {
         // The mirror is machine-readable: same-file garbage must not panic.
         assert!(format_status_lines("not json", 1).is_none());
         assert!(format_status_lines(r#"{"sessions":{}}"#, 1).is_none());
+    }
+
+    #[test]
+    fn sessions_and_links_that_came_or_went_are_events() {
+        let mut cast = session(Some("phone-a"), true);
+        cast.id = 1;
+        cast.streamed.cast = true;
+        let mut screen = session(Some("phone-b"), false);
+        screen.id = 2;
+        screen.streamed.video = true;
+        let link = |id: &str| shared::LinkedPhone {
+            device_id: id.into(),
+            files: true,
+        };
+        let seen = vec![
+            (2, Some("phone-b".to_string())),
+            (9, Some("phone-c".to_string())),
+        ];
+        let got = changes(
+            &seen,
+            &[cast, screen],
+            &["phone-c".into()],
+            &[link("phone-a")],
+        );
+        let kinds: Vec<_> = got
+            .iter()
+            .map(|(k, d, _)| (*k, d.clone().unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("session_started", "phone-a".to_string()),
+                ("session_ended", "phone-c".to_string()),
+                ("phone_linked", "phone-a".to_string()),
+                ("phone_unlinked", "phone-c".to_string()),
+            ]
+        );
+        assert_eq!(got[0].2["mode"], "cast");
+        assert_eq!(got[0].2["transport"], "lan");
+        assert_eq!(got[1].2["session_id"], 9);
+        assert!(
+            changes(&seen[..1], &[], &[], &[])
+                .iter()
+                .all(|(k, _, _)| *k == "session_ended")
+        );
     }
 }

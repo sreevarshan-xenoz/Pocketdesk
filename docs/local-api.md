@@ -6,7 +6,7 @@ Design: `docs/superpowers/specs/2026-10-15-local-api-design.md`. Source: `server
 
 ## The rules
 
-These hold for `status`, `devices`, `sent`, `received`, `send`, `link`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
+These hold for `status`, `devices`, `sent`, `received`, `send`, `link`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. `events` prints many objects, one per line, each following them. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
 
 - **One JSON object per run** on stdout, on one line. Logs go to stderr.
 - **Every object carries `"api": 1`.** Within version 1, fields are only ever added, never renamed, removed or given another meaning. A field a script does not know should be ignored.
@@ -82,6 +82,41 @@ A sent row's `state` is `offered` (the phone has not taken it yet), `sent` (save
 - `relay-ids`: the ids a relay elsewhere should allow, `{"api": 1, "ids": [{"who", "id"}]}`.
 
 `pocketdesk bench --json` prints the encoder benchmark's record, a contract of its own for CI (exit codes in `pocketdesk bench --help` and README).
+
+### `pocketdesk events [--since-start] --json`
+
+What Pocketdesk does as it happens, one object per line, until stopped: the server's event log (`<state>/events.jsonl`, owner-only, design `docs/superpowers/specs/2026-10-16-events-design.md`). `--since-start` prints the events already in the log first.
+
+```json
+{"api": 1, "at": 1792050000, "event": "file_received", "device_id": "0d7c3a52-…", "size": 30412}
+```
+
+Every event has `at`, `event` and `device_id` (the phone, or null). The kinds and their fields:
+
+| `event` | Fields | With "Details in events" also |
+|---|---|---|
+| `session_started` | `session_id`, `transport` (`lan`/`wan`), `mode` (`screen`, `remote`, `cast`) | — |
+| `session_ended` | `session_id` | — |
+| `phone_linked`, `phone_unlinked` | — (any connection the phone holds to this computer, a brief one for a single send included) | — |
+| `phone_battery` | `charge`, `charging` | — |
+| `phone_battery_low` | `charge` | — |
+| `notification` | `app` | `title`, `text` |
+| `text_received` | — | `from`, `body` |
+| `file_received` | `size`; or `folder: true`, once, as a folder starts arriving | `name` (`folder/` for a folder) |
+| `link_received` | `host` | `url` |
+
+By default an event says who, when and how much, never what. Settings "Details in events" (`events_detail = "full"`) adds the content. With "Event log" off (`events = false`) nothing is written, and `events` shows nothing. New kinds and fields may be added within `"api": 1`.
+
+**Hooks.** `[hooks]` in config.toml (or the desktop app's Settings) runs a command for each event of a kind, through the system shell, with the event's JSON on stdin and, when it is under 32 KiB (always, for the events above), in `POCKETDESK_EVENT`:
+
+```toml
+[hooks]
+file_received = "notify-send 'A file came from the phone'"
+```
+
+At most 4 hooks run at once and up to 32 more wait their turn (past that one is skipped, and logged); each is stopped after 30 s (programs it started in the background may outlive it), and none opens a window. A hook runs even with "Event log" off.
+
+**Read the event from stdin, and treat its fields as untrusted text:** a phone chooses a notification's app name and text, a file's name, a link. On Windows never write `%POCKETDESK_EVENT%` into the command line: cmd expands it before it parses `&`, `|` and quotes, so a field could run commands. On Unix, `"$POCKETDESK_EVENT"` in double quotes is safe.
 
 ## Acting
 

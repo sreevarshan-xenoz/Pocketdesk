@@ -231,9 +231,6 @@ impl Plugin for NotificationPlugin {
                 {
                     let _ = phone_notes::forget(&dir, sender.device_id(), id);
                 }
-                if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
-                    return Ok(());
-                }
                 let Some((app, title, text)) = to_show(&packet.body) else {
                     return Ok(());
                 };
@@ -243,6 +240,18 @@ impl Plugin for NotificationPlugin {
                     .unwrap_or_else(|e| e.into_inner())
                     .admit(sender.device_id(), Instant::now(), limit);
                 if !admitted {
+                    return Ok(());
+                }
+                // An event whether or not it is shown here (a script may want
+                // the phone's notifications without the toasts), as it would
+                // be shown: one the phone hides stays hidden in the log too.
+                crate::events::emit(
+                    "notification",
+                    Some(sender.device_id()),
+                    serde_json::json!({ "app": app }),
+                    serde_json::json!({ "title": title, "text": text }),
+                );
+                if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
                     return Ok(());
                 }
                 // One that offers buttons or a reply is kept for the desktop

@@ -107,6 +107,17 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Print what Pocketdesk does as it happens, until stopped: sessions,
+    /// phones, batteries, notifications, texts, files and links (the event log)
+    Events {
+        /// Print the events already in the log first
+        #[arg(long)]
+        since_start: bool,
+        /// Print each event as the local API's JSON, one object per line
+        /// (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// List the files received from phones, newest first
     Received {
         /// How many to list

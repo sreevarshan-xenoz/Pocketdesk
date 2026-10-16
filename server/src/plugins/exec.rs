@@ -31,7 +31,7 @@ impl Default for ExecPlugin {
 }
 
 /// The command-line shell: `sh -c` on Unix; on Windows the real
-/// `System32\cmd.exe /C` (located through the OS, never `PATH`), with no
+/// `System32\cmd.exe /S /C "command"` (located through the OS, never `PATH`), with no
 /// console window and the command passed verbatim, since cmd does its own
 /// parsing and Rust's argument quoting would corrupt it.
 fn shell(cmd: &str) -> Command {
@@ -39,9 +39,10 @@ fn shell(cmd: &str) -> Command {
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut command = Command::new(crate::platform::system32("cmd.exe"));
+        // `/S` and the outer quotes: cmd strips just those, so a command
+        // that starts with a quoted program and quotes more keeps them.
         command
-            .arg("/C")
-            .raw_arg(cmd)
+            .raw_arg(format!("/S /C \"{cmd}\""))
             .creation_flags(CREATE_NO_WINDOW);
         command
     }
@@ -118,5 +119,22 @@ mod windows_tests {
         assert!(out.status.success());
         let text = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
         assert_eq!(text, "\"a  b\"\nc\n");
+    }
+
+    /// A command naming a quoted program, with a quoted argument, runs as
+    /// sent: cmd's own rule would strip its first and last quote.
+    #[tokio::test]
+    async fn a_command_starting_with_a_quoted_program_runs_as_sent() {
+        let line = format!(
+            "\"{}\" /C echo \"x y\"",
+            crate::platform::system32("cmd.exe").display()
+        );
+        let out = shell(&line).output().await.unwrap();
+        assert!(
+            out.status.success(),
+            "{:?}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "\"x y\"");
     }
 }

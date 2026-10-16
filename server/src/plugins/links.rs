@@ -74,6 +74,12 @@ impl LinksPlugin {
             tracing::info!("Link from {device} refused: more than {MAX_PER_MINUTE} a minute");
             return;
         }
+        crate::events::emit(
+            "link_received",
+            Some(device),
+            serde_json::json!({ "host": pocketdesk_core::protocol::link::link_host(url) }),
+            serde_json::json!({ "url": url }),
+        );
         if OPEN_LINKS.load(Ordering::Relaxed) {
             match (self.open)(url) {
                 Ok(()) => {

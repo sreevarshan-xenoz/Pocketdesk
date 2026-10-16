@@ -10,6 +10,7 @@ pub mod cast;
 pub mod config;
 pub mod device_keys;
 pub mod diagnostics;
+pub mod events;
 pub mod identity;
 pub mod links;
 pub mod network;

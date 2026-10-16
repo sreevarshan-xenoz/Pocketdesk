@@ -1318,6 +1318,21 @@ Owed:
 - [ ] "Share one app" instead of the entire screen; a phone call or a secure screen (banking apps black out); a long cast's heat and battery.
 - [ ] The Linux desktop app (Wayland and X11), and a computer without `ffmpeg` (the window says so).
 
+## 78. Events and hooks (ecosystem 1a)
+
+A71 → this Windows box, LAN, debug server, 2026-10-16, with `pocketdesk events --json` following the log and a `session_started` hook copying its stdin to a file:
+- [x] `session_started` (mode `screen`, transport `lan`) and `phone_linked` as the app opened a session; `phone_unlinked` when the app was force-stopped; `session_ended` once the server noticed the silence (about 30 s later, as designed).
+- [x] The hook ran, with the event's JSON on its stdin.
+- [x] A battery faked at 13 % and unplugged: `phone_battery` (13, not charging) and `phone_battery_low`.
+- [x] Nothing about content at the default detail.
+- [x] After the review fixes: a hook starting with a quoted program (`"C:\Windows\System32\cmd.exe" /C more > "…"`) ran through the queue with the event on stdin, exit code 0.
+
+Owed:
+- [ ] `notification`, `text_received`, `file_received` and `link_received` from a phone, at both detail levels.
+- [ ] The desktop Settings hooks box saving a hook the server then runs; "Event log" off writing nothing.
+- [ ] A hook killed at 30 s, and the 33rd waiting hook skipped, on a real server.
+- [ ] Linux: `sh -c` hooks, and the log's mode (0600).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

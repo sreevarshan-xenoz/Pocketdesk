@@ -6,6 +6,7 @@ use eframe::egui::{self, Color32, RichText};
 use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
+use pocketdesk_core::local::events::{EventsDetail, KINDS};
 use pocketdesk_core::local::wake::WakeFacts;
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
@@ -17,6 +18,8 @@ pub struct SettingsForm {
     pub mic_device_text: String,
     /// The text box behind `relay_urls`: one per line, or comma separated.
     pub relay_urls_text: String,
+    /// The text box behind `[hooks]`: `kind = command`, one per line.
+    pub hooks_text: String,
     /// Saved since the server last read it.
     pub restart_needed: bool,
     /// The adapter a phone on this network would wake this computer
@@ -29,6 +32,7 @@ impl SettingsForm {
         Self {
             mic_device_text: config.mic_relay_device.clone().unwrap_or_default(),
             relay_urls_text: config.relay_urls.join("\n"),
+            hooks_text: hooks_text(&config.hooks),
             saved: config.clone(),
             edited: config,
             restart_needed: false,
@@ -47,6 +51,7 @@ impl SettingsForm {
             .filter(|url| !url.is_empty())
             .map(str::to_string)
             .collect();
+        self.edited.hooks = parse_hooks(&self.hooks_text).0;
     }
 
     pub fn dirty(&self) -> bool {
@@ -85,6 +90,9 @@ impl SettingsForm {
                 problems.push(format!("Relay: {problem}."));
             }
         }
+        for problem in parse_hooks(&self.hooks_text).1 {
+            problems.push(format!("Hooks: {problem}."));
+        }
         problems
     }
 
@@ -98,8 +106,12 @@ impl SettingsForm {
         self.edited
             .save_to(path)
             .map_err(|e: ConfigError| e.to_string())?;
+        // The server reads the event log's settings and hooks again at the
+        // next event; only the others wait for a restart.
+        if !same_but_events(&self.saved, &self.edited) {
+            self.restart_needed = true;
+        }
         self.saved = self.edited.clone();
-        self.restart_needed = true;
         Ok(())
     }
 
@@ -225,6 +237,59 @@ impl SettingsForm {
                     &mut e.phone_battery_alerts,
                     "a notification when a phone runs low",
                 );
+                ui.end_row();
+                ui.label("Event log");
+                ui.checkbox(
+                    &mut e.events,
+                    "keep a log of what happens, for `pocketdesk events` and scripts",
+                );
+                ui.end_row();
+                ui.label("");
+                let mut full = e.events_detail == EventsDetail::Full;
+                if ui
+                    .checkbox(
+                        &mut full,
+                        "details in events: notification and text content, file names, whole links",
+                    )
+                    .changed()
+                {
+                    e.events_detail = if full {
+                        EventsDetail::Full
+                    } else {
+                        EventsDetail::Metadata
+                    };
+                }
+                ui.end_row();
+                ui.label("Hooks");
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.hooks_text)
+                            .desired_rows(3)
+                            .hint_text("file_received = notify-send \"A file came\""),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "One per line: an event, \"=\", a command. It runs as you, with the event on stdin. Events: {}.",
+                            KINDS.join(", ")
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                    let unknown = unknown_hook_kinds(&parse_hooks(&self.hooks_text).0)
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>();
+                    if !unknown.is_empty() {
+                        ui.label(
+                            RichText::new(format!(
+                                "No such event here, so never run: {}.",
+                                unknown.join(", ")
+                            ))
+                            .small()
+                            .color(Color32::from_rgb(0xc0, 0x80, 0x00)),
+                        );
+                    }
+                });
                 ui.end_row();
                 ui.label("Messages history");
                 ui.add(
@@ -378,10 +443,101 @@ fn dht_label(mode: DhtPublish) -> &'static str {
     }
 }
 
+/// The hooks for events this version does not have: kept (a newer server
+/// may), but said, as a mistyped name would never run.
+fn unknown_hook_kinds(hooks: &std::collections::BTreeMap<String, String>) -> Vec<&str> {
+    hooks
+        .keys()
+        .map(String::as_str)
+        .filter(|kind| !KINDS.contains(kind))
+        .collect()
+}
+
+/// Whether `a` and `b` differ only in what the server reads at each event.
+fn same_but_events(a: &Config, b: &Config) -> bool {
+    let strip = |c: &Config| Config {
+        events: true,
+        events_detail: EventsDetail::Metadata,
+        hooks: Default::default(),
+        ..c.clone()
+    };
+    strip(a) == strip(b)
+}
+
+/// `[hooks]` as the text box shows it.
+fn hooks_text(hooks: &std::collections::BTreeMap<String, String>) -> String {
+    hooks
+        .iter()
+        .map(|(kind, command)| format!("{kind} = {command}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The hooks in the text box, and what is wrong with its lines.
+fn parse_hooks(text: &str) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
+    let mut hooks = std::collections::BTreeMap::new();
+    let mut problems = Vec::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let Some((kind, command)) = line.split_once('=') else {
+            problems.push(format!("\"{line}\" has no \"=\""));
+            continue;
+        };
+        let (kind, command) = (kind.trim(), command.trim());
+        if kind.is_empty() {
+            problems.push(format!("\"{line}\" names no event"));
+        } else if command.is_empty() {
+            problems.push(format!("{kind} has no command"));
+        } else if hooks
+            .insert(kind.to_string(), command.to_string())
+            .is_some()
+        {
+            problems.push(format!("{kind} is given twice"));
+        }
+    }
+    (hooks, problems)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pocketdesk_core::local::config::Config;
+
+    #[test]
+    fn hooks_are_one_event_and_command_per_line() {
+        let mut form = SettingsForm::from_config(Config::default());
+        form.hooks_text =
+            " file_received = notify-send \"a = b\" \n\nsession_started=echo hi".into();
+        form.apply_text_fields();
+        assert!(form.problems().is_empty(), "{:?}", form.problems());
+        assert_eq!(
+            form.edited.hooks.get("file_received").map(String::as_str),
+            Some("notify-send \"a = b\""),
+            "the command keeps its own equals signs"
+        );
+        assert_eq!(form.edited.hooks.len(), 2);
+        let back = SettingsForm::from_config(form.edited.clone());
+        assert_eq!(parse_hooks(&back.hooks_text).0, form.edited.hooks);
+        // An event this version does not know is kept, and said.
+        form.hooks_text = "a_newer_event = echo".into();
+        assert!(form.problems().is_empty());
+        form.apply_text_fields();
+        assert_eq!(
+            unknown_hook_kinds(&form.edited.hooks),
+            vec!["a_newer_event"]
+        );
+        for bad in [
+            "= x",
+            "file_received",
+            "file_received =",
+            "link_received = a\nlink_received = b",
+        ] {
+            form.hooks_text = bad.into();
+            assert!(
+                form.problems().iter().any(|p| p.starts_with("Hooks:")),
+                "{bad:?} passed"
+            );
+        }
+    }
 
     #[test]
     fn relays_are_read_one_per_line_or_comma_and_checked() {
@@ -417,6 +573,23 @@ mod tests {
             problems.iter().any(|p| p.contains("different")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn the_event_settings_apply_without_a_restart() {
+        let dir = std::env::temp_dir().join(format!("pd-settings-ev-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let mut form = SettingsForm::from_config(Config::default());
+        form.hooks_text = "file_received = echo".into();
+        form.edited.events_detail = EventsDetail::Full;
+        form.save_to(&path).unwrap();
+        assert!(!form.restart_needed, "events apply at the next event");
+        form.edited.allow_hevc = true;
+        form.save_to(&path).unwrap();
+        assert!(form.restart_needed);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
