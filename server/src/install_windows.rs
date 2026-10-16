@@ -338,6 +338,15 @@ pub fn install(elevated: bool) -> Result<()> {
         Err(e) => println!("\"{}\" was not added to Send To ({e})", send_menu::LABEL),
     }
 
+    // The browser extension's host (ecosystem 1d).
+    match crate::browser_host::install() {
+        Ok(done) => println!(
+            "The browser extension can reach Pocketdesk from {}",
+            done.join(", ")
+        ),
+        Err(e) => println!("The browser extension's host was not registered ({e:#})"),
+    }
+
     match unsafe { task.Run(&none) } {
         Ok(_) => println!("Started Pocketdesk; it will start again at every logon"),
         Err(e) => {
@@ -383,6 +392,9 @@ pub fn uninstall() -> Result<()> {
             "Removed \"{}\" from Explorer's Send To menu",
             send_menu::LABEL
         );
+    }
+    if crate::browser_host::remove().is_ok() {
+        println!("Removed the browser extension's host");
     }
     let subkey = HSTRING::from(r"Software\Classes\AppUserModelId\Pocketdesk.Server");
     let _ = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, &subkey) };

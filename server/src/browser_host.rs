@@ -413,33 +413,56 @@ pub fn remove_windows(config_dir: &Path) {
     let _ = std::fs::remove_dir_all(config_dir.join("browser"));
 }
 
-/// `pocketdesk browser-host --install | --remove`: say what was done.
-pub fn run_install(remove: bool) -> anyhow::Result<()> {
+/// What `registered.json` in the config folder's `browser/` says: the
+/// browsers the host was last registered with (the desktop app reads it).
+pub const REGISTERED_FILE: &str = "registered.json";
+
+/// Register the host with the browsers found, and say which in
+/// [`REGISTERED_FILE`]. The browsers registered.
+pub fn install() -> anyhow::Result<Vec<&'static str>> {
+    let config = pocketdesk_core::local::paths::config_dir()?;
+    let exe = std::env::current_exe()?;
     #[cfg(windows)]
-    {
-        let config = pocketdesk_core::local::paths::config_dir()?;
-        if remove {
-            remove_windows(&config);
-            println!("Removed Pocketdesk from the browsers");
-        } else {
-            let done = install_windows(&config, &std::env::current_exe()?)?;
-            println!("Pocketdesk can now be reached from {}", done.join(", "));
-        }
-    }
+    let done = install_windows(&config, &exe)?;
     #[cfg(not(windows))]
-    {
+    let done = {
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home folder"))?;
-        if remove {
-            remove_linux(&home);
-            println!("Removed Pocketdesk from the browsers");
-        } else {
-            let done = install_linux(&home, &std::env::current_exe()?)?;
-            if done.is_empty() {
-                println!("No browser found to register with");
-            } else {
-                println!("Pocketdesk can now be reached from {}", done.join(", "));
-            }
-        }
+        install_linux(&home, &exe)?
+    };
+    let dir = config.join("browser");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join(REGISTERED_FILE),
+        serde_json::to_string(&json!({ "browsers": done }))?,
+    )?;
+    Ok(done)
+}
+
+/// Undo [`install`].
+pub fn remove() -> anyhow::Result<()> {
+    let config = pocketdesk_core::local::paths::config_dir()?;
+    #[cfg(windows)]
+    remove_windows(&config);
+    #[cfg(not(windows))]
+    if let Some(home) = dirs::home_dir() {
+        remove_linux(&home);
+    }
+    let _ = std::fs::remove_dir_all(config.join("browser"));
+    Ok(())
+}
+
+/// `pocketdesk browser-host --install | --remove`: say what was done.
+pub fn run_install(remove_it: bool) -> anyhow::Result<()> {
+    if remove_it {
+        remove()?;
+        println!("Removed Pocketdesk from the browsers");
+        return Ok(());
+    }
+    let done = install()?;
+    if done.is_empty() {
+        println!("No browser found to register with");
+    } else {
+        println!("Pocketdesk can now be reached from {}", done.join(", "));
     }
     Ok(())
 }
