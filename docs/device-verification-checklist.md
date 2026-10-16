@@ -1390,6 +1390,7 @@ A71 → this Windows box, debug builds, 2026-10-16, "Tell other apps what happen
 - [x] `pocketdesk link` to the phone: `link_received`, with no link in it.
 - [x] `pocketdesk send --wait`: saved, and `file_received` with `MIME=text/plain`, `SIZE=16`, no file name.
 - [x] The switch off: a whole session told nothing.
+- [x] After the review fixes: `session_started` once the picture came, `session_ended` (`left`) on Back.
 
 Owed:
 - [ ] Tasker or MacroDroid receiving them (no automation app on the A71), a remote's events, a send's `FILES_SENT`, a task's `TASK_FINISHED`, a link lost (`REASON=lost`), and the Settings row on screen.
