@@ -93,10 +93,15 @@ fun RemoteInputScreen(
             return@LaunchedEffect
         }
         state = State.Waiting
+        val waitingSince = android.os.SystemClock.elapsedRealtime()
         while (isActive) {
             val (remote, closed) =
                 withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
             state = RemoteSession.next(state, remote, closed)
+            // Past the owner's 30 s to decide: the computer is not going to.
+            if (state == State.Waiting && android.os.SystemClock.elapsedRealtime() - waitingSince > WAIT_MS) {
+                state = State.Down
+            }
             if (state == State.Down || state == State.TooOld) {
                 reason = closed
                 break
@@ -296,3 +301,6 @@ private fun Status(
 }
 
 private const val POLL_MS = 500L
+
+/** How long a remote waits to be admitted: longer than the owner's 30 s to decide. */
+private const val WAIT_MS = 45_000L
