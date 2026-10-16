@@ -11,10 +11,14 @@ class SessionTell(private val mode: String) {
     /** One event to tell, with its fields. */
     data class Told(val kind: PhoneEvents.Kind, val fields: Map<String, Any?>)
 
-    /** The link is up: started, unless it was already. */
+    /**
+     * The session is up: started, unless it was already, or other apps are
+     * not being told ([telling] off), so that turning it on mid-session
+     * gives no end without a start.
+     */
     @Synchronized
-    fun up(): Told? {
-        if (up) return null
+    fun up(telling: Boolean = true): Told? {
+        if (up || !telling) return null
         up = true
         return Told(PhoneEvents.Kind.SESSION_STARTED, mapOf("mode" to mode))
     }

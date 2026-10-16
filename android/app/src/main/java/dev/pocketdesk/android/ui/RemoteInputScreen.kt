@@ -1,5 +1,6 @@
 package dev.pocketdesk.android.ui
 
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.automation.PhoneEventBroadcast
 import dev.pocketdesk.android.automation.SessionTell
 import android.content.Intent
@@ -87,7 +88,7 @@ fun RemoteInputScreen(
     val tell = remember(address) { SessionTell("remote") }
     LaunchedEffect(state) {
         val told = when (state) {
-            State.Ready -> tell.up()
+            State.Ready -> tell.up(Prefs.tellOtherApps(context))
             State.Down, State.TooOld -> tell.lost()
             else -> null
         }

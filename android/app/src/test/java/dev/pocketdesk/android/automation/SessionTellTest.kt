@@ -27,4 +27,12 @@ class SessionTellTest {
         assertEquals(PhoneEvents.Kind.SESSION_STARTED, tell.up()!!.kind)
         assertEquals("left", tell.left()!!.fields["reason"])
     }
+
+    @Test
+    fun aSessionNotToldStartedIsNotToldEnded() {
+        val tell = SessionTell("screen")
+        assertNull("the switch was off", tell.up(telling = false))
+        assertNull("so no end without a start", tell.lost())
+        assertEquals(PhoneEvents.Kind.SESSION_STARTED, tell.up(telling = true)!!.kind)
+    }
 }
