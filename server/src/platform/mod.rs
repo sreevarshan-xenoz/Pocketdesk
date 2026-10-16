@@ -18,6 +18,8 @@ pub(crate) mod clipboard_windows;
 mod windows;
 #[cfg(windows)]
 pub(crate) use windows::system32;
+#[cfg(windows)]
+pub(crate) use windows::{delete_user_key, set_user_default_value};
 
 /// One-time process setup, before anything enumerates monitors, windows or
 /// injects input.

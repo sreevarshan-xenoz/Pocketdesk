@@ -118,6 +118,16 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// The host the Pocketdesk browser extension talks to (browsers start it
+    /// themselves); --install registers it with the browsers found
+    BrowserHost {
+        /// Register it with the browsers found
+        #[arg(long)]
+        install: bool,
+        /// Remove its registrations
+        #[arg(long, conflicts_with = "install")]
+        remove: bool,
+    },
     /// List the files received from phones, newest first
     Received {
         /// How many to list

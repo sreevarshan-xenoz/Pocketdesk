@@ -5,7 +5,7 @@ use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
-    RegCreateKeyExW, RegSetValueExW,
+    RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW,
 };
 use windows::Win32::System::Threading::{
     CreateEventW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, OpenProcess, PROCESS_NAME_WIN32,
@@ -49,6 +49,39 @@ pub(super) fn init_process() {
 
 pub(super) fn detach_console() {
     let _ = unsafe { windows::Win32::System::Console::FreeConsole() };
+}
+
+/// Set the default value of `HKCU\<subkey>` to `value`, making the key.
+pub(crate) fn set_user_default_value(subkey: &str, value: &str) -> windows::core::Result<()> {
+    let subkey = HSTRING::from(subkey);
+    let mut key = HKEY::default();
+    unsafe {
+        RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            &subkey,
+            None,
+            PCWSTR::null(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_WRITE,
+            None,
+            &mut key,
+            None,
+        )
+        .ok()?;
+        let data: Vec<u8> = format!("{value}\0")
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let set = RegSetValueExW(key, PCWSTR::null(), None, REG_SZ, Some(&data));
+        let _ = RegCloseKey(key);
+        set.ok()
+    }
+}
+
+/// Remove `HKCU\<subkey>` and all under it, if it is there.
+pub(crate) fn delete_user_key(subkey: &str) {
+    let subkey = HSTRING::from(subkey);
+    let _ = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, &subkey) };
 }
 
 /// Register [`AUMID`] for the current user with a display name. Idempotent.

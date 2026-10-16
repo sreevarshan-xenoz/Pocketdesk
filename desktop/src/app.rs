@@ -148,6 +148,9 @@ pub struct PocketdeskApp {
     phone_files: crate::phone_files_view::PhoneFilesView,
     /// Whether "Send to phone" is in the file manager, as last read (T10e).
     send_menu_installed: Option<bool>,
+    /// The browsers the extension's host is registered with, as last read
+    /// (ecosystem 1d); `Some(None)` when it is not.
+    browser_registered: Option<Option<Vec<String>>>,
     /// The window showing a phone's screen (T10k), started on the first pass.
     cast: Option<crate::cast_view::CastView>,
     /// The Activity tab (ecosystem 1b).
@@ -188,6 +191,7 @@ impl PocketdeskApp {
             notes: Default::default(),
             phone_files: Default::default(),
             send_menu_installed: None,
+            browser_registered: None,
             cast: None,
             activity: Default::default(),
             task_requests: Vec::new(),
@@ -271,6 +275,7 @@ impl PocketdeskApp {
         if tab == Tab::Settings {
             // Read again on each visit: it may have changed outside the app.
             self.send_menu_installed = None;
+            self.browser_registered = None;
         }
         if tab == Tab::Settings && self.settings.is_none() {
             self.settings = Some(
@@ -846,6 +851,71 @@ impl PocketdeskApp {
             }
         }
         self.send_menu_setting(ui);
+        self.browser_setting(ui);
+    }
+
+    /// "Send from the browser" (ecosystem 1d): the extension's host,
+    /// registered by the server program, which says where in
+    /// `<config>/browser/registered.json`.
+    fn browser_setting(&mut self, ui: &mut egui::Ui) {
+        let Ok(config) = pocketdesk_core::local::paths::config_dir() else {
+            return;
+        };
+        // Read once, not every frame; again after a change.
+        let registered = self
+            .browser_registered
+            .get_or_insert_with(|| {
+                std::fs::read_to_string(config.join("browser").join("registered.json"))
+                    .ok()
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                    .and_then(|v| {
+                        v["browsers"].as_array().map(|list| {
+                            list.iter()
+                                .filter_map(|b| b.as_str().map(str::to_string))
+                                .collect()
+                        })
+                    })
+            })
+            .clone();
+        let installed = registered.is_some();
+        let mut on = installed;
+        ui.checkbox(
+            &mut on,
+            "Send from the browser (the Pocketdesk extension, in browser/: page, link or image to the phone)",
+        );
+        if let Some(browsers) = &registered {
+            ui.label(
+                RichText::new(if browsers.is_empty() {
+                    "No browser was found to register with.".to_string()
+                } else {
+                    format!("Registered with {}.", browsers.join(", "))
+                })
+                .small()
+                .color(MUTED),
+            );
+        }
+        if on == installed {
+            return;
+        }
+        let Some(exe) = crate::restart::server_exe_beside_app() else {
+            self.notice = Some("Not changed: the server program is not beside this app".into());
+            return;
+        };
+        self.browser_registered = None;
+        let flag = if on { "--install" } else { "--remove" };
+        let ran = crate::restart::quiet(exe)
+            .args(["browser-host", flag])
+            .output();
+        self.notice = Some(match ran {
+            Ok(out) if out.status.success() => {
+                String::from_utf8_lossy(&out.stdout).trim().to_string()
+            }
+            Ok(out) => format!(
+                "Not changed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(e) => format!("Not changed: {e}"),
+        });
     }
 
     /// "Send to phone" in the file manager (T10e): Explorer's Send To, or the
