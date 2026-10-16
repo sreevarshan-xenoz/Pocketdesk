@@ -2187,6 +2187,32 @@ mod tests {
         assert_eq!(phone.await.unwrap(), data);
     }
 
+    #[tokio::test]
+    async fn a_clipboard_image_comes_over_the_link_and_its_limit_holds() {
+        let png: Vec<u8> = (0..40_000u32).map(|i| (i % 253) as u8).collect();
+        let size = png.len() as u64;
+        let (link, streams) = fake_link();
+        let phone = phone_sending_on_link(streams, png.clone(), size);
+        let kept = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        receive_bytes(Route::Link(link.clone()), KEY, size, size, |bytes| {
+            let kept = kept.clone();
+            async move {
+                *kept.lock().unwrap() = bytes;
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(phone.await.unwrap().1.unwrap(), 0);
+        assert_eq!(*kept.lock().unwrap(), png);
+        // Over the limit: refused before a stream is opened.
+        assert!(
+            receive_bytes(Route::Link(link), KEY, size, size - 1, |_| async { Ok(()) })
+                .await
+                .is_err()
+        );
+    }
+
     #[test]
     fn the_road_decides_how_a_request_is_answered() {
         let (link, _streams) = fake_link();

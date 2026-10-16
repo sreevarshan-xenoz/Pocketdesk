@@ -1514,28 +1514,22 @@ pub async fn send_clipboard_image(address: String, port: u16, path: String) -> R
     if size == 0 || size > MAX_CLIPBOARD_IMAGE {
         return Err(format!("An image of {size} bytes is not sent"));
     }
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| format!("Failed to bind port: {e}"))?;
-    let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let key = uuid::Uuid::new_v4().simple().to_string();
-    let request = NetworkPacket::new(CLIPBOARD_IMAGE).with_body(serde_json::json!({
-        "size": size,
-        "port": transfer_port,
-        "key": key,
-    }));
+    // At home the computer dials a listener; by the internet road it opens a
+    // stream on this phone's link, and the request names no port (2e).
+    let arrival = crate::link::Arrival::new(&address, port, &key).await?;
+    let by_link = arrival.port().is_none();
+    let mut body = crate::link::transfer_info(&arrival, &key);
+    body["size"] = serde_json::json!(size);
+    let request = NetworkPacket::new(CLIPBOARD_IMAGE).with_body(body);
     let replies = crate::download::send_watching_replies(&address, port, &request)
         .await
         .map_err(|e| format!("Failed to offer the image: {e}"))?;
-    let tls = transfer_acceptor(&address)?;
     let refused = crate::download::refusal_on(replies, key.clone());
-    let accept = tokio::time::timeout(
-        Duration::from_secs(30),
-        accept_transfer(&listener, &key, &tls),
-    );
+    let accept = tokio::time::timeout(Duration::from_secs(30), arrival.take(&address, &key));
     let mut stream = tokio::select! {
         accepted = accept => accepted.map_err(|_| "The computer did not take the image".to_string())??,
-        reason = refused => return Err(reason),
+        reason = refused => return Err(refusal_text("image", &reason, by_link)),
     };
     send_over(&mut file, size, &mut stream, false, Pace::DEFAULT)
         .await

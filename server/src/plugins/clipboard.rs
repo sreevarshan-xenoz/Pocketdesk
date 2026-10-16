@@ -160,27 +160,20 @@ impl Plugin for ClipboardPlugin {
     }
 }
 
-/// Where the phone listens for this transfer, and with which key: the
-/// transport's peer, never an address the packet names.
-fn transfer_target(
+/// How an image reaches the phone that asked: dialing it back at home, or
+/// on a stream of its own link by the internet road when the request names
+/// no port (2e, as files do since 2c).
+fn transfer_route(
     packet: &NetworkPacket,
     sender: &dyn DeviceSender,
-) -> std::result::Result<std::net::SocketAddr, String> {
+) -> std::result::Result<share::Route, String> {
     let port = packet
         .body
         .get("port")
         .and_then(|v| v.as_u64())
         .and_then(|p| u16::try_from(p).ok())
-        .filter(|p| *p != 0)
-        .ok_or("no port to connect to")?;
-    let ip = sender
-        .peer_addr()
-        .map(|a| a.ip())
-        .ok_or("images need the local network connection")?;
-    if !share::dialable(ip) {
-        return Err(format!("will not connect back to {ip}"));
-    }
-    Ok(std::net::SocketAddr::new(ip, port))
+        .filter(|p| *p != 0);
+    share::route(share::reach(sender, port)?, sender)
 }
 
 fn transfer_key(packet: &NetworkPacket) -> Option<String> {
@@ -192,8 +185,8 @@ fn transfer_key(packet: &NetworkPacket) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The phone's clipboard image: dial back, read the PNG, put it on the
-/// clipboard; the phone hears "saved" only once the clipboard holds it.
+/// The phone's clipboard image: reach the phone, read the PNG, put it on
+/// the clipboard; the phone hears "saved" only once the clipboard holds it.
 async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     let Some(key) = transfer_key(packet) else {
         tracing::warn!("Clipboard image refused: no transfer key");
@@ -208,12 +201,11 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         if size == 0 || size > MAX_CLIPBOARD_IMAGE {
             return Err(format!("an image of {size} bytes is not taken"));
         }
-        let to = transfer_target(packet, sender)?;
-        let tls = share::transfer_tls(sender)?;
+        let route = transfer_route(packet, sender)?;
         let slot = share::transfer_slots().take(sender.device_id())?;
-        Ok((to, tls, slot))
+        Ok((route, slot))
     })();
-    let (from, tls, slot) = match plan {
+    let (route, slot) = match plan {
         Ok(plan) => plan,
         Err(reason) => {
             tracing::warn!("Clipboard image refused: {reason}");
@@ -223,20 +215,14 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     };
     tokio::spawn(async move {
         let _slot = slot;
-        let kept = share::receive_bytes(
-            share::Route::dial(from, tls),
-            &key,
-            size,
-            MAX_CLIPBOARD_IMAGE,
-            |png| async {
-                if !crate::platform::clip_image::is_png(&png) {
-                    return Err(share::io_error("clipboard", "not a PNG"));
-                }
-                let image = Arc::new(Image::new(png));
-                set_clipboard_image(&image).await?;
-                Ok(())
-            },
-        )
+        let kept = share::receive_bytes(route, &key, size, MAX_CLIPBOARD_IMAGE, |png| async {
+            if !crate::platform::clip_image::is_png(&png) {
+                return Err(share::io_error("clipboard", "not a PNG"));
+            }
+            let image = Arc::new(Image::new(png));
+            set_clipboard_image(&image).await?;
+            Ok(())
+        })
         .await;
         match kept {
             Ok(()) => tracing::info!("Clipboard image received ({size} bytes)"),
@@ -257,12 +243,11 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             let cached = cache().lock().unwrap_or_else(|e| e.into_inner());
             image_for_fetch(cached.as_ref(), id)?
         };
-        let to = transfer_target(packet, sender)?;
-        let tls = share::transfer_tls(sender)?;
+        let route = transfer_route(packet, sender)?;
         let slot = share::transfer_slots().take(sender.device_id())?;
-        Ok((image, to, tls, slot))
+        Ok((image, route, slot))
     })();
-    let (image, to, tls, slot) = match plan {
+    let (image, route, slot) = match plan {
         Ok(plan) => plan,
         Err(reason) => {
             tracing::warn!("Clipboard image fetch refused: {reason}");
@@ -274,7 +259,7 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         let _slot = slot;
         let size = image.png.len() as u64;
         let mut reader = image.png.as_slice();
-        match share::send_reader(share::Route::dial(to, tls), &key, &mut reader, size).await {
+        match share::send_reader(route, &key, &mut reader, size).await {
             Ok(_) => tracing::info!("Clipboard image sent ({size} bytes)"),
             Err(e) => tracing::warn!("Clipboard image not sent: {e}"),
         }
