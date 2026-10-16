@@ -515,6 +515,7 @@ impl StreamingClient {
         let audio_tx = self.audio_tx.clone();
         let video_bytes = self.video_bytes.clone();
         let remote = self.remote.clone();
+        let input_only = remote.input_only;
 
         let span = tracing::info_span!(
             "client_loop",
@@ -562,9 +563,11 @@ impl StreamingClient {
             // own view of the link, plus whatever it measured since the last tick
             let stats_cancel = cancel.clone();
             let stats_span = tracing::info_span!("stats_feedback");
+            let stats_every = feedback_interval(input_only);
             let stats_handle = tokio::spawn(
                 async move {
-                    send_stats_loop(&stats_connection, stats_cancel, &stats_samples).await;
+                    send_stats_loop(&stats_connection, stats_cancel, &stats_samples, stats_every)
+                        .await;
                 }
                 .instrument(stats_span),
             );
@@ -708,6 +711,22 @@ mod remote_tests {
             RemoteStream::Media
         );
     }
+
+    #[test]
+    fn a_remote_reports_its_link_less_often_but_well_within_the_silence_limit() {
+        assert_eq!(feedback_interval(false), Duration::from_secs(1));
+        // The server ends a session it has not heard from in 30 s.
+        assert!(feedback_interval(true) > feedback_interval(false));
+        assert!(feedback_interval(true) * 3 < Duration::from_secs(30));
+    }
+}
+
+/// How often the client reports its link: every second for a picture, whose
+/// rate the server steers by it; every 5 s for a remote (T10i), which only
+/// has to stay well inside the server's 30 s silence limit, so the phone's
+/// radio rests between reports.
+fn feedback_interval(input_only: bool) -> Duration {
+    Duration::from_secs(if input_only { 5 } else { 1 })
 }
 
 /// Queue one audio packet without ever making the caller wait for it.
@@ -986,8 +1005,9 @@ async fn send_stats_loop(
     connection: &SharedConnection,
     cancel: CancellationToken,
     e2e_samples: &SampleBatch,
+    every: Duration,
 ) {
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    let mut interval = tokio::time::interval(every);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
