@@ -51,6 +51,8 @@ import dev.pocketdesk.android.stream.keyboard.KeyboardSinkView
 import dev.pocketdesk.android.stream.keyboard.TextSend
 import dev.pocketdesk.android.ui.RemoteSession.State
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -83,10 +85,17 @@ fun RemoteInputScreen(
         val connected =
             withContext(Dispatchers.IO) {
                 RustCore.connectRemote(address, port).recoverCatching { lan ->
+                    // Left while the LAN dial failed: no internet dial after the screen's stop.
+                    coroutineContext.ensureActive()
                     val identity = HostStore.wanIdentity(context, address) ?: throw lan
                     RustCore.connectRemoteWan(address, identity).getOrThrow()
                 }
             }
+        // Left while it connected: the session the dial made has no screen to own it.
+        if (!isActive) {
+            if (connected.isSuccess) withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
+            return@LaunchedEffect
+        }
         if (connected.isFailure) {
             reason = connected.exceptionOrNull()?.message
             state = State.Down
