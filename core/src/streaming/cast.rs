@@ -67,6 +67,53 @@ pub fn parse(stream: &[u8]) -> Option<CastPayload> {
     }
 }
 
+/// Asks for a keyframe come at most this often.
+pub const KEYFRAME_ASK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// A cast's decode chain, as the server receives it: each frame travels on
+/// its own stream, so frames can finish out of order or be lost. A delta
+/// frame after a gap means the chain broke, and the phone is asked for a
+/// keyframe, at most every [`KEYFRAME_ASK_INTERVAL`].
+#[derive(Debug, Default)]
+pub struct CastChain {
+    last_seq: Option<u64>,
+    last_ask: Option<std::time::Instant>,
+}
+
+impl CastChain {
+    /// A frame arrived; whether to ask for a keyframe now.
+    pub fn on_frame(&mut self, keyframe: bool, seq: u64, now: std::time::Instant) -> bool {
+        let gap = !keyframe
+            && self
+                .last_seq
+                .is_some_and(|last| seq > last.saturating_add(1));
+        // A late frame does not move the chain back.
+        self.last_seq = Some(self.last_seq.map_or(seq, |last| last.max(seq)));
+        gap && self.ask(now)
+    }
+
+    /// A frame was lost on the way to the viewer; whether to ask now.
+    pub fn lost(&mut self, now: std::time::Instant) -> bool {
+        self.ask(now)
+    }
+
+    /// The phone started its encoder again, which counts from 0.
+    pub fn restart(&mut self) {
+        self.last_seq = None;
+    }
+
+    fn ask(&mut self, now: std::time::Instant) -> bool {
+        if self
+            .last_ask
+            .is_some_and(|t| now.duration_since(t) < KEYFRAME_ASK_INTERVAL)
+        {
+            return false;
+        }
+        self.last_ask = Some(now);
+        true
+    }
+}
+
 /// What the server tells its relay about the cast sessions it runs.
 #[derive(Debug)]
 pub enum CastEvent {
@@ -118,5 +165,41 @@ mod tests {
         assert_eq!(parse(&[0xFA, 0x07, 0, 0, 0, 0]), None, "an unknown marker");
         // No input packet tag reaches the cast prefix.
         assert!(super::super::input_packet::InputPacket::decode(&[CAST_PREFIX]).is_err());
+    }
+
+    #[test]
+    fn a_delta_after_a_gap_asks_for_a_keyframe_at_most_every_interval() {
+        let t0 = std::time::Instant::now();
+        let mut chain = CastChain::default();
+        assert!(!chain.on_frame(true, 0, t0), "the first keyframe");
+        assert!(!chain.on_frame(false, 1, t0), "in order");
+        assert!(chain.on_frame(false, 3, t0), "frame 2 is missing");
+        assert!(!chain.on_frame(false, 5, t0), "asked just now");
+        assert!(!chain.on_frame(false, 2, t0), "a late frame is no gap");
+        assert!(!chain.on_frame(false, 6, t0), "the chain did not move back");
+        let later = t0 + KEYFRAME_ASK_INTERVAL;
+        assert!(!chain.on_frame(true, 9, later), "a keyframe heals the gap");
+        assert!(
+            chain.on_frame(false, 11, later),
+            "another gap, after the interval"
+        );
+    }
+
+    #[test]
+    fn a_restarted_encoder_counts_from_zero_without_a_gap() {
+        let t0 = std::time::Instant::now();
+        let mut chain = CastChain::default();
+        assert!(!chain.on_frame(true, 0, t0));
+        assert!(chain.on_frame(false, 40, t0 + KEYFRAME_ASK_INTERVAL));
+        chain.restart();
+        assert!(!chain.on_frame(false, 1, t0 + KEYFRAME_ASK_INTERVAL * 4));
+        assert!(
+            chain.lost(t0 + KEYFRAME_ASK_INTERVAL * 8),
+            "a lost frame asks"
+        );
+        assert!(
+            !chain.lost(t0 + KEYFRAME_ASK_INTERVAL * 8),
+            "but not twice at once"
+        );
     }
 }

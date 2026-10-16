@@ -69,6 +69,25 @@ struct ClientClaim {
     iroh_id: Option<String>,
     /// The phone as a remote: no screen, no sound (T10i).
     input_only: bool,
+    /// The phone shows its own screen here (T10k): input only too, as the
+    /// computer sends it nothing to watch.
+    cast: bool,
+}
+
+/// Tells the relay a cast ended, however its session ends (T10k).
+struct CastEnded {
+    tx: mpsc::Sender<super::cast::CastEvent>,
+    session_id: u64,
+}
+
+impl Drop for CastEnded {
+    fn drop(&mut self) {
+        // A full channel loses this, and the relay then sees the session's
+        // keyframe channel closed instead.
+        let _ = self.tx.try_send(super::cast::CastEvent::End {
+            session_id: self.session_id,
+        });
+    }
 }
 
 /// Whether an input-only session (T10i) drops `packet`: it is about a
@@ -155,6 +174,9 @@ pub struct StreamingServer {
     /// them into a PipeWire source. Bounded with drop-on-full: stale mic
     /// audio is worse than gaps. If unset, mic packets are discarded.
     mic_tx: Option<tokio::sync::mpsc::Sender<InputPacket>>,
+    /// T10k: where a cast session's screen goes (the server crate's cast
+    /// relay, which hands it to the desktop app). Unset, casts are refused.
+    cast_tx: Option<tokio::sync::mpsc::Sender<super::cast::CastEvent>>,
     /// Optional session gate (pairing, F5 permissions and approval): called
     /// with the device id the client announced in-band (None if it sent
     /// none); `None` rejects the session before capture starts, `Some` is what
@@ -203,6 +225,7 @@ impl StreamingServer {
             bitrate_tx,
             input_tx: None,
             mic_tx: None,
+            cast_tx: None,
             session_gate: None,
             telemetry: false,
             view_only: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -244,6 +267,11 @@ impl StreamingServer {
     /// (R4 E2 reverse audio). See the `mic_tx` field docs.
     pub fn set_mic_channel(&mut self, tx: tokio::sync::mpsc::Sender<InputPacket>) {
         self.mic_tx = Some(tx);
+    }
+
+    /// Set where cast sessions' screens go (T10k). See the `cast_tx` field docs.
+    pub fn set_cast_channel(&mut self, tx: tokio::sync::mpsc::Sender<super::cast::CastEvent>) {
+        self.cast_tx = Some(tx);
     }
 
     /// Decide each session before any video/input pipeline starts: `None`
@@ -368,6 +396,8 @@ impl StreamingServer {
         let device_id = claim.device_id.clone();
         // The phone as a remote (T10i): no capture, encode, video or sound.
         let input_only = claim.input_only;
+        // The phone's own screen, shown here (T10k).
+        let cast = claim.cast;
 
         // R4 A2 session telemetry: a shared recorder observes the connection
         // on a slow poll and an RAII guard emits the outcome report when the
@@ -417,8 +447,37 @@ impl StreamingServer {
         let force_view_only = !permissions.allows(Capability::Input);
         let allow_mic = permissions.allows(Capability::Mic) && !input_only;
         let allow_audio = permissions.allows(Capability::Audio) && !input_only;
-        // A remote that may not give input has nothing to do.
-        if input_only && force_view_only {
+        // A cast needs its own permission, and somewhere to show it.
+        let cast_tx = if cast {
+            let refusal: Option<&[u8]> = if !permissions.allows(Capability::Cast) {
+                Some(b"phone screen not allowed")
+            } else if self.cast_tx.is_none() {
+                Some(b"phone screen not shown here")
+            } else {
+                None
+            };
+            if let Some(reason) = refusal {
+                warn!(
+                    device_id = device_id.as_deref().unwrap_or("<none announced>"),
+                    reason = %String::from_utf8_lossy(reason),
+                    "Cast session refused"
+                );
+                if let Some(guard) = &_telemetry_guard {
+                    guard.record(SessionOutcome::Rejected);
+                }
+                connection.close(0u32, reason);
+                return Err(anyhow::anyhow!(
+                    "cast session refused: {}",
+                    String::from_utf8_lossy(reason)
+                ));
+            }
+            self.cast_tx.clone()
+        } else {
+            None
+        };
+        // A remote that may not give input has nothing to do; a cast gives
+        // none.
+        if input_only && !cast && force_view_only {
             warn!(
                 device_id = device_id.as_deref().unwrap_or("<none announced>"),
                 "Input-only session refused: the device may not give input"
@@ -473,6 +532,27 @@ impl StreamingServer {
             }
             info!("Input-only session: no capture, encode or sound");
         }
+        // The relay learns of the cast, with a way to ask the phone for a
+        // keyframe (a viewer joined, or its decoder lost its way).
+        let (cast_want_tx, cast_want_rx) = mpsc::channel::<()>(4);
+        let _cast_ended = match &cast_tx {
+            Some(tx) => {
+                let start = super::cast::CastEvent::Start {
+                    session_id: _live_session.id(),
+                    device_id: device_id.clone(),
+                    want_keyframe: cast_want_tx.clone(),
+                };
+                if tx.send(start).await.is_err() {
+                    warn!("The cast relay is gone");
+                }
+                info!("Cast session: the phone's screen is shown here");
+                Some(CastEnded {
+                    tx: tx.clone(),
+                    session_id: _live_session.id(),
+                })
+            }
+            None => None,
+        };
         // Input is tagged with this session, so the server can tell which
         // phone drives when several are connected (roadmap N7).
         let live_id = _live_session.id();
@@ -501,6 +581,20 @@ impl StreamingServer {
         let window_mode = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let mut tasks = JoinSet::new();
+
+        // A cast's keyframe asks go to the phone as a header-only stream.
+        if cast {
+            let ask_conn = connection.clone();
+            let mut want_rx = cast_want_rx;
+            tasks.spawn(until_cancelled(
+                async move {
+                    while want_rx.recv().await.is_some() {
+                        send_cast_keyframe_ask(&ask_conn).await;
+                    }
+                },
+                cancel.clone(),
+            ));
+        }
 
         // Task 1: Screen capture (runs on dedicated OS thread internally)
         let capture_config = self.config.clone();
@@ -1023,6 +1117,15 @@ impl StreamingServer {
         let monitor_full_quality = self.full_quality.clone();
         let monitor_preset = self.preset.clone();
         let monitor_mic_tx = self.mic_tx.clone();
+        let monitor_cast_tx = cast_tx.clone();
+        let monitor_cast_want = cast_want_tx;
+        let mut cast_chain = super::cast::CastChain::default();
+        // A cast's frames are far larger than input packets.
+        let client_stream_max = if cast {
+            super::cast::MAX_CAST_STREAM
+        } else {
+            64 * 1024
+        };
         let pointer_space = PointerSpace::for_monitor(self.config.monitor_index);
         if let Some(space) = pointer_space {
             info!(
@@ -1066,7 +1169,7 @@ impl StreamingServer {
                                 // input and the silence check.
                                 let data = match tokio::time::timeout(
                                     CLIENT_PACKET_READ,
-                                    stream.read_to_end(64 * 1024),
+                                    stream.read_to_end(client_stream_max),
                                 )
                                 .await
                                 {
@@ -1079,6 +1182,36 @@ impl StreamingServer {
                                 match data {
                                     Ok(data) if !data.is_empty() => {
                                         debug!(size = data.len(), "Received client data");
+
+                                        // The phone's screen (T10k), to the relay.
+                                        if cast && data[0] == super::cast::CAST_PREFIX {
+                                            let Some(payload) = super::cast::parse(&data) else {
+                                                debug!("Ignored a malformed cast stream");
+                                                continue;
+                                            };
+                                            let now = Instant::now();
+                                            let ask = match &payload {
+                                                super::cast::CastPayload::Config { width, height } => {
+                                                    info!(width, height, "The phone's cast started its encoder");
+                                                    cast_chain.restart();
+                                                    false
+                                                }
+                                                super::cast::CastPayload::Frame { keyframe, seq, .. } => {
+                                                    cast_chain.on_frame(*keyframe, *seq, now)
+                                                }
+                                            };
+                                            let delivered = monitor_cast_tx.as_ref().is_some_and(|tx| {
+                                                tx.try_send(super::cast::CastEvent::Payload {
+                                                    session_id: live_id,
+                                                    payload,
+                                                })
+                                                .is_ok()
+                                            });
+                                            if ask || (!delivered && cast_chain.lost(now)) {
+                                                let _ = monitor_cast_want.try_send(());
+                                            }
+                                            continue;
+                                        }
 
                                         // Parse as binary InputPacket
                                         match InputPacket::decode(&data) {
@@ -1097,6 +1230,11 @@ impl StreamingServer {
                                                 // No picture or sound to steer,
                                                 // and no picture to point at.
                                                 if input_only && about_the_stream(&packet) {
+                                                    continue;
+                                                }
+                                                // A cast shows the phone here;
+                                                // it does not drive the computer.
+                                                if cast {
                                                     continue;
                                                 }
                                                 // IDR requests are control-plane:
@@ -1432,7 +1570,7 @@ async fn read_client_config(
 ) -> ClientClaim {
     use super::client::{
         CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER, MONITOR_CONFIG_MARKER,
-        SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER,
+        SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER,
     };
 
     let mut claim = ClientClaim::default();
@@ -1512,7 +1650,8 @@ async fn read_client_config(
             if !read_with_timeout(&mut *stream, &mut mode).await {
                 break;
             }
-            claim.input_only = mode[0] == SESSION_MODE_INPUT_ONLY;
+            claim.input_only = matches!(mode[0], SESSION_MODE_INPUT_ONLY | SESSION_MODE_CAST);
+            claim.cast = mode[0] == SESSION_MODE_CAST;
             info!(mode = mode[0], "Client session mode");
         } else {
             debug!("Unknown config marker: {:02X?}", &marker);
@@ -1537,6 +1676,25 @@ fn negotiate_codec(caps: u8, hevc_allowed: bool, current: VideoCodec) -> Option<
 /// session (the first task of the session's set to finish ends it). Audio
 /// ends at once on a computer with no audio capture, and the session then
 /// went with it.
+/// Ask a cast's phone for a keyframe (T10k): a header-only stream.
+async fn send_cast_keyframe_ask(connection: &SharedConnection) {
+    let header = super::transport::PacketHeader {
+        sequence: 0,
+        stream_kind: super::transport::STREAM_KIND_CAST_KEYFRAME,
+        is_keyframe: false,
+        timestamp_us: 0,
+    };
+    match connection.open_uni().await {
+        Ok(mut stream) => {
+            if let Err(e) = stream.write_all(&header.as_bytes()).await {
+                debug!(error = %e, "Could not ask the cast for a keyframe");
+            }
+            let _ = stream.finish();
+        }
+        Err(e) => debug!(error = %e, "Could not ask the cast for a keyframe"),
+    }
+}
+
 async fn until_cancelled(task: impl std::future::Future<Output = ()>, cancel: CancellationToken) {
     task.await;
     cancel.cancelled().await;
@@ -2081,9 +2239,51 @@ mod tests {
         let mut config = StreamingConfig::default();
         let claim = read_client_config(&server_conn, &mut config, true).await;
         assert!(claim.input_only);
+        assert!(!claim.cast);
         assert_eq!(claim.device_id.as_deref(), Some("device-r1"));
         assert_eq!(config.monitor_index, 0, "no monitor asked for");
         assert_eq!(config.codec, VideoCodec::H264, "no codec caps sent");
+    }
+
+    /// T10k: a cast says so, and is input only to the server: it is sent
+    /// no picture.
+    #[tokio::test]
+    async fn a_cast_client_says_so_and_asks_for_no_picture() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::StreamingClient;
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+
+        let (client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            None,
+            Some("device-c1"),
+            None,
+            None,
+            super::super::client::SessionMode::Cast,
+        )
+        .await
+        .expect("connect");
+        assert!(client.remote().cast);
+
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.cast);
+        assert!(claim.input_only, "a cast is sent no picture");
+        assert_eq!(claim.device_id.as_deref(), Some("device-c1"));
     }
 
     #[test]
