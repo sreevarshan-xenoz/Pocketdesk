@@ -1354,6 +1354,11 @@ impl StreamingServer {
             tasks_drained = cleanup_count,
             "Streaming pipeline shut down complete"
         );
+        // Said on the wire, so the phone learns at once that the session is
+        // over: a clone of the connection held elsewhere kept it open on the
+        // phone's own keep-alives, and a remote (T10i) has no frames whose
+        // absence would tell it.
+        connection.close(0u32, b"session ended");
 
         match result {
             Some(Ok(_)) => Ok(()),
