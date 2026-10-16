@@ -148,15 +148,17 @@ class TransferService : Service() {
     }
 
     /**
-     * Seconds the running job has waited for a network (R6i), shared by its
-     * files so a folder send waits 3 minutes in all, not 3 per file.
+     * The wait for a network during an outage (R6i), shared by every job,
+     * since a folder from the computer is one job per file. Only [worker]
+     * touches it.
      */
-    private var waitedOffline = 0L
+    private val offline = TransferRetry.OfflineBudget()
 
     /** Runs on [worker]; the last job queued reports everything done since. */
     private fun run(job: Job, startId: Int) {
         lastAddress = job.address
-        waitedOffline = 0L
+        // A job that starts with a network ends any outage.
+        if (NetworkWait.usable(this, job.address)) offline.reset()
         val (sentBefore, countBefore) = sentTotal to sendCount
         plannedSends = 0
         var threw = false
@@ -258,7 +260,7 @@ class TransferService : Service() {
         var attempt = 1
         retry@ while (result.isFailure) {
             val error = result.exceptionOrNull()
-            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this), waitedOffline)) {
+            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this, address), offline.waited(SystemClock.elapsedRealtime()))) {
                 is TransferRetry.Next.Stop -> {
                     if (next.noNetwork) result = Result.failure(java.io.IOException(getString(R.string.transfer_no_network)))
                     break@retry
@@ -267,8 +269,9 @@ class TransferService : Service() {
                     Log.i(TAG, "sending $name failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_waiting_network), name, 0))
                     val started = SystemClock.elapsedRealtime()
-                    val back = NetworkWait.await(this, next.seconds)
-                    waitedOffline += (SystemClock.elapsedRealtime() - started + 999) / 1000
+                    val back = NetworkWait.await(this, address, next.seconds)
+                    val ended = SystemClock.elapsedRealtime()
+                    offline.add((ended - started + 999) / 1000, ended)
                     if (!back) continue@retry
                 }
                 is TransferRetry.Next.After -> {
@@ -285,6 +288,7 @@ class TransferService : Service() {
         sendCount++
         if (result.isSuccess) {
             sentTotal++
+            offline.reset()
         } else {
             lastError = result.exceptionOrNull()?.message
             Log.w(TAG, "sending $name failed: $lastError")
@@ -337,7 +341,7 @@ class TransferService : Service() {
         var attempt = 1
         retry@ while (result.isFailure) {
             val error = result.exceptionOrNull()
-            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this), waitedOffline)) {
+            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this, job.address), offline.waited(SystemClock.elapsedRealtime()))) {
                 is TransferRetry.Next.Stop -> {
                     if (next.noNetwork) result = Result.failure(java.io.IOException(getString(R.string.transfer_no_network)))
                     break@retry
@@ -346,8 +350,9 @@ class TransferService : Service() {
                     Log.i(TAG, "receiving ${job.name} failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_waiting_network), job.name, 0))
                     val started = SystemClock.elapsedRealtime()
-                    val back = NetworkWait.await(this, next.seconds)
-                    waitedOffline += (SystemClock.elapsedRealtime() - started + 999) / 1000
+                    val back = NetworkWait.await(this, job.address, next.seconds)
+                    val ended = SystemClock.elapsedRealtime()
+                    offline.add((ended - started + 999) / 1000, ended)
                     if (!back) continue@retry
                 }
                 is TransferRetry.Next.After -> {
@@ -362,6 +367,7 @@ class TransferService : Service() {
         result.onSuccess { uri ->
             savedTotal++
             lastSaved = uri
+            offline.reset()
             // Ecosystem 1f: its type and size, never its name.
             val mime = uri?.let { runCatching { contentResolver.getType(it) }.getOrNull() } ?: "application/octet-stream"
             PhoneEventBroadcast.send(

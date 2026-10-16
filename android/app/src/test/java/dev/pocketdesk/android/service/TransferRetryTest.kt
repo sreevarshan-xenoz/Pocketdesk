@@ -154,27 +154,57 @@ class TransferRetryTest {
     }
 
     @Test
-    fun anyCarrierNetworkWillDoButAVpnAloneOrASuspendedOneWillNot() {
-        fun seen(vpn: Boolean = false, carrier: Boolean = true, suspended: Boolean = false) =
-            TransferRetry.SeenNetwork(vpn, carrier, suspended)
-        // Mobile data alone: a computer at home is reached by the internet road (2c).
-        assertTrue(TransferRetry.hasNetwork(listOf(seen()), sharing = false))
-        assertFalse("nothing at all", TransferRetry.hasNetwork(emptyList(), sharing = false))
-        assertFalse("a VPN left over from a lost network", TransferRetry.hasNetwork(listOf(seen(vpn = true)), sharing = false))
-        assertFalse("mobile data during a call", TransferRetry.hasNetwork(listOf(seen(suspended = true)), sharing = false))
-        assertFalse("a network with no carrier", TransferRetry.hasNetwork(listOf(seen(carrier = false)), sharing = false))
-        assertTrue("the Wi-Fi under a VPN", TransferRetry.hasNetwork(listOf(seen(vpn = true), seen()), sharing = false))
-        assertTrue("this phone's hotspot, a computer on it", TransferRetry.hasNetwork(emptyList(), sharing = true))
+    fun aHomeNetworkAlwaysCountsAndMobileDataOnlyForAComputerReachedFromAway() {
+        fun seen(
+            vpn: Boolean = false,
+            local: Boolean = false,
+            cellular: Boolean = false,
+            suspended: Boolean = false,
+            internet: Boolean = true,
+        ) = TransferRetry.SeenNetwork(vpn, local, cellular, suspended, internet)
+        val wifi = seen(local = true)
+        val data = seen(cellular = true)
+        assertTrue(TransferRetry.hasNetwork(listOf(wifi), sharing = false, fromAway = false))
+        assertTrue("Wi-Fi with no internet still reaches home", TransferRetry.hasNetwork(listOf(seen(local = true, internet = false)), false, false))
+        assertTrue("mobile data, by the internet road", TransferRetry.hasNetwork(listOf(data), false, fromAway = true))
+        assertFalse("mobile data cannot reach a computer only at home", TransferRetry.hasNetwork(listOf(data), false, fromAway = false))
+        assertFalse("a network for calls only (IMS)", TransferRetry.hasNetwork(listOf(seen(cellular = true, internet = false)), false, true))
+        assertFalse("mobile data during a call", TransferRetry.hasNetwork(listOf(seen(cellular = true, suspended = true)), false, true))
+        assertFalse("nothing at all", TransferRetry.hasNetwork(emptyList(), false, true))
+        assertFalse("a VPN left over from a lost network", TransferRetry.hasNetwork(listOf(seen(vpn = true, local = true)), false, true))
+        assertTrue("the Wi-Fi under a VPN", TransferRetry.hasNetwork(listOf(seen(vpn = true), wifi), false, false))
+        assertTrue("this phone's hotspot, a computer on it", TransferRetry.hasNetwork(emptyList(), sharing = true, fromAway = false))
     }
 
     @Test
-    fun aJobsSecondFileDoesNotWaitAgainOnceTheBudgetIsSpent() {
-        val reset = java.io.IOException("Network is unreachable (os error 101)")
-        // A folder's first file waited the 3 minutes; the next gives up at once.
+    fun aComputerIsReachedFromAwayByItsIdentityOrAnAddressThatIsNotAHomeOne() {
+        for (home in listOf("192.168.1.20", "10.0.0.5", "172.16.4.2", "169.254.3.3", "desk.local")) {
+            assertFalse(home, TransferRetry.reachedFromAway(home, wanIdentity = false))
+            assertTrue(home, TransferRetry.reachedFromAway(home, wanIdentity = true))
+        }
+        for (away in listOf("100.101.102.103", "203.0.113.7", "desk.example.org", "2001:db8::1")) {
+            assertTrue(away, TransferRetry.reachedFromAway(away, wanIdentity = false))
+        }
+    }
+
+    @Test
+    fun theWaitIsOnePerOutageAcrossJobsAndAnEndedOutageWaitsAfresh() {
+        val budget = TransferRetry.OfflineBudget(forgetAfterMs = 600_000)
+        assertEquals(0, budget.waited(0))
+        // A folder's first download waited the 3 minutes; the next one, a
+        // job of its own in the same outage, does not wait again.
+        budget.add(180, 180_000)
+        assertEquals(180, budget.waited(181_000))
         assertEquals(
             TransferRetry.Next.Stop(noNetwork = true),
-            TransferRetry.next(1, reset, enabled = true, hasNetwork = false, waitedOfflineSeconds = 181),
+            TransferRetry.next(1, java.io.IOException("unreachable"), true, hasNetwork = false, waitedOfflineSeconds = budget.waited(181_000)),
         )
+        // Ten minutes later a new transfer waits again.
+        assertEquals(0, budget.waited(180_000 + 600_000))
+        // A success ends the outage too.
+        budget.add(60, 900_000)
+        budget.reset()
+        assertEquals(0, budget.waited(900_001))
     }
 
     @Test

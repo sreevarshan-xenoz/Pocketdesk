@@ -1,5 +1,8 @@
 package dev.pocketdesk.android.service
 
+import dev.pocketdesk.android.doctor.AddressKind
+import dev.pocketdesk.android.doctor.ConnectionChecks
+
 /**
  * When a failed file is sent again (T6a). A retry continues where the last
  * attempt stopped, since the computer keeps what arrived, so retrying is
@@ -28,9 +31,9 @@ object TransferRetry {
         if (error is Refusal) null else delayBefore(attempt, error?.message, enabled)
 
     /**
-     * How long one job (a share, a folder, a download) waits, in all, for a
-     * network (R6i): a phone's Wi-Fi can take a minute to rejoin, longer
-     * than the retries. Once spent, its other files do not wait again.
+     * How long the transfers wait, in all, for a network during one outage
+     * (R6i): a phone's Wi-Fi can take a minute to rejoin, longer than the
+     * retries. [OfflineBudget] keeps the count across jobs.
      */
     const val NETWORK_WAIT_SECONDS = 180L
 
@@ -73,21 +76,77 @@ object TransferRetry {
     data class SeenNetwork(
         /** A VPN, which rides another network and is none by itself. */
         val vpn: Boolean,
-        /** Wi-Fi, Ethernet or mobile data. */
-        val carrier: Boolean,
+        /** Wi-Fi or Ethernet: a computer at home may be on it. */
+        val local: Boolean,
+        /** Mobile data. */
+        val cellular: Boolean,
         /** Up but carrying nothing (a mobile network during a call). */
         val suspended: Boolean,
+        /**
+         * It reaches the internet: a mobile network for calls (IMS) or
+         * picture messages (MMS) does not.
+         */
+        val internet: Boolean,
     )
 
     /**
-     * Whether the phone has a network a transfer may use (R6i): Wi-Fi,
-     * Ethernet or mobile data that is not suspended, or its own hotspot or
-     * tethering ([sharing]), which a computer may be on. Mobile data counts
-     * even for a computer at home, since files reach it by the internet
-     * road too (2c); whether that road is there is the retries' to find.
+     * Whether the phone has a network a transfer with its computer may use
+     * (R6i): Wi-Fi or Ethernet that is not suspended, or its own hotspot or
+     * tethering ([sharing]), which a computer may be on; and mobile data
+     * with the internet, but only for a computer it can reach from away
+     * ([fromAway]): by the internet road (2c), or at an address that is
+     * not a home one.
      */
-    fun hasNetwork(networks: List<SeenNetwork>, sharing: Boolean): Boolean =
-        sharing || networks.any { !it.vpn && it.carrier && !it.suspended }
+    fun hasNetwork(networks: List<SeenNetwork>, sharing: Boolean, fromAway: Boolean): Boolean =
+        sharing || networks.any { n ->
+            !n.vpn && !n.suspended && (n.local || (n.cellular && n.internet && fromAway))
+        }
+
+    /**
+     * Whether the computer at [address] can be reached from away: the phone
+     * holds its internet identity ([wanIdentity]), or the address is not a
+     * home one (private, link-local or `.local`).
+     */
+    fun reachedFromAway(address: String, wanIdentity: Boolean): Boolean {
+        if (wanIdentity) return true
+        return when (ConnectionChecks.kindOf(address)) {
+            AddressKind.PRIVATE_V4, AddressKind.LINK_LOCAL -> false
+            AddressKind.HOSTNAME -> !address.lowercase().trimEnd('.').endsWith(".local")
+            else -> true
+        }
+    }
+
+    /**
+     * The wait for a network, shared by every transfer during one outage
+     * (R6i): a folder from the computer comes as one download per file, and
+     * each would otherwise wait its own 3 minutes. A transfer that succeeds,
+     * or one that starts with a network, ends the outage; so do ten minutes
+     * without a wait, so a transfer asked for much later waits again.
+     * Clock in milliseconds, given.
+     */
+    class OfflineBudget(private val forgetAfterMs: Long = 10 * 60_000L) {
+        private var waitedSeconds = 0L
+        private var lastWaitMs: Long? = null
+
+        /** Seconds waited in this outage, as of [nowMs]. */
+        fun waited(nowMs: Long): Long {
+            val last = lastWaitMs
+            if (last != null && nowMs - last >= forgetAfterMs) reset()
+            return waitedSeconds
+        }
+
+        /** A wait of [seconds] ended at [nowMs]. */
+        fun add(seconds: Long, nowMs: Long) {
+            waitedSeconds += seconds
+            lastWaitMs = nowMs
+        }
+
+        /** The outage is over. */
+        fun reset() {
+            waitedSeconds = 0
+            lastWaitMs = null
+        }
+    }
 
     /**
      * Whether a folder send goes on (T6b). It stops once [GIVE_UP_AFTER]
