@@ -122,6 +122,10 @@ pub struct Config {
     /// stdin and in `POCKETDESK_EVENT` (`[hooks]` in config.toml).
     #[serde(default)]
     pub hooks: std::collections::BTreeMap<String, String>,
+    /// Commands a phone with the Tasks permission may start by name
+    /// (`[[tasks]]`, ecosystem 1c).
+    #[serde(default)]
+    pub tasks: Vec<super::tasks::TaskSpec>,
 }
 
 fn default_transfer_keep_hours() -> u32 {
@@ -231,6 +235,7 @@ impl Default for Config {
             events: true,
             events_detail: super::events::EventsDetail::Metadata,
             hooks: std::collections::BTreeMap::new(),
+            tasks: Vec::new(),
         }
     }
 }
@@ -398,6 +403,7 @@ impl Config {
         "events",
         "events_detail",
         "hooks",
+        "tasks",
     ];
 }
 
@@ -466,6 +472,24 @@ mod tests {
         let again = Config::load_from(&path).unwrap();
         assert!(!again.open_links);
         assert_eq!(again.hooks, hand.hooks);
+    }
+
+    #[test]
+    fn tasks_are_saved_and_read_back_and_a_hand_written_one_reads() {
+        let path = temp("tasks");
+        let mut config = Config::default();
+        config.tasks.push(crate::local::tasks::TaskSpec {
+            name: "Back up".into(),
+            command: "backup.sh --all".into(),
+            ask: false,
+            deadline_secs: 600,
+        });
+        config.save_to(&path).unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().tasks, config.tasks);
+        std::fs::write(&path, "[[tasks]]\nname = \"Build\"\ncommand = \"make\"\n").unwrap();
+        let hand = Config::load_from(&path).unwrap();
+        assert_eq!(hand.tasks.len(), 1);
+        assert!(hand.tasks[0].ask, "asks first unless it says not to");
     }
 
     #[test]
