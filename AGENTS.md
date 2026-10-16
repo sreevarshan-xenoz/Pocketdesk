@@ -42,6 +42,11 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-16: **T10i, the phone as a remote, without the screen (branch `feat/remote-input`; spec `docs/superpowers/specs/2026-10-16-remote-input-design.md`).**
+  - **How:** a new session mode stream (`[0xFB, 0x00, 1]`) makes a session input only: the server starts no capture, encode, video, sound or arbiter, needs the Input permission, drops packets about a picture, and says when it is admitted (`STREAM_KIND_READY`). The phone's "Remote" on each saved computer opens the trackpad dock, keyboard, media and presenter keys; the computer shows it as "control only".
+  - **Found and fixed on the way:** sessions on a computer without audio capture ended at once (two causes, `fix/audio-ends-session`); a finished session's connection was never closed; Retry reused a refused session.
+  - **Fresh review (0 Critical, 2 Important), fixed:** "too old" hidden by the close that follows, and an orphan session after leaving during a failing LAN dial; plus link reports every 5 s for a remote.
+  - **Device-checked:** on Windows, refused without Input, admitted with it, control only, no capture, the pointer moved; on the Azure VM, the presenter, media and typed keys, motion and a click in `wev`. An input-only session runs over loopback in CI (`server/tests/input_only_session.rs`). Owed: checklist §73.
 - 2026-10-16: **T10f, input on wlroots without uinput (branch `feat/wlr-input`; spec `docs/superpowers/specs/2026-10-16-wlr-input-design.md`).**
   - **How:** when uinput cannot be opened (root-only, the default on most distributions), the server injects through the compositor: `zwlr_virtual_pointer_v1` for the pointer and `zwp_virtual_keyboard_v1` with a `pc+us` keys keymap (`core::input::wlr_input`), before falling back to enigo. Found on the VM during F4, where input had done nothing.
   - **Fresh review (0 Critical, 1 Important), fixed:** a compositor that went away left input dead for the server's life (now reopened); plus the socket never read, an unbounded connect, Shift left down by a failed key, and the spec.

@@ -603,9 +603,14 @@ impl PocketdeskApp {
                         .map_or("unannounced".to_string(), short);
                     ui.monospace(who);
                     ui.label(format!(
-                        "{} · {}",
+                        "{} · {}{}",
                         session.transport.to_uppercase(),
-                        session.peer
+                        session.peer,
+                        if session.control_only {
+                            " · control only"
+                        } else {
+                            ""
+                        }
                     ));
                     ui.label(format!(
                         "for {}",

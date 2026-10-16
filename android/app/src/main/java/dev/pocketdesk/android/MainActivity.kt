@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.ConnectScreen
 import dev.pocketdesk.android.ui.HomeScreen
+import dev.pocketdesk.android.ui.RemoteInputScreen
 import dev.pocketdesk.android.ui.RemoteScreen
 import dev.pocketdesk.android.ui.PairLinkScreen
 import dev.pocketdesk.android.ui.QrScanScreen
@@ -343,6 +344,12 @@ class MainActivity : ComponentActivity() {
                                             sessionKey =
                                                 "${host.address}|${host.port}|${host.controlPort}"
                                         },
+                                        onRemote = { host ->
+                                            HostStore.save(this@MainActivity, host)
+                                            maybeRequestNotificationPermission()
+                                            sessionKey =
+                                                "${host.address}|${host.port}|${host.controlPort}|$REMOTE_MODE"
+                                        },
                                         onConnectFound = { host ->
                                             // Not saved until it pairs: an mDNS
                                             // announcement proves nothing.
@@ -363,13 +370,25 @@ class MainActivity : ComponentActivity() {
                         // (decoder, service, input) must end, not be reused
                         // with half its parts pointed at the new computer.
                         else -> key(sessionKey) {
-                            RemoteScreen(
-                                address = session.first,
-                                port = session.second,
-                                controlPort = session.third,
-                                inPictureInPicture = inPictureInPicture.value,
-                                onExit = { sessionKey = null },
-                            )
+                            if (session.remote) {
+                                // The phone as a remote (T10i): no picture.
+                                Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                                    RemoteInputScreen(
+                                        address = session.address,
+                                        port = session.port,
+                                        controlPort = session.controlPort,
+                                        onExit = { sessionKey = null },
+                                    )
+                                }
+                            } else {
+                                RemoteScreen(
+                                    address = session.address,
+                                    port = session.port,
+                                    controlPort = session.controlPort,
+                                    inPictureInPicture = inPictureInPicture.value,
+                                    onExit = { sessionKey = null },
+                                )
+                            }
                         }
                     }
                 }
@@ -436,15 +455,23 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Session state travels as "address|streamingPort|controlPort" so it survives process save/restore. */
-private fun parseSession(key: String?): Triple<String, Int, Int>? {
+/** The session on screen: a computer, and whether the phone is its remote (T10i). */
+private data class SessionTarget(val address: String, val port: Int, val controlPort: Int, val remote: Boolean)
+
+/** The session key's mark for the phone as a remote (T10i). */
+private const val REMOTE_MODE = "remote"
+
+private fun parseSession(key: String?): SessionTarget? {
     val parts = key?.split('|') ?: return null
-    if (parts.size !in 2..3 || parts[0].isBlank()) return null
+    if (parts.size !in 2..4 || parts[0].isBlank()) return null
     val port = parts[1].toIntOrNull() ?: return null
     val controlPort =
-        if (parts.size == 3) {
+        if (parts.size >= 3) {
             parts[2].toIntOrNull() ?: return null
         } else {
             HostStore.DEFAULT_CONTROL_PORT
         }
-    return Triple(parts[0], port, controlPort)
+    val remote = parts.size == 4 && parts[3] == REMOTE_MODE
+    if (parts.size == 4 && !remote) return null
+    return SessionTarget(parts[0], port, controlPort, remote)
 }

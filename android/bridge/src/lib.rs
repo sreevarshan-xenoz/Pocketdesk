@@ -432,6 +432,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         port as u16,
         monitor,
         codec_caps as u8,
+        false,
     )));
     to_jstring(&mut env, json)
 }
@@ -460,7 +461,56 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         identity,
         monitor,
         codec_caps as u8,
+        false,
     )));
+    to_jstring(&mut env, json)
+}
+
+/// Connect the phone as a remote (T10i): an input-only session, no picture
+/// or sound, to `address:port` on the LAN.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectRemote(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope_unit(RUNTIME.block_on(api::connect_streaming(
+        address,
+        port as u16,
+        None,
+        0,
+        true,
+    )));
+    to_jstring(&mut env, json)
+}
+
+/// [`Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectRemote`] over
+/// the iroh WAN path, with the desktop's cached endpoint identity.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectRemoteWan(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    identity_json: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let identity = jstring_to_string(&mut env, &identity_json);
+    let json = envelope_unit(
+        RUNTIME.block_on(api::connect_streaming_wan(address, identity, None, 0, true)),
+    );
+    to_jstring(&mut env, json)
+}
+
+/// The remote session's state (T10i): `{"state": "none" | "waiting" |
+/// "ready" | "tooOld"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRemoteState(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = api::remote_state();
     to_jstring(&mut env, json)
 }
 

@@ -446,12 +446,20 @@ pub(crate) fn take_file_offers_json() -> String {
 }
 
 /// Holds the live streaming client and its packet receiver.
+/// The live input-only session's state (T10i), for `api::remote_state`;
+/// `None` with no such session.
+pub(crate) static REMOTE: std::sync::Mutex<Option<pocketdesk_core::streaming::RemoteFlags>> =
+    std::sync::Mutex::new(None);
+
 pub(crate) struct StreamingHandle {
     pub(crate) address: String,
     pub(crate) port: u16,
     /// The monitor this session captures (`None`: the desktop's choice). A
     /// connect for another monitor is a new session, not this one.
     pub(crate) monitor_index: Option<u32>,
+    /// The phone as a remote (T10i): no picture or sound. A connect of the
+    /// other kind is a new session.
+    pub(crate) input_only: bool,
     /// Token that can be used to cancel the receive loop.
     pub(crate) cancel: tokio_util::sync::CancellationToken,
     /// JoinHandle of the background `client.start()` task.

@@ -1256,6 +1256,21 @@ Owed:
 - [ ] Android 14+'s "selected photos only" answer, and Android 12 and older.
 - [ ] Away from home (the internet road), and the Linux host.
 
+## 73. The phone as a remote (T10i)
+
+On the A71 against this box, 2026-10-16:
+- [x] With Input off, Remote was refused: "The remote stopped: input not allowed" (server: "Input-only session refused").
+- [x] With Input on, Retry reached the computer (found and fixed: Retry had reused the refused session), the controls showed once admitted, `status --json` said `control_only: true`, and the server log had no capture, encoder or audio for it.
+- [x] A trackpad drag moved the computer's pointer; Exit ended the session on the computer.
+- [x] Against a computer without T10i (the VM's older build): the remote did not hang once its session ended (found and fixed: the server never closed a finished session's connection; the phone now also gives up after 45 s).
+
+On the Azure VM (headless Sway, uinput root-only) from the A71 over the internet, after the review fixes:
+- [x] Admitted with no capture; into `wev`: Page Down, Right, F5, B, Play/Pause and Volume Up from the rows, "Hi PD" from the keyboard, trackpad motion and a tap as a left click.
+
+Owed:
+- [ ] The owner's approval prompt ("Ask before each session") before ready.
+- [ ] Over the internet road, and a phone driving while another has a picture session (driving rules).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
