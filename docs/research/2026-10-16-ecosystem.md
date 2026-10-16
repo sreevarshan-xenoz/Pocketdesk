@@ -52,7 +52,7 @@ Labels:
 
 | Phase | Goal | Deliverables | Check |
 |---|---|---|---|
-| 1. Open the edges | Others build on Pocketdesk without its internals | A versioned protocol spec with test vectors replayed against the real handler; `pocketdesk watch --json` events and per-event hooks; a browser extension ("send to phone") over native messaging; a Home Assistant MQTT-discovery bridge (off by default, Settings); the same events as Android broadcasts | Conformance in CI; HA entities appear within 10 s; a link from the browser reaches the A71 |
+| 1. Open the edges | Others build on Pocketdesk without its internals | A versioned protocol spec with test vectors replayed against the real handler; `pocketdesk events --json` events and per-event hooks; a browser extension ("send to phone") over native messaging; a Home Assistant MQTT-discovery bridge (off by default, Settings); the same events as Android broadcasts | Conformance in CI; HA entities appear within 10 s; a link from the browser reaches the A71 |
 | 2. Every feature on every road; computer ↔ computer | "Any of my devices" for two computers and a phone, from anywhere | Files, folders and image clipboard over iroh (no dial-back); pairing computers; clipboard and send between them; the other computer's screen in the desktop app; an input-only mode; edges crossing only where the OS allows (not wlroots) | 500 MB resumes over iroh with TCP 1716 blocked; Windows ↔ VM clipboard in under 2 s |
 | 3. KDE Connect compatibility | The KDE Connect apps (iOS included), GSConnect and Valent work with Pocketdesk | An off-by-default compat backend (UDP 1716, the v8 identity exchange, `payloadTransferInfo`) for the plugins whose bodies match, with narrower default permissions; refuse while the real KDE Connect holds the port | Unmodified KDE Connect Android, iOS and GSConnect pair and do clipboard, a file and ping; a compat device refused on every Pocketdesk-only packet; the CVE-2025-66270 case tested |
 | 4. A personal device mesh | Any device reaches any other without pairing each pair | Signer devices issue short-lived membership certificates; gossiped revocations; a recovery secret; membership grants nothing alone (each device keeps per-peer permissions); the relay's `--allow-paired` widens to members | A tablet added on computer A reaches computer B with no pairing on B; revoked within one link round |
@@ -82,7 +82,7 @@ The owner had ChatGPT review the public repository and propose its own plan. Eac
 
 ### The plan's phase 1, updated
 
-1. **1a, events and hooks:** the event log, `pocketdesk watch`, `[hooks]` (in progress).
+1. **1a, events and hooks:** the event log, `pocketdesk events`, `[hooks]` (in progress).
 2. **1b, the Activity Center:** a desktop app tab over the event log (sessions, transfers, links, notifications, hooks run, refusals), then the phone's.
 3. **1c, named tasks:** commands the owner names on the computer (Settings), which a phone with a new Tasks permission can start and see run: output (capped), exit code, a deadline, and an ask-first option. They show in the Activity Center. The raw Exec plugin gets the same deadline and cap.
 4. **1d, the browser extension**, then **1e, the Home Assistant bridge**, then **1f, Android broadcasts**.

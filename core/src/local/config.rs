@@ -111,7 +111,7 @@ pub struct Config {
     /// it (roadmap T6); 0 keeps none, and a retry starts over.
     #[serde(default = "default_transfer_keep_hours")]
     pub transfer_keep_hours: u32,
-    /// Keep the event log other programs read (`pocketdesk watch`,
+    /// Keep the event log other programs read (`pocketdesk events`,
     /// ecosystem phase 1a).
     #[serde(default = "default_true")]
     pub events: bool,

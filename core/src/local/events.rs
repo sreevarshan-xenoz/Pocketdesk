@@ -1,7 +1,7 @@
 //! Events (ecosystem phase 1a): what Pocketdesk does, as it happens, for
 //! other programs. The server appends one JSON object per line to
 //! `events.jsonl` in the state folder (owner-only, one rotation kept);
-//! `pocketdesk watch` and anything else running as the owner reads it with
+//! `pocketdesk events` and anything else running as the owner reads it with
 //! a [`Tail`]. No listener: the same rule as the rest of the local API.
 //!
 //! An event carries metadata, and content only at [`EventsDetail::Full`].

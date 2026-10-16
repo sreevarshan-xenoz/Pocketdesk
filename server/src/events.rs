@@ -1,5 +1,5 @@
 //! Events and hooks (ecosystem phase 1a): the server's half. Each event is
-//! appended to the owner-only log other programs read (`pocketdesk watch`,
+//! appended to the owner-only log other programs read (`pocketdesk events`,
 //! `core::local::events`), and runs the command the owner set for its kind
 //! in `[hooks]`, through the system shell, with the event's JSON on stdin and
 //! in `POCKETDESK_EVENT`. config.toml is read at each event, so a change in

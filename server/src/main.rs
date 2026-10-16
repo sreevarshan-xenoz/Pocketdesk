@@ -118,6 +118,7 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
         cli::Commands::SendMenu { remove } => local_api::run_send_menu(remove),
         cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
         cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
+        cli::Commands::Events { since_start, json } => local_api::watch(since_start, json),
         cli::Commands::Sessions { count, json } => session_telemetry::print_sessions(count, json),
         cli::Commands::Bench {
             target,
