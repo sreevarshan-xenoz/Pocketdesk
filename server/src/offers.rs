@@ -467,12 +467,12 @@ fn finish_in(dir: &Path, id: &str, outcome: Result<(), String>) {
 }
 
 /// The live connection that reaches `device_id` (a connection goes by its
-/// device's id, phase B). Only a connection with an address can carry the
-/// download that follows.
+/// device's id, phase B). Only one files can reach carries the download that
+/// follows: an address to dial back, or a link by the internet road (2c).
 fn target_for(device_id: &str, clients: &[Arc<dyn DeviceSender>]) -> Option<Arc<dyn DeviceSender>> {
     clients
         .iter()
-        .filter(|c| c.peer_addr().is_some())
+        .filter(|c| crate::plugins::share::files_reach(c.as_ref()))
         .find(|c| c.device_id() == device_id)
         .cloned()
 }

@@ -422,8 +422,14 @@ fn may_transfer_in(
     paired: bool,
 ) -> std::result::Result<(), String> {
     use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
-    let pocketdesk_core::streaming::PeerKey::Tls(hash) = key else {
-        return Err("files move only over the local network connection".to_string());
+    let hash = match key {
+        pocketdesk_core::streaming::PeerKey::Tls(hash) => hash,
+        // The internet road (2c): the phone's registered iroh key, which its
+        // control connection there proved; it admits paired phones only.
+        pocketdesk_core::streaming::PeerKey::Iroh(_) => {
+            return internet_standing_in(dir, device_id, Some(key), paired)
+                .map_err(|refusal| refusal.reason().to_string());
+        }
     };
     if !paired {
         return Ok(());
@@ -1101,6 +1107,27 @@ mod tests {
         assert!(
             may_transfer_in(&dir, "stranger", &PeerKey::Tls([3; 32]), false).is_ok(),
             "unpaired: only possible with pairing off"
+        );
+    }
+
+    #[test]
+    fn on_the_internet_road_files_move_with_the_registered_iroh_key() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        let dir = key_dir("transfer-internet");
+        let iroh = PeerKey::Iroh("c".repeat(64));
+        assert!(
+            may_transfer_in(&dir, "phone", &iroh, true).is_err(),
+            "no iroh key registered at home yet"
+        );
+        device_keys::register(&dir, "phone", Slot::Iroh, &"c".repeat(64)).unwrap();
+        assert!(may_transfer_in(&dir, "phone", &iroh, true).is_ok());
+        assert!(
+            may_transfer_in(&dir, "phone", &PeerKey::Iroh("d".repeat(64)), true).is_err(),
+            "another iroh key"
+        );
+        assert!(
+            may_transfer_in(&dir, "phone", &iroh, false).is_err(),
+            "unpaired: never by this road"
         );
     }
 

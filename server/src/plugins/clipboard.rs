@@ -223,14 +223,20 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     };
     tokio::spawn(async move {
         let _slot = slot;
-        let kept = share::receive_bytes(from, tls, &key, size, MAX_CLIPBOARD_IMAGE, |png| async {
-            if !crate::platform::clip_image::is_png(&png) {
-                return Err(share::io_error("clipboard", "not a PNG"));
-            }
-            let image = Arc::new(Image::new(png));
-            set_clipboard_image(&image).await?;
-            Ok(())
-        })
+        let kept = share::receive_bytes(
+            share::Route::dial(from, tls),
+            &key,
+            size,
+            MAX_CLIPBOARD_IMAGE,
+            |png| async {
+                if !crate::platform::clip_image::is_png(&png) {
+                    return Err(share::io_error("clipboard", "not a PNG"));
+                }
+                let image = Arc::new(Image::new(png));
+                set_clipboard_image(&image).await?;
+                Ok(())
+            },
+        )
         .await;
         match kept {
             Ok(()) => tracing::info!("Clipboard image received ({size} bytes)"),
@@ -268,7 +274,7 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         let _slot = slot;
         let size = image.png.len() as u64;
         let mut reader = image.png.as_slice();
-        match share::send_reader(to, tls, &key, &mut reader, size).await {
+        match share::send_reader(share::Route::dial(to, tls), &key, &mut reader, size).await {
             Ok(_) => tracing::info!("Clipboard image sent ({size} bytes)"),
             Err(e) => tracing::warn!("Clipboard image not sent: {e}"),
         }

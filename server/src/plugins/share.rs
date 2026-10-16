@@ -1,5 +1,7 @@
 use pocketdesk_core::error::{PocketdeskError, Result};
-use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::protocol::kdeconnect::{
+    DeviceSender, NetworkPacket, OpenLinkStream, Plugin, TransferIo,
+};
 use pocketdesk_core::protocol::partials::{Record, Store};
 use pocketdesk_core::protocol::transfer::{self, Have, Pace, TransferError};
 use std::net::{IpAddr, SocketAddr};
@@ -505,13 +507,16 @@ impl Plugin for SharePlugin {
                         Ok(())
                     }
                 };
-                let Some(port) = transfer_info
+                // A port to connect to at home; none asks for a stream on
+                // the phone's own link, by the internet road (2c).
+                let port = transfer_info
                     .get("port")
                     .and_then(|v| v.as_u64())
                     .and_then(|p| u16::try_from(p).ok())
-                    .filter(|p| *p != 0)
-                else {
-                    return refused("no usable port".into()).await;
+                    .filter(|p| *p != 0);
+                let reach = match reach(sender, port) {
+                    Ok(reach) => reach,
+                    Err(reason) => return refused(reason).await,
                 };
                 let size = packet.payload_size.unwrap_or(0);
                 if size == 0 || size > MAX_FILE_BYTES {
@@ -520,23 +525,14 @@ impl Plugin for SharePlugin {
                     ))
                     .await;
                 }
-                // The phone listens and the desktop connects, as in KDE
-                // Connect: to the address the transport saw, never to one the
-                // peer names (a v2 device id is the peer's own choice).
-                let Some(phone_ip) = sender.peer_addr().map(|a| a.ip()) else {
-                    return refused("only the TCP control channel can carry a file".into()).await;
-                };
-                if !dialable(phone_ip) {
-                    return refused(format!("will not connect back to {phone_ip}")).await;
-                }
                 let Some(dir) = self.download_dir.clone() else {
                     return refused("no downloads or home folder".into()).await;
                 };
-                // The bytes travel inside TLS with the phone that asked
-                // (phase C): the key its control connection proved.
-                let tls = match transfer_tls(sender) {
-                    Ok(tls) => tls,
-                    Err(reason) => return refused(reason.to_string()).await,
+                // At home the bytes travel inside TLS with the phone that
+                // asked (phase C); on the link, iroh proved both keys.
+                let route = match route(reach, sender) {
+                    Ok(route) => route,
+                    Err(reason) => return refused(reason).await,
                 };
                 let Some(store) = partials() else {
                     return refused("no state folder for the transfer".into()).await;
@@ -584,8 +580,7 @@ impl Plugin for SharePlugin {
                 running()
                     .spawn(running_key, async move {
                         match receive_file(
-                            SocketAddr::new(phone_ip, port),
-                            tls,
+                            route,
                             &key,
                             Incoming {
                                 dir: &dir,
@@ -646,9 +641,9 @@ async fn handle_folder_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) 
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     // Every file would be fetched by a download, so a phone the desktop
-    // cannot dial back is told now, not promised a folder that never comes.
+    // cannot reach is told now, not promised a folder that never comes.
     let checked =
-        dial_back(sender).and_then(|_| crate::plugins::file_browse::resolve_folder(asked));
+        can_reach(sender).and_then(|_| crate::plugins::file_browse::resolve_folder(asked));
     let refused = match checked {
         Err(reason) => reason,
         Ok((_, shown)) => match crate::state::state_dir() {
@@ -693,11 +688,11 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     running().supersede(&running_key).await;
     match plan_fetch(&packet.body, sender) {
         Ok(fetch) => {
-            tracing::info!("Sending {} to {}", fetch.path.display(), fetch.to);
+            tracing::info!("Sending {} to {}", fetch.path.display(), fetch.route);
             running()
                 .spawn(running_key, async move {
                     let _slot = fetch.slot;
-                    let sent = send_file_to(fetch.to, fetch.tls, &key, &fetch.path).await;
+                    let sent = send_file_to(fetch.route, &key, &fetch.path).await;
                     match &sent {
                         Ok(size) => {
                             tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
@@ -719,9 +714,8 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
 
 /// A download that passed every check, holding its transfer slot.
 struct Fetch {
-    to: SocketAddr,
-    /// The transfer's TLS, with the phone that asked.
-    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+    /// How the bytes reach the phone that asked.
+    route: Route,
     path: PathBuf,
     /// The desktop app's send this download answers, if any.
     offer: Option<String>,
@@ -736,9 +730,8 @@ fn plan_fetch(
         .get("port")
         .and_then(|v| v.as_u64())
         .and_then(|p| u16::try_from(p).ok())
-        .filter(|p| *p != 0)
-        .ok_or("no port to send to")?;
-    let ip = dial_back(sender)?;
+        .filter(|p| *p != 0);
+    let reach = reach(sender, port)?;
     // Taken before an offer is redeemed, so a busy desktop does not spend
     // one of the phone's tries.
     let slot = transfer_slots().take(sender.device_id())?;
@@ -775,10 +768,10 @@ fn plan_fetch(
         }
         return Err(reason.to_string());
     }
-    // Last, after every check that can refuse: it reads this desktop's
-    // certificate.
-    let tls = match transfer_tls(sender) {
-        Ok(tls) => tls,
+    // Last, after every check that can refuse: at home it reads this
+    // desktop's certificate.
+    let route = match route(reach, sender) {
+        Ok(route) => route,
         Err(reason) => {
             if let Some(id) = &offer {
                 crate::offers::fail(id, reason.clone());
@@ -787,12 +780,115 @@ fn plan_fetch(
         }
     };
     Ok(Fetch {
-        to: SocketAddr::new(ip, port),
-        tls,
+        route,
         path,
         offer,
         slot,
     })
+}
+
+/// How a transfer reaches the phone.
+pub(crate) enum Route {
+    /// Dial it back at home, inside the transfer's TLS (phase C).
+    Dial {
+        to: SocketAddr,
+        tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+    },
+    /// A stream on the phone's own control connection, by the internet road
+    /// (2c): iroh proved both keys, and nothing dials back across a NAT.
+    Link(std::sync::Arc<dyn OpenLinkStream>),
+}
+
+impl std::fmt::Display for Route {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dial { to, .. } => write!(f, "{to}"),
+            Self::Link(_) => f.write_str("the phone's link by the internet road"),
+        }
+    }
+}
+
+impl Route {
+    pub(crate) fn dial(
+        to: SocketAddr,
+        tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+    ) -> Self {
+        Self::Dial { to, tls }
+    }
+
+    /// Open the transfer's stream: the first thing written on it is the key.
+    async fn open(&self) -> Result<Box<dyn TransferIo>> {
+        match self {
+            Self::Dial { to, tls } => Ok(Box::new(dial_transfer(*to, tls.clone()).await?)),
+            Self::Link(link) => tokio::time::timeout(CONNECT_TIMEOUT, link.open())
+                .await
+                .map_err(|_| io_error("open", "timed out"))?
+                .map_err(|e| io_error("open", e)),
+        }
+    }
+}
+
+/// Where a request from `sender` that named `port` (or none) can be
+/// answered, before the checks that can refuse it: a port means dialing the
+/// phone back at home; none, a stream on its link by the internet road.
+pub(crate) enum Reach {
+    Dial(IpAddr, u16),
+    Link(std::sync::Arc<dyn OpenLinkStream>),
+}
+
+pub(crate) fn reach(
+    sender: &dyn DeviceSender,
+    port: Option<u16>,
+) -> std::result::Result<Reach, String> {
+    match (sender.link_streams(), port) {
+        (Some(link), None) => {
+            if !crate::events::current_config().internet_files {
+                return Err("files over the internet road are off on this computer".to_string());
+            }
+            Ok(Reach::Link(link))
+        }
+        (Some(_), Some(_)) => {
+            Err("nothing connects back by the internet road: ask without a port".to_string())
+        }
+        (None, Some(port)) => Ok(Reach::Dial(dial_back(sender)?, port)),
+        (None, None) => Err("no usable port".to_string()),
+    }
+}
+
+/// Whether files can reach the phone behind `sender`: a connection with an
+/// address to dial back, or a link by the internet road while
+/// `internet_files` is on (2c).
+pub(crate) fn files_reach(sender: &dyn DeviceSender) -> bool {
+    sender.peer_addr().is_some()
+        || (sender.link_streams().is_some() && crate::events::current_config().internet_files)
+}
+
+/// Whether files can reach the phone behind `sender` at all: a folder it
+/// asks for is fetched file by file.
+fn can_reach(sender: &dyn DeviceSender) -> std::result::Result<(), String> {
+    if sender.link_streams().is_some() {
+        return reach(sender, None).map(|_| ());
+    }
+    dial_back(sender).map(|_| ())
+}
+
+/// The route for `reach`: at home with the transfer's TLS; on the internet
+/// road with the iroh key the link proved, held to the one the phone
+/// registered at home.
+pub(crate) fn route(reach: Reach, sender: &dyn DeviceSender) -> std::result::Result<Route, String> {
+    match reach {
+        Reach::Dial(ip, port) => Ok(Route::dial(
+            SocketAddr::new(ip, port),
+            transfer_tls(sender)?,
+        )),
+        Reach::Link(link) => {
+            let Some(key) = sender.peer_key() else {
+                return Err("the phone's connection proved no key".to_string());
+            };
+            crate::plugins::pair::may_transfer(sender.device_id(), &key)?;
+            Ok(Route::Link(link))
+        }
+    }
 }
 
 /// This desktop's side of a transfer's TLS with the phone behind `sender`
@@ -870,14 +966,9 @@ pub(crate) async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {
     }
 }
 
-/// Send the file at `path` to the phone listening at `to`, and return its
-/// size once the phone says it saved it.
-pub(crate) async fn send_file_to(
-    to: SocketAddr,
-    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
-    key: &str,
-    path: &Path,
-) -> Result<u64> {
+/// Send the file at `path` to the phone by `route`, and return its size
+/// once the phone says it saved it.
+pub(crate) async fn send_file_to(route: Route, key: &str, path: &Path) -> Result<u64> {
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|e| io_error("open", e))?;
@@ -889,22 +980,21 @@ pub(crate) async fn send_file_to(
     if size > MAX_FILE_BYTES {
         return Err(io_error("send", "larger than 8 GB"));
     }
-    send_reader(to, tls, key, &mut file, size).await
+    send_reader(route, key, &mut file, size).await
 }
 
-/// Dial `to`, present `key`, and send `size` bytes of `reader` with the
+/// Open `route`, present `key`, and send `size` bytes of `reader` with the
 /// resumable transfer (T6a): from where the phone's partial copy ends, if it
 /// has one of this file, then the whole file's hash; the result is the
 /// phone's status byte. A reader that ends early (the file shrank) fails the
 /// send.
 pub(crate) async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
-    to: SocketAddr,
-    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+    route: Route,
     key: &str,
     reader: &mut R,
     size: u64,
 ) -> Result<u64> {
-    let mut stream = dial_transfer(to, tls).await?;
+    let mut stream = route.open().await?;
     present_key(&mut stream, key).await?;
     let from = transfer::send(reader, size, &mut stream, Pace::DEFAULT, |_| {})
         .await
@@ -1222,18 +1312,13 @@ struct Incoming<'a> {
     on_saved: Box<dyn FnOnce(&Path) + Send>,
 }
 
-/// Connect to the phone at `from` and receive one file with the resumable
+/// Reach the phone by `route` and receive one file with the resumable
 /// transfer (T6a), continuing a partial copy an earlier attempt left. The
 /// file goes into `dir` under a name no file has yet, and the phone hears
 /// "saved" only once it is there. A connection that breaks keeps what
 /// arrived for the next attempt (when the file has a source id and
 /// unfinished files are kept); anything else leaves nothing behind.
-async fn receive_file(
-    from: SocketAddr,
-    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
-    key: &str,
-    incoming: Incoming<'_>,
-) -> Result<PathBuf> {
+async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result<PathBuf> {
     let Incoming {
         dir,
         name,
@@ -1284,7 +1369,7 @@ async fn receive_file(
         let _ = std::fs::remove_file(&part_path);
     };
 
-    let mut stream = match dial_transfer(from, tls).await {
+    let mut stream = match route.open().await {
         Ok(stream) => stream,
         Err(e) => {
             drop(file);
@@ -1295,7 +1380,7 @@ async fn receive_file(
         }
     };
     present_key(&mut stream, key).await?;
-    tracing::info!("Receiving {name} from {from} ({size} bytes)");
+    tracing::info!("Receiving {name} from {route} ({size} bytes)");
     let outcome = transfer::receive(
         &mut stream,
         &mut file,
@@ -1393,8 +1478,7 @@ async fn place(part: &Path, dir: &Path, name: &str) -> Result<PathBuf> {
 /// received (the clipboard image, roadmap N4). Small and replaced by the
 /// next copy, so it never resumes; the whole-file hash is still checked.
 pub(crate) async fn receive_bytes<F, Fut>(
-    from: SocketAddr,
-    tls: std::sync::Arc<tokio_rustls::rustls::ClientConfig>,
+    route: Route,
     key: &str,
     size: u64,
     max: u64,
@@ -1410,7 +1494,7 @@ where
             format!("refused a declared size of {size}"),
         ));
     }
-    let mut stream = dial_transfer(from, tls).await?;
+    let mut stream = route.open().await?;
     present_key(&mut stream, key).await?;
     let mut memory = transfer::Memory::holding(&[]);
     let received = transfer::receive(
@@ -1881,8 +1965,7 @@ mod tests {
         let got = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = got.clone();
         receive_bytes(
-            from,
-            desktop_tls(),
+            Route::dial(from, desktop_tls()),
             KEY,
             data.len() as u64,
             1 << 20,
@@ -1897,9 +1980,13 @@ mod tests {
         assert_eq!(*got.lock().unwrap(), data);
 
         let (from, status) = phone_sending(vec![1, 2, 3]).await;
-        let refused = receive_bytes(from, desktop_tls(), KEY, 3, 1 << 20, |_| async {
-            Err(io_error("clipboard", "not a PNG"))
-        })
+        let refused = receive_bytes(
+            Route::dial(from, desktop_tls()),
+            KEY,
+            3,
+            1 << 20,
+            |_| async { Err(io_error("clipboard", "not a PNG")) },
+        )
         .await;
         assert!(refused.is_err());
         assert!(
@@ -1914,9 +2001,11 @@ mod tests {
         let from = listener.local_addr().unwrap();
         for size in [0, 11] {
             assert!(
-                receive_bytes(from, desktop_tls(), KEY, size, 10, |_| async { Ok(()) })
-                    .await
-                    .is_err()
+                receive_bytes(Route::dial(from, desktop_tls()), KEY, size, 10, |_| async {
+                    Ok(())
+                })
+                .await
+                .is_err()
             );
         }
         let accepted =
@@ -1932,8 +2021,7 @@ mod tests {
         let (from, status) = phone_sending(data.clone()).await;
         let size = data.len() as u64;
         let path = receive_file(
-            from,
-            desktop_tls(),
+            Route::dial(from, desktop_tls()),
             KEY,
             incoming(&dir, "big.bin", size, Some(SOURCE), &store),
         )
@@ -1964,8 +2052,7 @@ mod tests {
         // The first attempt stops at 120 000 bytes.
         let (from, first) = phone_sending_part(data[..120_000].to_vec(), size).await;
         let broken = receive_file(
-            from,
-            desktop_tls(),
+            Route::dial(from, desktop_tls()),
             KEY,
             incoming(&dir, "video.mp4", size, Some(SOURCE), &store),
         )
@@ -1982,8 +2069,7 @@ mod tests {
         // The retry sends only the rest.
         let (from, second) = phone_sending(data.clone()).await;
         let path = receive_file(
-            from,
-            desktop_tls(),
+            Route::dial(from, desktop_tls()),
             KEY,
             incoming(&dir, "video.mp4", size, Some(SOURCE), &store),
         )
@@ -1994,6 +2080,140 @@ mod tests {
         assert!(store.get("phone", SOURCE).is_none(), "the record is gone");
     }
 
+    /// A link by the internet road (2c), in memory: each stream the desktop
+    /// opens is handed to the phone's side.
+    struct FakeLink(tokio::sync::mpsc::UnboundedSender<tokio::io::DuplexStream>);
+
+    #[async_trait::async_trait]
+    impl OpenLinkStream for FakeLink {
+        async fn open(&self) -> std::io::Result<Box<dyn TransferIo>> {
+            let (desktop, phone) = tokio::io::duplex(64 * 1024);
+            self.0
+                .send(phone)
+                .map_err(|_| std::io::Error::other("the phone is gone"))?;
+            Ok(Box::new(desktop))
+        }
+    }
+
+    type PhoneStreams = tokio::sync::mpsc::UnboundedReceiver<tokio::io::DuplexStream>;
+
+    fn fake_link() -> (std::sync::Arc<dyn OpenLinkStream>, PhoneStreams) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (std::sync::Arc::new(FakeLink(tx)), rx)
+    }
+
+    /// The phone's side of a share on the link: the key, then the first
+    /// `data` bytes of a `size`-byte file.
+    fn phone_sending_on_link(
+        mut streams: PhoneStreams,
+        data: Vec<u8>,
+        size: u64,
+    ) -> tokio::task::JoinHandle<(PhoneStreams, std::result::Result<u64, TransferError>)> {
+        tokio::spawn(async move {
+            let mut stream = streams.recv().await.unwrap();
+            let mut presented = [0u8; 33];
+            stream.read_exact(&mut presented).await.unwrap();
+            assert_eq!(&presented, format!("{KEY}\n").as_bytes());
+            let mut reader: &[u8] = &data;
+            let sent = transfer::send(&mut reader, size, &mut stream, Pace::DEFAULT, |_| {}).await;
+            (streams, sent)
+        })
+    }
+
+    #[tokio::test]
+    async fn a_share_on_the_link_is_saved_and_a_broken_one_continued() {
+        let dir = temp_dir("link-share");
+        let store = Store::new(temp_dir("link-share-partials"));
+        let data: Vec<u8> = (0..300_000u32).map(|i| (i * 11) as u8).collect();
+        let size = data.len() as u64;
+        let (link, streams) = fake_link();
+
+        // The first attempt stops at 100 000 bytes.
+        let first = phone_sending_on_link(streams, data[..100_000].to_vec(), size);
+        let broken = receive_file(
+            Route::Link(link.clone()),
+            KEY,
+            incoming(&dir, "photo.raw", size, Some(SOURCE), &store),
+        )
+        .await;
+        assert!(broken.is_err());
+        let (streams, sent) = first.await.unwrap();
+        assert!(sent.is_err());
+        assert_eq!(store.get("phone", SOURCE).unwrap().committed, 100_000);
+
+        // The retry, on a new stream of the same link, sends only the rest.
+        let second = phone_sending_on_link(streams, data.clone(), size);
+        let path = receive_file(
+            Route::Link(link),
+            KEY,
+            incoming(&dir, "photo.raw", size, Some(SOURCE), &store),
+        )
+        .await
+        .unwrap();
+        assert_eq!(second.await.unwrap().1.unwrap(), 100_000, "continued");
+        assert_eq!(std::fs::read(path).unwrap(), data, "the SHA-256 held");
+    }
+
+    #[tokio::test]
+    async fn a_download_on_the_link_sends_the_file_and_waits_for_the_save() {
+        let dir = temp_dir("link-fetch");
+        let data: Vec<u8> = (0..120_000u32).map(|i| (i * 5) as u8).collect();
+        let path = dir.join("a.bin");
+        std::fs::write(&path, &data).unwrap();
+        let (link, mut streams) = fake_link();
+        let phone = tokio::spawn(async move {
+            let mut stream = streams.recv().await.unwrap();
+            let mut presented = [0u8; 33];
+            stream.read_exact(&mut presented).await.unwrap();
+            assert_eq!(&presented, format!("{KEY}\n").as_bytes());
+            let mut memory = transfer::Memory::holding(&[]);
+            let received = transfer::receive(
+                &mut stream,
+                &mut memory,
+                None,
+                None,
+                MAX_FILE_BYTES,
+                Pace::DEFAULT,
+                |_, _| {},
+            )
+            .await;
+            transfer::finish(&mut stream, received.is_ok(), Pace::DEFAULT).await;
+            memory.into_bytes()
+        });
+        assert_eq!(
+            send_file_to(Route::Link(link), KEY, &path).await.unwrap(),
+            data.len() as u64
+        );
+        assert_eq!(phone.await.unwrap(), data);
+    }
+
+    #[test]
+    fn the_road_decides_how_a_request_is_answered() {
+        let (link, _streams) = fake_link();
+        let internet = pocketdesk_core::protocol::kdeconnect::TcpDeviceSender::new(
+            tokio::io::sink(),
+            "phone".into(),
+        )
+        .with_link_streams(Some(link));
+        let home = pocketdesk_core::protocol::kdeconnect::TcpDeviceSender::new(
+            tokio::io::sink(),
+            "phone".into(),
+        )
+        .with_peer(Some("192.0.2.20:40000".parse().unwrap()));
+        if crate::events::current_config().internet_files {
+            assert!(matches!(reach(&internet, None), Ok(Reach::Link(_))));
+        }
+        assert!(
+            reach(&internet, Some(5000)).is_err(),
+            "nothing dials back by the internet road"
+        );
+        assert!(matches!(reach(&home, Some(5000)), Ok(Reach::Dial(_, 5000))));
+        assert!(
+            reach(&home, None).is_err(),
+            "at home a request names its port"
+        );
+    }
+
     #[tokio::test]
     async fn a_partial_is_continued_only_for_its_own_phone_and_only_while_kept() {
         let dir = temp_dir("resume-other");
@@ -2002,8 +2222,7 @@ mod tests {
         let size = data.len() as u64;
         let (from, _) = phone_sending_part(data[..90_000].to_vec(), size).await;
         let _ = receive_file(
-            from,
-            desktop_tls(),
+            Route::dial(from, desktop_tls()),
             KEY,
             incoming(&dir, "a.bin", size, Some(SOURCE), &store),
         )
@@ -2012,7 +2231,7 @@ mod tests {
         let (from, other) = phone_sending(data.clone()).await;
         let mut theirs = incoming(&dir, "a.bin", size, Some(SOURCE), &store);
         theirs.device = "another-phone";
-        receive_file(from, desktop_tls(), KEY, theirs)
+        receive_file(Route::dial(from, desktop_tls()), KEY, theirs)
             .await
             .unwrap();
         assert_eq!(other.await.unwrap().unwrap(), 0);
@@ -2027,7 +2246,7 @@ mod tests {
         let mut not_kept = incoming(&dir, "b.bin", size, Some(SOURCE), &none);
         not_kept.limits.max_age_secs = 0;
         assert!(
-            receive_file(from, desktop_tls(), KEY, not_kept)
+            receive_file(Route::dial(from, desktop_tls()), KEY, not_kept)
                 .await
                 .is_err()
         );
@@ -2041,8 +2260,7 @@ mod tests {
         let (from, status) = phone_sending_part(vec![1; 10], 20).await;
         assert!(
             receive_file(
-                from,
-                desktop_tls(),
+                Route::dial(from, desktop_tls()),
                 KEY,
                 incoming(&dir, "x.bin", 20, None, &store)
             )
@@ -2062,8 +2280,7 @@ mod tests {
         for size in [0, MAX_FILE_BYTES + 1] {
             assert!(
                 receive_file(
-                    unused,
-                    desktop_tls(),
+                    Route::dial(unused, desktop_tls()),
                     KEY,
                     incoming(&dir, "x", size, Some(SOURCE), &store)
                 )
@@ -2110,7 +2327,9 @@ mod tests {
         std::fs::write(&path, &data).unwrap();
         let (to, got) = phone_fetching(true).await;
         assert_eq!(
-            send_file_to(to, desktop_tls(), KEY, &path).await.unwrap(),
+            send_file_to(Route::dial(to, desktop_tls()), KEY, &path)
+                .await
+                .unwrap(),
             data.len() as u64
         );
         assert_eq!(got.await.unwrap(), data);
@@ -2122,14 +2341,18 @@ mod tests {
         let path = dir.join("a.bin");
         std::fs::write(&path, b"abc").unwrap();
         let (to, _) = phone_fetching(false).await;
-        assert!(send_file_to(to, desktop_tls(), KEY, &path).await.is_err());
+        assert!(
+            send_file_to(Route::dial(to, desktop_tls()), KEY, &path)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn a_file_that_shrinks_fails_the_send() {
         let (to, got) = phone_fetching(true).await;
         // Listed at 10 bytes, holding 4 by the time it is read.
-        let sent = send_reader(to, desktop_tls(), KEY, &mut &b"abcd"[..], 10).await;
+        let sent = send_reader(Route::dial(to, desktop_tls()), KEY, &mut &b"abcd"[..], 10).await;
         assert!(sent.is_err(), "{sent:?}");
         assert!(got.await.unwrap().len() <= 4, "nothing past what there was");
     }
@@ -2149,7 +2372,11 @@ mod tests {
             let _ = socket.read_to_end(&mut got).await;
             got
         });
-        assert!(send_file_to(to, desktop_tls(), KEY, &path).await.is_err());
+        assert!(
+            send_file_to(Route::dial(to, desktop_tls()), KEY, &path)
+                .await
+                .is_err()
+        );
         assert!(impostor.await.unwrap().is_empty(), "not a byte of it");
     }
 

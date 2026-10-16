@@ -505,6 +505,21 @@ impl SettingsForm {
                     );
                 });
                 ui.end_row();
+                ui.label("Files over the internet");
+                ui.vertical(|ui| {
+                    ui.checkbox(
+                        &mut e.internet_files,
+                        "move files with a phone linked from away",
+                    );
+                    ui.label(
+                        RichText::new(
+                            "On the phone's own link, so nothing dials it back. Relays see sizes and timing, never content.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                });
+                ui.end_row();
                 ui.label("Several phones");
                 egui::ComboBox::from_id_salt("input-control")
                     .selected_text(input_control_label(e.input_control))
