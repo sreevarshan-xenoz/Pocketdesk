@@ -31,6 +31,29 @@ use iroh::{Endpoint, EndpointAddr, RelayMode};
 #[cfg(target_os = "android")]
 pub use iroh::dns::install_android_jni_context;
 
+/// The DNS resolver this side's iroh endpoints use (2a): the system's own
+/// nameservers. iroh's default also asks public resolvers (Cloudflare,
+/// Google, Quad9) once every system nameserver has failed, which would
+/// name them as third parties a lookup can reach without saying so. On
+/// Android, where the bridge installs the phone's own servers, never; on a
+/// computer, only when its system lists no nameserver at all, so one with a
+/// broken setup still resolves its relays (`docs/protocol.md`).
+pub fn dns_resolver() -> iroh::dns::DnsResolver {
+    iroh::dns::DnsResolver::builder()
+        .with_system_defaults()
+        .with_fallback_mode(dns_fallback())
+        .build()
+}
+
+/// [`dns_resolver`]'s fallback, by platform.
+pub fn dns_fallback() -> iroh::dns::FallbackMode {
+    if cfg!(target_os = "android") {
+        iroh::dns::FallbackMode::Never
+    } else {
+        iroh::dns::FallbackMode::IfSystemEmpty
+    }
+}
+
 use super::connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, SharedConnection,
     TransportFamily,
@@ -318,7 +341,7 @@ impl IrohDial {
             addr = addr.with_ip_addr(a);
         }
 
-        let mut builder = Endpoint::builder(Minimal);
+        let mut builder = Endpoint::builder(Minimal).dns_resolver(dns_resolver());
         // Device keys: dial as this device's own key, so the desktop can bind
         // the session to it; without one, iroh makes a throwaway key.
         if let Some(key) = device_key {

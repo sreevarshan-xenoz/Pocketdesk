@@ -596,6 +596,7 @@ pub async fn spawn_wan_endpoint(
         .max_concurrent_bidi_streams(128u32.into())
         .build();
     let endpoint = Endpoint::builder(Minimal)
+        .dns_resolver(pocketdesk_core::streaming::iroh_connection::dns_resolver())
         .alpns(alpns(control.is_some()))
         .relay_mode(relay_mode(&relay_urls)?)
         .secret_key(secret_key)
