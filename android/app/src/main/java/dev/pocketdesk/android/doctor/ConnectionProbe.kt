@@ -42,6 +42,19 @@ object ConnectionProbe {
     private const val UDP_TRIES = 3
     private const val ANDROID_17 = 37
 
+    /** The connections this phone shares, read from its interfaces (no permission needed). */
+    private fun sharedConnections(): List<Shared> =
+        runCatching {
+            java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp }
+                .flatMap { nic ->
+                    val sharing = ConnectionChecks.sharingOf(nic.name) ?: return@flatMap emptyList()
+                    nic.interfaceAddresses
+                        .filter { it.address is Inet4Address }
+                        .map { Shared(sharing, it.address.hostAddress ?: "", it.networkPrefixLength.toInt()) }
+                }
+        }.getOrDefault(emptyList())
+
     /** The phone's state, as the checks need it. */
     @Suppress("DEPRECATION") // allNetworks: the Wi-Fi under a VPN has no other public lookup.
     fun phoneState(ctx: Context): PhoneState {
@@ -91,6 +104,7 @@ object ConnectionProbe {
                 null
             },
             lanPrefixes = prefixes,
+            shared = sharedConnections(),
             batteryOptimized = !power.isIgnoringBatteryOptimizations(ctx.packageName),
             backgroundRestricted = Build.VERSION.SDK_INT >= 28 && activity.isBackgroundRestricted,
             dataSaver = cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED,

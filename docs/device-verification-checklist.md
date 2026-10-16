@@ -1292,6 +1292,13 @@ On the Azure VM (headless Sway, no XWayland) from the A71 over the internet, 202
 Owed:
 - [ ] "Phones may add a screen" off: refused with its reason; on Windows and Hyprland: "only Sway can for now".
 
+## 76. Hotspot and tethering in Check connection
+
+JVM-tested only (the A71's build cannot start its hotspot from adb, and a computer joining it would mean changing this box's network). Owed:
+- [ ] A computer joined to the phone's hotspot, saved under that address: "on this phone's hotspot or tethering".
+- [ ] The same computer saved under its home address: the network finding, with "This phone is sharing its connection" beside it.
+- [ ] USB tethering (`rndis0`/`ncm0`), and the interface names on other makers' phones (Pixel's hotspot may be `wlan1`, not read).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -35,6 +35,12 @@ data class Finding(
 /** The phone's own network, as the doctor needs it. */
 enum class Link { NONE, WIFI, CELLULAR, ETHERNET, OTHER }
 
+/** How this phone shares its connection with a computer (research item 15). */
+enum class Sharing { HOTSPOT, USB }
+
+/** A connection this phone shares: how, and its IPv4 prefix (address, length). */
+data class Shared(val sharing: Sharing, val address: String, val length: Int)
+
 /** The phone's state, read once per run. */
 data class PhoneState(
     val link: Link,
@@ -48,6 +54,8 @@ data class PhoneState(
     val localNetworkAllowed: Boolean? = null,
     /** The phone's IPv4 prefixes on Wi-Fi or Ethernet, as (address, length). */
     val lanPrefixes: List<Pair<String, Int>> = emptyList(),
+    /** The connections this phone shares (its hotspot, USB or Bluetooth tethering). */
+    val shared: List<Shared> = emptyList(),
     val batteryOptimized: Boolean = false,
     val backgroundRestricted: Boolean = false,
     val dataSaver: Boolean = false,
@@ -104,6 +112,24 @@ object ConnectionChecks {
         }
     }
 
+    /**
+     * How the interface [name] shares this phone's connection, if it does:
+     * the hotspot (`ap`, `swlan`, `softap`) or USB tethering (`rndis`,
+     * `usb`, `ncm`). Not Bluetooth: `bt-pan` names the client side too.
+     */
+    fun sharingOf(name: String): Sharing? {
+        val n = name.lowercase()
+        return when {
+            n.startsWith("swlan") || n.startsWith("softap") || numbered(n, "ap") -> Sharing.HOTSPOT
+            n.startsWith("rndis") || n.startsWith("ncm") || numbered(n, "usb") -> Sharing.USB
+            else -> null
+        }
+    }
+
+    /** Whether [name] is [prefix] and a number, as `ap0` or `usb1`. */
+    private fun numbered(name: String, prefix: String): Boolean =
+        name.startsWith(prefix) && name.length > prefix.length && name.drop(prefix.length).all(Char::isDigit)
+
     /** Whether IPv4 [address] is inside one of [prefixes]. */
     fun onSameNetwork(address: String, prefixes: List<Pair<String, Int>>): Boolean {
         val target = parseV4(address) ?: return false
@@ -132,6 +158,7 @@ object ConnectionChecks {
         }
         vpn(state, kind, probes)?.let { out += it }
         out += sameNetwork(state, address, kind, probes.tcp)
+        sharing(state, address, kind, probes.tcp)?.let { out += it }
         out += answers(state, probes, canWake)
         out += identity(probes.identity)
         out += videoPort(probes)
@@ -176,6 +203,10 @@ object ConnectionChecks {
         kind == AddressKind.HOSTNAME -> Finding("saved_by_name", Status.INFO, R.string.doctor_saved_by_name)
         kind != AddressKind.PRIVATE_V4 -> Finding("not_lan_address", Status.INFO, R.string.doctor_not_lan_address)
         onSameNetwork(address, state.lanPrefixes) -> Finding("same_network", Status.GOOD, R.string.doctor_same_network)
+        // The computer joined this phone's hotspot or is tethered to it:
+        // good once it answers there.
+        onSameNetwork(address, state.shared.map { it.address to it.length }) ->
+            Finding("on_phone_hotspot", if (tcp == Tcp.OK) Status.GOOD else Status.INFO, R.string.doctor_on_phone_hotspot)
         // Reached anyway: a routed subnet, or a VPN home. Nothing to fix.
         tcp == Tcp.OK -> Finding("reached_through_router", Status.INFO, R.string.doctor_reached_routed)
         state.link == Link.CELLULAR -> Finding("on_mobile_home_address", Status.INFO, R.string.doctor_mobile_home_address)
@@ -185,6 +216,21 @@ object ConnectionChecks {
             FixAction.OPEN_WIFI_SETTINGS,
         )
     }
+
+    /**
+     * A note beside the network finding while this phone shares its
+     * connection and the computer, saved under another network's address,
+     * did not answer: joined to the phone, it has another address there.
+     */
+    private fun sharing(state: PhoneState, address: String, kind: AddressKind, tcp: Tcp): Finding? =
+        if (state.shared.isNotEmpty() && kind == AddressKind.PRIVATE_V4 && tcp != Tcp.OK &&
+            !onSameNetwork(address, state.lanPrefixes) &&
+            !onSameNetwork(address, state.shared.map { it.address to it.length })
+        ) {
+            Finding("phone_sharing", Status.INFO, R.string.doctor_phone_sharing, R.string.doctor_phone_sharing_fix)
+        } else {
+            null
+        }
 
     private fun answers(state: PhoneState, probes: Probes, canWake: Boolean): Finding = when (probes.tcp) {
         Tcp.OK -> Finding("answers", Status.GOOD, R.string.doctor_answers)
