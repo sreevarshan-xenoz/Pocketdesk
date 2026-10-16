@@ -7,6 +7,7 @@ use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
 use pocketdesk_core::local::events::{EventsDetail, KINDS, hookable};
+use pocketdesk_core::local::home_assistant as ha;
 use pocketdesk_core::local::tasks::{
     DEFAULT_DEADLINE_SECS, MAX_DEADLINE_SECS, TaskSpec, name_problem,
 };
@@ -28,6 +29,9 @@ pub struct SettingsForm {
     /// The adapter a phone on this network would wake this computer
     /// through, read when the tab opens (N6).
     wake: Option<WakeFacts>,
+    /// The Home Assistant bridge's status as last read, and when (it is
+    /// read again every 2 s, not every frame).
+    home_assistant: Option<(std::time::Instant, Option<ha::Status>)>,
 }
 
 impl SettingsForm {
@@ -40,6 +44,7 @@ impl SettingsForm {
             edited: config,
             restart_needed: false,
             wake: pocketdesk_core::local::wake::wake_facts(None),
+            home_assistant: None,
         }
     }
 
@@ -97,7 +102,29 @@ impl SettingsForm {
             problems.push(format!("Hooks: {problem}."));
         }
         problems.extend(task_problems(&self.edited.tasks));
+        if self.edited.home_assistant
+            && let Err(why) = ha::parse_broker(&self.edited.mqtt_broker)
+        {
+            problems.push(format!("Home Assistant: {why}."));
+        }
         problems
+    }
+
+    /// The bridge's status, read again when 2 s old.
+    fn home_assistant_status(&mut self) -> Option<ha::Status> {
+        let stale = self
+            .home_assistant
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() >= std::time::Duration::from_secs(2));
+        if stale {
+            // A file a stopped server left says nothing about now.
+            let status = pocketdesk_core::local::paths::state_dir()
+                .ok()
+                .filter(|dir| pocketdesk_core::local::server::is_running(dir))
+                .and_then(|dir| ha::read_status(&dir));
+            self.home_assistant = Some((std::time::Instant::now(), status));
+        }
+        self.home_assistant.as_ref().and_then(|(_, s)| s.clone())
     }
 
     /// Save the edit to `path` if it is valid.
@@ -121,6 +148,11 @@ impl SettingsForm {
 
     /// Draw the form. Returns true when the user asked to save.
     pub fn show(&mut self, ui: &mut egui::Ui) -> bool {
+        let home_assistant = if self.saved.home_assistant {
+            self.home_assistant_status()
+        } else {
+            None
+        };
         let e = &mut self.edited;
         egui::Grid::new("settings")
             .num_columns(2)
@@ -347,6 +379,52 @@ impl SettingsForm {
                     );
                 });
                 ui.end_row();
+                ui.label("Home Assistant");
+                ui.vertical(|ui| {
+                    ui.checkbox(
+                        &mut e.home_assistant,
+                        "publish this computer, its phones and its tasks through an MQTT broker",
+                    );
+                    if e.home_assistant {
+                        egui::Grid::new("home_assistant").show(ui, |ui| {
+                            ui.label("Broker");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut e.mqtt_broker)
+                                    .desired_width(240.0)
+                                    .hint_text("mqtt://homeassistant.local:1883"),
+                            );
+                            ui.end_row();
+                            ui.label("User");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut e.mqtt_user)
+                                    .desired_width(160.0)
+                                    .hint_text("none"),
+                            );
+                            ui.end_row();
+                            ui.label("Password");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut e.mqtt_password)
+                                    .password(true)
+                                    .desired_width(160.0),
+                            );
+                            ui.end_row();
+                        });
+                    }
+                    let note = match (&home_assistant, self.saved.home_assistant) {
+                        (Some(status), true) if status.connected => match &status.error {
+                            Some(why) => format!("Connected to the broker, but {why}."),
+                            None => "Connected to the broker.".to_string(),
+                        },
+                        (Some(status), true) => format!(
+                            "Not connected: {}",
+                            status.error.as_deref().unwrap_or("trying")
+                        ),
+                        (None, true) => "Not connected yet (is the server running?)".to_string(),
+                        _ => "Battery, connection, sessions and an Activity entity appear in Home Assistant by MQTT discovery, and a button per task (one that asks first still asks here). No notification, text, file name or link goes to the broker; the password is kept in config.toml, readable only by you.".to_string(),
+                    };
+                    ui.label(RichText::new(note).small().weak());
+                });
+                ui.end_row();
                 ui.label("Messages history");
                 ui.add(
                     egui::DragValue::new(&mut e.sms_keep)
@@ -534,6 +612,11 @@ fn same_but_events(a: &Config, b: &Config) -> bool {
         hooks: Default::default(),
         // Tasks are read at each start, as events are.
         tasks: Vec::new(),
+        // The Home Assistant bridge reads its settings every 2 s.
+        home_assistant: false,
+        mqtt_broker: String::new(),
+        mqtt_user: String::new(),
+        mqtt_password: String::new(),
         ..c.clone()
     };
     strip(a) == strip(b)
@@ -631,6 +714,21 @@ mod tests {
         form.relay_urls_text = "relay.example.org:3340".into();
         form.apply_text_fields();
         assert!(form.problems().iter().any(|p| p.starts_with("Relay:")));
+    }
+
+    #[test]
+    fn home_assistant_needs_a_broker_and_applies_without_a_restart() {
+        let mut form = SettingsForm::from_config(Config::default());
+        form.edited.home_assistant = true;
+        assert!(
+            form.problems().iter().any(|p| p.contains("Home Assistant")),
+            "no broker"
+        );
+        form.edited.mqtt_broker = "mqtts://broker.example.org".into();
+        assert!(form.problems().iter().any(|p| p.contains("TLS")));
+        form.edited.mqtt_broker = "mqtt://192.0.2.5".into();
+        assert!(form.problems().is_empty(), "{:?}", form.problems());
+        assert!(same_but_events(&Config::default(), &form.edited));
     }
 
     #[test]

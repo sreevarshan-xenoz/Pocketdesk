@@ -52,7 +52,7 @@ fn host_device_id() -> String {
     id
 }
 
-fn host_device_name() -> String {
+pub(crate) fn host_device_name() -> String {
     // Windows sets COMPUTERNAME for every process. HOSTNAME is a shell
     // variable bash does not export, so a server started from a script or a
     // systemd unit never sees it: on Linux the kernel's name is read too.

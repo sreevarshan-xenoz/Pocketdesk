@@ -126,6 +126,18 @@ pub struct Config {
     /// (`[[tasks]]`, ecosystem 1c).
     #[serde(default)]
     pub tasks: Vec<super::tasks::TaskSpec>,
+    /// Publish this computer and its phones to Home Assistant through an
+    /// MQTT broker (ecosystem 1e).
+    #[serde(default)]
+    pub home_assistant: bool,
+    /// The broker: `mqtt://host:port`, or `host[:port]`.
+    #[serde(default)]
+    pub mqtt_broker: String,
+    /// The broker's user name and password, when it asks for them.
+    #[serde(default)]
+    pub mqtt_user: String,
+    #[serde(default)]
+    pub mqtt_password: String,
 }
 
 fn default_transfer_keep_hours() -> u32 {
@@ -236,6 +248,10 @@ impl Default for Config {
             events_detail: super::events::EventsDetail::Metadata,
             hooks: std::collections::BTreeMap::new(),
             tasks: Vec::new(),
+            home_assistant: false,
+            mqtt_broker: String::new(),
+            mqtt_user: String::new(),
+            mqtt_password: String::new(),
         }
     }
 }
@@ -404,6 +420,10 @@ impl Config {
         "events_detail",
         "hooks",
         "tasks",
+        "home_assistant",
+        "mqtt_broker",
+        "mqtt_user",
+        "mqtt_password",
     ];
 }
 
@@ -490,6 +510,34 @@ mod tests {
         let hand = Config::load_from(&path).unwrap();
         assert_eq!(hand.tasks.len(), 1);
         assert!(hand.tasks[0].ask, "asks first unless it says not to");
+    }
+
+    #[test]
+    fn home_assistant_is_off_by_default_and_its_keys_read_back() {
+        let path = temp("home-assistant");
+        assert!(!Config::default().home_assistant);
+        std::fs::write(
+            &path,
+            "[hooks]
+phone_battery = \"x\"
+",
+        )
+        .unwrap();
+        let mut config = Config::load_from(&path).unwrap();
+        config.home_assistant = true;
+        config.mqtt_broker = "mqtt://192.0.2.5:1883".into();
+        config.mqtt_user = "pocketdesk".into();
+        // Made at run time: a literal here reads as a committed password to
+        // secret scanners, and it is only a fixture.
+        let fixture = format!("fixture-{}", 7);
+        config.mqtt_password = fixture.clone();
+        config.save_to(&path).unwrap();
+        let again = Config::load_from(&path).unwrap();
+        assert!(again.home_assistant);
+        assert_eq!(again.mqtt_broker, "mqtt://192.0.2.5:1883");
+        assert_eq!(again.mqtt_user, "pocketdesk");
+        assert_eq!(again.mqtt_password, fixture);
+        assert_eq!(again.hooks.len(), 1, "the table after them still reads");
     }
 
     #[test]

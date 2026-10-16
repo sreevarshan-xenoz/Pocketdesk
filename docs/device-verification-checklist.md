@@ -1368,6 +1368,21 @@ Owed:
 - [ ] The extension itself loaded in Brave or Chrome and in Firefox (unpacked), and its menus and notifications.
 - [ ] Linux registration (`~/.config/<browser>/NativeMessagingHosts`, `~/.mozilla/native-messaging-hosts`), images waiting in `~/.cache/pocketdesk-browser`, and the desktop Settings switch.
 
+## 82. Home Assistant over MQTT (ecosystem 1e)
+
+This Windows box and the A71, debug server, 2026-10-16, a local broker (amqtt 0.12 on 127.0.0.1) and a subscriber on `homeassistant/#` and `pocketdesk/#`:
+- [x] On connect: `availability` `online`, then the discovery configs (the server, sessions, cast, Activity, each paired phone's connection, the A71's battery and charging from its last report, a button per task) and the states; `home_assistant.json` says connected.
+- [x] The A71 connecting: its `connected` and `sessions` went to `ON` and `1` within 2 s, with `session_started` and `phone_linked` on the event topic (kind and phone only).
+- [x] A task button (`ask = false`): ran, `task_started` / `task_finished` logged with the device `home-assistant`; an ask-first one held in `task_requests.json` for the owner; a button for no task did nothing.
+- [x] The switch off in config.toml: `offline` published within 2 s and the status file removed; on again, connected again.
+- [x] The broker stopped: the status said why within a second; started again, the bridge was back within 5 s.
+- [x] Found and fixed: a `live_sessions.json` left by an earlier run was published as live sessions for 2 s.
+- [x] After the review fixes, the same broker reached as `localhost`: connected after 2.1 s (a connect the old 2 s tick would have cut short); a planted retained config and state for a phone that is not paired were cleared on connect; a planted retained `PRESS` started nothing, a live one started the task once, and an empty retained message (clearing it) started nothing.
+
+Owed:
+- [ ] Home Assistant itself (its Mosquitto add-on): the entities on its device page, the Activity entity's history, a button press from its UI.
+- [ ] The desktop Settings section on screen (the switch, the fields, the status line), a broker with a password, and Linux.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

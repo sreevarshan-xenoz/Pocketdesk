@@ -89,3 +89,10 @@ video_quality = "balanced"
 # program to provide a microphone; apps then record from its other end.
 # Default "CABLE Input" (a stock VB-CABLE install).
 # mic_relay_device = "CABLE Input"
+
+# Home Assistant over MQTT (off by default): this computer, its phones and
+# its tasks appear in Home Assistant by MQTT discovery. Plain MQTT only.
+# home_assistant = true
+# mqtt_broker = "mqtt://homeassistant.local:1883"
+# mqtt_user = "pocketdesk"
+# mqtt_password = ""   # the broker's password, when it asks for one
