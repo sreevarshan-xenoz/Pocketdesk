@@ -58,6 +58,8 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 
 # UUID for persistent device ID
 uuid.workspace = true
+# Images sent from the browser (ecosystem 1d); the version core already uses.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 dashmap = "6.1.0"
 xcap.workspace = true
 

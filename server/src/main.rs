@@ -10,6 +10,12 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[tokio::main]
 async fn main() -> Result<()> {
     platform::init_process();
+    // Started by a browser as the extension's host (ecosystem 1d): its own
+    // arguments, which are no command of ours.
+    let plain: Vec<String> = std::env::args().collect();
+    if browser_host::launched_by_browser(&plain) {
+        std::process::exit(browser_host::run());
+    }
     // With --json, even a usage error is JSON (exit 2, like clap's own).
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     let cli = match cli::Cli::try_parse_from(&args) {
@@ -119,6 +125,13 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
         cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
         cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
         cli::Commands::Events { since_start, json } => local_api::watch(since_start, json),
+        cli::Commands::BrowserHost { install, remove } => {
+            if install || remove {
+                browser_host::run_install(remove)
+            } else {
+                std::process::exit(browser_host::run())
+            }
+        }
         cli::Commands::Sessions { count, json } => session_telemetry::print_sessions(count, json),
         cli::Commands::Bench {
             target,
