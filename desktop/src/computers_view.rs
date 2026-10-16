@@ -29,7 +29,10 @@ pub fn link_words(computer: &PeerComputer) -> String {
     match computer.link.as_str() {
         "linked" => "linked".to_string(),
         "connecting" | "" => "connecting…".to_string(),
-        "refused" => "refused: it no longer has this computer paired".to_string(),
+        "refused" => {
+            "refused: it did not admit this computer (removed there, or older); pair again"
+                .to_string()
+        }
         other => other
             .strip_prefix("away: ")
             .map_or_else(|| other.to_string(), |why| format!("not linked ({why})")),

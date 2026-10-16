@@ -192,13 +192,12 @@ pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<Stri
     match chosen {
         Some(id) if targets.iter().any(|t| t == id) => Ok(id.to_string()),
         Some(_) => Err(
-            "The phone you chose is no longer connected. Choose a phone, then send again."
+            "The phone or computer you chose is no longer connected. Choose one, then send again."
                 .to_string(),
         ),
-        None => targets
-            .first()
-            .cloned()
-            .ok_or_else(|| "No phone is connected where files can reach it.".to_string()),
+        None => targets.first().cloned().ok_or_else(|| {
+            "No phone or computer is connected where files can reach it.".to_string()
+        }),
     }
 }
 

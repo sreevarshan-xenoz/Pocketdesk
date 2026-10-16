@@ -351,7 +351,8 @@ pub fn send_in(
     let device_id = match resolve_phone(&ids, query) {
         Ok(id) => id,
         Err(reason) => match resolve_computer(&computers, query) {
-            Some(id) => id,
+            Some(Ok(id)) => id,
+            Some(Err(ambiguous)) => return refused(exit::BAD_ARGUMENTS, ambiguous),
             None => return refused(exit::BAD_ARGUMENTS, reason),
         },
     };
@@ -722,27 +723,44 @@ pub fn resolve_phone(ids: &[String], query: &str) -> Result<String, String> {
     }
 }
 
-/// The paired computer (2h) `query` names: its id, 6 or more of its first
-/// characters (one computer's only), or its name, in any case.
+/// The paired computer (2h) `query` names: its id, its name in any case,
+/// or 6 or more of its id's first characters; each of one computer only.
+/// `None` when none is named, an error when more than one is.
 fn resolve_computer(
     computers: &[pocketdesk_core::local::computers::PeerComputer],
     query: &str,
-) -> Option<String> {
+) -> Option<Result<String, String>> {
     let query = query.trim();
-    if let Some(c) = computers
-        .iter()
-        .find(|c| c.device_id == query || c.name.eq_ignore_ascii_case(query))
-    {
-        return Some(c.device_id.clone());
+    if let Some(c) = computers.iter().find(|c| c.device_id == query) {
+        return Some(Ok(c.device_id.clone()));
     }
-    let by_prefix: Vec<_> = computers
-        .iter()
-        .filter(|c| query.chars().count() >= 6 && c.device_id.starts_with(query))
-        .collect();
-    match by_prefix.as_slice() {
-        [one] => Some(one.device_id.clone()),
-        _ => None,
-    }
+    let one_of =
+        |found: Vec<&pocketdesk_core::local::computers::PeerComputer>, by: &str| match found
+            .as_slice()
+        {
+            [] => None,
+            [one] => Some(Ok(one.device_id.clone())),
+            _ => Some(Err(format!(
+                "{} paired computers {by} {query:?}: give its id",
+                found.len()
+            ))),
+        };
+    one_of(
+        computers
+            .iter()
+            .filter(|c| c.name.eq_ignore_ascii_case(query))
+            .collect(),
+        "are named",
+    )
+    .or_else(|| {
+        one_of(
+            computers
+                .iter()
+                .filter(|c| query.chars().count() >= 6 && c.device_id.starts_with(query))
+                .collect(),
+            "have ids starting",
+        )
+    })
 }
 
 /// `pocketdesk devices`.
@@ -1500,22 +1518,24 @@ mod tests {
         let computers = [
             computer("a1b2c3d4e5", "Desk"),
             computer("a1b2c3ffff", "Laptop"),
+            computer("ffff000011", "Laptop"),
         ];
-        assert_eq!(
-            resolve_computer(&computers, "desk").as_deref(),
-            Some("a1b2c3d4e5")
+        let id = |q: &str| resolve_computer(&computers, q);
+        assert_eq!(id("desk"), Some(Ok("a1b2c3d4e5".to_string())));
+        assert_eq!(id("a1b2c3ffff"), Some(Ok("a1b2c3ffff".to_string())));
+        assert_eq!(id("a1b2c3d4"), Some(Ok("a1b2c3d4e5".to_string())));
+        assert!(
+            id("a1b2c3")
+                .unwrap()
+                .unwrap_err()
+                .contains("2 paired computers")
         );
-        assert_eq!(
-            resolve_computer(&computers, "a1b2c3ffff").as_deref(),
-            Some("a1b2c3ffff")
+        assert!(
+            id("laptop").unwrap().unwrap_err().contains("are named"),
+            "never the first of two"
         );
-        assert_eq!(
-            resolve_computer(&computers, "a1b2c3d4").as_deref(),
-            Some("a1b2c3d4e5")
-        );
-        assert_eq!(resolve_computer(&computers, "a1b2c3"), None, "two start so");
-        assert_eq!(resolve_computer(&computers, "a1b2"), None, "too short");
-        assert_eq!(resolve_computer(&computers, "Printer"), None);
+        assert_eq!(id("a1b2"), None, "too short");
+        assert_eq!(id("Printer"), None);
     }
 
     #[test]

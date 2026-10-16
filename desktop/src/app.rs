@@ -1084,6 +1084,16 @@ impl PocketdeskApp {
             }
         });
         if let Some(url) = link {
+            // A link opens on a phone; another computer takes files (2h).
+            if self
+                .snapshot
+                .linked_computers
+                .iter()
+                .any(|(id, _)| *id == device)
+            {
+                self.notice = Some("Links go to phones: choose a phone to send it to.".to_string());
+                return;
+            }
             self.notice = Some(
                 match model::queue_link(&self.state_dir, &device, &url, now_unix()) {
                     Ok(said) => {
