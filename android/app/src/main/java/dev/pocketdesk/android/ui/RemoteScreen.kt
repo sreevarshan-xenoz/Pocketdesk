@@ -693,6 +693,7 @@ fun RemoteScreen(
     // everything it reads must be a live reference, not the value captured
     // at registration.
     val pipNow = rememberUpdatedState(inPictureInPicture)
+    val statusNow = rememberUpdatedState(streamStatus)
     DisposableEffect(address) {
         val handler = Handler(Looper.getMainLooper())
         val callback = object : ConnectivityManager.NetworkCallback() {
@@ -705,12 +706,20 @@ fun RemoteScreen(
                         SystemClock.elapsedRealtime() - lastRebindMs > 3_000
                     ) {
                         lastRebindMs = SystemClock.elapsedRealtime()
-                        android.util.Log.i(
-                            "RemoteScreen",
-                            "default network changed — rebinding stream",
-                        )
                         restartReconnectWindow()
-                        retryStream()
+                        // A connect already under way (the reconnect the
+                        // network's return set off) is left to finish:
+                        // another would reach the computer as a second
+                        // session, captured and encoded until it closed.
+                        if (statusNow.value is StreamStatus.Connecting) {
+                            android.util.Log.i("RemoteScreen", "default network changed while connecting")
+                        } else {
+                            android.util.Log.i(
+                                "RemoteScreen",
+                                "default network changed — rebinding stream",
+                            )
+                            retryStream()
+                        }
                     }
                 }
             }
