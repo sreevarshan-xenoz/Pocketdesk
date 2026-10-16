@@ -36,7 +36,7 @@ enigo.workspace = true
 quinn.workspace = true
 # WAN (iroh) streaming endpoint — R1 stage 3
 # unstable-net-report: the NAT and UDP facts the Diagnostics tab shows (N1).
-# Pinned to 1.2.x: unstable-net-report is outside semver.
+# Pinned to 1.3.x: unstable-net-report is outside semver.
 iroh = { version = "~1.3", features = ["unstable-net-report"] }
 # N2: run your own relay (`pocketdesk relay`).
 iroh-relay = { version = "~1.3", features = ["server"] }

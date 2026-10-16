@@ -36,8 +36,10 @@ pub use iroh::dns::install_android_jni_context;
 /// Google, Quad9) once every system nameserver has failed, which would
 /// name them as third parties a lookup can reach without saying so. On
 /// Android, where the bridge installs the phone's own servers, never; on a
-/// computer, only when its system lists no nameserver at all, so one with a
-/// broken setup still resolves its relays (`docs/protocol.md`).
+/// computer, only when its system configuration yields no nameserver
+/// (none listed, or none readable). A computer whose listed nameservers
+/// fail is no longer rescued by the public ones, as iroh's default did
+/// (`docs/protocol.md`).
 pub fn dns_resolver() -> iroh::dns::DnsResolver {
     iroh::dns::DnsResolver::builder()
         .with_system_defaults()

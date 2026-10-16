@@ -87,9 +87,9 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeInit(
 /// Give iroh's resolver the JVM and the application context, once per
 /// process. Through them it reads the network's DNS servers
 /// (`LinkProperties.getDnsServers`); without them it has no system
-/// configuration and sends every relay lookup to its public fallback
-/// resolvers (Cloudflare, Google, Quad9), which also fails on networks that
-/// allow only their own DNS. The global reference is kept for the process's
+/// configuration, and with the fallback off on Android (2a) every relay
+/// lookup then fails, so the internet road is lost. The global reference is
+/// kept for the process's
 /// life, as the context must stay valid until it exits.
 #[cfg(target_os = "android")]
 fn install_android_context(env: &JNIEnv<'_>, context: &JObject<'_>) {
