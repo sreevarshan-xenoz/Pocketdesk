@@ -89,13 +89,26 @@ fn run_hooks(rx: &Mutex<Receiver<Job>>) {
         let Ok((kind, command, json)) = job else {
             return;
         };
-        match run_hook(&command, &json, HOOK_DEADLINE) {
-            Ok(HookEnd::Exited(code)) => tracing::info!(kind, ?code, "Hook ran"),
+        let (code, timed_out) = match run_hook(&command, &json, HOOK_DEADLINE) {
+            Ok(HookEnd::Exited(code)) => {
+                tracing::info!(kind, ?code, "Hook ran");
+                (code, false)
+            }
             Ok(HookEnd::TimedOut) => {
                 tracing::warn!(kind, "Hook killed after {}s", HOOK_DEADLINE.as_secs());
+                (None, true)
             }
-            Err(e) => tracing::warn!(kind, error = %e, "Hook could not run"),
-        }
+            Err(e) => {
+                tracing::warn!(kind, error = %e, "Hook could not run");
+                (None, false)
+            }
+        };
+        emit(
+            "hook_ran",
+            None,
+            serde_json::json!({ "hook": kind, "code": code, "timed_out": timed_out }),
+            serde_json::json!({}),
+        );
     }
 }
 
@@ -138,7 +151,11 @@ pub(crate) fn emit_to(
     content: Value,
     at: u64,
 ) -> Option<Event> {
-    let hook = config.hooks.get(kind).filter(|c| !c.trim().is_empty());
+    // A hook's own report runs no hook: a `hook_ran` hook would loop.
+    let hook = config
+        .hooks
+        .get(kind)
+        .filter(|c| kind != "hook_ran" && !c.trim().is_empty());
     if !config.events && hook.is_none() {
         return None;
     }
@@ -452,6 +469,27 @@ mod tests {
             assert!(Instant::now() < deadline, "not every hook ran");
             std::thread::sleep(Duration::from_millis(50));
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hooks_own_report_runs_no_hook() {
+        let dir = temp("hook-ran");
+        let out = dir.join("never.txt");
+        let mut config = Config::default();
+        config.hooks.insert("hook_ran".into(), copy_stdin_to(&out));
+        let event = emit_to(
+            &dir,
+            &config,
+            "hook_ran",
+            None,
+            json!({"hook": "x"}),
+            json!({}),
+            1,
+        );
+        assert!(event.is_some(), "logged");
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(!out.exists(), "a hook_ran hook would loop");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

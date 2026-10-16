@@ -26,7 +26,17 @@ pub const KINDS: &[&str] = &[
     "text_received",
     "file_received",
     "link_received",
+    "session_refused",
+    "phone_paired",
+    "phone_unpaired",
+    "hook_ran",
 ];
+
+/// Whether a hook may be set for `kind`: any event but `hook_ran`, whose
+/// hook would run at every hook's end, its own included.
+pub fn hookable(kind: &str) -> bool {
+    KINDS.contains(&kind) && kind != "hook_ran"
+}
 
 /// The log moves to `events.jsonl.1` at this size.
 pub const MAX_LOG: u64 = 1024 * 1024;
@@ -127,6 +137,18 @@ pub fn append(state_dir: &Path, event: &Event) -> io::Result<()> {
     }
     let mut file = std::fs::OpenOptions::new().append(true).open(&path)?;
     file.write_all(line.as_bytes())
+}
+
+/// The last `max` events in the log, oldest first: the moved log's, then
+/// the current one's.
+pub fn history(state_dir: &Path, max: usize) -> Vec<Event> {
+    let mut events = Vec::new();
+    for path in [rotated_path(state_dir), log_path(state_dir)] {
+        let (mut offset, mut partial) = (0, String::new());
+        events.extend(read_lines(&path, &mut offset, &mut partial));
+    }
+    let skip = events.len().saturating_sub(max);
+    events.split_off(skip)
 }
 
 /// Reads the events appended since it last looked, across a rotation.
@@ -351,6 +373,34 @@ mod tests {
             append(&dir, &big).unwrap();
         }
         assert_eq!(tail.poll().len(), per_log / 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_history_is_both_logs_newest_last_and_capped() {
+        let dir = temp("history");
+        let at = |n: u64| {
+            Event::new(
+                "session_ended",
+                None,
+                n,
+                json!({"session_id": n}),
+                json!({}),
+                EventsDetail::Metadata,
+            )
+        };
+        std::fs::write(
+            rotated_path(&dir),
+            at(1).to_line() + "\n" + &at(2).to_line() + "\n",
+        )
+        .unwrap();
+        append(&dir, &at(3)).unwrap();
+        append(&dir, &at(4)).unwrap();
+        let all: Vec<u64> = history(&dir, 10).iter().map(|e| e.at).collect();
+        assert_eq!(all, vec![1, 2, 3, 4]);
+        let last: Vec<u64> = history(&dir, 3).iter().map(|e| e.at).collect();
+        assert_eq!(last, vec![2, 3, 4]);
+        assert!(history(&temp("history-empty"), 5).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

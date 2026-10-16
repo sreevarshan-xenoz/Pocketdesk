@@ -43,6 +43,16 @@ pub fn init() {
         if let Err(e) = record(report) {
             tracing::warn!("Failed to record session telemetry: {e}");
         }
+        // Every refused session leaves a record: not paired, denied by the
+        // owner, or without the permission it needs (ecosystem 1b).
+        if report.outcome == pocketdesk_core::streaming::SessionOutcome::Rejected {
+            crate::events::emit(
+                "session_refused",
+                report.device_id.as_deref(),
+                serde_json::json!({}),
+                serde_json::json!({}),
+            );
+        }
     });
 }
 

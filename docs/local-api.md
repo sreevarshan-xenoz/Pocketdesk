@@ -102,8 +102,11 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `phone_battery_low` | `charge` | — |
 | `notification` | `app` | `title`, `text` |
 | `text_received` | — | `from`, `body` |
-| `file_received` | `size`; or `folder: true`, once, as a folder starts arriving | `name` (`folder/` for a folder) |
+| `file_received` | `size`; or `folder: true`, once, as a folder starts arriving; `key`, the first 16 hex digits of the SHA-256 of where it was saved (its `path` in `received --json`) | `name` (`folder/` for a folder) |
 | `link_received` | `host` | `url` |
+| `session_refused` | — (not paired, denied by you, or without the permission it needs) | — |
+| `phone_paired`, `phone_unpaired` | — (however it was done: the PIN, the desktop app, `pocketdesk unpair`) | — |
+| `hook_ran` | `hook` (the event it ran for), `code` (its exit code, or null when it could not start or a signal ended it), `timed_out`. It cannot have a hook of its own (that would run at every hook's end) | — |
 
 By default an event says who, when and how much, never what. Settings "Details in events" (`events_detail = "full"`) adds the content. With "Event log" off (`events = false`) nothing is written, and `events` shows nothing. New kinds and fields may be added within `"api": 1`.
 

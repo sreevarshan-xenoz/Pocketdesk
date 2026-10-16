@@ -33,6 +33,19 @@ struct ReceivedList {
 }
 
 /// The received files, oldest first. A missing or unreadable list is empty.
+/// A key for the file or folder saved at `path`, as an event names it
+/// (ecosystem 1b): the first 16 hex digits of the SHA-256 of the path, so
+/// the Activity Center finds its row here without the event holding the
+/// path itself.
+pub fn path_key(path: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(path.as_bytes())
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 pub fn read(state_dir: &Path) -> Vec<ReceivedFile> {
     std::fs::read_to_string(state_dir.join(RECEIVED_FILE))
         .ok()
@@ -148,5 +161,13 @@ mod tests {
         assert!(read(&dir).is_empty());
         record(&dir, file(1)).unwrap();
         assert_eq!(read(&dir), [file(1)]);
+    }
+
+    #[test]
+    fn a_paths_key_is_short_and_its_own() {
+        let a = path_key("/home/u/Downloads/a.txt");
+        assert_eq!(a.len(), 16);
+        assert_eq!(a, path_key("/home/u/Downloads/a.txt"));
+        assert_ne!(a, path_key("/home/u/Downloads/b.txt"));
     }
 }

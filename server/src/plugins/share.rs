@@ -980,7 +980,7 @@ fn received_in(
             crate::events::emit(
                 "file_received",
                 Some(from),
-                serde_json::json!({ "size": size }),
+                serde_json::json!({ "size": size, "key": received::path_key(&path.display().to_string()) }),
                 serde_json::json!({ "name": name }),
             );
             Some((
@@ -1004,7 +1004,7 @@ fn received_in(
                 crate::events::emit(
                     "file_received",
                     Some(from),
-                    serde_json::json!({ "folder": true }),
+                    serde_json::json!({ "folder": true, "key": received::path_key(&top.display().to_string()) }),
                     serde_json::json!({ "name": format!("{folder}/") }),
                 );
             }
