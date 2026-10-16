@@ -106,8 +106,12 @@ impl SettingsForm {
         self.edited
             .save_to(path)
             .map_err(|e: ConfigError| e.to_string())?;
+        // The server reads the event log's settings and hooks again at the
+        // next event; only the others wait for a restart.
+        if !same_but_events(&self.saved, &self.edited) {
+            self.restart_needed = true;
+        }
         self.saved = self.edited.clone();
-        self.restart_needed = true;
         Ok(())
     }
 
@@ -271,6 +275,20 @@ impl SettingsForm {
                         .small()
                         .weak(),
                     );
+                    let unknown = unknown_hook_kinds(&parse_hooks(&self.hooks_text).0)
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>();
+                    if !unknown.is_empty() {
+                        ui.label(
+                            RichText::new(format!(
+                                "No such event here, so never run: {}.",
+                                unknown.join(", ")
+                            ))
+                            .small()
+                            .color(Color32::from_rgb(0xc0, 0x80, 0x00)),
+                        );
+                    }
                 });
                 ui.end_row();
                 ui.label("Messages history");
@@ -425,6 +443,27 @@ fn dht_label(mode: DhtPublish) -> &'static str {
     }
 }
 
+/// The hooks for events this version does not have: kept (a newer server
+/// may), but said, as a mistyped name would never run.
+fn unknown_hook_kinds(hooks: &std::collections::BTreeMap<String, String>) -> Vec<&str> {
+    hooks
+        .keys()
+        .map(String::as_str)
+        .filter(|kind| !KINDS.contains(kind))
+        .collect()
+}
+
+/// Whether `a` and `b` differ only in what the server reads at each event.
+fn same_but_events(a: &Config, b: &Config) -> bool {
+    let strip = |c: &Config| Config {
+        events: true,
+        events_detail: EventsDetail::Metadata,
+        hooks: Default::default(),
+        ..c.clone()
+    };
+    strip(a) == strip(b)
+}
+
 /// `[hooks]` as the text box shows it.
 fn hooks_text(hooks: &std::collections::BTreeMap<String, String>) -> String {
     hooks
@@ -444,8 +483,8 @@ fn parse_hooks(text: &str) -> (std::collections::BTreeMap<String, String>, Vec<S
             continue;
         };
         let (kind, command) = (kind.trim(), command.trim());
-        if !KINDS.contains(&kind) {
-            problems.push(format!("there is no event \"{kind}\""));
+        if kind.is_empty() {
+            problems.push(format!("\"{line}\" names no event"));
         } else if command.is_empty() {
             problems.push(format!("{kind} has no command"));
         } else if hooks
@@ -478,8 +517,16 @@ mod tests {
         assert_eq!(form.edited.hooks.len(), 2);
         let back = SettingsForm::from_config(form.edited.clone());
         assert_eq!(parse_hooks(&back.hooks_text).0, form.edited.hooks);
+        // An event this version does not know is kept, and said.
+        form.hooks_text = "a_newer_event = echo".into();
+        assert!(form.problems().is_empty());
+        form.apply_text_fields();
+        assert_eq!(
+            unknown_hook_kinds(&form.edited.hooks),
+            vec!["a_newer_event"]
+        );
         for bad in [
-            "no_such = x",
+            "= x",
             "file_received",
             "file_received =",
             "link_received = a\nlink_received = b",
@@ -526,6 +573,23 @@ mod tests {
             problems.iter().any(|p| p.contains("different")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn the_event_settings_apply_without_a_restart() {
+        let dir = std::env::temp_dir().join(format!("pd-settings-ev-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let mut form = SettingsForm::from_config(Config::default());
+        form.hooks_text = "file_received = echo".into();
+        form.edited.events_detail = EventsDetail::Full;
+        form.save_to(&path).unwrap();
+        assert!(!form.restart_needed, "events apply at the next event");
+        form.edited.allow_hevc = true;
+        form.save_to(&path).unwrap();
+        assert!(form.restart_needed);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
