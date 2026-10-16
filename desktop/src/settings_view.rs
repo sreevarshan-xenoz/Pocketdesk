@@ -117,8 +117,10 @@ impl SettingsForm {
             .as_ref()
             .is_none_or(|(at, _)| at.elapsed() >= std::time::Duration::from_secs(2));
         if stale {
+            // A file a stopped server left says nothing about now.
             let status = pocketdesk_core::local::paths::state_dir()
                 .ok()
+                .filter(|dir| pocketdesk_core::local::server::is_running(dir))
                 .and_then(|dir| ha::read_status(&dir));
             self.home_assistant = Some((std::time::Instant::now(), status));
         }
