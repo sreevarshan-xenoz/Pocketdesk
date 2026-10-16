@@ -58,3 +58,14 @@ Part of the ecosystem plan (`docs/research/2026-10-16-ecosystem.md`, phase 1). H
   - the switch off publishing `offline`.
 
   Home Assistant itself is owed unless a test instance is at hand.
+
+## As built
+
+- **The event loop runs in a task of its own** that forwards rumqttc's events: its poll makes the whole connection, and a 2 s tick racing it would cut short any connect slower than that (a `.local` name).
+- **Presses:** only a live `PRESS` starts a task; a retained message or an empty one (a client clearing a retained message) does not.
+- **Entities removed while away** (a phone unpaired or a task deleted while the broker was down, Home Assistant off, or across a restart) are cleared at the next connect: the bridge subscribes to its own discovery configs and phone states and clears each retained one it no longer wants.
+- **Phones** are those paired for good, not guests' time-boxed grants; a trust store or battery file that does not read keeps the last good list.
+- **`home-assistant`** is refused as a phone's device id (`valid_device_id`), so no phone's start reads as Home Assistant's.
+- **Order:** removals, then the computer's configs, then its phones' (whose `via_device` names the computer), then the states.
+- **Refusals:** a broker refusing the connection is asked again after a minute, and Settings says to check the user and password; a refused subscription shows as "Connected to the broker, but …". Settings reads the status only while the server runs.
+- **Switching off** marks the entities unavailable (the bridge publishes `offline`); they stay in Home Assistant until its device is deleted there.
