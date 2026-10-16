@@ -1683,10 +1683,6 @@ fn negotiate_codec(caps: u8, hevc_allowed: bool, current: VideoCodec) -> Option<
     }
 }
 
-/// Run `task`, then wait for `cancel`: a task whose ending must not end the
-/// session (the first task of the session's set to finish ends it). Audio
-/// ends at once on a computer with no audio capture, and the session then
-/// went with it.
 /// Ask a cast's phone for a keyframe (T10k): a header-only stream.
 async fn send_cast_keyframe_ask(connection: &SharedConnection) {
     let header = super::transport::PacketHeader {
@@ -1706,6 +1702,10 @@ async fn send_cast_keyframe_ask(connection: &SharedConnection) {
     }
 }
 
+/// Run `task`, then wait for `cancel`: a task whose ending must not end the
+/// session (the first task of the session's set to finish ends it). Audio
+/// ends at once on a computer with no audio capture, and the session then
+/// went with it.
 async fn until_cancelled(task: impl std::future::Future<Output = ()>, cancel: CancellationToken) {
     task.await;
     cancel.cancelled().await;
