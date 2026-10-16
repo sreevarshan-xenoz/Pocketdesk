@@ -32,6 +32,8 @@ pub const OUTBOX_DIR: &str = "outbox";
 /// Links the desktop app or the local API asks the server to hand to a phone (T8a).
 pub const LINKS_DIR: &str = "links_out";
 pub const SENT_FILE: &str = "sent.json";
+/// How the bridge to Home Assistant's MQTT broker stands (ecosystem 1e).
+pub const HOME_ASSISTANT_FILE: &str = "home_assistant.json";
 /// Each phone's last battery report (T8b), written by the server.
 pub const PHONE_STATUS_FILE: &str = "phone_status.json";
 /// Each phone's last media report (T8d), written by the server.
