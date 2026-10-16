@@ -1377,6 +1377,7 @@ This Windows box and the A71, debug server, 2026-10-16, a local broker (amqtt 0.
 - [x] The switch off in config.toml: `offline` published within 2 s and the status file removed; on again, connected again.
 - [x] The broker stopped: the status said why within a second; started again, the bridge was back within 5 s.
 - [x] Found and fixed: a `live_sessions.json` left by an earlier run was published as live sessions for 2 s.
+- [x] After the review fixes, the same broker reached as `localhost`: connected after 2.1 s (a connect the old 2 s tick would have cut short); a planted retained config and state for a phone that is not paired were cleared on connect; a planted retained `PRESS` started nothing, a live one started the task once, and an empty retained message (clearing it) started nothing.
 
 Owed:
 - [ ] Home Assistant itself (its Mosquitto add-on): the entities on its device page, the Activity entity's history, a button press from its UI.
