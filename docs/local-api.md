@@ -107,7 +107,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 
 By default an event says who, when and how much, never what. Settings "Details in events" (`events_detail = "full"`) adds the content. With "Event log" off (`events = false`) nothing is written, and `events` shows nothing. New kinds and fields may be added within `"api": 1`.
 
-**Hooks.** `[hooks]` in config.toml (or the desktop app's Settings) runs a command for each event of a kind, through the system shell, with the event's JSON on stdin and in `POCKETDESK_EVENT`:
+**Hooks.** `[hooks]` in config.toml (or the desktop app's Settings) runs a command for each event of a kind, through the system shell, with the event's JSON on stdin and, when it is under 32 KiB (always, for the events above), in `POCKETDESK_EVENT`:
 
 ```toml
 [hooks]

@@ -22,6 +22,10 @@ const MAX_HOOKS: usize = 4;
 const HOOK_QUEUE: usize = 32;
 /// A hook still running after this is killed.
 const HOOK_DEADLINE: Duration = Duration::from_secs(30);
+/// The longest event also put in `POCKETDESK_EVENT`: one variable may hold
+/// at most 128 KiB on Linux and 32 767 characters on Windows, and a longer
+/// one would stop the hook from starting. Stdin always has the event.
+const MAX_EVENT_VAR: usize = 32 * 1024;
 
 /// One writer at a time appends to the log.
 static WRITE: Mutex<()> = Mutex::new(());
@@ -194,10 +198,14 @@ fn shell(command: &str) -> std::process::Command {
 }
 
 /// Run one hook to its end or `deadline`: the system shell, the event's JSON
-/// on stdin and in `POCKETDESK_EVENT`, its output discarded.
+/// on stdin and, up to [`MAX_EVENT_VAR`], in `POCKETDESK_EVENT`, its output
+/// discarded.
 pub(crate) fn run_hook(command: &str, json: &str, deadline: Duration) -> io::Result<HookEnd> {
-    let mut child = shell(command)
-        .env("POCKETDESK_EVENT", json)
+    let mut shell = shell(command);
+    if json.len() <= MAX_EVENT_VAR {
+        shell.env("POCKETDESK_EVENT", json);
+    }
+    let mut child = shell
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
