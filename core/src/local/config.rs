@@ -111,6 +111,17 @@ pub struct Config {
     /// it (roadmap T6); 0 keeps none, and a retry starts over.
     #[serde(default = "default_transfer_keep_hours")]
     pub transfer_keep_hours: u32,
+    /// Keep the event log other programs read (`pocketdesk watch`,
+    /// ecosystem phase 1a).
+    #[serde(default = "default_true")]
+    pub events: bool,
+    /// How much an event says: metadata, or the content too.
+    #[serde(default)]
+    pub events_detail: super::events::EventsDetail,
+    /// A command line run for each event of a kind, with the event's JSON on
+    /// stdin and in `POCKETDESK_EVENT` (`[hooks]` in config.toml).
+    #[serde(default)]
+    pub hooks: std::collections::BTreeMap<String, String>,
 }
 
 fn default_transfer_keep_hours() -> u32 {
@@ -217,6 +228,9 @@ impl Default for Config {
             input_control: InputControlMode::One,
             input_idle_secs: default_input_idle_secs(),
             transfer_keep_hours: default_transfer_keep_hours(),
+            events: true,
+            events_detail: super::events::EventsDetail::Metadata,
+            hooks: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -381,6 +395,9 @@ impl Config {
         "input_control",
         "input_idle_secs",
         "transfer_keep_hours",
+        "events",
+        "events_detail",
+        "hooks",
     ];
 }
 
@@ -413,6 +430,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("config.toml")
+    }
+
+    #[test]
+    fn events_and_hooks_are_saved_and_read_back() {
+        let path = temp("events");
+        let mut config = Config::default();
+        assert!(config.events, "the log is on by default");
+        assert_eq!(
+            config.events_detail,
+            crate::local::events::EventsDetail::Metadata
+        );
+        config.events_detail = crate::local::events::EventsDetail::Full;
+        config
+            .hooks
+            .insert("file_received".into(), "echo got it".into());
+        config.save_to(&path).unwrap();
+        let back = Config::load_from(&path).unwrap();
+        assert_eq!(back.events_detail, crate::local::events::EventsDetail::Full);
+        assert_eq!(
+            back.hooks.get("file_received").map(String::as_str),
+            Some("echo got it")
+        );
+        // A [hooks] table written by hand reads as well.
+        std::fs::write(&path, "[hooks]\nsession_started = \"echo hi\"\n").unwrap();
+        let hand = Config::load_from(&path).unwrap();
+        assert_eq!(
+            hand.hooks.get("session_started").map(String::as_str),
+            Some("echo hi")
+        );
+        // Saving it again keeps the hook and adds another setting.
+        let mut changed = hand.clone();
+        changed.open_links = false;
+        changed.save_to(&path).unwrap();
+        let again = Config::load_from(&path).unwrap();
+        assert!(!again.open_links);
+        assert_eq!(again.hooks, hand.hooks);
     }
 
     #[test]
