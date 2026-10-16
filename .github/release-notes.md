@@ -16,48 +16,40 @@ An APK named `…-debug-signed.apk` is the debug build. It works, but Android wi
 
 ## What's changed
 
-This is the first release with files. Pocketdesk 0.2.0 has:
+Pocketdesk 0.3.0 makes the phone and the computer useful to each other outside a session, and adds a few new ways to use the phone. It updates 0.2.0 in place (same signing key), keeping your saved computers and pairings.
 
-**Seeing and driving the computer**
-- The desktop on the phone with hardware encoding: VAAPI and NVENC on Linux; NVENC, AMF, Quick Sync and Media Foundation on Windows. Each session shows its frame rate and latency.
-- Direct touch, a laptop-style trackpad with gestures and pinch-to-zoom, a full keyboard with a modifier and function-key bar, and a USB or Bluetooth mouse plugged into the phone.
-- Held upright, a session stacks the desktop on top and the trackpad below. Foldables and tablets split side by side.
-- Several phones at once (one drives), view-only, privacy mode, a screen picker and single-window streaming.
+**Without opening a session**
+- The control channel reaches the computer over the internet too, so the clipboard, notifications, texts, links and the battery keep working away from home without Tailscale.
+- The clipboard both ways in the background, and a "Send clipboard" Quick Settings tile.
+- Files from the computer arrive in the background (`pocketdesk send`, the desktop app's Files tab, and a new "Send to phone" entry in Explorer, Nautilus, Nemo and Dolphin).
+- Answer the phone's notifications from the desktop app: reply, or press one of their buttons.
+- Browse folders you share from the phone in the desktop app's new Phone tab, and copy files from them.
+- New screenshots taken on the phone land on the computer's clipboard and in its Downloads (off by default).
+- The phone's battery reaches the computer in the background, over a link another background feature keeps.
 
-**Between phone and computer**
-- Clipboard both ways, text and images.
-- Files and whole folders both ways, resumable after a dropped link. The remote file browser can download a folder.
-- Links both ways: "Open on computer" in the share sheet, and "Send link" or `pocketdesk link` to the phone.
-- The phone's notifications on the computer. Texts (SMS) with replies from the computer and, optionally, contact names.
-- The phone's battery on the computer, with a warning when it runs low.
-- Media both ways: the computer's music and video from the phone's Sound sheet, and the phone's from the desktop app's Sessions tab.
-- The desktop's sound on the phone, and the phone's microphone on the desktop.
+**New ways to use the phone**
+- **Remote:** a trackpad, keyboard, media keys and presenter keys with no picture sent, so the computer captures and encodes nothing. The computer shows it as "control only".
+- **A second screen** at the phone's shape, on Sway: the session's screen picker adds a screen beside your others, and windows dragged onto it show on the phone.
 
-**Reaching the computer**
-- Same network: computers are found on the network, and pairing is by QR code or PIN, with the certificate pinned.
-- From anywhere: direct over the internet with hole punching, n0's relays or your own (`pocketdesk relay`), and discovery over the Mainline DHT.
-- Wake from the phone: at home, from outside through a router forward, or through another computer left on.
-- "Check connection" on the phone names what blocks a connection.
+**Linux**
+- Any character types correctly on any keyboard layout (accents, other scripts, emoji) on wlroots compositors, and capitals arrive as capitals.
+- Input works where `/dev/uinput` is root-only (most distributions), through the compositor's own virtual pointer and keyboard on Sway and Hyprland, including shortcuts with their modifiers.
+- A computer without audio capture (no PipeWire) no longer ends every session as it starts.
 
-**On the computer**
-- The desktop app: status, pairing, devices and their permissions (one switch per capability), sessions, files, messages, settings and diagnostics.
-- A local JSON API for scripts (`pocketdesk … --json`), and Android intents for automation apps.
-- Starts at login: a systemd user unit on Linux, `pocketdesk install` on Windows.
-
-**Security**
-- The control channel, the stream and file transfers run over TLS 1.3 / QUIC, with mutual device keys and per-phone permissions.
-- `docs/protocol.md` maps everything Pocketdesk sends, and to whom; SECURITY.md lists the known limits.
+**Also fixed**
+- A session's connection is closed when the session ends, so the phone learns at once.
+- "Check connection" names the phone's own hotspot and USB tethering.
+- Every Linux desktop notification had been failing (`notify-send`); fixed.
 
 ### Not yet checked on a device
 
-These work in tests, but no one has run them on real hardware yet:
-- texts on a phone with a SIM;
-- a mouse connected to the phone;
-- the phone's media with a real music app;
-- pinch-zoom in trackpad mode;
-- GNOME and KDE hosts;
-- a Linux host's sound and files;
-- a Windows host started at logon by `install`;
-- updating from this release to the next one.
+These work in tests, and most were checked on one phone against Windows or a headless Sway VM, but not yet:
+- the internet control path from a real outside network;
+- answering a real chat app's notifications with buttons;
+- the second screen on Hyprland (blocked upstream), GNOME, KDE and Windows (not supported yet);
+- a computer on the phone's hotspot or USB tethering;
+- the remote's keys into a Windows window (checked on Linux);
+- texts on a phone with a SIM, and GNOME and KDE hosts;
+- updating from 0.2.0 to this release on a phone.
 
-The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md).
+The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§64–§76 are this release's).
