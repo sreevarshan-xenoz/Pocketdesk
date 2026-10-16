@@ -3,7 +3,39 @@ use pocketdesk_core::error::Result;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use serde_json::json;
 use std::path::PathBuf;
+use std::time::Duration;
 use tokio::process::Command;
+
+/// A command still running after this is stopped (ecosystem 1c).
+const DEADLINE: Duration = Duration::from_secs(60);
+/// The most of each of stdout and stderr sent back: its end.
+const MAX_OUTPUT: usize = 32 * 1024;
+
+/// The last `max` bytes of `bytes` as text, and whether any were left out.
+pub(crate) fn tail_text(bytes: &[u8], max: usize) -> (String, bool) {
+    if bytes.len() <= max {
+        return (String::from_utf8_lossy(bytes).into_owned(), false);
+    }
+    (
+        String::from_utf8_lossy(&bytes[bytes.len() - max..]).into_owned(),
+        true,
+    )
+}
+
+/// Run `cmd` to its end or `deadline`; `None` when it was stopped there.
+async fn run(cmd: &str, deadline: Duration) -> std::io::Result<Option<std::process::Output>> {
+    let child = shell(cmd)
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    // Past the deadline the child is dropped, and so killed.
+    match tokio::time::timeout(deadline, child.wait_with_output()).await {
+        Ok(output) => output.map(Some),
+        Err(_) => Ok(None),
+    }
+}
 
 /// Remote command execution plugin.
 ///
@@ -75,12 +107,10 @@ impl Plugin for ExecPlugin {
             if let Some(cmd) = command {
                 tracing::info!("Executing remote command: {}", cmd);
 
-                let output = shell(cmd).output().await;
-
-                match output {
-                    Ok(out) => {
-                        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                match run(cmd, DEADLINE).await {
+                    Ok(Some(out)) => {
+                        let (stdout, cut_out) = tail_text(&out.stdout, MAX_OUTPUT);
+                        let (stderr, cut_err) = tail_text(&out.stderr, MAX_OUTPUT);
                         let exit_code = out.status.code().unwrap_or(-1);
 
                         let response =
@@ -88,6 +118,17 @@ impl Plugin for ExecPlugin {
                                 "stdout": stdout,
                                 "stderr": stderr,
                                 "exit_code": exit_code,
+                                "truncated": cut_out || cut_err,
+                            }));
+                        sender.send_packet(&response).await?;
+                    }
+                    Ok(None) => {
+                        let response =
+                            NetworkPacket::new("kdeconnect.pocketdesk.exec").with_body(json!({
+                                "stdout": "",
+                                "stderr": format!("Stopped after {} s", DEADLINE.as_secs()),
+                                "exit_code": -1,
+                                "timed_out": true,
                             }));
                         sender.send_packet(&response).await?;
                     }
@@ -104,6 +145,39 @@ impl Plugin for ExecPlugin {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_past_the_cap_keeps_its_end() {
+        assert_eq!(tail_text(b"abc", 8), ("abc".to_string(), false));
+        assert_eq!(tail_text(b"0123456789", 4), ("6789".to_string(), true));
+    }
+
+    #[tokio::test]
+    async fn a_command_past_its_deadline_is_stopped() {
+        let slow = if cfg!(windows) {
+            "ping -n 30 127.0.0.1 > NUL"
+        } else {
+            "sleep 30"
+        };
+        let started = std::time::Instant::now();
+        assert!(
+            run(slow, Duration::from_millis(500))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let quick = run("echo hi", Duration::from_secs(10))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&quick.stdout).contains("hi"));
     }
 }
 
