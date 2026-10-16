@@ -1263,7 +1263,7 @@ On the A71 against this box, 2026-10-16, with "Computer's clipboard in the backg
 - [x] With no session listed at all, level 9 reached `phone_status.json`.
 
 Owed:
-- [ ] With only folders, answers or files keeping the link; with none on, nothing sent and no connection made.
+- [ ] With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
 - [ ] Over the internet road.
 
 ## Recording results
