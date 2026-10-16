@@ -703,8 +703,13 @@ impl StreamingServer {
             let mut last_packet_at = Instant::now();
             let mut used_fallback_rung = false;
             // R6f: when the encoder runs slower than the capture, frames are
-            // passed on at its rate and the rest are skipped.
+            // passed on at its rate. The newest one too early is held and
+            // fed when its turn comes, so the last frame of a burst (the
+            // capture sends only on change) is not left for the next 1 s
+            // heartbeat.
             let mut last_fed: Option<Instant> = None;
+            let mut held: Option<VideoFrame> = None;
+            let mut held_due: Option<tokio::time::Instant> = None;
             const ERR_REBUILD_AT: u64 = 5;
             const ERR_END_AT: u64 = 90;
             const STALL_FRAMES: u64 = 30;
@@ -838,17 +843,37 @@ impl StreamingServer {
                         }
                     }
 
-                    // Process next frame
-                    Some(mut frame) = frame_rx.recv() => {
+                    // Process next frame: from the capture, or the one held
+                    // back by pacing once its turn comes.
+                    Some(mut frame) = async {
+                        match held_due {
+                            Some(due) => tokio::select! {
+                                biased;
+                                frame = frame_rx.recv() => frame,
+                                _ = tokio::time::sleep_until(due) => held.take(),
+                            },
+                            None => frame_rx.recv().await,
+                        }
+                    } => {
+                        let from_hold = held.is_none() && held_due.is_some();
                         // R6f: at a lower frame rate than the capture's, pass
-                        // frames on at the encoder's rate.
+                        // frames on at the encoder's rate, holding the newest
+                        // early one.
                         let target_fps = encoder.config().fps.max(1);
-                        if target_fps < capture_fps {
+                        if !from_hold && target_fps < capture_fps {
                             let period = Duration::from_micros(1_000_000 / u64::from(target_fps));
-                            if last_fed.is_some_and(|t| t.elapsed() < period.mul_f64(0.9)) {
+                            if let Some(fed) = last_fed
+                                && fed.elapsed() < period.mul_f64(0.9)
+                            {
+                                held = Some(frame);
+                                if held_due.is_none() {
+                                    held_due = Some(tokio::time::Instant::from_std(fed + period));
+                                }
                                 continue;
                             }
                         }
+                        held = None;
+                        held_due = None;
                         last_fed = Some(Instant::now());
                         // In compositor-side window mode the frames already
                         // are exactly the window — the software crop would
