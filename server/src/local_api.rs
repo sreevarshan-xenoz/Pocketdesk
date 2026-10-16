@@ -318,7 +318,8 @@ pub mod exit {
 }
 
 /// Ask the server in `state_dir` to send `path` to the phone `query`
-/// names, as the desktop app's Files tab does (an outbox request), and,
+/// names, or the paired computer (2h), as the desktop app's Files tab does
+/// (an outbox request), and,
 /// with `wait`, wait up to that long for the sent list to say how it went.
 /// What to print, and the exit code.
 pub fn send_in(
@@ -346,16 +347,27 @@ pub fn send_in(
         Ok(store) => store.trusted_devices(),
         Err(reason) => return refused(exit::FAILED, reason),
     };
+    let computers = pocketdesk_core::local::computers::read(state_dir).computers;
     let device_id = match resolve_phone(&ids, query) {
         Ok(id) => id,
-        Err(reason) => return refused(exit::BAD_ARGUMENTS, reason),
+        Err(reason) => match resolve_computer(&computers, query) {
+            Some(id) => id,
+            None => return refused(exit::BAD_ARGUMENTS, reason),
+        },
     };
     // An offer reaches only a phone files can reach (in a session, or
     // holding a control link at home, T10d, or by the internet road with
-    // `internet_files` on, 2c): say so now, not after queueing a send the
-    // server can only fail.
+    // `internet_files` on, 2c), and a computer only while its link is up
+    // (2h): say so now, not after queueing a send the server can only fail.
     let now = pocketdesk_core::local::pin::now_unix();
-    if !live_mirror(state_dir, now, true).is_some_and(|m| m.files_reach(&device_id)) {
+    if let Some(computer) = computers.iter().find(|c| c.device_id == device_id) {
+        if computer.link != "linked" {
+            return refused(
+                exit::FAILED,
+                format!("{} is not linked now ({})", computer.name, computer.link),
+            );
+        }
+    } else if !live_mirror(state_dir, now, true).is_some_and(|m| m.files_reach(&device_id)) {
         return refused(
             exit::FAILED,
             format!(
@@ -707,6 +719,29 @@ pub fn resolve_phone(ids: &[String], query: &str) -> Result<String, String> {
             "{} paired phones' ids start with {query:?}: give more of it",
             matches.len()
         )),
+    }
+}
+
+/// The paired computer (2h) `query` names: its id, 6 or more of its first
+/// characters (one computer's only), or its name, in any case.
+fn resolve_computer(
+    computers: &[pocketdesk_core::local::computers::PeerComputer],
+    query: &str,
+) -> Option<String> {
+    let query = query.trim();
+    if let Some(c) = computers
+        .iter()
+        .find(|c| c.device_id == query || c.name.eq_ignore_ascii_case(query))
+    {
+        return Some(c.device_id.clone());
+    }
+    let by_prefix: Vec<_> = computers
+        .iter()
+        .filter(|c| query.chars().count() >= 6 && c.device_id.starts_with(query))
+        .collect();
+    match by_prefix.as_slice() {
+        [one] => Some(one.device_id.clone()),
+        _ => None,
     }
 }
 
@@ -1447,6 +1482,40 @@ mod tests {
             pocketdesk_core::local::links::take_all(&dir, pocketdesk_core::local::pin::now_unix())
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_computer_is_named_by_its_id_its_name_or_a_unique_prefix() {
+        let computer = |id: &str, name: &str| pocketdesk_core::local::computers::PeerComputer {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            addresses: Vec::new(),
+            control_port: 1716,
+            fingerprint: String::new(),
+            endpoint: None,
+            paired_unix: 0,
+            link: "linked".to_string(),
+            link_unix: 0,
+        };
+        let computers = [
+            computer("a1b2c3d4e5", "Desk"),
+            computer("a1b2c3ffff", "Laptop"),
+        ];
+        assert_eq!(
+            resolve_computer(&computers, "desk").as_deref(),
+            Some("a1b2c3d4e5")
+        );
+        assert_eq!(
+            resolve_computer(&computers, "a1b2c3ffff").as_deref(),
+            Some("a1b2c3ffff")
+        );
+        assert_eq!(
+            resolve_computer(&computers, "a1b2c3d4").as_deref(),
+            Some("a1b2c3d4e5")
+        );
+        assert_eq!(resolve_computer(&computers, "a1b2c3"), None, "two start so");
+        assert_eq!(resolve_computer(&computers, "a1b2"), None, "too short");
+        assert_eq!(resolve_computer(&computers, "Printer"), None);
     }
 
     #[test]

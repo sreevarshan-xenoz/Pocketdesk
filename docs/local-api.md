@@ -128,7 +128,7 @@ At most 4 hooks run at once and up to 32 more wait their turn (past that one is 
 
 ### `pocketdesk send <phone> <path> [--wait SECONDS] --json`
 
-Sends a file or a folder to a connected phone, exactly as the desktop app's Files tab does, so the server's checks apply: the phone is paired, may take files and is connected; a folder leaves out hidden files and stops at its limits. Connected means in a session, or holding a control link (the phone's app open, or a background feature keeping one, T10d): on this network, or by the internet road while `internet_files` is on, where the file rides that link (2c). A phone not connected so is refused at once (exit 1).
+Sends a file or a folder to a connected phone, exactly as the desktop app's Files tab does, so the server's checks apply: the phone is paired, may take files and is connected; a folder leaves out hidden files and stops at its limits. Connected means in a session, or holding a control link (the phone's app open, or a background feature keeping one, T10d): on this network, or by the internet road while `internet_files` is on, where the file rides that link (2c). A phone not connected so is refused at once (exit 1). The target can also be another of your computers paired in Settings → Computers (2h), by its id, 6 or more of its first characters, or its name: a file goes on the link to it while the link is up (refused at once otherwise), and lands in its Downloads; a folder does not go to a computer yet.
 
 ```json
 {"api": 1, "id": "8b4b2722-…", "device_id": "0d7c3a52-…", "path": "C:\\Users\\me\\report.pdf",
