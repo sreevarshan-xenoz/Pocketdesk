@@ -63,7 +63,14 @@ fn missing(what: &str) -> io::Error {
 }
 
 /// `<config dir>/pocketdesk` (`%APPDATA%\pocketdesk`, `~/.config/pocketdesk`).
+/// `POCKETDESK_CONFIG_DIR` names another folder, so a second server (for
+/// tests, or a second set of settings) has its own `config.toml` (its own
+/// ports) and its own iroh identity; set `POCKETDESK_STATE_DIR` with it for
+/// its own pairings and device id.
 pub fn config_dir() -> io::Result<PathBuf> {
+    if let Some(dir) = dir_from_env(CONFIG_DIR_VAR, std::env::var_os(CONFIG_DIR_VAR)) {
+        return dir;
+    }
     Ok(app_dir(
         &dirs::config_dir().ok_or_else(|| missing("config"))?,
     ))
@@ -87,7 +94,7 @@ pub fn state_dir() -> io::Result<PathBuf> {
     if let Some(dir) = STATE_DIR_OVERRIDE.get() {
         return Ok(dir.clone());
     }
-    if let Some(dir) = state_dir_from_env(std::env::var_os("POCKETDESK_STATE_DIR")) {
+    if let Some(dir) = dir_from_env(STATE_DIR_VAR, std::env::var_os(STATE_DIR_VAR)) {
         return dir;
     }
     Ok(app_dir(
@@ -119,21 +126,23 @@ pub fn protect_state_dir(dir: &std::path::Path) -> io::Result<bool> {
     Ok(false)
 }
 
-/// The folder `POCKETDESK_STATE_DIR` names, if it is set. It must be
-/// absolute: a relative one would resolve against each process's own working
-/// folder, so the server and the desktop app could each use a different one
-/// without a word.
-fn state_dir_from_env(value: Option<std::ffi::OsString>) -> Option<io::Result<PathBuf>> {
+/// The variable that moves the state folder.
+pub const STATE_DIR_VAR: &str = "POCKETDESK_STATE_DIR";
+/// The variable that moves the config folder.
+pub const CONFIG_DIR_VAR: &str = "POCKETDESK_CONFIG_DIR";
+
+/// The folder the variable `name` names, if it is set. It must be absolute:
+/// a relative one would resolve against each process's own working folder,
+/// so the server and the desktop app could each use a different one without
+/// a word.
+fn dir_from_env(name: &str, value: Option<std::ffi::OsString>) -> Option<io::Result<PathBuf>> {
     let dir = PathBuf::from(value.filter(|d| !d.is_empty())?);
     Some(if dir.is_absolute() {
         Ok(dir)
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!(
-                "POCKETDESK_STATE_DIR must be an absolute path, not {}",
-                dir.display()
-            ),
+            format!("{name} must be an absolute path, not {}", dir.display()),
         ))
     })
 }
@@ -187,25 +196,27 @@ mod tests {
     }
 
     #[test]
-    fn the_state_dir_variable_must_name_an_absolute_folder() {
-        assert!(state_dir_from_env(None).is_none());
-        assert!(
-            state_dir_from_env(Some("".into())).is_none(),
-            "empty is unset"
-        );
-        let absolute = std::env::temp_dir().join("pd-second");
-        assert_eq!(
-            state_dir_from_env(Some(absolute.clone().into()))
-                .unwrap()
-                .unwrap(),
-            absolute
-        );
-        assert!(
-            state_dir_from_env(Some("pd-second".into()))
-                .unwrap()
-                .is_err(),
-            "relative is refused, not resolved against the working folder"
-        );
+    fn a_folder_variable_must_name_an_absolute_folder() {
+        for name in [STATE_DIR_VAR, CONFIG_DIR_VAR] {
+            assert!(dir_from_env(name, None).is_none());
+            assert!(
+                dir_from_env(name, Some("".into())).is_none(),
+                "empty is unset"
+            );
+            let absolute = std::env::temp_dir().join("pd-second");
+            assert_eq!(
+                dir_from_env(name, Some(absolute.clone().into()))
+                    .unwrap()
+                    .unwrap(),
+                absolute
+            );
+            let relative = dir_from_env(name, Some("pd-second".into())).unwrap();
+            let message = relative.unwrap_err().to_string();
+            assert!(
+                message.contains(name),
+                "relative is refused, not resolved against the working folder: {message}"
+            );
+        }
     }
 
     fn base(name: &str) -> PathBuf {

@@ -386,7 +386,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 
 ### 5.1 Desktop
 
-- `<state>` is `$XDG_STATE_HOME/pocketdesk` (normally `~/.local/state/pocketdesk`), or `%LOCALAPPDATA%\pocketdesk` on Windows, or `POCKETDESK_STATE_DIR` (must be absolute). `<config>` is `~/.config/pocketdesk`, or `%APPDATA%\pocketdesk`. A `linux-link` folder from before the rename is moved on first use (`core/src/local/paths.rs`).
+- `<state>` is `$XDG_STATE_HOME/pocketdesk` (normally `~/.local/state/pocketdesk`), or `%LOCALAPPDATA%\pocketdesk` on Windows, or `POCKETDESK_STATE_DIR` (must be absolute). `<config>` is `~/.config/pocketdesk`, or `%APPDATA%\pocketdesk`, or `POCKETDESK_CONFIG_DIR` (must be absolute). A `linux-link` folder from before the rename is moved on first use (`core/src/local/paths.rs`).
 - "Owner-only" means `secure_fs::write_private` or `create_private_dir`: mode 0600/0700 on Unix, an owner-only DACL on Windows (`core/src/secure_fs.rs`).
 - "Default" means no owner-only call was found for the file itself. On Unix the server makes `<state>` `0700` at start (`paths::protect_state_dir`), so no other local user can open any file in it; where it cannot (a folder it does not own, a filesystem without modes) it starts anyway and logs a warning. On Windows `%LOCALAPPDATA%` is already the user's own and its DACL is left alone; a `POCKETDESK_STATE_DIR` there keeps whatever ACL its folder has.
 
