@@ -675,6 +675,11 @@ fn turn(device_id: &str) -> Arc<tokio::sync::Semaphore> {
 /// Downloads. A file that breaks off is sent again (continuing) up to 3
 /// times.
 pub(crate) async fn send_file(device_id: &str, path: &Path) -> Result<(), String> {
+    // The link is the internet road, at home too: this computer's switch
+    // applies, as the other's does.
+    if !crate::events::current_config().internet_files {
+        return Err("files over the internet are off on this computer (Settings)".to_string());
+    }
     let size = std::fs::metadata(path)
         .ok()
         .filter(|m| m.is_file())
@@ -742,6 +747,19 @@ async fn fetch_offer(device_id: String, offer: serde_json::Value) {
         .and_then(|v| v.as_str())
         .unwrap_or("a file")
         .to_string();
+    if !crate::events::current_config().internet_files {
+        // Said to the other computer, so its sent list ends now.
+        if let Some(outgoing) = live(&device_id) {
+            let declined =
+                NetworkPacket::new(crate::offers::DECLINE).with_body(serde_json::json!({
+                    "id": id,
+                    "reason": "files over the internet are off on that computer",
+                }));
+            let _ = outgoing.send(declined).await;
+        }
+        tracing::info!("Declined {name} from another computer: files over the internet are off");
+        return;
+    }
     let mut attempt = 0;
     loop {
         let turn = turn(&device_id);

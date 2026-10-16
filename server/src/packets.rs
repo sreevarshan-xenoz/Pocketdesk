@@ -198,6 +198,7 @@ mod tests {
             // one dials: never to a phone, so not announced to one.
             "kdeconnect.pocketdesk.wan_key",
             "kdeconnect.pocketdesk.file_fetch",
+            "kdeconnect.pocketdesk.file_offer_declined",
         ];
         let (_, outgoing) = crate::plugins::announced(&crate::plugins::register_all());
         let mut files = Vec::new();
