@@ -245,6 +245,13 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
     clipboard_holds(&b_state, "copied on A", "A's copy on B");
     std::fs::write(clipboard(&b_state), "copied on B").unwrap();
     clipboard_holds(&a_state, "copied on B", "B's copy on A");
+    // A pairing link holds a PIN: it stays where it was copied.
+    std::fs::write(clipboard(&a_state), "pocketdesk://pair?v=1&pin=000000").unwrap();
+    std::thread::sleep(Duration::from_secs(4));
+    assert_eq!(
+        std::fs::read_to_string(clipboard(&b_state)).unwrap(),
+        "copied on B"
+    );
 
     // Files both ways (2h): A shares on the link, B offers and A fetches.
     let file = |state: &Path, name: &str, seed: u8| {

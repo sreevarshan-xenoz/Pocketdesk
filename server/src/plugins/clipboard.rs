@@ -152,10 +152,14 @@ impl Plugin for ClipboardPlugin {
                 // Remote requested our clipboard - get and send it. A
                 // clipboard that cannot be read is answered as empty, so the
                 // phone is not left waiting out its query.
-                let clip = read_clipboard().await.unwrap_or_else(|e| {
-                    tracing::debug!("Could not read the clipboard: {e}");
-                    Clip::Empty
-                });
+                let clip = match read_clipboard().await {
+                    Ok(Clip::Text(text)) if is_pairing_link(&text) => Clip::Empty,
+                    Ok(clip) => clip,
+                    Err(e) => {
+                        tracing::debug!("Could not read the clipboard: {e}");
+                        Clip::Empty
+                    }
+                };
                 let response =
                     NetworkPacket::new("kdeconnect.clipboard").with_body(reply_body(&clip));
                 sender.send_packet(&response).await?;
@@ -286,14 +290,22 @@ pub(crate) fn stand_in() -> Option<std::path::PathBuf> {
     std::env::var_os("POCKETDESK_CLIPBOARD_FILE").map(std::path::PathBuf::from)
 }
 
+/// Whether `text` is a pairing link (`pocketdesk://pair?...`), which the
+/// Pair tab copies for another computer (2f): it holds the PIN, so it goes
+/// to no phone or computer from the clipboard.
+pub(crate) fn is_pairing_link(text: &str) -> bool {
+    text.trim_start().starts_with("pocketdesk://pair?")
+}
+
 /// The clipboard's text, if it holds any (T10b's watcher): never an image,
-/// and never a copy a password manager marked private.
+/// a copy a password manager marked private, or a pairing link.
 /// An error says the clipboard could not be read (another app held it).
 pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
-    if let Some(path) = stand_in() {
-        return Ok(std::fs::read_to_string(path).ok().filter(|t| !t.is_empty()));
-    }
-    read_system_text().await
+    let text = match stand_in() {
+        Some(path) => std::fs::read_to_string(path).ok().filter(|t| !t.is_empty()),
+        None => read_system_text().await?,
+    };
+    Ok(text.filter(|t| !is_pairing_link(t)))
 }
 
 /// Set the clipboard's text.
@@ -497,6 +509,14 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pairing_link_is_told_from_other_text() {
+        assert!(is_pairing_link("pocketdesk://pair?v=1&id=b&pin=123456"));
+        assert!(is_pairing_link("  pocketdesk://pair?v=1"));
+        assert!(!is_pairing_link("see pocketdesk://pair?v=1"));
+        assert!(!is_pairing_link("https://example.org/"));
+    }
 
     #[test]
     fn an_image_is_known_by_the_sha256_of_its_png() {
