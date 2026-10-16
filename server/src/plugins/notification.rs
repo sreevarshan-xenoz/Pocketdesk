@@ -198,8 +198,13 @@ impl Plugin for NotificationPlugin {
         &["kdeconnect.notification", "kdeconnect.notification.request"]
     }
 
+    // The phone's notifications answered from here (T10c) go out too.
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.notification"]
+        &[
+            "kdeconnect.notification",
+            pocketdesk_core::protocol::notification_action::NOTIFICATION_REPLY,
+            pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION,
+        ]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {

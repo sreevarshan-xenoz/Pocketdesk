@@ -31,6 +31,27 @@ pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     audio_control::answer_denied(packet, sender).await;
 }
 
+/// Packets the computer sends from outside its plugins: pushes and what a
+/// connection is seeded with (ecosystem 1g). Announced with the plugins'
+/// own in the identity, so a client learns of them too.
+pub const SERVER_PUSHES: &[&str] = &[
+    crate::driving::CONTROL,
+    crate::hypr_events::EVENT_PACKET,
+    crate::hypr_events::STATE_PACKET,
+    crate::iroh_endpoint::ENDPOINT_PACKET,
+    crate::wake_info::WAKE_INFO,
+];
+
+/// What the computer's identity announces: the packet types its plugins
+/// take, and those they and the server send ([`SERVER_PUSHES`]), sorted.
+pub fn announced(registry: &PluginRegistry) -> (Vec<String>, Vec<String>) {
+    let (incoming, mut outgoing) = registry.capability_sets();
+    outgoing.extend(SERVER_PUSHES.iter().map(|t| (*t).to_string()));
+    outgoing.sort();
+    outgoing.dedup();
+    (incoming, outgoing)
+}
+
 /// Shorthand for the full plugin registry type with every plugin registered.
 pub type PluginSet = PluginRegistry;
 

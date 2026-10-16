@@ -24,7 +24,9 @@ pub struct Packet {
 pub fn catalogue() -> Vec<Packet> {
     let registry = crate::plugins::register_all();
     let mut packets: BTreeMap<String, Packet> = BTreeMap::new();
-    for (plugin, incoming, outgoing) in registry.describe() {
+    let mut sources = registry.describe();
+    sources.push(("server".to_string(), &[], crate::plugins::SERVER_PUSHES));
+    for (plugin, incoming, outgoing) in sources {
         for (types, is_incoming) in [(incoming, true), (outgoing, false)] {
             for packet_type in types {
                 let entry = packets
@@ -52,6 +54,12 @@ pub fn catalogue() -> Vec<Packet> {
 /// The permission a phone needs for the computer to act on `packet_type`,
 /// in words.
 fn permission(packet_type: &str) -> String {
+    if matches!(
+        packet_type,
+        "kdeconnect.identity" | "kdeconnect.pair" | "kdeconnect.pocketdesk.pair"
+    ) {
+        return "none (any phone: pairing)".to_string();
+    }
     match capability_for(packet_type) {
         Some(capability) => format!("{capability:?}"),
         None => "none (any paired phone)".to_string(),
@@ -119,25 +127,103 @@ mod tests {
         assert_eq!(permission("kdeconnect.pocketdesk.task_run"), "Tasks");
     }
 
-    #[test]
-    fn every_packet_a_plugin_sends_is_announced() {
-        // Literal types only (a constant's is checked where it is declared);
-        // a test module's packets and the phone-shaped helper are not sent.
-        let phone_shaped = ["kdeconnect.pocketdesk.notification_reply"];
-        let (_, outgoing) = crate::plugins::register_all().capability_sets();
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/plugins");
-        let mut missing = Vec::new();
+    /// Every `NetworkPacket::new(..)` in `source` outside its test module:
+    /// a literal type, or a constant's name (its last path part).
+    fn packet_types_built(source: &str) -> Vec<String> {
+        let source = match source.find("#[cfg(test)]\nmod tests") {
+            Some(at) => &source[..at],
+            None => source,
+        };
+        source
+            .split("NetworkPacket::new(")
+            .skip(1)
+            .filter_map(|after| {
+                let after = after.trim_start();
+                if let Some(literal) = after.strip_prefix('"') {
+                    return literal.split('"').next().map(str::to_string);
+                }
+                let name: String = after
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+                    .collect();
+                let last = name.rsplit("::").next().unwrap_or("").to_string();
+                (!last.is_empty()).then_some(last)
+            })
+            .collect()
+    }
+
+    /// `const NAME: &str = "kdeconnect…";` in `source`, by name.
+    fn constants(source: &str, into: &mut BTreeMap<String, String>) {
+        for line in source.lines() {
+            let line = line
+                .trim_start()
+                .trim_start_matches("pub ")
+                .trim_start_matches("pub(crate) ");
+            let Some(rest) = line.strip_prefix("const ") else {
+                continue;
+            };
+            let Some((name, value)) = rest.split_once(": &str = \"") else {
+                continue;
+            };
+            if let Some(value) = value
+                .split('"')
+                .next()
+                .filter(|v| v.starts_with("kdeconnect"))
+            {
+                into.insert(name.trim().to_string(), value.to_string());
+            }
+        }
+    }
+
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
-            let source = std::fs::read_to_string(&path).unwrap();
-            let source = source.split("#[cfg(test)]").next().unwrap();
-            for part in source.split("NetworkPacket::new(\"").skip(1) {
-                let packet_type = part.split('"').next().unwrap();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn every_packet_the_server_sends_is_announced() {
+        // Built by a helper that sends nothing (the phone's shape, a test
+        // packet), or a variable's type: not the computer's own sends.
+        let not_sent = [
+            "kdeconnect.pocketdesk.notification_reply",
+            "kdeconnect.ping",
+            "packet_type",
+        ];
+        let (_, outgoing) = crate::plugins::announced(&crate::plugins::register_all());
+        let mut files = Vec::new();
+        rust_files(
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")),
+            &mut files,
+        );
+        let mut names = BTreeMap::new();
+        let sources: Vec<(std::path::PathBuf, String)> = files
+            .into_iter()
+            .map(|p| {
+                let s = std::fs::read_to_string(&p).unwrap();
+                (p, s)
+            })
+            .collect();
+        for (_, source) in &sources {
+            constants(source, &mut names);
+        }
+        let mut missing = Vec::new();
+        for (path, source) in &sources {
+            if path.ends_with("packets.rs") {
+                continue;
+            }
+            for built in packet_types_built(source) {
+                let packet_type = names.get(&built).cloned().unwrap_or(built);
                 if packet_type.starts_with("kdeconnect")
-                    && !phone_shaped.contains(&packet_type)
-                    && !outgoing.iter().any(|t| t == packet_type)
+                    && !not_sent.contains(&packet_type.as_str())
+                    && !outgoing.contains(&packet_type)
                 {
-                    missing.push(format!("{} in {}", packet_type, path.display()));
+                    missing.push(format!("{packet_type} in {}", path.display()));
                 }
             }
         }
@@ -148,21 +234,32 @@ mod tests {
     }
 
     #[test]
-    fn the_identity_announces_what_the_catalogue_lists() {
-        let (incoming, outgoing) = crate::plugins::register_all().capability_sets();
-        for packet in catalogue() {
-            assert_eq!(
-                packet.incoming,
-                incoming.contains(&packet.packet_type),
-                "{}",
-                packet.packet_type
-            );
-            assert_eq!(
-                packet.outgoing,
-                outgoing.contains(&packet.packet_type),
-                "{}",
-                packet.packet_type
-            );
+    fn the_scan_sees_what_it_should() {
+        let source = "const X: &str = \"kdeconnect.x\";\nfn a() { NetworkPacket::new(\n    X,\n); NetworkPacket::new(\"kdeconnect.y\"); }\n#[cfg(test)]\nfn helper() { NetworkPacket::new(\"kdeconnect.z\"); }\n#[cfg(test)]\nmod tests { NetworkPacket::new(\"kdeconnect.t\"); }";
+        let mut names = BTreeMap::new();
+        constants(source, &mut names);
+        assert_eq!(names.get("X").map(String::as_str), Some("kdeconnect.x"));
+        assert_eq!(
+            packet_types_built(source),
+            vec!["X", "kdeconnect.y", "kdeconnect.z"],
+            "a test helper is still scanned; the test module is not"
+        );
+    }
+
+    #[test]
+    fn the_identity_announces_the_servers_own_pushes() {
+        let (_, outgoing) = crate::plugins::announced(&crate::plugins::register_all());
+        for push in crate::plugins::SERVER_PUSHES {
+            assert!(outgoing.iter().any(|t| t == push), "{push}");
         }
+        let listed: Vec<String> = catalogue()
+            .into_iter()
+            .filter(|p| p.outgoing)
+            .map(|p| p.packet_type)
+            .collect();
+        assert_eq!(
+            listed, outgoing,
+            "the catalogue lists what the identity announces"
+        );
     }
 }

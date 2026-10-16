@@ -2179,7 +2179,7 @@ mod vector_tests {
         let desktop = CertManager::new().unwrap();
         let tls = tokio_rustls::TlsAcceptor::from(desktop.control_server_config().unwrap());
         let registry = Arc::new(crate::plugins::register_all());
-        let (incoming, outgoing) = registry.capability_sets();
+        let (incoming, outgoing) = crate::plugins::announced(&registry);
         let mut identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
             "vector-test-computer",
             "Vector Test Computer",
