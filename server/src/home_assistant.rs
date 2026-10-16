@@ -328,6 +328,20 @@ pub fn changes(
             .filter(|(topic, payload)| sent.get(*topic) != Some(*payload))
             .map(|(topic, payload)| (topic.clone(), payload.clone())),
     );
+    // Removals, then the computer's own configs, then its phones' (whose
+    // device names the computer's as `via_device`, so it is registered
+    // first), then the states.
+    out.sort_by_key(|(topic, payload)| {
+        if payload.is_empty() {
+            0
+        } else if !topic.ends_with("/config") {
+            3
+        } else if payload.contains("\"via_device\"") {
+            2
+        } else {
+            1
+        }
+    });
     out
 }
 
@@ -783,6 +797,24 @@ mod tests {
                 .any(|t| t.contains("a71e00aa_battery") || t.ends_with("a71e00aa/battery")),
             "no battery entity before a report"
         );
+    }
+
+    #[test]
+    fn the_computer_is_announced_before_its_phones() {
+        let all = changes(&BTreeMap::new(), &messages(&computer(), &snapshot()));
+        let first_phone = all
+            .iter()
+            .position(|(_, p)| p.contains("via_device"))
+            .unwrap();
+        let last_computer = all
+            .iter()
+            .rposition(|(t, p)| t.ends_with("/config") && !p.contains("via_device"))
+            .unwrap();
+        let first_state = all
+            .iter()
+            .position(|(t, _)| !t.ends_with("/config"))
+            .unwrap();
+        assert!(last_computer < first_phone && first_phone < first_state);
     }
 
     #[test]
