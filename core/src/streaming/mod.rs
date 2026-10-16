@@ -223,14 +223,21 @@ impl VideoCodec {
 }
 
 /// User-facing video quality preset with concrete encoding parameters.
+/// Written in lowercase in config.toml, as the docs and the example config
+/// spell it (`video_quality = "balanced"`); the capitalised spelling earlier
+/// versions wrote still reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum VideoQualityPreset {
     /// 720p, 2 Mbps, veryfast encoder preset
+    #[serde(alias = "Low")]
     Low,
     /// 1080p, 5 Mbps, superfast encoder preset
     #[default]
+    #[serde(alias = "Balanced")]
     Balanced,
     /// 1080p, 10 Mbps, medium encoder preset
+    #[serde(alias = "High")]
     High,
 }
 
