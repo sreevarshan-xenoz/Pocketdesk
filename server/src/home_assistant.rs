@@ -483,16 +483,40 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
         options.set_credentials(wanted.user.clone(), wanted.password.clone());
     }
     let (client, mut events) = AsyncClient::new(options, QUEUE);
+    // The event loop runs in a task of its own: its poll makes the whole
+    // connection (DNS, TCP, CONNECT), and a tick racing it would cancel a
+    // slow connect, as to a `.local` name, every 2 s.
+    let (to_bridge, mut from_broker) = tokio::sync::mpsc::channel::<Result<Event, String>>(64);
+    let poller = tokio::spawn(async move {
+        loop {
+            let event = events.poll().await;
+            let failed = event.is_err();
+            if to_bridge
+                .send(event.map_err(|e| e.to_string()))
+                .await
+                .is_err()
+            {
+                return;
+            }
+            if failed {
+                // The next poll connects again.
+                tokio::time::sleep(RETRY).await;
+            }
+        }
+    });
+    let _poller = AbortOnDrop(poller);
     let mut sent: BTreeMap<String, String> = BTreeMap::new();
     let mut tail = pocketdesk_core::local::events::Tail::at_end(state_dir);
     let mut tick = tokio::time::interval(TICK);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut up = false;
     let mut snapshot = Snapshot::default();
     tracing::info!(broker = %wanted.broker.host, port = wanted.broker.port, "Home Assistant: connecting to the MQTT broker");
     loop {
         tokio::select! {
-            event = events.poll() => match event {
-                Ok(Event::Incoming(Packet::ConnAck(_))) => {
+            event = from_broker.recv() => match event {
+                None => return,
+                Some(Ok(Event::Incoming(Packet::ConnAck(_)))) => {
                     tracing::info!("Home Assistant: connected to the MQTT broker");
                     up = true;
                     write_status(state_dir, last, true, None);
@@ -503,7 +527,7 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                     snapshot = read_snapshot(state_dir, &config);
                     publish(&client, &computer, &snapshot, &mut sent);
                 }
-                Ok(Event::Incoming(Packet::Publish(message))) => {
+                Some(Ok(Event::Incoming(Packet::Publish(message)))) => {
                     if let Some(task) = pressed_task(&computer, &snapshot, &message.topic) {
                         match crate::plugins::tasks::start_for_home_assistant(&task) {
                             Ok(()) => tracing::info!(task = %task, "Home Assistant started a task"),
@@ -511,18 +535,13 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                         }
                     }
                 }
-                Ok(_) => {}
-                Err(e) => {
+                Some(Ok(_)) => {}
+                Some(Err(e)) => {
                     if up {
                         tracing::warn!("Home Assistant: lost the MQTT broker: {e}");
                     }
                     up = false;
-                    write_status(state_dir, last, false, Some(e.to_string()));
-                    tokio::time::sleep(RETRY).await;
-                    // The next poll connects again; check the config first.
-                    if settings(&crate::events::current_config()).as_ref() != Some(&Ok(wanted.clone())) {
-                        return;
-                    }
+                    write_status(state_dir, last, false, Some(e));
                 }
             },
             _ = tick.tick() => {
@@ -531,9 +550,10 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                     if up {
                         let _ = client.try_publish(computer.availability(), QoS::AtLeastOnce, true, "offline");
                         let _ = client.try_disconnect();
-                        // Let the offline and the disconnect go out.
+                        // Let the offline and the disconnect go out: the
+                        // poller reports the closed connection after them.
                         let _ = tokio::time::timeout(Duration::from_secs(2), async {
-                            while events.poll().await.is_ok() {}
+                            while let Some(Ok(_)) = from_broker.recv().await {}
                         })
                         .await;
                     }
@@ -550,6 +570,15 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                 }
             }
         }
+    }
+}
+
+/// Stops the event loop's task when the bridge it serves returns.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
