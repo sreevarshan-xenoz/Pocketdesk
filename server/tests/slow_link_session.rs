@@ -21,7 +21,13 @@
 //! congestion control kept the queue from overflowing (89 datagrams lost in
 //! 5 minutes), so the loss controller, which acts on loss alone, held the
 //! encoder at 6.4-8 Mbit/s and the transport dropped what the link could
-//! not carry.
+//! not carry. With 3 % random loss too: no end, the loss controller at its
+//! 1 Mbit/s floor, QUIC carrying about 300 kbit/s, about 18 fps. Neither
+//! reproduces the A71's reconnects (owed: the VM with `tc`).
+//!
+//! With R6f's delivery ceiling (the transport's waits cap the rate), the
+//! clean 1 Mbit/s link held 300 s at 12-24 fps (worst 10 s, 9.7), with 14
+//! rate changes; the encoder overshot the lowest targets at 2560x1080.
 //!
 //! Ignored, since it captures the real desktop:
 //!
