@@ -1,0 +1,75 @@
+{
+  "spec": "docs/protocol-spec.md",
+  "channel": "control",
+  "version": 1,
+  "about": "Conversations a phone has with a computer on the control channel, replayed against the real handler by server/src/service.rs (vector_tests). Each case starts from a fresh connection by a phone that is not paired, with pairing required. A step either sends a line (a JSON packet, or raw text) or expects one: the next line the computer sends within its time, matched on its type and the body fields given, or none (\"expect\": null), or the connection closed.",
+  "cases": [
+    {
+      "name": "a client without TLS is told and dropped",
+      "tls": false,
+      "steps": [
+        { "send_raw": "POCKETDESK_HELLO 1" },
+        { "expect_raw": "POCKETDESK_ERR 1 tls-required" },
+        { "expect_closed": true }
+      ]
+    },
+    {
+      "name": "the handshake: OK, then the computer's identity naming what it speaks",
+      "tls": true,
+      "handshake": false,
+      "steps": [
+        { "send_raw": "POCKETDESK_HELLO 1" },
+        { "expect_raw": "POCKETDESK_OK 1" },
+        {
+          "expect": {
+            "type": "kdeconnect.identity",
+            "body_has": ["deviceId", "deviceName", "protocolVersion", "incomingCapabilities", "outgoingCapabilities"],
+            "capabilities_include": { "incoming": ["kdeconnect.pair", "kdeconnect.pocketdesk.tasks"], "outgoing": ["kdeconnect.pair", "kdeconnect.pocketdesk.tasks"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "an unpaired phone's request is not answered",
+      "tls": true,
+      "steps": [
+        { "send": { "type": "kdeconnect.pocketdesk.monitors", "body": { "request": true } } },
+        { "expect": null, "within_ms": 1000 }
+      ]
+    },
+    {
+      "name": "an unpaired phone may try a PIN, and a wrong one is answered no",
+      "tls": true,
+      "steps": [
+        { "send": { "type": "kdeconnect.pair", "body": { "pin": "000000" } } },
+        { "expect": { "type": "kdeconnect.pair", "body": { "pair": false } } }
+      ]
+    },
+    {
+      "name": "a second identity on a connection changes nothing, and the connection goes on",
+      "tls": true,
+      "steps": [
+        { "send": { "type": "kdeconnect.identity", "body": { "deviceId": "someone-else", "deviceName": "Someone" } } },
+        { "send": { "type": "kdeconnect.pair", "body": { "pin": "000000" } } },
+        { "expect": { "type": "kdeconnect.pair", "body": { "pair": false } } }
+      ]
+    },
+    {
+      "name": "a line that is not a packet is skipped",
+      "tls": true,
+      "steps": [
+        { "send_raw": "this is not json" },
+        { "send": { "type": "kdeconnect.pair", "body": { "pin": "000000" } } },
+        { "expect": { "type": "kdeconnect.pair", "body": { "pair": false } } }
+      ]
+    },
+    {
+      "name": "a line longer than 4 MiB closes the connection",
+      "tls": true,
+      "steps": [
+        { "send_raw_repeat": { "text": "x", "times": 4194400 } },
+        { "expect_closed": true }
+      ]
+    }
+  ]
+}

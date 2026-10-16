@@ -2156,3 +2156,202 @@ mod internet_control_tests {
         assert!(refused(&outcome), "a stranger: {outcome:?}");
     }
 }
+
+/// The protocol's conformance vectors (ecosystem 1g,
+/// `docs/protocol-vectors/control-v1.json`), replayed against the real
+/// control handler with every plugin the server runs.
+#[cfg(test)]
+mod vector_tests {
+    use super::*;
+    use serde_json::Value;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    const VECTORS: &str = include_str!("../../docs/protocol-vectors/control-v1.json");
+
+    /// A control port served by the real handler, the real plugins and the
+    /// computer's real identity packet, over a throwaway state folder.
+    async fn real_port() -> std::net::SocketAddr {
+        pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let desktop = CertManager::new().unwrap();
+        let tls = tokio_rustls::TlsAcceptor::from(desktop.control_server_config().unwrap());
+        let registry = Arc::new(crate::plugins::register_all());
+        let (incoming, outgoing) = registry.capability_sets();
+        let mut identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
+            "vector-test-computer",
+            "Vector Test Computer",
+        );
+        identity.incoming_capabilities = incoming;
+        identity.outgoing_capabilities = outgoing;
+        let identity_packet = identity.as_identity_packet();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let (tls, registry, identity_packet) =
+                    (tls.clone(), registry.clone(), identity_packet.clone());
+                tokio::spawn(async move {
+                    let _ = handle_connection_with_kde(
+                        stream,
+                        tls,
+                        Some(identity_packet),
+                        &registry,
+                        None,
+                        None,
+                        true,
+                    )
+                    .await;
+                });
+            }
+        });
+        addr
+    }
+
+    type Stream = Box<dyn ReadWrite>;
+    trait ReadWrite: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+    impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> ReadWrite for T {}
+
+    /// A connection as a new phone: TLS or not, and the handshake done
+    /// unless the case does it itself.
+    async fn open(addr: std::net::SocketAddr, tls: bool, handshake: bool) -> BufReader<Stream> {
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        if !tls {
+            return BufReader::new(Box::new(tcp));
+        }
+        let phone = CertManager::new().unwrap();
+        let stream = tokio_rustls::TlsConnector::from(phone.control_client_config())
+            .connect(
+                rustls::pki_types::ServerName::try_from("127.0.0.1").unwrap(),
+                tcp,
+            )
+            .await
+            .expect("TLS");
+        let mut reader = BufReader::new(Box::new(stream) as Stream);
+        if handshake {
+            let me = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
+                format!("vector-phone-{}", uuid::Uuid::new_v4()),
+                "Vector Phone",
+            );
+            write_line(&mut reader, HANDSHAKE_HELLO).await;
+            assert_eq!(
+                read_line(&mut reader, 5000).await.as_deref(),
+                Some(HANDSHAKE_OK)
+            );
+            read_line(&mut reader, 5000)
+                .await
+                .expect("the computer's identity");
+            let wire = String::from_utf8(me.as_identity_packet().to_wire().unwrap()).unwrap();
+            write_line(&mut reader, wire.trim_end()).await;
+        }
+        reader
+    }
+
+    async fn write_line(stream: &mut BufReader<Stream>, line: &str) {
+        let inner = stream.get_mut();
+        inner.write_all(line.as_bytes()).await.unwrap();
+        inner.write_all(b"\n").await.unwrap();
+        inner.flush().await.unwrap();
+    }
+
+    /// The next line within `ms`, or `None` for silence; `Some("")` never
+    /// (a closed connection reads as `CLOSED`).
+    async fn read_line(stream: &mut BufReader<Stream>, ms: u64) -> Option<String> {
+        let mut line = String::new();
+        match timeout(Duration::from_millis(ms), stream.read_line(&mut line)).await {
+            Err(_) => None,
+            Ok(Ok(0)) | Ok(Err(_)) => Some(CLOSED.to_string()),
+            Ok(Ok(_)) => Some(line.trim_end().to_string()),
+        }
+    }
+
+    const CLOSED: &str = "<closed>";
+
+    /// Whether `body` holds every field of `want` with the same value.
+    fn holds(body: &Value, want: &Value) -> bool {
+        want.as_object()
+            .is_none_or(|fields| fields.iter().all(|(k, v)| body.get(k) == Some(v)))
+    }
+
+    async fn replay(addr: std::net::SocketAddr, case: &Value) {
+        let name = case["name"].as_str().unwrap();
+        let tls = case["tls"].as_bool().unwrap_or(true);
+        let handshake = case["handshake"].as_bool().unwrap_or(true);
+        let mut stream = open(addr, tls, tls && handshake).await;
+        for step in case["steps"].as_array().unwrap() {
+            let within = step["within_ms"].as_u64().unwrap_or(5000);
+            if let Some(raw) = step["send_raw"].as_str() {
+                write_line(&mut stream, raw).await;
+            } else if let Some(repeat) = step.get("send_raw_repeat") {
+                let text = repeat["text"]
+                    .as_str()
+                    .unwrap()
+                    .repeat(repeat["times"].as_u64().unwrap() as usize);
+                // The computer may close mid-line; what it then reads is the point.
+                let inner = stream.get_mut();
+                let _ = inner.write_all(text.as_bytes()).await;
+                let _ = inner.write_all(b"\n").await;
+                let _ = inner.flush().await;
+            } else if let Some(packet) = step.get("send") {
+                write_line(&mut stream, &packet.to_string()).await;
+            } else if let Some(raw) = step["expect_raw"].as_str() {
+                assert_eq!(
+                    read_line(&mut stream, within).await.as_deref(),
+                    Some(raw),
+                    "{name}"
+                );
+            } else if step["expect_closed"].as_bool() == Some(true) {
+                // Whatever was buffered, then the end.
+                let mut rest = Vec::new();
+                let closed =
+                    timeout(Duration::from_millis(within), stream.read_to_end(&mut rest)).await;
+                assert!(
+                    matches!(closed, Ok(Ok(_)) | Ok(Err(_))),
+                    "{name}: the connection was not closed"
+                );
+            } else if let Some(want) = step.get("expect") {
+                let line = read_line(&mut stream, within).await;
+                if want.is_null() {
+                    assert_eq!(line, None, "{name}: expected silence");
+                    continue;
+                }
+                let line = line.unwrap_or_else(|| panic!("{name}: nothing came"));
+                let packet: Value = serde_json::from_str(&line)
+                    .unwrap_or_else(|e| panic!("{name}: not a packet ({e}): {line}"));
+                assert_eq!(packet["type"], want["type"], "{name}: {line}");
+                assert!(holds(&packet["body"], &want["body"]), "{name}: {line}");
+                for field in want["body_has"].as_array().into_iter().flatten() {
+                    assert!(
+                        packet["body"].get(field.as_str().unwrap()).is_some(),
+                        "{name}: no {field}"
+                    );
+                }
+                if let Some(include) = want.get("capabilities_include") {
+                    for (side, key) in [
+                        ("incoming", "incomingCapabilities"),
+                        ("outgoing", "outgoingCapabilities"),
+                    ] {
+                        let listed = packet["body"][key].as_array().unwrap();
+                        for wanted in include[side].as_array().into_iter().flatten() {
+                            assert!(listed.contains(wanted), "{name}: {key} lacks {wanted}");
+                        }
+                    }
+                }
+            } else {
+                panic!("{name}: a step this replay does not know: {step}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn every_control_vector_holds_against_the_real_handler() {
+        let vectors: Value = serde_json::from_str(VECTORS).unwrap();
+        assert_eq!(vectors["version"], 1);
+        let addr = real_port().await;
+        let cases = vectors["cases"].as_array().unwrap();
+        assert!(cases.len() >= 7);
+        for case in cases {
+            replay(addr, case).await;
+        }
+    }
+}
