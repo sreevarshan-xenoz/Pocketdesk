@@ -2215,6 +2215,21 @@ mod vector_tests {
     /// A connection as a new phone: TLS or not, and the handshake done
     /// unless the case does it itself.
     async fn open(addr: std::net::SocketAddr, tls: bool, handshake: bool) -> BufReader<Stream> {
+        open_as(
+            addr,
+            tls,
+            handshake,
+            &format!("vector-phone-{}", uuid::Uuid::new_v4()),
+        )
+        .await
+    }
+
+    async fn open_as(
+        addr: std::net::SocketAddr,
+        tls: bool,
+        handshake: bool,
+        id: &str,
+    ) -> BufReader<Stream> {
         let tcp = TcpStream::connect(addr).await.unwrap();
         if !tls {
             return BufReader::new(Box::new(tcp));
@@ -2229,10 +2244,7 @@ mod vector_tests {
             .expect("TLS");
         let mut reader = BufReader::new(Box::new(stream) as Stream);
         if handshake {
-            let me = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
-                format!("vector-phone-{}", uuid::Uuid::new_v4()),
-                "Vector Phone",
-            );
+            let me = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(id, "Vector Phone");
             write_line(&mut reader, HANDSHAKE_HELLO).await;
             assert_eq!(
                 read_line(&mut reader, 5000).await.as_deref(),
@@ -2341,6 +2353,50 @@ mod vector_tests {
                 panic!("{name}: a step this replay does not know: {step}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_second_identity_naming_a_paired_phone_borrows_nothing() {
+        let addr = real_port().await;
+        // A phone paired in the throwaway state folder, whose id a stranger
+        // names after its own handshake.
+        let mut store = pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(
+            crate::state::trust_store_path().unwrap(),
+        )
+        .unwrap();
+        store.trust_device("vector-paired-phone").unwrap();
+        let request = serde_json::json!({
+            "type": "kdeconnect.pocketdesk.monitors",
+            "body": { "request": true }
+        });
+        // The control: the paired phone itself is answered.
+        let mut paired = open_as(addr, true, true, "vector-paired-phone").await;
+        write_line(&mut paired, &request.to_string()).await;
+        // Its seed pushes come first; then the answer.
+        let mut answered = false;
+        for _ in 0..10 {
+            match read_line(&mut paired, 5000).await {
+                Some(line) if line.contains("\"kdeconnect.pocketdesk.monitors\"") => {
+                    answered = true;
+                    break;
+                }
+                Some(line) if line != CLOSED => continue,
+                _ => break,
+            }
+        }
+        assert!(answered, "the paired phone is answered");
+        let mut stream = open(addr, true, true).await;
+        let identity = serde_json::json!({
+            "type": "kdeconnect.identity",
+            "body": { "deviceId": "vector-paired-phone", "deviceName": "Borrowed" }
+        });
+        write_line(&mut stream, &identity.to_string()).await;
+        write_line(&mut stream, &request.to_string()).await;
+        assert_eq!(
+            read_line(&mut stream, 1000).await,
+            None,
+            "still the stranger it opened as: a paired phone's request would be answered"
+        );
     }
 
     #[tokio::test]

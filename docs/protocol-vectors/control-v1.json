@@ -46,7 +46,7 @@
       ]
     },
     {
-      "name": "a second identity on a connection changes nothing, and the connection goes on",
+      "name": "a second identity on a connection does not end it",
       "tls": true,
       "steps": [
         { "send": { "type": "kdeconnect.identity", "body": { "deviceId": "someone-else", "deviceName": "Someone" } } },
