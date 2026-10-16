@@ -12,6 +12,7 @@ pub mod connection;
 #[cfg(feature = "wan")]
 pub mod dht;
 pub mod encoder_detect;
+pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
 pub mod iroh_connection;
