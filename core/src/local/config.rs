@@ -99,6 +99,10 @@ pub struct Config {
     /// Clipboard permission, as it changes (T10b).
     #[serde(default = "default_true")]
     pub clipboard_push: bool,
+    /// Share what is copied with the owner's other paired computers, both
+    /// ways (2g). Off by default: the content crosses machines.
+    #[serde(default)]
+    pub computer_clipboard: bool,
     /// A notification when a phone in a session reports a low battery
     /// (roadmap T8b).
     #[serde(default = "default_true")]
@@ -250,6 +254,7 @@ impl Default for Config {
             open_links: true,
             virtual_screens: true,
             clipboard_push: true,
+            computer_clipboard: false,
             phone_battery_alerts: true,
             wake_announce: true,
             wake_port: 0,
@@ -422,6 +427,7 @@ impl Config {
         "open_links",
         "virtual_screens",
         "clipboard_push",
+        "computer_clipboard",
         "phone_battery_alerts",
         "sms_keep",
         "sms_names",
@@ -754,6 +760,10 @@ phone_battery = \"x\"
         config.clipboard_push = false;
         config.save_to(&path).unwrap();
         assert!(!Config::load_from(&path).unwrap().clipboard_push);
+        assert!(
+            !Config::default().computer_clipboard,
+            "the clipboard crosses to other computers only when asked (2g)"
+        );
     }
 
     #[test]

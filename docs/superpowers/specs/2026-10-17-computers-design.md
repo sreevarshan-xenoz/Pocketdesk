@@ -1,6 +1,6 @@
 # Two computers: pairing, a link, the clipboard and files (2f–2h)
 
-Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2f–2h (ecosystem phase 2, "any of my devices", gap 6). Status: 2f built (see "As built" at the end); 2g and 2h to come.
+Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2f–2h (ecosystem phase 2, "any of my devices", gap 6). Status: 2f and 2g built (see "As built" at the end); 2h to come.
 
 ## Goal
 
@@ -78,3 +78,9 @@ Desktop only, in Settings → "Computers": the list with Forget, "Pair another c
 - **A refused link** is tried again every 5 minutes rather than never, in case the refusal was a moment's race (a key not yet registered); one connection every 5 minutes to a computer that dropped this one.
 - **No event on A** for a pairing yet; B's Activity shows A as `phone_paired`, as for any device (the `kind: "computer"` metadata is still to do).
 - **Tests:** `peer_computers` unit tests (the pairing exchange on an in-memory stream, a refused code naming no key, the endpoint and fingerprint parsing, the refusal), `core::local::computers` (requests, the file), and `server/tests/two_computers.rs` (ignored: two real servers; a forged certificate and a wrong PIN pair nothing, the code pairs, B lists A as a computer with the profile and holds A's iroh key, the link comes up over iroh, Forget drops it).
+
+## As built (2g)
+
+- `computer_clipboard` (desktop Settings "Clipboard with my computers", off) starts the clipboard watcher even with "Clipboard to phones" off. The watcher pushes a change to the connections whose device is a computer only while it is on, and to phones only while `clipboard_push` is, each with the Clipboard permission; and to the computers this one links to (`peer_computers::linked`). A computer's `kdeconnect.clipboard` is applied only while it is on here, on either side.
+- The echo guard is T10b's: the device a copy came from is noted, and the change it causes is not sent back to it.
+- `POCKETDESK_CLIPBOARD_FILE` stands in for the clipboard (read and written as a file, and read each tick on Windows, which has no sequence for it), so `two_computers.rs` checks a copy each way between two servers on one machine, which would otherwise share its real clipboard.

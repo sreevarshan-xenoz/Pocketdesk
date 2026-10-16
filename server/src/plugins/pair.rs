@@ -84,6 +84,16 @@ pub fn is_paired_device(device_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Is `device_id` one of the owner's other computers (2f)?
+pub fn is_computer_device(device_id: &str) -> bool {
+    let Ok(path) = state::trust_store_path() else {
+        return false;
+    };
+    TrustStore::load_or_create(path)
+        .map(|store| store.is_computer(device_id))
+        .unwrap_or(false)
+}
+
 /// F5: may this device send `packet_type`? Packets that use no capability
 /// always pass. [conn_key] is the deviceId a connection goes by: on TCP the
 /// one its identity named in the handshake and its TLS key backed (phase B),

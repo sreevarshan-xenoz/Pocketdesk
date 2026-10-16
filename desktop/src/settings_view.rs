@@ -262,6 +262,12 @@ impl SettingsForm {
                     "send what I copy to connected phones (those with Clipboard on)",
                 );
                 ui.end_row();
+                ui.label("Clipboard with my computers");
+                ui.checkbox(
+                    &mut e.computer_clipboard,
+                    "share what I copy with my other paired computers, both ways (turn it on on each)",
+                );
+                ui.end_row();
                 ui.label("Phones may add a screen");
                 ui.checkbox(
                     &mut e.virtual_screens,

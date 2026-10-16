@@ -133,6 +133,14 @@ impl Plugin for ClipboardPlugin {
             "kdeconnect.clipboard" => {
                 // Remote clipboard update - set local clipboard
                 if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
+                    // Another computer's copy, only while this one shares
+                    // with its computers too (2g).
+                    if !crate::clipboard_push::with_computers()
+                        && crate::plugins::pair::is_computer_device(sender.device_id())
+                    {
+                        tracing::debug!("Another computer's clipboard, not shared here; ignored");
+                        return Ok(());
+                    }
                     // Not pushed back to the phone it came from (T10b).
                     crate::clipboard_push::note_from_phone(sender.device_id(), content);
                     if let Err(e) = set_clipboard(content).await {
@@ -271,11 +279,34 @@ fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
     share::io_error("clipboard", e)
 }
 
+/// A file that stands in for the clipboard (`POCKETDESK_CLIPBOARD_FILE`):
+/// for tests that run two servers on one machine, which share its real
+/// one (2g).
+pub(crate) fn stand_in() -> Option<std::path::PathBuf> {
+    std::env::var_os("POCKETDESK_CLIPBOARD_FILE").map(std::path::PathBuf::from)
+}
+
 /// The clipboard's text, if it holds any (T10b's watcher): never an image,
 /// and never a copy a password manager marked private.
 /// An error says the clipboard could not be read (another app held it).
-#[cfg(windows)]
 pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
+    if let Some(path) = stand_in() {
+        return Ok(std::fs::read_to_string(path).ok().filter(|t| !t.is_empty()));
+    }
+    read_system_text().await
+}
+
+/// Set the clipboard's text.
+pub(crate) async fn set_clipboard(content: &str) -> Result<()> {
+    if let Some(path) = stand_in() {
+        return std::fs::write(path, content).map_err(|e| share::io_error("clipboard", e));
+    }
+    set_system_clipboard(content).await
+}
+
+/// [`read_text`] from the system's clipboard.
+#[cfg(windows)]
+async fn read_system_text() -> std::io::Result<Option<String>> {
     use crate::platform::clipboard_windows as win;
     tokio::task::spawn_blocking(|| {
         if !win::has_text() || win::privacy_marks().private() {
@@ -292,7 +323,7 @@ pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
 /// password manager marked private.
 /// `wl-paste` fails on an empty clipboard, so a failure reads as no text.
 #[cfg(not(windows))]
-pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
+async fn read_system_text() -> std::io::Result<Option<String>> {
     let Ok(types) = wl_paste(&["--list-types"]).await else {
         return Ok(None);
     };
@@ -307,7 +338,7 @@ pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
 
 /// Set the system clipboard: the Win32 clipboard on Windows.
 #[cfg(windows)]
-async fn set_clipboard(content: &str) -> Result<()> {
+async fn set_system_clipboard(content: &str) -> Result<()> {
     let content = content.to_string();
     tokio::task::spawn_blocking(move || crate::platform::clipboard_windows::set_text(&content))
         .await
@@ -377,7 +408,7 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
 
 /// Set system clipboard using `wl-copy`.
 #[cfg(not(windows))]
-async fn set_clipboard(content: &str) -> Result<()> {
+async fn set_system_clipboard(content: &str) -> Result<()> {
     wl_copy(None, content.as_bytes()).await
 }
 

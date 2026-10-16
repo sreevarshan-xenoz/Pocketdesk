@@ -167,8 +167,9 @@ pub async fn run(config: Config) -> Result<()> {
     crate::virtual_screen::configure(config.virtual_screens);
     // The desktop app's answers to the phones' notifications (T10c).
     tokio::spawn(crate::plugins::notification::run_answers());
-    // The clipboard to connected phones as it changes (T10b).
-    if config.clipboard_push {
+    // The clipboard to connected phones as it changes (T10b), and shared
+    // with the owner's other computers (2g).
+    if crate::clipboard_push::configure(config.clipboard_push, config.computer_clipboard) {
         tokio::spawn(crate::clipboard_push::run());
     }
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);

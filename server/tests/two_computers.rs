@@ -1,7 +1,10 @@
-//! Two computers pair and keep a link (2f), as two real servers side by
-//! side (R6a's seams: each with its own config and state folders and
-//! ports). B mints a code as its Pair tab does; A is asked to pair with
-//! B's pairing link as the desktop app asks, through `computers_out/`.
+//! Two computers pair, keep a link (2f) and share the clipboard (2g), as
+//! two real servers side by side (R6a's seams: each with its own config and
+//! state folders and ports). B mints a code as its Pair tab does; A is
+//! asked to pair with B's pairing link as the desktop app asks, through
+//! `computers_out/`. Each has a file for a clipboard
+//! (`POCKETDESK_CLIPBOARD_FILE`): two servers on one machine would share
+//! its real one.
 //!
 //! Ignored: it starts two real servers, which reach iroh's relays. Run it
 //! with `cargo test -p pocketdesk-server --test two_computers -- --ignored`.
@@ -27,7 +30,7 @@ fn folders(name: &str, control: u16, streaming: u16) -> (PathBuf, PathBuf) {
     std::fs::write(
         config.join("config.toml"),
         format!(
-            "control_port = {control}\nstreaming_port = {streaming}\nlan_discovery = false\ndht_publish = \"off\"\n"
+            "control_port = {control}\nstreaming_port = {streaming}\nlan_discovery = false\ndht_publish = \"off\"\ncomputer_clipboard = true\n"
         ),
     )
     .unwrap();
@@ -39,9 +42,22 @@ fn pocketdesk(config: &Path, state: &Path) -> Command {
     command
         .env("POCKETDESK_CONFIG_DIR", config)
         .env("POCKETDESK_STATE_DIR", state)
+        .env("POCKETDESK_CLIPBOARD_FILE", clipboard(state))
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     command
+}
+
+/// The file that stands in for a server's clipboard.
+fn clipboard(state: &Path) -> PathBuf {
+    state.parent().unwrap().join("clipboard.txt")
+}
+
+/// Wait for `state`'s clipboard to hold `text`.
+fn clipboard_holds(state: &Path, text: &str, what: &str) {
+    wait_for(15, what, || {
+        (std::fs::read_to_string(clipboard(state)).ok().as_deref() == Some(text)).then_some(())
+    });
 }
 
 /// Stops the servers and removes their folders however the test ends.
@@ -193,6 +209,13 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
         let file = computers::read(&a_state);
         (file.computers.first()?.link == "linked").then_some(())
     });
+
+    // The clipboard, both ways (2g), once each watcher has had a look.
+    std::thread::sleep(Duration::from_secs(3));
+    std::fs::write(clipboard(&a_state), "copied on A").unwrap();
+    clipboard_holds(&b_state, "copied on A", "A's copy on B");
+    std::fs::write(clipboard(&b_state), "copied on B").unwrap();
+    clipboard_holds(&a_state, "copied on B", "B's copy on A");
 
     // A forgets B: its entry goes, and the link with it.
     computers::request(

@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use pocketdesk_core::local::computers::{self, ComputerAsk, PairingOutcome, PeerComputer};
@@ -73,11 +73,65 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     }
 }
 
-/// One kept link: its task, and the way to send on it.
+/// One kept link's task.
 struct Link {
     task: tokio::task::JoinHandle<()>,
-    #[allow(dead_code)] // 2g and 2h send on it.
+}
+
+/// The links that are up, by the other computer's id: the way to send on
+/// each.
+static LIVE: LazyLock<Mutex<HashMap<String, mpsc::Sender<NetworkPacket>>>> =
+    LazyLock::new(Default::default);
+
+/// A computer this one keeps a link to, while the link is up.
+pub(crate) struct LinkedComputer {
+    pub device_id: String,
     outgoing: mpsc::Sender<NetworkPacket>,
+}
+
+impl LinkedComputer {
+    /// Send `packet` on the link, or drop it when the link is busy or gone.
+    pub(crate) fn send(&self, packet: NetworkPacket) {
+        if self.outgoing.try_send(packet).is_err() {
+            tracing::debug!(device_id = %self.device_id, "Not sent: the link is busy or gone");
+        }
+    }
+}
+
+/// The computers this one keeps a link to that are up now, for the
+/// clipboard (2g) while it is shared with them.
+pub(crate) fn linked() -> Vec<LinkedComputer> {
+    if !crate::clipboard_push::with_computers() {
+        return Vec::new();
+    }
+    LIVE.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|(id, outgoing)| LinkedComputer {
+            device_id: id.clone(),
+            outgoing: outgoing.clone(),
+        })
+        .collect()
+}
+
+/// A link counted live while it is held; gone however the link ends.
+struct LiveLink(String);
+
+impl LiveLink {
+    fn new(device_id: &str, outgoing: mpsc::Sender<NetworkPacket>) -> Self {
+        LIVE.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(device_id.to_string(), outgoing);
+        Self(device_id.to_string())
+    }
+}
+
+impl Drop for LiveLink {
+    fn drop(&mut self) {
+        LIVE.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
 }
 
 /// A link for every paired computer, and none for one forgotten.
@@ -96,10 +150,9 @@ fn keep_links(dir: &Path, wan: &iroh::Endpoint, links: &mut HashMap<String, Link
     });
     for id in paired {
         if let std::collections::hash_map::Entry::Vacant(slot) = links.entry(id) {
-            let (outgoing, rx) = mpsc::channel(32);
             let id = slot.key().clone();
-            let task = tokio::spawn(keep_link(dir.to_path_buf(), wan.clone(), id, rx));
-            slot.insert(Link { task, outgoing });
+            let task = tokio::spawn(keep_link(dir.to_path_buf(), wan.clone(), id));
+            slot.insert(Link { task });
         }
     }
 }
@@ -357,12 +410,7 @@ enum LinkEnd {
 }
 
 /// Keep the link to `device_id` up while it is paired, backing off.
-async fn keep_link(
-    dir: PathBuf,
-    wan: iroh::Endpoint,
-    device_id: String,
-    mut outgoing: mpsc::Receiver<NetworkPacket>,
-) {
+async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
     let me = crate::kde::host_identity();
     let mut backoff = BACKOFF_FIRST;
     loop {
@@ -378,7 +426,7 @@ async fn keep_link(
             tokio::time::sleep(BACKOFF_MOST).await;
             continue;
         };
-        let end = run_link(&dir, &wan, &computer, &target, &me, &mut outgoing).await;
+        let end = run_link(&dir, &wan, &computer, &target, &me).await;
         let wait = match &end {
             LinkEnd::Closed => {
                 set_link(&dir, &device_id, "away: the link closed");
@@ -412,7 +460,6 @@ async fn run_link(
     computer: &PeerComputer,
     target: &WanTarget,
     me: &DeviceIdentity,
-    outgoing: &mut mpsc::Receiver<NetworkPacket>,
 ) -> LinkEnd {
     let stream = match pocketdesk_core::streaming::IrohControlStream::dial_from(
         wan,
@@ -443,12 +490,14 @@ async fn run_link(
     };
     tracing::info!(device_id = %computer.device_id, "Linked to another computer");
     set_link(dir, &computer.device_id, "linked");
+    let (outgoing_tx, mut outgoing) = mpsc::channel(32);
+    let _live = LiveLink::new(&computer.device_id, outgoing_tx);
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
     loop {
         tokio::select! {
             packet = read_packet(&mut reader) => match packet {
-                Ok(Some(packet)) => take(dir, &computer.device_id, &packet),
+                Ok(Some(packet)) => take(dir, &computer.device_id, &packet).await,
                 Ok(None) | Err(_) => return LinkEnd::Closed,
             },
             Some(packet) = outgoing.recv() => {
@@ -461,9 +510,23 @@ async fn run_link(
 }
 
 /// What this computer takes from another on the link: its endpoint, kept
-/// current. The rest it pushes to any client (the HUD, wake info, control)
-/// is for phones.
-fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
+/// current, and its clipboard while it is shared (2g). The rest it pushes
+/// to any client (the HUD, wake info, control) is for phones.
+async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
+    if packet.packet_type == "kdeconnect.clipboard" {
+        let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) else {
+            return;
+        };
+        if !crate::clipboard_push::with_computers() {
+            return;
+        }
+        // Not sent back to the computer it came from.
+        crate::clipboard_push::note_from_phone(device_id, content);
+        if let Err(e) = crate::plugins::clipboard::set_clipboard(content).await {
+            tracing::warn!("Another computer's clipboard was not set: {e}");
+        }
+        return;
+    }
     if packet.packet_type == crate::iroh_endpoint::ENDPOINT_PACKET
         && WanTarget::parse(&packet.body).is_some()
     {
