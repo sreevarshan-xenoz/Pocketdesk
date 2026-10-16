@@ -77,7 +77,7 @@ pub fn render_markdown() -> String {
     out.push_str(
         "Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`). \
          *Phone → computer* packets are acted on only for a paired phone with the permission shown; \
-         an unpaired phone may send only `kdeconnect.pair` and `kdeconnect.pocketdesk.pair`, and a packet it lacks the permission for is dropped (a file or audio request is answered as refused). *Computer → phone* packets are what the \
+         an unpaired phone may send only `kdeconnect.pair` and `kdeconnect.pocketdesk.pair`, and a packet it lacks the permission for is dropped (a folder fetch or an audio request is answered as refused). *Computer → phone* packets are what the \
          computer pushes or answers with. A computer announces both lists in its identity packet \
          (`incomingCapabilities`, `outgoingCapabilities`), which is how a client learns what it offers.\n\n",
     );

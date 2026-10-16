@@ -14,6 +14,6 @@ fn the_packet_catalogue_matches_the_build() {
     assert_eq!(
         expected.trim_end(),
         actual.trim_end(),
-        "docs/packets.md is stale: run `pocketdesk capabilities --packets > docs/packets.md`"
+        "docs/packets.md is stale: run `pocketdesk capabilities --packets > docs/packets.md` from a POSIX shell (Git Bash on Windows; PowerShell 5.1's > writes UTF-16)"
     );
 }

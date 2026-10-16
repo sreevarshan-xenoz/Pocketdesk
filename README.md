@@ -495,7 +495,7 @@ pocketdesk capabilities --packets    # the source of docs/packets.md
 and `server/tests/capabilities_doc.rs` fails when it stops matching the build —
 regenerate it in the same commit as the constant you changed. The same holds for
 [`docs/packets.md`](docs/packets.md), every control packet, the plugin that takes it
-and the permission that gates it (`server/tests/packets_doc.rs`).
+and the permission that gates it (`server/tests/packets_doc.rs`); regenerate it from a POSIX shell, as PowerShell 5.1's `>` writes UTF-16.
 
 **Writing your own client?** [`docs/protocol-spec.md`](docs/protocol-spec.md) is the
 contract (framing, handshake, standing, how a client learns what a computer offers),
