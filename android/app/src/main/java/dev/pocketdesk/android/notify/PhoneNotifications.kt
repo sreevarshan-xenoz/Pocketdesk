@@ -106,6 +106,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val clipboard by lazy { dev.pocketdesk.android.clip.BackgroundClipboard(applicationContext) }
     private val clipboardTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /** The battery without a session (research item 11), on the clipboard's ticker, over the link those keep. */
+    private val battery by lazy { dev.pocketdesk.android.status.BackgroundBattery(applicationContext) }
+
     /** Files the computer sends with no session open (T10d), on the clipboard's ticker. */
     private val files by lazy { dev.pocketdesk.android.service.BackgroundFiles(applicationContext) }
 
@@ -169,6 +172,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             {
                 runCatching { clipboard.tick() }.onFailure { Log.w("PhoneNotifications", "clipboard tick failed", it) }
                 runCatching { files.tick() }.onFailure { Log.w("PhoneNotifications", "files tick failed", it) }
+                runCatching { battery.tick() }.onFailure { Log.w("PhoneNotifications", "battery tick failed", it) }
             },
             5,
             5,

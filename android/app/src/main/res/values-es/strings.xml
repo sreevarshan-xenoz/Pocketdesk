@@ -456,7 +456,7 @@
     <string name="settings_links_from_computer">Enlaces del equipo</string>
     <string name="settings_links_from_computer_summary">Un enlace que envía el equipo aparece como una notificación que lo abre. Desactivado: esos enlaces se descartan</string>
     <string name="settings_share_battery">Compartir la batería con el equipo</string>
-    <string name="settings_share_battery_summary">Durante una sesión, el equipo muestra la batería de este teléfono y puede avisar cuando se está agotando</string>
+    <string name="settings_share_battery_summary">El equipo muestra la batería de este teléfono y puede avisar cuando se está agotando: durante una sesión, y en segundo plano mientras otra función en segundo plano mantiene el teléfono conectado</string>
     <string name="media_now_playing">Reproduciendo en el equipo</string>
     <string name="media_nothing">No se está reproduciendo nada</string>
     <string name="media_previous">Anterior</string>

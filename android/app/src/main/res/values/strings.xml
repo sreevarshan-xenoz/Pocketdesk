@@ -458,7 +458,7 @@
     <string name="settings_links_from_computer">Links from the computer</string>
     <string name="settings_links_from_computer_summary">A link the computer sends shows as a notification that opens it. Off: such links are dropped</string>
     <string name="settings_share_battery">Share battery with the computer</string>
-    <string name="settings_share_battery_summary">During a session the computer shows this phone\'s battery, and can warn when it runs low</string>
+    <string name="settings_share_battery_summary">The computer shows this phone\'s battery, and can warn when it runs low: during a session, and in the background while another background feature keeps the phone connected</string>
     <string name="media_now_playing">Now playing on the computer</string>
     <string name="media_nothing">Nothing is playing</string>
     <string name="media_previous">Previous</string>

@@ -123,7 +123,10 @@ object Prefs {
         prefs(ctx).edit { putBoolean(KEY_LINKS_FROM_COMPUTER, enabled) }
     }
 
-    /** Whether a session tells the computer this phone's battery (T8b). On by default. */
+    /**
+     * Whether the phone tells the computer its battery (T8b): in a session,
+     * and outside one over a link a background feature keeps. On by default.
+     */
     fun shareBattery(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_SHARE_BATTERY, true)
 
