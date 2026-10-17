@@ -10,17 +10,36 @@ import dev.pocketdesk.android.HostStore
 object ShortcutPlan {
     enum class Kind { CONNECT, WAKE }
 
-    data class Entry(val kind: Kind, val address: String) {
+    /**
+     * One shortcut. A connect shortcut is also a Direct Share target (N2),
+     * so its id carries this install's [token]: shortcut ids are readable
+     * only by the system and the launcher, so another app cannot forge one
+     * to choose a computer (N2 review).
+     */
+    data class Entry(val kind: Kind, val address: String, val token: String = "") {
         /** Stable per computer and action, so a launcher keeps a pinned one. */
         val id: String
-            get() = "${kind.name.lowercase()}:$address"
+            get() = if (kind == Kind.CONNECT && token.isNotEmpty()) {
+                "connect:$token:$address"
+            } else {
+                "${kind.name.lowercase()}:$address"
+            }
+    }
+
+    /** A connect shortcut's token: 16 hex digits, which no address starts with before a colon. */
+    private val TOKEN = Regex("^[0-9a-f]{16}:")
+
+    /** The address a shortcut id names, with or without a token. */
+    fun addressOf(id: String): String {
+        val rest = id.substringAfter(':')
+        return if (id.startsWith("connect:") && TOKEN.containsMatchIn(rest)) rest.substring(17) else rest
     }
 
     /** Launchers show four app shortcuts. */
     const val MAX = 4
 
-    fun plan(hosts: List<HostStore.Host>, hasWake: (String) -> Boolean, max: Int = MAX): List<Entry> {
-        val connect = hosts.map { Entry(Kind.CONNECT, it.address) }
+    fun plan(hosts: List<HostStore.Host>, hasWake: (String) -> Boolean, max: Int = MAX, token: String = ""): List<Entry> {
+        val connect = hosts.map { Entry(Kind.CONNECT, it.address, token) }
         val wake = hosts.filter { hasWake(it.address) }.map { Entry(Kind.WAKE, it.address) }
         return (connect + wake).take(max)
     }
@@ -45,11 +64,13 @@ object ShortcutPlan {
 
     /**
      * The saved computer a Direct Share target names (N2): the share sheet
-     * gives the shortcut's id, and only a connect shortcut of a computer
-     * still saved is one. Any other id goes nowhere, never to another.
+     * gives the shortcut's id, and only a connect shortcut with this
+     * install's [token], of a computer still saved, is one. Any other id
+     * goes nowhere, never to another computer.
      */
-    fun shortcutHost(shortcutId: String, hosts: List<HostStore.Host>): Share {
-        val prefix = Entry(Kind.CONNECT, "").id
+    fun shortcutHost(shortcutId: String, hosts: List<HostStore.Host>, token: String): Share {
+        if (token.isEmpty()) return Share.NotSaved
+        val prefix = "connect:$token:"
         if (!shortcutId.startsWith(prefix)) return Share.NotSaved
         return savedHost(shortcutId.removePrefix(prefix), hosts)?.let { Share.To(it) } ?: Share.NotSaved
     }

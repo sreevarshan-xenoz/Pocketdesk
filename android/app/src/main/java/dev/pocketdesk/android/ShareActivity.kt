@@ -54,7 +54,7 @@ class ShareActivity : ComponentActivity() {
         // Direct Share through shortcuts starts; older share sheets send none.
         val shortcut = intent.getStringExtra("android.intent.extra.shortcut.ID")
         val share = if (shortcut != null) {
-            ShortcutPlan.shortcutHost(shortcut, HostStore.hosts(this))
+            ShortcutPlan.shortcutHost(shortcut, HostStore.hosts(this), Prefs.shareToken(this))
         } else {
             ShortcutPlan.shareHost(asked, HostStore.hosts(this), Prefs.othersChooseComputer(this))
         }
