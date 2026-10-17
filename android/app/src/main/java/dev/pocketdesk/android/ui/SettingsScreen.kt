@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -23,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -121,6 +124,29 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.dynamicColor(context),
                 ) { Prefs.setDynamicColor(context, it) }
             }
+
+            // U3: what this phone calls itself to computers.
+            Header(stringResource(R.string.settings_this_phone))
+            var phoneName by remember { mutableStateOf(Prefs.phoneName(context)) }
+            // Applied as Settings closes, not per key: a changed name closes
+            // the control link so the next one carries it.
+            DisposableEffect(Unit) {
+                onDispose { Thread { dev.pocketdesk.android.PhoneName.apply(context) }.start() }
+            }
+            OutlinedTextField(
+                value = phoneName,
+                onValueChange = {
+                    phoneName = it.take(dev.pocketdesk.android.ComputerName.MAX_CHARS * 2)
+                    Prefs.setPhoneName(context, phoneName)
+                },
+                label = { Text(stringResource(R.string.settings_phone_name)) },
+                placeholder = { Text(dev.pocketdesk.android.PhoneName.deviceName(context)) },
+                supportingText = { Text(stringResource(R.string.settings_phone_name_summary)) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            )
 
             Header(stringResource(R.string.settings_session))
             boolRow(

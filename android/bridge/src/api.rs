@@ -235,6 +235,49 @@ pub struct MonitorInfoDto {
     pub is_primary: bool,
 }
 
+/// What this phone calls itself before the app has said (U3).
+const UNNAMED_PHONE: &str = "Android phone";
+
+/// The name this phone gives itself in its identity (U3): the app's, from
+/// its Settings or Android's device name, cleaned.
+fn device_name() -> String {
+    crate::DEVICE_NAME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_else(|| UNNAMED_PHONE.to_string())
+}
+
+/// Set the name this phone gives itself to computers (U3); an identity
+/// already made takes it from its next connection. Whether it changed.
+pub fn set_device_name(name: String) -> bool {
+    let name = pocketdesk_core::protocol::kdeconnect::clean_device_name(&name);
+    let changed = {
+        let mut slot = crate::DEVICE_NAME.lock().unwrap_or_else(|e| e.into_inner());
+        let changed = *slot != name;
+        *slot = name;
+        changed
+    };
+    if let Some(identity) = crate::DEVICE_IDENTITY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+    {
+        identity.device_name = device_name();
+    }
+    changed
+}
+
+/// Close the live control link, so the next one opens with a fresh
+/// identity (U3: a name the owner changed travels only in a handshake).
+/// Its reader clears the shared slots when the computer closes its end.
+pub async fn close_control_link() {
+    let live = (*CONTROL_WRITER).lock().await.clone();
+    if let Some(writer) = live {
+        let _ = writer.lock().await.shutdown().await;
+    }
+}
+
 /// Get or create the persistent device identity for this Android client.
 pub(crate) fn client_identity() -> pocketdesk_core::protocol::kdeconnect::DeviceIdentity {
     let mut guard = crate::DEVICE_IDENTITY.lock().unwrap();
@@ -253,10 +296,8 @@ pub(crate) fn client_identity() -> pocketdesk_core::protocol::kdeconnect::Device
     {
         let trimmed = data.trim().to_string();
         if !trimmed.is_empty() {
-            let identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
-                &trimmed,
-                "Pocketdesk Android Client",
-            );
+            let identity =
+                pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(&trimmed, device_name());
             *guard = Some(identity.clone());
             return identity;
         }
@@ -268,10 +309,8 @@ pub(crate) fn client_identity() -> pocketdesk_core::protocol::kdeconnect::Device
         let _ = std::fs::write(&path, &new_id);
     }
 
-    let identity = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(
-        &new_id,
-        "Pocketdesk Android Client",
-    );
+    let identity =
+        pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(&new_id, device_name());
     *guard = Some(identity.clone());
     identity
 }
@@ -507,8 +546,12 @@ pub async fn connect_to_peer(
     let result = async move {
         // The stream, and whether it came by the internet road.
         let dialed: Result<(ControlDuplex, bool), _> =
-            match conn_mgr.connect(&address, port, &identity).await {
-                Ok(stream) => Ok((Box::new(stream) as ControlDuplex, false)),
+            match conn_mgr.connect_named(&address, port, &identity).await {
+                Ok((stream, name)) => {
+                    // U3: the computer's name, for the app to keep.
+                    crate::peer_names::note(&address, name);
+                    Ok((Box::new(stream) as ControlDuplex, false))
+                }
                 Err(home) => match wan_identity.as_deref().map(WanTarget::parse) {
                     Some(Ok(target)) if INTERNET_PAUSE.may_try(&address, Instant::now()) => {
                         tracing::info!(
@@ -1222,6 +1265,16 @@ async fn control_request(
 
 #[cfg(test)]
 mod reply_tests {
+    /// U3: the phone's name is the app's, cleaned, and a placeholder until
+    /// it says.
+    #[test]
+    fn the_phone_gives_itself_the_name_the_app_set() {
+        super::set_device_name("  Galaxy\u{202E} A71 ".to_string());
+        assert_eq!(super::device_name(), "Galaxy A71");
+        super::set_device_name(String::new());
+        assert_eq!(super::device_name(), super::UNNAMED_PHONE);
+    }
+
     use serde_json::json;
 
     /// Several audio requests share one reply type: a reply naming another
@@ -1262,10 +1315,12 @@ async fn oneshot_request(
 ) -> Result<serde_json::Value, String> {
     let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
-    let stream = conn_mgr
-        .connect(address, port, &identity)
+    let (stream, name) = conn_mgr
+        .connect_named(address, port, &identity)
         .await
         .map_err(|e| format!("Connection failed: {e}"))?;
+    // U3: every connection hears the computer's name, a one-off one too.
+    crate::peer_names::note(address, name);
     let (reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));
     let sender = TcpDeviceSender::from_arc(writer.clone(), address.to_string());
@@ -1382,10 +1437,12 @@ pub(crate) async fn push_packet(
 
     let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
-    let stream = conn_mgr
-        .connect(address, port, &identity)
+    let (stream, name) = conn_mgr
+        .connect_named(address, port, &identity)
         .await
         .map_err(|e| format!("Connection failed: {e}"))?;
+    // U3: every connection hears the computer's name, a one-off one too.
+    crate::peer_names::note(address, name);
     let (mut reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));
     let sender = TcpDeviceSender::from_arc(writer.clone(), address.to_string());
@@ -2139,11 +2196,12 @@ pub(crate) async fn dial_internet_control(
     .map_err(|e| format!("{e:#}"))?;
     // The streams the computer opens on this connection for transfers (2d).
     let acceptor = stream.link_acceptor();
-    let stream = pocketdesk_core::protocol::connection::internet_control_handshake(
+    let (stream, name) = pocketdesk_core::protocol::connection::internet_control_handshake_named(
         stream, address, identity,
     )
     .await
     .map_err(|e| e.to_string())?;
+    crate::peer_names::note(address, name);
     if let Some(acceptor) = acceptor {
         crate::link::spawn_acceptor(acceptor);
     }

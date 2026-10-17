@@ -16,10 +16,19 @@ import dev.pocketdesk.android.bridge.RustCore
  * (this dialog's own ends as it closes) and says what happened.
  */
 @Composable
-fun LockQuestion(onDismiss: () -> Unit, onLock: () -> Unit) {
+fun LockQuestion(name: String?, onDismiss: () -> Unit, onLock: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.lock_confirm_title)) },
+        // U3: by its name, once it has one.
+        title = {
+            Text(
+                if (name != null) {
+                    stringResource(R.string.lock_confirm_title_named, name)
+                } else {
+                    stringResource(R.string.lock_confirm_title)
+                },
+            )
+        },
         text = { Text(stringResource(R.string.lock_confirm_message)) },
         confirmButton = {
             TextButton(onClick = {

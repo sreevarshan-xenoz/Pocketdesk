@@ -57,6 +57,19 @@ impl ConnectionManager {
         port: u16,
         identity: &DeviceIdentity,
     ) -> Result<ControlStream> {
+        self.connect_named(address, port, identity)
+            .await
+            .map(|(stream, _)| stream)
+    }
+
+    /// [`ConnectionManager::connect`], with the name the desktop gives
+    /// itself in its identity, cleaned (U3).
+    pub async fn connect_named(
+        &self,
+        address: &str,
+        port: u16,
+        identity: &DeviceIdentity,
+    ) -> Result<(ControlStream, Option<String>)> {
         let conn_id = uuid::Uuid::new_v4().to_string();
         let span = info_span!(
             "handshake",
@@ -108,7 +121,7 @@ impl ConnectionManager {
                 reason: format!("TLS: {e}"),
             })?;
 
-            control_handshake(stream, address, identity).await
+            control_handshake_named(stream, address, identity).await
         }
         .instrument(span)
         .await
@@ -119,6 +132,34 @@ impl ConnectionManager {
 /// TCP, or an iroh stream): our HELLO, the desktop's OK and identity, then
 /// ours. `peer` names the desktop in errors.
 pub async fn control_handshake<S>(stream: S, peer: &str, identity: &DeviceIdentity) -> Result<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    control_handshake_named(stream, peer, identity)
+        .await
+        .map(|(stream, _)| stream)
+}
+
+/// The name a desktop gives itself in its identity line, cleaned (U3):
+/// its own claim, for a person to tell computers apart.
+fn identity_name(line: &str) -> Option<String> {
+    let packet = super::kdeconnect::NetworkPacket::from_wire(line.trim()).ok()?;
+    if packet.packet_type != "kdeconnect.identity" {
+        return None;
+    }
+    packet
+        .body
+        .get("deviceName")
+        .and_then(|v| v.as_str())
+        .and_then(super::kdeconnect::clean_device_name)
+}
+
+/// [`control_handshake`], with the desktop's name from its identity (U3).
+pub async fn control_handshake_named<S>(
+    stream: S,
+    peer: &str,
+    identity: &DeviceIdentity,
+) -> Result<(S, Option<String>)>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -154,7 +195,7 @@ where
         });
     }
 
-    // Step 3: Read server's identity packet (optional)
+    // Step 3: Read server's identity packet (optional), keeping its name.
     let mut identity_response = String::new();
     match tokio::time::timeout(
         Duration::from_secs(3),
@@ -192,7 +233,7 @@ where
         detail: e.to_string(),
     })?;
 
-    Ok(stream)
+    Ok((stream, identity_name(&identity_response)))
 }
 
 /// The control channel's opening over the internet road (T10a). The desktop
@@ -203,10 +244,25 @@ where
 /// read a byte at a time: the desktop's pushes follow its identity at once,
 /// and a buffered reader would swallow them.
 pub async fn internet_control_handshake<S>(
-    mut stream: S,
+    stream: S,
     peer: &str,
     identity: &DeviceIdentity,
 ) -> Result<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    internet_control_handshake_named(stream, peer, identity)
+        .await
+        .map(|(stream, _)| stream)
+}
+
+/// [`internet_control_handshake`], with the desktop's name from the
+/// identity that admits the phone (U3).
+pub async fn internet_control_handshake_named<S>(
+    mut stream: S,
+    peer: &str,
+    identity: &DeviceIdentity,
+) -> Result<(S, Option<String>)>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -252,7 +308,7 @@ where
     match super::kdeconnect::NetworkPacket::from_wire(admitted.trim()) {
         Ok(packet) if packet.packet_type == "kdeconnect.identity" => {
             debug!("Admitted over the internet");
-            Ok(stream)
+            Ok((stream, identity_name(&admitted)))
         }
         _ => Err(failed(admitted.trim().to_string())),
     }
@@ -380,6 +436,53 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    /// U3: the computer's name comes with its identity, cleaned, on both
+    /// roads; an identity without one is no name.
+    #[tokio::test]
+    async fn the_handshake_returns_the_computers_name() {
+        let identity = DeviceIdentity::new("duplex-phone", "Duplex Phone");
+        let (phone, desktop) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(async move {
+            let mut desktop = BufReader::new(desktop);
+            let mut hello = String::new();
+            desktop.read_line(&mut hello).await.unwrap();
+            desktop
+                .get_mut()
+                .write_all(
+                    format!(
+                        "{HANDSHAKE_OK}\n{{\"type\":\"kdeconnect.identity\",\"body\":{{\"deviceName\":\"Desk\u{202E}top\"}}}}\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            let mut ours = String::new();
+            desktop.read_line(&mut ours).await.unwrap();
+        });
+        let (_stream, name) = control_handshake_named(phone, "duplex", &identity)
+            .await
+            .unwrap();
+        assert_eq!(name.as_deref(), Some("Desktop"));
+
+        let identity = DeviceIdentity::new("road-phone", "Road Phone");
+        let (phone, desktop) = tokio::io::duplex(64 * 1024);
+        internet_desktop(
+            desktop,
+            "{\"type\":\"kdeconnect.identity\",\"body\":{\"deviceName\":\"Study PC\"}}\n",
+        );
+        let (_stream, name) = internet_control_handshake_named(phone, "desktop", &identity)
+            .await
+            .expect("admitted");
+        assert_eq!(name.as_deref(), Some("Study PC"));
+
+        let (phone, desktop) = tokio::io::duplex(64 * 1024);
+        internet_desktop(desktop, "{\"type\":\"kdeconnect.identity\"}\n");
+        let (_stream, name) = internet_control_handshake_named(phone, "desktop", &identity)
+            .await
+            .expect("admitted");
+        assert_eq!(name, None);
     }
 
     #[tokio::test]

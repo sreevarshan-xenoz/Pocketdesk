@@ -13,11 +13,15 @@ use pocketdesk_core::protocol::v2::{
 use crate::state;
 
 /// A v2 peer's id and name reach logs, the registry and the owner's prompts,
-/// so both are held to the rule the control channel and the stream use:
-/// short and printable (R3 review).
+/// so the id is held to the rule the control channel and the stream use
+/// (short and printable, R3 review), and the name to the names' rule: one
+/// printable line of at most 40 characters, as a phone now sends (U3
+/// review: the id's 128 bytes refused a long name in a 4-byte script).
 fn usable_identity(identity: &IdentityPacketV2) -> bool {
-    use pocketdesk_core::protocol::kdeconnect::valid_device_id;
-    valid_device_id(&identity.device_id) && valid_device_id(&identity.device_name)
+    use pocketdesk_core::protocol::kdeconnect::{clean_device_name, valid_device_id};
+    valid_device_id(&identity.device_id)
+        && clean_device_name(&identity.device_name).as_deref()
+            == Some(identity.device_name.as_str())
 }
 
 /// Handles a v2 multiplexed QUIC session.
@@ -378,5 +382,11 @@ mod tests {
         assert!(!usable_identity(&identity("0d7c3a52", "\u{1b}[31mred")));
         assert!(!usable_identity(&identity("0d7c3a52", &"x".repeat(4096))));
         assert!(!usable_identity(&identity("", "Galaxy")));
+        // A long name in a 4-byte script is a usable name (U3 review).
+        assert!(usable_identity(&identity(
+            "0d7c3a52",
+            &"\u{1F600}".repeat(40)
+        )));
+        assert!(!usable_identity(&identity("0d7c3a52", "  padded ")));
     }
 }

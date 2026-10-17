@@ -93,9 +93,16 @@ fun RemoteInputScreen(
 
     // Ecosystem 1f: other apps hear the remote start and end.
     val tell = remember(address) { SessionTell("remote") }
+    var shownName by remember(address) { mutableStateOf(HostStore.shownName(context, address)) }
     LaunchedEffect(state) {
         val told = when (state) {
-            State.Ready -> tell.up(Prefs.tellOtherApps(context))
+            State.Ready -> {
+                // U3: the name the computer gave itself on this connection,
+                // into the title too (U3 review: it kept the address).
+                RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
+                shownName = HostStore.shownName(context, address)
+                tell.up(Prefs.tellOtherApps(context))
+            }
             State.Down, State.TooOld -> tell.lost()
             else -> null
         }
@@ -224,6 +231,7 @@ fun RemoteInputScreen(
     val resources = LocalResources.current
     if (confirmLock) {
         LockQuestion(
+            name = HostStore.name(context, address),
             onDismiss = { confirmLock = false },
             onLock = {
                 keyScope.launch(Dispatchers.IO) {
@@ -250,7 +258,7 @@ fun RemoteInputScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    stringResource(R.string.remote_title, address),
+                    stringResource(R.string.remote_title, shownName),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )

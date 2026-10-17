@@ -128,7 +128,7 @@ impl PhoneFilesView {
         ui.horizontal(|ui| {
             for d in &phones {
                 if ui
-                    .selectable_label(d.id == phone, crate::app::short(&d.id))
+                    .selectable_label(d.id == phone, crate::model::device_label(devices, &d.id))
                     .clicked()
                 {
                     self.phone = Some(d.id.clone());

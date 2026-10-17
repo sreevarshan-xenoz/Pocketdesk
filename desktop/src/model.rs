@@ -15,6 +15,10 @@ use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
     pub id: String,
+    /// U3: the owner's name for it, else what it calls itself.
+    pub name: Option<String>,
+    /// Whether [`Device::name`] is the owner's, not the phone's own claim.
+    pub renamed: bool,
     /// Seconds left on a time-boxed grant; `None` is permanent.
     pub grant_remaining: Option<u64>,
     /// Whether it has a live streaming session right now.
@@ -83,6 +87,9 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
             .trusted_devices()
             .into_iter()
             .map(|id| Device {
+                name: store.name(&id).map(str::to_string),
+                // The owner's, even when it matches the phone's own (U3 review).
+                renamed: store.chosen_name(&id).is_some(),
                 grant_remaining: store.grant_remaining(&id),
                 connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
                 takes_files: takes_files(&id),
@@ -179,12 +186,45 @@ pub fn send_target_ids(snapshot: &Snapshot) -> Vec<String> {
         .collect()
 }
 
-/// How a send target is named: a computer by its name, a phone by its id.
+/// How a send target is named: a computer by its name, a phone by its
+/// name (U3), else by the first characters of its id.
 pub fn target_label(snapshot: &Snapshot, id: &str) -> String {
     match snapshot.linked_computers.iter().find(|(c, _)| c == id) {
         Some((_, name)) => format!("{name} (computer)"),
-        None => crate::app::short(id),
+        None => device_label(&snapshot.devices, id),
     }
+}
+
+/// A paired device by its name (U3), else by the first characters of its
+/// id: one label for every page. A name another device shares (two phones
+/// of one model keep Android's default) gets its short id too, so a picker
+/// never lists the same words twice (U3 review).
+pub fn device_label(devices: &[Device], id: &str) -> String {
+    let Some(name) = devices
+        .iter()
+        .find(|d| d.id == id)
+        .and_then(|d| d.name.as_deref())
+    else {
+        return crate::app::short(id);
+    };
+    let shared = devices
+        .iter()
+        .filter(|d| d.name.as_deref() == Some(name))
+        .count()
+        > 1;
+    if shared {
+        format!("{name} · {}", crate::app::short(id))
+    } else {
+        name.to_string()
+    }
+}
+
+/// Name the paired device `id` (U3); blank clears the owner's name, back
+/// to the phone's own.
+pub fn rename_device(state_dir: &Path, id: &str, name: &str) -> pocketdesk_core::error::Result<()> {
+    TrustStore::update(state_dir.join(TRUST_FILE), |store| {
+        store.rename(id, Some(name))
+    })
 }
 
 /// The phone a send goes to: the one the owner chose, while it is still in
@@ -643,6 +683,51 @@ mod tests {
         );
         assert_eq!(target_label(&with_computer, "desk-b"), "Desk (computer)");
         assert_eq!(target_label(&with_computer, "phone-a"), "phone-a");
+    }
+
+    /// U3: a phone shows by its name, the owner's over its own, and by
+    /// its id until it has one.
+    #[test]
+    fn a_phone_is_labelled_by_its_name_and_the_owners_rename_wins() {
+        let dir = temp_dir("names");
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("phone-a").unwrap();
+        store.trust_device("0a1b2c3d-4e5f-6789").unwrap();
+        store.note_claimed_name("phone-a", "Galaxy A71").unwrap();
+        let snapshot = snapshot_with(&dir, 101, true);
+        let a = snapshot.devices.iter().find(|d| d.id == "phone-a").unwrap();
+        assert_eq!(a.name.as_deref(), Some("Galaxy A71"));
+        assert!(!a.renamed, "its own claim");
+        assert_eq!(target_label(&snapshot, "phone-a"), "Galaxy A71");
+        assert_eq!(
+            device_label(&snapshot.devices, "0a1b2c3d-4e5f-6789"),
+            "0a1b2c3d-4e5…",
+            "no name yet: its id"
+        );
+
+        rename_device(&dir, "phone-a", "Work phone").unwrap();
+        let snapshot = snapshot_with(&dir, 101, true);
+        let a = snapshot.devices.iter().find(|d| d.id == "phone-a").unwrap();
+        assert_eq!(a.name.as_deref(), Some("Work phone"));
+        assert!(a.renamed);
+        rename_device(&dir, "phone-a", "  ").unwrap();
+        let snapshot = snapshot_with(&dir, 101, true);
+        assert_eq!(device_label(&snapshot.devices, "phone-a"), "Galaxy A71");
+
+        // Two phones of one model: each name says which (U3 review).
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store
+            .note_claimed_name("0a1b2c3d-4e5f-6789", "Galaxy A71")
+            .unwrap();
+        let snapshot = snapshot_with(&dir, 101, true);
+        assert_eq!(
+            device_label(&snapshot.devices, "0a1b2c3d-4e5f-6789"),
+            "Galaxy A71 · 0a1b2c3d-4e5…"
+        );
+        assert_eq!(
+            device_label(&snapshot.devices, "phone-a"),
+            "Galaxy A71 · phone-a"
+        );
     }
 
     #[test]

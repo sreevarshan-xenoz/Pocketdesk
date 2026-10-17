@@ -57,6 +57,9 @@ pub(crate) static DEVICE_IDENTITY: LazyLock<
     std::sync::Mutex<Option<pocketdesk_core::protocol::kdeconnect::DeviceIdentity>>,
 > = LazyLock::new(|| std::sync::Mutex::new(None));
 
+/// The name this phone gives itself in its identity (U3), as the app set it.
+pub(crate) static DEVICE_NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 /// mDNS discovery service status flag.
 pub(crate) static MDNS_ACTIVE: AtomicBool = AtomicBool::new(false);
 

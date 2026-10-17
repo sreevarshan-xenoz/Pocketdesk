@@ -911,6 +911,16 @@ pub async fn connect_peer(peer: String, port: u16, identity: &DeviceIdentity) ->
     Ok(())
 }
 
+/// Keep what a paired phone calls itself (U3), off the runtime: the trust
+/// store is a file, written only when the name changed.
+fn note_claimed_name(device_id: &str, claimed: Option<&str>) {
+    let Some(name) = claimed.map(str::to_string) else {
+        return;
+    };
+    let id = device_id.to_string();
+    tokio::task::spawn_blocking(move || crate::plugins::pair::note_claimed_name(&id, &name));
+}
+
 /// Send a peer the desktop state it should not have to wait for: the Workspace
 /// HUD snapshot and the WAN (iroh) identity it dials when the LAN path fails.
 async fn seed_desktop_state(
@@ -1281,6 +1291,13 @@ where
             tracing::warn!("Control connection with an unusable deviceId; dropped");
             return Ok(());
         };
+        // U3: what the phone calls itself, kept once it is paired (at the
+        // start, and when it pairs on this connection).
+        let claimed_name = identity
+            .body
+            .get("deviceName")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         let peer = match road {
             Road::Local { peer: None, .. } => return Ok(()),
             Road::Local {
@@ -1364,6 +1381,7 @@ where
         if state::may_receive_pushes(&*sender) {
             seed_desktop_state(&sender, hypr_ipc, wan_endpoint, road).await;
             seeded = true;
+            note_claimed_name(&device_id, claimed_name.as_deref());
         }
 
         tracing::info!("Entering main packet loop");
@@ -1480,6 +1498,7 @@ where
                                 );
                                 seed_desktop_state(&sender, hypr_ipc, wan_endpoint, road).await;
                                 seeded = true;
+                                note_claimed_name(&device_id, claimed_name.as_deref());
                             }
                         }
                         Err(e) => {

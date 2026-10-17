@@ -18,7 +18,7 @@ class ConnectTileService : TileService() {
         val host = HostStore.lastHost(this)
         tile.label = getString(R.string.tile_label)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = host?.address ?: getString(R.string.tile_no_computer)
+            tile.subtitle = host?.let { HostStore.shownName(this, it.address) } ?: getString(R.string.tile_no_computer)
         }
         // Inactive, not unavailable, with no computer saved: an unavailable
         // tile gets no clicks, and this one then opens the app.

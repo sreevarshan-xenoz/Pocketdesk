@@ -14,6 +14,7 @@ mod links;
 mod logcat;
 mod media_presses;
 mod notification_answers;
+mod peer_names;
 mod phone_file_requests;
 mod rates;
 mod session;
@@ -136,6 +137,19 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetData
     let path = jstring_to_string(&mut env, &path);
     if !path.is_empty() {
         api::set_data_dir(path);
+    }
+}
+
+/// The name this phone gives itself to computers (U3).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetDeviceName(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) {
+    let name = jstring_to_string(&mut env, &name);
+    if api::set_device_name(name) {
+        RUNTIME.block_on(api::close_control_link());
     }
 }
 
@@ -1528,6 +1542,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeControl
 ) -> jstring {
     let json = RUNTIME.block_on(api::control_peer()).unwrap_or_default();
     to_jstring(&mut env, json)
+}
+
+/// The name the computer at `address` gave itself when last connected (U3),
+/// or "" when it has not said.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePeerName(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    to_jstring(&mut env, peer_names::name(&address).unwrap_or_default())
 }
 
 /// The replies the desktop asked this phone to text (N5b), as JSON.

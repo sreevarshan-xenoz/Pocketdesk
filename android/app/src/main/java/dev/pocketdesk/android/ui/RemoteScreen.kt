@@ -227,6 +227,7 @@ fun RemoteScreen(
     }
     if (confirmLock) {
         LockQuestion(
+            name = HostStore.name(context, address),
             onDismiss = { confirmLock = false },
             onLock = {
                 scope.launch(Dispatchers.IO) {
@@ -847,7 +848,11 @@ fun RemoteScreen(
     // session that looks live cannot take a file or a push.
     var streamUps by remember(address) { mutableIntStateOf(0) }
     LaunchedEffect(streamStatus is StreamStatus.Up) {
-        if (streamStatus is StreamStatus.Up) streamUps++
+        if (streamStatus is StreamStatus.Up) {
+            streamUps++
+            // U3: the name the computer gave itself on this connection.
+            RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
+        }
     }
     ControlLinkEffect(address, controlPort, streamUps)
     ClipboardSyncEffect(address, controlPort, enabled = clipboardSync)

@@ -40,7 +40,7 @@ From `server/src/service.rs` (`handle_connection_with_kde`):
 2. The TLS handshake must finish within 8 s. The client must present a certificate (`AnyClientCert { mandatory: true }`). Its SHA-256 becomes the connection's `peer_key`.
 3. The client sends `POCKETDESK_HELLO 1` and the desktop answers `POCKETDESK_OK 1`. Any other line gets `POCKETDESK_ERR 1`. A handshake line is at most 64 KiB (`MAX_HANDSHAKE_LINE`).
 4. **The desktop sends its own `kdeconnect.identity` before the client has identified itself.** It contains `deviceId`, `deviceName` (the host name), `deviceType: "desktop"`, `protocolVersion` and the plugin capability lists (`core/src/protocol/kdeconnect.rs`, `as_identity_packet`). Any TLS client with any certificate therefore learns the desktop's id and name.
-5. The client sends its `kdeconnect.identity` within 5 s. Its `deviceId` must pass `valid_device_id` (§2.4). The connection is known by that id from then on. A second identity on the same connection is ignored.
+5. The client sends its `kdeconnect.identity` within 5 s. Its `deviceId` must pass `valid_device_id` (§2.4). The connection is known by that id from then on. A second identity on the same connection is ignored. Once the phone is paired, its `deviceName`, cleaned (`clean_device_name`: one printable line of at most 40 characters), is kept in the trust store as what it calls itself (U3), written only when it changed; the owner's rename is kept beside it and never replaced.
 6. Packets follow as JSON lines, each at most 4 MiB (`MAX_PACKET_LINE`). Every packet is checked against two things. First, the device's standing (`pair::standing`: paired with this key, unpaired, or wrong key), re-read for each packet. Second, the per-device permission (`pair::permits` → `capability_for`).
 7. A connection that may receive pushes (paired with its key, or any connection when `pairing_required = false`) is seeded with the window and workspace HUD state, the WAN endpoint (`kdeconnect.pocketdesk.endpoint`) and `kdeconnect.pocketdesk.wake_info` (`seed_desktop_state`, `server/src/state.rs` `may_receive_pushes`).
 
@@ -118,7 +118,7 @@ Discovery is mDNS (UDP 5353), so no rule is made for UDP 1716. `install` removes
 | Desktop iroh key | Desktop | 32-byte iroh secret key. Its public half is the WAN endpoint id | `<config>/iroh_secret.key` (mode 0600, or an owner-only DACL on Windows) | Endpoint packet, QR `ep`, relays it uses, the DHT record key | `server/src/iroh_endpoint.rs` (`load_or_create_secret_key`, `key_path`) |
 | Phone certificate | Phone | Same generator as the desktop's | app `files/pocketdesk/certs/identity.der` and `identity.key` | Every desktop the phone connects to (sent as the TLS client certificate) | `android/bridge/src/api.rs` (`set_data_dir`), `core/src/streaming/transport.rs` |
 | Phone device id | Phone | UUIDv4 | app `files/pocketdesk/certs/device_id` | Desktops: control identity, stream marker `[0xFE,0x00]` | `android/bridge/src/api.rs` (lines near `new_id`) |
-| Phone name | Phone | The fixed string `Pocketdesk Android Client`. The phone model is not sent | — | Desktops | `android/bridge/src/api.rs` |
+| Phone name | Phone | The name set in the app's Settings ("This phone's name"), else Android's device name (Settings › About phone), else the model; cleaned to one printable line of at most 40 characters (U3; it was the fixed string `Pocketdesk Android Client`). Sent in the identity to each computer the phone connects to, before it is paired | — | Desktops it connects to | `android/app/.../PhoneName.kt`, `android/bridge/src/api.rs` |
 | Phone iroh key | Phone | iroh secret key, used for every WAN dial | app `files/pocketdesk/certs/iroh_device.key` (owner-only write) | The desktop (registered on the LAN), relays, DHT nodes the phone queries | `android/bridge/src/api.rs` (`device_wan_key`), `core/src/streaming/iroh_connection.rs` |
 
 ### 2.2 How the phone trusts the desktop
@@ -407,7 +407,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/certs/known_peers.json` | Certificate pins (for `pocketdesk connect`, and the other computers this one paired with, 2f) | Default | same (`update_pins`) |
 | `<state>/device_id` | The desktop's device id | Default | `server/src/kde.rs` |
 | `<state>/pairing.pin` | The PIN, minting time, grant length | Owner-only | `core/src/local/pin.rs` |
-| `<state>/trusted_devices.json` (+ `.lock`) | Paired device ids, guest grants, per-device permissions | Default | `core/src/protocol/kdeconnect.rs` (`TrustStore`) |
+| `<state>/trusted_devices.json` (+ `.lock`) | Paired device ids, guest grants, per-device permissions, and each one's name: what it calls itself and the owner's rename (U3) | Default | `core/src/protocol/kdeconnect.rs` (`TrustStore`) |
 | `<state>/device_keys.json` | Per device: TLS key hash and iroh id | Default; atomic and synced | `core/src/local/device_keys.rs` |
 | `<state>/endpoint.json` | The WAN endpoint body: id, relay URLs, direct addresses, `dht` | Default | `core/src/local/identity.rs`, `iroh_endpoint.rs` |
 | `<state>/wan_status.json` | Yes/no facts (UDP, NAT varies, public IPv6, captive portal, DHT state). No addresses | Default | `core/src/local/diagnostics.rs` |
@@ -454,8 +454,8 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | `files/pocketdesk/certs/known_peers.json` | Desktop certificate pins | same |
 | `files/pocketdesk/certs/device_id`, `paired_servers.json` | The phone's id, and the desktops it paired with | `android/bridge/src/api.rs` |
 | `files/pocketdesk/certs/iroh_device.key` | The phone's iroh key | `api.rs` (`device_wan_key`), `iroh_connection.rs` |
-| SharedPreferences `pocketdesk-host` | Saved computers: address, ports, WoL MAC, `wake_info`, wake settings, `wan_identity` (endpoint JSON), monitor, paired flag | `android/app/.../HostStore.kt` |
-| SharedPreferences `pocketdesk-ui` | App settings | `Prefs.kt` |
+| SharedPreferences `pocketdesk-host` | Saved computers: address, ports, WoL MAC, `wake_info`, wake settings, `wan_identity` (endpoint JSON), monitor, paired flag, and each computer's name: what it calls itself and the owner's rename (U3) | `android/app/.../HostStore.kt` |
+| SharedPreferences `pocketdesk-ui` | App settings, the name this phone gives computers among them | `Prefs.kt` |
 | SharedPreferences `pocketdesk-phone-notifications` | On/off, the opted-in app list, seen ids | `notify/PhoneNotifications.kt` |
 | SharedPreferences `pocketdesk-texts` | On/off (show, reply, names), and up to 200 texts queued while the computer is away (without names: a name is looked up as a text leaves), with send tracking | `notify/Texts.kt` |
 | `cache/share`, `cache/clipboard`, `cache/clipboard-out` | Files being shared, clipboard images | `service/TransferService.kt`, `ui/ClipboardImages.kt` |
