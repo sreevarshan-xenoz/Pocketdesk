@@ -48,8 +48,11 @@ impl CompatIdentity {
         let (cert_der, key_der) = make_certificate(&id)?;
         let write = |path: &PathBuf, bytes: &[u8], private: bool| -> Result<()> {
             // Its own temporary name: `with_extension` gave the key and the
-            // certificate the same one.
-            let tmp = PathBuf::from(format!("{}.tmp", path.display()));
+            // certificate the same one. Built on the path itself, not its
+            // display, which is lossy for a path that is not UTF-8.
+            let mut tmp = path.clone().into_os_string();
+            tmp.push(".tmp");
+            let tmp = PathBuf::from(tmp);
             if private {
                 pocketdesk_core::secure_fs::write_private(&tmp, bytes)?;
             } else {
