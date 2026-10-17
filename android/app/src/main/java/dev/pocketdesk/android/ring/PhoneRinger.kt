@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import androidx.core.content.edit
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.MainActivity
 import dev.pocketdesk.android.Prefs
@@ -163,20 +164,47 @@ object PhoneRinger {
         manager.createNotificationChannel(channel)
     }
 
+    /** Where the volume before a ring is kept, so a process killed mid-ring still puts it back. */
+    private fun saved(ctx: Context) = ctx.getSharedPreferences("pocketdesk-ring", Context.MODE_PRIVATE)
+
+    private const val KEY_VOLUME_BEFORE = "alarm_volume_before"
+
+    /** Whether a ring sounds now (in this process). */
+    val ringing: Boolean
+        get() = volumeBefore != null || tone != null
+
     private fun loudest(ctx: Context) {
         runCatching {
             val audio = ctx.getSystemService(AudioManager::class.java)
-            if (volumeBefore == null) volumeBefore = audio.getStreamVolume(AudioManager.STREAM_ALARM)
+            if (volumeBefore == null) {
+                val before = audio.getStreamVolume(AudioManager.STREAM_ALARM)
+                volumeBefore = before
+                // A volume saved by a ring cut short stays the one to restore.
+                if (!saved(ctx).contains(KEY_VOLUME_BEFORE)) {
+                    // On disk before the volume goes up.
+                    saved(ctx).edit(commit = true) { putInt(KEY_VOLUME_BEFORE, before) }
+                }
+            }
             audio.setStreamVolume(AudioManager.STREAM_ALARM, audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
         }
     }
 
     private fun restoreVolume(ctx: Context) {
-        val before = volumeBefore ?: return
+        val kept = saved(ctx).getInt(KEY_VOLUME_BEFORE, -1).takeIf { it >= 0 }
+        val before = kept ?: volumeBefore ?: return
         volumeBefore = null
         runCatching {
             ctx.getSystemService(AudioManager::class.java).setStreamVolume(AudioManager.STREAM_ALARM, before, 0)
         }
+        saved(ctx).edit { remove(KEY_VOLUME_BEFORE) }
+    }
+
+    /**
+     * Put back an alarm volume a ring left raised when its process died
+     * mid-ring (N1 review); nothing while one rings here.
+     */
+    fun restoreAfterDeath(ctx: Context) {
+        if (!ringing && saved(ctx).contains(KEY_VOLUME_BEFORE)) restoreVolume(ctx.applicationContext)
     }
 }
 
@@ -215,10 +243,13 @@ object RingOwner {
  * latch outside a session ([RingRule]).
  */
 class BackgroundRing(private val ctx: Context) {
-    private val rule = RingRule()
+    // Under the computer's minute, so tick timing never drops a ring the
+    // computer let through (N1 review).
+    private val rule = RingRule(everyMs = 45_000L)
     private var lastConnectMs = 0L
 
     fun tick() {
+        PhoneRinger.restoreAfterDeath(ctx)
         val on = Prefs.ringFromComputer(ctx)
         val now = SystemClock.elapsedRealtime()
         if (on) {
@@ -232,14 +263,16 @@ class BackgroundRing(private val ctx: Context) {
         val inSession = RingOwner.watched
         val asked = !inSession && RustCore.checkSiren()
         when (rule.decide(asked, on, inSession, now)) {
+            // Named by the computer whose link carried it (N1 review).
             RingRule.Act.RING ->
-                PhoneRinger.ring(ctx, PhoneLink.target(ctx)?.let { HostStore.name(ctx, it.address) })
+                PhoneRinger.ring(ctx, RustCore.controlPeer()?.let { HostStore.name(ctx, it.first) })
             RingRule.Act.TAKE_AND_DROP -> Log.i("BackgroundRing", "a ring from the computer, not rung (switch off, or within a minute)")
             RingRule.Act.NOTHING -> {}
         }
     }
 
     private companion object {
-        const val RECONNECT_MS = 30_000L
+        // As the other background features retry: a computer away costs a dial a minute.
+        const val RECONNECT_MS = 60_000L
     }
 }

@@ -186,10 +186,6 @@ object Prefs {
         bump()
     }
 
-    /**
-     * Whether files the computer sends arrive without a session (T10d): the
-     * notification listener keeps a link for them. Off by default.
-     */
     /** Whether the computer may ring this phone to find it (N1); keeps the background link. Off by default. */
     fun ringFromComputer(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_RING_FROM_COMPUTER, false)
@@ -199,6 +195,10 @@ object Prefs {
         bump()
     }
 
+    /**
+     * Whether files the computer sends arrive without a session (T10d): the
+     * notification listener keeps a link for them. Off by default.
+     */
     fun filesInBackground(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_FILES_BACKGROUND, false)
 
