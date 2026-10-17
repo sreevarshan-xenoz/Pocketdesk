@@ -23,4 +23,10 @@ class Android17Test {
         assertFalse(Android17.captures(sdk = 37, virtual = true, mouse = true, touchpad = true))
         assertFalse(Android17.captures(sdk = 37, virtual = false, mouse = false, touchpad = false))
     }
+
+    @Test
+    fun codeTextsAreHeldFrom17() {
+        assertFalse(Android17.holdsCodeTexts(36))
+        assertTrue(Android17.holdsCodeTexts(37))
+    }
 }

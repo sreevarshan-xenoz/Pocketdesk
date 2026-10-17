@@ -27,4 +27,7 @@ object Android17 {
         sdk >= SDK -> mouse || touchpad
         else -> mouse && !touchpad
     }
+
+    /** Whether Android holds texts with a one-time code from this app for 3 hours. */
+    fun holdsCodeTexts(sdk: Int): Boolean = sdk >= SDK
 }
