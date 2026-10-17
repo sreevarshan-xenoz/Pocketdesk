@@ -469,6 +469,53 @@ pub struct TrustStore {
     permissions: HashMap<String, DevicePermissions>,
     /// 2f: the paired devices that are the owner's other computers.
     computers: HashSet<String>,
+    /// U3: deviceId -> what it calls itself and the owner's rename.
+    names: HashMap<String, DeviceName>,
+}
+
+/// A paired device's name (U3): what it calls itself in its identity, and
+/// the owner's rename, which the device's own never replaces.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceName {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chosen: Option<String>,
+}
+
+/// The longest name kept, in characters: enough for "Pixel 9 Pro Fold" or
+/// a host name, short enough that a prompt's id and buttons stay in view.
+pub const MAX_NAME_CHARS: usize = 40;
+
+/// A device's name as shown (U3): trimmed, control and invisible format
+/// characters dropped (the device id rules' list), white space made one
+/// space, at most [`MAX_NAME_CHARS`]; `None` when nothing is left. A name
+/// is the device's own claim, so it is cleaned, never trusted.
+pub fn clean_device_name(raw: &str) -> Option<String> {
+    let mut cleaned = String::new();
+    let mut space = false;
+    for c in raw.chars() {
+        if c.is_whitespace() {
+            space = !cleaned.is_empty();
+            continue;
+        }
+        if c.is_control() || is_invisible_format(c) {
+            continue;
+        }
+        if cleaned.chars().count() >= MAX_NAME_CHARS {
+            break;
+        }
+        if space {
+            cleaned.push(' ');
+            space = false;
+            if cleaned.chars().count() >= MAX_NAME_CHARS {
+                break;
+            }
+        }
+        cleaned.push(c);
+    }
+    let cleaned = cleaned.trim_end().to_string();
+    (!cleaned.is_empty()).then_some(cleaned)
 }
 
 fn unix_now_secs() -> u64 {
@@ -578,6 +625,7 @@ impl TrustStore {
                 grants: HashMap::new(),
                 permissions: HashMap::new(),
                 computers: HashSet::new(),
+                names: HashMap::new(),
             });
         }
 
@@ -607,12 +655,19 @@ impl TrustStore {
             .into_iter()
             .filter(|id| trusted_device_ids.contains(id))
             .collect();
+        // Names go with the device too (U3).
+        let names = decoded
+            .names
+            .into_iter()
+            .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
+            .collect();
         Ok(Self {
             path,
             trusted_device_ids,
             grants,
             permissions,
             computers,
+            names,
         })
     }
 
@@ -650,6 +705,53 @@ impl TrustStore {
         // A forgotten device that pairs again starts from the defaults.
         self.permissions.remove(device_id);
         self.computers.remove(device_id);
+        self.names.remove(device_id);
+        self.persist()
+    }
+
+    /// The name a device is shown by (U3): the owner's rename, else what
+    /// it calls itself.
+    pub fn name(&self, device_id: &str) -> Option<&str> {
+        let name = self.names.get(device_id)?;
+        name.chosen.as_deref().or(name.claimed.as_deref())
+    }
+
+    /// What a device last called itself.
+    pub fn claimed_name(&self, device_id: &str) -> Option<&str> {
+        self.names.get(device_id)?.claimed.as_deref()
+    }
+
+    /// Keep what a paired device calls itself in its identity; whether the
+    /// store changed (and was written). A device not trusted, or a name
+    /// unchanged or empty once cleaned, writes nothing.
+    pub fn note_claimed_name(&mut self, device_id: &str, raw: &str) -> Result<bool> {
+        if !self.is_trusted(device_id) {
+            return Ok(false);
+        }
+        let Some(claimed) = clean_device_name(raw) else {
+            return Ok(false);
+        };
+        let entry = self.names.entry(device_id.to_string()).or_default();
+        if entry.claimed.as_deref() == Some(claimed.as_str()) {
+            return Ok(false);
+        }
+        entry.claimed = Some(claimed);
+        self.persist()?;
+        Ok(true)
+    }
+
+    /// The owner's name for a paired device; `None`, or one empty once
+    /// cleaned, clears it, back to the device's own.
+    pub fn rename(&mut self, device_id: &str, chosen: Option<&str>) -> Result<()> {
+        if !self.is_trusted(device_id) {
+            return Ok(());
+        }
+        let chosen = chosen.and_then(clean_device_name);
+        let entry = self.names.entry(device_id.to_string()).or_default();
+        entry.chosen = chosen;
+        if *entry == DeviceName::default() {
+            self.names.remove(device_id);
+        }
         self.persist()
     }
 
@@ -721,6 +823,7 @@ impl TrustStore {
             grants: self.grants.clone(),
             permissions: self.permissions.clone(),
             computers,
+            names: self.names.clone(),
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
         // Whole-file replace: the server and the desktop app both write this
@@ -749,6 +852,8 @@ struct TrustStoreFile {
     permissions: HashMap<String, DevicePermissions>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     computers: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    names: HashMap<String, DeviceName>,
 }
 
 #[derive(Default)]
@@ -1039,6 +1144,104 @@ mod tests {
         store.untrust_device("phone-p").unwrap();
         store.trust_device("phone-p").unwrap();
         assert!(store.permissions("phone-p").is_default());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_name_is_cleaned_to_one_short_printable_line() {
+        assert_eq!(
+            clean_device_name("  Galaxy A71 ").as_deref(),
+            Some("Galaxy A71")
+        );
+        assert_eq!(
+            clean_device_name("Ann\u{2019}s\tphone\n\nWARN forged").as_deref(),
+            Some("Ann\u{2019}s phone WARN forged"),
+            "white space, line breaks included, is one space"
+        );
+        assert_eq!(
+            clean_device_name("pho\u{200B}ne\u{202E}lieve").as_deref(),
+            Some("phonelieve"),
+            "invisible and bidi characters dropped"
+        );
+        assert_eq!(
+            clean_device_name("\u{1b}[31mred").as_deref(),
+            Some("[31mred")
+        );
+        assert_eq!(
+            clean_device_name("தமிழ் கணினி").as_deref(),
+            Some("தமிழ் கணினி")
+        );
+        assert_eq!(
+            clean_device_name(&"x".repeat(100)).map(|n| n.chars().count()),
+            Some(40)
+        );
+        assert_eq!(clean_device_name(" \u{200B} "), None);
+        assert_eq!(clean_device_name(""), None);
+    }
+
+    #[test]
+    fn a_paired_device_keeps_its_name_and_the_owners_rename() {
+        let path = temp_store_path("names");
+        let mut store = TrustStore::load_or_create(&path).unwrap();
+        assert!(
+            !store.note_claimed_name("phone-n", "Stranger").unwrap(),
+            "not paired: nothing kept"
+        );
+        store.trust_device("phone-n").unwrap();
+        assert!(store.note_claimed_name("phone-n", " Galaxy A71 ").unwrap());
+        assert!(
+            !store.note_claimed_name("phone-n", "Galaxy A71").unwrap(),
+            "unchanged: not written again"
+        );
+        assert_eq!(store.name("phone-n"), Some("Galaxy A71"));
+        store.rename("phone-n", Some("Work phone")).unwrap();
+        assert!(store.note_claimed_name("phone-n", "Galaxy A72").unwrap());
+        let read = TrustStore::read(&path).unwrap();
+        assert_eq!(
+            read.name("phone-n"),
+            Some("Work phone"),
+            "a rename is never replaced"
+        );
+        assert_eq!(read.claimed_name("phone-n"), Some("Galaxy A72"));
+        let mut store = read;
+        store.rename("phone-n", Some("  ")).unwrap();
+        assert_eq!(
+            store.name("phone-n"),
+            Some("Galaxy A72"),
+            "an empty rename clears it"
+        );
+        store.untrust_device("phone-n").unwrap();
+        assert_eq!(store.name("phone-n"), None);
+        store.trust_device("phone-n").unwrap();
+        assert_eq!(
+            TrustStore::read(&path).unwrap().name("phone-n"),
+            None,
+            "the name went with the device"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_store_without_names_reads_and_writes_none() {
+        let path = temp_store_path("names-old");
+        std::fs::write(&path, r#"{"trusted_device_ids":["phone-o"],"grants":{}}"#).unwrap();
+        let mut store = TrustStore::load_or_create(&path).expect("old file");
+        assert_eq!(store.name("phone-o"), None);
+        store.trust_device("phone-o").unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("names"), "{raw}");
+        std::fs::write(
+            &path,
+            r#"{"trusted_device_ids":["phone-o"],"grants":{},"names":{"phone-o":{"claimed":"A71"},"gone":{"claimed":"Old"}}}"#,
+        )
+        .unwrap();
+        let store = TrustStore::read(&path).unwrap();
+        assert_eq!(store.name("phone-o"), Some("A71"));
+        assert_eq!(
+            store.name("gone"),
+            None,
+            "an unpaired id's name is not loaded"
+        );
         let _ = std::fs::remove_file(path);
     }
 
