@@ -41,3 +41,11 @@ On this box through the app's own window, with a throwaway config and state (`PO
 - **Empty pages**: Devices offers Pair a phone; Sessions says how a phone starts one, and a stopped server's page offers Overview; Files says which phones and computers can take a file, and offers Pair a phone when none is paired.
 - **Unpair**: Devices and Other computers say "Unpair…" and ask "Unpair <name>? …" with Unpair and Cancel; the notice says "Unpaired <name>".
 
+## Review
+
+A fresh review (0 Critical, 2 Important, 7 Minor), fixed one commit each:
+
+- **KDE Connect's pairing requests sat in a closed section** while the server's toast sent the owner to Settings: the section is held open while a request waits, and a held section's heading says why.
+- **Files promised a phone could take files "while Pocketdesk is open on it"**, which holds no link; it now names a session or "Files from the computer in the background", and Phone files names a phone with folders shared.
+- The restart notice never shrank (now what is saved minus what the server read), and a failed restart cleared it; Diagnostics kept its own age format; Forget and Remove lingered in SECURITY.md, the checklist, a server toast and a comment; names such as "At most, per phone" said nothing in the save bar; the quality note now gives each step's resolution and bitrate; a stray doc line.
+
