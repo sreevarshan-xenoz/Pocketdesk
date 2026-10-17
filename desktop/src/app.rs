@@ -232,7 +232,7 @@ impl PocketdeskApp {
             Err(_) => format!("{what}: failed."),
         });
         if let Some(Ok(form)) = &mut self.settings {
-            form.restart_needed = false;
+            form.restarted();
         }
         self.refreshed = None;
     }
@@ -872,7 +872,10 @@ impl PocketdeskApp {
         self.browser_setting(ui);
         self.computers
             .show(ui, &self.state_dir, self.snapshot.running, now_unix());
-        let compat_on = matches!(&self.settings, Some(Ok(form)) if form.edited.kdeconnect_compat);
+        // As the running server read it, not the box as edited (3c
+        // review: requests to a server with it off lapsed unread).
+        let compat_on =
+            matches!(&self.settings, Some(Ok(form)) if form.running().kdeconnect_compat);
         self.kdeconnect.show(
             ui,
             &self.state_dir,
