@@ -296,7 +296,7 @@
     <string name="pair_link_unreachable">டெஸ்க்டாப்பை அதன் எந்த முகவரியிலும் அடைய முடியவில்லை. இந்த ஃபோன் அதே பிணையம் அல்லது tailnet-இல் உள்ளதா? (%1$s)</string>
     <string name="pair_link_invalid">அது Pocketdesk இணைப்புக் குறியீடு அல்ல.</string>
     <string name="scan_pairing_code">இணைப்புக் குறியீட்டை ஸ்கேன் செய்</string>
-    <string name="scan_hint">Pocketdesk டெஸ்க்டாப் செயலியில் உள்ள குறியீட்டை நோக்கி கேமராவைக் காட்டுங்கள் (Pair தாவல்).</string>
+    <string name="scan_hint">உங்கள் கணினியில் உள்ள Pocketdesk செயலியின் Pair பக்கத்தில் உள்ள குறியீட்டை நோக்கி கேமராவைக் காட்டுங்கள்.</string>
     <string name="scan_need_camera">குறியீட்டைப் படிக்க Pocketdesk-க்கு கேமரா தேவை. முகவரி மற்றும் PIN மூலமும் கணினியைச் சேர்க்கலாம்.</string>
     <string name="scan_allow_camera">கேமராவை அனுமதி</string>
     <string name="pair_link_confirm_title">%1$s இல் உள்ள கணினியுடன் இணைக்கவா?</string>

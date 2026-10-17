@@ -128,7 +128,7 @@ fun PairLinkScreen(
         }
         if (link == null || outcome != null || !confirmed) {
             Spacer(Modifier.height(16.dp))
-            TextButton(onClick = onBack) { Text(stringResource(R.string.exit)) }
+            TextButton(onClick = onBack) { Text(stringResource(R.string.cancel)) }
         }
     }
 }

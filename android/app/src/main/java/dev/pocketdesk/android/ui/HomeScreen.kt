@@ -18,6 +18,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -80,8 +83,17 @@ fun HomeScreen(
     // Wake status is carried as a @StringRes id + arg and resolved during
     // composition (LocalContext.getString in a coroutine is lint-error:
     // stale configuration) — same discipline as the mic/view-only toasts.
-    var wakeStatusRes by remember { mutableStateOf<Int?>(null) }
-    var wakeStatusArg by remember { mutableStateOf<String?>(null) }
+    // U2: a wake's result in a snackbar, which is announced and goes by
+    // itself (a line at the bottom had stayed, unannounced).
+    val snackbar = remember { SnackbarHostState() }
+    val resources = LocalResources.current
+    var wakeSaid by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(wakeSaid) {
+        wakeSaid?.let {
+            snackbar.showSnackbar(it)
+            wakeSaid = null
+        }
+    }
     // F6: computers announcing themselves on this network, browsed while
     // this screen is in front.
     val found by rememberFoundComputers()
@@ -135,8 +147,7 @@ fun HomeScreen(
                 if (w.connect) {
                     onConnect(w.host)
                 } else {
-                    wakeStatusRes = R.string.wake_awake
-                    wakeStatusArg = w.host.address
+                    wakeSaid = resources.getString(R.string.wake_awake, w.host.address)
                 }
                 return@LaunchedEffect
             }
@@ -146,14 +157,16 @@ fun HomeScreen(
         if (w.connect) {
             onConnect(w.host)
         } else {
-            wakeStatusRes = if (w.atHome) R.string.wake_no_answer else R.string.wake_sent
-            wakeStatusArg = w.host.address
+            wakeSaid = resources.getString(
+                if (w.atHome) R.string.wake_no_answer else R.string.wake_sent,
+                w.host.address,
+            )
         }
     }
 
     // Send the wake, then watch for the computer to answer.
     fun startWake(host: HostStore.Host, connect: Boolean) {
-        wakeStatusRes = null
+        snackbar.currentSnackbarData?.dismiss()
         scope.launch(Dispatchers.IO) {
             val result = Waker.wake(context, host.address)
             val atHome = Waker.atHome(context, host.address)
@@ -161,8 +174,10 @@ fun HomeScreen(
                 if (result.isSuccess) {
                     waking = Waking(host, atHome, connect)
                 } else {
-                    wakeStatusRes = R.string.wake_failed
-                    wakeStatusArg = context.plainErrorText(result.exceptionOrNull()?.message)
+                    wakeSaid = resources.getString(
+                        R.string.wake_failed,
+                        context.plainErrorText(result.exceptionOrNull()?.message),
+                    )
                 }
             }
         }
@@ -318,14 +333,7 @@ fun HomeScreen(
                     TextButton(onClick = { waking = null }) { Text(stringResource(R.string.cancel)) }
                 }
             }
-            wakeStatusRes?.let { res ->
-                Text(
-                    stringResource(res, wakeStatusArg.orEmpty()),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
+            SnackbarHost(snackbar)
         }
     }
 
