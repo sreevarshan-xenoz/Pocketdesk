@@ -1548,6 +1548,17 @@ On the A71, against a throwaway server (`adb reverse`, input off for the phone):
 - [x] Spanish and Tamil (the app's own language set by `cmd locale`): the card's buttons fit (Tamil wraps Show screen to a second row), and the four quality choices fit after the review.
 - [ ] Landscape: the bottom chrome with 48 dp chips.
 
+## 94. The desktop's Settings and words (U5)
+
+On this box through the app's own window (screenshots only), with a throwaway config and state:
+
+- [x] Settings in sections, Connection and Phones open, each heading with what it holds; rows with their notes under them.
+- [x] Devices: "Unpair…" and a battery's age as "9 min ago"; Files with nothing to send to says which phones and computers can take a file.
+- [ ] Opening and closing sections; a change shown as applying now or after a restart in the save bar, and the restart notice naming it.
+- [ ] A narrow window wrapping every row; a section with a problem held open.
+- [ ] Unpair's question for a phone and for a computer, and Cancel.
+- [ ] Pair a phone and Overview buttons on the empty pages.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -30,3 +30,14 @@ Date: 2026-10-17. Plan: `docs/research/2026-10-17-finish-and-polish.md` §U5. Fr
 ## Check
 
 On this box through the app's own window, with a throwaway config and state (`POCKETDESK_CONFIG_DIR`, `POCKETDESK_STATE_DIR`): Settings' sections opened and closed, a change marked as applying now or after a restart, a narrow window wrapping, the empty states and their buttons, Unpair's question.
+
+## As built
+
+- **Sections** (`settings_view.rs`): `Section` (title, a one-line summary, Connection and Phones open at first) and `SETTINGS`, one table of every config key's name and section, held by a test to `Config::KNOWN_KEYS` (now public) so no setting is lost or listed twice. `show_section` draws one section's rows; the app's `settings_tab` draws each as an `egui::CollapsingHeader` whose heading is the title with the summary quieter, and puts the file manager's menu and the browser under Phones, the computers under Other computers and the KDE devices under KDE Connect (their own bold headings removed). A section with a problem (`problems_by_key`) is held open.
+- **Rows**: the name, then the control and a small note, in a vertical layout that wraps at the page's width. The wake adapter's line became the note under "Wake from the phone"; "Details in events" sits under "Event log".
+- **Applies now or after a restart**: `Config::changed_keys` (core, tested) lists what a save changes; `applies_live` names what the running server reads again (the event log and its details, hooks, tasks, Home Assistant and its broker, files over the internet, which the server reads at each transfer and the app had wrongly sent to a restart). The save bar says "Applies now: …" and "After the server restarts: …"; after saving, "Restart the server to apply: …" names what waits (`restart_names`, kept across Undo and cleared by a restart).
+- **Time**: `words::ago` (tested) in Activity, KDE Connect, a phone's battery in Devices, Files' sent and received lists and the phone's folders.
+- **Words**: "this computer's sound" in the Audio permission's help; the event log "for scripts and hooks"; video quality as Economy, Balanced and Max (`quality_label`, tested) with a note that a phone can choose lower for its session. Two strings had runs of spaces from a lost line continuation; the pairing link's note and the docs say Settings → Other computers.
+- **Empty pages**: Devices offers Pair a phone; Sessions says how a phone starts one, and a stopped server's page offers Overview; Files says which phones and computers can take a file, and offers Pair a phone when none is paired.
+- **Unpair**: Devices and Other computers say "Unpair…" and ask "Unpair <name>? …" with Unpair and Cancel; the notice says "Unpaired <name>".
+
