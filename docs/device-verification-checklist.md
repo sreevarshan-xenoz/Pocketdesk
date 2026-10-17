@@ -1500,6 +1500,17 @@ On the A71, against this box and a throwaway server reached through `adb reverse
 - [ ] Ring's snackbar (it rings the computer), and a shortcut key's failure message on a dropped link.
 - [ ] TalkBack reading the snackbars and the checking card.
 
+## 90. Names on both sides (U3)
+
+On the A71, against a throwaway server named "Test Desk" (`COMPUTERNAME`) reached through `adb reverse`, and the desktop app's own window:
+
+- [x] A computer's card shows its name after a connection, with its address and ports under it; Rename to "Lab box", and clearing it, back to its own.
+- [x] The computer keeps the phone's name at pairing (Android's device name), and a name set in the phone's Settings, changed mid-run too (the link reopens), and the device name again once cleared.
+- [x] `pocketdesk devices --json` gives `name`; the desktop app's Devices page shows the name over the id.
+- [ ] Rename on the desktop's Devices page, and the approval prompt's "(calls itself)" (they need clicks).
+- [ ] A computer's name from a scanned pairing code, the session notification and launcher shortcuts by name, and "Lock <name>?".
+- [ ] The Linux host (its kernel host name), and a phone whose Android name holds a person's name.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

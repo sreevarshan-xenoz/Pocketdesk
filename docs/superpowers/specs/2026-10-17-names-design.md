@@ -32,3 +32,15 @@ A name is the device's own claim. The approval prompt shows "calls itself" and t
 ## Device check
 
 The A71 against this box: a computer's name on its card after a connection, renamed and cleared; the phone's name in the desktop's Devices (read through UI Automation), renamed there; `devices --json`.
+
+## As built
+
+- **The cleaner:** `core::protocol::kdeconnect::clean_device_name` (40 characters at most, `MAX_NAME_CHARS`), and its Kotlin twin `ComputerName.clean` for names the phone takes in (JVM-tested on the same cases).
+- **The trust store:** `names: {id: {claimed?, chosen?}}`, `TrustStore::{name, claimed_name, note_claimed_name, rename}`; written only when a claimed name changed, filtered at load like permissions, gone with `untrust_device`.
+- **The server:** `pair::note_claimed_name`, called off the runtime at a paired connection's start and when it pairs on it (`service.rs`); `devices` prints "name (id)" and `--json` has `name`.
+- **The desktop app:** `Device::{name, renamed}`, `model::device_label` (and `target_label` through it), `model::rename_device`; the Devices page shows the name over the id and a Name box with Rename in each phone's section; the approval and task prompts show the name with "(calls itself)" unless the owner gave it, and the id; the rest of the pages, the notices and the cast window use the label.
+- **The phone hears the computer's name:** `connect_named`, `control_handshake_named` and `internet_control_handshake_named` return it with the stream; the bridge keeps it per dialed address (`peer_names`, `nativePeerName`) from every connection, one-off queries included (the pairing is one). The app saves it from the pairing link, when a session's stream comes up, when the remote is ready, and as Home opens.
+- **The phone shows names:** `HostStore.{name, shownName, chosenName, claimedName, saveClaimedName, rename}` in `pocketdesk-host`; the card's title (the address and ports under it), Rename on the card, the remote's title, the session notification, launcher shortcuts and "Lock <name>?".
+- **Found on the device:** the phone called itself "Pocketdesk Android Client" to every computer (a fixed string, recorded in `docs/protocol.md` as a choice not to send the model), so every phone would have shown the same name. It now sends Android's device name, or the name set in Settings ("This phone's name"; `PhoneName`), applied as Settings closes; a changed name closes the control link (`close_control_link`), since a name travels only in a handshake.
+- **Checked on the A71** against a throwaway server named "Test Desk" (reached through `adb reverse`; checklist §90): the card showed "Test Desk" with "127.0.0.1 · stream 4716 · control 1716" under it after a connection, renamed to "Lab box" and back by clearing; the computer kept the phone's name at pairing ("Galaxy A71", Android's default for it), "Test Phone" after setting it, "Test Phone 2" after changing it mid-run, and the device name again once cleared; `devices --json` gave it; the desktop app's Devices page showed the name over the id.
+
