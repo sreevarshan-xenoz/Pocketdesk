@@ -1522,6 +1522,14 @@ On the A71, against a throwaway server reached through `adb reverse`; each ring 
 - [ ] The desktop's Ring button on screen (it needs a click), Ring off in Devices refusing it, and once a minute from the button.
 - [ ] Do Not Disturb with alarms allowed and not; a phone with a secure lock screen (the full-screen ring and Stop); a phone where the full-screen permission is not granted.
 - [ ] The Linux host.
+## 92. Phone → computer text in one tap (N2)
+
+On the A71, against a throwaway server with a stand-in clipboard (`POCKETDESK_CLIPBOARD_FILE`):
+
+- [x] Android lists "To computer" among the apps that take selected text, and its intent put the text on the computer's clipboard.
+- [x] The connect shortcuts carry the share category (long-lived); a share through a computer's shortcut id reached that computer, and one through an unknown id went nowhere.
+- [ ] "To computer" in a real app's selection menu, on screen; the Sharesheet's Direct Share row showing the computers (adb opens only the app chooser).
+- [ ] A copy marked sensitive (a password manager's) asking first through the tile.
 
 ## Recording results
 

@@ -21,3 +21,11 @@ JVM: which computer a share goes to with a shortcut id (a saved one, an unknown 
 ## Device check
 
 On the A71 against a throwaway server: select text in an app → "To computer" → the computer's clipboard (the stand-in file) holds it; a share through a computer's Direct Share target reaches that computer; a sensitive copy asks first.
+
+## As built
+
+- **"To computer":** the activity alias `.ToComputer` on `ShareActivity` with a `PROCESS_TEXT` filter; `ShareActivity` takes `EXTRA_PROCESS_TEXT` and sends it as a shared text (`sendText`, to the clipboard), returning no result.
+- **Direct Share:** `res/xml/shortcuts.xml` (a `share-target` for `text/plain` and `*/*` with `ShortcutPlan.SHARE_CATEGORY`, on `MainActivity`); the launcher's connect shortcuts get the category and are long-lived (Android 11+). `ShareActivity` reads the shortcut id by its value (`Intent.EXTRA_SHORTCUT_ID` is API 29) and `ShortcutPlan.shortcutHost` (JVM-tested) maps `connect:<address>` to a saved computer, else nowhere.
+- **A private copy:** `SendClipboard.check(…, private)` returns `AskPrivate` for a clip marked `android.content.extra.IS_SENSITIVE`; the tile's window then takes touches for an `AlertDialog` ("Send a private copy?") and sends on Send. Its messages name the computer (U3).
+- **Checked on the A71** against a throwaway server with a stand-in clipboard file (checklist §92): Android lists "To computer" for selected text, and the selection menu's intent put the text on the computer's clipboard; the connect shortcuts carry the share category; a share through `connect:127.0.0.1` reached that computer, and one through an unknown id went nowhere.
+
