@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use pocketdesk_core::local::approval::{ApprovalRequest, Verdict};
 use pocketdesk_core::local::config::Config;
 use pocketdesk_core::local::paths::TRUST_FILE;
@@ -19,8 +19,6 @@ use crate::settings_view::SettingsForm;
 use crate::tray::{Tray, TrayAction};
 
 const REFRESH: Duration = Duration::from_secs(1);
-const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
-const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 
 /// The Devices tab's switches, in the order a person thinks of them.
 const PERMISSIONS: [(Capability, &str, &str); 13] = [
@@ -399,7 +397,7 @@ impl PocketdeskApp {
                         "Denied in {}s if you do nothing.",
                         request.remaining(now_unix())
                     ))
-                    .color(MUTED),
+                    .color(crate::theme::muted(ui)),
                 );
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -442,7 +440,7 @@ impl PocketdeskApp {
                         "Denied in {}s if you do nothing.",
                         request.remaining(now_unix())
                     ))
-                    .color(MUTED),
+                    .color(crate::theme::muted(ui)),
                 );
                 if waiting > 1 {
                     ui.label(format!("{} more waiting.", waiting - 1));
@@ -613,10 +611,10 @@ impl PocketdeskApp {
     fn status_tab(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         if self.snapshot.running {
-            status_line(ui, GOOD, "The server is running");
+            status_line(ui, crate::theme::GOOD, "The server is running");
             self.restart_button(ui);
         } else {
-            status_line(ui, MUTED, "The server is not running");
+            status_line(ui, crate::theme::MUTED, "The server is not running");
             ui.label(
                 "Phones cannot connect until it starts. It starts at logon once \
                  installed (`pocketdesk install` on Windows, the systemd user unit on Linux).",
@@ -674,9 +672,9 @@ impl PocketdeskApp {
                         Some(secs) => format!("{} left", human_duration(secs)),
                     });
                     if device.connected {
-                        ui.label(RichText::new("connected").color(GOOD));
+                        ui.label(RichText::new("connected").color(crate::theme::good(ui)));
                     } else {
-                        ui.label(RichText::new("—").color(MUTED));
+                        ui.label(RichText::new("—").color(crate::theme::muted(ui)));
                     }
                     ui.label(battery_text(device.battery.as_ref(), now))
                         .on_hover_text("The phone's battery, as it last reported it in a session");
@@ -700,7 +698,7 @@ impl PocketdeskApp {
             RichText::new(
                 "A change applies at once. Turning off control, sound or the microphone ends that phone's running session, so it reconnects with the change.",
             )
-            .color(MUTED),
+            .color(crate::theme::muted(ui)),
         );
         let mut change = None;
         let mut ask = None;
@@ -795,9 +793,7 @@ impl PocketdeskApp {
                     ));
                     match model::control_cell(session, count, self.snapshot.shared_control) {
                         model::ControlCell::Driving => {
-                            ui.label(
-                                RichText::new("Driving").color(Color32::from_rgb(0x4c, 0xaf, 0x50)),
-                            );
+                            ui.label(RichText::new("Driving").color(crate::theme::good(ui)));
                         }
                         model::ControlCell::Give(id) => {
                             if ui
@@ -895,7 +891,7 @@ impl PocketdeskApp {
             Some(Err(error)) => {
                 ui.label(
                     RichText::new(format!("config.toml could not be read: {error}"))
-                        .color(Color32::from_rgb(0xd9, 0x5c, 0x4a)),
+                        .color(crate::theme::bad(ui)),
                 );
                 ui.label("Fix or remove the file, then reopen this tab. Nothing is saved over it.");
                 return;
@@ -989,7 +985,7 @@ impl PocketdeskApp {
                     format!("Registered with {}.", browsers.join(", "))
                 })
                 .small()
-                .color(MUTED),
+                .color(crate::theme::muted(ui)),
             );
         }
         if on == installed {
@@ -1107,7 +1103,7 @@ impl PocketdeskApp {
                     "No phone is in a session. Open a session on the phone, then send files \
                      from here; they land in the phone's Downloads/Pocketdesk.",
                 )
-                .color(MUTED),
+                .color(crate::theme::muted(ui)),
             );
             return;
         };
@@ -1190,7 +1186,7 @@ impl PocketdeskApp {
         let hint = if hovering {
             RichText::new("Drop to send.").strong()
         } else {
-            RichText::new("Or drop files or folders on this window.").color(MUTED)
+            RichText::new("Or drop files or folders on this window.").color(crate::theme::muted(ui))
         };
         ui.label(hint);
     }
@@ -1224,7 +1220,7 @@ impl PocketdeskApp {
                         SentState::Sent => ui.label(format!("saved on the phone{note}")),
                         SentState::Failed(reason) => ui.label(
                             RichText::new(format!("not sent: {reason}{note}"))
-                                .color(Color32::from_rgb(0xd9, 0x5c, 0x4a)),
+                                .color(crate::theme::bad(ui)),
                         ),
                     };
                     ui.end_row();
@@ -1242,7 +1238,7 @@ impl PocketdeskApp {
                     "Share a file to Pocketdesk on your phone; it lands in Downloads and is \
                      listed here.",
                 )
-                .color(MUTED),
+                .color(crate::theme::muted(ui)),
             );
             return;
         }
@@ -1266,7 +1262,7 @@ impl PocketdeskApp {
                             show = Some(file.path.clone());
                         }
                     } else {
-                        ui.label(RichText::new("moved or deleted").color(MUTED));
+                        ui.label(RichText::new("moved or deleted").color(crate::theme::muted(ui)));
                     }
                     ui.end_row();
                 }
@@ -1366,7 +1362,7 @@ impl eframe::App for PocketdeskApp {
                     for group in crate::nav::GROUPS {
                         ui.add_space(10.0);
                         if let Some(title) = group.title {
-                            ui.label(RichText::new(title).small().color(MUTED));
+                            ui.label(RichText::new(title).small().color(crate::theme::muted(ui)));
                         }
                         for tab in group.pages {
                             if ui.selectable_label(self.tab == *tab, tab.name()).clicked() {
@@ -1384,7 +1380,7 @@ impl eframe::App for PocketdeskApp {
                 ui.label(RichText::new(notice).italics());
             }
             ui.heading(self.tab.name());
-            ui.label(RichText::new(self.tab.purpose()).color(MUTED));
+            ui.label(RichText::new(self.tab.purpose()).color(crate::theme::muted(ui)));
             ui.add_space(6.0);
             if self.tab.scrolls_itself() {
                 self.page(ui);
@@ -1401,7 +1397,8 @@ impl eframe::App for PocketdeskApp {
 
 /// A coloured dot and a bold line. The dot is painted: the bundled fonts
 /// have no "●" glyph.
-fn status_line(ui: &mut egui::Ui, color: Color32, text: &str) {
+fn status_line(ui: &mut egui::Ui, token: crate::theme::Token, text: &str) {
+    let color = crate::theme::pick(ui, token);
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
         ui.painter().circle_filled(rect.center(), 5.0, color);

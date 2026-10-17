@@ -209,7 +209,7 @@ impl PairView {
         if let Some(id) = &self.paired {
             ui.label(
                 RichText::new(format!("Paired ✓  {}", crate::app::short(id)))
-                    .color(Color32::from_rgb(0x2e, 0x9e, 0x6a))
+                    .color(crate::theme::good(ui))
                     .strong()
                     .size(18.0),
             );
@@ -274,7 +274,7 @@ impl PairView {
             return;
         }
         if let Some(error) = &self.error {
-            ui.label(RichText::new(error).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
+            ui.label(RichText::new(error).color(crate::theme::bad(ui)));
             if ui.button("Try again").clicked() {
                 self.error = None;
             }

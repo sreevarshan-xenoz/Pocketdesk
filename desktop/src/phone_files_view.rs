@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use pocketdesk_core::local::phone_files::{self as store, Kept, Kind};
 
 use crate::model::Device;
@@ -113,7 +113,7 @@ impl PhoneFilesView {
                     "No phone is connected. Open Pocketdesk on the phone; it \
                      shares the folders its owner adds under Settings, \"Folders the computer may open\".",
                 )
-                .color(Color32::GRAY),
+                .color(crate::theme::muted(ui)),
             );
             return;
         }
@@ -170,18 +170,18 @@ impl PhoneFilesView {
                     "Listed {} ago: Refresh to see the phone as it is now.",
                     age_text(age)
                 ))
-                .color(Color32::GRAY),
+                .color(crate::theme::muted(ui)),
             );
         }
         if let Some(error) = &listing.error {
-            ui.label(RichText::new(error).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
+            ui.label(RichText::new(error).color(crate::theme::bad(ui)));
         }
         if listing.roots.is_empty() {
             ui.label(
                 RichText::new(
                     "The phone shares no folder yet: add one in its Settings, \"Folders the computer may open\".",
                 )
-                .color(Color32::GRAY),
+                .color(crate::theme::muted(ui)),
             );
         }
         ui.horizontal_wrapped(|ui| {
@@ -233,12 +233,12 @@ impl PhoneFilesView {
                     "Showing the first {} entries: the folder holds more.",
                     listing.entries.len()
                 ))
-                .color(Color32::GRAY),
+                .color(crate::theme::muted(ui)),
             );
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             if listing.entries.is_empty() {
-                ui.label(RichText::new("Empty").color(Color32::GRAY));
+                ui.label(RichText::new("Empty").color(crate::theme::muted(ui)));
             }
             for entry in &listing.entries {
                 ui.horizontal(|ui| {
@@ -250,7 +250,9 @@ impl PhoneFilesView {
                         }
                     } else {
                         ui.label(&entry.name);
-                        ui.label(RichText::new(size_text(entry.size)).color(Color32::GRAY));
+                        ui.label(
+                            RichText::new(size_text(entry.size)).color(crate::theme::muted(ui)),
+                        );
                         if ui.small_button("Download").clicked() {
                             self.ask(state_dir, &phone, Kind::Fetch, root, path, now_unix);
                         }

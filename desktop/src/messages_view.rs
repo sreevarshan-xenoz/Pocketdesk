@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use pocketdesk_core::local::sms::{self, Direction, Message, ReplyRequest, ReplyState};
 use pocketdesk_core::protocol::permissions::Capability;
 
@@ -121,6 +121,7 @@ impl MessagesView {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(REFRESH);
         let conversations = sms::conversations(&self.messages);
+        let muted = crate::theme::muted(ui);
         ui.columns(2, |columns| {
             let list = &mut columns[0];
             if list.button("New text").clicked() {
@@ -133,7 +134,7 @@ impl MessagesView {
                         "No texts yet. A phone shares its texts once its owner turns on \
                          \"Show texts on my computer\" in the phone's Settings.",
                     )
-                    .color(Color32::GRAY),
+                    .color(muted),
                 );
             }
             egui::ScrollArea::vertical()
@@ -162,7 +163,7 @@ impl MessagesView {
                     pane.strong(title(&address, name.as_deref()));
                     pane.label(
                         RichText::new(format!("through {}", crate::app::short(&device)))
-                            .color(Color32::GRAY),
+                            .color(muted),
                     );
                     egui::ScrollArea::vertical()
                         .id_salt("thread")
@@ -177,7 +178,7 @@ impl MessagesView {
                                 };
                                 ui.label(text);
                                 if let Some(status) = row.status {
-                                    ui.label(RichText::new(status).small().color(Color32::GRAY));
+                                    ui.label(RichText::new(status).small().color(muted));
                                 }
                                 ui.add_space(4.0);
                             }
@@ -235,7 +236,7 @@ impl MessagesView {
                 }
             }
             if let Some(notice) = &self.notice {
-                pane.label(RichText::new(notice).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
+                pane.label(RichText::new(notice).color(crate::theme::bad(pane)));
             }
         });
     }

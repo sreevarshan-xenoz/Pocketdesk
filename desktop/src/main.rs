@@ -22,6 +22,7 @@ mod restart;
 mod reveal;
 mod settings_view;
 mod single_instance;
+mod theme;
 #[cfg(not(target_os = "linux"))]
 mod tray;
 #[cfg(target_os = "linux")]

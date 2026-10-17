@@ -4,14 +4,9 @@
 use std::path::Path;
 use std::thread::JoinHandle;
 
-use eframe::egui::{self, Color32};
+use eframe::egui;
 use pocketdesk_core::local::config::Config;
 use pocketdesk_core::local::diagnostics::{self, Finding, Report, Status};
-
-const GOOD: Color32 = Color32::from_rgb(0x2e, 0x9e, 0x6a);
-const WARN: Color32 = Color32::from_rgb(0xd9, 0x9a, 0x2b);
-const BAD: Color32 = Color32::from_rgb(0xd9, 0x5c, 0x4a);
-const MUTED: Color32 = Color32::from_rgb(0x8a, 0x93, 0x91);
 
 #[derive(Default)]
 pub struct DiagnosticsView {
@@ -61,7 +56,9 @@ impl DiagnosticsView {
                 self.running = Some(std::thread::spawn(move || run(&dir, config)));
             }
             if self.failed {
-                ui.label(egui::RichText::new("The checks failed to run.").color(BAD));
+                ui.label(
+                    egui::RichText::new("The checks failed to run.").color(crate::theme::bad(ui)),
+                );
             }
             if busy {
                 ui.spinner();
@@ -125,7 +122,7 @@ impl DiagnosticsView {
                 egui::RichText::new(
                     "For an issue. It includes this computer's addresses (local, and any public or Tailscale ones), but no PINs, keys or file names.",
                 )
-                .color(MUTED),
+                .color(crate::theme::muted(ui)),
             );
         });
     }
@@ -133,17 +130,17 @@ impl DiagnosticsView {
 
 fn finding_row(ui: &mut egui::Ui, finding: &Finding) {
     let (color, mark) = match finding.status {
-        Status::Good => (GOOD, "ok"),
-        Status::Warn => (WARN, "check"),
-        Status::Bad => (BAD, "problem"),
-        Status::Info => (MUTED, "info"),
+        Status::Good => (crate::theme::good(ui), "ok"),
+        Status::Warn => (crate::theme::warn(ui), "check"),
+        Status::Bad => (crate::theme::bad(ui), "problem"),
+        Status::Info => (crate::theme::muted(ui), "info"),
     };
     ui.label(egui::RichText::new(mark).color(color).strong());
     ui.strong(finding.check);
     ui.vertical(|ui| {
         ui.label(&finding.detail);
         if let Some(hint) = &finding.hint {
-            ui.label(egui::RichText::new(hint).color(MUTED));
+            ui.label(egui::RichText::new(hint).color(crate::theme::muted(ui)));
         }
     });
     ui.end_row();

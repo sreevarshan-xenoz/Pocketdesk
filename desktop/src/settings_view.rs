@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
@@ -362,7 +362,7 @@ impl SettingsForm {
                                 unknown.join(", ")
                             ))
                             .small()
-                            .color(Color32::from_rgb(0xc0, 0x80, 0x00)),
+                            .color(crate::theme::warn(ui)),
                         );
                     }
                 });
@@ -588,7 +588,7 @@ impl SettingsForm {
     pub fn save_bar(&mut self, ui: &mut egui::Ui) -> bool {
         let problems = self.problems();
         for problem in &problems {
-            ui.label(RichText::new(problem).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
+            ui.label(RichText::new(problem).color(crate::theme::bad(ui)));
         }
         let mut save = false;
         ui.horizontal(|ui| {
