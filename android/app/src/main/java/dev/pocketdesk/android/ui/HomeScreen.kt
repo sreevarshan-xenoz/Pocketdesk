@@ -80,6 +80,7 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     onConnect: (HostStore.Host) -> Unit,
     onRemote: (HostStore.Host) -> Unit,
+    onSound: (HostStore.Host) -> Unit,
     onCast: (HostStore.Host) -> Unit,
     onConnectFound: (HostStore.Host) -> Unit,
     onAdd: () -> Unit,
@@ -300,6 +301,7 @@ fun HomeScreen(
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
                         onRemote = { onRemote(host) },
+                        onSound = { onSound(host) },
                         onCast = { onCast(host) },
                         onConnect = {
                             if (!Prefs.offerWake(context)) {
@@ -590,6 +592,7 @@ private fun HostCard(
     hasWake: Boolean,
     onConnect: () -> Unit,
     onRemote: () -> Unit,
+    onSound: () -> Unit,
     onCast: () -> Unit,
     onWake: () -> Unit,
     onWakeSettings: () -> Unit,
@@ -622,6 +625,8 @@ private fun HostCard(
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         val entries = buildList {
+                            // The phone as the computer's speaker and mic (N5).
+                            add(R.string.sound_button to onSound)
                             if (hasWake) add(R.string.wake to onWake)
                             add(R.string.wake_settings to onWakeSettings)
                             add(R.string.doctor_title to onCheck)

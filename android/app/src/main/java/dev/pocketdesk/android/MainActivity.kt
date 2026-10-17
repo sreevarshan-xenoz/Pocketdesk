@@ -36,6 +36,7 @@ import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.ConnectScreen
 import dev.pocketdesk.android.ui.HomeScreen
 import dev.pocketdesk.android.ui.RemoteInputScreen
+import dev.pocketdesk.android.ui.SoundScreen
 import dev.pocketdesk.android.ui.RemoteScreen
 import dev.pocketdesk.android.ui.PairLinkScreen
 import dev.pocketdesk.android.ui.QrScanScreen
@@ -372,6 +373,12 @@ class MainActivity : ComponentActivity() {
                                             sessionKey =
                                                 "${host.address}|${host.port}|${host.controlPort}|$REMOTE_MODE"
                                         },
+                                        onSound = { host ->
+                                            HostStore.save(this@MainActivity, host)
+                                            maybeRequestNotificationPermission()
+                                            sessionKey =
+                                                "${host.address}|${host.port}|${host.controlPort}|$SOUND_MODE"
+                                        },
                                         onCast = { host ->
                                             HostStore.save(this@MainActivity, host)
                                             maybeRequestNotificationPermission()
@@ -409,6 +416,16 @@ class MainActivity : ComponentActivity() {
                                         port = session.port,
                                         controlPort = session.controlPort,
                                         askLock = lockAskSignal.intValue,
+                                        onExit = { sessionKey = null },
+                                    )
+                                }
+                            } else if (session.sound) {
+                                // The phone as the computer's speaker and mic (N5).
+                                Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                                    SoundScreen(
+                                        address = session.address,
+                                        port = session.port,
+                                        controlPort = session.controlPort,
                                         onExit = { sessionKey = null },
                                     )
                                 }
@@ -480,10 +497,20 @@ class MainActivity : ComponentActivity() {
 
 /** Session state travels as "address|streamingPort|controlPort" so it survives process save/restore. */
 /** The session on screen: a computer, and whether the phone is its remote (T10i). */
-private data class SessionTarget(val address: String, val port: Int, val controlPort: Int, val remote: Boolean)
+private data class SessionTarget(
+    val address: String,
+    val port: Int,
+    val controlPort: Int,
+    val remote: Boolean,
+    /** The phone as the computer's speaker and mic (N5). */
+    val sound: Boolean = false,
+)
 
 /** The session key's mark for the phone as a remote (T10i). */
 private const val REMOTE_MODE = "remote"
+
+/** The session key's mark for a sound session (N5). */
+private const val SOUND_MODE = "sound"
 
 private fun parseSession(key: String?): SessionTarget? {
     val parts = key?.split('|') ?: return null
@@ -496,6 +523,7 @@ private fun parseSession(key: String?): SessionTarget? {
             HostStore.DEFAULT_CONTROL_PORT
         }
     val remote = parts.size == 4 && parts[3] == REMOTE_MODE
-    if (parts.size == 4 && !remote) return null
-    return SessionTarget(parts[0], port, controlPort, remote)
+    val sound = parts.size == 4 && parts[3] == SOUND_MODE
+    if (parts.size == 4 && !remote && !sound) return null
+    return SessionTarget(parts[0], port, controlPort, remote, sound)
 }
