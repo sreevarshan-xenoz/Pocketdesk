@@ -10,6 +10,7 @@ import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.clip.ClipboardShared
 import dev.pocketdesk.android.bridge.RemoteClip
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.clip.SendClipboard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
@@ -45,7 +46,9 @@ fun ClipboardSyncEffect(
                 RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
                 var lastLocal = localClipboardText(context)
                 var lastRemote: String? = null
-                lastLocal?.let {
+                // A copy its app marked private (a password) stays on the
+                // phone: a poll cannot ask, so it skips (N2 review).
+                lastLocal?.takeUnless { SendClipboard.clipIsPrivate(context) }?.let {
                     if (RustCore.sendClipboard(address, controlPort, it).isSuccess) {
                         lastRemote = it
                         ClipboardShared.lastExchanged = it
@@ -84,13 +87,16 @@ fun ClipboardSyncEffect(
                         val local = localClipboardText(context)
                         if (local != null && local != lastLocal) {
                             lastLocal = local
-                            if (RustCore.sendClipboard(address, controlPort, local).isSuccess) {
-                                ClipboardShared.lastExchanged = local
-                                ClipHistory.add(context, local)
-                                lastRemote = local
-                                images.textMoved()
-                            } else {
-                                RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
+                            // A private copy is seen and left on the phone (N2 review).
+                            if (!SendClipboard.clipIsPrivate(context)) {
+                                if (RustCore.sendClipboard(address, controlPort, local).isSuccess) {
+                                    ClipboardShared.lastExchanged = local
+                                    ClipHistory.add(context, local)
+                                    lastRemote = local
+                                    images.textMoved()
+                                } else {
+                                    RustCore.connectToPeer(address, controlPort, HostStore.wanIdentity(context, address))
+                                }
                             }
                         }
                     }
