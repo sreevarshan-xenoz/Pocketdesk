@@ -124,6 +124,9 @@ pub struct PocketdeskApp {
     settings: Option<Result<SettingsForm, String>>,
     /// A start or restart running off the UI thread.
     job: Option<(&'static str, std::thread::JoinHandle<Result<(), String>>)>,
+    /// A setting that runs a program (the file manager's menu, the
+    /// browser's host), off the UI thread: what it says once done.
+    setting_job: Option<std::thread::JoinHandle<Result<String, String>>>,
     /// Restart was asked for while phones are connected; awaiting a yes.
     confirm_restart: bool,
     /// Held sessions already brought to the owner's attention.
@@ -183,6 +186,7 @@ impl PocketdeskApp {
             pair: PairView::default(),
             settings: None,
             job: None,
+            setting_job: None,
             confirm_restart: false,
             raised_approvals: Vec::new(),
             send_to: None,
@@ -220,6 +224,37 @@ impl PocketdeskApp {
         }
         self.notice = crate::notice::Notice::say(format!("{what}…"));
         self.job = Some((what, std::thread::spawn(job)));
+    }
+
+    /// Run a setting's program off the UI thread (U1: PowerShell and
+    /// `browser-host` froze the window for a second or two); one at a time.
+    fn run_setting(
+        &mut self,
+        doing: &str,
+        job: impl FnOnce() -> Result<String, String> + Send + 'static,
+    ) {
+        if self.setting_job.is_some() {
+            return;
+        }
+        self.notice = crate::notice::Notice::say(format!("{doing}…"));
+        self.setting_job = Some(std::thread::spawn(job));
+    }
+
+    fn finish_setting(&mut self) {
+        if !self.setting_job.as_ref().is_some_and(|h| h.is_finished()) {
+            return;
+        }
+        let Some(handle) = self.setting_job.take() else {
+            return;
+        };
+        self.notice = crate::notice::Notice::say(match handle.join() {
+            Ok(Ok(said)) => said,
+            Ok(Err(e)) => format!("Not changed: {e}"),
+            Err(_) => "Not changed: the change failed.".to_string(),
+        });
+        // Read again: they changed.
+        self.send_menu_installed = None;
+        self.browser_registered = None;
     }
 
     fn finish_job(&mut self) {
@@ -979,9 +1014,12 @@ impl PocketdeskApp {
             .clone();
         let installed = registered.is_some();
         let mut on = installed;
-        ui.checkbox(
-            &mut on,
-            "Send from the browser (the Pocketdesk extension, in browser/: page, link or image to the phone)",
+        ui.add_enabled(
+            self.setting_job.is_none(),
+            egui::Checkbox::new(
+                &mut on,
+                "Send from the browser (the Pocketdesk extension, in browser/: page, link or image to the phone)",
+            ),
         );
         if let Some(browsers) = &registered {
             ui.label(
@@ -1003,20 +1041,27 @@ impl PocketdeskApp {
             );
             return;
         };
-        self.browser_registered = None;
         let flag = if on { "--install" } else { "--remove" };
-        let ran = crate::restart::quiet(exe)
-            .args(["browser-host", flag])
-            .output();
-        self.notice = crate::notice::Notice::say(match ran {
-            Ok(out) if out.status.success() => {
-                String::from_utf8_lossy(&out.stdout).trim().to_string()
+        let doing = if on {
+            "Registering with the browsers"
+        } else {
+            "Removing from the browsers"
+        };
+        self.run_setting(doing, move || {
+            let out = crate::restart::quiet(exe)
+                .args(["browser-host", flag])
+                .output()
+                .map_err(|e| e.to_string())?;
+            if out.status.success() {
+                let said = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                Ok(if said.is_empty() {
+                    "Done.".to_string()
+                } else {
+                    said
+                })
+            } else {
+                Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
             }
-            Ok(out) => format!(
-                "Not changed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-            Err(e) => format!("Not changed: {e}"),
         });
     }
 
@@ -1034,30 +1079,35 @@ impl PocketdeskApp {
             .send_menu_installed
             .get_or_insert_with(|| send_menu::installed_in(&data));
         let mut on = installed;
-        ui.checkbox(
-            &mut on,
-            "\"Send to phone\" in the file manager (sends to the connected phone)",
+        ui.add_enabled(
+            self.setting_job.is_none(),
+            egui::Checkbox::new(
+                &mut on,
+                "\"Send to phone\" in the file manager (sends to the connected phone)",
+            ),
         );
         if on == installed {
             return;
         }
-        let done = if on {
-            match crate::restart::server_exe_beside_app() {
-                Some(exe) => {
-                    send_menu::install_in(&data, &exe).map(|()| "Added to the file manager.")
-                }
-                None => Err(std::io::Error::other(
-                    "the server program is not beside this app",
-                )),
-            }
+        if on {
+            let Some(exe) = crate::restart::server_exe_beside_app() else {
+                self.notice = crate::notice::Notice::say(
+                    "Not changed: the server program is not beside this app",
+                );
+                return;
+            };
+            self.run_setting("Adding to the file manager", move || {
+                send_menu::install_in(&data, &exe)
+                    .map(|()| "Added to the file manager.".to_string())
+                    .map_err(|e| e.to_string())
+            });
         } else {
-            send_menu::remove_in(&data).map(|()| "Removed from the file manager.")
-        };
-        self.send_menu_installed = None;
-        self.notice = crate::notice::Notice::say(match done {
-            Ok(said) => said.to_string(),
-            Err(e) => format!("Not changed: {e}"),
-        });
+            self.run_setting("Removing from the file manager", move || {
+                send_menu::remove_in(&data)
+                    .map(|()| "Removed from the file manager.".to_string())
+                    .map_err(|e| e.to_string())
+            });
+        }
     }
 
     fn files_tab(&mut self, ui: &mut egui::Ui) {
@@ -1337,6 +1387,7 @@ impl eframe::App for PocketdeskApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_tray(ctx);
         self.finish_job();
+        self.finish_setting();
         // Closing hides to the tray; Quit (or no tray to come back from) exits.
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.tray.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
