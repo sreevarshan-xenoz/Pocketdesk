@@ -94,6 +94,19 @@
             </intent-filter>
         </activity>
 
+        <!-- N2: text selected in any app goes to the computer's clipboard. -->
+        <activity-alias
+            android:name=".ToComputer"
+            android:exported="true"
+            android:label="@string/to_computer_label"
+            android:targetActivity=".ShareActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- T8a: a link shared here opens in the computer's browser. -->
         <activity-alias
             android:name=".OpenOnComputer"

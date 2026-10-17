@@ -55,6 +55,12 @@ class ShareActivity : ComponentActivity() {
             ShortcutPlan.Share.NotAllowed -> return done(getString(R.string.share_choosing_off))
         }
 
+        // N2: text selected in another app ("To computer" in its menu) goes
+        // to the computer's clipboard; the selection is left as it was.
+        if (intent.action == Intent.ACTION_PROCESS_TEXT) {
+            val selected = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+            return if (selected.isNullOrBlank()) done(getString(R.string.share_nothing)) else sendText(host, selected)
+        }
         val uris = sharedUris(intent)
         val text =
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null

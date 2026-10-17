@@ -461,6 +461,7 @@
     <string name="settings_background_remind_summary">When phone notifications or texts are on and Android may hold them back</string>
     <string name="bg_maker_guide_summary">Many phones add their own battery saver on top of Android\'s</string>
     <string name="open_on_computer_label">Open on computer</string>
+    <string name="to_computer_label">To computer</string>
     <string name="link_sent">Sent to the computer, to open there if it allows links.</string>
     <string name="link_not_web">No web link to open (only http and https links).</string>
     <string name="link_from_computer">A link from %1$s</string>
