@@ -35,10 +35,14 @@ pub enum Capability {
     Cast,
     /// See this computer's named tasks and start them (ecosystem 1c).
     Tasks,
+    /// Be rung from this computer when lost (N1). The one permission about
+    /// what the computer sends, not what the phone may do: no packet from a
+    /// phone needs it.
+    Ring,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 13] = [
+    pub const ALL: [Capability; 14] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -52,6 +56,7 @@ impl Capability {
         Capability::Media,
         Capability::Cast,
         Capability::Tasks,
+        Capability::Ring,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -142,6 +147,8 @@ pub struct DevicePermissions {
     pub cast: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tasks: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ring: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -163,6 +170,7 @@ impl DevicePermissions {
             Capability::Media => &mut self.media,
             Capability::Cast => &mut self.cast,
             Capability::Tasks => &mut self.tasks,
+            Capability::Ring => &mut self.ring,
         }
     }
 
@@ -181,6 +189,7 @@ impl DevicePermissions {
             Capability::Media => self.media,
             Capability::Cast => self.cast,
             Capability::Tasks => self.tasks,
+            Capability::Ring => self.ring,
         };
         value.unwrap_or(capability.default_allowed())
     }

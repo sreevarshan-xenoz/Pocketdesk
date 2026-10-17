@@ -24,7 +24,7 @@ const REFRESH: Duration = Duration::from_secs(1);
 pub const PAGE_KEY: &str = "page";
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 13] = [
+const PERMISSIONS: [(Capability, &str, &str); 14] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -89,6 +89,11 @@ const PERMISSIONS: [(Capability, &str, &str); 13] = [
         Capability::Tasks,
         "Start my tasks",
         "The phone can list the tasks named in Settings and start them (each one may ask you first).",
+    ),
+    (
+        Capability::Ring,
+        "Ring this phone from here",
+        "Ring it from here when it is lost, at most once a minute. The phone rings only with \"Ring from the computer\" on in its own Settings.",
     ),
 ];
 
