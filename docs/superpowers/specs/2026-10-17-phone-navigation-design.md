@@ -27,3 +27,15 @@ Date: 2026-10-17. Plan: `docs/research/2026-10-17-finish-and-polish.md` §U2. Fr
 ## Device check
 
 On the A71: Back from each screen; a card's "Checking…" against a computer that does not answer; a failed connect's message; Lock's question (cancelled, never confirmed on this box); a wake's snackbar.
+
+## As built
+
+- **Back:** `ui/Navigation.kt` holds the routes (moved out of `MainActivity`) and `Navigation.backTo(route)`, JVM-tested. Home's routes (Settings, Add computer, the scanner) go back to Home, the pairing confirmation cancels, the remote ends as a session does.
+- **Checking:** the tapped card says "Checking whether it is awake…" over a thin progress line, and ignores taps until the check ends; the internet road's try is bounded at 10 s (`INTERNET_CHECK_MS`).
+- **Plain errors:** `ui/PlainError.kt`. Text with a developer's marks (an OS error, TLS, QUIC, a timeout, `::`) or starting with a lowercase word, as Rust's errors do, becomes `humanizeError`'s sentence and goes to logcat; a sentence starting with a capital is kept. `Context.plainErrorText` is used by the sound sheet, connect, the monitor and window pickers, pairing, the remote browser, the remote, tasks, the session's switches, the pairing link, the cast, shares and transfers, and Wake.
+- **Lock:** `LockQuestion` asks from the session's sheet and from the session notification's "Lock desktop" (which opened the app and locked; it now bumps `lockAskSignal`, and the session or the remote on screen asks, counting only asks made since it opened). `PrivacyReply` (JVM-tested) reads the answer: done only when the computer names what locked it. Reading it fixed privacy mode showing on after a refused grab. The computer now answers a privacy request from a phone with Power off (`privacy::answer_denied`), which had been dropped, so the phone waited 5 s and said it did not answer.
+- **Ring** has no answer (the siren plugin sends none), so the phone says it asked, or why it could not send. A shortcut key, or a key on the remote, that did not reach the computer says so; the remote has a snackbar for it now.
+- **The pairing sheet:** the PIN field, then Pair (filled, once six digits are typed), then "Show a PIN on the computer", then Cancel; the eye says Show PIN or Hide PIN and its glyph changes (`ic_ll_eye_off`); its lines say "the computer", not "the desktop".
+- **Cancel and wake:** the scanner and the pairing confirmation say Cancel; a wake's result is a snackbar, which goes by itself; the scanner's hint names the desktop app's Pair page (U1).
+- **Checked on the A71** against this box and a throwaway server reached through `adb reverse` (checklist §89): Back from each screen, the checking card (16 s where it had taken 31 s), a remote's plain failure, Lock's question from the sheet and from the notification (cancelled both times; the server logged no privacy request), the pairing sheet and a pairing with its PIN, a wake's snackbar going by itself, and the scanner. Lock was never confirmed against this box.
+

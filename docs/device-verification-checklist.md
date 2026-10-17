@@ -1486,6 +1486,20 @@ On this box, the app's own window captured (no input into it):
 - [ ] Narrator reading the app; the Linux build (Orca, the Noto fonts through fc-list).
 - [ ] A line mixing Arabic or Hebrew with Latin (egui has no bidirectional layout), read by someone who reads it.
 
+## 89. The phone's navigation and feedback (U2)
+
+On the A71, against this box and a throwaway server reached through `adb reverse` (phone-only taps; the throwaway's Input off for the phone):
+
+- [x] Back from Settings, Add computer and the scanner to Home; from the pairing confirmation, cancelling it; from the remote, ending it.
+- [x] A tapped computer that does not answer says "Checking whether it is awake…", and the internet try ends in about 16 s (31 s before).
+- [x] A remote that could not connect says why in plain words.
+- [x] Lock's question from the session's sheet and from the notification's "Lock desktop"; Cancel both times, and the server logged no privacy request.
+- [x] The pairing sheet: the PIN field, Pair, "Show a PIN on the computer", Cancel; the eye says Show PIN and Hide PIN; paired with a PIN.
+- [x] A wake's result as a snackbar that goes by itself; the scanner's Cancel and its hint.
+- [ ] Lock confirmed, and refused with Power off (the server's answer is unit-tested): never against this box, so on the VM or a spare computer.
+- [ ] Ring's snackbar (it rings the computer), and a shortcut key's failure message on a dropped link.
+- [ ] TalkBack reading the snackbars and the checking card.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
