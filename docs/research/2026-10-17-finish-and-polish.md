@@ -53,10 +53,10 @@ Usability first: U1–U3 fix what stops or confuses a person today. N1 and N2 ar
 **Audit findings:** P-W1 (Back closes the app from Settings, Add computer, Scan, the pairing-link confirmation and Remote: the only `BackHandler` is in `RemoteScreen`), P-W2 (tapping a card waits seconds on an asleep check and an internet dial with no sign), P-W3 (raw Rust and OS errors in about 15 places; `humanizeError` used once), P-W4 (Lock and Ring with no confirmation and no result), P-W5 (the pairing sheet's primary button is the wrong one, and it prints a CLI command), P-W8 ("Exit" to leave a flow, a wake status that never clears and is not announced).
 
 **What:**
-- Back goes up one level everywhere; on Remote and in a session it asks first.
+- Back goes up one level everywhere; on Remote it ends the remote, as it ends a session (as built: neither asks).
 - A card shows "Checking…" with a progress line while it decides, and ignores taps meanwhile.
 - Every failure shown goes through one mapping to a plain, localized sentence, with the raw text in logcat and the copied report.
-- Lock asks first (naming the computer); Ring and Lock say what happened; a failed shortcut says so.
+- Lock asks first ("Lock the computer?"; U3 names the computer); Ring and Lock say what happened; a failed shortcut says so.
 - The pairing sheet: "Pair" primary, "Show a PIN on the computer" secondary, no command in the text, the eye toggling.
 - "Cancel" to leave a flow, "Exit" only for a session; wake results in a snackbar.
 
