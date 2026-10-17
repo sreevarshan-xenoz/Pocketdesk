@@ -861,7 +861,7 @@ mod tests {
             s.pair_packet(PairSays::Yes(Some(now))).is_empty(),
             "held, not answered"
         );
-        let held = devices::pending(&s.dir, now);
+        let held = devices::pending(&s.dir, now_unix());
         assert_eq!(held.len(), 1);
         assert!(held[0].from_device);
         assert_eq!(held[0].code.len(), 8);
@@ -875,7 +875,7 @@ mod tests {
         let out = s.event(Event::Answer { yes: true, code });
         assert_eq!(says(&out[0]), Some(PairSays::Yes(None)));
         assert_eq!(devices::pinned(&s.dir, &s.device_id), Some([9; 32]));
-        assert!(devices::pending(&s.dir, now).is_empty());
+        assert!(devices::pending(&s.dir, now_unix()).is_empty());
     }
 
     #[test]
@@ -883,7 +883,7 @@ mod tests {
         let mut s = state("deny", false);
         let now = now_unix();
         s.pair_packet(PairSays::Yes(Some(now)));
-        let code = devices::pending(&s.dir, now)[0].code.clone();
+        let code = devices::pending(&s.dir, now_unix())[0].code.clone();
         let out = s.event(Event::Answer { yes: false, code });
         assert_eq!(says(&out[0]), Some(PairSays::No));
         assert_eq!(devices::pinned(&s.dir, &s.device_id), None);
@@ -891,7 +891,7 @@ mod tests {
         let mut s = state("skew", false);
         let out = s.pair_packet(PairSays::Yes(Some(now - pairing::MAX_SKEW_SECS - 5)));
         assert_eq!(says(&out[0]), Some(PairSays::No), "its clock is off");
-        assert!(devices::pending(&s.dir, now).is_empty());
+        assert!(devices::pending(&s.dir, now_unix()).is_empty());
 
         let mut s = state("expire", false);
         s.pair_packet(PairSays::Yes(Some(now)));
@@ -910,10 +910,10 @@ mod tests {
         let mut s = state("flood", false);
         let now = now_unix();
         s.pair_packet(PairSays::Yes(Some(now)));
-        let first = devices::pending(&s.dir, now)[0].clone();
+        let first = devices::pending(&s.dir, now_unix())[0].clone();
         assert!(s.pair_packet(PairSays::Yes(Some(now + 1))).is_empty());
         assert_eq!(
-            devices::pending(&s.dir, now + 1)[0],
+            devices::pending(&s.dir, now_unix())[0],
             first,
             "a repeat while one waits changes nothing"
         );
@@ -923,12 +923,16 @@ mod tests {
         });
         assert!(s.pair_packet(PairSays::Yes(Some(now))).is_empty());
         assert!(
-            devices::pending(&s.dir, now).is_empty(),
+            devices::pending(&s.dir, now_unix()).is_empty(),
             "not again at once"
         );
         s.last_asked = now - REQUEST_GAP_SECS;
         s.pair_packet(PairSays::Yes(Some(now)));
-        assert_eq!(devices::pending(&s.dir, now).len(), 1, "a while later");
+        assert_eq!(
+            devices::pending(&s.dir, now_unix()).len(),
+            1,
+            "a while later"
+        );
     }
 
     #[test]
@@ -944,10 +948,9 @@ mod tests {
     #[test]
     fn pairing_from_here_pairs_when_the_owner_confirms_the_devices_yes() {
         let mut s = state("here", false);
-        let now = now_unix();
         let out = s.event(Event::PairFromHere);
         assert!(matches!(says(&out[0]), Some(PairSays::Yes(Some(_)))));
-        let code = devices::pending(&s.dir, now)[0].code.clone();
+        let code = devices::pending(&s.dir, now_unix())[0].code.clone();
         assert!(
             s.event(Event::Answer {
                 yes: true,
@@ -959,7 +962,7 @@ mod tests {
         assert!(!s.paired);
         assert!(s.pair_packet(PairSays::Yes(None)).is_empty());
         assert!(!s.paired, "its yes alone pairs nothing");
-        let held = devices::pending(&s.dir, now);
+        let held = devices::pending(&s.dir, now_unix());
         assert!(held[0].accepted && !held[0].from_device);
         assert!(
             s.event(Event::Answer {
@@ -970,7 +973,7 @@ mod tests {
         );
         assert!(s.paired);
         assert_eq!(devices::pinned(&s.dir, &s.device_id), Some([9; 32]));
-        assert!(devices::pending(&s.dir, now).is_empty());
+        assert!(devices::pending(&s.dir, now_unix()).is_empty());
     }
 
     #[test]
@@ -978,7 +981,7 @@ mod tests {
         let mut s = state("here-no", false);
         let now = now_unix();
         s.event(Event::PairFromHere);
-        let code = devices::pending(&s.dir, now)[0].code.clone();
+        let code = devices::pending(&s.dir, now_unix())[0].code.clone();
         s.pair_packet(PairSays::Yes(None));
         let out = s.event(Event::Answer { yes: false, code });
         assert_eq!(says(&out[0]), Some(PairSays::No));
@@ -1028,12 +1031,12 @@ mod tests {
         let now = now_unix();
         old.pair_packet(PairSays::Yes(Some(now)));
         new.pair_packet(PairSays::Yes(Some(now + 1)));
-        let newer = devices::pending(&new.dir, now + 1);
+        let newer = devices::pending(&new.dir, now_unix());
         assert_eq!(newer.len(), 1);
         old.end_waiting(now + 1);
-        assert_eq!(devices::pending(&new.dir, now + 1), newer, "left");
+        assert_eq!(devices::pending(&new.dir, now_unix()), newer, "left");
         new.end_waiting(now + 1);
-        assert!(devices::pending(&new.dir, now + 1).is_empty());
+        assert!(devices::pending(&new.dir, now_unix()).is_empty());
     }
 
     #[test]
@@ -1041,7 +1044,7 @@ mod tests {
         let mut s = state("unkept", false);
         let now = now_unix();
         s.pair_packet(PairSays::Yes(Some(now)));
-        let code = devices::pending(&s.dir, now)[0].code.clone();
+        let code = devices::pending(&s.dir, now_unix())[0].code.clone();
         // The pins do not read: nothing can be added to them.
         std::fs::write(
             s.dir
@@ -1415,9 +1418,8 @@ mod tests {
     fn a_battery_sent_while_the_owner_confirms_is_kept_at_pairing() {
         let mut s = state("held", false);
         s.device_id = format!("held{}", uuid::Uuid::new_v4().simple());
-        let now = now_unix();
         s.event(Event::PairFromHere);
-        let code = devices::pending(&s.dir, now)[0].code.clone();
+        let code = devices::pending(&s.dir, now_unix())[0].code.clone();
         s.pair_packet(PairSays::Yes(None));
         s.packet(&battery(42));
         assert_eq!(
