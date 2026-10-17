@@ -121,6 +121,8 @@ pub struct PocketdeskApp {
     refreshed: Option<Instant>,
     /// A device the user asked to revoke, awaiting confirmation.
     confirm_revoke: Option<String>,
+    /// The Name boxes on the Devices page, by device id (U3).
+    renaming: std::collections::HashMap<String, String>,
     /// The last action's outcome, shown under the tabs.
     notice: Option<crate::notice::Notice>,
     quitting: bool,
@@ -188,6 +190,7 @@ impl PocketdeskApp {
             log: Vec::new(),
             refreshed: None,
             confirm_revoke: None,
+            renaming: std::collections::HashMap::new(),
             notice: None,
             quitting: false,
             pair: PairView::default(),
@@ -429,11 +432,7 @@ impl PocketdeskApp {
                 if from_home_assistant {
                     ui.label("Asked from a button in Home Assistant.");
                 } else {
-                    ui.horizontal(|ui| {
-                        ui.label("Phone");
-                        ui.monospace(short(&request.device_id))
-                            .on_hover_text(&request.device_id);
-                    });
+                    phone_row(ui, &self.snapshot.devices, &request.device_id);
                 }
                 ui.label(
                     RichText::new(format!(
@@ -473,11 +472,7 @@ impl PocketdeskApp {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ui.ctx(), |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Phone");
-                    ui.monospace(short(&request.device_id))
-                        .on_hover_text(&request.device_id);
-                });
+                phone_row(ui, &self.snapshot.devices, &request.device_id);
                 ui.label(format!("from {}", request.peer));
                 ui.label(
                     RichText::new(format!(
@@ -512,7 +507,7 @@ impl PocketdeskApp {
     }
 
     fn answer(&mut self, request: &ApprovalRequest, verdict: Verdict) {
-        let who = short(&request.device_id);
+        let who = self.label(&request.device_id);
         // A phone that retried while it waited has several requests held;
         // the owner's answer is about the phone, so it answers them all.
         let ids: Vec<String> = self
@@ -543,12 +538,33 @@ impl PocketdeskApp {
     fn set_ask_first(&mut self, id: &str, ask_first: bool) {
         if let Err(e) = model::set_ask_first(&self.state_dir, id, ask_first) {
             self.notice =
-                crate::notice::Notice::error(format!("Could not change {}: {e}", short(id)));
+                crate::notice::Notice::error(format!("Could not change {}: {e}", self.label(id)));
         }
         self.refresh();
     }
 
+    /// A paired device by its name, else its short id (U3).
+    fn label(&self, id: &str) -> String {
+        model::device_label(&self.snapshot.devices, id)
+    }
+
+    /// The owner names a paired device (U3); blank clears it.
+    fn rename_device(&mut self, id: &str, name: &str) {
+        let before = self.label(id);
+        self.notice =
+            crate::notice::Notice::outcome(match model::rename_device(&self.state_dir, id, name) {
+                Ok(()) if name.trim().is_empty() => {
+                    Ok(format!("{before} goes by its own name again."))
+                }
+                Ok(()) => Ok(format!("Renamed {before}.")),
+                Err(e) => Err(format!("Could not rename {before}: {e}")),
+            });
+        self.refresh();
+    }
+
     fn revoke(&mut self, id: &str) {
+        // Named before it goes, since the name goes with it.
+        let who = self.label(id);
         let result = TrustStore::update(self.state_dir.join(TRUST_FILE), |store| {
             store.untrust_device(id)
         });
@@ -556,11 +572,8 @@ impl PocketdeskApp {
         // with new keys) and bind them.
         let _ = pocketdesk_core::local::device_keys::clear(&self.state_dir, id);
         self.notice = crate::notice::Notice::outcome(match result {
-            Ok(()) => Ok(format!(
-                "Removed {} — it must pair again to connect.",
-                short(id)
-            )),
-            Err(e) => Err(format!("Could not remove {}: {e}", short(id))),
+            Ok(()) => Ok(format!("Removed {who} — it must pair again to connect.")),
+            Err(e) => Err(format!("Could not remove {who}: {e}")),
         });
         // Removing a phone must not leave it in control of a running session.
         self.end_sessions_of(id);
@@ -579,8 +592,10 @@ impl PocketdeskApp {
             return;
         }
         if let Err(e) = sessions::request_kick(&self.state_dir, id, now_unix()) {
-            self.notice =
-                crate::notice::Notice::error(format!("Could not end {}'s session: {e}", short(id)));
+            self.notice = crate::notice::Notice::error(format!(
+                "Could not end {}'s session: {e}",
+                self.label(id)
+            ));
         }
     }
 
@@ -591,8 +606,10 @@ impl PocketdeskApp {
             }
             Ok(()) => {}
             Err(e) => {
-                self.notice =
-                    crate::notice::Notice::error(format!("Could not change {}: {e}", short(id)))
+                self.notice = crate::notice::Notice::error(format!(
+                    "Could not change {}: {e}",
+                    self.label(id)
+                ))
             }
         }
         self.refresh();
@@ -609,7 +626,10 @@ impl PocketdeskApp {
         });
         self.notice = crate::notice::Notice::outcome(
             match sessions::request_kick(&self.state_dir, &target, now_unix()) {
-                Ok(()) => Ok(format!("Asked the session from {} to end.", short(&target))),
+                Ok(()) => Ok(format!(
+                    "Asked the session from {} to end.",
+                    self.label(&target)
+                )),
                 Err(e) => Err(format!("Could not end the session: {e}")),
             },
         );
@@ -621,7 +641,10 @@ impl PocketdeskApp {
             Tab::Status => self.status_tab(ui),
             Tab::Activity => {
                 let log_on = self.config.as_ref().is_none_or(|c| c.events);
-                match self.activity.show(ui, log_on, now_unix()) {
+                match self
+                    .activity
+                    .show(ui, log_on, &self.snapshot.devices, now_unix())
+                {
                     Some(crate::activity_view::Action::ShowFile(path)) => {
                         if let Err(e) = crate::reveal::show_in_folder(&path) {
                             self.notice = crate::notice::Notice::error(format!(
@@ -649,7 +672,10 @@ impl PocketdeskApp {
                 self.messages
                     .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
             }
-            Tab::Notifications => self.notes.show(ui, &self.state_dir, now_unix()),
+            Tab::Notifications => {
+                self.notes
+                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
+            }
             Tab::Phone => {
                 self.phone_files
                     .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
@@ -719,7 +745,14 @@ impl PocketdeskApp {
             .spacing([16.0, 8.0])
             .show(ui, |ui| {
                 for device in &self.snapshot.devices {
-                    ui.monospace(short(&device.id)).on_hover_text(&device.id);
+                    ui.vertical(|ui| {
+                        // Room for a name and a short id on one line each.
+                        ui.set_min_width(170.0);
+                        if let Some(name) = &device.name {
+                            ui.label(RichText::new(name).strong());
+                        }
+                        ui.monospace(short(&device.id)).on_hover_text(&device.id);
+                    });
                     ui.label(match device.grant_remaining {
                         None if device.computer => "a computer".to_string(),
                         None => "permanent".to_string(),
@@ -756,10 +789,36 @@ impl PocketdeskApp {
         );
         let mut change = None;
         let mut ask = None;
+        let mut rename = None;
         for device in &self.snapshot.devices {
-            egui::CollapsingHeader::new(format!("What {} may do", short(&device.id)))
+            let label = model::device_label(&self.snapshot.devices, &device.id);
+            egui::CollapsingHeader::new(format!("What {label} may do"))
                 .id_salt(("permissions", &device.id))
                 .show(ui, |ui| {
+                    // U3: the owner's name for it, which the phone's own
+                    // never replaces; blank goes back to the phone's.
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Name");
+                        let text = self.renaming.entry(device.id.clone()).or_insert_with(|| {
+                            if device.renamed {
+                                device.name.clone().unwrap_or_default()
+                            } else {
+                                String::new()
+                            }
+                        });
+                        ui.add(
+                            egui::TextEdit::singleline(text)
+                                .hint_text(device.name.as_deref().unwrap_or("its own name"))
+                                .desired_width(200.0),
+                        );
+                        if ui
+                            .button("Rename")
+                            .on_hover_text("Blank: the name the phone gives itself.")
+                            .clicked()
+                        {
+                            rename = Some((device.id.clone(), text.clone()));
+                        }
+                    });
                     let mut ask_first = device.permissions.ask_first;
                     if ui
                         .checkbox(&mut ask_first, "Ask before each session")
@@ -788,6 +847,10 @@ impl PocketdeskApp {
         }
         if let Some((id, ask_first)) = ask {
             self.set_ask_first(&id, ask_first);
+        }
+        if let Some((id, name)) = rename {
+            self.renaming.remove(&id);
+            self.rename_device(&id, &name);
         }
         if let Some(choice) = revoke {
             self.confirm_revoke = choice;
@@ -824,11 +887,15 @@ impl PocketdeskApp {
             .spacing([16.0, 8.0])
             .show(ui, |ui| {
                 for session in &self.snapshot.sessions {
-                    let who = session
-                        .device_id
-                        .as_deref()
-                        .map_or("unannounced".to_string(), short);
-                    ui.monospace(who);
+                    match session.device_id.as_deref() {
+                        Some(id) => {
+                            ui.label(model::device_label(&self.snapshot.devices, id))
+                                .on_hover_text(id);
+                        }
+                        None => {
+                            ui.monospace("unannounced");
+                        }
+                    }
                     ui.label(format!(
                         "{} · {}{}",
                         session.transport.to_uppercase(),
@@ -886,7 +953,7 @@ impl PocketdeskApp {
             let media = &playing.media;
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label(format!("Playing on {}:", short(id)));
+                ui.label(format!("Playing on {}:", self.label(id)));
                 ui.label(RichText::new(media_line(media)).strong());
             });
             ui.horizontal(|ui| {
@@ -1427,7 +1494,7 @@ impl eframe::App for PocketdeskApp {
         }
         self.cast
             .get_or_insert_with(|| crate::cast_view::CastView::new(ctx, self.state_dir.clone()))
-            .show(ctx);
+            .show(ctx, &self.snapshot.devices);
         ctx.request_repaint_after(REFRESH);
     }
 
@@ -1500,6 +1567,23 @@ pub fn kept_page(chosen: Tab) -> Tab {
     } else {
         chosen
     }
+}
+
+/// "Phone", the device's name (said as its own claim unless the owner gave
+/// it) and its id: where a decision rests on who asks (U3).
+fn phone_row(ui: &mut egui::Ui, devices: &[model::Device], id: &str) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Phone");
+        if let Some(device) = devices.iter().find(|d| d.id == id)
+            && let Some(name) = &device.name
+        {
+            ui.label(RichText::new(name).strong());
+            if !device.renamed {
+                ui.label(RichText::new("(calls itself)").color(crate::theme::muted(ui)));
+            }
+        }
+        ui.monospace(short(id)).on_hover_text(id);
+    });
 }
 
 /// A device id short enough for a table: the first 12 characters.

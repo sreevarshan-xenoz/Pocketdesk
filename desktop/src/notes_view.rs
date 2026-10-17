@@ -60,7 +60,13 @@ impl NotesView {
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path, now_unix: u64) {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        state_dir: &Path,
+        devices: &[crate::model::Device],
+        now_unix: u64,
+    ) {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(REFRESH);
         if let Some(notice) = &self.notice {
@@ -87,9 +93,12 @@ impl NotesView {
                         ui.label(&note.text);
                     }
                     ui.label(
-                        RichText::new(format!("from {}", crate::app::short(&note.device_id)))
-                            .small()
-                            .color(crate::theme::muted(ui)),
+                        RichText::new(format!(
+                            "from {}",
+                            crate::model::device_label(devices, &note.device_id)
+                        ))
+                        .small()
+                        .color(crate::theme::muted(ui)),
                     );
                     ui.horizontal(|ui| {
                         for action in &note.actions {

@@ -89,7 +89,7 @@ impl CastView {
     }
 
     /// Call each pass: keeps the window open while there is a cast to show.
-    pub fn show(&self, ctx: &egui::Context) {
+    pub fn show(&self, ctx: &egui::Context, devices: &[crate::model::Device]) {
         let (title, size) = {
             let state = lock(&self.shared);
             let Some(id) = state.session_id else { return };
@@ -97,7 +97,15 @@ impl CastView {
                 return;
             }
             (
-                format!("{} · phone screen", short(&state.device_id)),
+                // The phone's name (U3), else its id.
+                format!(
+                    "{} · phone screen",
+                    devices
+                        .iter()
+                        .find(|d| d.id == state.device_id)
+                        .and_then(|d| d.name.clone())
+                        .unwrap_or_else(|| short(&state.device_id))
+                ),
                 state.size,
             )
         };

@@ -162,7 +162,10 @@ impl MessagesView {
                         .and_then(|c| c.name.clone());
                     pane.strong(title(&address, name.as_deref()));
                     pane.label(
-                        RichText::new(format!("through {}", crate::app::short(&device)))
+                        RichText::new(format!(
+                            "through {}",
+                            crate::model::device_label(devices, &device)
+                        ))
                             .color(muted),
                     );
                     egui::ScrollArea::vertical()
@@ -208,10 +211,10 @@ impl MessagesView {
                             .filter(|id| phones.iter().any(|d| &d.id == id))
                             .unwrap_or_else(|| phones[0].id.clone());
                         egui::ComboBox::from_id_salt("sms-phone")
-                            .selected_text(crate::app::short(&chosen))
+                            .selected_text(crate::model::device_label(devices, &chosen))
                             .show_ui(pane, |ui| {
                                 for phone in &phones {
-                                    let label = crate::app::short(&phone.id);
+                                    let label = crate::model::device_label(devices, &phone.id);
                                     if ui.selectable_label(phone.id == chosen, label).clicked() {
                                         self.new_phone = Some(phone.id.clone());
                                     }

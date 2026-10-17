@@ -102,7 +102,13 @@ impl ActivityView {
     }
 
     /// Draw the tab; what the person asked for, if anything.
-    pub fn show(&mut self, ui: &mut egui::Ui, log_on: bool, now_unix: u64) -> Option<Action> {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        log_on: bool,
+        devices: &[crate::model::Device],
+        now_unix: u64,
+    ) -> Option<Action> {
         let mut action = None;
         if !log_on {
             ui.horizontal(|ui| {
@@ -142,7 +148,7 @@ impl ActivityView {
                     .show(ui, |ui| {
                         for event in shown {
                             ui.label(RichText::new(ago(now_unix, event.at)).weak());
-                            ui.monospace(phone(event));
+                            ui.label(phone(event, devices));
                             ui.label(describe(event));
                             match file_path(event, received) {
                                 Some(path) => {
@@ -173,11 +179,15 @@ fn ago(now: u64, at: u64) -> String {
     }
 }
 
-/// The phone, by the first characters of its id; Home Assistant by name.
-fn phone(event: &Event) -> String {
+/// The phone by its name (U3), else by the first characters of its id;
+/// Home Assistant by name.
+fn phone(event: &Event, devices: &[crate::model::Device]) -> String {
     match &event.device_id {
         Some(id) if id == pocketdesk_core::local::home_assistant::HOME_ASSISTANT_DEVICE => {
             "Home Assistant".to_string()
+        }
+        Some(id) if devices.iter().any(|d| &d.id == id && d.name.is_some()) => {
+            crate::model::device_label(devices, id)
         }
         Some(id) if id.chars().count() > 8 => id.chars().take(8).collect(),
         Some(id) => id.clone(),
