@@ -199,6 +199,9 @@ mod tests {
             "kdeconnect.pocketdesk.wan_key",
             "kdeconnect.pocketdesk.file_fetch",
             "kdeconnect.pocketdesk.file_offer_declined",
+            // This computer's KDE identity (3a), broadcast and sent on a KDE
+            // Connect device's link only, never on the Pocketdesk road.
+            "kdeconnect.identity",
         ];
         let (_, outgoing) = crate::plugins::announced(&crate::plugins::register_all());
         let mut files = Vec::new();
