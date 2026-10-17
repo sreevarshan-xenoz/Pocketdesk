@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +51,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -64,6 +66,7 @@ fun SoundScreen(
     address: String,
     port: Int,
     controlPort: Int,
+    askLock: Int = 0,
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -246,6 +249,27 @@ fun SoundScreen(
     }
     val micShare = rememberMicShare(address, port, controlPort) { micErrorRes = it }
     var soundHere by remember { mutableStateOf(Prefs.desktopSound(context)) }
+
+    // The session notification's Lock asks here too, as it does in a remote
+    // (N5 review: it did nothing): only asks made since this screen opened.
+    var confirmLock by remember { mutableStateOf(false) }
+    val askLockAtStart = remember { askLock }
+    LaunchedEffect(askLock) {
+        if (askLock > askLockAtStart) confirmLock = true
+    }
+    val lockScope = rememberCoroutineScope()
+    if (confirmLock) {
+        LockQuestion(
+            name = HostStore.name(context, address),
+            onDismiss = { confirmLock = false },
+            onLock = {
+                lockScope.launch(Dispatchers.IO) {
+                    val said = lockComputer(context, address, controlPort)
+                    withContext(Dispatchers.Main) { snackbar.showSnackbar(said) }
+                }
+            },
+        )
+    }
     var showControls by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().safeDrawingPadding()) {

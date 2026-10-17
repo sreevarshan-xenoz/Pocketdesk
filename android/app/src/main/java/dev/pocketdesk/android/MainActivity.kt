@@ -426,6 +426,7 @@ class MainActivity : ComponentActivity() {
                                         address = session.address,
                                         port = session.port,
                                         controlPort = session.controlPort,
+                                        askLock = lockAskSignal.intValue,
                                         onExit = { sessionKey = null },
                                     )
                                 }
