@@ -822,8 +822,9 @@ fun RemoteScreen(
             }
         }
     }
+    // Sent again even when unchanged: a tap on the chosen one retries a
+    // send that failed (U4 review).
     fun setQuality(next: Int) {
-        if (next == qualityPreset) return
         qualityPreset = next
         scope.launch(Dispatchers.IO) {
             RustCore.sendQualityPreset(next).onFailure { qualityPresetError = context.plainErrorText(it.message) }
