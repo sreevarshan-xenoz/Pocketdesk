@@ -1559,6 +1559,15 @@ On this box through the app's own window (screenshots only), with a throwaway co
 - [ ] Unpair's question for a phone and for a computer, and Cancel.
 - [ ] Pair a phone and Overview buttons on the empty pages.
 
+## 95. The phone app in Spanish and Tamil (U6)
+
+On the A71 with the app's language set by `cmd locale set-app-locales` (reset after), against a throwaway server:
+
+- [x] Tamil: Home's bottom row wraps to two lines; a session's chip says நேரடித் தொடுதல் as its menu does; the connection details in Tamil, clear of Exit after the fix.
+- [x] Spanish: the details (retardo, perdidos, equipo, "tasas en 1,5 s"), the chip "Toque directo", and the shortcut bar's Ctrl+Alt+Supr and Impr Pant.
+- [ ] The keyboard bar's keys and the remote's presenter keys in Spanish.
+- [ ] Every screen in Spanish and Tamil for text that runs out of its box.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

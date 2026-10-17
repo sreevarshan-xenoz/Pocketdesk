@@ -23,3 +23,13 @@ A JVM test that every string in `values/strings.xml` exists in `values-es` and `
 ## Check
 
 On the A71 with the app's language set to Spanish and to Tamil (`cmd locale set-app-locales`, reset after): Home's bottom row, a session's chip and menu, the connection details on, the shortcut bar.
+
+## As built
+
+- **Connection details** (`StatsHud.kt`): `hud_fps`, `hud_kbps`, `hud_rtt`, `hud_delay`, `hud_lost`, `hud_computer` and the caption's `hud_no_video`, `hud_rates_over`, `hud_rtt_unmeasured`, `hud_rtt_median`. English now says delay, lost and computer where it said e2e, drops and desk; Spanish retardo, perdidos, equipo; Tamil தாமதம், இழந்தவை, கணினி. Numbers keep the phone's own formatting (Spanish shows "1,5 s"). The panel ends 72 dp from the edge, clear of Exit (found in Tamil, where it ran under it).
+- **Keys** (`ShortcutBar.kt`, `KeyboardBar.kt`, the remote's `RemoteSession.Key.labelRes`): `key_*` resources. Spanish: Ctrl+Alt+Supr, Impr Pant, Inicio, Fin, Re Pág, Av Pág, Supr, Insert, workspaces E1–E9; Tamil keeps the printed names.
+- **Direct touch**: the chip's `mode_direct_touch` follows the menu's `value_direct_touch` (Toque directo; நேரடித் தொடுதல்).
+- **Home**: the bottom row is a `FlowRow`.
+- **The guard**: `StringsTranslatedTest` fails when a string is in English only, or only in a translation.
+- **Kept in English**, as designed: what the phone sends for the computer to show.
+
