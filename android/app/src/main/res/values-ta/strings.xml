@@ -45,6 +45,12 @@
     <string name="settings_reveal_pin_summary">கண் ஐகானைத் தொடாமல் இணைப்பு எண்கள் தெரியும்</string>
     <string name="settings_haptics">அதிர்வு</string>
     <string name="settings_haptics_summary">பொத்தான்கள்/தேர்வுகளில் முடுக்கம்</string>
+    <string name="settings_connection_details">இணைப்பு விவரங்களைக் காட்டு</string>
+    <string name="settings_connection_details_summary">அமர்வின்போது, இணைப்புக்கான புள்ளிக்குப் பதிலாக எண்கள் (பிரேம் வீதம், பிட் வீதம், சுற்றுப் பயணம், தாமதம், இழந்த பிரேம்கள், கணினியின் பேட்டரி)</string>
+    <string name="link_measuring">அளவிடுகிறது</string>
+    <string name="link_good">நல்ல இணைப்பு</string>
+    <string name="link_fair">சுமாரான இணைப்பு</string>
+    <string name="link_poor">மோசமான இணைப்பு</string>
     <string name="settings_trackpad_speed">தொடுதிண்டு வேகம்</string>
     <string name="settings_trackpad_speed_summary">தொடுதிண்டு முறையில் விரல் நகர்வுக்கு சுட்டி எவ்வளவு நகரும்</string>
     <string name="settings_system">சிஸ்டம்</string>

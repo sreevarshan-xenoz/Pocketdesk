@@ -1,27 +1,38 @@
 package dev.pocketdesk.android.stream
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -29,7 +40,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Streaming telemetry HUD overlay (Tier 1 #1): fps / bitrate / RTT /
+ * Streaming telemetry HUD overlay (Tier 1 #1). With [details] off (the
+ * default, U4) it is one coloured dot and a word for the connection
+ * ([LinkQuality]); on, the numbers: fps / bitrate / RTT /
  * end-to-end latency / frame drops, refreshed on a fixed interval from the
  * Rust core, over a caption naming the sample basis of the rate and link
  * figures. When an [address]/[controlPort] are given, the desktop's battery is
@@ -47,18 +60,27 @@ fun StatsHud(
     refreshMs: Long = 500,
     address: String? = null,
     controlPort: Int = 1716,
+    details: Boolean = true,
 ) {
     var stats by remember { mutableStateOf<RustCore.StreamingStats?>(null) }
     var battery by remember { mutableStateOf<String?>(null) }
+    var recentDrops by remember { mutableLongStateOf(0L) }
+    val drops = remember { LinkQuality.DropWindow(spanMs = 3_000) }
 
     LaunchedEffect(refreshMs) {
         while (true) {
             stats = runCatching { RustCore.streamingStats() }.getOrNull()
+            stats?.let {
+                drops.add(SystemClock.elapsedRealtime(), it.frameDrops)
+                recentDrops = drops.recent()
+            }
             delay(refreshMs)
         }
     }
 
-    LaunchedEffect(address, controlPort) {
+    LaunchedEffect(address, controlPort, details) {
+        // The computer's battery is one of the details.
+        if (!details) return@LaunchedEffect
         val host = address ?: return@LaunchedEffect
         battery = null
         while (true) {
@@ -84,6 +106,10 @@ fun StatsHud(
     }
 
     val s = stats ?: return
+    if (!details) {
+        QualityDot(LinkQuality.of(s.rttMs, s.rttSamples, s.e2eLatencyMs, recentDrops), modifier)
+        return
+    }
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
@@ -117,6 +143,32 @@ fun StatsHud(
                 color = Color.White.copy(alpha = 0.55f),
             ),
         )
+    }
+}
+
+/** The connection in a dot and a word, the word for those who cannot tell the colours apart. */
+@Composable
+private fun QualityDot(level: LinkQuality.Level, modifier: Modifier) {
+    val (colour, word) = when (level) {
+        LinkQuality.Level.MEASURING -> Color(0xFF9E9E9E) to R.string.link_measuring
+        LinkQuality.Level.GOOD -> Color(0xFF4CAF50) to R.string.link_good
+        LinkQuality.Level.FAIR -> Color(0xFFFFC107) to R.string.link_fair
+        LinkQuality.Level.POOR -> Color(0xFFF44336) to R.string.link_poor
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    ) {
+        Box(
+            Modifier
+                .size(10.dp)
+                .background(colour, CircleShape),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(word), color = Color.White, style = MaterialTheme.typography.labelSmall)
     }
 }
 

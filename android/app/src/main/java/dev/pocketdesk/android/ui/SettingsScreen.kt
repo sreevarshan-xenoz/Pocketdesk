@@ -138,6 +138,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.haptics(context),
                 { Prefs.setHaptics(context, it) },
             )
+            SettingSwitch(
+                stringResource(R.string.settings_connection_details),
+                stringResource(R.string.settings_connection_details_summary),
+                Prefs.connectionDetails(context),
+                { Prefs.setConnectionDetails(context, it) },
+            )
 
             SettingsHeader(stringResource(R.string.settings_files_links))
             SettingSwitch(

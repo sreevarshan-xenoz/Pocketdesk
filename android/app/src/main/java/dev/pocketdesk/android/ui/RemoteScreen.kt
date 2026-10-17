@@ -1182,7 +1182,11 @@ fun RemoteScreen(
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     Column(modifier = Modifier.padding(8.dp)) {
-                        StatsHud(address = address, controlPort = controlPort)
+                        StatsHud(
+                            address = address,
+                            controlPort = controlPort,
+                            details = dev.pocketdesk.android.Prefs.connectionDetails(context),
+                        )
                         // A live WAN link keeps a small badge reporting *how* it
                         // is connected (R4 A1) — punched-direct vs relayed, since
                         // relayed is a normal first-class state iroh keeps trying

@@ -52,6 +52,12 @@
     <string name="settings_reveal_pin_summary">Pairing digits visible without tapping the eye</string>
     <string name="settings_haptics">Haptics</string>
     <string name="settings_haptics_summary">Vibrate on buttons and picks</string>
+    <string name="settings_connection_details">Show connection details</string>
+    <string name="settings_connection_details_summary">During a session, the numbers (frame rate, bitrate, round trip, delay, lost frames and the computer\'s battery) instead of a dot for the connection</string>
+    <string name="link_measuring">Measuring</string>
+    <string name="link_good">Good connection</string>
+    <string name="link_fair">Fair connection</string>
+    <string name="link_poor">Poor connection</string>
     <string name="settings_trackpad_speed">Trackpad speed</string>
     <string name="settings_trackpad_speed_summary">How far the cursor moves for each finger movement in trackpad mode</string>
     <string name="settings_system">System</string>

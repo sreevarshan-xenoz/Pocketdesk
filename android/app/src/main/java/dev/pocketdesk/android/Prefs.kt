@@ -37,6 +37,7 @@ object Prefs {
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
+    private const val KEY_CONNECTION_DETAILS = "connection_details"
     private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
     private const val KEY_OFFER_WAKE = "offer_wake"
     private const val KEY_PHONE_NAME = "phone_name"
@@ -300,6 +301,15 @@ object Prefs {
 
     fun setHaptics(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_HAPTICS, enabled) }
+        bump()
+    }
+
+    /** The session shows its numbers, not a dot for the connection (U4). */
+    fun connectionDetails(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_CONNECTION_DETAILS, false)
+
+    fun setConnectionDetails(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CONNECTION_DETAILS, enabled) }
         bump()
     }
 
