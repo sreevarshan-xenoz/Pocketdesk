@@ -267,7 +267,38 @@ pub async fn receive<P, S>(
     expected: Option<u64>,
     max: u64,
     pace: Pace,
+    on_commit: impl FnMut(u64, u64),
+) -> Result<u64, TransferError>
+where
+    P: Partial,
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    receive_counted(
+        stream,
+        partial,
+        have,
+        expected,
+        max,
+        pace,
+        on_commit,
+        |_| {},
+    )
+    .await
+}
+
+/// [`receive`], telling `progress` how many bytes of the file this end has
+/// as they arrive, counting what it already had (C1: the desktop app shows
+/// a transfer under way).
+#[allow(clippy::too_many_arguments)]
+pub async fn receive_counted<P, S>(
+    stream: &mut S,
+    partial: &mut P,
+    have: Option<Have>,
+    expected: Option<u64>,
+    max: u64,
+    pace: Pace,
     mut on_commit: impl FnMut(u64, u64),
+    mut progress: impl FnMut(u64),
 ) -> Result<u64, TransferError>
 where
     P: Partial,
@@ -334,6 +365,7 @@ where
     partial.truncate(offset).await?;
     partial.seek(io::SeekFrom::Start(offset)).await?;
     on_commit(size, offset);
+    progress(offset);
 
     let deadline = pace.deadline(size - offset);
     let mut received = offset;
@@ -360,6 +392,7 @@ where
         }
         hasher.update(&buffer[..n]);
         received += n as u64;
+        progress(received);
         if received - committed >= COMMIT_EVERY {
             commit(partial, size, received, &mut committed, &mut on_commit).await?;
         }
@@ -615,6 +648,44 @@ mod tests {
             pace.slow_step(eight_gib) >= pace.idle + Duration::from_secs(400),
             "8 GiB at 20 MiB/s is about 410 s"
         );
+    }
+
+    #[tokio::test]
+    async fn the_receiver_counts_from_what_it_had_to_the_whole_file() {
+        let source = file(300_000);
+        let mut partial = Memory::holding(&source[..120_000]);
+        let (mut a, mut b) = tokio::io::duplex(256 * 1024);
+        let mut reader: &[u8] = &source;
+        let sending = async move {
+            let sent = send(&mut reader, 300_000, &mut a, Pace::DEFAULT, |_| {}).await;
+            drop(a);
+            sent
+        };
+        let mut seen = Vec::new();
+        let receiving = async {
+            let received = receive_counted(
+                &mut b,
+                &mut partial,
+                Some(Have {
+                    size: 300_000,
+                    committed: 120_000,
+                }),
+                Some(300_000),
+                MAX,
+                Pace::DEFAULT,
+                |_, _| {},
+                |n| seen.push(n),
+            )
+            .await;
+            finish(&mut b, received.is_ok(), Pace::DEFAULT).await;
+            received
+        };
+        let (sent, received) = tokio::join!(sending, receiving);
+        sent.unwrap();
+        received.unwrap();
+        assert_eq!(seen.first(), Some(&120_000), "what it had, first");
+        assert_eq!(seen.last(), Some(&300_000), "the whole file, last");
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]), "never backwards");
     }
 
     #[tokio::test]
