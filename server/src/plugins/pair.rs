@@ -94,6 +94,30 @@ pub fn is_computer_device(device_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Keep what a paired device calls itself in its identity (U3). Read
+/// first, and written under the store's lock only when the name changed,
+/// so a connection that brings the same name writes nothing; a device not
+/// paired leaves nothing. Blocking file work: call it off the runtime.
+pub fn note_claimed_name(device_id: &str, claimed: &str) {
+    let Ok(path) = state::trust_store_path() else {
+        return;
+    };
+    let Some(name) = pocketdesk_core::protocol::kdeconnect::clean_device_name(claimed) else {
+        return;
+    };
+    let unchanged = TrustStore::read(&path)
+        .map(|store| {
+            !store.is_trusted(device_id) || store.claimed_name(device_id) == Some(name.as_str())
+        })
+        .unwrap_or(true);
+    if unchanged {
+        return;
+    }
+    if let Err(e) = TrustStore::update(&path, |store| store.note_claimed_name(device_id, &name)) {
+        tracing::debug!("Could not keep {device_id}'s name: {e}");
+    }
+}
+
 /// F5: may this device send `packet_type`? Packets that use no capability
 /// always pass. [conn_key] is the deviceId a connection goes by: on TCP the
 /// one its identity named in the handshake and its TLS key backed (phase B),
@@ -1034,6 +1058,23 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// U3: a paired phone's name, from its identity, is kept cleaned; a
+    /// phone not paired leaves nothing in the store.
+    #[test]
+    fn a_paired_phones_name_is_kept_and_an_unpaired_ones_is_not() {
+        pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        let path = state::trust_store_path().unwrap();
+        TrustStore::update(&path, |store| store.trust_device("names-paired-phone")).unwrap();
+        note_claimed_name("names-paired-phone", "Galaxy\u{202E} A71");
+        note_claimed_name("names-stranger-phone", "Stranger");
+        let store = TrustStore::read(&path).unwrap();
+        assert_eq!(store.name("names-paired-phone"), Some("Galaxy A71"));
+        assert_eq!(store.name("names-stranger-phone"), None);
+        TrustStore::update(&path, |store| store.untrust_device("names-paired-phone")).unwrap();
+    }
 
     #[test]
     fn a_pin_that_paired_stays_spent() {

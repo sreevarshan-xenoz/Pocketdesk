@@ -40,7 +40,7 @@ From `server/src/service.rs` (`handle_connection_with_kde`):
 2. The TLS handshake must finish within 8 s. The client must present a certificate (`AnyClientCert { mandatory: true }`). Its SHA-256 becomes the connection's `peer_key`.
 3. The client sends `POCKETDESK_HELLO 1` and the desktop answers `POCKETDESK_OK 1`. Any other line gets `POCKETDESK_ERR 1`. A handshake line is at most 64 KiB (`MAX_HANDSHAKE_LINE`).
 4. **The desktop sends its own `kdeconnect.identity` before the client has identified itself.** It contains `deviceId`, `deviceName` (the host name), `deviceType: "desktop"`, `protocolVersion` and the plugin capability lists (`core/src/protocol/kdeconnect.rs`, `as_identity_packet`). Any TLS client with any certificate therefore learns the desktop's id and name.
-5. The client sends its `kdeconnect.identity` within 5 s. Its `deviceId` must pass `valid_device_id` (§2.4). The connection is known by that id from then on. A second identity on the same connection is ignored.
+5. The client sends its `kdeconnect.identity` within 5 s. Its `deviceId` must pass `valid_device_id` (§2.4). The connection is known by that id from then on. A second identity on the same connection is ignored. Once the phone is paired, its `deviceName`, cleaned (`clean_device_name`: one printable line of at most 40 characters), is kept in the trust store as what it calls itself (U3), written only when it changed; the owner's rename is kept beside it and never replaced.
 6. Packets follow as JSON lines, each at most 4 MiB (`MAX_PACKET_LINE`). Every packet is checked against two things. First, the device's standing (`pair::standing`: paired with this key, unpaired, or wrong key), re-read for each packet. Second, the per-device permission (`pair::permits` → `capability_for`).
 7. A connection that may receive pushes (paired with its key, or any connection when `pairing_required = false`) is seeded with the window and workspace HUD state, the WAN endpoint (`kdeconnect.pocketdesk.endpoint`) and `kdeconnect.pocketdesk.wake_info` (`seed_desktop_state`, `server/src/state.rs` `may_receive_pushes`).
 
@@ -407,7 +407,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/certs/known_peers.json` | Certificate pins (for `pocketdesk connect`, and the other computers this one paired with, 2f) | Default | same (`update_pins`) |
 | `<state>/device_id` | The desktop's device id | Default | `server/src/kde.rs` |
 | `<state>/pairing.pin` | The PIN, minting time, grant length | Owner-only | `core/src/local/pin.rs` |
-| `<state>/trusted_devices.json` (+ `.lock`) | Paired device ids, guest grants, per-device permissions | Default | `core/src/protocol/kdeconnect.rs` (`TrustStore`) |
+| `<state>/trusted_devices.json` (+ `.lock`) | Paired device ids, guest grants, per-device permissions, and each one's name: what it calls itself and the owner's rename (U3) | Default | `core/src/protocol/kdeconnect.rs` (`TrustStore`) |
 | `<state>/device_keys.json` | Per device: TLS key hash and iroh id | Default; atomic and synced | `core/src/local/device_keys.rs` |
 | `<state>/endpoint.json` | The WAN endpoint body: id, relay URLs, direct addresses, `dht` | Default | `core/src/local/identity.rs`, `iroh_endpoint.rs` |
 | `<state>/wan_status.json` | Yes/no facts (UDP, NAT varies, public IPv6, captive portal, DHT state). No addresses | Default | `core/src/local/diagnostics.rs` |

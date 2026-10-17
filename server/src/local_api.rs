@@ -145,6 +145,9 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
             let bound = keys.get(&id);
             json!({
                 "id": id,
+                // U3: the owner's rename, else what it calls itself; null
+                // until it has said.
+                "name": store.name(&id),
                 "grant_remaining_secs": store.grant_remaining(&id),
                 "in_session": live.iter().any(|s| s.device_id.as_deref() == Some(id.as_str())),
                 "key_bound": bound.is_some_and(|k| k.tls.is_some()),
@@ -787,9 +790,15 @@ pub fn print_devices(as_json: bool) -> anyhow::Result<()> {
                     .collect()
             })
             .unwrap_or_default();
+        // The name first when there is one (U3), the id the commands take.
+        let id = device["id"].as_str().unwrap_or_default();
+        let named = match device["name"].as_str() {
+            Some(name) => format!("{name} ({id})"),
+            None => id.to_string(),
+        };
         println!(
             "{}  {}{}  not allowed: {}",
-            device["id"].as_str().unwrap_or_default(),
+            named,
             if device["in_session"] == true {
                 "in a session"
             } else {
@@ -925,6 +934,7 @@ mod tests {
         let dir = temp_dir("devices");
         let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
         store.trust_device("phone-a").unwrap();
+        store.note_claimed_name("phone-a", "Galaxy A71").unwrap();
         store
             .trust_device_with_ttl("phone-b", std::time::Duration::from_secs(60))
             .unwrap();
@@ -967,6 +977,8 @@ mod tests {
         let all = listed["devices"].as_array().unwrap();
         let a = all.iter().find(|d| d["id"] == "phone-a").unwrap();
         let b = all.iter().find(|d| d["id"] == "phone-b").unwrap();
+        assert_eq!(a["name"], "Galaxy A71");
+        assert_eq!(b["name"], Value::Null, "none said yet");
         assert_eq!(a["in_session"], true);
         assert_eq!(a["key_bound"], true);
         assert_eq!(a["grant_remaining_secs"], Value::Null);

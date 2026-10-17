@@ -48,7 +48,7 @@ The paired phones.
 
 ```json
 {"api": 1, "server_running": true,
- "devices": [{"id": "0d7c3a52-…", "grant_remaining_secs": null, "in_session": true,
+ "devices": [{"id": "0d7c3a52-…", "name": "Galaxy A71", "grant_remaining_secs": null, "in_session": true,
               "key_bound": true, "internet_key_bound": true,
               "permissions": {"input": true, "clipboard": true, "files": true, "audio": true,
                               "mic": true, "power": true, "exec": false,
@@ -58,7 +58,7 @@ The paired phones.
                         "canPlayPause": true, "canNext": true, "canPrevious": true}}]}
 ```
 
-`grant_remaining_secs` is null for a lasting pairing and counts down for one made with `pair --grant`. `key_bound` says the phone has proved its key on this network; `internet_key_bound`, from outside. Each permission is what the phone may do now, defaults included. `battery` is the phone's last report, sent during sessions (null if it never reported); `updated_unix` says how old it is. `media` is what the phone plays, as it says during a session with "My media on the computer" on (null when nothing plays, or the phone is not connected, has Media off, or the server is stopped).
+`name` is the owner's rename in the desktop app's Devices page, else the name the phone gives itself (cleaned: one short printable line), or null until it has connected since this version. `grant_remaining_secs` is null for a lasting pairing and counts down for one made with `pair --grant`. `key_bound` says the phone has proved its key on this network; `internet_key_bound`, from outside. Each permission is what the phone may do now, defaults included. `battery` is the phone's last report, sent during sessions (null if it never reported); `updated_unix` says how old it is. `media` is what the phone plays, as it says during a session with "My media on the computer" on (null when nothing plays, or the phone is not connected, has Media off, or the server is stopped).
 
 ### `pocketdesk sent --json` and `pocketdesk received --json`
 
