@@ -43,7 +43,7 @@ const PERMISSIONS: [(Capability, &str, &str); 14] = [
     (
         Capability::Audio,
         "Hear and change this computer's sound, and its media",
-        "Plays desktop sound on the phone and sets the volume. Also shows the phone what is          playing here (title, artist, app) and lets it pause and skip.",
+        "Plays this computer's sound on the phone and sets the volume. Also shows the phone what is playing here (title, artist, app) and lets it pause and skip.",
     ),
     (
         Capability::Mic,
@@ -158,7 +158,7 @@ pub struct PocketdeskApp {
     messages: crate::messages_view::MessagesView,
     /// The Notifications tab (T10c).
     notes: crate::notes_view::NotesView,
-    /// Settings → Computers (2f).
+    /// Settings → Other computers (2f).
     computers: crate::computers_view::ComputersView,
     /// Settings → KDE Connect devices (3a).
     kdeconnect: crate::kdeconnect_view::KdeConnectView,
@@ -280,14 +280,19 @@ impl PocketdeskApp {
         let Some((what, handle)) = self.job.take() else {
             return;
         };
-        self.notice = crate::notice::Notice::outcome(match handle.join() {
+        let outcome = match handle.join() {
             Ok(Ok(())) => Ok(format!("{what}: done.")),
             Ok(Err(e)) => Err(format!("{what}: {e}")),
             Err(_) => Err(format!("{what}: failed.")),
-        });
-        if let Some(Ok(form)) = &mut self.settings {
+        };
+        // Only a server that started again has read what is saved (U5
+        // review: a failed restart cleared the notice of what waits).
+        if outcome.is_ok()
+            && let Some(Ok(form)) = &mut self.settings
+        {
             form.restarted();
         }
+        self.notice = crate::notice::Notice::outcome(outcome);
         self.refreshed = None;
     }
 
@@ -577,10 +582,10 @@ impl PocketdeskApp {
         // with new keys) and bind them.
         let _ = pocketdesk_core::local::device_keys::clear(&self.state_dir, id);
         self.notice = crate::notice::Notice::outcome(match result {
-            Ok(()) => Ok(format!("Removed {who} — it must pair again to connect.")),
-            Err(e) => Err(format!("Could not remove {who}: {e}")),
+            Ok(()) => Ok(format!("Unpaired {who}: it must pair again to connect.")),
+            Err(e) => Err(format!("Could not unpair {who}: {e}")),
         });
-        // Removing a phone must not leave it in control of a running session.
+        // Unpairing a phone must not leave it in control of a running session.
         self.end_sessions_of(id);
         self.refresh();
     }
@@ -738,7 +743,11 @@ impl PocketdeskApp {
 
     fn devices_tab(&mut self, ui: &mut egui::Ui) {
         if self.snapshot.devices.is_empty() {
-            ui.label("No phone is paired yet.");
+            // U5: an empty page says what to do next, with the way there.
+            ui.label("No phone is paired yet. The phone scans a code from the Pair page.");
+            if ui.button("Pair a phone").clicked() {
+                self.switch_to(Tab::Pair);
+            }
             return;
         }
         let mut revoke = None;
@@ -792,16 +801,23 @@ impl PocketdeskApp {
                     {
                         ring = Some(device.id.clone());
                     }
+                    // U5: "Unpair" for a pairing everywhere, asked by name.
                     if self.confirm_revoke.as_deref() == Some(&device.id) {
-                        ui.horizontal(|ui| {
-                            if ui.button("Remove").clicked() {
-                                confirmed = Some(device.id.clone());
-                            }
-                            if ui.button("Cancel").clicked() {
-                                revoke = Some(None);
-                            }
+                        ui.vertical(|ui| {
+                            ui.label(format!(
+                                "Unpair {}? It must pair again to connect.",
+                                model::device_label(&self.snapshot.devices, &device.id)
+                            ));
+                            ui.horizontal(|ui| {
+                                if ui.button("Unpair").clicked() {
+                                    confirmed = Some(device.id.clone());
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    revoke = Some(None);
+                                }
+                            });
                         });
-                    } else if ui.button("Remove…").clicked() {
+                    } else if ui.button("Unpair…").clicked() {
                         revoke = Some(Some(device.id.clone()));
                     }
                     ui.end_row();
@@ -899,11 +915,22 @@ impl PocketdeskApp {
 
     fn sessions_tab(&mut self, ui: &mut egui::Ui) {
         if !self.snapshot.running {
-            ui.label("The server is not running, so no phone is connected.");
+            ui.label(
+                "The server is not running, so no phone is connected. Start it from Overview.",
+            );
+            if ui.button("Overview").clicked() {
+                self.switch_to(Tab::Status);
+            }
             return;
         }
         if self.snapshot.sessions.is_empty() {
-            ui.label("No phone is viewing this desktop right now.");
+            ui.label(
+                "No phone is viewing this computer right now. On the phone, tap Connect on this \
+                 computer's card.",
+            );
+            if self.snapshot.devices.is_empty() && ui.button("Pair a phone").clicked() {
+                self.switch_to(Tab::Pair);
+            }
             return;
         }
         let now = now_unix();
@@ -1043,40 +1070,86 @@ impl PocketdeskApp {
     }
 
     fn settings_tab(&mut self, ui: &mut egui::Ui) {
-        let form = match &mut self.settings {
+        // Taken out while the page draws, so the sections can also call on
+        // the app's own parts (the file manager's menu, the computers).
+        let mut form = match self.settings.take() {
             Some(Ok(form)) => form,
-            Some(Err(error)) => {
-                ui.label(
-                    RichText::new(format!("config.toml could not be read: {error}"))
-                        .color(crate::theme::bad(ui)),
-                );
-                ui.label("Fix or remove the file, then reopen this tab. Nothing is saved over it.");
+            other => {
+                if let Some(Err(error)) = &other {
+                    ui.label(
+                        RichText::new(format!("config.toml could not be read: {error}"))
+                            .color(crate::theme::bad(ui)),
+                    );
+                    ui.label(
+                        "Fix or remove the file, then reopen this tab. Nothing is saved over it.",
+                    );
+                }
+                self.settings = other;
                 return;
             }
-            None => return,
         };
-        form.show(ui);
-        if form.restart_needed {
-            ui.add_space(8.0);
-            ui.label(RichText::new("Restart the server to apply the saved settings.").strong());
+        if form.restart_needed() {
+            ui.label(
+                RichText::new(format!(
+                    "Restart the server to apply: {}.",
+                    form.restart_names().join(", ")
+                ))
+                .strong(),
+            );
             if self.snapshot.running {
                 self.restart_button(ui);
             }
+            ui.add_space(8.0);
         }
-        self.send_menu_setting(ui);
-        self.browser_setting(ui);
-        self.computers
-            .show(ui, &self.state_dir, self.snapshot.running, now_unix());
         // As the running server read it, not the box as edited (3c
         // review: requests to a server with it off lapsed unread).
-        let compat_on =
-            matches!(&self.settings, Some(Ok(form)) if form.running().kdeconnect_compat);
-        self.kdeconnect.show(
-            ui,
-            &self.state_dir,
-            self.snapshot.running && compat_on,
-            now_unix(),
-        );
+        let compat_on = form.running().kdeconnect_compat;
+        let kde_waiting = self.kdeconnect.waiting(&self.state_dir, now_unix());
+        for section in crate::settings_view::Section::ALL {
+            // A section with a problem, or a pairing request waiting, stays
+            // open until it is dealt with, and its heading says why.
+            let held = if form.section_has_problem(section) {
+                Some("has a problem".to_string())
+            } else if section == crate::settings_view::Section::KdeConnect && kde_waiting > 0 {
+                Some(match kde_waiting {
+                    1 => "a pairing request waits".to_string(),
+                    n => format!("{n} pairing requests wait"),
+                })
+            } else {
+                None
+            };
+            let mut header =
+                egui::CollapsingHeader::new(section_heading(ui, section, held.as_deref()))
+                    .id_salt(section.title())
+                    .default_open(section.opens());
+            if held.is_some() {
+                header = header.open(Some(true));
+            }
+            header.show(ui, |ui| {
+                form.show_section(ui, section);
+                match section {
+                    crate::settings_view::Section::Phones => {
+                        self.send_menu_setting(ui);
+                        self.browser_setting(ui);
+                    }
+                    crate::settings_view::Section::Computers => {
+                        self.computers
+                            .show(ui, &self.state_dir, self.snapshot.running, now_unix());
+                    }
+                    crate::settings_view::Section::KdeConnect => {
+                        self.kdeconnect.show(
+                            ui,
+                            &self.state_dir,
+                            self.snapshot.running && compat_on,
+                            now_unix(),
+                        );
+                    }
+                    _ => {}
+                }
+                ui.add_space(8.0);
+            });
+        }
+        self.settings = Some(Ok(form));
     }
 
     /// Settings' Save and Undo, in a bar at the bottom while the form has
@@ -1185,8 +1258,7 @@ impl PocketdeskApp {
     /// Nautilus, Nemo and Dolphin menus.
     fn send_menu_setting(&mut self, ui: &mut egui::Ui) {
         use pocketdesk_core::local::send_menu;
-        ui.add_space(12.0);
-        ui.separator();
+        ui.add_space(8.0);
         let Ok(data) = send_menu::data_dir() else {
             return;
         };
@@ -1274,11 +1346,18 @@ impl PocketdeskApp {
         let Some(device) = self.send_target() else {
             ui.label(
                 RichText::new(
-                    "No phone is in a session. Open a session on the phone, then send files \
-                     from here; they land in the phone's Downloads/Pocketdesk.",
+                    "No phone or computer can take a file right now. A phone can in a session, or \
+                     with \"Files from the computer in the background\" on in its Settings; \
+                     another of your computers, while its link is up. Files land in the \
+                     phone's Downloads/Pocketdesk.",
                 )
                 .color(crate::theme::muted(ui)),
             );
+            // Not only a session: a phone linked at home or by the internet
+            // road, or another computer, takes files too (U5).
+            if self.snapshot.devices.is_empty() && ui.button("Pair a phone").clicked() {
+                self.switch_to(Tab::Pair);
+            }
             return;
         };
         let targets = model::send_target_ids(&self.snapshot);
@@ -1382,10 +1461,7 @@ impl PocketdeskApp {
                 for file in &self.snapshot.sent {
                     ui.label(&file.name).on_hover_text(&file.path);
                     ui.label(model::target_label(&self.snapshot, &file.device_id));
-                    ui.label(format!(
-                        "{} ago",
-                        human_duration(now.saturating_sub(file.sent_unix))
-                    ));
+                    ui.label(crate::words::ago(now, file.sent_unix));
                     // What a folder send left out goes beside its state.
                     let note = file
                         .note
@@ -1430,10 +1506,7 @@ impl PocketdeskApp {
                     let file = &row.file;
                     ui.label(&file.name).on_hover_text(&file.path);
                     ui.label(human_size(file.size));
-                    ui.label(format!(
-                        "{} ago",
-                        human_duration(now.saturating_sub(file.received_unix))
-                    ));
+                    ui.label(crate::words::ago(now, file.received_unix));
                     if row.exists {
                         if ui.button("Show in folder").clicked() {
                             show = Some(file.path.clone());
@@ -1675,11 +1748,50 @@ pub fn battery_text(
     if battery.charging {
         text.push_str(", charging");
     }
-    let age = now_unix.saturating_sub(battery.updated_unix);
-    if age >= 60 {
-        text.push_str(&format!(" · {} ago", human_duration(age)));
+    if now_unix.saturating_sub(battery.updated_unix) >= 60 {
+        text.push_str(&format!(
+            " · {}",
+            crate::words::ago(now_unix, battery.updated_unix)
+        ));
     }
     text
+}
+
+/// A Settings section's heading: its title, and what is in it, quieter.
+fn section_heading(
+    ui: &egui::Ui,
+    section: crate::settings_view::Section,
+    held: Option<&str>,
+) -> egui::WidgetText {
+    let mut job = egui::text::LayoutJob::default();
+    RichText::new(section.title()).strong().append_to(
+        &mut job,
+        ui.style(),
+        egui::FontSelection::Default,
+        egui::Align::Center,
+    );
+    RichText::new(format!("   {}", section.summary()))
+        .small()
+        .weak()
+        .append_to(
+            &mut job,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::Center,
+        );
+    // Why it will not close: a problem, or a request waiting.
+    if let Some(held) = held {
+        RichText::new(format!("   · {held}"))
+            .small()
+            .color(crate::theme::warn(ui))
+            .append_to(
+                &mut job,
+                ui.style(),
+                egui::FontSelection::Default,
+                egui::Align::Center,
+            );
+    }
+    job.into()
 }
 
 /// `75` → "1m 15s", `7200` → "2h 0m".
@@ -1753,7 +1865,7 @@ mod tests {
         );
         assert_eq!(
             battery_text(Some(&battery(54, false)), 1000 + 180),
-            "54 % · 3m 0s ago"
+            "54 % · 3 min ago"
         );
         // A clock that went back is not "in the future".
         assert_eq!(battery_text(Some(&battery(9, false)), 900), "9 %");

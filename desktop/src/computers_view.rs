@@ -19,7 +19,7 @@ pub struct ComputersView {
     read_at: Option<Instant>,
     /// The pairing link being pasted.
     link: String,
-    /// The computer whose Forget waits for a second click.
+    /// The computer whose Unpair waits for its answer.
     forgetting: Option<String>,
     notice: Option<String>,
 }
@@ -72,8 +72,8 @@ impl ComputersView {
         now_unix: u64,
     ) {
         self.refresh(state_dir);
-        ui.add_space(12.0);
-        ui.label(RichText::new("Computers").strong());
+        // Under Settings' "Other computers" heading (U5).
+        ui.add_space(8.0);
         ui.label(
             RichText::new(
                 "Your other computers. On the other one, open Pair and copy its link for \
@@ -116,21 +116,23 @@ impl ComputersView {
         }
         let mut forget = None;
         for computer in &self.file.computers {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(&computer.name).strong());
                 ui.label(RichText::new(link_words(computer)).weak());
-                let asked = self.forgetting.as_deref() == Some(computer.device_id.as_str());
-                let label = if asked {
-                    "Forget it? Click again"
-                } else {
-                    "Forget"
-                };
-                if ui.button(label).clicked() {
-                    if asked {
+                // U5: "Unpair" for a pairing everywhere, asked by name.
+                if self.forgetting.as_deref() == Some(computer.device_id.as_str()) {
+                    ui.label(format!(
+                        "Unpair {}? It must pair again to share with this one.",
+                        computer.name
+                    ));
+                    if ui.button("Unpair").clicked() {
                         forget = Some(computer.device_id.clone());
-                    } else {
-                        self.forgetting = Some(computer.device_id.clone());
                     }
+                    if ui.button("Cancel").clicked() {
+                        self.forgetting = None;
+                    }
+                } else if ui.button("Unpair…").clicked() {
+                    self.forgetting = Some(computer.device_id.clone());
                 }
             });
         }
@@ -140,7 +142,7 @@ impl ComputersView {
                 state_dir,
                 ComputerAsk::Forget { device_id },
                 now_unix,
-                "Forgotten here. Remove this computer in the other one's Devices tab too.",
+                "Unpaired here. Unpair this computer in the other one's Devices page too.",
             );
         }
         if let Some(notice) = &self.notice {

@@ -323,7 +323,7 @@ impl PairView {
                 if ui
                     .button("Copy the link for another computer")
                     .on_hover_text(
-                        "Paste it in the other computer's Settings, under Computers. It holds the                          code: Pocketdesk sends it to no phone, but copy something else after",
+                        "Paste it in the other computer's Settings, under Other computers. It holds the code: Pocketdesk sends it to no phone, but copy something else after",
                     )
                     .clicked()
                 {

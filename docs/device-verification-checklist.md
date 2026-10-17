@@ -1442,12 +1442,12 @@ The A71 against this Windows box, 2026-10-17, debug builds of the branches, inpu
 
 Two real servers on this box passed `server/tests/two_computers.rs` (2026-10-17): a forged certificate and a wrong PIN paired nothing, the code paired, B listed A as a computer with the narrow profile and held A's iroh key, the link came up over iroh, a copy crossed each way (stand-in clipboards), a 3 MB file each way byte for byte, Forget dropped the link. Owed on two real computers (Windows, the R6a throwaway instance for A so the installed server is untouched, and the Azure VM for B):
 
-- [ ] Pairing from the Pair tab's copied link pasted in Settings → Computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first.
+- [ ] Pairing from the Pair tab's copied link pasted in Settings → Other computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first.
 - [ ] The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute).
 - [ ] The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays.
 - [ ] A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`.
 - [ ] A folder from B to A lands under one new folder; a folder from A to B is refused with its reason.
-- [ ] Forget on A: the link goes, and B's Devices tab still lists A until removed there; after that, a pairing again works.
+- [ ] Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works.
 
 ## 87. KDE Connect devices (3a–3c)
 
@@ -1547,6 +1547,17 @@ On the A71, against a throwaway server (`adb reverse`, input off for the phone):
 - [ ] A row's "Allow notification access" with a feature on and access off.
 - [x] Spanish and Tamil (the app's own language set by `cmd locale`): the card's buttons fit (Tamil wraps Show screen to a second row), and the four quality choices fit after the review.
 - [ ] Landscape: the bottom chrome with 48 dp chips.
+
+## 94. The desktop's Settings and words (U5)
+
+On this box through the app's own window (screenshots only), with a throwaway config and state:
+
+- [x] Settings in sections, Connection and Phones open, each heading with what it holds; rows with their notes under them.
+- [x] Devices: "Unpair…" and a battery's age as "9 min ago"; Files with nothing to send to says which phones and computers can take a file.
+- [ ] Opening and closing sections; a change shown as applying now or after a restart in the save bar, and the restart notice naming it.
+- [ ] A narrow window wrapping every row; a section with a problem held open.
+- [ ] Unpair's question for a phone and for a computer, and Cancel.
+- [ ] Pair a phone and Overview buttons on the empty pages.
 
 ## Recording results
 

@@ -116,17 +116,6 @@ pub fn rows(paired: &[KdeDevice], seen: &[SeenDevice]) -> Vec<Row> {
     rows
 }
 
-/// How long ago `then` was, in words.
-pub fn ago(now_unix: u64, then: u64) -> String {
-    let secs = now_unix.saturating_sub(then);
-    match secs {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{} min ago", secs / 60),
-        3600..=86_399 => format!("{} h ago", secs / 3600),
-        _ => format!("{} days ago", secs / 86_400),
-    }
-}
-
 impl KdeConnectView {
     fn refresh(&mut self, state_dir: &Path, now_unix: u64) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
@@ -140,11 +129,19 @@ impl KdeConnectView {
         self.read_at = Some(Instant::now());
     }
 
+    /// How many pairing requests wait for the owner's answer, read again as
+    /// [`Self::show`] reads: Settings holds the section open while any do
+    /// (U5 review: the server's toast sends the owner there).
+    pub fn waiting(&mut self, state_dir: &Path, now_unix: u64) -> usize {
+        self.refresh(state_dir, now_unix);
+        self.pending.len()
+    }
+
     /// `running` is whether the server runs with the switch on.
     pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path, running: bool, now_unix: u64) {
         self.refresh(state_dir, now_unix);
-        ui.add_space(12.0);
-        ui.label(RichText::new("KDE Connect devices").strong());
+        // Under Settings' "KDE Connect" heading (U5).
+        ui.add_space(8.0);
         ui.label(
             RichText::new(
                 "Phones and computers that run KDE Connect. Open KDE Connect on the device, \
@@ -245,7 +242,7 @@ impl KdeConnectView {
                 };
                 ui.label(
                     RichText::new(match device.seen_unix {
-                        Some(at) => format!("{paired}, seen {}", ago(now_unix, at)),
+                        Some(at) => format!("{paired}, seen {}", crate::words::ago(now_unix, at)),
                         None => paired.to_string(),
                     })
                     .weak(),
@@ -494,14 +491,5 @@ mod tests {
     fn a_code_reads_in_two_groups() {
         assert_eq!(spaced("1ACBAC75"), "1ACB AC75");
         assert_eq!(spaced("odd"), "odd");
-    }
-
-    #[test]
-    fn a_time_reads_in_words() {
-        assert_eq!(ago(100, 90), "just now");
-        assert_eq!(ago(1000, 100), "15 min ago");
-        assert_eq!(ago(10_000, 100), "2 h ago");
-        assert_eq!(ago(300_000, 100), "3 days ago");
-        assert_eq!(ago(100, 200), "just now", "a clock behind is not negative");
     }
 }

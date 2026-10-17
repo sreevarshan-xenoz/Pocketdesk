@@ -30,6 +30,7 @@ mod tray;
 #[cfg(target_os = "linux")]
 #[path = "tray_none.rs"]
 mod tray;
+mod words;
 
 use eframe::egui;
 

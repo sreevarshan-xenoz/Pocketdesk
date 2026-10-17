@@ -94,8 +94,8 @@ impl DiagnosticsView {
             }
             Some(s) => {
                 ui.label(format!(
-                    "{} ago, {} s, {}{}; encoder: {}",
-                    diagnostics::human_ago(now_unix().saturating_sub(s.unix_secs)),
+                    "{}, {} s, {}{}; encoder: {}",
+                    crate::words::ago(now_unix(), s.unix_secs),
                     s.duration_secs,
                     s.outcome.replace('_', " "),
                     if s.ever_relayed { " (relayed)" } else { "" },
