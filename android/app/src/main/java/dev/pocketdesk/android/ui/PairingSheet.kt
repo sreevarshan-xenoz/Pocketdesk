@@ -125,7 +125,7 @@ fun PairingSheet(
             if (serverId != null) {
                 onPairedNow(serverId)
             } else {
-                val error = result.exceptionOrNull()?.message
+                val error = result.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
                 if (error != null) setStatus(R.string.pair_error, error) else setStatus(R.string.pair_wrong_pin)
             }
         }
@@ -181,7 +181,7 @@ fun PairingSheet(
                             withContext(Dispatchers.IO) {
                                 RustCore.requestPairPin(address, controlPort)
                             }
-                        val error = result.exceptionOrNull()?.message
+                        val error = result.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
                         when (result.getOrNull()) {
                             "pinSent" -> {
                                 waiting = true

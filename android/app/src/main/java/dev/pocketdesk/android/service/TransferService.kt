@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.service
 
+import dev.pocketdesk.android.ui.plainErrorText
+
 import dev.pocketdesk.android.automation.PhoneEventBroadcast
 import dev.pocketdesk.android.automation.PhoneEvents
 import android.app.Notification
@@ -638,7 +640,7 @@ class TransferService : Service() {
                 getString(R.string.transfer_some_failed, outcome.failed, outcome.count)
         }
         val failed = outcome is TransferSummary.Outcome.NotSent || outcome is TransferSummary.Outcome.Failed
-        val detail = TransferSummary.detail(failed, lastError, notice)
+        val detail = TransferSummary.detail(failed, lastError?.let { plainErrorText(it) }, notice)
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
             .setContentTitle(title)

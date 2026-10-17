@@ -141,7 +141,7 @@ fun ConnectScreen(
                             wakeStatusArg = if (result.isSuccess) {
                                 address.trim()
                             } else {
-                                result.exceptionOrNull()?.message
+                                context.plainErrorText(result.exceptionOrNull()?.message)
                             }
                         }
                     },

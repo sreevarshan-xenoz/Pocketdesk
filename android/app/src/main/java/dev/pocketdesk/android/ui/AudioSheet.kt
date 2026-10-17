@@ -103,6 +103,7 @@ fun AudioControlSheet(
     var snapshot by remember { mutableStateOf<AudioSnapshot?>(null) }
     // Errors split in two: server-supplied text (not localizable) vs a local
     // fallback resource, resolved at render time so it follows configuration.
+    val context = androidx.compose.ui.platform.LocalContext.current
     var errorText by remember { mutableStateOf<String?>(null) }
     var errorRes by remember { mutableStateOf<Int?>(null) }
     var slider by remember { mutableFloatStateOf(0f) }
@@ -123,7 +124,7 @@ fun AudioControlSheet(
             answer
         } else {
             mediaError = answer?.optString("error")?.ifBlank { null }
-                ?: result.exceptionOrNull()?.message
+                ?: result.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
                 ?: ""
             null
         }
@@ -168,7 +169,7 @@ fun AudioControlSheet(
             },
             onFailure = { e ->
                 val msg = e.message
-                errorText = msg?.ifBlank { null }
+                errorText = msg?.ifBlank { null }?.let { context.plainErrorText(it) }
                 errorRes = if (msg.isNullOrBlank()) R.string.audio_failed else null
                 null
             },

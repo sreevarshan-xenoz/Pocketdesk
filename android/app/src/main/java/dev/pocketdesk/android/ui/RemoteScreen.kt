@@ -767,7 +767,7 @@ fun RemoteScreen(
         scope.launch(Dispatchers.IO) {
             val result = RustCore.setViewOnly(next)
             withContext(Dispatchers.Main) {
-                if (result.isSuccess) viewOnly = next else viewOnlyError = result.exceptionOrNull()?.message
+                if (result.isSuccess) viewOnly = next else viewOnlyError = context.plainErrorText(result.exceptionOrNull()?.message)
             }
         }
     }
@@ -776,7 +776,7 @@ fun RemoteScreen(
             val result =
                 RustCore.desktopPrivacy(address, controlPort, if (next) "grab" else "release")
             withContext(Dispatchers.Main) {
-                if (result.isSuccess) privacyGrab = next else privacyError = result.exceptionOrNull()?.message
+                if (result.isSuccess) privacyGrab = next else privacyError = context.plainErrorText(result.exceptionOrNull()?.message)
             }
         }
     }
@@ -789,7 +789,7 @@ fun RemoteScreen(
         }
         qualityPreset = next
         scope.launch(Dispatchers.IO) {
-            RustCore.sendQualityPreset(next).onFailure { qualityPresetError = it.message }
+            RustCore.sendQualityPreset(next).onFailure { qualityPresetError = context.plainErrorText(it.message) }
         }
     }
     fun toggleMode() {
@@ -1168,7 +1168,7 @@ fun RemoteScreen(
                                             fullQuality = next
                                             scope.launch(Dispatchers.IO) {
                                                 RustCore.setFullQuality(next)
-                                                    .onFailure { fullQualityError = it.message }
+                                                    .onFailure { fullQualityError = context.plainErrorText(it.message) }
                                             }
                                         },
                                     ) {
@@ -1456,7 +1456,7 @@ fun RemoteScreen(
                                 is PhoneScreen.Answer.Refused -> sendTextNotice = a.reason.ifEmpty { screenFailed }
                             }
                         },
-                        onFailure = { sendTextNotice = it.message ?: screenFailed },
+                        onFailure = { sendTextNotice = it.message?.let { m -> context.plainErrorText(m) } ?: screenFailed },
                     )
                 }
             },

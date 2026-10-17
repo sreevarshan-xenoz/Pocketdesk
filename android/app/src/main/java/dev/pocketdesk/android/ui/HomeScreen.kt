@@ -162,7 +162,7 @@ fun HomeScreen(
                     waking = Waking(host, atHome, connect)
                 } else {
                     wakeStatusRes = R.string.wake_failed
-                    wakeStatusArg = result.exceptionOrNull()?.message
+                    wakeStatusArg = context.plainErrorText(result.exceptionOrNull()?.message)
                 }
             }
         }

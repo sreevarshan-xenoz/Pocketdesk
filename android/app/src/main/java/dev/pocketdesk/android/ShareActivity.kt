@@ -1,5 +1,7 @@
 package dev.pocketdesk.android
 
+import dev.pocketdesk.android.ui.plainErrorText
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -99,7 +101,7 @@ class ShareActivity : ComponentActivity() {
                     if (result.isSuccess) {
                         getString(R.string.share_sent_clipboard)
                     } else {
-                        getString(R.string.share_failed, result.exceptionOrNull()?.message)
+                        getString(R.string.share_failed, plainErrorText(result.exceptionOrNull()?.message))
                     },
                 )
             }
@@ -114,7 +116,7 @@ class ShareActivity : ComponentActivity() {
                     if (result.isSuccess) {
                         getString(R.string.link_sent)
                     } else {
-                        getString(R.string.share_failed, result.exceptionOrNull()?.message)
+                        getString(R.string.share_failed, plainErrorText(result.exceptionOrNull()?.message))
                     },
                 )
             }

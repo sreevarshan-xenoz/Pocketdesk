@@ -119,7 +119,9 @@ fun PairLinkScreen(
             else -> Text(
                 stringResource(
                     R.string.pair_link_unreachable,
-                    (outcome as? PairOutcome.Unreachable)?.lastError.orEmpty(),
+                    androidx.compose.ui.platform.LocalContext.current.plainErrorText(
+                        (outcome as? PairOutcome.Unreachable)?.lastError,
+                    ),
                 ),
                 textAlign = TextAlign.Center,
             )

@@ -1,5 +1,7 @@
 package dev.pocketdesk.android
 
+import dev.pocketdesk.android.ui.plainErrorText
+
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -119,7 +121,7 @@ class MainActivity : ComponentActivity() {
                 app.getString(R.string.wake_sent, host.address)
             } else {
                 val error = result.exceptionOrNull()
-                app.getString(R.string.wake_failed, error?.message ?: error.toString())
+                app.getString(R.string.wake_failed, app.plainErrorText(error?.message))
             }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 android.widget.Toast.makeText(app, message, android.widget.Toast.LENGTH_LONG).show()

@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.cast
 
+import dev.pocketdesk.android.ui.plainErrorText
+
 import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
@@ -145,7 +147,7 @@ class CastService : Service() {
             }
         if (finished) return
         connected.exceptionOrNull()?.let {
-            fail(getString(R.string.cast_failed, address, it.message ?: ""))
+            fail(getString(R.string.cast_failed, address, plainErrorText(it.message)))
             return
         }
         update(getString(R.string.cast_waiting, address))
@@ -209,7 +211,7 @@ class CastService : Service() {
         val made = runCatching { CastEncoder(width, height, ::encoderEnded) }
         val started = made.getOrElse {
             Log.w(TAG, "No encoder for the cast", it)
-            return fail(getString(R.string.cast_failed, address, it.message ?: ""))
+            return fail(getString(R.string.cast_failed, address, plainErrorText(it.message)))
         }
         encoder = started
         display =
@@ -226,7 +228,7 @@ class CastService : Service() {
                 )
             }.getOrElse {
                 Log.w(TAG, "No virtual display for the cast", it)
-                return fail(getString(R.string.cast_failed, address, it.message ?: ""))
+                return fail(getString(R.string.cast_failed, address, plainErrorText(it.message)))
             }
     }
 

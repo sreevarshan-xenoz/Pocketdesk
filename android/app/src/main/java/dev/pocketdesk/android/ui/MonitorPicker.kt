@@ -74,6 +74,7 @@ fun MonitorPickerSheet(
     var error by remember { mutableStateOf<String?>(null) }
     val malformedMsg = stringResource(R.string.malformed_monitors)
     val queryFailMsg = stringResource(R.string.monitor_query_failed)
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(address, controlPort) {
         val result =
@@ -86,7 +87,7 @@ fun MonitorPickerSheet(
                     .onSuccess { monitors = it }
                     .onFailure { error = malformedMsg }
             },
-            onFailure = { error = it.message ?: queryFailMsg },
+            onFailure = { error = it.message?.let { m -> context.plainErrorText(m) } ?: queryFailMsg },
         )
     }
 

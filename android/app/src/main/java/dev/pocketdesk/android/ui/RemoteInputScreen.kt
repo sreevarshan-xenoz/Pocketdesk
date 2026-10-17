@@ -118,7 +118,7 @@ fun RemoteInputScreen(
             return@LaunchedEffect
         }
         if (connected.isFailure) {
-            reason = connected.exceptionOrNull()?.message
+            reason = connected.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
             state = State.Down
             return@LaunchedEffect
         }
