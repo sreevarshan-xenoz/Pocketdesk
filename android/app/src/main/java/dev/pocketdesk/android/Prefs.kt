@@ -275,6 +275,20 @@ object Prefs {
         bump()
     }
 
+    private const val KEY_SHARE_TOKEN = "share_shortcut_token"
+
+    /**
+     * This install's secret in its Direct Share shortcuts' ids (N2): made
+     * once, 16 hex digits, read only here, by the system and the launcher.
+     */
+    fun shareToken(ctx: Context): String {
+        prefs(ctx).getString(KEY_SHARE_TOKEN, null)?.let { return it }
+        val bytes = ByteArray(8).also { java.security.SecureRandom().nextBytes(it) }
+        val token = bytes.joinToString("") { "%02x".format(it) }
+        prefs(ctx).edit { putString(KEY_SHARE_TOKEN, token) }
+        return token
+    }
+
     /** Connect checks first, and offers "Wake and connect" to a computer that does not answer (N6). */
     fun offerWake(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_OFFER_WAKE, true)

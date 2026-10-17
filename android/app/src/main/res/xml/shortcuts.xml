@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- N2: each saved computer's connect shortcut is a Direct Share target. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="dev.pocketdesk.android.ShareActivity">
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="*/*" />
+        <category android:name="dev.pocketdesk.android.category.SHARE_TO_COMPUTER" />
+    </share-target>
+</shortcuts>

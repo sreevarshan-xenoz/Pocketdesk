@@ -29,6 +29,11 @@ import dev.pocketdesk.android.shortcuts.Shortcuts
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A window that shows nothing and lets every touch through while a
+        // send runs, so "To computer" does not cover the app it came from
+        // (N2 review); it stays until the send is done, or the process
+        // could be frozen mid-send.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
         RustCore.start(this)
         handle(intent)
     }
@@ -48,13 +53,29 @@ class ShareActivity : ComponentActivity() {
         } else {
             null
         }
-        val host = when (val share = ShortcutPlan.shareHost(asked, HostStore.hosts(this), Prefs.othersChooseComputer(this))) {
+        // N2: a computer chosen in the share sheet's Direct Share row is the
+        // person's own choice; its id names a saved computer or nothing.
+        // Intent.EXTRA_SHORTCUT_ID, by value: the constant is API 29, where
+        // Direct Share through shortcuts starts; older share sheets send none.
+        val shortcut = intent.getStringExtra("android.intent.extra.shortcut.ID")
+        val share = if (shortcut != null) {
+            ShortcutPlan.shortcutHost(shortcut, HostStore.hosts(this), Prefs.shareToken(this))
+        } else {
+            ShortcutPlan.shareHost(asked, HostStore.hosts(this), Prefs.othersChooseComputer(this))
+        }
+        val host = when (share) {
             is ShortcutPlan.Share.To -> share.host
             ShortcutPlan.Share.NoneSaved -> return done(getString(R.string.share_no_host))
             ShortcutPlan.Share.NotSaved -> return done(getString(R.string.share_not_saved))
             ShortcutPlan.Share.NotAllowed -> return done(getString(R.string.share_choosing_off))
         }
 
+        // N2: text selected in another app ("To computer" in its menu) goes
+        // to the computer's clipboard; the selection is left as it was.
+        if (intent.action == Intent.ACTION_PROCESS_TEXT) {
+            val selected = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+            return if (selected.isNullOrBlank()) done(getString(R.string.share_nothing)) else sendText(host, selected)
+        }
         val uris = sharedUris(intent)
         val text =
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
@@ -99,7 +120,7 @@ class ShareActivity : ComponentActivity() {
             runOnUiThread {
                 done(
                     if (result.isSuccess) {
-                        getString(R.string.share_sent_clipboard)
+                        getString(R.string.share_sent_clipboard_to, HostStore.shownName(this, host.address))
                     } else {
                         getString(R.string.share_failed, plainErrorText(result.exceptionOrNull()?.message))
                     },

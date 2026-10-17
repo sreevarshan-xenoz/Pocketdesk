@@ -182,7 +182,7 @@
     <!-- ShareActivity -->
     <string name="share_no_host">Pocketdesk: no saved host. Connect once from the app first.</string>
     <string name="share_nothing">Nothing shareable in this intent.</string>
-    <string name="share_sent_clipboard">Sent to clipboard.</string>
+    <string name="share_sent_clipboard_to">Sent to the clipboard of %1$s.</string>
     <string name="share_failed">Failed: %1$s</string>
     <string name="share_unreadable">The app that shared this did not let Pocketdesk read it.</string>
     <string name="shortcut_connect">Connect to %1$s</string>
@@ -461,6 +461,7 @@
     <string name="settings_background_remind_summary">When phone notifications or texts are on and Android may hold them back</string>
     <string name="bg_maker_guide_summary">Many phones add their own battery saver on top of Android\'s</string>
     <string name="open_on_computer_label">Open on computer</string>
+    <string name="to_computer_label">To computer</string>
     <string name="link_sent">Sent to the computer, to open there if it allows links.</string>
     <string name="link_not_web">No web link to open (only http and https links).</string>
     <string name="link_from_computer">A link from %1$s</string>
@@ -487,6 +488,9 @@
     <string name="send_clipboard_too_long">The clipboard text is too long to send</string>
     <string name="send_clipboard_sent">Clipboard sent to %1$s</string>
     <string name="send_clipboard_failed">Could not reach %1$s</string>
+    <string name="send_clipboard_private_title">Send a private copy?</string>
+    <string name="send_clipboard_private_text">The app you copied from marked this private (a password, say). Send it to %1$s anyway?</string>
+    <string name="send_clipboard_private_send">Send</string>
     <string name="settings_clipboard_background">Computer\'s clipboard in the background</string>
     <string name="settings_clipboard_background_summary">What you copy on the computer reaches this phone without a session, also away from home. It needs notification access, which keeps the connection</string>
     <string name="phone_notifications_answer">Let the computer answer notifications</string>

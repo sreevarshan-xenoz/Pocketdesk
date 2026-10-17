@@ -71,12 +71,17 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="pocketdesk" android:host="pair" />
             </intent-filter>
+            <!-- N2: the saved computers as Direct Share targets. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <activity
             android:name=".ShareActivity"
             android:exported="true"
-            android:label="@string/share_target_label">
+            android:label="@string/share_target_label"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -93,6 +98,19 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <!-- N2: text selected in any app goes to the computer's clipboard. -->
+        <activity-alias
+            android:name=".ToComputer"
+            android:exported="true"
+            android:label="@string/to_computer_label"
+            android:targetActivity=".ShareActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- T8a: a link shared here opens in the computer's browser. -->
         <activity-alias
@@ -133,6 +151,7 @@
         <!-- T10b: reads the clipboard once in focus, sends it, closes; never shown. -->
         <activity
             android:name=".clip.SendClipboardActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:excludeFromRecents="true"
             android:exported="false"
             android:noHistory="true"

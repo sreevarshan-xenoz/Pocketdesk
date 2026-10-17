@@ -35,7 +35,7 @@ Sends the Wake-on-LAN packets the computer's Wake settings describe. The compute
 | Type | `text/plain` |
 | Extras | `android.intent.extra.TEXT` = the text; `dev.pocketdesk.android.extra.ADDRESS` = the computer (optional) |
 
-Without the address, the text goes to the last computer used. Naming a computer needs **Settings → Let other apps choose a computer**, off by default: choosing where a share goes is more than the share sheet lets an app do. With it off, a share that names a computer is refused, never sent to another one.
+Without the address, the text goes to the last computer used. Naming a computer needs **Settings → Let other apps choose a computer**, off by default: choosing where a share goes is more than the share sheet lets an app do. A computer chosen in the system's share sheet (its Direct Share row) is the person's own choice and needs no switch: its shortcut id carries a token only the system and the launcher can read, so no app can forge it. With it off, a share that names a computer is refused, never sent to another one.
 
 ## Send files to a computer
 

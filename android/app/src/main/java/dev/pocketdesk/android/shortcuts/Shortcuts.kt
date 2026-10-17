@@ -44,7 +44,9 @@ object Shortcuts {
     fun reportConnected(ctx: Context, address: String) {
         runCatching {
             ctx.getSystemService(ShortcutManager::class.java)
-                ?.reportShortcutUsed(ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, address).id)
+                ?.reportShortcutUsed(
+                    ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, address, dev.pocketdesk.android.Prefs.shareToken(ctx)).id,
+                )
         }
     }
 
@@ -57,6 +59,7 @@ object Shortcuts {
         val plan = ShortcutPlan.plan(
             HostStore.hosts(app),
             hasWake = { dev.pocketdesk.android.wake.Waker.canWake(dev.pocketdesk.android.wake.Waker.planFor(app, it)) },
+            token = dev.pocketdesk.android.Prefs.shareToken(app),
         )
         val wake = ShortcutPlan.Kind.WAKE
         // Its name tells computers apart, else its address (U3); two of one
@@ -82,6 +85,13 @@ object Shortcuts {
                     ),
                 )
                 .setIntent(intent(app, entry.kind, entry.address))
+                .apply {
+                    // N2: a computer to share to from the share sheet.
+                    if (entry.kind != wake) {
+                        setCategories(setOf(ShortcutPlan.SHARE_CATEGORY))
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) setLongLived(true)
+                    }
+                }
                 .build()
         }
         val manager = app.getSystemService(ShortcutManager::class.java)
@@ -95,7 +105,7 @@ object Shortcuts {
         runCatching {
             val saved = HostStore.hosts(app).map { it.address }.toSet()
             val (keep, gone) = manager?.pinnedShortcuts.orEmpty().map { it.id }
-                .partition { id -> id.substringAfter(':') in saved }
+                .partition { id -> ShortcutPlan.addressOf(id) in saved }
             if (gone.isNotEmpty()) manager?.disableShortcuts(gone, app.getString(R.string.shortcut_not_saved))
             if (keep.isNotEmpty()) manager?.enableShortcuts(keep)
         }

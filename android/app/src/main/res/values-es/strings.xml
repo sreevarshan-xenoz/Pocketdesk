@@ -177,7 +177,7 @@
     <!-- ShareActivity -->
     <string name="share_no_host">Pocketdesk: no hay host guardado. Conéctate una vez desde la app.</string>
     <string name="share_nothing">No hay nada compartible en esta intent.</string>
-    <string name="share_sent_clipboard">Enviado al portapapeles.</string>
+    <string name="share_sent_clipboard_to">Enviado al portapapeles de %1$s.</string>
     <string name="share_failed">Error: %1$s</string>
     <string name="share_unreadable">La app que lo compartió no permitió que Pocketdesk lo leyera.</string>
     <string name="shortcut_connect">Conectar a %1$s</string>
@@ -459,6 +459,7 @@
     <string name="settings_background_remind_summary">Cuando las notificaciones o los mensajes están activados y Android puede frenarlos</string>
     <string name="bg_maker_guide_summary">Muchos teléfonos añaden su propio ahorro de batería además del de Android</string>
     <string name="open_on_computer_label">Abrir en el equipo</string>
+    <string name="to_computer_label">Al ordenador</string>
     <string name="link_sent">Enviado al equipo, que lo abre si admite enlaces.</string>
     <string name="link_not_web">No hay un enlace web que abrir (solo enlaces http y https).</string>
     <string name="link_from_computer">Un enlace de %1$s</string>
@@ -485,6 +486,9 @@
     <string name="send_clipboard_too_long">El texto del portapapeles es demasiado largo para enviarlo</string>
     <string name="send_clipboard_sent">Portapapeles enviado a %1$s</string>
     <string name="send_clipboard_failed">No se pudo llegar a %1$s</string>
+    <string name="send_clipboard_private_title">¿Enviar una copia privada?</string>
+    <string name="send_clipboard_private_text">La app de la que copiaste lo marcó como privado (una contraseña, por ejemplo). ¿Enviarlo a %1$s de todos modos?</string>
+    <string name="send_clipboard_private_send">Enviar</string>
     <string name="settings_clipboard_background">Portapapeles del equipo en segundo plano</string>
     <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>

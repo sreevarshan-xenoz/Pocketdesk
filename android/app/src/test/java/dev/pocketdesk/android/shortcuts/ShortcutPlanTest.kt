@@ -33,6 +33,38 @@ class ShortcutPlanTest {
         assertEquals(ShortcutPlan.Kind.CONNECT, plan.last().kind)
     }
 
+    /** N2: a Direct Share target goes to its own saved computer, never another. */
+    @Test
+    fun aDirectShareTargetGoesToItsSavedComputerOnly() {
+        val hosts = listOf(host("192.0.2.1"), host("192.0.2.2"), host("2001:db8::7"))
+        val token = "0123456789abcdef"
+        fun share(id: String) = ShortcutPlan.shortcutHost(id, hosts, token)
+        val id = ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, "192.0.2.2", token).id
+        assertEquals(ShortcutPlan.Share.To(host("192.0.2.2")), share(id))
+        assertEquals(ShortcutPlan.Share.To(host("2001:db8::7")), share("connect:$token:2001:db8::7"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:$token:192.0.2.9"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("wake:192.0.2.1"))
+        // Another app knows the format, not the token (N2 review).
+        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:192.0.2.2"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:fedcba9876543210:192.0.2.2"))
+        assertEquals(ShortcutPlan.Share.NotSaved, ShortcutPlan.shortcutHost("connect::192.0.2.2", hosts, ""))
+    }
+
+    @Test
+    fun aShortcutIdNamesItsAddressWithOrWithoutAToken() {
+        assertEquals("192.0.2.2", ShortcutPlan.addressOf("connect:0123456789abcdef:192.0.2.2"))
+        assertEquals("192.0.2.2", ShortcutPlan.addressOf("connect:192.0.2.2"))
+        assertEquals("2001:db8::7", ShortcutPlan.addressOf("connect:0123456789abcdef:2001:db8::7"))
+        assertEquals("2001:db8::7", ShortcutPlan.addressOf("wake:2001:db8::7"))
+    }
+
+    /** The category in shortcuts.xml is the one the code publishes (N2 review). */
+    @Test
+    fun theShareTargetNamesTheCategoryTheShortcutsCarry() {
+        val xml = java.io.File("src/main/res/xml/shortcuts.xml").readText()
+        assertTrue(xml.contains("\"${ShortcutPlan.SHARE_CATEGORY}\""))
+    }
+
     @Test
     fun noComputersNoShortcuts() {
         assertEquals(emptyList<ShortcutPlan.Entry>(), ShortcutPlan.plan(emptyList(), hasWake = { true }))
