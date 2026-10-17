@@ -147,7 +147,17 @@ pub async fn fetch(
         let identity = super::load_identity().map_err(|e| format!("no KDE identity: {e:#}"))?;
         let downloads =
             crate::plugins::share::download_dir().ok_or("no Downloads folder to put it in")?;
-        receive(&identity, &device_id, pin, address, &offer, &downloads).await
+        // Still paired with the same certificate, and still allowed files
+        // (3c review: a transfer had outlived both).
+        let allowed = || {
+            super::link::pin_of(&dir, &device_id) == Some(pin)
+                && pocketdesk_core::local::kdeconnect_devices::permissions(&dir, &device_id)
+                    .is_some_and(|p| p.files)
+        };
+        receive(
+            &identity, &device_id, pin, address, &offer, &downloads, &allowed,
+        )
+        .await
     }
     .await;
     match fetched {
@@ -181,6 +191,7 @@ async fn receive(
     address: IpAddr,
     offer: &Offer,
     downloads: &Path,
+    allowed: &(dyn Fn() -> bool + Sync),
 ) -> Result<PathBuf, String> {
     let _turn = tokio::time::timeout(TURN_WAIT, AT_ONCE.acquire())
         .await
@@ -200,8 +211,11 @@ async fn receive(
     .await
     .map_err(|_| "no TLS handshake in time".to_string())?
     .map_err(|e| format!("TLS: {e}"))?;
-    receive_into(&mut tls, offer, downloads, Pace::DEFAULT).await
+    receive_into(&mut tls, offer, downloads, Pace::DEFAULT, allowed).await
 }
+
+/// Why a file stopped when its device was no longer allowed it.
+const NO_LONGER: &str = "the device is no longer paired or allowed files";
 
 /// A partial file, removed unless it was placed.
 struct Part(PathBuf);
@@ -212,13 +226,18 @@ impl Drop for Part {
     }
 }
 
+/// How often a file on the way asks whether it is still allowed.
+const CHECK_EVERY: u64 = 4 * 1024 * 1024;
+
 /// Read exactly `offer.size` bytes from `stream`, at `pace`, into a new
-/// file in `downloads`, named like `offer.name`.
+/// file in `downloads`, named like `offer.name`, while `allowed` says so
+/// (asked every [`CHECK_EVERY`] bytes and before it is kept).
 async fn receive_into<S: AsyncRead + Unpin>(
     stream: &mut S,
     offer: &Offer,
     downloads: &Path,
     pace: Pace,
+    allowed: &(dyn Fn() -> bool + Sync),
 ) -> Result<PathBuf, String> {
     let deadline = tokio::time::Instant::now() + pace.allowed(offer.size);
     tokio::fs::create_dir_all(downloads)
@@ -236,7 +255,14 @@ async fn receive_into<S: AsyncRead + Unpin>(
         .map_err(|e| format!("could not write in Downloads: {e}"))?;
     let mut left = offer.size;
     let mut buffer = vec![0u8; 64 * 1024];
+    let mut since_check = 0u64;
     while left > 0 {
+        if since_check >= CHECK_EVERY {
+            since_check = 0;
+            if !allowed() {
+                return Err(NO_LONGER.to_string());
+            }
+        }
         let want = buffer
             .len()
             .min(usize::try_from(left).unwrap_or(usize::MAX));
@@ -260,6 +286,10 @@ async fn receive_into<S: AsyncRead + Unpin>(
             .await
             .map_err(|e| format!("could not write in Downloads: {e}"))?;
         left -= read as u64;
+        since_check += read as u64;
+    }
+    if !allowed() {
+        return Err(NO_LONGER.to_string());
     }
     file.flush()
         .await
@@ -342,7 +372,7 @@ mod tests {
         let (mut device, mut ours) = tokio::io::duplex(8 * 1024);
         let sent = bytes.clone();
         tokio::spawn(async move { device.write_all(&sent).await });
-        let path = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT)
+        let path = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT, &|| true)
             .await
             .unwrap();
         assert_eq!(path, downloads.join("photo.jpg"));
@@ -352,7 +382,7 @@ mod tests {
         tokio::spawn(async move {
             let _ = device.write_all(&[1; 1000]).await;
         });
-        let short = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT).await;
+        let short = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT, &|| true).await;
         assert!(short.unwrap_err().contains("before the end"));
         let left: Vec<_> = std::fs::read_dir(&downloads).unwrap().flatten().collect();
         assert_eq!(left.len(), 1, "only the first file, no part left behind");
@@ -367,6 +397,37 @@ mod tests {
         assert!(admit("another device").is_some(), "per device");
         drop(tickets);
         assert!(admit(&id).is_some(), "given back");
+    }
+
+    #[tokio::test]
+    async fn a_file_stops_once_its_device_is_allowed_it_no_more() {
+        let downloads = temp("revoked");
+        let size = 3 * CHECK_EVERY;
+        let offer = Offer {
+            name: "big.bin".to_string(),
+            size,
+            port: 1739,
+        };
+        let (mut device, mut ours) = tokio::io::duplex(256 * 1024);
+        tokio::spawn(async move {
+            let chunk = vec![7u8; 64 * 1024];
+            for _ in 0..(size / chunk.len() as u64) {
+                if device.write_all(&chunk).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let asked = std::sync::atomic::AtomicUsize::new(0);
+        // Allowed at the first look, not at the second.
+        let allowed = || asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
+        let stopped = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT, &allowed).await;
+        assert_eq!(stopped.unwrap_err(), NO_LONGER);
+        assert_eq!(
+            std::fs::read_dir(&downloads).unwrap().count(),
+            0,
+            "nothing kept, no part left"
+        );
+        let _ = std::fs::remove_dir_all(&downloads);
     }
 
     #[tokio::test(start_paused = true)]
@@ -391,7 +452,7 @@ mod tests {
             quiet: Duration::from_secs(5),
             min_rate: 10,
         };
-        let slow = receive_into(&mut ours, &offer, &downloads, pace).await;
+        let slow = receive_into(&mut ours, &offer, &downloads, pace, &|| true).await;
         assert!(slow.unwrap_err().contains("too slowly"));
         let _ = std::fs::remove_dir_all(&downloads);
     }
@@ -438,14 +499,31 @@ mod tests {
             size: 5,
             port,
         };
-        let path = receive(&ours, &phone.id, pin, localhost, &offer, &downloads)
-            .await
-            .unwrap();
+        let path = receive(
+            &ours,
+            &phone.id,
+            pin,
+            localhost,
+            &offer,
+            &downloads,
+            &|| true,
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(path).unwrap(), b"hello");
 
         let port = device_offering(&phone, b"hello".to_vec()).await;
         let offer = Offer { port, ..offer };
-        let refused = receive(&ours, &phone.id, [7; 32], localhost, &offer, &downloads).await;
+        let refused = receive(
+            &ours,
+            &phone.id,
+            [7; 32],
+            localhost,
+            &offer,
+            &downloads,
+            &|| true,
+        )
+        .await;
         assert!(refused.unwrap_err().contains("TLS"), "another certificate");
         let _ = std::fs::remove_dir_all(&downloads);
     }
