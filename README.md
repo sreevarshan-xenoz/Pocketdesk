@@ -95,6 +95,9 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 | Now playing on the computer, from the phone | MPRIS through `playerctl` | the system media controls |
 | The phone's battery and media on the computer | yes | yes |
 | The phone's screen in a window (cast) | yes, with `ffmpeg` | yes, with `ffmpeg.exe` on `PATH` |
+| Another of your computers, paired (clipboard, files, over the internet) | yes | yes (two servers on one box) |
+| KDE Connect devices (pairing, ping, clipboard, battery, Ring, files to here) | yes, not yet beside `kdeconnectd` (which holds UDP 1716) | yes, with KDE Connect 1.36 on the A71 |
+| Events, hooks, named tasks, Home Assistant | yes | yes |
 | Desktop app tray | no (closing quits) | yes |
 | Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard; 2026-10-15: links both ways, the phone's battery, now-playing and Pause through `playerctl`). Not yet: files, notifications and texts, sound on the phone, GNOME/KDE, the desktop app | most rows, with a Galaxy A71 (2026-10). Not yet: start at login, the tray menu, single-window streaming |
 
@@ -212,7 +215,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash
 
 # Install specific version
-curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- v0.3.0
+curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- v0.4.0
 
 # Non-interactive install (no prompts)
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --yes
