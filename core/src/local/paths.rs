@@ -31,6 +31,8 @@ pub const RECEIVED_FILE: &str = "received.json";
 pub const OUTBOX_DIR: &str = "outbox";
 /// Links the desktop app or the local API asks the server to hand to a phone (T8a).
 pub const LINKS_DIR: &str = "links_out";
+/// Rings the desktop app or the local API asks the server to send to a phone (N1).
+pub const RINGS_DIR: &str = "rings_out";
 /// KDE Connect devices this computer has seen (3a), for the desktop app.
 pub const KDECONNECT_SEEN_FILE: &str = "kdeconnect_seen.json";
 /// The desktop app's request to look for KDE Connect devices: until when.

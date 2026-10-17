@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use pocketdesk_core::local::paths::{
     COMPUTERS_DIR, CONTROL_DIR, KDECONNECT_OUT_DIR, KICKS_DIR, LINKS_DIR, NOTIFICATION_OUT_DIR,
-    OUTBOX_DIR, PHONE_FILES_DIR, PHONE_MEDIA_DIR,
+    OUTBOX_DIR, PHONE_FILES_DIR, PHONE_MEDIA_DIR, RINGS_DIR,
 };
 use tokio::sync::Notify;
 
@@ -25,6 +25,7 @@ pub const SWEEP: Duration = Duration::from_secs(5);
 pub const FOLDERS: &[&str] = &[
     OUTBOX_DIR,
     LINKS_DIR,
+    RINGS_DIR,
     PHONE_MEDIA_DIR,
     PHONE_FILES_DIR,
     NOTIFICATION_OUT_DIR,

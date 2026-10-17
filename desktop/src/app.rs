@@ -24,7 +24,7 @@ const REFRESH: Duration = Duration::from_secs(1);
 pub const PAGE_KEY: &str = "page";
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 13] = [
+const PERMISSIONS: [(Capability, &str, &str); 14] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -89,6 +89,11 @@ const PERMISSIONS: [(Capability, &str, &str); 13] = [
         Capability::Tasks,
         "Start my tasks",
         "The phone can list the tasks named in Settings and start them (each one may ask you first).",
+    ),
+    (
+        Capability::Ring,
+        "Ring this phone from here",
+        "Ring it from here when it is lost, at most once a minute. The phone rings only with \"Ring from the computer\" on in its own Settings.",
     ),
 ];
 
@@ -738,9 +743,10 @@ impl PocketdeskApp {
         }
         let mut revoke = None;
         let mut confirmed = None;
+        let mut ring = None;
         let now = now_unix();
         egui::Grid::new("devices")
-            .num_columns(5)
+            .num_columns(6)
             .striped(true)
             .spacing([16.0, 8.0])
             .show(ui, |ui| {
@@ -765,6 +771,27 @@ impl PocketdeskApp {
                     }
                     ui.label(battery_text(device.battery.as_ref(), now))
                         .on_hover_text("The phone's battery, as it last reported it in a session");
+                    // N1: ring a phone that keeps a link, with Ring on.
+                    let can_ring = device.linked
+                        && !device.computer
+                        && device.permissions.allows(Capability::Ring);
+                    let why = if device.computer {
+                        "A computer is not rung."
+                    } else if !device.permissions.allows(Capability::Ring) {
+                        "Ring is off for this phone, in its section below."
+                    } else if !device.linked {
+                        "Not linked now: it rings in a session, or with Ring from the computer on in its own Settings."
+                    } else {
+                        "Ring it at full volume for 30 seconds, through Do Not Disturb when the phone lets alarms through. At most once a minute."
+                    };
+                    if ui
+                        .add_enabled(can_ring, egui::Button::new("Ring"))
+                        .on_hover_text(why)
+                        .on_disabled_hover_text(why)
+                        .clicked()
+                    {
+                        ring = Some(device.id.clone());
+                    }
                     if self.confirm_revoke.as_deref() == Some(&device.id) {
                         ui.horizontal(|ui| {
                             if ui.button("Remove").clicked() {
@@ -854,6 +881,15 @@ impl PocketdeskApp {
         }
         if let Some(choice) = revoke {
             self.confirm_revoke = choice;
+        }
+        if let Some(id) = ring {
+            let who = self.label(&id);
+            self.notice = crate::notice::Notice::outcome(
+                match pocketdesk_core::local::rings::request(&self.state_dir, &id, now) {
+                    Ok(_) => Ok(format!("Asked {who} to ring.")),
+                    Err(e) => Err(format!("Could not ring {who}: {e}")),
+                },
+            );
         }
         if let Some(id) = confirmed {
             self.confirm_revoke = None;

@@ -12,7 +12,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.clipboard.connect` | yes |  | Clipboard | clipboard |
 | `kdeconnect.filebrowse.request` | yes |  | Files | filebrowse |
 | `kdeconnect.filebrowse.response` |  | yes |  | filebrowse |
-| `kdeconnect.findmydevice` | yes |  | none (any paired phone) | siren |
+| `kdeconnect.findmydevice` | yes | yes | none (any paired phone) | siren, server |
 | `kdeconnect.identity` | yes |  | none (any phone: pairing) | pair |
 | `kdeconnect.mousepad.echo` |  | yes |  | input |
 | `kdeconnect.mousepad.request` | yes |  | Input | input |

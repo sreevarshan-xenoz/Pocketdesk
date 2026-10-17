@@ -45,6 +45,7 @@ pub mod platform;
 pub mod plugins;
 pub mod privacy;
 pub mod relay;
+pub mod ring_phone;
 pub mod service;
 pub mod session_telemetry;
 pub mod state;

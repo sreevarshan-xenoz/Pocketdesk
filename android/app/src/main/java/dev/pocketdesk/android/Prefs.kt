@@ -32,6 +32,7 @@ object Prefs {
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
     private const val KEY_FILES_BACKGROUND = "files_in_background"
+    private const val KEY_RING_FROM_COMPUTER = "ring_from_computer"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
@@ -116,6 +117,7 @@ object Prefs {
 
     fun setOthersChooseComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_OTHERS_CHOOSE_COMPUTER, enabled) }
+        bump()
     }
 
     /**
@@ -127,6 +129,7 @@ object Prefs {
 
     fun setTellOtherApps(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_TELL_OTHER_APPS, enabled) }
+        bump()
     }
 
     /** Whether a link the computer hands over is shown as a notification (T8a). On by default. */
@@ -135,6 +138,7 @@ object Prefs {
 
     fun setLinksFromComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_LINKS_FROM_COMPUTER, enabled) }
+        bump()
     }
 
     /**
@@ -146,6 +150,7 @@ object Prefs {
 
     fun setShareBattery(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_SHARE_BATTERY, enabled) }
+        bump()
     }
 
     /** Whether a session tells the computer what this phone plays and takes its presses (T8d). Off by default. */
@@ -154,6 +159,7 @@ object Prefs {
 
     fun setPhoneMediaOnComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_PHONE_MEDIA, enabled) }
+        bump()
     }
 
     /**
@@ -165,6 +171,7 @@ object Prefs {
 
     fun setClipboardInBackground(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CLIPBOARD_BACKGROUND, enabled) }
+        bump()
     }
 
     /**
@@ -176,6 +183,16 @@ object Prefs {
 
     fun setAnswerNotifications(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_ANSWER_NOTIFICATIONS, enabled) }
+        bump()
+    }
+
+    /** Whether the computer may ring this phone to find it (N1); keeps the background link. Off by default. */
+    fun ringFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_RING_FROM_COMPUTER, false)
+
+    fun setRingFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_RING_FROM_COMPUTER, enabled) }
+        bump()
     }
 
     /**
@@ -187,6 +204,7 @@ object Prefs {
 
     fun setFilesInBackground(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_FILES_BACKGROUND, enabled) }
+        bump()
     }
 
     /** Whether a mouse connected to the phone drives the computer's cursor in a session (T9c). On by default. */

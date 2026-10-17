@@ -13,6 +13,8 @@
     <!-- T10k: this phone's screen on the computer, only while the owner casts it. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- N1: the ring from the computer onto the lock screen, only while it rings. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- N5b: texts on the computer and replies from it; both asked for only
          when the user turns them on. -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
@@ -212,6 +214,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/clipboard_paths" />
         </provider>
+        <!-- N1: Stop on the ring from the computer. -->
+        <receiver
+            android:name=".ring.StopRingReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

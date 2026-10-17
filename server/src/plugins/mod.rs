@@ -41,6 +41,8 @@ pub const SERVER_PUSHES: &[&str] = &[
     crate::hypr_events::STATE_PACKET,
     crate::iroh_endpoint::ENDPOINT_PACKET,
     crate::wake_info::WAKE_INFO,
+    // N1: the computer rings a phone with the packet a phone rings it with.
+    crate::ring_phone::FIND,
 ];
 
 /// What the computer's identity announces: the packet types its plugins

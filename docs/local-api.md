@@ -6,7 +6,7 @@ Design: `docs/superpowers/specs/2026-10-15-local-api-design.md`. Source: `server
 
 ## The rules
 
-These hold for `status`, `devices`, `sent`, `received`, `send`, `link`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. `events` prints many objects, one per line, each following them. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
+These hold for `status`, `devices`, `sent`, `received`, `send`, `link`, `ring`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. `events` prints many objects, one per line, each following them. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
 
 - **One JSON object per run** on stdout, on one line. Logs go to stderr.
 - **Every object carries `"api": 1`.** Within version 1, fields are only ever added, never renamed, removed or given another meaning. A field a script does not know should be ignored.
@@ -52,7 +52,8 @@ The paired phones.
               "key_bound": true, "internet_key_bound": true,
               "permissions": {"input": true, "clipboard": true, "files": true, "audio": true,
                               "mic": true, "power": true, "exec": false,
-                              "notifications": true, "texts": true, "links": true, "media": true, "cast": true, "tasks": true},
+                              "notifications": true, "texts": true, "links": true, "media": true, "cast": true, "tasks": true,
+                              "ring": true},
               "battery": {"charge": 54, "charging": false, "updated_unix": 1792069000},
               "media": {"title": "Song", "artist": "Artist", "app": "Spotify", "isPlaying": true,
                         "canPlayPause": true, "canNext": true, "canPrevious": true}}]}
@@ -144,6 +145,10 @@ pocketdesk send 0d7c3a backup.tar --wait 600 --json || notify-send "backup did n
 ### `pocketdesk link <phone> <url> --json`
 
 Hands a web link to a phone in a session; it waits there as a notification that opens it (T8a). Only `http` and `https` links of at most 2048 bytes, with no user name or password, and not to the phone's own `localhost`. `{"api": 1, "id": "…", "device_id": "…", "url": "…", "state": "queued"}`. Exit 2 for a link that may not be opened, 1 for a phone not in a session or with its Links permission off, 3 when no server runs.
+
+### `pocketdesk ring <phone> --json`
+
+Asks the server to ring the phone (N1): `{"api": 1, "id": "…", "device_id": "…", "state": "queued"}`. Refused at once (exit 1) when the phone's Ring permission is off or it keeps no link now: it rings in a session, or with "Ring from the computer" on in its own Settings. The server sends at most one ring a minute to a phone, and drops a ring not sent within a minute.
 
 ### `pocketdesk kick <target> --json`
 
