@@ -90,53 +90,53 @@ fun SoundScreen(
         onDispose { tell.left()?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) } }
     }
 
-    // The computer's sound plays for this session, as for a screen session's
-    // stream: one generation per attempt, up once admitted.
-    val generation = remember(attempt) { DesktopAudio.newGeneration(context) }
-    LaunchedEffect(generation, state) {
-        when (state) {
-            State.Ready -> DesktopAudio.streamUp(context, generation)
-            State.Down, State.TooOld -> DesktopAudio.streamDown(generation)
-            else -> Unit
-        }
-    }
-    DisposableEffect(generation) { onDispose { DesktopAudio.streamDown(generation) } }
-
     LaunchedEffect(attempt) {
         state = State.Connecting
         reason = null
-        val connected =
-            withContext(Dispatchers.IO) {
-                RustCore.connectSound(address, port).recoverCatching { lan ->
-                    // Left while the LAN dial failed: no internet dial after the screen's stop.
-                    coroutineContext.ensureActive()
-                    val identity = HostStore.wanIdentity(context, address) ?: throw lan
-                    RustCore.connectSoundWan(address, identity).getOrThrow()
+        // The computer's sound plays for this attempt, as for a screen
+        // session's stream: its own generation, up once admitted and down
+        // when it ends, both from here (N5 review: a generation keyed on
+        // composition was ended by the old attempt's Down before a Retry
+        // could start it, and a screen that is off may not recompose).
+        val generation = DesktopAudio.newGeneration(context)
+        try {
+            val connected =
+                withContext(Dispatchers.IO) {
+                    RustCore.connectSound(address, port).recoverCatching { lan ->
+                        // Left while the LAN dial failed: no internet dial after the screen's stop.
+                        coroutineContext.ensureActive()
+                        val identity = HostStore.wanIdentity(context, address) ?: throw lan
+                        RustCore.connectSoundWan(address, identity).getOrThrow()
+                    }
                 }
+            if (!isActive) {
+                if (connected.isSuccess) withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
+                return@LaunchedEffect
             }
-        if (!isActive) {
-            if (connected.isSuccess) withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
-            return@LaunchedEffect
-        }
-        if (connected.isFailure) {
-            reason = connected.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
-            state = State.Down
-            return@LaunchedEffect
-        }
-        state = State.Waiting
-        val waitingSince = android.os.SystemClock.elapsedRealtime()
-        while (isActive) {
-            val (remote, closed) =
-                withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
-            state = RemoteSession.next(state, remote, closed)
-            if (state == State.Waiting && android.os.SystemClock.elapsedRealtime() - waitingSince > WAIT_MS) {
+            if (connected.isFailure) {
+                reason = connected.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
                 state = State.Down
+                return@LaunchedEffect
             }
-            if (state == State.Down || state == State.TooOld) {
-                reason = closed?.let { context.closeReasonText(it) }
-                break
+            state = State.Waiting
+            val waitingSince = android.os.SystemClock.elapsedRealtime()
+            while (isActive) {
+                val (remote, closed) =
+                    withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
+                val next = RemoteSession.next(state, remote, closed)
+                if (next == State.Ready && state != State.Ready) DesktopAudio.streamUp(context, generation)
+                state = next
+                if (state == State.Waiting && android.os.SystemClock.elapsedRealtime() - waitingSince > WAIT_MS) {
+                    state = State.Down
+                }
+                if (state == State.Down || state == State.TooOld) {
+                    reason = closed?.let { context.closeReasonText(it) }
+                    break
+                }
+                delay(POLL_MS)
             }
-            delay(POLL_MS)
+        } finally {
+            DesktopAudio.streamDown(generation)
         }
     }
 
