@@ -373,7 +373,7 @@ impl State {
             PairSays::Yes(None) => Vec::new(),
             PairSays::No => {
                 if self.paired {
-                    let _ = devices::remove(&self.dir, &self.device_id);
+                    self.unpin();
                     self.paired = false;
                     self.note_seen();
                     notify("A KDE Connect device unpaired", self.name.clone());
@@ -419,8 +419,20 @@ impl State {
         );
     }
 
-    /// Pair the device with the certificate it brought.
-    fn pair_now(&mut self) {
+    /// Forget the device's pin; a failure is told (its pin would let it
+    /// back in as paired).
+    fn unpin(&self) {
+        if let Err(e) = devices::remove(&self.dir, &self.device_id) {
+            tracing::warn!(device_id = %self.device_id, "A KDE Connect device's pairing could not be forgotten: {e}");
+            notify(
+                "A KDE Connect device is still paired",
+                format!("{}: its pairing could not be forgotten ({e})", self.name),
+            );
+        }
+    }
+
+    /// Pair the device with the certificate it brought; whether it is.
+    fn pair_now(&mut self) -> bool {
         let now = now_unix();
         let added = devices::add(
             &self.dir,
@@ -434,7 +446,7 @@ impl State {
         );
         if let Err(e) = added {
             tracing::warn!("A KDE pairing could not be kept: {e}");
-            return;
+            return false;
         }
         self.paired = true;
         self.waiting = None;
@@ -443,6 +455,7 @@ impl State {
         let _ = devices::clear_pending(&self.dir, &self.device_id, now);
         self.note_seen();
         tracing::info!(device_id = %self.device_id, "Paired with a KDE Connect device");
+        true
     }
 
     fn note_seen(&self) {
@@ -496,9 +509,10 @@ impl State {
                     .is_some_and(|w| (w.from_device || w.accepted) && w.code == code) =>
             {
                 let from_device = self.waiting.as_ref().is_some_and(|w| w.from_device);
-                if yes {
-                    self.pair_now();
-                } else {
+                // A pairing that could not be kept is answered no (3b
+                // review): the device would think itself paired.
+                let yes = yes && self.pair_now();
+                if !yes {
                     self.waiting = None;
                     let _ = devices::clear_pending(&self.dir, &self.device_id, now);
                 }
@@ -514,7 +528,7 @@ impl State {
                 Vec::new()
             }
             Event::Unpair => {
-                let _ = devices::remove(&self.dir, &self.device_id);
+                self.unpin();
                 self.paired = false;
                 self.note_seen();
                 vec![pairing::answer(false)]
@@ -777,6 +791,24 @@ mod tests {
         assert!(PLACES.take(address).is_none(), "held");
         s.pair_now();
         assert!(PLACES.take(address).is_some(), "given back");
+    }
+
+    #[test]
+    fn a_pairing_that_cannot_be_kept_is_answered_no() {
+        let mut s = state("unkept", false);
+        let now = now_unix();
+        s.pair_packet(PairSays::Yes(Some(now)));
+        let code = devices::pending(&s.dir, now)[0].code.clone();
+        // The pins do not read: nothing can be added to them.
+        std::fs::write(
+            s.dir
+                .join(pocketdesk_core::local::paths::KDECONNECT_DEVICES_FILE),
+            "not json",
+        )
+        .unwrap();
+        let out = s.event(Event::Answer { yes: true, code });
+        assert_eq!(says(&out[0]), Some(PairSays::No));
+        assert!(!s.paired);
     }
 
     #[test]
