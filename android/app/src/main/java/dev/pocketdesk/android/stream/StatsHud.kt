@@ -42,7 +42,8 @@ import org.json.JSONObject
 /**
  * Streaming telemetry HUD overlay (Tier 1 #1). With [details] off (the
  * default, U4) it is one coloured dot and a word for the connection
- * ([LinkQuality]); on, the numbers: fps / bitrate / RTT /
+ * ([LinkQuality]), shown only while the stream is [live]; on, the numbers:
+ * fps / bitrate / RTT /
  * end-to-end latency / frame drops, refreshed on a fixed interval from the
  * Rust core, over a caption naming the sample basis of the rate and link
  * figures. When an [address]/[controlPort] are given, the desktop's battery is
@@ -61,6 +62,7 @@ fun StatsHud(
     address: String? = null,
     controlPort: Int = 1716,
     details: Boolean = true,
+    live: Boolean = true,
 ) {
     var stats by remember { mutableStateOf<RustCore.StreamingStats?>(null) }
     var battery by remember { mutableStateOf<String?>(null) }
@@ -107,6 +109,9 @@ fun StatsHud(
 
     val s = stats ?: return
     if (!details) {
+        // Only a stream that is up has a connection to judge: a refused or
+        // dropped one keeps its last numbers, which would read as "poor".
+        if (!live) return
         QualityDot(LinkQuality.of(s.rttMs, s.rttSamples, s.e2eLatencyMs, recentDrops), modifier)
         return
     }

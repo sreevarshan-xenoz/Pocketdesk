@@ -1176,6 +1176,7 @@ fun RemoteScreen(
                             address = address,
                             controlPort = controlPort,
                             details = dev.pocketdesk.android.Prefs.connectionDetails(context),
+                            live = status is StreamStatus.Up,
                         )
                         // A live WAN link keeps a small badge reporting *how* it
                         // is connected (R4 A1) — punched-direct vs relayed, since
