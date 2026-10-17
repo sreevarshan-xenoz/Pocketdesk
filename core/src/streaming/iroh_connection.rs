@@ -211,17 +211,181 @@ impl Connection for IrohConnection {
 
 /// Client-side WAN dial (R1 stage 3).
 ///
-/// Owns the ephemeral iroh `Endpoint` for the life of the session: iroh
-/// aborts its socket task with an error if an `Endpoint` is dropped while
-/// live, so callers must `close()` the dial (or at least keep the endpoint
-/// alive until the connection ends). The identity the phone learned from the
+/// Holds the iroh `Endpoint` it dialed from for the life of the connection:
+/// iroh aborts its socket task with an error if an `Endpoint` is dropped
+/// while live, so callers must `close()` the dial (or at least keep it alive
+/// until the connection ends). The identity the phone learned from the
 /// server's `kdeconnect.pocketdesk.endpoint` announcement is reassembled here
 /// from its string parts — relays are dial-reachable fallbacks, direct
 /// addresses the LAN/Tailscale-routable set.
+///
+/// Dials with the same device key and relays share one endpoint (2b): the
+/// session and the internet control link used to bind one each, with one
+/// key, and a relay knows one client per key, so on a relayed path one of
+/// the two never connected (`server/tests/one_key_two_endpoints.rs`).
 pub struct IrohDial {
-    endpoint: Endpoint,
+    endpoint: std::sync::Arc<DialEndpoint>,
     raw: iroh::endpoint::Connection,
     connection: SharedConnection,
+}
+
+/// One dialing endpoint, shared by every dial with its key and relays.
+struct DialEndpoint {
+    endpoint: Endpoint,
+    /// Dials under way on it: while any is, the DHT lookup stays attached.
+    /// The count and the lookup's add and clear change under this lock.
+    pending: std::sync::Mutex<usize>,
+}
+
+impl DialEndpoint {
+    /// A dial starts on this endpoint, looking the computer up on the DHT
+    /// too when `dht` is given.
+    fn begin(&self, dht: Option<DhtAddressLookup>) -> PendingDial<'_> {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        *pending += 1;
+        if let Some(dht) = dht
+            && let Ok(lookup) = self.endpoint.address_lookup()
+        {
+            lookup.add(dht);
+        }
+        PendingDial { on: self }
+    }
+}
+
+/// A dial under way on a [`DialEndpoint`]. The last one to end, however it
+/// ends (connected, failed, or dropped mid-way), takes the DHT lookup off:
+/// left in place, its node would keep up a routing table for the session.
+struct PendingDial<'a> {
+    on: &'a DialEndpoint,
+}
+
+impl Drop for PendingDial<'_> {
+    fn drop(&mut self) {
+        let mut pending = self.on.pending.lock().unwrap_or_else(|e| e.into_inner());
+        *pending = pending.saturating_sub(1);
+        if *pending == 0
+            && let Ok(lookup) = self.on.endpoint.address_lookup()
+        {
+            lookup.clear();
+        }
+    }
+}
+
+impl Drop for DialEndpoint {
+    fn drop(&mut self) {
+        // The last dial on it is gone: close it, where a runtime can run the
+        // close (iroh logs an error for an endpoint dropped while live).
+        if !self.endpoint.is_closed()
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let endpoint = self.endpoint.clone();
+            runtime.spawn(async move { endpoint.close().await });
+        }
+    }
+}
+
+/// What two dials must have alike to share an endpoint: the device key
+/// they dial as (by its public half: the secret stays out of the map), and
+/// the relays they use.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct DialKey {
+    id: String,
+    relays: String,
+}
+
+/// The shared dialing endpoints, by [`DialKey`]; an entry whose last dial
+/// has closed is dead and pruned at the next dial. A dial without a device
+/// key gets an endpoint of its own (iroh makes a throwaway key), as before.
+static DIAL_ENDPOINTS: std::sync::LazyLock<
+    tokio::sync::Mutex<std::collections::HashMap<DialKey, std::sync::Weak<DialEndpoint>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// How many shared dialing endpoints are live (for tests).
+#[cfg(test)]
+async fn live_dial_endpoints() -> usize {
+    DIAL_ENDPOINTS
+        .lock()
+        .await
+        .values()
+        .filter(|weak| weak.strong_count() > 0)
+        .count()
+}
+
+/// The name of a relay set for [`DialKey`].
+fn relay_set_name(announced: &[iroh::RelayUrl], use_relays: bool) -> String {
+    match dial_relay_mode(announced, use_relays) {
+        RelayMode::Disabled => "off".to_string(),
+        RelayMode::Default => "n0".to_string(),
+        _ => {
+            let mut urls: Vec<String> = announced.iter().map(|url| url.to_string()).collect();
+            urls.sort();
+            urls.join(" ")
+        }
+    }
+}
+
+/// The endpoint to dial from: the live one for this key and relays, or a
+/// new one.
+async fn dial_endpoint(
+    device_key: Option<iroh::SecretKey>,
+    relay_urls: &[iroh::RelayUrl],
+    use_relays: bool,
+) -> Result<std::sync::Arc<DialEndpoint>> {
+    let bind = |key: Option<iroh::SecretKey>| async move {
+        let mut builder = Endpoint::builder(Minimal).dns_resolver(dns_resolver());
+        // Device keys: dial as this device's own key, so the desktop can
+        // bind the session to it; without one, iroh makes a throwaway key.
+        if let Some(key) = key {
+            builder = builder.secret_key(key);
+        }
+        let endpoint = builder
+            .relay_mode(dial_relay_mode(relay_urls, use_relays))
+            .bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)))
+            .context("iroh bind_addr rejected wildcard socket addr")?
+            .bind()
+            .await
+            .context("iroh client endpoint bind failed")?;
+        Ok::<_, anyhow::Error>(std::sync::Arc::new(DialEndpoint {
+            endpoint,
+            pending: std::sync::Mutex::new(0),
+        }))
+    };
+    let Some(key) = device_key else {
+        return bind(None).await;
+    };
+    let wanted = DialKey {
+        id: key.public().to_string(),
+        relays: relay_set_name(relay_urls, use_relays),
+    };
+    // Held while a new endpoint binds, so two dials at once make one.
+    let mut endpoints = DIAL_ENDPOINTS.lock().await;
+    endpoints.retain(|_, weak| weak.strong_count() > 0);
+    if let Some(shared) = endpoints.get(&wanted).and_then(std::sync::Weak::upgrade)
+        && !shared.endpoint.is_closed()
+    {
+        return Ok(shared);
+    }
+    let shared = bind(Some(key)).await?;
+    endpoints.insert(wanted, std::sync::Arc::downgrade(&shared));
+    Ok(shared)
+}
+
+/// Tell every live dialing endpoint that this device's network changed (2b
+/// review): Android gives iroh no such events, and a shared endpoint
+/// outlives the network it was made on, keeping its old paths and DNS
+/// servers (a fresh endpoint per dial used to hide that). iroh then checks
+/// the interfaces and, on a real change, rebinds, finds its relay again and
+/// re-reads DNS. Harmless when nothing changed.
+pub async fn network_changed() {
+    let live: Vec<std::sync::Arc<DialEndpoint>> = DIAL_ENDPOINTS
+        .lock()
+        .await
+        .values()
+        .filter_map(std::sync::Weak::upgrade)
+        .collect();
+    for shared in live {
+        shared.endpoint.network_change().await;
+    }
 }
 
 /// The relays the dialing end uses for itself. A desktop that announces only
@@ -343,38 +507,19 @@ impl IrohDial {
             addr = addr.with_ip_addr(a);
         }
 
-        let mut builder = Endpoint::builder(Minimal).dns_resolver(dns_resolver());
-        // Device keys: dial as this device's own key, so the desktop can bind
-        // the session to it; without one, iroh makes a throwaway key.
-        if let Some(key) = device_key {
-            builder = builder.secret_key(key);
-        }
-        if let Some(dht) = dht {
-            builder = builder.address_lookup(dht);
-        }
-        let endpoint = builder
-            .alpns(vec![alpn.clone()])
-            .relay_mode(dial_relay_mode(&relay_urls, use_relays))
-            .bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)))
-            .context("iroh bind_addr rejected wildcard socket addr")?
-            .bind()
-            .await
-            .context("iroh client endpoint bind failed")?;
-
-        let raw = tokio::time::timeout(timeout, endpoint.connect(addr, &alpn))
-            .await
+        let shared = dial_endpoint(device_key, &relay_urls, use_relays).await?;
+        let connected = {
+            let _dialing = shared.begin(dht);
+            tokio::time::timeout(timeout, shared.endpoint.connect(addr, &alpn)).await
+        };
+        let raw = connected
             .context("iroh dial timed out")?
             .context("iroh dial failed")?;
-        // Connected: the DHT has done its job. Left in place, its node would
-        // keep up a routing table for the whole session.
-        if let Ok(lookup) = endpoint.address_lookup() {
-            lookup.clear();
-        }
 
         Ok(Self {
-            endpoint,
             connection: IrohConnection::shared(raw.clone()),
             raw,
+            endpoint: shared,
         })
     }
 
@@ -383,17 +528,21 @@ impl IrohDial {
         self.connection.clone()
     }
 
-    /// Gracefully close the connection and the endpoint. Mandatory before
-    /// drop to avoid iroh's dropped-live-endpoint error log.
+    /// Gracefully close the connection, and the endpoint when no other dial
+    /// shares it. Mandatory before drop to avoid iroh's dropped-live-endpoint
+    /// error log.
     pub async fn close(self) {
         self.raw
             .close(iroh::endpoint::VarInt::from_u32(0), b"session end");
-        self.endpoint.close().await;
+        if let Ok(last) = std::sync::Arc::try_unwrap(self.endpoint) {
+            last.endpoint.close().await;
+        }
     }
 }
 
 /// The control channel's stream over iroh (T10a), holding the dial whose
-/// endpoint carries it. Dropped, it closes the connection and the endpoint.
+/// endpoint carries it. Dropped, it closes the connection, and the endpoint
+/// when no other dial shares it.
 pub struct IrohControlStream {
     io: tokio::io::Join<RecvStream, SendStream>,
     dial: Option<IrohDial>,
@@ -674,6 +823,95 @@ mod tests {
         desktop.close().await;
     }
 
+    /// 2b: a session and a control dial with one device key and the same
+    /// relays share one endpoint, so a relay sees one client; the endpoint
+    /// closes with the last of them.
+    #[tokio::test]
+    async fn dials_with_one_key_share_one_endpoint_until_the_last_closes() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let alpn = StreamTransportConfig::default().alpn;
+        let (desktop, desktop_addr) = bind_loopback_endpoint(&alpn).await;
+        // The desktop takes both roads on one endpoint, as the server does.
+        desktop.set_alpns(vec![alpn.clone(), crate::protocol::ALPN_CONTROL.to_vec()]);
+        let accepting = {
+            let desktop = desktop.clone();
+            tokio::spawn(async move {
+                let mut held = Vec::new();
+                while let Some(incoming) = desktop.accept().await {
+                    if let Ok(conn) = incoming.await {
+                        // The control road's stream is opened by the dialer.
+                        let keep = conn.clone();
+                        tokio::spawn(async move {
+                            let _ = keep.accept_bi().await;
+                            keep.closed().await;
+                        });
+                        held.push(conn);
+                    }
+                }
+            })
+        };
+        let key = iroh::SecretKey::generate();
+        let before = live_dial_endpoints().await;
+        let session = IrohDial::dial(
+            &desktop.id().to_string(),
+            &[],
+            &[desktop_addr.to_string()],
+            false,
+            Duration::from_secs(5),
+            Some(key.clone()),
+            None,
+        )
+        .await
+        .expect("the session dial");
+        let control = IrohDial::dial_control(
+            &desktop.id().to_string(),
+            &[],
+            &[desktop_addr.to_string()],
+            false,
+            Duration::from_secs(5),
+            Some(key),
+            None,
+        )
+        .await
+        .expect("the control dial");
+        assert_eq!(
+            live_dial_endpoints().await,
+            before + 1,
+            "one endpoint carries both"
+        );
+        assert_eq!(
+            session.endpoint.endpoint.bound_sockets(),
+            control
+                .dial
+                .as_ref()
+                .unwrap()
+                .endpoint
+                .endpoint
+                .bound_sockets(),
+            "the same sockets"
+        );
+        session.close().await;
+        assert_eq!(
+            live_dial_endpoints().await,
+            before + 1,
+            "the control link keeps it"
+        );
+        drop(control);
+        for _ in 0..50 {
+            if live_dial_endpoints().await == before {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            live_dial_endpoints().await,
+            before,
+            "closed with the last dial"
+        );
+        accepting.abort();
+        desktop.close().await;
+    }
+
     /// Same exercise as `connection::tests::quinn_connection_roundtrip`,
     /// over iroh's noq connection: uni round-trip through the traits and
     /// graceful close surfacing as `ConnectionError::Closed`.
@@ -910,11 +1148,11 @@ mod tests {
         let accepted = accept.await.expect("accept task");
         assert_eq!(
             accepted.remote_id(),
-            dial.endpoint.id(),
+            dial.endpoint.endpoint.id(),
             "the session is the phone's"
         );
         assert!(
-            dial.endpoint.address_lookup().unwrap().is_empty(),
+            dial.endpoint.endpoint.address_lookup().unwrap().is_empty(),
             "the phone's DHT node stops once connected"
         );
         drop(accepted);

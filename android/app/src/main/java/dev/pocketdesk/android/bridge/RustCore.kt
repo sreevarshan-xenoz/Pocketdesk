@@ -1,6 +1,8 @@
 package dev.pocketdesk.android.bridge
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.media.MediaCodec
 import org.json.JSONObject
 import java.io.File
@@ -24,6 +26,7 @@ object RustCore {
     private external fun nativeVersion(): String
     private external fun nativeInit(context: Context)
     private external fun nativeSetDataDir(path: String)
+    private external fun nativeNetworkChanged()
     private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
     private external fun nativeForgetPeerCertificate(address: String): String
     private external fun nativeIsDiscoveryActive(): Boolean
@@ -230,6 +233,41 @@ object RustCore {
     fun start(context: Context) {
         nativeInit(context.applicationContext)
         nativeSetDataDir(context.filesDir.absolutePath)
+        watchNetwork(context.applicationContext)
+    }
+
+    @Volatile
+    private var watchingNetwork = false
+
+    /**
+     * Tell the bridge when the phone's default network changes (2b): its
+     * iroh endpoints outlive one network now, and Android gives iroh no
+     * such event. Once per process; the first report is the current network.
+     */
+    private fun watchNetwork(context: Context) {
+        synchronized(this) {
+            if (watchingNetwork) return
+            watchingNetwork = true
+        }
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
+        runCatching {
+            cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                private var current: Network? = null
+
+                override fun onAvailable(network: Network) {
+                    val was = current
+                    current = network
+                    if (was != null && was != network) nativeNetworkChanged()
+                }
+
+                override fun onLost(network: Network) {
+                    if (network == current) {
+                        current = null
+                        nativeNetworkChanged()
+                    }
+                }
+            })
+        }.onFailure { android.util.Log.w("RustCore", "No network callback: ${it.message}") }
     }
 
     // ---- Session / discovery ----

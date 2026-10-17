@@ -91,7 +91,9 @@ pub use input_packet::{
 #[cfg(feature = "wan")]
 pub use iroh::SecretKey as IrohSecretKey;
 #[cfg(feature = "wan")]
-pub use iroh_connection::{IrohConnection, IrohControlStream, IrohDial, load_or_create_device_key};
+pub use iroh_connection::{
+    IrohConnection, IrohControlStream, IrohDial, load_or_create_device_key, network_changed,
+};
 pub use session::{SessionType, detect_session_type};
 pub use session_telemetry::{
     LinkReport, SessionGuard, SessionOutcome, SessionRecorder, SessionReport,
