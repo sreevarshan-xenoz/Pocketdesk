@@ -1804,6 +1804,41 @@ mod control_tls_tests {
         addr
     }
 
+    #[tokio::test]
+    async fn a_kde_connect_devices_packet_goes_to_the_bridge_not_the_refusal() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // The bridge makes its identity in a throwaway state folder.
+        pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        let addr = control_port().await;
+        let mut tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let hello = serde_json::json!({
+            "id": 1,
+            "type": "kdeconnect.identity",
+            "body": {"deviceId": "a".repeat(32), "deviceName": "Phone", "protocolVersion": 8},
+        });
+        tcp.write_all(
+            format!(
+                "{hello}
+"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+        let mut first = [0u8; 1];
+        tokio::time::timeout(Duration::from_secs(5), tcp.read_exact(&mut first))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first[0],
+            pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD,
+            "this computer opens TLS as the client (KDE's roles), no plain refusal"
+        );
+    }
+
     /// Counts the packets the connection handler dispatches to it.
     pub(super) struct Counting(pub(super) Arc<std::sync::atomic::AtomicUsize>);
 
