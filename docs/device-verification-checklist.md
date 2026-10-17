@@ -1479,11 +1479,12 @@ The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box
 On this box, the app's own window captured (no input into it):
 
 - [x] The navigation down the left in its groups; Settings at 720×480 scrolling, its heading and purpose shown.
-- [x] File names in Hindi, Korean, Thai, Arabic, Chinese and Tamil drawn (they were boxes); Arabic unjoined (egui draws without shaping).
+- [x] File names in Hindi, Korean, Thai, Arabic, Chinese and Tamil drawn (they were boxes).
 - [x] Windows UI Automation reads the navigation, the group titles, the page's heading and its text.
 - [x] A second run opened on the page the first had shown.
 - [ ] Settings' Save bar after an edit, a notice clearing after 6 s, "Copied.", and the two settings' switches while their change runs (they need clicks).
 - [ ] Narrator reading the app; the Linux build (Orca, the Noto fonts through fc-list).
+- [ ] A line mixing Arabic or Hebrew with Latin (egui has no bidirectional layout), read by someone who reads it.
 
 ## Recording results
 
