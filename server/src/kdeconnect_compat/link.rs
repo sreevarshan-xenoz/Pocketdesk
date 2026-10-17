@@ -1,7 +1,8 @@
 //! A KDE Connect device's link after the handshake (3b): pairing both ways,
 //! held for the owner with the code both screens show; unpairing; ping.
-//! Once paired (3c), what its permissions allow: its battery. Anything else
-//! it sends, Pocketdesk's own packets among them, is not taken.
+//! Once paired (3c), what its permissions allow: its battery, and the
+//! clipboard both ways. Anything else it sends, Pocketdesk's own packets
+//! among them, is not taken.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,14 @@ pub const PING: &str = "kdeconnect.ping";
 
 /// A device's battery report (3c).
 pub const BATTERY: &str = "kdeconnect.battery";
+
+/// Clipboard text, both ways (3c).
+pub const CLIPBOARD: &str = "kdeconnect.clipboard";
+
+/// The longest line a paired device's link reads, as the Pocketdesk control
+/// channel's (a long copied text is one line); an unpaired one's is
+/// [`MAX_LINE`].
+const PAIRED_LINE: usize = 4 * 1024 * 1024;
 
 /// An unpaired link silent this long is closed (3a review): it holds one
 /// of the few unpaired places, and the device dials again at the next Find.
@@ -47,6 +56,9 @@ pub enum Event {
     Unpair,
     /// Ping it.
     Ping,
+    /// The computer's clipboard changed to this text: sent to a paired
+    /// device allowed the clipboard.
+    Clipboard(String),
     /// Close: a newer link from the same device took this one's place.
     Replaced,
 }
@@ -60,6 +72,15 @@ static LIVE: LazyLock<Mutex<HashMap<String, LiveLink>>> = LazyLock::new(Default:
 
 /// The next link's token.
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The devices with a link up now.
+pub fn live() -> Vec<String> {
+    LIVE.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .keys()
+        .cloned()
+        .collect()
+}
 
 /// Tell `device_id`'s link of `event`; false when it has none.
 pub fn tell(device_id: &str, event: Event) -> bool {
@@ -222,12 +243,14 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
         waiting: None,
         last_asked: 0,
         unpaired,
+        clipboard_in: None,
     };
     let (reader, mut writer) = tokio::io::split(link.stream);
     let mut reader = PacketReader::new(reader);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut heard = tokio::time::Instant::now();
     'link: loop {
+        reader.limit = if state.paired { PAIRED_LINE } else { MAX_LINE };
         if !state.paired && state.waiting.is_none() && heard.elapsed() >= UNPAIRED_IDLE {
             tracing::info!(device_id, "An unpaired KDE Connect link went quiet; closed");
             break;
@@ -253,6 +276,13 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
                 break 'link;
             }
         }
+        if let Some(text) = state.clipboard_in.take() {
+            // Not sent back to the device it came from.
+            crate::clipboard_push::note_from_phone(&device_id, &text);
+            if let Err(e) = crate::plugins::clipboard::set_clipboard(&text).await {
+                tracing::warn!("The clipboard from a KDE Connect device was not set: {e}");
+            }
+        }
     }
     state.end_waiting(now_unix());
     tracing::info!(device_id, "A KDE Connect device went");
@@ -272,6 +302,8 @@ struct State {
     last_asked: u64,
     /// The unpaired place this link holds, until it pairs.
     unpaired: Option<super::Slot>,
+    /// Clipboard text the device sent, for the loop to set.
+    clipboard_in: Option<String>,
 }
 
 impl State {
@@ -299,6 +331,14 @@ impl State {
             }
             BATTERY if may.battery => {
                 crate::plugins::phone_battery::take_from(&self.device_id, &packet.body);
+            }
+            // `kdeconnect.clipboard.connect`, the device's clipboard as it
+            // connects, is not taken: each connection would replace the
+            // computer's clipboard.
+            CLIPBOARD if may.clipboard => {
+                if let Some(text) = packet.body.get("content").and_then(|v| v.as_str()) {
+                    self.clipboard_in = Some(text.to_string());
+                }
             }
             other => {
                 // The device's own text, kept short for the log.
@@ -546,7 +586,12 @@ impl State {
                 vec![pairing::answer(false)]
             }
             Event::Ping if self.paired => vec![NetworkPacket::new(PING)],
-            Event::Ping | Event::Replaced => Vec::new(),
+            Event::Clipboard(text) if self.paired && self.permissions().clipboard => {
+                let mut packet = NetworkPacket::new(CLIPBOARD);
+                packet.body = serde_json::json!({ "content": text });
+                vec![packet]
+            }
+            Event::Ping | Event::Clipboard(_) | Event::Replaced => Vec::new(),
         }
     }
 
@@ -587,6 +632,8 @@ async fn send<W: AsyncWrite + Unpin>(
 /// A device's packets, one a line.
 struct PacketReader<R> {
     reader: BufReader<R>,
+    /// The longest line taken.
+    limit: usize,
     /// The line read so far: kept across a wait cut short, so a tick or an
     /// event in the middle of a line loses none of it (3b review).
     line: Vec<u8>,
@@ -596,17 +643,18 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
     fn new(reader: R) -> Self {
         Self {
             reader: BufReader::new(reader),
+            limit: MAX_LINE,
             line: Vec::new(),
         }
     }
 
-    /// The next packet, `None` at the end or on a line longer than
-    /// [`MAX_LINE`]; a line that is not a packet is skipped. Safe to cut
+    /// The next packet, `None` at the end or on a line longer than the
+    /// limit; a line that is not a packet is skipped. Safe to cut
     /// short in `select!`: `read_until` keeps what it read in `line`.
     async fn next(&mut self) -> Option<NetworkPacket> {
         use tokio::io::AsyncReadExt;
         loop {
-            let room = (MAX_LINE + 1).saturating_sub(self.line.len()) as u64;
+            let room = (self.limit + 1).saturating_sub(self.line.len()) as u64;
             let read = (&mut self.reader)
                 .take(room)
                 .read_until(b'\n', &mut self.line)
@@ -655,6 +703,7 @@ mod tests {
             waiting: None,
             last_asked: 0,
             unpaired: None,
+            clipboard_in: None,
         }
     }
 
@@ -1027,6 +1076,56 @@ mod tests {
             Some(60),
             "the owner's change holds at once"
         );
+    }
+
+    fn clipboard(text: &str) -> NetworkPacket {
+        let mut packet = NetworkPacket::new(CLIPBOARD);
+        packet.body = serde_json::json!({ "content": text });
+        packet
+    }
+
+    #[test]
+    fn the_clipboard_goes_both_ways_with_a_paired_device_allowed_it() {
+        let mut s = state("clipboard", false);
+        s.packet(&clipboard("from the phone"));
+        assert_eq!(s.clipboard_in, None, "not paired");
+        assert!(s.event(Event::Clipboard("hi".to_string())).is_empty());
+        s.pair_now();
+        s.packet(&clipboard("from the phone"));
+        assert_eq!(s.clipboard_in.take().as_deref(), Some("from the phone"));
+        let mut connect = clipboard("as it connects");
+        connect.packet_type = "kdeconnect.clipboard.connect".to_string();
+        s.packet(&connect);
+        assert_eq!(s.clipboard_in, None, "not on connecting");
+        let out = s.event(Event::Clipboard("from here".to_string()));
+        assert_eq!(out[0].packet_type, CLIPBOARD);
+        assert_eq!(out[0].body["content"], "from here");
+        let off = devices::KdePermissions {
+            clipboard: false,
+            ..devices::KdePermissions::default()
+        };
+        devices::set_permissions(&s.dir, &s.device_id, off).unwrap();
+        s.packet(&clipboard("again"));
+        assert_eq!(s.clipboard_in, None);
+        assert!(s.event(Event::Clipboard("again".to_string())).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_paired_links_line_may_be_long_and_an_unpaired_ones_not() {
+        let long = clipboard(&"x".repeat(MAX_LINE * 2));
+        let wire = long.to_wire().unwrap();
+        let (mut device, ours) = tokio::io::duplex(64 * 1024);
+        let mut reader = PacketReader::new(ours);
+        let writing = tokio::spawn(async move {
+            device.write_all(&wire).await.unwrap();
+            device.write_all(&wire).await.unwrap();
+            device
+        });
+        reader.limit = PAIRED_LINE;
+        assert_eq!(reader.next().await.unwrap().packet_type, CLIPBOARD);
+        reader.limit = MAX_LINE;
+        assert!(reader.next().await.is_none());
+        drop(writing);
     }
 
     #[test]

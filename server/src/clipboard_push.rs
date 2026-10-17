@@ -347,6 +347,18 @@ async fn push_change(
             computer.send(packet.clone());
         }
     }
+    // Paired KDE Connect devices, as phones (3c): each link sends it only
+    // to a device allowed the clipboard.
+    if TO_PHONES.load(Ordering::Relaxed) {
+        for device_id in crate::kdeconnect_compat::link::live() {
+            if !came_from(from_phone.as_ref(), &device_id, &text) {
+                crate::kdeconnect_compat::link::tell(
+                    &device_id,
+                    crate::kdeconnect_compat::link::Event::Clipboard(text.clone()),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

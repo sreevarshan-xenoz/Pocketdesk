@@ -31,8 +31,12 @@ pub const PROTOCOL: u64 = 8;
 /// What this computer takes from a KDE Connect device, and sends one
 /// (pairing needs no capability). A device turns its plugin for this
 /// computer on when one of these meets the plugin's packets.
-pub const INCOMING: &[&str] = &["kdeconnect.ping", super::link::BATTERY];
-pub const OUTGOING: &[&str] = &["kdeconnect.ping"];
+pub const INCOMING: &[&str] = &[
+    "kdeconnect.ping",
+    super::link::BATTERY,
+    super::link::CLIPBOARD,
+];
+pub const OUTGOING: &[&str] = &["kdeconnect.ping", super::link::CLIPBOARD];
 
 /// Whether `id` is a KDE Connect device id: 32 to 38 letters, digits, `_`
 /// or `-`.
