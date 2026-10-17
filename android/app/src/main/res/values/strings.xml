@@ -62,7 +62,6 @@
     <string name="wake">Wake</string>
     <string name="remove_host">Remove</string>
     <string name="remove_host_message">Remove %1$s from this phone? Pairing and cached settings go with it.</string>
-    <string name="auto_badge">Auto</string>
     <string name="host_ports">stream %1$d · control %2$d</string>
     <string name="streaming_port">Streaming port</string>
     <string name="control_port">Control port (clipboard, files)</string>
@@ -585,10 +584,13 @@
     <!-- U3: names for computers. -->
     <string name="lock_confirm_title_named">Lock %1$s?</string>
     <string name="card_rename">Rename</string>
+    <string name="card_more">More for %1$s</string>
+    <string name="status_paired">Paired</string>
+    <string name="status_not_paired">Not paired</string>
+    <string name="status_auto">Connects at launch</string>
     <string name="rename_title">Rename %1$s</string>
     <string name="rename_label">Name</string>
     <string name="rename_hint">Blank: the name it gives itself</string>
-    <string name="host_address_ports">%1$s · stream %2$d · control %3$d</string>
     <string name="settings_this_phone">This phone</string>
     <string name="settings_phone_name">This phone\'s name</string>
     <string name="settings_phone_name_summary">What computers call this phone, sent to each one it connects to. Blank: Android\'s device name</string>

@@ -1,5 +1,16 @@
 package dev.pocketdesk.android.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -559,6 +570,11 @@ private fun FoundCard(computer: FoundComputer, onConnect: () -> Unit) {
     }
 }
 
+/**
+ * A saved computer (U4): its name with a status line under it, a filled
+ * Connect with Remote and Show screen beside it, and the rest in a menu,
+ * Remove last. The whole card still connects, and says so to TalkBack.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HostCard(
@@ -578,103 +594,106 @@ private fun HostCard(
     onRemove: () -> Unit,
     onRename: () -> Unit,
 ) {
-    Card(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // U3: its name, the address under it; the address alone
-                // until it has one.
-                Text(
-                    name ?: host.address,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (online) {
-                        Text(
-                            stringResource(R.string.found_on_network),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(8.dp))
+    val title = name ?: host.address
+    val connectLabel = stringResource(R.string.connect)
+    var menu by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardDefaults.shape)
+            .clickable(onClickLabel = connectLabel, onClick = onConnect),
+    ) {
+        Column(modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f).padding(top = 4.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Box {
+                    IconButton(onClick = { menu = true }) {
+                        LlIcon(LlIcons.MoreVert, stringResource(R.string.card_more, title))
                     }
-                    if (isAuto) {
-                        Text(
-                            stringResource(R.string.auto_badge),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    if (paired) {
-                        Text(
-                            stringResource(R.string.paired),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        val entries = buildList {
+                            if (hasWake) add(R.string.wake to onWake)
+                            add(R.string.wake_settings to onWakeSettings)
+                            add(R.string.doctor_title to onCheck)
+                            add(R.string.card_rename to onRename)
+                        }
+                        entries.forEach { (label, action) ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(label)) },
+                                onClick = {
+                                    menu = false
+                                    action()
+                                },
+                            )
+                        }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.remove_host), color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                menu = false
+                                onRemove()
+                            },
                         )
                     }
                 }
             }
-            Text(
-                if (name != null) {
-                    stringResource(R.string.host_address_ports, host.address, host.port, host.controlPort)
-                } else {
-                    stringResource(R.string.host_ports, host.port, host.controlPort)
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             if (checking) {
                 Text(
                     stringResource(R.string.card_checking),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = 4.dp, end = 12.dp),
                 )
                 androidx.compose.material3.LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp),
+                        .padding(top = 4.dp, end = 12.dp),
                 )
             }
             FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 2.dp),
-                horizontalArrangement = Arrangement.End,
+                    .padding(top = 8.dp, end = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                Button(onClick = onConnect) { Text(connectLabel) }
                 // The phone as a remote (T10i): trackpad and keys, no picture.
-                TextButton(onClick = onRemote) {
-                    Text(stringResource(R.string.remote_button), style = MaterialTheme.typography.labelMedium)
-                }
+                OutlinedButton(onClick = onRemote) { Text(stringResource(R.string.remote_button)) }
                 // This phone's screen on the computer (T10k).
-                TextButton(onClick = onCast) {
-                    Text(stringResource(R.string.cast_button), style = MaterialTheme.typography.labelMedium)
-                }
-                if (hasWake) {
-                    TextButton(onClick = onWake) {
-                        Text(stringResource(R.string.wake), style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-                TextButton(onClick = onCheck) {
-                    Text(stringResource(R.string.doctor_title), style = MaterialTheme.typography.labelMedium)
-                }
-                TextButton(onClick = onWakeSettings) {
-                    Text(stringResource(R.string.wake_settings), style = MaterialTheme.typography.labelMedium)
-                }
-                TextButton(onClick = onRename) {
-                    Text(stringResource(R.string.card_rename), style = MaterialTheme.typography.labelMedium)
-                }
-                TextButton(onClick = onRemove) {
-                    Text(
-                        stringResource(R.string.remove_host),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                OutlinedButton(onClick = onCast) { Text(stringResource(R.string.cast_button)) }
+            }
+        }
+    }
+}
+
+/** The card's status line: [HostStatus]'s parts in words, "On this network" in the accent colour. */
+@Composable
+private fun statusLine(parts: List<HostStatus.Part>): AnnotatedString {
+    val accent = MaterialTheme.colorScheme.primary
+    val words = parts.map { part ->
+        when (part) {
+            is HostStatus.Part.Address -> part.address
+            HostStatus.Part.OnThisNetwork -> stringResource(R.string.found_on_network)
+            HostStatus.Part.Paired -> stringResource(R.string.status_paired)
+            HostStatus.Part.NotPaired -> stringResource(R.string.status_not_paired)
+            HostStatus.Part.OpensAtLaunch -> stringResource(R.string.status_auto)
+            is HostStatus.Part.Ports -> stringResource(R.string.host_ports, part.stream, part.control)
+        }
+    }
+    return buildAnnotatedString {
+        parts.forEachIndexed { i, part ->
+            if (i > 0) append(" · ")
+            if (part == HostStatus.Part.OnThisNetwork) {
+                withStyle(SpanStyle(color = accent)) { append(words[i]) }
+            } else {
+                append(words[i])
             }
         }
     }

@@ -55,7 +55,6 @@
     <string name="wake">எழுப்பு</string>
     <string name="remove_host">நீக்கு</string>
     <string name="remove_host_message">இந்த கைபேசியில் இருந்து %1$s ஐ நீக்கவா? இணைப்பு மற்றும் சேமித்த அமைப்புகளும் நீக்கப்படும்.</string>
-    <string name="auto_badge">தானியங்கி</string>
     <string name="host_ports">ஒளிபரப்பு %1$d · கட்டுப்பாடு %2$d</string>
     <string name="streaming_port">ஸ்ட்ரீமிங் போர்ட்</string>
     <string name="control_port">கண்ட்ரோல் போர்ட் (க்ளிப் போர்டு, கோப்புகள்)</string>
@@ -578,10 +577,13 @@
     <!-- U3: names for computers. -->
     <string name="lock_confirm_title_named">%1$s-ஐப் பூட்டவா?</string>
     <string name="card_rename">மறுபெயரிடு</string>
+    <string name="card_more">%1$s க்கான மேலும்</string>
+    <string name="status_paired">இணைக்கப்பட்டது</string>
+    <string name="status_not_paired">இணைக்கப்படவில்லை</string>
+    <string name="status_auto">திறக்கும்போது இணையும்</string>
     <string name="rename_title">%1$s-க்கு மறுபெயரிடு</string>
     <string name="rename_label">பெயர்</string>
     <string name="rename_hint">வெறுமையாக: அது தனக்குத் தரும் பெயர்</string>
-    <string name="host_address_ports">%1$s · ஒளிபரப்பு %2$d · கட்டுப்பாடு %3$d</string>
     <string name="settings_this_phone">இந்தத் தொலைபேசி</string>
     <string name="settings_phone_name">இந்தத் தொலைபேசியின் பெயர்</string>
     <string name="settings_phone_name_summary">கணினிகள் இந்தத் தொலைபேசியை அழைக்கும் பெயர்; இணையும் ஒவ்வொரு கணினிக்கும் அனுப்பப்படும். வெறுமையாக: Android சாதனப் பெயர்</string>
