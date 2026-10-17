@@ -175,6 +175,9 @@ fun RemoteInputScreen(
         }
     }
 
+    // N1: a ring from the computer sounds here too, as in a session.
+    SirenWatcher(context)
+
     // The keyboard, as in a session: the IME types into an invisible sink.
     val keyboardScope = rememberCoroutineScope()
     val keyboard =

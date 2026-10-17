@@ -143,6 +143,28 @@ class StopRingReceiver : BroadcastReceiver() {
 }
 
 /**
+ * Whether a session or the remote is on screen with its [SirenWatcher]
+ * (dev.pocketdesk.android.ui), which then takes the ring latch itself; the
+ * background tick takes it otherwise (N1 review: a remote, which had no
+ * watcher, left a ring in the latch to sound when it closed).
+ */
+object RingOwner {
+    @Volatile
+    private var watchers = 0
+
+    fun watching() {
+        synchronized(this) { watchers++ }
+    }
+
+    fun left() {
+        synchronized(this) { watchers = (watchers - 1).coerceAtLeast(0) }
+    }
+
+    val watched: Boolean
+        get() = watchers > 0
+}
+
+/**
  * The notification listener's tick for N1: keep the link to the phone's
  * computer while "Ring from the computer" is on, and take the bridge's ring
  * latch outside a session ([RingRule]).
@@ -161,8 +183,8 @@ class BackgroundRing(private val ctx: Context) {
                 RustCore.connectToPeer(own.address, own.controlPort, HostStore.wanIdentity(ctx, own.address))
             }
         }
-        val inSession = RustCore.isStreamingActive
-        // The latch is taken only outside a session, whose watcher takes it.
+        // A session or the remote on screen takes the latch itself.
+        val inSession = RingOwner.watched
         val asked = !inSession && RustCore.checkSiren()
         when (rule.decide(asked, on, inSession, now)) {
             RingRule.Act.RING ->
