@@ -42,6 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-17: **N8, GNOME and KDE hosts that work unattended (branch `feat/unattended-portal`; spec `docs/superpowers/specs/2026-10-17-unattended-portal-design.md`, with an as-built section).**
+  - **Remember the grant:** with "Remember the screen-sharing grant" on (Linux, off by default), the portal capture asks to keep its grant until revoked and restores it with the last token (owner-only in the state folder), so the dialog shows once (SECURITY.md limit 24).
+  - **Portal input:** where uinput cannot be opened on GNOME or KDE, input goes through a RemoteDesktop portal session that also shares the screen. One grant covers both; a worker owns the session for the capture's life (`core::streaming::portal_input`).
+  - **Compile:** the Linux code compiled clean in CI on the first push.
+  - **Fresh review (0 Critical, 3 Important), fixed:** a second session ended the first's sharing, a slow first dialog failed in 10 s, and portal sessions leaked. Also fixed: a fallback to the screen alone, keysyms, forgetting at start, and the docs' promises.
+  - **Not run on a GNOME or KDE desktop** (checklist §100).
 - 2026-10-17: **N6, the phone panel and a Linux tray (branch `feat/phone-panel`; spec `docs/superpowers/specs/2026-10-17-phone-panel-design.md`, with an as-built section).**
   - **The Overview** shows each paired phone in a short block: where it is (in a session, linked or away), its battery, its last session (from the session log's tail), and Ring, Send file… (Files with it chosen) and Send link… (a box right there), each saying why when it cannot reach the phone now (`model::phone_rows`, tested).
   - **Linux has a tray:** a StatusNotifierItem over D-Bus (`ksni`, no GTK) with the Windows menu. With no tray host, closing quits as before. The no-tray stub is gone.
