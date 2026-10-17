@@ -35,7 +35,8 @@ import dev.pocketdesk.android.R
  * The parts every Settings row is made of (U4): a group's heading, marked as
  * one for TalkBack; rows with no icon (they carried no meaning); a summary of
  * at most two lines, with an ⓘ that shows the whole when it is longer; and a
- * switch row that is one toggle and one TalkBack stop.
+ * switch row that is one toggle and one TalkBack stop (a long summary's ⓘ is
+ * a second, its own button).
  */
 
 /** A group's heading. */
@@ -52,9 +53,8 @@ fun SettingsHeader(label: String) {
 }
 
 /**
- * A row with a switch. The whole row toggles it; [onRowClick], when set,
- * is what the row does instead (a switch that needs access first opens
- * Android's page for it). [warning] shows the summary in the error colour.
+ * A row with a switch, which the whole row toggles, an [indent] included.
+ * [warning] shows the summary in the error colour.
  */
 @Composable
 fun SettingSwitch(
@@ -65,17 +65,15 @@ fun SettingSwitch(
     enabled: Boolean = true,
     warning: Boolean = false,
     indent: Boolean = false,
-    onRowClick: (() -> Unit)? = null,
 ) {
     SettingRow(
         title = title,
         summary = summary,
         warning = warning,
+        // The indent inside the toggle, so it is no dead strip (U4 review).
         modifier = Modifier
-            .padding(start = if (indent) 24.dp else 0.dp)
-            .toggleable(value = checked, enabled = enabled, role = Role.Switch) { on ->
-                if (onRowClick != null) onRowClick() else onChange(on)
-            },
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+            .padding(start = if (indent) 24.dp else 0.dp),
     ) {
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
