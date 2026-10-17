@@ -82,7 +82,7 @@
     <string name="connecting">இணைக்கிறது…</string>
     <string name="retry">மீண்டும் முயற்சி</string>
     <string name="exit">வெளியேறு</string>
-    <string name="mode_direct_touch">நேரடி தொடும்</string>
+    <string name="mode_direct_touch">நேரடித் தொடுதல்</string>
     <string name="mode_trackpad">டிராக்பேட்</string>
     <string name="ring_pc">PC ஒலியெழுப்பு</string>
     <string name="paired">இணைக்கப்பட்டது ✓</string>

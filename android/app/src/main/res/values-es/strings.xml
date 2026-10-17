@@ -82,7 +82,7 @@
     <string name="connecting">Conectando…</string>
     <string name="retry">Reintentar</string>
     <string name="exit">Salir</string>
-    <string name="mode_direct_touch">Tacto directo</string>
+    <string name="mode_direct_touch">Toque directo</string>
     <string name="mode_trackpad">Panel táctil</string>
     <string name="ring_pc">Hacer sonar PC</string>
     <string name="paired">Emparejado ✓</string>
