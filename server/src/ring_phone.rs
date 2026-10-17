@@ -36,6 +36,11 @@ impl Pace {
         self.last.insert(device.to_string(), now);
         true
     }
+
+    /// A ring counted by [`Pace::due`] that did not go: it uses up no minute.
+    pub fn forget(&mut self, device: &str) {
+        self.last.remove(device);
+    }
 }
 
 fn pace() -> &'static Mutex<Pace> {
@@ -58,10 +63,11 @@ pub async fn run_watcher() {
         let now = pocketdesk_core::local::pin::now_unix();
         for request in pocketdesk_core::local::rings::take_all(&dir, now) {
             let clients = crate::state::clone_clients().await;
+            // A computer is never rung, whatever its switches say (N1 review).
             let allowed = crate::plugins::pair::allows(
                 &request.device_id,
                 pocketdesk_core::protocol::permissions::Capability::Ring,
-            );
+            ) && !crate::plugins::pair::is_computer_device(&request.device_id);
             match ring(&request, &clients, allowed, pace(), Instant::now()).await {
                 Ok(()) => tracing::info!("Rang {}", request.device_id),
                 Err(reason) => tracing::info!("{} not rung: {reason}", request.device_id),
@@ -93,10 +99,14 @@ async fn ring(
         return Err("it was rung less than a minute ago".to_string());
     }
     let packet = NetworkPacket::new(FIND).with_body(serde_json::json!({ "ring": true }));
-    phone
-        .send_packet(&packet)
-        .await
-        .map_err(|e| format!("could not send: {e}"))
+    let sent = phone.send_packet(&packet).await;
+    if sent.is_err() {
+        // Counted only once it went (N1 review): a failed send is tried again.
+        pace.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .forget(&request.device_id);
+    }
+    sent.map_err(|e| format!("could not send: {e}"))
 }
 
 #[cfg(test)]
@@ -173,8 +183,40 @@ mod tests {
         assert_eq!(b.sent.lock().unwrap().len(), 2);
     }
 
+    /// N1 review: a send that fails uses up no minute.
+    #[tokio::test]
+    async fn a_ring_that_could_not_be_sent_is_tried_again() {
+        struct Broken;
+        #[async_trait::async_trait]
+        impl DeviceSender for Broken {
+            fn device_id(&self) -> &str {
+                "phone-x"
+            }
+            fn connection_id(&self) -> &str {
+                "phone-x"
+            }
+            async fn send_packet(&self, _packet: &NetworkPacket) -> Result<()> {
+                Err(pocketdesk_core::error::PocketdeskError::Io {
+                    operation: "send",
+                    detail: "gone".to_string(),
+                })
+            }
+        }
+        let clients: Vec<Arc<dyn DeviceSender>> = vec![Arc::new(Broken)];
+        let pace = Mutex::new(Pace::default());
+        let now = Instant::now();
+        let failed = ring(&request("phone-x"), &clients, true, &pace, now).await;
+        assert!(failed.unwrap_err().contains("could not send"));
+        assert!(
+            pace.lock()
+                .unwrap()
+                .due("phone-x", now + Duration::from_secs(1)),
+            "the failed ring used up no minute"
+        );
+    }
+
     #[test]
-    fn a_refused_ring_does_not_use_up_the_minute() {
+    fn each_phone_has_its_own_minute() {
         let mut pace = Pace::default();
         let now = Instant::now();
         assert!(pace.due("phone-a", now));

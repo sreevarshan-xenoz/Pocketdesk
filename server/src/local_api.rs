@@ -524,6 +524,15 @@ pub fn ring_in(state_dir: &Path, query: &str, running: bool) -> (Value, i32) {
         Ok(id) => id,
         Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
     };
+    // A computer is never rung (N1 review).
+    if store.is_computer(&device_id) {
+        return (
+            error(format!(
+                "{device_id} is a computer, not a phone: only phones ring"
+            )),
+            exit::FAILED,
+        );
+    }
     // The server would drop it: say so now, not "queued".
     if !store.permissions(&device_id).allows(Capability::Ring) {
         return (
@@ -532,13 +541,10 @@ pub fn ring_in(state_dir: &Path, query: &str, running: bool) -> (Value, i32) {
         );
     }
     let now = pocketdesk_core::local::pin::now_unix();
-    let reachable = live_mirror(state_dir, now, running).is_some_and(|mirror| {
-        mirror
-            .sessions
-            .iter()
-            .any(|s| s.device_id.as_deref() == Some(device_id.as_str()))
-            || mirror.linked.iter().any(|p| p.device_id == device_id)
-    });
+    // A control link is what carries the ring, a session's or the
+    // background one (N1 review: a session's video alone carries none).
+    let reachable = live_mirror(state_dir, now, running)
+        .is_some_and(|mirror| mirror.linked.iter().any(|p| p.device_id == device_id));
     if !reachable {
         return (
             error(format!(
@@ -1559,12 +1565,14 @@ mod tests {
     fn a_ring_is_queued_for_a_linked_phone_with_ring_on() {
         let (dir, _) = send_setup("ring");
         let (out, code) = ring_in(&dir, "5f1c9b", true);
-        assert_eq!(code, exit::DONE, "in a session: {out}");
-        assert_eq!(out["state"], "queued");
+        assert_eq!(
+            code,
+            exit::FAILED,
+            "a session's video, no control link: {out}"
+        );
         let now = pocketdesk_core::local::pin::now_unix();
-        assert_eq!(pocketdesk_core::local::rings::take_all(&dir, now).len(), 1);
 
-        // Only the background link, no session.
+        // The background link, or a session's: a control link.
         std::fs::write(
             dir.join(LIVE_FILE),
             json!({
@@ -1577,6 +1585,9 @@ mod tests {
         .unwrap();
         let (out, code) = ring_in(&dir, "5f1c9b", true);
         assert_eq!(code, exit::DONE, "linked: {out}");
+        assert_eq!(out["state"], "queued");
+        let now = pocketdesk_core::local::pin::now_unix();
+        assert_eq!(pocketdesk_core::local::rings::take_all(&dir, now).len(), 1);
 
         in_session(&dir, &[]);
         let (out, code) = ring_in(&dir, "5f1c9b", true);
@@ -1590,7 +1601,6 @@ mod tests {
         let (_, code) = ring_in(&dir, "5f1c9b", false);
         assert_eq!(code, exit::NO_SERVER);
 
-        in_session(&dir, &["5f1c9b3d-6e70"]);
         let mut store = TrustStore::read(dir.join(TRUST_FILE)).unwrap();
         let mut permissions = store.permissions("5f1c9b3d-6e70");
         permissions.ring = Some(false);
@@ -1598,11 +1608,23 @@ mod tests {
         let (out, code) = ring_in(&dir, "5f1c9b", true);
         assert_eq!(code, exit::FAILED, "{out}");
         assert!(out["error"].as_str().unwrap().contains("Ring is off"));
+
+        // Another of the owner's computers is never rung.
+        TrustStore::update(dir.join(TRUST_FILE), |store| {
+            store.trust_computer("7c2d9e4f-1a3b")
+        })
+        .unwrap();
+        let mut store = TrustStore::read(dir.join(TRUST_FILE)).unwrap();
+        let mut permissions = store.permissions("7c2d9e4f-1a3b");
+        permissions.ring = Some(true);
+        store.set_permissions("7c2d9e4f-1a3b", permissions).unwrap();
+        let (out, code) = ring_in(&dir, "7c2d9e4f", true);
+        assert_eq!(code, exit::FAILED, "{out}");
+        assert!(out["error"].as_str().unwrap().contains("computer"));
         let now = pocketdesk_core::local::pin::now_unix();
-        assert_eq!(
-            pocketdesk_core::local::rings::take_all(&dir, now).len(),
-            1,
-            "only the linked one's ring, none refused"
+        assert!(
+            pocketdesk_core::local::rings::take_all(&dir, now).is_empty(),
+            "none refused was queued"
         );
     }
 

@@ -96,12 +96,10 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                 grant_remaining: store.grant_remaining(&id),
                 connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
                 takes_files: takes_files(&id),
-                linked: mirror.as_ref().is_some_and(|m| {
-                    m.sessions
-                        .iter()
-                        .any(|s| s.device_id.as_deref() == Some(&id))
-                        || m.linked.iter().any(|p| p.device_id == id)
-                }),
+                // A control link carries the ring (N1 review).
+                linked: mirror
+                    .as_ref()
+                    .is_some_and(|m| m.linked.iter().any(|p| p.device_id == id)),
                 permissions: store.permissions(&id),
                 battery: batteries.get(&id).copied(),
                 computer: store.is_computer(&id),
@@ -433,10 +431,10 @@ mod tests {
         assert_eq!(snapshot_with(&dir, 101, true).sessions.len(), 1);
     }
 
-    /// N1: a phone is linked, so a ring reaches it, in a session or with
-    /// only the background link; neither is not.
+    /// N1: a phone is linked, so a ring reaches it, while it holds a
+    /// control link (a session's or the background one).
     #[test]
-    fn a_phone_with_a_session_or_a_background_link_is_linked() {
+    fn a_phone_with_a_control_link_is_linked() {
         let dir = temp_dir("linked");
         let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
         for id in ["a", "b", "c"] {
@@ -449,8 +447,8 @@ mod tests {
         .unwrap();
         let snap = snapshot_with(&dir, 101, true);
         let linked = |id: &str| snap.devices.iter().find(|d| d.id == id).unwrap().linked;
-        assert!(linked("a"), "in a session");
-        assert!(linked("b"), "the background link");
+        assert!(!linked("a"), "a session's video alone carries no ring");
+        assert!(linked("b"), "a control link");
         assert!(!linked("c"));
     }
 
