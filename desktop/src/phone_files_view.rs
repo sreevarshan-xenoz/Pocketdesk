@@ -101,8 +101,8 @@ impl PhoneFilesView {
         if phones.is_empty() {
             ui.label(
                 RichText::new(
-                    "No phone is connected. Open Pocketdesk on the phone; it \
-                     shares the folders its owner adds under Settings, \"Folders the computer may open\".",
+                    "No phone is connected. A phone with folders shared (its Settings, \"Folders the \
+                     computer may open\") stays connected to answer, through notification access.",
                 )
                 .color(crate::theme::muted(ui)),
             );

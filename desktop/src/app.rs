@@ -1341,10 +1341,10 @@ impl PocketdeskApp {
         let Some(device) = self.send_target() else {
             ui.label(
                 RichText::new(
-                    "No phone or computer can take a file right now. A phone can while Pocketdesk \
-                     is open on it, in a session, or with \"Files from the computer in the \
-                     background\" on; another of your computers, while its link is up. Files \
-                     land in the phone's Downloads/Pocketdesk.",
+                    "No phone or computer can take a file right now. A phone can in a session, or \
+                     with \"Files from the computer in the background\" on in its Settings; \
+                     another of your computers, while its link is up. Files land in the \
+                     phone's Downloads/Pocketdesk.",
                 )
                 .color(crate::theme::muted(ui)),
             );
