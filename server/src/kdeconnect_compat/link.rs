@@ -88,6 +88,26 @@ pub fn live() -> Vec<String> {
         .collect()
 }
 
+/// The paired devices with a link up now: the clipboard watcher's (3c
+/// review: an unpaired link had kept it awake, with no one to tell).
+pub fn live_paired() -> Vec<String> {
+    let live = live();
+    if live.is_empty() {
+        return live;
+    }
+    let Ok(dir) = crate::state::state_dir() else {
+        return Vec::new();
+    };
+    paired_among(live, &devices::devices(&dir))
+}
+
+/// Those of `live` that are paired.
+fn paired_among(live: Vec<String>, paired: &[KdeDevice]) -> Vec<String> {
+    live.into_iter()
+        .filter(|id| paired.iter().any(|d| &d.device_id == id))
+        .collect()
+}
+
 /// Tell `device_id`'s link of `event`; false when it has none.
 pub fn tell(device_id: &str, event: Event) -> bool {
     let link = LIVE
@@ -1269,6 +1289,21 @@ mod tests {
             crate::plugins::phone_battery::charge_of(&s.device_id),
             None,
             "no battery taken from another packet"
+        );
+    }
+
+    #[test]
+    fn only_paired_links_count_for_the_clipboard() {
+        let paired = KdeDevice {
+            device_id: "p".to_string(),
+            name: "Phone".to_string(),
+            cert_hash: String::new(),
+            paired_unix: 1,
+            permissions: devices::KdePermissions::default(),
+        };
+        assert_eq!(
+            paired_among(vec!["p".to_string(), "stranger".to_string()], &[paired]),
+            ["p"]
         );
     }
 
