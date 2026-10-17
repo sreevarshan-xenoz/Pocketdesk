@@ -15,6 +15,7 @@ pub mod events;
 pub mod home_assistant;
 pub mod identity;
 pub mod kdeconnect;
+pub mod kdeconnect_devices;
 pub mod links;
 pub mod network;
 pub mod outbox;

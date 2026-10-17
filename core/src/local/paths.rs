@@ -35,6 +35,12 @@ pub const LINKS_DIR: &str = "links_out";
 pub const KDECONNECT_SEEN_FILE: &str = "kdeconnect_seen.json";
 /// The desktop app's request to look for KDE Connect devices: until when.
 pub const KDECONNECT_FIND_FILE: &str = "kdeconnect_find";
+/// KDE Connect devices paired with this computer (3b), owner-only.
+pub const KDECONNECT_DEVICES_FILE: &str = "kdeconnect_devices.json";
+/// KDE Connect pairings waiting for an answer, with their codes (3b).
+pub const KDECONNECT_PAIRING_FILE: &str = "kdeconnect_pairing.json";
+/// The desktop app's requests about KDE Connect devices, one file each.
+pub const KDECONNECT_OUT_DIR: &str = "kdeconnect_out";
 /// The owner's other computers this one paired with (2f), owner-only.
 pub const COMPUTERS_FILE: &str = "computers.json";
 /// The desktop app's requests about them, one file each.
