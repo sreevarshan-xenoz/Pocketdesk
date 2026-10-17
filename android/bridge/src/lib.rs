@@ -140,6 +140,19 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetData
     }
 }
 
+/// The name this phone gives itself to computers (U3).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetDeviceName(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+) {
+    let name = jstring_to_string(&mut env, &name);
+    if api::set_device_name(name) {
+        RUNTIME.block_on(api::close_control_link());
+    }
+}
+
 /// Pin a desktop's certificate for `address` from a scanned pairing code.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePinPeerCertificate(

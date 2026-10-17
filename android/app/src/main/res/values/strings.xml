@@ -578,4 +578,14 @@
     <string name="ring_failed">Could not ring the computer: %1$s</string>
     <string name="key_failed">That key did not reach the computer: %1$s</string>
     <string name="shortcut_failed">%1$s did not reach the computer: %2$s</string>
+    <!-- U3: names for computers. -->
+    <string name="lock_confirm_title_named">Lock %1$s?</string>
+    <string name="card_rename">Rename</string>
+    <string name="rename_title">Rename %1$s</string>
+    <string name="rename_label">Name</string>
+    <string name="rename_hint">Blank: the name it gives itself</string>
+    <string name="host_address_ports">%1$s · stream %2$d · control %3$d</string>
+    <string name="settings_this_phone">This phone</string>
+    <string name="settings_phone_name">This phone\'s name</string>
+    <string name="settings_phone_name_summary">What computers call this phone, sent to each one it connects to. Blank: Android\'s device name</string>
 </resources>

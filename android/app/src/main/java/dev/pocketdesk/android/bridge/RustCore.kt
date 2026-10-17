@@ -26,6 +26,7 @@ object RustCore {
     private external fun nativeVersion(): String
     private external fun nativeInit(context: Context)
     private external fun nativeSetDataDir(path: String)
+    private external fun nativeSetDeviceName(name: String)
     private external fun nativeNetworkChanged()
     private external fun nativeSetInternetFiles(enabled: Boolean)
     private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
@@ -42,6 +43,7 @@ object RustCore {
     private external fun nativeSendPhonePacketOnLink(address: String, port: Int, packetType: String, body: String): String
     private external fun nativeTakeSmsRequests(): String
     private external fun nativeControlPeer(): String
+    private external fun nativePeerName(address: String): String
     private external fun nativeSendClipboardImage(address: String, port: Int, path: String): String
     private external fun nativeFetchClipboardImage(
         address: String,
@@ -226,6 +228,11 @@ object RustCore {
     val version: String
         get() = nativeVersion()
 
+    /** The name this phone gives computers from its next connection (U3). */
+    fun setDeviceName(name: String) {
+        runCatching { nativeSetDeviceName(name) }
+    }
+
     /**
      * Initialize logging, hand the bridge the application context (iroh reads
      * the network's DNS servers through it; without it, relay names went to
@@ -234,6 +241,8 @@ object RustCore {
     fun start(context: Context) {
         nativeInit(context.applicationContext)
         nativeSetDataDir(context.filesDir.absolutePath)
+        // U3: what this phone calls itself to computers.
+        nativeSetDeviceName(dev.pocketdesk.android.PhoneName.current(context))
         nativeSetInternetFiles(dev.pocketdesk.android.Prefs.internetFiles(context))
         watchNetwork(context.applicationContext)
     }
@@ -342,6 +351,10 @@ object RustCore {
 
     fun sendPhonePacket(address: String, port: Int, packetType: String, body: String): Result<Unit> =
         envelope(nativeSendPhonePacket(address, port, packetType, body)).map { }
+
+    /** The name the computer at [address] gave itself when last connected (U3), or null. */
+    fun peerName(address: String): String? =
+        runCatching { nativePeerName(address) }.getOrNull()?.takeIf { it.isNotBlank() }
 
     /** The computer the live control connection is to, or null. */
     fun controlPeer(): Pair<String, Int>? =

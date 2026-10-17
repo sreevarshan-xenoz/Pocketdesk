@@ -60,14 +60,15 @@ object Shortcuts {
         )
         val wake = ShortcutPlan.Kind.WAKE
         val shortcuts = plan.map { entry ->
+            // Its name tells computers apart, else its address (U3); the
+            // icon tells connect from wake.
+            val shown = HostStore.shownName(app, entry.address)
             ShortcutInfo.Builder(app, entry.id)
-                // The address tells computers apart where little fits; the
-                // icon tells connect from wake.
-                .setShortLabel(entry.address)
+                .setShortLabel(shown)
                 .setLongLabel(
                     app.getString(
                         if (entry.kind == wake) R.string.shortcut_wake else R.string.shortcut_connect,
-                        entry.address,
+                        shown,
                     ),
                 )
                 .setIcon(

@@ -90,7 +90,52 @@ object HostStore {
             .remove("$KEY_WAN_IDENTITY_PREFIX$address")
             .remove("$KEY_MONITOR_PREFIX$address")
             .remove("$KEY_PAIRED_PREFIX$address")
+            .remove("$KEY_NAME_PREFIX$address")
+            .remove("$KEY_CHOSEN_NAME_PREFIX$address")
             .apply()
+    }
+
+    private const val KEY_NAME_PREFIX = "computer_name:"
+    private const val KEY_CHOSEN_NAME_PREFIX = "computer_name_chosen:"
+
+    private fun stored(ctx: Context, key: String): String? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(key, null)?.takeIf { it.isNotBlank() }
+
+    /** The owner's name for the computer at [address] (U3), or null. */
+    fun chosenName(ctx: Context, address: String): String? = stored(ctx, "$KEY_CHOSEN_NAME_PREFIX$address")
+
+    /** What the computer at [address] calls itself (U3), or null. */
+    fun claimedName(ctx: Context, address: String): String? = stored(ctx, "$KEY_NAME_PREFIX$address")
+
+    /** The computer's name if it has one: the owner's, else its own (U3). */
+    fun name(ctx: Context, address: String): String? = chosenName(ctx, address) ?: claimedName(ctx, address)
+
+    /** What the computer at [address] is shown by: its name, else its address. */
+    fun shownName(ctx: Context, address: String): String =
+        ComputerName.shown(chosenName(ctx, address), claimedName(ctx, address), address)
+
+    /**
+     * Keep what the computer at [address] calls itself (the pairing link,
+     * then each connection). A saved computer only; the owner's rename is
+     * kept beside it, never replaced. Whether it changed.
+     */
+    fun saveClaimedName(ctx: Context, address: String, raw: String?): Boolean {
+        val name = ComputerName.clean(raw) ?: return false
+        if (hosts(ctx).none { it.address == address } || claimedName(ctx, address) == name) return false
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString("$KEY_NAME_PREFIX$address", name)
+        }
+        return true
+    }
+
+    /** The owner names the computer at [address]; blank goes back to its own. */
+    fun rename(ctx: Context, address: String, raw: String?) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            when (val name = ComputerName.clean(raw)) {
+                null -> remove("$KEY_CHOSEN_NAME_PREFIX$address")
+                else -> putString("$KEY_CHOSEN_NAME_PREFIX$address", name)
+            }
+        }
     }
 
     private fun writeHosts(ctx: Context, list: List<Host>) {

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.ComputerName
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
@@ -80,6 +82,15 @@ fun HomeScreen(
     var hosts by remember { mutableStateOf(HostStore.hosts(context)) }
     var autoConnect by remember { mutableStateOf(HostStore.autoConnect(context)) }
     var removing by remember { mutableStateOf<HostStore.Host?>(null) }
+    // U3: the card being renamed, and a count that redraws names.
+    var renaming by remember { mutableStateOf<HostStore.Host?>(null) }
+    var names by remember { mutableIntStateOf(0) }
+    LaunchedEffect(hosts) {
+        // The names the computers gave themselves on this run's connections.
+        if (hosts.count { h -> RustCore.peerName(h.address)?.let { HostStore.saveClaimedName(context, h.address, it) } == true } > 0) {
+            names++
+        }
+    }
     // Wake status is carried as a @StringRes id + arg and resolved during
     // composition (LocalContext.getString in a coroutine is lint-error:
     // stale configuration) — same discipline as the mic/view-only toasts.
@@ -270,6 +281,7 @@ fun HomeScreen(
                 items(hosts, key = { it.address }) { host ->
                     HostCard(
                         host = host,
+                        name = names.let { HostStore.name(context, host.address) },
                         checking = checkingAddress == host.address,
                         online = host.address in network.savedOnline,
                         isAuto = autoConnect && host == hosts.first(),
@@ -303,6 +315,7 @@ fun HomeScreen(
                         onWakeSettings = { wakeSettingsFor = host.address },
                         onCheck = { checking = host },
                         onRemove = { removing = host },
+                        onRename = { renaming = host },
                     )
                 }
                 item {
@@ -438,11 +451,25 @@ fun HomeScreen(
         }
     }
 
+    renaming?.let { host ->
+        RenameDialog(
+            shown = HostStore.shownName(context, host.address),
+            chosen = HostStore.chosenName(context, host.address),
+            own = HostStore.claimedName(context, host.address),
+            onSave = { typed ->
+                HostStore.rename(context, host.address, typed)
+                names++
+                renaming = null
+            },
+            onDismiss = { renaming = null },
+        )
+    }
+
     removing?.let { host ->
         AlertDialog(
             onDismissRequest = { removing = null },
             title = { Text(stringResource(R.string.remove_host)) },
-            text = { Text(stringResource(R.string.remove_host_message, host.address)) },
+            text = { Text(stringResource(R.string.remove_host_message, HostStore.shownName(context, host.address))) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -462,6 +489,41 @@ fun HomeScreen(
             },
         )
     }
+}
+
+/**
+ * Rename a computer (U3): the owner's name, kept on this phone; blank goes
+ * back to the name it gives itself.
+ */
+@Composable
+private fun RenameDialog(
+    shown: String,
+    chosen: String?,
+    own: String?,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var typed by remember { mutableStateOf(chosen.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.rename_title, shown)) },
+        text = {
+            OutlinedTextField(
+                value = typed,
+                onValueChange = { typed = it.take(ComputerName.MAX_CHARS * 2) },
+                label = { Text(stringResource(R.string.rename_label)) },
+                placeholder = own?.let { { Text(it) } },
+                supportingText = { Text(stringResource(R.string.rename_hint)) },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(typed) }) { Text(stringResource(R.string.save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
 }
 
 @Composable
@@ -501,6 +563,7 @@ private fun FoundCard(computer: FoundComputer, onConnect: () -> Unit) {
 @Composable
 private fun HostCard(
     host: HostStore.Host,
+    name: String?,
     checking: Boolean,
     online: Boolean,
     isAuto: Boolean,
@@ -513,6 +576,7 @@ private fun HostCard(
     onWakeSettings: () -> Unit,
     onCheck: () -> Unit,
     onRemove: () -> Unit,
+    onRename: () -> Unit,
 ) {
     Card(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -521,7 +585,13 @@ private fun HostCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(host.address, style = MaterialTheme.typography.titleMedium)
+                // U3: its name, the address under it; the address alone
+                // until it has one.
+                Text(
+                    name ?: host.address,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (online) {
                         Text(
@@ -549,7 +619,11 @@ private fun HostCard(
                 }
             }
             Text(
-                stringResource(R.string.host_ports, host.port, host.controlPort),
+                if (name != null) {
+                    stringResource(R.string.host_address_ports, host.address, host.port, host.controlPort)
+                } else {
+                    stringResource(R.string.host_ports, host.port, host.controlPort)
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -590,6 +664,9 @@ private fun HostCard(
                 }
                 TextButton(onClick = onWakeSettings) {
                     Text(stringResource(R.string.wake_settings), style = MaterialTheme.typography.labelMedium)
+                }
+                TextButton(onClick = onRename) {
+                    Text(stringResource(R.string.card_rename), style = MaterialTheme.typography.labelMedium)
                 }
                 TextButton(onClick = onRemove) {
                     Text(

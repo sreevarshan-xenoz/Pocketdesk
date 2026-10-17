@@ -38,6 +38,7 @@ object Prefs {
     private const val KEY_HAPTICS = "haptics"
     private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
     private const val KEY_OFFER_WAKE = "offer_wake"
+    private const val KEY_PHONE_NAME = "phone_name"
     private const val KEY_SHOW_DRIVING = "show_driving"
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
     private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
@@ -248,6 +249,15 @@ object Prefs {
     }
 
     /** Connect checks first, and offers "Wake and connect" to a computer that does not answer (N6). */
+    /** The name this phone gives computers (U3); blank: Android's device name. */
+    fun phoneName(ctx: Context): String =
+        prefs(ctx).getString(KEY_PHONE_NAME, null).orEmpty()
+
+    fun setPhoneName(ctx: Context, name: String) {
+        prefs(ctx).edit { putString(KEY_PHONE_NAME, name) }
+        bump()
+    }
+
     fun offerWake(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_OFFER_WAKE, true)
 

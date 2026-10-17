@@ -286,6 +286,9 @@ class MainActivity : ComponentActivity() {
                                         HostStore.Host(address, link.streamPort, link.controlPort),
                                     )
                                     HostStore.savePairedDesktop(ctx, address, serverId)
+                                    // U3: the name the code carried, until a
+                                    // connection says it again.
+                                    HostStore.saveClaimedName(ctx, address, link.name)
                                     link.endpoint?.let { HostStore.saveWanIdentity(ctx, address, it) }
                                     pairLink.value = null
                                     maybeRequestNotificationPermission()

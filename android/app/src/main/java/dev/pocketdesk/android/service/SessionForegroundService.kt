@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import dev.pocketdesk.android.MainActivity
+import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 
@@ -143,7 +144,7 @@ class SessionForegroundService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(R.string.notif_streaming, address))
+            .setContentText(getString(R.string.notif_streaming, HostStore.shownName(this, address)))
             .setContentIntent(open)
             .setOngoing(true)
             .addAction(

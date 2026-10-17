@@ -576,4 +576,14 @@
     <string name="ring_failed">No se pudo hacer sonar el ordenador: %1$s</string>
     <string name="key_failed">Esa tecla no llegó al ordenador: %1$s</string>
     <string name="shortcut_failed">%1$s no llegó al ordenador: %2$s</string>
+    <!-- U3: names for computers. -->
+    <string name="lock_confirm_title_named">¿Bloquear %1$s?</string>
+    <string name="card_rename">Renombrar</string>
+    <string name="rename_title">Renombrar %1$s</string>
+    <string name="rename_label">Nombre</string>
+    <string name="rename_hint">En blanco: el nombre que se da a sí mismo</string>
+    <string name="host_address_ports">%1$s · transmisión %2$d · control %3$d</string>
+    <string name="settings_this_phone">Este teléfono</string>
+    <string name="settings_phone_name">Nombre de este teléfono</string>
+    <string name="settings_phone_name_summary">Cómo llaman los ordenadores a este teléfono; se envía a cada uno al que se conecta. En blanco: el nombre del dispositivo en Android</string>
 </resources>

@@ -118,7 +118,7 @@ Discovery is mDNS (UDP 5353), so no rule is made for UDP 1716. `install` removes
 | Desktop iroh key | Desktop | 32-byte iroh secret key. Its public half is the WAN endpoint id | `<config>/iroh_secret.key` (mode 0600, or an owner-only DACL on Windows) | Endpoint packet, QR `ep`, relays it uses, the DHT record key | `server/src/iroh_endpoint.rs` (`load_or_create_secret_key`, `key_path`) |
 | Phone certificate | Phone | Same generator as the desktop's | app `files/pocketdesk/certs/identity.der` and `identity.key` | Every desktop the phone connects to (sent as the TLS client certificate) | `android/bridge/src/api.rs` (`set_data_dir`), `core/src/streaming/transport.rs` |
 | Phone device id | Phone | UUIDv4 | app `files/pocketdesk/certs/device_id` | Desktops: control identity, stream marker `[0xFE,0x00]` | `android/bridge/src/api.rs` (lines near `new_id`) |
-| Phone name | Phone | The fixed string `Pocketdesk Android Client`. The phone model is not sent | — | Desktops | `android/bridge/src/api.rs` |
+| Phone name | Phone | The name set in the app's Settings ("This phone's name"), else Android's device name (Settings › About phone), else the model; cleaned to one printable line of at most 40 characters (U3; it was the fixed string `Pocketdesk Android Client`). Sent in the identity to each computer the phone connects to, before it is paired | — | Desktops it connects to | `android/app/.../PhoneName.kt`, `android/bridge/src/api.rs` |
 | Phone iroh key | Phone | iroh secret key, used for every WAN dial | app `files/pocketdesk/certs/iroh_device.key` (owner-only write) | The desktop (registered on the LAN), relays, DHT nodes the phone queries | `android/bridge/src/api.rs` (`device_wan_key`), `core/src/streaming/iroh_connection.rs` |
 
 ### 2.2 How the phone trusts the desktop
@@ -454,8 +454,8 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | `files/pocketdesk/certs/known_peers.json` | Desktop certificate pins | same |
 | `files/pocketdesk/certs/device_id`, `paired_servers.json` | The phone's id, and the desktops it paired with | `android/bridge/src/api.rs` |
 | `files/pocketdesk/certs/iroh_device.key` | The phone's iroh key | `api.rs` (`device_wan_key`), `iroh_connection.rs` |
-| SharedPreferences `pocketdesk-host` | Saved computers: address, ports, WoL MAC, `wake_info`, wake settings, `wan_identity` (endpoint JSON), monitor, paired flag | `android/app/.../HostStore.kt` |
-| SharedPreferences `pocketdesk-ui` | App settings | `Prefs.kt` |
+| SharedPreferences `pocketdesk-host` | Saved computers: address, ports, WoL MAC, `wake_info`, wake settings, `wan_identity` (endpoint JSON), monitor, paired flag, and each computer's name: what it calls itself and the owner's rename (U3) | `android/app/.../HostStore.kt` |
+| SharedPreferences `pocketdesk-ui` | App settings, the name this phone gives computers among them | `Prefs.kt` |
 | SharedPreferences `pocketdesk-phone-notifications` | On/off, the opted-in app list, seen ids | `notify/PhoneNotifications.kt` |
 | SharedPreferences `pocketdesk-texts` | On/off (show, reply, names), and up to 200 texts queued while the computer is away (without names: a name is looked up as a text leaves), with send tracking | `notify/Texts.kt` |
 | `cache/share`, `cache/clipboard`, `cache/clipboard-out` | Files being shared, clipboard images | `service/TransferService.kt`, `ui/ClipboardImages.kt` |
