@@ -51,8 +51,8 @@
     <string name="link_good">நல்ல இணைப்பு</string>
     <string name="link_fair">சுமாரான இணைப்பு</string>
     <string name="link_poor">மோசமான இணைப்பு</string>
-    <string name="settings_trackpad_speed">தொடுதிண்டு வேகம்</string>
-    <string name="settings_trackpad_speed_summary">தொடுதிண்டு முறையில் விரல் நகர்வுக்கு சுட்டி எவ்வளவு நகரும்</string>
+    <string name="settings_trackpad_speed">டிராக்பேட் வேகம்</string>
+    <string name="settings_trackpad_speed_summary">டிராக்பேட் முறையில் விரல் நகர்வுக்கு சுட்டி எவ்வளவு நகரும்</string>
     <string name="settings_system">சிஸ்டம்</string>
     <string name="settings_about">பற்றி</string>
     <string name="app_version">பதிப்பு %1$s</string>
@@ -614,7 +614,7 @@
     <string name="hud_lost">இழந்தவை</string>
     <string name="hud_computer">கணினி</string>
     <string name="hud_no_video">இன்னும் காணொளி இல்லை</string>
-    <string name="hud_rates_over">%1$s வி. அளவில் வீதங்கள்</string>
+    <string name="hud_rates_over">%1$s வி அளவில் வீதங்கள்</string>
     <string name="hud_rtt_unmeasured">RTT இன்னும் அளக்கப்படவில்லை</string>
     <string name="hud_rtt_median">%1$d அளவுகளின் நடு RTT</string>
     <string name="key_super">Super</string>

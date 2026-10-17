@@ -51,8 +51,8 @@
     <string name="link_good">Buena conexión</string>
     <string name="link_fair">Conexión regular</string>
     <string name="link_poor">Mala conexión</string>
-    <string name="settings_trackpad_speed">Velocidad del trackpad</string>
-    <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo trackpad</string>
+    <string name="settings_trackpad_speed">Velocidad del panel táctil</string>
+    <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo panel táctil</string>
     <string name="settings_system">Sistema</string>
     <string name="settings_about">Acerca de</string>
     <string name="app_version">Versión %1$s</string>
@@ -273,7 +273,7 @@
 
     <!-- Shortcut bar group captions (C9); key caps stay literal -->
     <string name="shortcut_system">Sistema</string>
-    <string name="shortcut_workspaces">Áreas de trabajo</string>
+    <string name="shortcut_workspaces">Espacios de trabajo</string>
 
     <!-- Find-my-device siren dialog (C8) -->
     <string name="siren_ringing_title">Tu ordenador está buscando este teléfono</string>
