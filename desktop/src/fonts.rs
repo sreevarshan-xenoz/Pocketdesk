@@ -67,7 +67,13 @@ pub fn noto_from_fc_list(listing: &str) -> Vec<Candidate> {
             // "/usr/share/fonts/…/NotoSansTamil-Regular.ttf: Noto Sans Tamil"
             let (file, families) = line.split_once(": ")?;
             let named = families.split(',').any(|f| f.trim() == family);
-            let regular = file.contains("Regular") || !file.contains('-');
+            // A static family's regular file, or a variable font (one file,
+            // no "-Style" in its name; its folder may well have a "-").
+            let name = Path::new(file.trim())
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            let regular = name.contains("Regular") || !name.contains('-');
             (named && regular).then(|| file.trim().to_string())
         });
         if let Some(file) = regular {
@@ -115,8 +121,27 @@ pub fn present(candidates: Vec<Candidate>, exists: impl Fn(&Path) -> bool) -> Ve
     kept
 }
 
-/// Add the system's fonts for other scripts after egui's own.
+/// Add the system's fonts for other scripts after egui's own, found on a
+/// thread of their own (`fc-list` and the font files are not the UI's to
+/// wait on); the app repaints with them once they are in.
 pub fn install(ctx: &egui::Context) {
+    let ctx = ctx.clone();
+    let spawned = std::thread::Builder::new()
+        .name("fonts".into())
+        .spawn(move || {
+            if let Some(definitions) = definitions() {
+                ctx.set_fonts(definitions);
+                ctx.request_repaint();
+            }
+        });
+    if spawned.is_err() {
+        let _ = LOADED.set(Vec::new());
+    }
+}
+
+/// egui's fonts with the system's for other scripts after them; `None`
+/// when none was found.
+fn definitions() -> Option<egui::FontDefinitions> {
     let mut definitions = egui::FontDefinitions::default();
     let mut names = Vec::new();
     for candidate in present(candidates(), Path::exists) {
@@ -128,6 +153,11 @@ pub fn install(ctx: &egui::Context) {
         let Ok(map) = (unsafe { memmap2::Mmap::map(&file) }) else {
             continue;
         };
+        // As epaint parses it: a file that does not parse is left out, not
+        // a panic at the first frame (U1 review).
+        if skrifa::FontRef::from_index(&map[..], 0).is_err() {
+            continue;
+        }
         let map: &'static memmap2::Mmap = Box::leak(Box::new(map));
         let bytes: &'static [u8] = &map[..];
         let key = format!("system: {}", candidate.name);
@@ -143,10 +173,9 @@ pub fn install(ctx: &egui::Context) {
         }
         names.push(candidate.name);
     }
-    if !names.is_empty() {
-        ctx.set_fonts(definitions);
-    }
+    let found = !names.is_empty();
     let _ = LOADED.set(names);
+    found.then_some(definitions)
 }
 
 #[cfg(test)]
@@ -176,16 +205,25 @@ mod tests {
     }
 
     #[test]
+    fn a_file_that_is_not_a_font_is_left_out() {
+        assert!(skrifa::FontRef::from_index(b"not a font at all", 0).is_err());
+    }
+
+    #[test]
     fn noto_fonts_are_found_in_fc_lists_output() {
         let listing = "\
 /usr/share/fonts/noto/NotoSansTamil-Bold.ttf: Noto Sans Tamil
 /usr/share/fonts/noto/NotoSansTamil-Regular.ttf: Noto Sans Tamil
 /usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc: Noto Sans CJK JP,Noto Sans CJK SC,Noto Sans CJK TC
 /usr/share/fonts/dejavu/DejaVuSans.ttf: DejaVu Sans
+/usr/share/fonts/google-noto-vf/NotoSansThai[wdth,wght].ttf: Noto Sans Thai
 ";
         let found = noto_from_fc_list(listing);
         let names: Vec<_> = found.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, ["Noto Sans Tamil", "Noto Sans CJK SC"]);
+        assert_eq!(
+            names,
+            ["Noto Sans Tamil", "Noto Sans Thai", "Noto Sans CJK SC"]
+        );
         assert!(found[0].path.ends_with("NotoSansTamil-Regular.ttf"));
     }
 }
@@ -198,7 +236,7 @@ mod probe {
     #[ignore = "reads this system's fonts"]
     fn the_systems_fonts_draw_other_scripts() {
         let ctx = egui::Context::default();
-        install(&ctx);
+        ctx.set_fonts(definitions().expect("fonts found"));
         let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
         out.textures_delta.clear();
         eprintln!("loaded: {:?}", loaded());

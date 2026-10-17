@@ -17,6 +17,9 @@ eframe = { version = "0.36", default-features = false, features = ["accesskit", 
 qrcode = { version = "0.14", default-features = false }
 # System fonts for other scripts, mapped rather than read (fonts.rs).
 memmap2 = "0.9"
+# Each font is parsed as epaint parses it before it is added: one that
+# does not parse would panic the app at its first frame.
+skrifa = "0.44"
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
