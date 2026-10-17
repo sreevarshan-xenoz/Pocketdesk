@@ -7,6 +7,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AutoReconnectTest {
+    /** A session refused for want of a permission waits for the owner (N5). */
+    @Test
+    fun `a refusal for a permission is not retried`() {
+        assertFalse(AutoReconnect.retryable("stream closed by the desktop: sound not allowed"))
+        assertFalse(AutoReconnect.retryable("stream closed by the desktop: input not allowed"))
+    }
+
     @Test
     fun `a link that went silent is retried`() {
         assertTrue(AutoReconnect.retryable("video feed stalled — connection closed"))

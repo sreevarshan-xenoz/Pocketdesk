@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.ui
 
 import android.content.Intent
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -90,60 +92,15 @@ fun SoundScreen(
         onDispose { tell.left()?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) } }
     }
 
-    LaunchedEffect(attempt) {
-        state = State.Connecting
-        reason = null
-        // The computer's sound plays for this attempt, as for a screen
-        // session's stream: its own generation, up once admitted and down
-        // when it ends, both from here (N5 review: a generation keyed on
-        // composition was ended by the old attempt's Down before a Retry
-        // could start it, and a screen that is off may not recompose).
-        val generation = DesktopAudio.newGeneration(context)
-        try {
-            val connected =
-                withContext(Dispatchers.IO) {
-                    RustCore.connectSound(address, port).recoverCatching { lan ->
-                        // Left while the LAN dial failed: no internet dial after the screen's stop.
-                        coroutineContext.ensureActive()
-                        val identity = HostStore.wanIdentity(context, address) ?: throw lan
-                        RustCore.connectSoundWan(address, identity).getOrThrow()
-                    }
-                }
-            if (!isActive) {
-                if (connected.isSuccess) withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
-                return@LaunchedEffect
-            }
-            if (connected.isFailure) {
-                reason = connected.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
-                state = State.Down
-                return@LaunchedEffect
-            }
-            state = State.Waiting
-            val waitingSince = android.os.SystemClock.elapsedRealtime()
-            while (isActive) {
-                val (remote, closed) =
-                    withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
-                val next = RemoteSession.next(state, remote, closed)
-                if (next == State.Ready && state != State.Ready) DesktopAudio.streamUp(context, generation)
-                state = next
-                if (state == State.Waiting && android.os.SystemClock.elapsedRealtime() - waitingSince > WAIT_MS) {
-                    state = State.Down
-                }
-                if (state == State.Down || state == State.TooOld) {
-                    reason = closed?.let { context.closeReasonText(it) }
-                    break
-                }
-                delay(POLL_MS)
-            }
-        } finally {
-            DesktopAudio.streamDown(generation)
-        }
-    }
-
     // The session's foreground service, so the sound goes on with the
-    // screen off or the app in the background; the session ends with the
-    // screen. No keep-screen-on: a speaker needs no screen.
-    DisposableEffect(Unit) {
+    // screen off or the app in the background. It is started from the
+    // foreground (the first attempt, a Retry) and kept while the session
+    // reconnects by itself; once it stays down, nothing plays, so it stops
+    // and lets the phone sleep (N5 review: it had held a wake lock and the
+    // notification for hours after a drop). No keep-screen-on: a speaker
+    // needs no screen.
+    var serviceOn by remember { mutableStateOf(false) }
+    fun startService() {
         context.startForegroundService(
             Intent(context, SessionForegroundService::class.java).apply {
                 action = SessionForegroundService.ACTION_START
@@ -152,10 +109,123 @@ fun SoundScreen(
                 putExtra(SessionForegroundService.EXTRA_CONTROL_PORT, controlPort)
             },
         )
+        serviceOn = true
+    }
+    DisposableEffect(Unit) {
         onDispose {
             context.stopService(Intent(context, SessionForegroundService::class.java))
             Thread { RustCore.stopStreaming() }.start()
         }
+    }
+
+    // R2, as a screen session: a link that went away comes back by itself,
+    // with backoff, for ten minutes; an end the computer chose waits for
+    // the person (AutoReconnect).
+    var reconnects by remember { mutableIntStateOf(0) }
+    var droppedAtMs by remember { mutableLongStateOf(0L) }
+    var reconnectInS by remember { mutableStateOf<Int?>(null) }
+    var gaveUp by remember { mutableStateOf(false) }
+
+    LaunchedEffect(attempt) {
+        state = State.Connecting
+        reason = null
+        reconnectInS = null
+        gaveUp = false
+        if (!serviceOn) startService()
+        // Why it ended, in the bridge's words, for AutoReconnect; null when
+        // it is not to be retried (the owner never answered).
+        var ended: String? = null
+        // The computer's sound plays for this attempt, as for a screen
+        // session's stream: its own generation, up once admitted and down
+        // when it ends, both from here (N5 review: a generation keyed on
+        // composition was ended by the old attempt's Down before a Retry
+        // could start it, and a screen that is off may not recompose).
+        val generation = DesktopAudio.newGeneration(context)
+        try {
+            run attempt@{
+                val connected =
+                    withContext(Dispatchers.IO) {
+                        RustCore.connectSound(address, port).recoverCatching { lan ->
+                            // Left while the LAN dial failed: no internet dial after the screen's stop.
+                            coroutineContext.ensureActive()
+                            val identity = HostStore.wanIdentity(context, address) ?: throw lan
+                            RustCore.connectSoundWan(address, identity).getOrThrow()
+                        }
+                    }
+                if (!isActive) {
+                    if (connected.isSuccess) withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
+                    return@LaunchedEffect
+                }
+                if (connected.isFailure) {
+                    val raw = connected.exceptionOrNull()?.message
+                    reason = raw?.let { context.plainErrorText(it) }
+                    ended = raw
+                    state = State.Down
+                    return@attempt
+                }
+                state = State.Waiting
+                val waitingSince = SystemClock.elapsedRealtime()
+                var readySince = 0L
+                while (isActive) {
+                    val (remote, closed) =
+                        withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
+                    val next = RemoteSession.next(state, remote, closed)
+                    if (next == State.Ready && state != State.Ready) {
+                        DesktopAudio.streamUp(context, generation)
+                        readySince = SystemClock.elapsedRealtime()
+                    }
+                    // Healthy for a while: the next drop gets a fresh window.
+                    if (readySince != 0L && SystemClock.elapsedRealtime() - readySince > AutoReconnect.HEALTHY_MS) {
+                        reconnects = 0
+                        droppedAtMs = 0L
+                        readySince = 0L
+                    }
+                    val wasWaiting = state == State.Waiting
+                    state = next
+                    if (state == State.Waiting && SystemClock.elapsedRealtime() - waitingSince > WAIT_MS) {
+                        state = State.Down
+                    }
+                    if (state == State.Down || state == State.TooOld) {
+                        reason = closed?.let { context.closeReasonText(it) }
+                        ended =
+                            when {
+                                closed != null -> "stream closed by the desktop: $closed"
+                                // The owner never answered: theirs to decide again.
+                                wasWaiting -> null
+                                // It went away under us.
+                                else -> "stalled"
+                            }
+                        return@attempt
+                    }
+                    delay(POLL_MS)
+                }
+            }
+        } finally {
+            DesktopAudio.streamDown(generation)
+        }
+        if (state != State.Down) return@LaunchedEffect
+        val retry = ended?.let { Prefs.autoReconnect(context) && AutoReconnect.retryable(it) } == true
+        val now = SystemClock.elapsedRealtime()
+        if (retry && droppedAtMs == 0L) droppedAtMs = now
+        val wait = if (retry) AutoReconnect.delayMs(reconnects, now - droppedAtMs) else null
+        if (wait == null) {
+            // It stays down: no service holds the phone awake for nothing.
+            gaveUp = retry
+            context.stopService(Intent(context, SessionForegroundService::class.java))
+            serviceOn = false
+            withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
+            return@LaunchedEffect
+        }
+        val due = now + wait
+        while (true) {
+            val left = due - SystemClock.elapsedRealtime()
+            if (left <= 0) break
+            reconnectInS = ((left + 999) / 1000).toInt()
+            delay(minOf(left, 1_000L))
+        }
+        reconnectInS = null
+        reconnects++
+        attempt++
     }
 
     // N1: a ring from the computer sounds here too.
@@ -221,6 +291,8 @@ fun SoundScreen(
                 SoundStatus(
                     state = state,
                     reason = reason,
+                    reconnectInS = reconnectInS,
+                    gaveUp = gaveUp,
                     onRetry = { attempt++ },
                     onExit = onExit,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -243,6 +315,8 @@ fun SoundScreen(
 private fun SoundStatus(
     state: State,
     reason: String?,
+    reconnectInS: Int?,
+    gaveUp: Boolean,
     onRetry: () -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
@@ -270,6 +344,19 @@ private fun SoundStatus(
                     },
                     textAlign = TextAlign.Center,
                 )
+                // It comes back by itself, as a screen session does (R2).
+                val retrying =
+                    reconnectInS?.let { stringResource(R.string.reconnecting_in, it) }
+                        ?: if (gaveUp) stringResource(R.string.reconnect_gave_up) else null
+                retrying?.let {
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 Spacer(Modifier.size(16.dp))
                 Row {
                     Button(onClick = onRetry) { Text(stringResource(R.string.remote_retry)) }

@@ -20,7 +20,8 @@ object AutoReconnect {
     private const val DESKTOP_CLOSED = "closed by the desktop:"
 
     /** The reasons the desktop gives when it ends a session on purpose. */
-    private val DESKTOP_ENDS = listOf("kicked", "refused", "not paired", "permissions changed", "session end")
+    private val DESKTOP_ENDS =
+        listOf("kicked", "refused", "not paired", "permissions changed", "session end", "not allowed")
 
     private val TRANSIENT =
         listOf("stalled", "timed out", "timeout", "refused", "unreachable", "no route", "reset", "closed")
