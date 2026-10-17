@@ -218,6 +218,9 @@ pub struct StreamingServer {
     /// R4 B3 capture backend selection: `Auto` detects + falls back, an
     /// explicit variant pins the pipeline (`Config::capture_backend`).
     capture_backend: super::CaptureBackend,
+    /// Where a kept screen-sharing grant lives, when the owner chose to keep
+    /// it (N8, GNOME and KDE); `None` asks the portal at every session.
+    screen_grant: Option<std::path::PathBuf>,
 }
 
 impl StreamingServer {
@@ -248,6 +251,7 @@ impl StreamingServer {
             preset: std::sync::Arc::new(AtomicU8::new(PRESET_AUTO)),
             hevc_allowed: false,
             capture_backend: super::CaptureBackend::default(),
+            screen_grant: None,
         }
     }
 
@@ -274,6 +278,12 @@ impl StreamingServer {
     /// display server and falls back; an explicit variant pins the pipeline.
     pub fn set_capture_backend(&mut self, backend: super::CaptureBackend) {
         self.capture_backend = backend;
+    }
+
+    /// Keep the screen-sharing portal's grant in `state_dir` (N8), or ask
+    /// at every session (`None`).
+    pub fn set_screen_grant(&mut self, state_dir: Option<std::path::PathBuf>) {
+        self.screen_grant = state_dir;
     }
 
     /// Set a channel to receive input events from the remote client.
@@ -677,6 +687,7 @@ impl StreamingServer {
                 window_rx.clone(),
                 window_mode.clone(),
                 self.capture_backend,
+                self.screen_grant.clone(),
             )
             .await
             .context("Failed to start screen capture")?;

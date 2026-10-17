@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use ashpd::desktop::PersistMode;
 use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions, SourceType};
 use pipewire::stream::StreamFlags;
 use tokio::sync::mpsc;
@@ -62,6 +63,7 @@ pub async fn start_capture(
     config: StreamingConfig,
     frame_tx: mpsc::Sender<VideoFrame>,
     cancel: CancellationToken,
+    screen_grant: Option<std::path::PathBuf>,
 ) -> Result<CaptureSession> {
     info!(
         "Starting screen capture: {}x{}@{}fps",
@@ -92,13 +94,24 @@ pub async fn start_capture(
     // ashpd screencast captures all monitors; we'll select based on config.monitor_index.
     // For now, Portal captures primary monitor by default.
     let source_types = ashpd::enumflags2::BitFlags::from(SourceType::Monitor);
+    // N8: with the owner's choice, ask the portal to keep its grant and
+    // restore it from the token it gave last; a token it refuses only means
+    // the dialog again.
+    let saved = screen_grant.as_deref().and_then(crate::portal_grant::read);
+    let (persist, token) = crate::portal_grant::request(screen_grant.is_some(), saved.as_deref());
+    let persist_mode = match persist {
+        crate::portal_grant::Persist::No => PersistMode::DoNot,
+        crate::portal_grant::Persist::UntilRevoked => PersistMode::ExplicitlyRevoked,
+    };
     tokio::time::timeout(
         Duration::from_secs(10),
         screencast.select_sources(
             &session,
             SelectSourcesOptions::default()
                 .set_sources(Some(source_types))
-                .set_multiple(Some(true)),
+                .set_multiple(Some(true))
+                .set_persist_mode(persist_mode)
+                .set_restore_token(token),
         ),
     )
     .await
@@ -118,6 +131,13 @@ pub async fn start_capture(
     let streams = response
         .response()
         .context("No response from capture start")?;
+    // Each start answers with a new token, to restore the grant next time.
+    if let (Some(dir), Some(token)) = (screen_grant.as_deref(), streams.restore_token()) {
+        match crate::portal_grant::write(dir, token) {
+            Ok(()) => info!("Screen-sharing grant kept for the next session"),
+            Err(e) => warn!(error = %e, "Could not keep the screen-sharing grant"),
+        }
+    }
 
     // Step 4: Pick the stream for the requested monitor. The portal grants one
     // stream per monitor the desktop user shared; the position match against

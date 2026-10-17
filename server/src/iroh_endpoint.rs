@@ -675,6 +675,7 @@ pub async fn spawn_wan_endpoint(
                 streaming_server.set_hevc_allowed(allow_hevc);
                 streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);
                 streaming_server.set_capture_backend(capture_backend);
+                streaming_server.set_screen_grant(crate::state::screen_grant());
                 // The gate judges the deviceId the client announces in-band
                 // against the iroh key the connection proved (device keys). It
                 // runs with pairing off too, so a paired device's own

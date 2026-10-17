@@ -188,7 +188,11 @@ pub async fn start_capture_auto(
     window_rx: tokio::sync::watch::Receiver<u64>,
     window_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
     backend: CaptureBackend,
+    screen_grant: Option<std::path::PathBuf>,
 ) -> Result<CaptureSession> {
+    // Only the portal asks anyone; the other backends need no grant.
+    #[cfg(not(target_os = "linux"))]
+    let _ = &screen_grant;
     let attempts = capture_attempts(backend, detect_display_server())?;
     let mut last_err: Option<anyhow::Error> = None;
     for backend_tried in attempts {
@@ -211,7 +215,13 @@ pub async fn start_capture_auto(
             ),
             #[cfg(target_os = "linux")]
             CaptureBackend::Portal => {
-                start_capture(config.clone(), frame_tx.clone(), attempt.clone()).await
+                start_capture(
+                    config.clone(),
+                    frame_tx.clone(),
+                    attempt.clone(),
+                    screen_grant.clone(),
+                )
+                .await
             }
             #[cfg(target_os = "linux")]
             CaptureBackend::X11 => {

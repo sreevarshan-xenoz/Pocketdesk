@@ -22,6 +22,20 @@ pub fn state_dir() -> Result<PathBuf> {
     pocketdesk_core::local::paths::state_dir().context("unable to determine local state directory")
 }
 
+/// Where this session keeps the screen-sharing portal's grant (N8), read
+/// from the config as it is now: the state folder when the owner chose to
+/// keep it, else `None`, and a kept one forgotten, so turning the setting
+/// off brings the dialog back.
+pub fn screen_grant() -> Option<PathBuf> {
+    let dir = state_dir().ok()?;
+    if crate::events::current_config().remember_screen_grant {
+        Some(dir)
+    } else {
+        let _ = pocketdesk_core::portal_grant::forget(&dir);
+        None
+    }
+}
+
 /// Path to the server PID file.
 pub fn pid_file_path() -> Result<PathBuf> {
     Ok(state_dir()?.join("server.pid"))
