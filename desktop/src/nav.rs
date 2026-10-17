@@ -127,11 +127,19 @@ impl Tab {
 }
 
 /// The page `--page <key>` (or `--page=<key>`) in `args` names, if any.
-pub fn page_from_args(args: impl IntoIterator<Item = String>) -> Option<Tab> {
+/// Read as the OS gives them: an argument that is not Unicode (a file
+/// name, say) is passed over, where `std::env::args` would panic (U1
+/// review).
+pub fn page_from_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<Tab> {
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
+        let Some(arg) = arg.to_str() else {
+            continue;
+        };
         if arg == "--page" {
-            return args.next().and_then(|key| Tab::from_key(&key));
+            return args
+                .next()
+                .and_then(|key| key.to_str().and_then(Tab::from_key));
         }
         if let Some(key) = arg.strip_prefix("--page=") {
             return Tab::from_key(key);
@@ -174,7 +182,11 @@ mod tests {
 
     #[test]
     fn page_names_a_page_to_open_on() {
-        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let args = |list: &[&str]| {
+            list.iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
             page_from_args(args(&["app", "--page", "settings"])),
             Some(Tab::Settings)
@@ -185,5 +197,15 @@ mod tests {
         );
         assert_eq!(page_from_args(args(&["app", "--page", "nope"])), None);
         assert_eq!(page_from_args(args(&["app"])), None);
+    }
+
+    #[test]
+    fn an_argument_that_is_not_unicode_is_passed_over() {
+        #[cfg(windows)]
+        let odd = std::os::windows::ffi::OsStringExt::from_wide(&[0xD800]);
+        #[cfg(unix)]
+        let odd = std::os::unix::ffi::OsStringExt::from_vec(vec![0xff]);
+        let args: Vec<std::ffi::OsString> = vec!["app".into(), odd, "--page=settings".into()];
+        assert_eq!(page_from_args(args), Some(Tab::Settings));
     }
 }

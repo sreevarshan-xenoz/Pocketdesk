@@ -41,7 +41,7 @@ fn main() -> eframe::Result {
         return Ok(());
     };
     // `--page <name>` opens on a page (nav.rs names them).
-    let page = nav::page_from_args(std::env::args());
+    let page = nav::page_from_args(std::env::args_os());
     let state_dir = match pocketdesk_core::local::paths::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
