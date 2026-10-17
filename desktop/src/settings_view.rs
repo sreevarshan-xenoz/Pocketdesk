@@ -482,7 +482,13 @@ impl SettingsForm {
                                 ui.selectable_value(&mut e.video_quality, preset, label);
                             }
                         });
-                    note(ui, "A phone can choose a lower one for its own session.");
+                    // What each means, since the phone's Quality caps the
+                    // bitrate at the computer's resolution (U5 review).
+                    note(
+                        ui,
+                        "Economy: 720p at 2 Mbit/s. Balanced: 1080p at 5. Max: 1080p at 10. \
+                         A phone's own Quality choice can lower the bitrate for its session.",
+                    );
                 });
                 row(ui, "allow_hevc", |ui| {
                     ui.checkbox(&mut e.allow_hevc, "use it with phones that can decode it");
@@ -867,7 +873,6 @@ impl SettingsForm {
     }
 }
 
-/// How the several-phones choice reads in the form.
 /// The video quality in the phone's words (U5: the phone said Economy,
 /// Balanced and Max where this page said Low, Balanced and High); the
 /// config's keys stay as they are.
