@@ -317,13 +317,13 @@
     <string name="pair_link_not_scanned">Este código lo abrió otra app o una página web, no lo escaneaste tú.</string>
     <string name="phone_notifications_service">Pocketdesk: mostrar en el ordenador</string>
     <string name="phone_notifications_share">Notificaciones de este teléfono en mi ordenador</string>
-    <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste.</string>
+    <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste</string>
     <string name="phone_notifications_no_access">Necesita acceso a las notificaciones</string>
     <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Ninguna se comparte hasta que la actives.</string>
     <string name="texts_show">Mostrar mensajes en mi ordenador</string>
-    <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste.</string>
+    <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste</string>
     <string name="texts_reply">Responder desde mi ordenador</string>
-    <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono.</string>
+    <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono</string>
     <string name="texts_reply_needs_access">Necesita acceso a las notificaciones: las respuestas llegan por ahí</string>
     <!-- N6: waking a computer from the phone -->
     <string name="save">Guardar</string>
