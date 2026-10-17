@@ -13,9 +13,21 @@ use eframe::egui;
 /// The fonts added, by name, for Diagnostics.
 static LOADED: OnceLock<Vec<String>> = OnceLock::new();
 
-/// The fonts added at start.
-pub fn loaded() -> &'static [String] {
-    LOADED.get().map(Vec::as_slice).unwrap_or(&[])
+/// The fonts added at start, once looked for (`None` while still looking).
+pub fn loaded() -> Option<&'static [String]> {
+    LOADED.get().map(Vec::as_slice)
+}
+
+/// Diagnostics' line about the fonts for other scripts.
+pub fn summary(loaded: Option<&[String]>) -> String {
+    match loaded {
+        None => "Fonts for other scripts: still looking.".to_string(),
+        Some([]) => {
+            "Fonts for other scripts: none found, so some names and texts may show as boxes."
+                .to_string()
+        }
+        Some(names) => format!("Fonts for other scripts: {}.", names.join(", ")),
+    }
 }
 
 /// A font to look for: its name and its file.
@@ -181,6 +193,19 @@ fn definitions() -> Option<egui::FontDefinitions> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_summary_tells_looking_from_none() {
+        assert!(summary(None).contains("still looking"));
+        assert!(summary(Some(&[])).contains("none found"));
+        assert_eq!(
+            summary(Some(&[
+                "Nirmala UI".to_string(),
+                "Leelawadee UI".to_string()
+            ])),
+            "Fonts for other scripts: Nirmala UI, Leelawadee UI."
+        );
+    }
 
     #[test]
     fn missing_fonts_are_skipped_and_a_name_found_once_is_kept_once() {

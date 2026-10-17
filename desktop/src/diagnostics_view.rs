@@ -68,6 +68,12 @@ impl DiagnosticsView {
                     .request_repaint_after(std::time::Duration::from_millis(200));
             }
         });
+        // Said with or without a report: it is about this app, not the
+        // checks (U1 review: it showed only after a run).
+        ui.label(
+            egui::RichText::new(crate::fonts::summary(crate::fonts::loaded()))
+                .color(crate::theme::muted(ui)),
+        );
         let Some(report) = &self.report else {
             return;
         };
@@ -123,24 +129,12 @@ impl DiagnosticsView {
             }
             crate::notice::copied(ui, &mut self.copied);
         });
-        ui.horizontal(|ui| {
-            let fonts = crate::fonts::loaded();
-            ui.label(
-                egui::RichText::new(if fonts.is_empty() {
-                    "Fonts for other scripts: none found, so some names and texts may show as boxes."
-                        .to_string()
-                } else {
-                    format!("Fonts for other scripts: {}.", fonts.join(", "))
-                })
-                .color(crate::theme::muted(ui)),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "For an issue. It includes this computer's addresses (local, and any public or Tailscale ones), but no PINs, keys or file names.",
-                )
-                .color(crate::theme::muted(ui)),
-            );
-        });
+        ui.label(
+            egui::RichText::new(
+                "For an issue. It includes this computer's addresses (local, and any public or Tailscale ones), but no PINs, keys or file names.",
+            )
+            .color(crate::theme::muted(ui)),
+        );
     }
 }
 
