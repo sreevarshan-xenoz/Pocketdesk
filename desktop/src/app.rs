@@ -152,6 +152,8 @@ pub struct PocketdeskApp {
     send_link: String,
     /// Each phone's last session, for the Overview (N6), read while it shows.
     last_sessions: std::collections::HashMap<String, u64>,
+    /// The session log as last read for [`Self::last_sessions`].
+    last_sessions_stamp: Option<(u64, std::time::SystemTime)>,
     /// The Overview's link box: the phone it is for, and the link typed.
     overview_link: Option<(String, String)>,
     /// The link box was just opened: its field takes the cursor once.
@@ -214,6 +216,7 @@ impl PocketdeskApp {
             send_path: String::new(),
             send_link: String::new(),
             last_sessions: Default::default(),
+            last_sessions_stamp: None,
             overview_link: None,
             overview_link_focus: false,
             picking: None,
@@ -380,7 +383,13 @@ impl PocketdeskApp {
             self.log = model::log_tail(&self.state_dir, 400);
         }
         if self.tab == Tab::Status {
-            self.last_sessions = model::last_sessions(&model::session_log_tail(&self.state_dir));
+            // Read again only when the log changed, not every second.
+            let stamp = model::session_log_stamp(&self.state_dir);
+            if stamp != self.last_sessions_stamp {
+                self.last_sessions =
+                    model::last_sessions(&model::session_log_tail(&self.state_dir));
+                self.last_sessions_stamp = stamp;
+            }
         }
         if self.tab == Tab::Activity {
             self.activity.refresh(&self.state_dir);
@@ -822,7 +831,8 @@ impl PocketdeskApp {
                 if row.place != model::Place::Session {
                     facts.push(match row.last_session {
                         Some(at) => format!("last session {}", crate::words::ago(now, at)),
-                        None => "no session yet".to_string(),
+                        // The log's tail holds a few hundred sessions.
+                        None => "no recent session".to_string(),
                     });
                 }
                 ui.label(RichText::new(facts.join(" · ")).color(crate::theme::muted(ui)));

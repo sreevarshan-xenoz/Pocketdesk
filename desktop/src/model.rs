@@ -284,6 +284,14 @@ pub fn last_sessions(lines: &str) -> std::collections::HashMap<String, u64> {
     last
 }
 
+/// The session log's size and change time, so it is read again only when
+/// it changes (N6 review); `None` when there is no log.
+pub fn session_log_stamp(state_dir: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta =
+        std::fs::metadata(state_dir.join(pocketdesk_core::local::paths::SESSIONS_FILE)).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
 /// The end of the session log under `state_dir`, at most
 /// [`SESSION_LOG_TAIL`] bytes; empty when there is none.
 pub fn session_log_tail(state_dir: &Path) -> String {
