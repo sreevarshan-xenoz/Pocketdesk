@@ -1458,7 +1458,7 @@ The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box
 - [x] 3b, ping: from here the phone showed "Ping!"; from the phone ("Send ping") the server took it.
 - [x] Found on the way: a null body (a ping's) made KDE Connect drop the link; a new link from one device was dropped from the list by its old one going.
 - [ ] The desktop app's Find button, list, Allow/Deny and Pair on screen.
-- [ ] Find again after the 3a review: broadcasts every 10 s until the device connects, then stops (no churn).
+- [x] Find again after the 3a review: the device connected (paired) and held for the minute, one link, no churn.
 - [ ] A device that broadcasts first (this computer dialing it): not built (the receive half waits).
 - [ ] Linux, with `kdeconnectd` holding UDP 1716.
 
