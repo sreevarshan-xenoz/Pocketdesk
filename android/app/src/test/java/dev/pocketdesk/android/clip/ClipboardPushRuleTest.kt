@@ -32,4 +32,14 @@ class ClipboardPushRuleTest {
         )
         assertEquals(SendClipboard.Check.Send, SendClipboard.check("hello", hasComputer = true))
     }
+
+    @Test
+    fun `a private copy is sent only once the person says so`() {
+        assertEquals(SendClipboard.Check.AskPrivate, SendClipboard.check("hunter2", hasComputer = true, private = true))
+        assertEquals(
+            "nothing to ask about without a computer",
+            SendClipboard.Check.NoComputer,
+            SendClipboard.check("hunter2", hasComputer = false, private = true),
+        )
+    }
 }
