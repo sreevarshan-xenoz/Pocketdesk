@@ -182,7 +182,7 @@
     <!-- ShareActivity -->
     <string name="share_no_host">Pocketdesk: no saved host. Connect once from the app first.</string>
     <string name="share_nothing">Nothing shareable in this intent.</string>
-    <string name="share_sent_clipboard">Sent to clipboard.</string>
+    <string name="share_sent_clipboard_to">Sent to the clipboard of %1$s.</string>
     <string name="share_failed">Failed: %1$s</string>
     <string name="share_unreadable">The app that shared this did not let Pocketdesk read it.</string>
     <string name="shortcut_connect">Connect to %1$s</string>

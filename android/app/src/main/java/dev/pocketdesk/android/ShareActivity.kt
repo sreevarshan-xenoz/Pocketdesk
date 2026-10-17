@@ -29,6 +29,11 @@ import dev.pocketdesk.android.shortcuts.Shortcuts
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A window that shows nothing and lets every touch through while a
+        // send runs, so "To computer" does not cover the app it came from
+        // (N2 review); it stays until the send is done, or the process
+        // could be frozen mid-send.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
         RustCore.start(this)
         handle(intent)
     }
@@ -115,7 +120,7 @@ class ShareActivity : ComponentActivity() {
             runOnUiThread {
                 done(
                     if (result.isSuccess) {
-                        getString(R.string.share_sent_clipboard)
+                        getString(R.string.share_sent_clipboard_to, HostStore.shownName(this, host.address))
                     } else {
                         getString(R.string.share_failed, plainErrorText(result.exceptionOrNull()?.message))
                     },

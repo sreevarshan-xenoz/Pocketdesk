@@ -175,7 +175,7 @@
     <!-- ShareActivity -->
     <string name="share_no_host">Pocketdesk: சேமித்த ஹோஸ்ட் இல்லை. முதலில் செயலியிலிருந்து ஒருமுறை இணையுங்கள்.</string>
     <string name="share_nothing">இந்த intent-ல் பகிர ஏதும் இல்லை.</string>
-    <string name="share_sent_clipboard">க்ளிப் போர்டுக்கு அனுப்பப்பட்டது.</string>
+    <string name="share_sent_clipboard_to">%1$s-இன் க்ளிப் போர்டுக்கு அனுப்பப்பட்டது.</string>
     <string name="share_failed">தோல்வி: %1$s</string>
     <string name="share_unreadable">இதைப் பகிர்ந்த செயலி Pocketdesk-ஐ இதைப் படிக்க அனுமதிக்கவில்லை.</string>
     <string name="shortcut_connect">%1$s உடன் இணை</string>

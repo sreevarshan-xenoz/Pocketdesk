@@ -80,7 +80,8 @@
         <activity
             android:name=".ShareActivity"
             android:exported="true"
-            android:label="@string/share_target_label">
+            android:label="@string/share_target_label"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -150,6 +151,7 @@
         <!-- T10b: reads the clipboard once in focus, sends it, closes; never shown. -->
         <activity
             android:name=".clip.SendClipboardActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:excludeFromRecents="true"
             android:exported="false"
             android:noHistory="true"

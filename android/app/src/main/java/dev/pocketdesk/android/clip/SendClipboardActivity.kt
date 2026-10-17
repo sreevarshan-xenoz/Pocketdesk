@@ -89,7 +89,13 @@ class SendClipboardActivity : Activity() {
     private fun askPrivate(app: Context, host: HostStore.Host, text: String) {
         // The window takes touches for the question, and lets them through again after.
         window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
-        android.app.AlertDialog.Builder(this)
+        // The device's own dialog, light or dark as the phone is (N2 review).
+        val night = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        android.app.AlertDialog.Builder(
+            this,
+            if (night) android.R.style.Theme_DeviceDefault_Dialog_Alert else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert,
+        )
             .setTitle(R.string.send_clipboard_private_title)
             .setMessage(getString(R.string.send_clipboard_private_text, HostStore.shownName(app, host.address)))
             .setPositiveButton(R.string.send_clipboard_private_send) { _, _ ->

@@ -177,7 +177,7 @@
     <!-- ShareActivity -->
     <string name="share_no_host">Pocketdesk: no hay host guardado. Conéctate una vez desde la app.</string>
     <string name="share_nothing">No hay nada compartible en esta intent.</string>
-    <string name="share_sent_clipboard">Enviado al portapapeles.</string>
+    <string name="share_sent_clipboard_to">Enviado al portapapeles de %1$s.</string>
     <string name="share_failed">Error: %1$s</string>
     <string name="share_unreadable">La app que lo compartió no permitió que Pocketdesk lo leyera.</string>
     <string name="shortcut_connect">Conectar a %1$s</string>
