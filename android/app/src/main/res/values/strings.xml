@@ -113,9 +113,9 @@
 
     <!-- UI refresh: quick-settings sheet (grouped session controls) -->
     <string name="quick_settings_title">Session settings</string>
-    <string name="group_input">Input</string>
-    <string name="group_stream">Streaming</string>
-    <string name="group_desktop">Desktop</string>
+    <string name="group_view">Screen and input</string>
+    <string name="group_share">Share</string>
+    <string name="group_computer">Computer</string>
     <string name="row_input_mode">Input mode</string>
     <string name="row_view_only">View-only</string>
     <string name="row_quality">Quality</string>

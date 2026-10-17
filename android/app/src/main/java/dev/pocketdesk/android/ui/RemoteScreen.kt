@@ -185,13 +185,6 @@ fun RemoteScreen(
     var paneMode by remember { mutableStateOf(PaneMode.Auto) }
     val activity = remember(context) { context.findActivity() }
     val foldSplit = rememberFoldingSplit(activity)
-    fun cyclePane() {
-        paneMode = when (paneMode) {
-            PaneMode.Auto -> PaneMode.Dual
-            PaneMode.Dual -> PaneMode.Single
-            PaneMode.Single -> PaneMode.Auto
-        }
-    }
     var clipboardSync by remember { mutableStateOf(true) }
     var desktopSound by remember { mutableStateOf(Prefs.desktopSound(context)) }
     var showHistory by remember { mutableStateOf(false) }
@@ -827,13 +820,8 @@ fun RemoteScreen(
             }
         }
     }
-    fun cycleQuality() {
-        val next = when (qualityPreset) {
-            RustCore.PRESET_AUTO -> RustCore.PRESET_QUALITY
-            RustCore.PRESET_QUALITY -> RustCore.PRESET_BALANCED
-            RustCore.PRESET_BALANCED -> RustCore.PRESET_ECONOMY
-            else -> RustCore.PRESET_AUTO
-        }
+    fun setQuality(next: Int) {
+        if (next == qualityPreset) return
         qualityPreset = next
         scope.launch(Dispatchers.IO) {
             RustCore.sendQualityPreset(next).onFailure { qualityPresetError = context.plainErrorText(it.message) }
@@ -1588,21 +1576,12 @@ fun RemoteScreen(
     if (showQuick) {
         QuickSettingsSheet(
             onDismiss = { showQuick = false },
-            inputModeValue = stringResource(
-                if (mode == InputMode.DirectTouch) R.string.value_direct_touch else R.string.value_trackpad,
-            ),
-            onCycleInputMode = ::toggleMode,
+            trackpad = mode == InputMode.Trackpad,
+            onSetTrackpad = { mode = if (it) InputMode.Trackpad else InputMode.DirectTouch },
             viewOnly = viewOnly,
             onSetViewOnly = ::applyViewOnly,
-            qualityValue = stringResource(
-                when (qualityPreset) {
-                    RustCore.PRESET_QUALITY -> R.string.value_quality_max
-                    RustCore.PRESET_BALANCED -> R.string.value_quality_balanced
-                    RustCore.PRESET_ECONOMY -> R.string.value_quality_economy
-                    else -> R.string.value_quality_auto
-                },
-            ),
-            onCycleQuality = ::cycleQuality,
+            qualityPreset = qualityPreset,
+            onSetQuality = ::setQuality,
             windowValue = cropWindow?.title?.take(18) ?: stringResource(R.string.value_window_all),
             onPickWindow = {
                 showQuick = false
@@ -1618,14 +1597,8 @@ fun RemoteScreen(
                 showQuick = false
                 showMonitorPicker = true
             },
-            paneValue = stringResource(
-                when (paneMode) {
-                    PaneMode.Auto -> R.string.value_pane_auto
-                    PaneMode.Dual -> R.string.value_pane_dual
-                    PaneMode.Single -> R.string.value_pane_single
-                },
-            ),
-            onCyclePane = ::cyclePane,
+            paneMode = paneMode,
+            onSetPane = { paneMode = it },
             desktopSound = desktopSound,
             onSetDesktopSound = {
                 desktopSound = it

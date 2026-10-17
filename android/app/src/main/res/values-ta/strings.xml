@@ -106,9 +106,9 @@
 
     <!-- UI புதுப்பிப்பு: விரைவு அமைப்புத் தாள் + மங்கும் HUD -->
     <string name="quick_settings_title">அமர்வு அமைப்புகள்</string>
-    <string name="group_input">உள்ளீடு</string>
-    <string name="group_stream">ஒளிபரப்பு</string>
-    <string name="group_desktop">டெஸ்க்டாப்</string>
+    <string name="group_view">திரையும் உள்ளீடும்</string>
+    <string name="group_share">பகிர்</string>
+    <string name="group_computer">கணினி</string>
     <string name="row_input_mode">உள்ளீட்டு முறை</string>
     <string name="row_view_only">காட்சி மட்டும்</string>
     <string name="row_quality">தரம்</string>

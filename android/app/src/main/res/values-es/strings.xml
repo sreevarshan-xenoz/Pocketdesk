@@ -106,9 +106,9 @@
 
     <!-- Actualización de UI: hoja de ajustes rápidos + HUD que se desvanece -->
     <string name="quick_settings_title">Ajustes de sesión</string>
-    <string name="group_input">Entrada</string>
-    <string name="group_stream">Transmisión</string>
-    <string name="group_desktop">Escritorio</string>
+    <string name="group_view">Pantalla y control</string>
+    <string name="group_share">Compartir</string>
+    <string name="group_computer">Ordenador</string>
     <string name="row_input_mode">Modo de entrada</string>
     <string name="row_view_only">Solo lectura</string>
     <string name="row_quality">Calidad</string>
