@@ -11,6 +11,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SegmentedButton
@@ -21,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -198,6 +200,8 @@ private fun ToggleRow(icon: LlGlyph, label: String, checked: Boolean, onToggle: 
     ListItem(
         headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
         leadingContent = { LlIcon(icon, null) },
+        // The sheet's own colour: the list's default painted bands across it.
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         trailingContent = { Switch(checked = checked, onCheckedChange = null) },
         modifier = Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = onToggle),
     )
@@ -209,6 +213,8 @@ private fun OpenRow(icon: LlGlyph, label: String, value: String?, onClick: () ->
     ListItem(
         headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
         leadingContent = { LlIcon(icon, null) },
+        // The sheet's own colour: the list's default painted bands across it.
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (value != null) {
@@ -234,6 +240,8 @@ private fun ActionRow(icon: LlGlyph, label: String, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
         leadingContent = { LlIcon(icon, null) },
+        // The sheet's own colour: the list's default painted bands across it.
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.clickable(role = Role.Button, onClick = onClick),
     )
 }
