@@ -107,6 +107,8 @@ struct Waiting {
     from_device: bool,
     /// The code shown for it.
     code: String,
+    /// Ours, and the device accepted: the owner confirms here.
+    accepted: bool,
 }
 
 fn now_unix() -> u64 {
@@ -258,9 +260,10 @@ impl State {
         let now = now_unix();
         match says {
             PairSays::Yes(_) if self.paired => vec![pairing::answer(true)],
-            // Its yes to ours, or its request while ours waits: paired.
+            // Its yes to ours, or its request while ours waits: accepted
+            // there, and the owner confirms the code here (3b review).
             PairSays::Yes(_) if self.waiting.as_ref().is_some_and(|w| !w.from_device) => {
-                self.pair_now();
+                self.accepted(now);
                 Vec::new()
             }
             PairSays::Yes(Some(timestamp)) => {
@@ -279,6 +282,7 @@ impl State {
                         code: code.clone(),
                         asked_unix: now,
                         from_device: true,
+                        accepted: false,
                     },
                     now,
                 );
@@ -290,6 +294,7 @@ impl State {
                     since: now,
                     from_device: true,
                     code: code.clone(),
+                    accepted: false,
                 });
                 notify(
                     "A KDE Connect device asks to pair",
@@ -315,6 +320,39 @@ impl State {
                 Vec::new()
             }
         }
+    }
+
+    /// The device accepted this computer's request: held for the owner to
+    /// confirm the code here, for another [`devices::PAIRING_TTL_SECS`].
+    fn accepted(&mut self, now: u64) {
+        let Some(waiting) = self.waiting.as_mut().filter(|w| !w.accepted) else {
+            return;
+        };
+        waiting.accepted = true;
+        waiting.since = now;
+        let code = waiting.code.clone();
+        let noted = devices::set_pending(
+            &self.dir,
+            Pending {
+                device_id: self.device_id.clone(),
+                name: self.name.clone(),
+                code: code.clone(),
+                asked_unix: now,
+                from_device: false,
+                accepted: true,
+            },
+            now,
+        );
+        if let Err(e) = noted {
+            tracing::warn!("A KDE pairing could not be held for the owner: {e}");
+        }
+        notify(
+            "A KDE Connect device accepted pairing",
+            format!(
+                "{}: confirm it in Settings if it showed the code {code}",
+                self.name
+            ),
+        );
     }
 
     /// Pair the device with the certificate it brought.
@@ -369,6 +407,7 @@ impl State {
                         code: code.clone(),
                         asked_unix: now,
                         from_device: false,
+                        accepted: false,
                     },
                     now,
                 );
@@ -379,6 +418,7 @@ impl State {
                     since: now,
                     from_device: false,
                     code,
+                    accepted: false,
                 });
                 vec![pairing::ask(now)]
             }
@@ -387,15 +427,21 @@ impl State {
                 if self
                     .waiting
                     .as_ref()
-                    .is_some_and(|w| w.from_device && w.code == code) =>
+                    .is_some_and(|w| (w.from_device || w.accepted) && w.code == code) =>
             {
+                let from_device = self.waiting.as_ref().is_some_and(|w| w.from_device);
                 if yes {
                     self.pair_now();
                 } else {
                     self.waiting = None;
                     let _ = devices::clear_pending(&self.dir, &self.device_id, now);
                 }
-                vec![pairing::answer(yes)]
+                match (from_device, yes) {
+                    // The device accepted ours already: a yes needs no word.
+                    (false, true) => Vec::new(),
+                    // A no to ours after it accepted: it unpairs there.
+                    _ => vec![pairing::answer(yes)],
+                }
             }
             Event::Answer { .. } => {
                 tracing::info!(device_id = %self.device_id, "A KDE pairing answer for another request; not taken");
@@ -412,7 +458,8 @@ impl State {
         }
     }
 
-    /// A pairing past its time ends: a device's request with a no.
+    /// A pairing past its time ends with a no, as KDE Connect's own does
+    /// (a device that accepted ours unpairs there).
     fn expire(&mut self) -> Vec<NetworkPacket> {
         let Some(waiting) = self.waiting.clone() else {
             return Vec::new();
@@ -423,11 +470,7 @@ impl State {
         }
         self.waiting = None;
         let _ = devices::clear_pending(&self.dir, &self.device_id, now);
-        if waiting.from_device {
-            vec![pairing::answer(false)]
-        } else {
-            Vec::new()
-        }
+        vec![pairing::answer(false)]
     }
 }
 
@@ -547,19 +590,62 @@ mod tests {
             since: now - devices::PAIRING_TTL_SECS - 1,
             from_device: true,
             code: String::new(),
+            accepted: false,
         });
         let out = s.expire();
         assert_eq!(says(&out[0]), Some(PairSays::No), "no answer is a no");
     }
 
     #[test]
-    fn pairing_from_here_pairs_on_the_devices_yes() {
+    fn pairing_from_here_pairs_when_the_owner_confirms_the_devices_yes() {
         let mut s = state("here", false);
+        let now = now_unix();
         let out = s.event(Event::PairFromHere);
         assert!(matches!(says(&out[0]), Some(PairSays::Yes(Some(_)))));
+        let code = devices::pending(&s.dir, now)[0].code.clone();
+        assert!(
+            s.event(Event::Answer {
+                yes: true,
+                code: code.clone()
+            })
+            .is_empty(),
+            "nothing to confirm before the device accepts"
+        );
+        assert!(!s.paired);
         assert!(s.pair_packet(PairSays::Yes(None)).is_empty());
+        assert!(!s.paired, "its yes alone pairs nothing");
+        let held = devices::pending(&s.dir, now);
+        assert!(held[0].accepted && !held[0].from_device);
+        assert!(
+            s.event(Event::Answer {
+                yes: true,
+                code: code.clone()
+            })
+            .is_empty()
+        );
         assert!(s.paired);
         assert_eq!(devices::pinned(&s.dir, &s.device_id), Some([9; 32]));
+        assert!(devices::pending(&s.dir, now).is_empty());
+    }
+
+    #[test]
+    fn a_devices_yes_the_owner_does_not_confirm_unpairs_it_there() {
+        let mut s = state("here-no", false);
+        let now = now_unix();
+        s.event(Event::PairFromHere);
+        let code = devices::pending(&s.dir, now)[0].code.clone();
+        s.pair_packet(PairSays::Yes(None));
+        let out = s.event(Event::Answer { yes: false, code });
+        assert_eq!(says(&out[0]), Some(PairSays::No));
+        assert!(!s.paired);
+
+        let mut s = state("here-late", false);
+        s.event(Event::PairFromHere);
+        s.pair_packet(PairSays::Yes(None));
+        s.waiting.as_mut().unwrap().since = now - devices::PAIRING_TTL_SECS - 1;
+        let out = s.expire();
+        assert_eq!(says(&out[0]), Some(PairSays::No), "not confirmed in time");
+        assert_eq!(devices::pinned(&s.dir, &s.device_id), None);
     }
 
     #[test]

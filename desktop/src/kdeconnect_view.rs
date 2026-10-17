@@ -2,7 +2,8 @@
 //! Connect (the server tells the network this computer is here for a
 //! minute), the devices that have connected, and pairing with them: a
 //! device's request waits here with the code both screens show, for Allow
-//! or Deny; Pair asks a device from here. Ping and Unpair once paired.
+//! or Deny; Pair asks a device from here, and its acceptance waits for
+//! Confirm with the same code. Ping and Unpair once paired.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -105,6 +106,27 @@ impl KdeConnectView {
                         });
                     }
                     if ui.button("Deny").clicked() {
+                        ask = Some(KdeAsk::Deny {
+                            device_id: pending.device_id.clone(),
+                            code: pending.code.clone(),
+                        });
+                    }
+                } else if pending.accepted {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} accepted. Confirm only if it showed the code {}.",
+                            pending.name,
+                            spaced(&pending.code)
+                        ))
+                        .strong(),
+                    );
+                    if ui.button("Confirm").clicked() {
+                        ask = Some(KdeAsk::Allow {
+                            device_id: pending.device_id.clone(),
+                            code: pending.code.clone(),
+                        });
+                    }
+                    if ui.button("Cancel").clicked() {
                         ask = Some(KdeAsk::Deny {
                             device_id: pending.device_id.clone(),
                             code: pending.code.clone(),

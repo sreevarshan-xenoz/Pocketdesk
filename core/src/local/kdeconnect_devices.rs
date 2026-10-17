@@ -102,6 +102,11 @@ pub struct Pending {
     pub asked_unix: u64,
     /// The device asked; else this computer did.
     pub from_device: bool,
+    /// This computer asked and the device accepted: it waits for the owner
+    /// to confirm the code here (3b review), since a device answering for
+    /// another could otherwise pair with no one comparing codes.
+    #[serde(default)]
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -412,6 +417,7 @@ mod tests {
             code: "1ACBAC75".to_string(),
             asked_unix: at,
             from_device: true,
+            accepted: false,
         };
         set_pending(&dir, entry("a", 100), 100).unwrap();
         set_pending(&dir, entry("a", 105), 105).unwrap();
