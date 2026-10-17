@@ -738,7 +738,11 @@ impl PocketdeskApp {
 
     fn devices_tab(&mut self, ui: &mut egui::Ui) {
         if self.snapshot.devices.is_empty() {
-            ui.label("No phone is paired yet.");
+            // U5: an empty page says what to do next, with the way there.
+            ui.label("No phone is paired yet. The phone scans a code from the Pair page.");
+            if ui.button("Pair a phone").clicked() {
+                self.switch_to(Tab::Pair);
+            }
             return;
         }
         let mut revoke = None;
@@ -899,11 +903,22 @@ impl PocketdeskApp {
 
     fn sessions_tab(&mut self, ui: &mut egui::Ui) {
         if !self.snapshot.running {
-            ui.label("The server is not running, so no phone is connected.");
+            ui.label(
+                "The server is not running, so no phone is connected. Start it from Overview.",
+            );
+            if ui.button("Overview").clicked() {
+                self.switch_to(Tab::Status);
+            }
             return;
         }
         if self.snapshot.sessions.is_empty() {
-            ui.label("No phone is viewing this desktop right now.");
+            ui.label(
+                "No phone is viewing this computer right now. On the phone, tap Connect on this \
+                 computer's card.",
+            );
+            if self.snapshot.devices.is_empty() && ui.button("Pair a phone").clicked() {
+                self.switch_to(Tab::Pair);
+            }
             return;
         }
         let now = now_unix();
@@ -1306,11 +1321,18 @@ impl PocketdeskApp {
         let Some(device) = self.send_target() else {
             ui.label(
                 RichText::new(
-                    "No phone is in a session. Open a session on the phone, then send files \
-                     from here; they land in the phone's Downloads/Pocketdesk.",
+                    "No phone or computer can take a file right now. A phone can while Pocketdesk \
+                     is open on it, in a session, or with \"Files from the computer in the \
+                     background\" on; another of your computers, while its link is up. Files \
+                     land in the phone's Downloads/Pocketdesk.",
                 )
                 .color(crate::theme::muted(ui)),
             );
+            // Not only a session: a phone linked at home or by the internet
+            // road, or another computer, takes files too (U5).
+            if self.snapshot.devices.is_empty() && ui.button("Pair a phone").clicked() {
+                self.switch_to(Tab::Pair);
+            }
             return;
         };
         let targets = model::send_target_ids(&self.snapshot);
