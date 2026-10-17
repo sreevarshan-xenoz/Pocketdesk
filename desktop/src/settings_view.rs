@@ -14,6 +14,205 @@ use pocketdesk_core::local::tasks::{
 use pocketdesk_core::local::wake::WakeFacts;
 use pocketdesk_core::streaming::{CaptureBackend, VideoQualityPreset};
 
+/// Settings' sections, in page order (U5): a flat grid of about 35 rows
+/// had everyday choices beside developer ones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Section {
+    Connection,
+    Phones,
+    Notifications,
+    Wake,
+    Automation,
+    Computers,
+    KdeConnect,
+    Advanced,
+}
+
+impl Section {
+    pub const ALL: [Section; 8] = [
+        Section::Connection,
+        Section::Phones,
+        Section::Notifications,
+        Section::Wake,
+        Section::Automation,
+        Section::Computers,
+        Section::KdeConnect,
+        Section::Advanced,
+    ];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Section::Connection => "Connection",
+            Section::Phones => "Phones",
+            Section::Notifications => "Notifications and texts",
+            Section::Wake => "Wake",
+            Section::Automation => "Automation",
+            Section::Computers => "Other computers",
+            Section::KdeConnect => "KDE Connect",
+            Section::Advanced => "Advanced",
+        }
+    }
+
+    /// What is in it, in a line beside the title.
+    pub fn summary(self) -> &'static str {
+        match self {
+            Section::Connection => "ports, pairing, this network, files",
+            Section::Phones => "video, control, clipboard, links, batteries",
+            Section::Notifications => "phones' notifications and texts here",
+            Section::Wake => "waking this computer from a phone",
+            Section::Automation => "event log, hooks, tasks, Home Assistant",
+            Section::Computers => "pairing and sharing with your other computers",
+            Section::KdeConnect => "devices that run KDE Connect",
+            Section::Advanced => "screen capture, logs, relays, the DHT",
+        }
+    }
+
+    /// Open when the page first shows.
+    pub fn opens(self) -> bool {
+        matches!(self, Section::Connection | Section::Phones)
+    }
+}
+
+/// Every setting the form edits: its key in config.toml, its name on the
+/// page and its section. One table, so the save bar names a change as its
+/// row does, and a test holds it to the config's keys (none lost in a move).
+pub const SETTINGS: &[(&str, &str, Section)] = &[
+    ("control_port", "Control port (TCP)", Section::Connection),
+    (
+        "streaming_port",
+        "Streaming port (UDP)",
+        Section::Connection,
+    ),
+    ("pairing_required", "Require pairing", Section::Connection),
+    (
+        "lan_discovery",
+        "Visible on this network",
+        Section::Connection,
+    ),
+    (
+        "internet_files",
+        "Files over the internet",
+        Section::Connection,
+    ),
+    (
+        "transfer_keep_hours",
+        "Unfinished files",
+        Section::Connection,
+    ),
+    ("video_quality", "Video quality", Section::Phones),
+    ("allow_hevc", "H.265 (HEVC)", Section::Phones),
+    ("slow_link_frame_rate", "Slow links", Section::Phones),
+    ("input_control", "Several phones", Section::Phones),
+    (
+        "input_idle_secs",
+        "Hand control back after",
+        Section::Phones,
+    ),
+    ("clipboard_push", "Clipboard to phones", Section::Phones),
+    ("open_links", "Links from phones", Section::Phones),
+    ("phone_battery_alerts", "Phones' batteries", Section::Phones),
+    (
+        "virtual_screens",
+        "Phones may add a screen",
+        Section::Phones,
+    ),
+    ("mic_relay_device", "Phone mic plays into", Section::Phones),
+    (
+        "phone_notifications",
+        "Phone notifications",
+        Section::Notifications,
+    ),
+    (
+        "notifications_per_minute",
+        "At most, per phone",
+        Section::Notifications,
+    ),
+    ("sms_notify", "Texts", Section::Notifications),
+    ("sms_names", "Contact names", Section::Notifications),
+    ("sms_keep", "Messages history", Section::Notifications),
+    ("wake_announce", "Wake from the phone", Section::Wake),
+    ("wake_port", "Outside wake port", Section::Wake),
+    ("events", "Event log", Section::Automation),
+    ("events_detail", "Details in events", Section::Automation),
+    ("hooks", "Hooks", Section::Automation),
+    ("tasks", "Tasks", Section::Automation),
+    ("home_assistant", "Home Assistant", Section::Automation),
+    (
+        "mqtt_broker",
+        "Home Assistant's broker",
+        Section::Automation,
+    ),
+    ("mqtt_user", "Home Assistant's user", Section::Automation),
+    (
+        "mqtt_password",
+        "Home Assistant's password",
+        Section::Automation,
+    ),
+    (
+        "computer_clipboard",
+        "Clipboard with my computers",
+        Section::Computers,
+    ),
+    (
+        "kdeconnect_compat",
+        "KDE Connect devices",
+        Section::KdeConnect,
+    ),
+    ("capture_backend", "Screen capture", Section::Advanced),
+    ("log_level", "Log level", Section::Advanced),
+    ("relay_urls", "Your own relays", Section::Advanced),
+    ("dht_publish", "Found by id (DHT)", Section::Advanced),
+];
+
+/// A setting's name on the page.
+pub fn name(key: &str) -> &'static str {
+    SETTINGS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, name, _)| *name)
+        .unwrap_or("A setting")
+}
+
+fn section_of(key: &str) -> Option<Section> {
+    SETTINGS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, _, section)| *section)
+}
+
+/// Whether the running server reads `key` again on its own: the event log
+/// and hooks at each event, tasks at each start, Home Assistant every 2 s,
+/// files over the internet at each transfer. The rest wait for a restart.
+pub fn applies_live(key: &str) -> bool {
+    matches!(
+        key,
+        "events"
+            | "events_detail"
+            | "hooks"
+            | "tasks"
+            | "home_assistant"
+            | "mqtt_broker"
+            | "mqtt_user"
+            | "mqtt_password"
+            | "internet_files"
+    )
+}
+
+/// What changes from `saved` to `edited`, by name: those that apply now,
+/// and those after a restart.
+pub fn split_changes(saved: &Config, edited: &Config) -> (Vec<&'static str>, Vec<&'static str>) {
+    let (now, later): (Vec<_>, Vec<_>) = saved
+        .changed_keys(edited)
+        .into_iter()
+        .partition(|key| applies_live(key));
+    let names = |keys: Vec<&str>| {
+        let mut names: Vec<&'static str> = keys.into_iter().map(name).collect();
+        names.dedup();
+        names
+    };
+    (names(now), names(later))
+}
+
 /// The settings being edited against what is saved.
 pub struct SettingsForm {
     saved: Config,
@@ -26,6 +225,8 @@ pub struct SettingsForm {
     pub hooks_text: String,
     /// Saved since the server last read it.
     pub restart_needed: bool,
+    /// What those saves changed, by name, for the restart notice.
+    restart_names: Vec<&'static str>,
     /// The settings as the running server read them: saved changes wait
     /// for a restart (the KDE section's buttons follow this, not the box).
     running: Config,
@@ -46,6 +247,7 @@ impl SettingsForm {
     /// The server was restarted: it has read what is saved.
     pub fn restarted(&mut self) {
         self.restart_needed = false;
+        self.restart_names.clear();
         self.running = self.saved.clone();
     }
 
@@ -58,6 +260,7 @@ impl SettingsForm {
             running: config.clone(),
             edited: config,
             restart_needed: false,
+            restart_names: Vec::new(),
             wake: pocketdesk_core::local::wake::wake_facts(None),
             home_assistant: None,
         }
@@ -94,53 +297,86 @@ impl SettingsForm {
     pub fn undo(&mut self) {
         let running = std::mem::take(&mut self.running);
         let restart_needed = self.restart_needed;
+        let restart_names = std::mem::take(&mut self.restart_names);
         *self = Self::from_config(self.saved.clone());
         self.running = running;
         self.restart_needed = restart_needed;
+        self.restart_names = restart_names;
     }
 
     /// What stops the edit from being saved, in words for the user.
     pub fn problems(&self) -> Vec<String> {
+        self.problems_by_key()
+            .into_iter()
+            .map(|(_, problem)| problem)
+            .collect()
+    }
+
+    /// The problems, each with the key it is about, so its section opens.
+    fn problems_by_key(&self) -> Vec<(&'static str, String)> {
         let mut problems = Vec::new();
         for (name, port) in [
             ("control", self.edited.control_port),
             ("streaming", self.edited.streaming_port),
         ] {
             if port < 1024 {
-                problems.push(format!(
+                let key = if name == "control" {
+                    "control_port"
+                } else {
+                    "streaming_port"
+                };
+                problems.push((key, format!(
                     "The {name} port must be 1024 or higher (lower ports need administrator rights)."
-                ));
+                )));
             }
         }
         if self.edited.control_port == self.edited.streaming_port {
-            problems.push("The control and streaming ports must be different.".to_string());
+            problems.push((
+                "control_port",
+                "The control and streaming ports must be different.".to_string(),
+            ));
         }
         if self.edited.wake_port != 0 && self.edited.wake_port == self.edited.streaming_port {
-            problems.push(
+            problems.push((
+                "wake_port",
                 "The outside wake port must differ from the streaming port, so the two router forwards do not clash."
                     .to_string(),
-            );
+            ));
         }
         if self.edited.input_control == InputControlMode::One
             && !(3..=120).contains(&self.edited.input_idle_secs)
         {
-            problems.push("Control is handed back after 3 to 120 seconds.".to_string());
+            problems.push((
+                "input_idle_secs",
+                "Control is handed back after 3 to 120 seconds.".to_string(),
+            ));
         }
         for url in &self.edited.relay_urls {
             if let Some(problem) = relay_url_problem(url) {
-                problems.push(format!("Relay: {problem}."));
+                problems.push(("relay_urls", format!("Relay: {problem}.")));
             }
         }
         for problem in parse_hooks(&self.hooks_text).1 {
-            problems.push(format!("Hooks: {problem}."));
+            problems.push(("hooks", format!("Hooks: {problem}.")));
         }
-        problems.extend(task_problems(&self.edited.tasks));
+        problems.extend(
+            task_problems(&self.edited.tasks)
+                .into_iter()
+                .map(|problem| ("tasks", problem)),
+        );
         if self.edited.home_assistant
             && let Err(why) = ha::parse_broker(&self.edited.mqtt_broker)
         {
-            problems.push(format!("Home Assistant: {why}."));
+            problems.push(("mqtt_broker", format!("Home Assistant: {why}.")));
         }
         problems
+    }
+
+    /// Whether a problem is about a setting in `section`, which then opens.
+    pub fn section_has_problem(&self, section: Section) -> bool {
+        self.problems_by_key()
+            .iter()
+            .any(|(key, _)| section_of(key) == Some(section))
     }
 
     /// The bridge's status, read again when 2 s old.
@@ -170,194 +406,260 @@ impl SettingsForm {
         self.edited
             .save_to(path)
             .map_err(|e: ConfigError| e.to_string())?;
-        // The server reads the event log's settings and hooks again at the
-        // next event; only the others wait for a restart.
-        if !same_but_events(&self.saved, &self.edited) {
-            self.restart_needed = true;
+        // Some settings the running server reads again on its own; only the
+        // others wait for a restart (applies_live).
+        let (_, later) = split_changes(&self.saved, &self.edited);
+        for name in later {
+            if !self.restart_names.contains(&name) {
+                self.restart_names.push(name);
+            }
         }
+        self.restart_needed = !self.restart_names.is_empty();
         self.saved = self.edited.clone();
         Ok(())
     }
 
-    /// Draw the form. Returns true when the user asked to save.
-    /// The form. Save and Undo are in [`Self::save_bar`], shown in view
-    /// while there are changes.
-    pub fn show(&mut self, ui: &mut egui::Ui) {
-        let home_assistant = if self.saved.home_assistant {
+    /// What saved changes wait for a restart, by name.
+    pub fn restart_names(&self) -> &[&'static str] {
+        &self.restart_names
+    }
+
+    /// The rows of one section; Save and Undo are in [`Self::save_bar`],
+    /// shown in view while there are changes.
+    pub fn show_section(&mut self, ui: &mut egui::Ui, section: Section) {
+        let home_assistant = if section == Section::Automation && self.saved.home_assistant {
             self.home_assistant_status()
         } else {
             None
         };
         let e = &mut self.edited;
-        egui::Grid::new("settings")
-            .num_columns(2)
-            .spacing([24.0, 10.0])
-            .show(ui, |ui| {
-                ui.label("Control port (TCP)");
-                ui.add(egui::DragValue::new(&mut e.control_port).range(1..=65535));
-                ui.end_row();
-                ui.label("Streaming port (UDP)");
-                ui.add(egui::DragValue::new(&mut e.streaming_port).range(1..=65535));
-                ui.end_row();
-                ui.label("Require pairing");
-                ui.checkbox(&mut e.pairing_required, "only paired phones may connect");
-                ui.end_row();
-                ui.label("Visible on this network");
-                ui.checkbox(
-                    &mut e.lan_discovery,
-                    "phones on the same network list this computer",
-                );
-                ui.end_row();
-                ui.label("Video quality");
-                egui::ComboBox::from_id_salt("quality")
-                    .selected_text(format!("{:?}", e.video_quality))
-                    .show_ui(ui, |ui| {
-                        for preset in [
-                            VideoQualityPreset::Low,
-                            VideoQualityPreset::Balanced,
-                            VideoQualityPreset::High,
-                        ] {
-                            let label = format!("{preset:?}");
-                            ui.selectable_value(&mut e.video_quality, preset, label);
-                        }
+        match section {
+            Section::Connection => {
+                row(ui, "control_port", |ui| {
+                    ui.add(egui::DragValue::new(&mut e.control_port).range(1..=65535));
+                });
+                row(ui, "streaming_port", |ui| {
+                    ui.add(egui::DragValue::new(&mut e.streaming_port).range(1..=65535));
+                });
+                row(ui, "pairing_required", |ui| {
+                    ui.checkbox(&mut e.pairing_required, "only paired phones may connect");
+                });
+                row(ui, "lan_discovery", |ui| {
+                    ui.checkbox(
+                        &mut e.lan_discovery,
+                        "phones on the same network list this computer",
+                    );
+                });
+                row(ui, "internet_files", |ui| {
+                    ui.checkbox(
+                        &mut e.internet_files,
+                        "move files with a phone linked from away",
+                    );
+                    note(
+                        ui,
+                        "On the phone's own link, so nothing dials it back. Relays see sizes and timing, never content.",
+                    );
+                });
+                row(ui, "transfer_keep_hours", |ui| {
+                    egui::ComboBox::from_id_salt("transfer-keep")
+                        .selected_text(keep_label(e.transfer_keep_hours))
+                        .show_ui(ui, |ui| {
+                            for hours in [0, 1, 24] {
+                                ui.selectable_value(
+                                    &mut e.transfer_keep_hours,
+                                    hours,
+                                    keep_label(hours),
+                                );
+                            }
+                        });
+                    note(
+                        ui,
+                        "A file from a phone that stops part way is kept this long, so the phone's retry continues it.",
+                    );
+                });
+            }
+            Section::Phones => {
+                row(ui, "video_quality", |ui| {
+                    egui::ComboBox::from_id_salt("quality")
+                        .selected_text(format!("{:?}", e.video_quality))
+                        .show_ui(ui, |ui| {
+                            for preset in [
+                                VideoQualityPreset::Low,
+                                VideoQualityPreset::Balanced,
+                                VideoQualityPreset::High,
+                            ] {
+                                let label = format!("{preset:?}");
+                                ui.selectable_value(&mut e.video_quality, preset, label);
+                            }
+                        });
+                });
+                row(ui, "allow_hevc", |ui| {
+                    ui.checkbox(&mut e.allow_hevc, "use it with phones that can decode it");
+                });
+                row(ui, "slow_link_frame_rate", |ui| {
+                    ui.checkbox(
+                        &mut e.slow_link_frame_rate,
+                        "lower the frame rate to keep the picture moving",
+                    );
+                });
+                row(ui, "input_control", |ui| {
+                    egui::ComboBox::from_id_salt("input-control")
+                        .selected_text(input_control_label(e.input_control))
+                        .show_ui(ui, |ui| {
+                            for mode in [InputControlMode::One, InputControlMode::Shared] {
+                                ui.selectable_value(
+                                    &mut e.input_control,
+                                    mode,
+                                    input_control_label(mode),
+                                );
+                            }
+                        });
+                });
+                row(ui, "input_idle_secs", |ui| {
+                    ui.add_enabled(
+                        e.input_control == InputControlMode::One,
+                        egui::DragValue::new(&mut e.input_idle_secs)
+                            .range(3..=120)
+                            .suffix(" s without input"),
+                    );
+                });
+                row(ui, "clipboard_push", |ui| {
+                    ui.checkbox(
+                        &mut e.clipboard_push,
+                        "send what I copy to connected phones (those with Clipboard on)",
+                    );
+                });
+                row(ui, "open_links", |ui| {
+                    ui.checkbox(
+                        &mut e.open_links,
+                        "open in the browser (off: show as a notification)",
+                    );
+                });
+                row(ui, "phone_battery_alerts", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_battery_alerts,
+                        "a notification when a phone runs low",
+                    );
+                });
+                row(ui, "virtual_screens", |ui| {
+                    ui.checkbox(
+                        &mut e.virtual_screens,
+                        "a phone with Input can add a screen of its own shape (Sway)",
+                    );
+                });
+                if cfg!(windows) {
+                    let mic = &mut self.mic_device_text;
+                    row(ui, "mic_relay_device", |ui| {
+                        ui.add(egui::TextEdit::singleline(mic).hint_text("CABLE Input (VB-CABLE)"));
                     });
-                ui.end_row();
-                ui.label("H.265 (HEVC)");
-                ui.checkbox(&mut e.allow_hevc, "use it with phones that can decode it");
-                ui.end_row();
-                ui.label("Slow links");
-                ui.checkbox(
-                    &mut e.slow_link_frame_rate,
-                    "lower the frame rate to keep the picture moving",
-                );
-                ui.end_row();
-                ui.label("Screen capture");
-                egui::ComboBox::from_id_salt("capture")
-                    .selected_text(e.capture_backend.config_key())
-                    .show_ui(ui, |ui| {
-                        for backend in CaptureBackend::ALL {
-                            ui.selectable_value(
-                                &mut e.capture_backend,
-                                *backend,
-                                backend.config_key(),
-                            );
-                        }
-                    });
-                ui.end_row();
-                ui.label("Log level");
-                egui::ComboBox::from_id_salt("log")
-                    .selected_text(e.log_level.clone())
-                    .show_ui(ui, |ui| {
-                        for level in ["error", "warn", "info", "debug", "trace"] {
-                            ui.selectable_value(&mut e.log_level, level.to_string(), level);
-                        }
-                    });
-                ui.end_row();
-                ui.label("Your own relays");
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.relay_urls_text)
-                        .desired_rows(2)
-                        .hint_text("blank: n0's public relays\nhttps://relay.example.org"),
-                );
-                ui.end_row();
-                ui.label("Found by id (DHT)");
-                egui::ComboBox::from_id_salt("dht")
-                    .selected_text(dht_label(e.dht_publish))
-                    .show_ui(ui, |ui| {
-                        for mode in [DhtPublish::Relay, DhtPublish::Addresses, DhtPublish::Off] {
-                            ui.selectable_value(&mut e.dht_publish, mode, dht_label(mode));
-                        }
-                    });
-                ui.end_row();
-                ui.label("Phone notifications");
-                ui.checkbox(
-                    &mut e.phone_notifications,
-                    "show the notifications phones share",
-                );
-                ui.end_row();
-                ui.label("At most, per phone");
-                ui.add(
-                    egui::DragValue::new(&mut e.notifications_per_minute)
-                        .range(1..=600)
-                        .suffix(" a minute"),
-                );
-                ui.end_row();
-                ui.label("Texts");
-                ui.checkbox(&mut e.sms_notify, "a notification for each text");
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(
-                    &mut e.sms_names,
-                    "keep the contact names phones send with texts (off forgets those kept, when the server restarts)",
-                );
-                ui.end_row();
-                ui.label("Clipboard to phones");
-                ui.checkbox(
-                    &mut e.clipboard_push,
-                    "send what I copy to connected phones (those with Clipboard on)",
-                );
-                ui.end_row();
-                ui.label("KDE Connect devices");
-                ui.checkbox(
-                    &mut e.kdeconnect_compat,
-                    "work with devices that run KDE Connect (pairing asks you first)",
-                );
-                ui.end_row();
-                ui.label("Clipboard with my computers");
-                ui.checkbox(
-                    &mut e.computer_clipboard,
-                    "share what I copy with my other paired computers, both ways (turn it on on each)",
-                );
-                ui.end_row();
-                ui.label("Phones may add a screen");
-                ui.checkbox(
-                    &mut e.virtual_screens,
-                    "a phone with Input can add a screen of its own shape (Sway)",
-                );
-                ui.end_row();
-                ui.label("Links from phones");
-                ui.checkbox(
-                    &mut e.open_links,
-                    "open in the browser (off: show as a notification)",
-                );
-                ui.end_row();
-                ui.label("Phones' batteries");
-                ui.checkbox(
-                    &mut e.phone_battery_alerts,
-                    "a notification when a phone runs low",
-                );
-                ui.end_row();
-                ui.label("Event log");
-                ui.checkbox(
-                    &mut e.events,
-                    "keep a log of what happens, for `pocketdesk events` and scripts",
-                );
-                ui.end_row();
-                ui.label("");
-                let mut full = e.events_detail == EventsDetail::Full;
-                if ui
-                    .checkbox(
-                        &mut full,
-                        "details in events: notification and text content, file names, whole links",
-                    )
-                    .changed()
-                {
-                    e.events_detail = if full {
-                        EventsDetail::Full
-                    } else {
-                        EventsDetail::Metadata
-                    };
                 }
-                ui.end_row();
-                ui.label("Hooks");
-                ui.vertical(|ui| {
+            }
+            Section::Notifications => {
+                row(ui, "phone_notifications", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_notifications,
+                        "show the notifications phones share",
+                    );
+                });
+                row(ui, "notifications_per_minute", |ui| {
                     ui.add(
-                        egui::TextEdit::multiline(&mut self.hooks_text)
+                        egui::DragValue::new(&mut e.notifications_per_minute)
+                            .range(1..=600)
+                            .suffix(" a minute"),
+                    );
+                });
+                row(ui, "sms_notify", |ui| {
+                    ui.checkbox(&mut e.sms_notify, "a notification for each text");
+                });
+                row(ui, "sms_names", |ui| {
+                    ui.checkbox(
+                        &mut e.sms_names,
+                        "keep the contact names phones send with texts (off forgets those kept, when the server restarts)",
+                    );
+                });
+                row(ui, "sms_keep", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut e.sms_keep)
+                            .range(50..=100_000)
+                            .suffix(" texts"),
+                    );
+                });
+            }
+            Section::Wake => {
+                row(ui, "wake_announce", |ui| {
+                    ui.checkbox(
+                        &mut e.wake_announce,
+                        "tell paired phones how to wake this computer",
+                    );
+                    note(
+                        ui,
+                        match &self.wake {
+                            Some(w) => format!(
+                                "Through {} ({}), {}.",
+                                w.adapter,
+                                if w.wired {
+                                    "wired"
+                                } else {
+                                    "Wi-Fi: usually wakes only from sleep"
+                                },
+                                w.mac
+                            ),
+                            None => "No adapter with a hardware address was found.".to_string(),
+                        },
+                    );
+                });
+                row(ui, "wake_port", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut e.wake_port)
+                            .range(0..=65535)
+                            .custom_formatter(|n, _| {
+                                if n == 0.0 {
+                                    "none".to_string()
+                                } else {
+                                    format!("{n}")
+                                }
+                            }),
+                    );
+                    note(
+                        ui,
+                        "To wake it from outside, forward this UDP port on the router to this computer's address. \
+                         It reaches the computer while the router still remembers it (minutes to hours after it sleeps), \
+                         or always when the router can forward to the network's broadcast address.",
+                    );
+                });
+            }
+            Section::Automation => {
+                row(ui, "events", |ui| {
+                    ui.checkbox(
+                        &mut e.events,
+                        "keep a log of what happens, for `pocketdesk events` and scripts",
+                    );
+                    let mut full = e.events_detail == EventsDetail::Full;
+                    if ui
+                        .checkbox(
+                            &mut full,
+                            "details in events: notification and text content, file names, whole links",
+                        )
+                        .changed()
+                    {
+                        e.events_detail = if full {
+                            EventsDetail::Full
+                        } else {
+                            EventsDetail::Metadata
+                        };
+                    }
+                });
+                let hooks = &mut self.hooks_text;
+                row(ui, "hooks", |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(hooks)
                             .desired_rows(3)
+                            .desired_width(f32::INFINITY)
                             .hint_text("file_received = notify-send \"A file came\""),
                     );
-                    ui.label(
-                        RichText::new(format!(
+                    note(
+                        ui,
+                        format!(
                             "One per line: an event, \"=\", a command. It runs as you, with the event on stdin. Events: {}.",
                             KINDS
                                 .iter()
@@ -365,11 +667,9 @@ impl SettingsForm {
                                 .filter(|k| hookable(k))
                                 .collect::<Vec<_>>()
                                 .join(", ")
-                        ))
-                        .small()
-                        .weak(),
+                        ),
                     );
-                    let unknown = unknown_hook_kinds(&parse_hooks(&self.hooks_text).0)
+                    let unknown = unknown_hook_kinds(&parse_hooks(hooks).0)
                         .into_iter()
                         .map(str::to_string)
                         .collect::<Vec<_>>();
@@ -384,9 +684,7 @@ impl SettingsForm {
                         );
                     }
                 });
-                ui.end_row();
-                ui.label("Tasks");
-                ui.vertical(|ui| {
+                row(ui, "tasks", |ui| {
                     let mut remove = None;
                     for (i, task) in e.tasks.iter_mut().enumerate() {
                         // Wrapped: name, command, ask, deadline and Remove
@@ -433,9 +731,7 @@ impl SettingsForm {
                         .weak(),
                     );
                 });
-                ui.end_row();
-                ui.label("Home Assistant");
-                ui.vertical(|ui| {
+                row(ui, "home_assistant", |ui| {
                     ui.checkbox(
                         &mut e.home_assistant,
                         "publish this computer, its phones and its tasks through an MQTT broker",
@@ -479,126 +775,66 @@ impl SettingsForm {
                     };
                     ui.label(RichText::new(note).small().weak());
                 });
-                ui.end_row();
-                ui.label("Messages history");
-                ui.add(
-                    egui::DragValue::new(&mut e.sms_keep)
-                        .range(50..=100_000)
-                        .suffix(" texts"),
-                );
-                ui.end_row();
-                ui.label("Wake from the phone");
-                ui.checkbox(
-                    &mut e.wake_announce,
-                    "tell paired phones how to wake this computer",
-                );
-                ui.end_row();
-                ui.label("Adapter");
-                ui.label(match &self.wake {
-                    Some(w) => format!(
-                        "{} ({}), {}",
-                        w.adapter,
-                        if w.wired {
-                            "wired"
-                        } else {
-                            "Wi-Fi: usually wakes only from sleep"
-                        },
-                        w.mac
-                    ),
-                    None => "none found with a hardware address".to_string(),
-                });
-                ui.end_row();
-                ui.label("Outside wake port");
-                ui.vertical(|ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut e.wake_port)
-                            .range(0..=65535)
-                            .custom_formatter(|n, _| {
-                                if n == 0.0 {
-                                    "none".to_string()
-                                } else {
-                                    format!("{n}")
-                                }
-                            }),
-                    );
-                    ui.label(
-                        RichText::new(
-                            "To wake it from outside, forward this UDP port on the router to this computer's address. \
-                             It reaches the computer while the router still remembers it (minutes to hours after it sleeps), \
-                             or always when the router can forward to the network's broadcast address.",
-                        )
-                        .small()
-                        .weak(),
+            }
+            Section::Computers => {
+                row(ui, "computer_clipboard", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_clipboard,
+                        "share what I copy with my other paired computers, both ways (turn it on on each)",
                     );
                 });
-                ui.end_row();
-                ui.label("Unfinished files");
-                ui.vertical(|ui| {
-                    egui::ComboBox::from_id_salt("transfer-keep")
-                        .selected_text(keep_label(e.transfer_keep_hours))
+            }
+            Section::KdeConnect => {
+                row(ui, "kdeconnect_compat", |ui| {
+                    ui.checkbox(
+                        &mut e.kdeconnect_compat,
+                        "work with devices that run KDE Connect (pairing asks you first)",
+                    );
+                });
+            }
+            Section::Advanced => {
+                row(ui, "capture_backend", |ui| {
+                    egui::ComboBox::from_id_salt("capture")
+                        .selected_text(e.capture_backend.config_key())
                         .show_ui(ui, |ui| {
-                            for hours in [0, 1, 24] {
+                            for backend in CaptureBackend::ALL {
                                 ui.selectable_value(
-                                    &mut e.transfer_keep_hours,
-                                    hours,
-                                    keep_label(hours),
+                                    &mut e.capture_backend,
+                                    *backend,
+                                    backend.config_key(),
                                 );
                             }
                         });
-                    ui.label(
-                        RichText::new(
-                            "A file from a phone that stops part way is kept this long, so the phone's retry continues it.",
-                        )
-                        .small()
-                        .weak(),
-                    );
                 });
-                ui.end_row();
-                ui.label("Files over the internet");
-                ui.vertical(|ui| {
-                    ui.checkbox(
-                        &mut e.internet_files,
-                        "move files with a phone linked from away",
-                    );
-                    ui.label(
-                        RichText::new(
-                            "On the phone's own link, so nothing dials it back. Relays see sizes and timing, never content.",
-                        )
-                        .small()
-                        .weak(),
-                    );
+                row(ui, "log_level", |ui| {
+                    egui::ComboBox::from_id_salt("log")
+                        .selected_text(e.log_level.clone())
+                        .show_ui(ui, |ui| {
+                            for level in ["error", "warn", "info", "debug", "trace"] {
+                                ui.selectable_value(&mut e.log_level, level.to_string(), level);
+                            }
+                        });
                 });
-                ui.end_row();
-                ui.label("Several phones");
-                egui::ComboBox::from_id_salt("input-control")
-                    .selected_text(input_control_label(e.input_control))
-                    .show_ui(ui, |ui| {
-                        for mode in [InputControlMode::One, InputControlMode::Shared] {
-                            ui.selectable_value(
-                                &mut e.input_control,
-                                mode,
-                                input_control_label(mode),
-                            );
-                        }
-                    });
-                ui.end_row();
-                ui.label("Hand control back after");
-                ui.add_enabled(
-                    e.input_control == InputControlMode::One,
-                    egui::DragValue::new(&mut e.input_idle_secs)
-                        .range(3..=120)
-                        .suffix(" s without input"),
-                );
-                ui.end_row();
-                if cfg!(windows) {
-                    ui.label("Phone mic plays into");
+                let relays = &mut self.relay_urls_text;
+                row(ui, "relay_urls", |ui| {
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.mic_device_text)
-                            .hint_text("CABLE Input (VB-CABLE)"),
+                        egui::TextEdit::multiline(relays)
+                            .desired_rows(2)
+                            .hint_text("blank: n0's public relays\nhttps://relay.example.org"),
                     );
-                    ui.end_row();
-                }
-            });
+                });
+                row(ui, "dht_publish", |ui| {
+                    egui::ComboBox::from_id_salt("dht")
+                        .selected_text(dht_label(e.dht_publish))
+                        .show_ui(ui, |ui| {
+                            for mode in [DhtPublish::Relay, DhtPublish::Addresses, DhtPublish::Off]
+                            {
+                                ui.selectable_value(&mut e.dht_publish, mode, dht_label(mode));
+                            }
+                        });
+                });
+            }
+        }
         self.apply_text_fields();
     }
 
@@ -616,6 +852,15 @@ impl SettingsForm {
                     .weak(),
             );
             return false;
+        }
+        let (now, later) = split_changes(&self.saved, &self.edited);
+        if !now.is_empty() {
+            ui.label(RichText::new(format!("Applies now: {}.", now.join(", "))).weak());
+        }
+        if !later.is_empty() {
+            ui.label(
+                RichText::new(format!("After the server restarts: {}.", later.join(", "))).weak(),
+            );
         }
         let mut save = false;
         ui.horizontal_wrapped(|ui| {
@@ -684,22 +929,17 @@ fn task_problems(tasks: &[TaskSpec]) -> Vec<String> {
     problems
 }
 
-/// Whether `a` and `b` differ only in what the server reads at each event.
-fn same_but_events(a: &Config, b: &Config) -> bool {
-    let strip = |c: &Config| Config {
-        events: true,
-        events_detail: EventsDetail::Metadata,
-        hooks: Default::default(),
-        // Tasks are read at each start, as events are.
-        tasks: Vec::new(),
-        // The Home Assistant bridge reads its settings every 2 s.
-        home_assistant: false,
-        mqtt_broker: String::new(),
-        mqtt_user: String::new(),
-        mqtt_password: String::new(),
-        ..c.clone()
-    };
-    strip(a) == strip(b)
+/// One setting: its name, then its control and any note under it, wrapping
+/// at the page's width (U5: a grid's long labels widened the page).
+fn row(ui: &mut egui::Ui, key: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.add_space(8.0);
+    ui.label(RichText::new(name(key)).strong());
+    add(ui);
+}
+
+/// A row's note, small and quiet.
+fn note(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.label(RichText::new(text.into()).small().weak());
 }
 
 /// `[hooks]` as the text box shows it.
@@ -838,7 +1078,61 @@ mod tests {
         assert!(form.problems().iter().any(|p| p.contains("TLS")));
         form.edited.mqtt_broker = "mqtt://192.0.2.5".into();
         assert!(form.problems().is_empty(), "{:?}", form.problems());
-        assert!(same_but_events(&Config::default(), &form.edited));
+        assert!(split_changes(&Config::default(), &form.edited).1.is_empty());
+    }
+
+    #[test]
+    fn every_setting_has_one_place_on_the_page() {
+        for key in Config::KNOWN_KEYS {
+            let rows = SETTINGS.iter().filter(|(k, _, _)| k == key).count();
+            assert_eq!(rows, 1, "{key} is in {rows} rows");
+        }
+        assert_eq!(SETTINGS.len(), Config::KNOWN_KEYS.len(), "a row for no key");
+        for section in Section::ALL {
+            assert!(
+                SETTINGS.iter().any(|(_, _, s)| *s == section),
+                "{section:?} is empty"
+            );
+        }
+    }
+
+    #[test]
+    fn the_save_bar_says_what_applies_now_and_what_after_a_restart() {
+        let saved = Config::default();
+        let mut edited = saved.clone();
+        edited.internet_files = !saved.internet_files;
+        edited.events = !saved.events;
+        edited.control_port = 1800;
+        edited.clipboard_push = !saved.clipboard_push;
+        let (now, later) = split_changes(&saved, &edited);
+        assert_eq!(now, ["Files over the internet", "Event log"]);
+        assert_eq!(later, ["Control port (TCP)", "Clipboard to phones"]);
+    }
+
+    #[test]
+    fn files_over_the_internet_apply_without_a_restart() {
+        let dir = std::env::temp_dir().join(format!("pd-settings-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let mut form = SettingsForm::from_config(Config::default());
+        form.edited.internet_files = !form.edited.internet_files;
+        form.save_to(&path).unwrap();
+        assert!(!form.restart_needed, "the server reads it at each transfer");
+        form.edited.lan_discovery = !form.edited.lan_discovery;
+        form.save_to(&path).unwrap();
+        assert!(form.restart_needed);
+        assert_eq!(form.restart_names(), ["Visible on this network"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_problem_opens_its_section() {
+        let mut form = SettingsForm::from_config(Config::default());
+        assert!(!form.section_has_problem(Section::Connection));
+        form.edited.control_port = 80;
+        assert!(form.section_has_problem(Section::Connection));
+        assert!(!form.section_has_problem(Section::Advanced));
     }
 
     #[test]

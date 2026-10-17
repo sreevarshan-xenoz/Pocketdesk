@@ -72,8 +72,8 @@ impl ComputersView {
         now_unix: u64,
     ) {
         self.refresh(state_dir);
-        ui.add_space(12.0);
-        ui.label(RichText::new("Computers").strong());
+        // Under Settings' "Other computers" heading (U5).
+        ui.add_space(8.0);
         ui.label(
             RichText::new(
                 "Your other computers. On the other one, open Pair and copy its link for \

@@ -1043,40 +1043,73 @@ impl PocketdeskApp {
     }
 
     fn settings_tab(&mut self, ui: &mut egui::Ui) {
-        let form = match &mut self.settings {
+        // Taken out while the page draws, so the sections can also call on
+        // the app's own parts (the file manager's menu, the computers).
+        let mut form = match self.settings.take() {
             Some(Ok(form)) => form,
-            Some(Err(error)) => {
-                ui.label(
-                    RichText::new(format!("config.toml could not be read: {error}"))
-                        .color(crate::theme::bad(ui)),
-                );
-                ui.label("Fix or remove the file, then reopen this tab. Nothing is saved over it.");
+            other => {
+                if let Some(Err(error)) = &other {
+                    ui.label(
+                        RichText::new(format!("config.toml could not be read: {error}"))
+                            .color(crate::theme::bad(ui)),
+                    );
+                    ui.label(
+                        "Fix or remove the file, then reopen this tab. Nothing is saved over it.",
+                    );
+                }
+                self.settings = other;
                 return;
             }
-            None => return,
         };
-        form.show(ui);
         if form.restart_needed {
-            ui.add_space(8.0);
-            ui.label(RichText::new("Restart the server to apply the saved settings.").strong());
+            ui.label(
+                RichText::new(format!(
+                    "Restart the server to apply: {}.",
+                    form.restart_names().join(", ")
+                ))
+                .strong(),
+            );
             if self.snapshot.running {
                 self.restart_button(ui);
             }
+            ui.add_space(8.0);
         }
-        self.send_menu_setting(ui);
-        self.browser_setting(ui);
-        self.computers
-            .show(ui, &self.state_dir, self.snapshot.running, now_unix());
         // As the running server read it, not the box as edited (3c
         // review: requests to a server with it off lapsed unread).
-        let compat_on =
-            matches!(&self.settings, Some(Ok(form)) if form.running().kdeconnect_compat);
-        self.kdeconnect.show(
-            ui,
-            &self.state_dir,
-            self.snapshot.running && compat_on,
-            now_unix(),
-        );
+        let compat_on = form.running().kdeconnect_compat;
+        for section in crate::settings_view::Section::ALL {
+            let mut header = egui::CollapsingHeader::new(section_heading(ui, section))
+                .id_salt(section.title())
+                .default_open(section.opens());
+            // A section with a problem stays open until it is fixed.
+            if form.section_has_problem(section) {
+                header = header.open(Some(true));
+            }
+            header.show(ui, |ui| {
+                form.show_section(ui, section);
+                match section {
+                    crate::settings_view::Section::Phones => {
+                        self.send_menu_setting(ui);
+                        self.browser_setting(ui);
+                    }
+                    crate::settings_view::Section::Computers => {
+                        self.computers
+                            .show(ui, &self.state_dir, self.snapshot.running, now_unix());
+                    }
+                    crate::settings_view::Section::KdeConnect => {
+                        self.kdeconnect.show(
+                            ui,
+                            &self.state_dir,
+                            self.snapshot.running && compat_on,
+                            now_unix(),
+                        );
+                    }
+                    _ => {}
+                }
+                ui.add_space(8.0);
+            });
+        }
+        self.settings = Some(Ok(form));
     }
 
     /// Settings' Save and Undo, in a bar at the bottom while the form has
@@ -1185,8 +1218,7 @@ impl PocketdeskApp {
     /// Nautilus, Nemo and Dolphin menus.
     fn send_menu_setting(&mut self, ui: &mut egui::Ui) {
         use pocketdesk_core::local::send_menu;
-        ui.add_space(12.0);
-        ui.separator();
+        ui.add_space(8.0);
         let Ok(data) = send_menu::data_dir() else {
             return;
         };
@@ -1676,6 +1708,27 @@ pub fn battery_text(
         ));
     }
     text
+}
+
+/// A Settings section's heading: its title, and what is in it, quieter.
+fn section_heading(ui: &egui::Ui, section: crate::settings_view::Section) -> egui::WidgetText {
+    let mut job = egui::text::LayoutJob::default();
+    RichText::new(section.title()).strong().append_to(
+        &mut job,
+        ui.style(),
+        egui::FontSelection::Default,
+        egui::Align::Center,
+    );
+    RichText::new(format!("   {}", section.summary()))
+        .small()
+        .weak()
+        .append_to(
+            &mut job,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::Center,
+        );
+    job.into()
 }
 
 /// `75` → "1m 15s", `7200` → "2h 0m".

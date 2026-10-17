@@ -132,8 +132,8 @@ impl KdeConnectView {
     /// `running` is whether the server runs with the switch on.
     pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path, running: bool, now_unix: u64) {
         self.refresh(state_dir, now_unix);
-        ui.add_space(12.0);
-        ui.label(RichText::new("KDE Connect devices").strong());
+        // Under Settings' "KDE Connect" heading (U5).
+        ui.add_space(8.0);
         ui.label(
             RichText::new(
                 "Phones and computers that run KDE Connect. Open KDE Connect on the device, \
