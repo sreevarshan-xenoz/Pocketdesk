@@ -43,8 +43,9 @@ pub enum Event {
     Replaced,
 }
 
-/// A live link: its token, and the way to tell it of an event.
-type LiveLink = (u64, mpsc::Sender<Event>);
+/// A live link: its token, the certificate it came with, and the way to
+/// tell it of an event.
+type LiveLink = (u64, [u8; 32], mpsc::Sender<Event>);
 
 /// The links up now, by device id, each with a token of its own.
 static LIVE: LazyLock<Mutex<HashMap<String, LiveLink>>> = LazyLock::new(Default::default);
@@ -58,33 +59,42 @@ pub fn tell(device_id: &str, event: Event) -> bool {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(device_id)
-        .map(|(_, tx)| tx.clone());
+        .map(|(_, _, tx)| tx.clone());
     link.is_some_and(|tx| tx.try_send(event).is_ok())
 }
 
-/// A link counted live while held. A newer one from the same device takes
-/// its place and closes it; a link going removes only itself (the A71's
-/// new link had been dropped from the list by its old one going).
+/// A link counted live while held. A newer one from the same device, with
+/// the same certificate, takes its place and closes it; one with another
+/// certificate is refused while it lives (3b review: a device claiming the
+/// id would otherwise close the real one's link, and its pairing request
+/// with it). A link going removes only itself (the A71's new link had been
+/// dropped from the list by its old one going).
 struct Live(String, u64);
 
 impl Live {
-    fn new(device_id: &str, tx: mpsc::Sender<Event>) -> Self {
+    fn new(device_id: &str, cert_hash: [u8; 32], tx: mpsc::Sender<Event>) -> Option<Self> {
         let token = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let older = LIVE
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(device_id.to_string(), (token, tx));
-        if let Some((_, older)) = older {
+        let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
+        if live
+            .get(device_id)
+            .is_some_and(|(_, theirs, _)| *theirs != cert_hash)
+        {
+            return None;
+        }
+        if let Some((_, _, older)) = live.insert(device_id.to_string(), (token, cert_hash, tx)) {
             let _ = older.try_send(Event::Replaced);
         }
-        Self(device_id.to_string(), token)
+        Some(Self(device_id.to_string(), token))
     }
 }
 
 impl Drop for Live {
     fn drop(&mut self) {
         let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
-        if live.get(&self.0).is_some_and(|(token, _)| *token == self.1) {
+        if live
+            .get(&self.0)
+            .is_some_and(|(token, _, _)| *token == self.1)
+        {
             live.remove(&self.0);
         }
     }
@@ -129,7 +139,13 @@ pub async fn run<S: AsyncRead + AsyncWrite + Unpin>(
     let device_id = link.hello.device_id.clone();
     let name = link.hello.device_name.clone();
     let (tx, mut events) = mpsc::channel(8);
-    let _live = Live::new(&device_id, tx);
+    let Some(_live) = Live::new(&device_id, link.cert_hash, tx) else {
+        tracing::warn!(
+            device_id,
+            "A KDE Connect link refused: this device is connected with another certificate"
+        );
+        return;
+    };
     let keys = (
         pairing::public_key_der(our_cert_der),
         pairing::public_key_der(&link.cert_der),
@@ -588,9 +604,15 @@ mod tests {
     async fn a_newer_link_takes_the_older_ones_place_and_its_going_leaves_the_new_one() {
         let id = "r".repeat(32);
         let (old_tx, mut old_rx) = mpsc::channel(4);
-        let old = Live::new(&id, old_tx);
+        let old = Live::new(&id, [1; 32], old_tx).unwrap();
+        let (other_tx, _other_rx) = mpsc::channel(4);
+        assert!(
+            Live::new(&id, [2; 32], other_tx).is_none(),
+            "another certificate does not take a live link's place"
+        );
+        assert!(old_rx.try_recv().is_err(), "and the live one is left alone");
         let (new_tx, mut new_rx) = mpsc::channel(4);
-        let new = Live::new(&id, new_tx);
+        let new = Live::new(&id, [1; 32], new_tx).unwrap();
         assert_eq!(
             old_rx.try_recv().unwrap(),
             Event::Replaced,
@@ -601,6 +623,11 @@ mod tests {
         assert_eq!(new_rx.try_recv().unwrap(), Event::Ping);
         drop(new);
         assert!(!tell(&id, Event::Ping));
+        let (other_tx, _other_rx) = mpsc::channel(4);
+        assert!(
+            Live::new(&id, [2; 32], other_tx).is_some(),
+            "once none is live, it may connect"
+        );
     }
 
     fn battery(charge: u8) -> NetworkPacket {
