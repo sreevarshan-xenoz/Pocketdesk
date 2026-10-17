@@ -43,9 +43,8 @@ import kotlinx.coroutines.withContext
  * Desktop shortcut bar (Tier 1 #3): keys a touchscreen cannot produce.
  * C9 groups it into System (Super, window switching, safety screen,
  * screenshots, Esc) and Workspaces (W1–9 — Super+1..9 drives Hyprland
- * workspace switching on the server). Key-cap labels stay literal by
- * design (see the i18n exemption note in strings.xml); only the group
- * captions are localized.
+ * workspace switching on the server). The key captions are string
+ * resources, named as each language's keyboards print them (U6).
  *
  * Rendered as a dark, rounded floating pill rather than a theme-coloured
  * sheet: it lives on top of remote video (or the dock) where a surfaceVariant
@@ -76,11 +75,11 @@ fun ShortcutBar(
         ) {
             val press = KeyEvent.KEYCODE_META_LEFT
             GroupLabel(stringResource(R.string.shortcut_system), content)
-            Shortcut("Super", content, onFailed) { RustCore.tapKey(address, port, press) }
-            Shortcut("Alt+Tab", content, onFailed) {
+            Shortcut(stringResource(R.string.key_super), content, onFailed) { RustCore.tapKey(address, port, press) }
+            Shortcut(stringResource(R.string.key_alt_tab), content, onFailed) {
                 RustCore.hotkey(address, port, KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_ALT_LEFT)
             }
-            Shortcut("Ctrl+Alt+Del", content, onFailed) {
+            Shortcut(stringResource(R.string.key_ctrl_alt_del), content, onFailed) {
                 RustCore.hotkey(
                     address,
                     port,
@@ -89,12 +88,12 @@ fun ShortcutBar(
                     KeyEvent.KEYCODE_ALT_LEFT,
                 )
             }
-            Shortcut("PrtSc", content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_SYSRQ) }
-            Shortcut("Esc", content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_ESCAPE) }
+            Shortcut(stringResource(R.string.key_print_screen), content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_SYSRQ) }
+            Shortcut(stringResource(R.string.key_escape), content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_ESCAPE) }
             Divider(content)
             GroupLabel(stringResource(R.string.shortcut_workspaces), content)
             (1..9).forEach { workspace ->
-                Shortcut("W$workspace", content, onFailed) {
+                Shortcut(stringResource(R.string.key_workspace, workspace), content, onFailed) {
                     RustCore.hotkey(
                         address,
                         port,

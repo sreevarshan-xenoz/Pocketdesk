@@ -336,11 +336,12 @@ private fun KeyRow(keys: List<RemoteSession.Key>, onTap: (Int) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         keys.forEach { key ->
-            val spoken = if (key.spoken != 0) stringResource(key.spoken) else key.label
+            val label = if (key.labelRes != 0) stringResource(key.labelRes) else key.label
+            val spoken = if (key.spoken != 0) stringResource(key.spoken) else label
             FilledTonalButton(
                 onClick = { onTap(key.keyCode) },
                 modifier = Modifier.semantics { contentDescription = spoken },
-            ) { Text(key.label) }
+            ) { Text(label) }
         }
     }
 }

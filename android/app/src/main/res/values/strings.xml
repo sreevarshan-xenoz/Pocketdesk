@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  UI chrome strings (Tier-3 #17 remainder: per-app language). Telemetry HUD
-  units (fps/kbps/rtt/e2e/drops), shortcut key labels (Super, Alt+Tab, …) and
-  desktop-supplied data (window titles, monitor names, Rust-side error
-  reasons) are deliberately NOT localized — they are technical tokens or
-  remote content. Locales must stay in sync with res/xml/locales_config.xml.
+  UI chrome strings (Tier-3 #17 remainder: per-app language). The connection
+  details' labels and the key captions are localized too (U6: keys by the
+  names each language's keyboards print). Desktop-supplied data (window
+  titles, monitor names, Rust-side error reasons) and what the phone sends
+  for the computer to show stay as they are. Every string here must be in
+  values-es and values-ta (StringsTranslatedTest). Locales must stay in sync
+  with res/xml/locales_config.xml.
 -->
 <resources>
     <string name="share_target_label">Send to Pocketdesk</string>
@@ -273,7 +275,7 @@
     <string name="clipboard_empty">Nothing captured yet — copy something or turn on clipboard sync.</string>
     <string name="clipboard_clear_message">This deletes every saved clipboard entry from this phone.</string>
 
-    <!-- Shortcut bar group captions (C9); key caps stay literal -->
+    <!-- Shortcut bar group captions (C9); the key captions are the key_* strings (U6) -->
     <string name="shortcut_system">System</string>
     <string name="shortcut_workspaces">Workspaces</string>
 
@@ -614,4 +616,36 @@
     <string name="ring_channel_description">When your computer rings this phone to find it</string>
     <string name="settings_ring_from_computer">Ring from the computer</string>
     <string name="settings_ring_from_computer_summary">Your computer can ring this phone to find it: loud, for 30 seconds, through Do Not Disturb when alarms are allowed. Keeps a link to it in the background</string>
+    <string name="hud_fps">fps</string>
+    <string name="hud_kbps">kbps</string>
+    <string name="hud_rtt">rtt</string>
+    <string name="hud_delay">delay</string>
+    <string name="hud_lost">lost</string>
+    <string name="hud_computer">computer</string>
+    <string name="hud_no_video">no video yet</string>
+    <string name="hud_rates_over">rates over %1$s s</string>
+    <string name="hud_rtt_unmeasured">rtt not measured yet</string>
+    <string name="hud_rtt_median">rtt median of %1$d</string>
+    <string name="key_super">Super</string>
+    <string name="key_alt_tab">Alt+Tab</string>
+    <string name="key_ctrl_alt_del">Ctrl+Alt+Del</string>
+    <string name="key_print_screen">PrtSc</string>
+    <string name="key_escape">Esc</string>
+    <string name="key_tab">Tab</string>
+    <string name="key_home">Home</string>
+    <string name="key_end">End</string>
+    <string name="key_page_up">PgUp</string>
+    <string name="key_page_down">PgDn</string>
+    <string name="key_delete">Del</string>
+    <string name="key_insert">Ins</string>
+    <string name="key_workspace">W%1$d</string>
+    <string name="key_volume_down">Vol −</string>
+    <string name="key_volume_up">Vol +</string>
+    <string name="key_ctrl">Ctrl</string>
+    <string name="key_alt">Alt</string>
+    <string name="key_shift">Shift</string>
+    <string name="mic_start_failed">The computer did not take the mic share</string>
+    <string name="mic_encoder_failed">This phone\'s Opus encoder did not start</string>
+    <string name="mic_record_failed">The microphone did not open</string>
+    <string name="mic_busy">The microphone is in use by another app</string>
 </resources>

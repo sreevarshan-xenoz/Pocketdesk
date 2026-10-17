@@ -49,9 +49,11 @@ object RemoteSession {
 
     /**
      * A key on the remote's rows: its label, the Android key code the bridge
-     * maps, and what a screen reader says for a symbol label (0: the label).
+     * maps, what a screen reader says for a symbol label (0: the label), and
+     * the label in the phone's language where keyboards name the key
+     * differently (U6; 0: [label]).
      */
-    data class Key(val label: String, val keyCode: Int, val spoken: Int = 0)
+    data class Key(val label: String, val keyCode: Int, val spoken: Int = 0, val labelRes: Int = 0)
 
     /** Media: Previous, Play/Pause, Next, and the volume. */
     val media =
@@ -59,19 +61,19 @@ object RemoteSession {
             Key("⏮", 88, R.string.remote_key_previous), // KEYCODE_MEDIA_PREVIOUS
             Key("⏯", 85, R.string.remote_key_play_pause), // KEYCODE_MEDIA_PLAY_PAUSE
             Key("⏭", 87, R.string.remote_key_next), // KEYCODE_MEDIA_NEXT
-            Key("Vol −", 25, R.string.remote_key_volume_down), // KEYCODE_VOLUME_DOWN
-            Key("Vol +", 24, R.string.remote_key_volume_up), // KEYCODE_VOLUME_UP
+            Key("Vol −", 25, R.string.remote_key_volume_down, R.string.key_volume_down), // KEYCODE_VOLUME_DOWN
+            Key("Vol +", 24, R.string.remote_key_volume_up, R.string.key_volume_up), // KEYCODE_VOLUME_UP
         )
 
     /** A presenter's keys: slides back and on, start the show, end it, blank the screen. */
     val presenter =
         listOf(
-            Key("PgUp", 92, R.string.remote_key_page_up), // KEYCODE_PAGE_UP
-            Key("PgDn", 93, R.string.remote_key_page_down), // KEYCODE_PAGE_DOWN
+            Key("PgUp", 92, R.string.remote_key_page_up, R.string.key_page_up), // KEYCODE_PAGE_UP
+            Key("PgDn", 93, R.string.remote_key_page_down, R.string.key_page_down), // KEYCODE_PAGE_DOWN
             Key("◀", 21, R.string.remote_key_left), // KEYCODE_DPAD_LEFT
             Key("▶", 22, R.string.remote_key_right), // KEYCODE_DPAD_RIGHT
             Key("F5", 135), // KEYCODE_F5
-            Key("Esc", 111), // KEYCODE_ESCAPE
+            Key("Esc", 111, labelRes = R.string.key_escape), // KEYCODE_ESCAPE
             Key("B", 30), // KEYCODE_B
         )
 }

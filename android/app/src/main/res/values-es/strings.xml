@@ -51,8 +51,8 @@
     <string name="link_good">Buena conexión</string>
     <string name="link_fair">Conexión regular</string>
     <string name="link_poor">Mala conexión</string>
-    <string name="settings_trackpad_speed">Velocidad del trackpad</string>
-    <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo trackpad</string>
+    <string name="settings_trackpad_speed">Velocidad del panel táctil</string>
+    <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo panel táctil</string>
     <string name="settings_system">Sistema</string>
     <string name="settings_about">Acerca de</string>
     <string name="app_version">Versión %1$s</string>
@@ -82,7 +82,7 @@
     <string name="connecting">Conectando…</string>
     <string name="retry">Reintentar</string>
     <string name="exit">Salir</string>
-    <string name="mode_direct_touch">Tacto directo</string>
+    <string name="mode_direct_touch">Toque directo</string>
     <string name="mode_trackpad">Panel táctil</string>
     <string name="ring_pc">Hacer sonar PC</string>
     <string name="paired">Emparejado ✓</string>
@@ -273,7 +273,7 @@
 
     <!-- Shortcut bar group captions (C9); key caps stay literal -->
     <string name="shortcut_system">Sistema</string>
-    <string name="shortcut_workspaces">Áreas de trabajo</string>
+    <string name="shortcut_workspaces">Espacios de trabajo</string>
 
     <!-- Find-my-device siren dialog (C8) -->
     <string name="siren_ringing_title">Tu ordenador está buscando este teléfono</string>
@@ -612,4 +612,36 @@
     <string name="ring_channel_description">Cuando tu ordenador hace sonar este teléfono para encontrarlo</string>
     <string name="settings_ring_from_computer">Sonar desde el ordenador</string>
     <string name="settings_ring_from_computer_summary">Tu ordenador puede hacer sonar este teléfono para encontrarlo: fuerte, 30 segundos, incluso en No molestar si las alarmas están permitidas. Mantiene un enlace en segundo plano</string>
+    <string name="hud_fps">fps</string>
+    <string name="hud_kbps">kbps</string>
+    <string name="hud_rtt">RTT</string>
+    <string name="hud_delay">retardo</string>
+    <string name="hud_lost">perdidos</string>
+    <string name="hud_computer">equipo</string>
+    <string name="hud_no_video">aún sin vídeo</string>
+    <string name="hud_rates_over">tasas en %1$s s</string>
+    <string name="hud_rtt_unmeasured">RTT aún sin medir</string>
+    <string name="hud_rtt_median">RTT: mediana de %1$d</string>
+    <string name="key_super">Super</string>
+    <string name="key_alt_tab">Alt+Tab</string>
+    <string name="key_ctrl_alt_del">Ctrl+Alt+Supr</string>
+    <string name="key_print_screen">Impr Pant</string>
+    <string name="key_escape">Esc</string>
+    <string name="key_tab">Tab</string>
+    <string name="key_home">Inicio</string>
+    <string name="key_end">Fin</string>
+    <string name="key_page_up">Re Pág</string>
+    <string name="key_page_down">Av Pág</string>
+    <string name="key_delete">Supr</string>
+    <string name="key_insert">Insert</string>
+    <string name="key_workspace">E%1$d</string>
+    <string name="key_volume_down">Vol −</string>
+    <string name="key_volume_up">Vol +</string>
+    <string name="key_ctrl">Ctrl</string>
+    <string name="key_alt">Alt</string>
+    <string name="key_shift">Mayús</string>
+    <string name="mic_start_failed">El ordenador no aceptó el micrófono</string>
+    <string name="mic_encoder_failed">El codificador Opus del teléfono no arrancó</string>
+    <string name="mic_record_failed">El micrófono no se abrió</string>
+    <string name="mic_busy">Otra app está usando el micrófono</string>
 </resources>

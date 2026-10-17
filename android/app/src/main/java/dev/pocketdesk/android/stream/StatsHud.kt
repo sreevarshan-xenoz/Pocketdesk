@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -132,15 +133,15 @@ fun StatsHud(
             // measured over three, so the ones still filling their window are
             // dimmed until they are not (roadmap 2056).
             val settled = s.ratesSettled
-            HudItem("fps", "%.0f".format(s.fps), settled)
-            HudItem("kbps", "%,d".format(s.bitrateKbps), settled)
-            HudItem("rtt", "${s.rttMs}ms", s.rttSamples > 0)
-            HudItem("e2e", "${s.e2eLatencyMs}ms")
-            HudItem("drops", "${s.frameDrops}")
-            battery?.let { HudItem("desk", it) }
+            HudItem(stringResource(R.string.hud_fps), "%.0f".format(s.fps), settled)
+            HudItem(stringResource(R.string.hud_kbps), "%,d".format(s.bitrateKbps), settled)
+            HudItem(stringResource(R.string.hud_rtt), "${s.rttMs} ms", s.rttSamples > 0)
+            HudItem(stringResource(R.string.hud_delay), "${s.e2eLatencyMs} ms")
+            HudItem(stringResource(R.string.hud_lost), "${s.frameDrops}")
+            battery?.let { HudItem(stringResource(R.string.hud_computer), it) }
         }
         Text(
-            text = basis(s),
+            text = basis(s, LocalResources.current),
             maxLines = 1,
             style = MaterialTheme.typography.labelSmall.copy(
                 fontFamily = FontFamily.Monospace,
@@ -183,10 +184,17 @@ private fun QualityDot(level: LinkQuality.Level, modifier: Modifier) {
  * quoting either without saying how much of a sample stood behind it is how a
  * HUD ends up presenting a guess as a reading.
  */
-private fun basis(s: RustCore.StreamingStats): String {
-    val rates = if (s.rateWindowMs == 0L) "no video yet"
-    else "rates over %.1fs".format(s.rateWindowMs / 1000.0)
-    val rtt = if (s.rttSamples == 0) "rtt unsampled" else "rtt median of %d".format(s.rttSamples)
+private fun basis(s: RustCore.StreamingStats, res: android.content.res.Resources): String {
+    val rates = if (s.rateWindowMs == 0L) {
+        res.getString(R.string.hud_no_video)
+    } else {
+        res.getString(R.string.hud_rates_over, "%.1f".format(s.rateWindowMs / 1000.0))
+    }
+    val rtt = if (s.rttSamples == 0) {
+        res.getString(R.string.hud_rtt_unmeasured)
+    } else {
+        res.getString(R.string.hud_rtt_median, s.rttSamples)
+    }
     return "$rates · $rtt"
 }
 

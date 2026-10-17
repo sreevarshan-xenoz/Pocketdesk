@@ -49,8 +49,9 @@ private val KeyShape = RoundedCornerShape(8.dp)
  * The accessory rows docked above the phone keyboard (spec K7). The latching
  * modifiers, Esc, Tab, the arrows and a hide button come first. Then come the
  * navigation keys, F1-F12 and Ctrl+Alt+Del, on a second scrolling row, or on
- * the same row when [compact]. Key-cap labels are literal (Esc, F5), like the
- * shortcut bar's.
+ * the same row when [compact]. Key captions are string resources, named as
+ * each language's keyboards print them (U6); F1-F12 and the arrows are the
+ * same everywhere.
  *
  * A modifier latches the moment it is tapped, and a second tap within the
  * double-tap window locks it ([ModifierLatch.tap]). [latchVersion] changes
@@ -77,8 +78,8 @@ fun KeyboardBar(
                 keyboard.latch.tap(mod, SystemClock.uptimeMillis())
             }
         }
-        Cap("Esc") { key(KeyEvent.KEYCODE_ESCAPE) }
-        Cap("Tab") { key(KeyEvent.KEYCODE_TAB) }
+        Cap(stringResource(R.string.key_escape)) { key(KeyEvent.KEYCODE_ESCAPE) }
+        Cap(stringResource(R.string.key_tab)) { key(KeyEvent.KEYCODE_TAB) }
         Cap("←") { key(KeyEvent.KEYCODE_DPAD_LEFT) }
         Cap("↑") { key(KeyEvent.KEYCODE_DPAD_UP) }
         Cap("↓") { key(KeyEvent.KEYCODE_DPAD_DOWN) }
@@ -87,16 +88,16 @@ fun KeyboardBar(
         Cap("⌄", stringResource(R.string.keyboard_hide)) { haptics.tap(); onHide() }
     }
     val second: @Composable RowScope.() -> Unit = {
-        Cap("Home") { key(KeyEvent.KEYCODE_MOVE_HOME) }
-        Cap("End") { key(KeyEvent.KEYCODE_MOVE_END) }
-        Cap("PgUp") { key(KeyEvent.KEYCODE_PAGE_UP) }
-        Cap("PgDn") { key(KeyEvent.KEYCODE_PAGE_DOWN) }
-        Cap("Del") { key(KeyEvent.KEYCODE_FORWARD_DEL) }
-        Cap("Ins") { key(KeyEvent.KEYCODE_INSERT) }
+        Cap(stringResource(R.string.key_home)) { key(KeyEvent.KEYCODE_MOVE_HOME) }
+        Cap(stringResource(R.string.key_end)) { key(KeyEvent.KEYCODE_MOVE_END) }
+        Cap(stringResource(R.string.key_page_up)) { key(KeyEvent.KEYCODE_PAGE_UP) }
+        Cap(stringResource(R.string.key_page_down)) { key(KeyEvent.KEYCODE_PAGE_DOWN) }
+        Cap(stringResource(R.string.key_delete)) { key(KeyEvent.KEYCODE_FORWARD_DEL) }
+        Cap(stringResource(R.string.key_insert)) { key(KeyEvent.KEYCODE_INSERT) }
         for (n in 1..12) {
             Cap("F$n") { key(KeyEvent.KEYCODE_F1 + n - 1) }
         }
-        Cap("Ctrl+Alt+Del") {
+        Cap(stringResource(R.string.key_ctrl_alt_del)) {
             haptics.tap()
             keyboard.combo(KeyEvent.KEYCODE_FORWARD_DEL, KeyModifier.Ctrl, KeyModifier.Alt)
         }
@@ -179,6 +180,15 @@ private fun ModifierCap(key: KeyModifier, state: LatchState, latchVersion: Int, 
             .padding(horizontal = 12.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(key.name, color = text, fontSize = 14.sp)
+        // Named as the language's keyboards print it (U6: Spanish "Mayús").
+        val label = stringResource(
+            when (key) {
+                KeyModifier.Ctrl -> R.string.key_ctrl
+                KeyModifier.Alt -> R.string.key_alt
+                KeyModifier.Shift -> R.string.key_shift
+                KeyModifier.Super -> R.string.key_super
+            },
+        )
+        Text(label, color = text, fontSize = 14.sp)
     }
 }
