@@ -16,4 +16,15 @@ object Android17 {
      * raised while the app was open would then never be put back.
      */
     fun ringRaisesVolume(sdk: Int): Boolean = sdk < SDK
+
+    /**
+     * Whether an input device drives the computer's pointer under capture.
+     * Before 17 a captured touchpad sent absolute finger positions, so only
+     * mice were captured; from 17 it reports like a captured mouse.
+     */
+    fun captures(sdk: Int, virtual: Boolean, mouse: Boolean, touchpad: Boolean): Boolean = when {
+        virtual -> false
+        sdk >= SDK -> mouse || touchpad
+        else -> mouse && !touchpad
+    }
 }

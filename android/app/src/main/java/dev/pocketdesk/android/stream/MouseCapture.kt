@@ -8,6 +8,7 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
+import dev.pocketdesk.android.compat.Android17
 
 /**
  * T9c: a mouse connected to the phone (USB or Bluetooth) drives the
@@ -129,13 +130,19 @@ fun attachMouseCapture(
     }
 }
 
-/** Whether a real mouse is connected: not a virtual device, and not a touchpad reporting as one. */
+/**
+ * Whether a real mouse is connected: not a virtual device; a touchpad only
+ * from Android 17, where it reports like a captured mouse (N4).
+ */
 private fun mousePresent(context: Context): Boolean {
     val inputs = context.getSystemService(InputManager::class.java) ?: return false
     return inputs.inputDeviceIds.any { id ->
         val device = inputs.getInputDevice(id) ?: return@any false
-        !device.isVirtual &&
-            device.supportsSource(InputDevice.SOURCE_MOUSE) &&
-            !device.supportsSource(InputDevice.SOURCE_TOUCHPAD)
+        Android17.captures(
+            sdk = android.os.Build.VERSION.SDK_INT,
+            virtual = device.isVirtual,
+            mouse = device.supportsSource(InputDevice.SOURCE_MOUSE),
+            touchpad = device.supportsSource(InputDevice.SOURCE_TOUCHPAD),
+        )
     }
 }
