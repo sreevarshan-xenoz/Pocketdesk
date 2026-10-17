@@ -280,14 +280,19 @@ impl PocketdeskApp {
         let Some((what, handle)) = self.job.take() else {
             return;
         };
-        self.notice = crate::notice::Notice::outcome(match handle.join() {
+        let outcome = match handle.join() {
             Ok(Ok(())) => Ok(format!("{what}: done.")),
             Ok(Err(e)) => Err(format!("{what}: {e}")),
             Err(_) => Err(format!("{what}: failed.")),
-        });
-        if let Some(Ok(form)) = &mut self.settings {
+        };
+        // Only a server that started again has read what is saved (U5
+        // review: a failed restart cleared the notice of what waits).
+        if outcome.is_ok()
+            && let Some(Ok(form)) = &mut self.settings
+        {
             form.restarted();
         }
+        self.notice = crate::notice::Notice::outcome(outcome);
         self.refreshed = None;
     }
 
@@ -1083,7 +1088,7 @@ impl PocketdeskApp {
                 return;
             }
         };
-        if form.restart_needed {
+        if form.restart_needed() {
             ui.label(
                 RichText::new(format!(
                     "Restart the server to apply: {}.",

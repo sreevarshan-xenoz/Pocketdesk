@@ -223,10 +223,6 @@ pub struct SettingsForm {
     pub relay_urls_text: String,
     /// The text box behind `[hooks]`: `kind = command`, one per line.
     pub hooks_text: String,
-    /// Saved since the server last read it.
-    pub restart_needed: bool,
-    /// What those saves changed, by name, for the restart notice.
-    restart_names: Vec<&'static str>,
     /// The settings as the running server read them: saved changes wait
     /// for a restart (the KDE section's buttons follow this, not the box).
     running: Config,
@@ -246,8 +242,6 @@ impl SettingsForm {
 
     /// The server was restarted: it has read what is saved.
     pub fn restarted(&mut self) {
-        self.restart_needed = false;
-        self.restart_names.clear();
         self.running = self.saved.clone();
     }
 
@@ -259,8 +253,6 @@ impl SettingsForm {
             saved: config.clone(),
             running: config.clone(),
             edited: config,
-            restart_needed: false,
-            restart_names: Vec::new(),
             wake: pocketdesk_core::local::wake::wake_facts(None),
             home_assistant: None,
         }
@@ -296,12 +288,8 @@ impl SettingsForm {
     /// both).
     pub fn undo(&mut self) {
         let running = std::mem::take(&mut self.running);
-        let restart_needed = self.restart_needed;
-        let restart_names = std::mem::take(&mut self.restart_names);
         *self = Self::from_config(self.saved.clone());
         self.running = running;
-        self.restart_needed = restart_needed;
-        self.restart_names = restart_names;
     }
 
     /// What stops the edit from being saved, in words for the user.
@@ -406,22 +394,20 @@ impl SettingsForm {
         self.edited
             .save_to(path)
             .map_err(|e: ConfigError| e.to_string())?;
-        // Some settings the running server reads again on its own; only the
-        // others wait for a restart (applies_live).
-        let (_, later) = split_changes(&self.saved, &self.edited);
-        for name in later {
-            if !self.restart_names.contains(&name) {
-                self.restart_names.push(name);
-            }
-        }
-        self.restart_needed = !self.restart_names.is_empty();
         self.saved = self.edited.clone();
         Ok(())
     }
 
-    /// What saved changes wait for a restart, by name.
-    pub fn restart_names(&self) -> &[&'static str] {
-        &self.restart_names
+    /// What is saved but not yet read by the server, by name: the settings
+    /// it reads only at start (applies_live) that differ from what it read.
+    /// Saved back to what it runs, a setting no longer waits (U5 review).
+    pub fn restart_names(&self) -> Vec<&'static str> {
+        split_changes(&self.running, &self.saved).1
+    }
+
+    /// Whether a saved change waits for a restart.
+    pub fn restart_needed(&self) -> bool {
+        !self.restart_names().is_empty()
     }
 
     /// The rows of one section; Save and Undo are in [`Self::save_bar`],
@@ -997,11 +983,10 @@ mod tests {
         let mut form = SettingsForm::from_config(Config::default());
         form.edited.control_port = 1800;
         form.saved = form.edited.clone();
-        form.restart_needed = true;
         form.edited.streaming_port = 4800;
         form.undo();
         assert_eq!(form.edited, form.saved, "the edit is undone");
-        assert!(form.restart_needed, "the saved change still waits");
+        assert!(form.restart_needed(), "the saved change still waits");
         assert_eq!(
             form.running().control_port,
             Config::default().control_port,
@@ -1137,11 +1122,18 @@ mod tests {
         let mut form = SettingsForm::from_config(Config::default());
         form.edited.internet_files = !form.edited.internet_files;
         form.save_to(&path).unwrap();
-        assert!(!form.restart_needed, "the server reads it at each transfer");
+        assert!(
+            !form.restart_needed(),
+            "the server reads it at each transfer"
+        );
         form.edited.lan_discovery = !form.edited.lan_discovery;
         form.save_to(&path).unwrap();
-        assert!(form.restart_needed);
+        assert!(form.restart_needed());
         assert_eq!(form.restart_names(), ["Visible on this network"]);
+        // Saved back to what the server runs: nothing waits any more.
+        form.edited.lan_discovery = !form.edited.lan_discovery;
+        form.save_to(&path).unwrap();
+        assert!(!form.restart_needed());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1210,10 +1202,10 @@ mod tests {
         form.hooks_text = "file_received = echo".into();
         form.edited.events_detail = EventsDetail::Full;
         form.save_to(&path).unwrap();
-        assert!(!form.restart_needed, "events apply at the next event");
+        assert!(!form.restart_needed(), "events apply at the next event");
         form.edited.allow_hevc = true;
         form.save_to(&path).unwrap();
-        assert!(form.restart_needed);
+        assert!(form.restart_needed());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1227,13 +1219,13 @@ mod tests {
         form.edited.allow_hevc = true;
         form.edited.kdeconnect_compat = false;
         form.save_to(&path).unwrap();
-        assert!(!form.dirty() && form.restart_needed);
+        assert!(!form.dirty() && form.restart_needed());
         assert!(
             form.running().kdeconnect_compat,
             "the running server read it before the save"
         );
         form.restarted();
-        assert!(!form.running().kdeconnect_compat && !form.restart_needed);
+        assert!(!form.running().kdeconnect_compat && !form.restart_needed());
         form.edited.kdeconnect_compat = true;
         assert!(Config::load_from(&path).unwrap().allow_hevc);
         form.edited.control_port = 1;
