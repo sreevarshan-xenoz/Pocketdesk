@@ -29,6 +29,19 @@ object RemoteSession {
     /** The bridge's `{"state": ...}`: none, waiting, ready or tooOld. */
     fun parse(json: String): String = STATE.find(json)?.groupValues?.get(1) ?: "none"
 
+    /** What a sound session (N5) may do: hear the computer, and be its mic. */
+    data class Grants(val audio: Boolean, val mic: Boolean)
+
+    private val AUDIO = Regex("\"audio\"\\s*:\\s*(true|false)")
+    private val MIC = Regex("\"mic\"\\s*:\\s*(true|false)")
+
+    /** The bridge's grants for a sound session; each allowed when not said. */
+    fun grants(json: String): Grants =
+        Grants(
+            audio = AUDIO.find(json)?.groupValues?.get(1) != "false",
+            mic = MIC.find(json)?.groupValues?.get(1) != "false",
+        )
+
     /**
      * The next state, from the current one, the bridge's [remote] state and
      * the reason the computer closed the session ([closedReason], null while

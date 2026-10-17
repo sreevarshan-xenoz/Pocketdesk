@@ -191,6 +191,7 @@ pub fn status(state_dir: &Path, now_unix: u64, running: bool) -> Value {
                 "driving": s.driving,
                 "control_only": s.control_only,
                 "cast": s.cast,
+                "sound_only": s.sound_only,
             })
         })
         .collect();

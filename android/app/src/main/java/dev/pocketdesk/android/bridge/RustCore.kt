@@ -77,6 +77,8 @@ object RustCore {
     private external fun nativeGetWanIdentity(): String
     private external fun nativeConnectRemote(address: String, port: Int): String
     private external fun nativeConnectRemoteWan(address: String, identityJson: String): String
+    private external fun nativeConnectSound(address: String, port: Int): String
+    private external fun nativeConnectSoundWan(address: String, identityJson: String): String
     private external fun nativeRemoteState(): String
     private external fun nativeConnectCast(address: String, port: Int): String
     private external fun nativeConnectCastWan(address: String, identityJson: String): String
@@ -501,7 +503,14 @@ object RustCore {
     fun connectRemoteWan(address: String, identityJson: String): Result<Unit> =
         envelope(nativeConnectRemoteWan(address, identityJson)).map { }
 
-    /** The remote session's state as the bridge reports it: `{"state": none | waiting | ready | tooOld}`. */
+    /** Connect the phone as the computer's speaker and mic (N5): sound both ways, no picture or input. */
+    fun connectSound(address: String, port: Int): Result<Unit> = envelope(nativeConnectSound(address, port)).map { }
+
+    /** [connectSound] over the iroh WAN path, with the desktop's cached endpoint identity. */
+    fun connectSoundWan(address: String, identityJson: String): Result<Unit> =
+        envelope(nativeConnectSoundWan(address, identityJson)).map { }
+
+    /** The remote (or sound) session's state as the bridge reports it: `{"state": none | waiting | ready | tooOld}`. */
     fun remoteState(): String = nativeRemoteState()
 
     /** Show this phone's screen on the computer at [address] (T10k): a cast session on the LAN. */

@@ -215,6 +215,7 @@ pub fn describe(event: &Event) -> String {
             let what = match text(event, "mode") {
                 Some("cast") => "Showing its screen here",
                 Some("remote") => "Using this computer as a remote",
+                Some("sound") => "Being this computer's speaker and mic",
                 _ => "Viewing this computer",
             };
             if text(event, "transport") == Some("wan") {

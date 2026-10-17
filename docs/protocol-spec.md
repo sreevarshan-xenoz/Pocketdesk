@@ -94,12 +94,12 @@ The stream is QUIC (`pocketdesk-stream`).
   - `[0xFE,0x00]` + length u8 + UTF-8, its device id;
   - `[0xFC,0x00]` + length u8 + UTF-8, its iroh key;
   - `[0xFD,0x00]` + u8, its codec capabilities (bit 0, HEVC);
-  - `[0xFB,0x00]` + u8, the session mode: `1` input only, `2` cast (none: a screen session).
+  - `[0xFB,0x00]` + u8, the session mode: `1` input only, `2` cast, `3` sound (none: a screen session). A sound session gets the computer's sound and no picture; a computer that sends it a picture does not know the mode, and the client closes it.
 
   A cast then sends `[0xFA,…]` streams. Input travels as tagged packets, tags 0 to 14. The tables are in `docs/protocol.md` §3.2, from `core/src/streaming/{client,streamer,input_packet}.rs`.
 - **From the computer:** each frame or audio packet goes on its own uni-stream, with an 18-byte header, little-endian:
   - sequence, u64;
-  - kind, u8: `0` video, `1` audio, `2` ready (an input-only session was admitted), `3` keyframe wanted (a cast);
+  - kind, u8: `0` video, `1` audio, `2` ready (a session without a picture was admitted; a sound session's carries one byte: bit 7 set, bit 0 the computer's sound sent, bit 1 the phone's mic played), `3` keyframe wanted (a cast);
   - a keyframe flag, u8;
   - a timestamp in microseconds, u64.
 

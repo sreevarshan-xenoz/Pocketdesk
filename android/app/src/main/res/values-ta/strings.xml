@@ -639,4 +639,19 @@
     <string name="mic_encoder_failed">இந்தத் தொலைபேசியின் Opus குறியாக்கி தொடங்கவில்லை</string>
     <string name="mic_record_failed">மைக்ரோஃபோன் திறக்கவில்லை</string>
     <string name="mic_busy">மைக்ரோஃபோனை வேறொரு செயலி பயன்படுத்துகிறது</string>
+    <string name="sound_button">ஒலி</string>
+    <string name="sound_title">%1$s உடன் ஒலி</string>
+    <string name="sound_on">இந்தத் தொலைபேசி கணினியின் ஒலிபெருக்கி, அதன் மைக்காகவும் இருக்கலாம், திரை அணைந்திருந்தாலும். அறிவிப்பு இதை முடிக்கும்.</string>
+    <string name="sound_here">கணினியின் ஒலி இங்கே</string>
+    <string name="sound_here_summary">கணினி இயக்குவது இந்தத் தொலைபேசியில் ஒலிக்கும்</string>
+    <string name="sound_mic">இந்தத் தொலைபேசியின் மைக் அங்கே</string>
+    <string name="sound_mic_summary">அழைப்புகளுக்கும் பதிவுகளுக்கும் கணினி இந்தத் தொலைபேசியின் மைக்கைக் கேட்கும்</string>
+    <string name="sound_controls">கணினியின் ஒலியளவும் வெளியீடும்</string>
+    <string name="sound_too_old">இந்தக் கணினியின் Pocketdesk ஒலிக்கு மட்டும் மிகப் பழையது: அதைப் புதுப்பிக்கவும், அல்லது ஒரு அமர்வைத் திறக்கவும்.</string>
+    <string name="sound_down">ஒலி நின்றது: %1$s</string>
+    <string name="err_input_not_allowed">இந்தக் கணினி இந்தத் தொலைபேசியைத் தன்னைக் கட்டுப்படுத்த விடவில்லை. கணினியில், Pocketdesk-இன் Devices பக்கத்தில் இந்தத் தொலைபேசிக்கு \"Control the mouse and keyboard\" என்பதை இயக்கவும்.</string>
+    <string name="err_sound_not_allowed">இந்தக் கணினி இந்தத் தொலைபேசியைத் தன் ஒலியைக் கேட்கவோ தன் மைக்காக இருக்கவோ விடவில்லை. கணினியில், Pocketdesk-இன் Devices பக்கத்தில் இந்தத் தொலைபேசிக்கு \"Hear and change this computer\'s sound\" அல்லது \"Use the phone as a microphone\" என்பதை இயக்கவும்.</string>
+    <string name="sound_here_refused">இந்தக் கணினி தன் ஒலியை இந்தத் தொலைபேசிக்கு அனுப்பவில்லை. கணினியில், Pocketdesk-இன் Devices பக்கத்தில் இந்தத் தொலைபேசிக்கு \"Hear and change this computer\'s sound\" என்பதை இயக்கவும்</string>
+    <string name="sound_mic_refused">இந்தக் கணினி இந்தத் தொலைபேசியின் மைக்கைப் பயன்படுத்தவில்லை. கணினியில், Pocketdesk-இன் Devices பக்கத்தில் இந்தத் தொலைபேசிக்கு \"Use the phone as a microphone\" என்பதை இயக்கவும்</string>
+    <string name="err_permissions_changed">இந்தக் கணினியின் உரிமையாளர் இந்தத் தொலைபேசி செய்யக்கூடியதை மாற்றினார், அதனால் அமர்வு முடிந்தது. Pocketdesk-இன் Devices பக்கத்தில் அதை மீண்டும் மாற்றலாம்.</string>
 </resources>

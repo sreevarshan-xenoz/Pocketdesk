@@ -967,6 +967,8 @@ impl PocketdeskApp {
                             " · showing its screen"
                         } else if session.control_only {
                             " · control only"
+                        } else if session.sound_only {
+                            " · sound only"
                         } else {
                             ""
                         }

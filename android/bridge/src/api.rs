@@ -2419,6 +2419,8 @@ async fn install_streaming(
     let input_only = remote.input_only;
     let mode = if remote.cast {
         pocketdesk_core::streaming::SessionMode::Cast
+    } else if remote.sound {
+        pocketdesk_core::streaming::SessionMode::Sound
     } else if input_only {
         pocketdesk_core::streaming::SessionMode::InputOnly
     } else {
@@ -2731,8 +2733,28 @@ pub async fn reconnect_streaming(
 /// the computer admitted it, `{"tooOld"}` when it streamed to it anyway,
 /// `{"none"}` with no input-only session.
 pub fn remote_state() -> String {
-    let state = state_name(crate::session::REMOTE.lock().unwrap().as_ref(), false);
-    format!("{{\"state\":\"{state}\"}}")
+    let guard = crate::session::REMOTE.lock().unwrap();
+    let state = state_name(guard.as_ref(), false);
+    format!("{{\"state\":\"{state}\"{}}}", sound_grants(guard.as_ref()))
+}
+
+/// For a sound session (N5), what the computer said it allows, as JSON
+/// fields to follow the state: both when it said nothing (a computer that
+/// does not say). Empty for any other session.
+fn sound_grants(flags: Option<&pocketdesk_core::streaming::RemoteFlags>) -> String {
+    use pocketdesk_core::streaming::{SOUND_GRANT_AUDIO, SOUND_GRANT_MIC};
+    let Some(flags) = flags.filter(|f| f.sound) else {
+        return String::new();
+    };
+    let granted = flags
+        .sound_granted
+        .load(std::sync::atomic::Ordering::Acquire);
+    let has = |bit: u8| granted == 0 || granted & bit != 0;
+    format!(
+        ",\"audio\":{},\"mic\":{}",
+        has(SOUND_GRANT_AUDIO),
+        has(SOUND_GRANT_MIC)
+    )
 }
 
 /// [`remote_state`] of a cast session only (T10k): `none` while the phone's
@@ -2780,8 +2802,38 @@ pub async fn stop_cast() {
 
 #[cfg(test)]
 mod cast_state_tests {
-    use super::state_name;
-    use pocketdesk_core::streaming::RemoteFlags;
+    use super::{sound_grants, state_name};
+    use pocketdesk_core::streaming::{
+        RemoteFlags, SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID,
+    };
+
+    #[test]
+    fn a_sound_session_says_what_the_computer_allows() {
+        let sound = RemoteFlags {
+            input_only: true,
+            sound: true,
+            ..Default::default()
+        };
+        // Nothing said yet, or by an older computer: both.
+        assert_eq!(sound_grants(Some(&sound)), r#","audio":true,"mic":true"#);
+        sound.sound_granted.store(
+            SOUND_GRANT_SAID | SOUND_GRANT_AUDIO,
+            std::sync::atomic::Ordering::Release,
+        );
+        assert_eq!(sound_grants(Some(&sound)), r#","audio":true,"mic":false"#);
+        sound.sound_granted.store(
+            SOUND_GRANT_SAID | SOUND_GRANT_MIC,
+            std::sync::atomic::Ordering::Release,
+        );
+        assert_eq!(sound_grants(Some(&sound)), r#","audio":false,"mic":true"#);
+        // Not a sound session: nothing.
+        let remote = RemoteFlags {
+            input_only: true,
+            ..Default::default()
+        };
+        assert_eq!(sound_grants(Some(&remote)), "");
+        assert_eq!(sound_grants(None), "");
+    }
 
     #[test]
     fn a_cast_sees_only_a_cast_session() {

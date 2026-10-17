@@ -78,6 +78,7 @@ pub use client::StreamingClient;
 /// [`StreamingClient`] itself (the Android decoder): see
 /// [`client::report_samples`].
 pub use client::report_samples;
+pub use client::{SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID, sound_grant};
 pub use connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, QuinnConnection,
     SharedConnection, TransportFamily,

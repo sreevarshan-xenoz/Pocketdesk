@@ -3,7 +3,7 @@ package dev.pocketdesk.android.automation
 /**
  * A session's ups and downs as [PhoneEvents]: started once it is up, ended
  * once when it goes down or the screen is left, never twice in a row.
- * [mode] is the session's kind (`screen`, `remote`).
+ * [mode] is the session's kind (`screen`, `remote`, `sound`).
  */
 class SessionTell(private val mode: String) {
     private var up = false

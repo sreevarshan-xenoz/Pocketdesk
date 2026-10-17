@@ -168,7 +168,10 @@ pub fn control_cell(
     sessions_live: usize,
     shared_control: bool,
 ) -> ControlCell {
-    if sessions_live < 2 || session.id == 0 || shared_control {
+    // A sound session or a cast gives no input: made the driver, it would
+    // only block the phone that does (N5 review).
+    if sessions_live < 2 || session.id == 0 || shared_control || session.sound_only || session.cast
+    {
         ControlCell::Nothing
     } else if session.driving {
         ControlCell::Driving
@@ -795,6 +798,7 @@ mod tests {
             started_unix: 1,
             driving,
             control_only: false,
+            sound_only: false,
             cast: false,
         }
     }
@@ -809,6 +813,21 @@ mod tests {
             control_cell(&session(2, false), 2, false),
             ControlCell::Give(2)
         );
+    }
+
+    /// A sound session or a cast gives no input: control is not theirs to take (N5 review).
+    #[test]
+    fn a_session_that_gives_no_input_is_never_offered_control() {
+        let sound = sessions::MirrorSession {
+            sound_only: true,
+            ..session(2, false)
+        };
+        assert_eq!(control_cell(&sound, 2, false), ControlCell::Nothing);
+        let cast = sessions::MirrorSession {
+            cast: true,
+            ..session(3, false)
+        };
+        assert_eq!(control_cell(&cast, 2, false), ControlCell::Nothing);
     }
 
     #[test]

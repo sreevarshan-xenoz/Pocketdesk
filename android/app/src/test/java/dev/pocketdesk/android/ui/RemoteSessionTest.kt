@@ -13,6 +13,21 @@ class RemoteSessionTest {
         assertEquals("none", RemoteSession.parse("garbage"))
     }
 
+    /** A sound session hears which of the two the computer allows (N5 review). */
+    @Test
+    fun `a sound session's grants are read`() {
+        assertEquals(
+            RemoteSession.Grants(audio = true, mic = false),
+            RemoteSession.grants("""{"state":"ready","audio":true,"mic":false}"""),
+        )
+        assertEquals(
+            RemoteSession.Grants(audio = false, mic = true),
+            RemoteSession.grants("""{"state":"ready","audio": false,"mic": true}"""),
+        )
+        // Not said: both, as a computer that does not say allows what it allows.
+        assertEquals(RemoteSession.Grants(audio = true, mic = true), RemoteSession.grants("""{"state":"ready"}"""))
+    }
+
     @Test
     fun `a remote waits, is admitted, and stays admitted until it ends`() {
         assertEquals(State.Waiting, RemoteSession.next(State.Connecting, "waiting", null))

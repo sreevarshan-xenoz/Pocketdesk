@@ -59,8 +59,10 @@ pub fn render_json(
             peer: s.peer.to_string(),
             transport: if s.lan { "lan" } else { "wan" }.to_string(),
             started_unix: s.started_unix,
-            control_only: !s.streamed.video && !s.streamed.cast,
+            // A remote gives input; a sound session (N5) none.
+            control_only: !s.streamed.video && !s.streamed.cast && s.streamed.input,
             cast: s.streamed.cast,
+            sound_only: !s.streamed.video && !s.streamed.cast && !s.streamed.input,
         })
         .collect();
     shared::render_mirror(&sessions, crate::driving::is_shared(), linked, now_unix)
@@ -147,6 +149,21 @@ async fn tell_phones(sessions: &[(u64, String)], driver: Option<u64>) {
     }
 }
 
+/// What a new session is, for its notification.
+fn session_summary(streamed: &pocketdesk_core::streaming::sessions::Streamed) -> &'static str {
+    if streamed.cast {
+        "Pocketdesk: a phone is showing its screen here"
+    } else if streamed.video {
+        "Pocketdesk: a device is streaming this desktop"
+    } else if streamed.input {
+        // The phone as a remote (T10i) sees nothing; it only gives input.
+        "Pocketdesk: a device is controlling this desktop (no screen)"
+    } else {
+        // A sound session (N5): neither picture nor input.
+        "Pocketdesk: a phone is this computer's speaker and mic"
+    }
+}
+
 /// "phone is watching this desktop" — desktop notification, log fallback
 /// (same delivery discipline as the pairing PIN notification).
 fn notify_session_started(session: &LiveSession) {
@@ -154,14 +171,7 @@ fn notify_session_started(session: &LiveSession) {
         Some(id) => id.clone(),
         None => session.peer.ip().to_string(),
     };
-    // The phone as a remote (T10i) sees nothing; it only gives input.
-    let summary = if session.streamed.cast {
-        "Pocketdesk: a phone is showing its screen here"
-    } else if session.streamed.video {
-        "Pocketdesk: a device is streaming this desktop"
-    } else {
-        "Pocketdesk: a device is controlling this desktop (no screen)"
-    };
+    let summary = session_summary(&session.streamed);
     let body = format!(
         "device {who} · {} · {peer}",
         if session.lan { "LAN" } else { "WAN" },
@@ -392,8 +402,11 @@ fn changes(
                 "cast"
             } else if s.streamed.video {
                 "screen"
-            } else {
+            } else if s.streamed.input {
                 "remote"
+            } else {
+                // The phone as this computer's speaker and mic (N5).
+                "sound"
             };
             out.push((
                 "session_started",
@@ -492,6 +505,8 @@ pub fn format_status_lines(raw: &str, now_unix: u64) -> Option<Vec<String>> {
                     "  showing its screen"
                 } else if s.control_only {
                     "  control only"
+                } else if s.sound_only {
+                    "  sound only"
                 } else {
                     ""
                 };
@@ -506,6 +521,39 @@ mod tests {
     use super::*;
     use pocketdesk_core::streaming::sessions::LiveSession;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    #[test]
+    fn each_kind_of_session_is_announced_as_what_it_is() {
+        use pocketdesk_core::streaming::sessions::Streamed;
+        let screen = Streamed {
+            input: true,
+            audio: true,
+            mic: true,
+            video: true,
+            cast: false,
+        };
+        assert!(session_summary(&screen).contains("streaming this desktop"));
+        let remote = Streamed {
+            video: false,
+            audio: false,
+            mic: false,
+            ..screen
+        };
+        assert!(session_summary(&remote).contains("controlling this desktop"));
+        let cast = Streamed {
+            cast: true,
+            input: false,
+            ..remote
+        };
+        assert!(session_summary(&cast).contains("showing its screen"));
+        // A sound session (N5): no picture and no input.
+        let sound = Streamed {
+            input: false,
+            video: false,
+            ..screen
+        };
+        assert!(session_summary(&sound).contains("speaker and mic"));
+    }
 
     #[test]
     fn phones_are_told_on_a_change_and_again_every_few_seconds() {
@@ -635,12 +683,15 @@ mod tests {
             session(Some("abcdef0123456789"), true),
             session(None, false),
             session(Some("casting"), true),
+            session(Some("speaker"), true),
         ];
         live[0].streamed.video = true;
+        live[1].streamed.input = true;
         live[2].streamed.cast = true;
+        live[3].streamed.audio = true;
         let json = render_json(&live, None, &[], 1_030);
         let lines = format_status_lines(&json, 1_030).expect("parseable");
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 4);
         assert!(lines[0].starts_with("abcdef012345…"));
         assert!(lines[0].contains("lan") && lines[0].contains("up 30s"));
         assert!(!lines[0].contains("control only"));
@@ -651,6 +702,8 @@ mod tests {
         // A cast (T10k): the phone's screen shown here, not a remote.
         assert!(lines[2].ends_with("showing its screen"));
         assert!(!lines[2].contains("control only"));
+        // The phone as this computer's speaker and mic (N5): no input.
+        assert!(lines[3].ends_with("sound only"));
         // The mirror is machine-readable: same-file garbage must not panic.
         assert!(format_status_lines("not json", 1).is_none());
         assert!(format_status_lines(r#"{"sessions":{}}"#, 1).is_none());

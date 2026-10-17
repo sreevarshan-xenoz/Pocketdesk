@@ -644,4 +644,19 @@
     <string name="mic_encoder_failed">El codificador Opus del teléfono no arrancó</string>
     <string name="mic_record_failed">El micrófono no se abrió</string>
     <string name="mic_busy">Otra app está usando el micrófono</string>
+    <string name="sound_button">Sonido</string>
+    <string name="sound_title">Sonido con %1$s</string>
+    <string name="sound_on">Este teléfono es el altavoz del equipo y puede ser su micrófono, también con la pantalla apagada. La notificación lo termina.</string>
+    <string name="sound_here">El sonido del equipo aquí</string>
+    <string name="sound_here_summary">Lo que reproduce el equipo sale por este teléfono</string>
+    <string name="sound_mic">El micrófono de este teléfono allí</string>
+    <string name="sound_mic_summary">El equipo oye el micrófono de este teléfono, para llamadas y grabaciones</string>
+    <string name="sound_controls">Volumen y salida del equipo</string>
+    <string name="sound_too_old">El Pocketdesk de este equipo es demasiado antiguo para el sonido solo: actualízalo o abre una sesión.</string>
+    <string name="sound_down">El sonido se detuvo: %1$s</string>
+    <string name="err_input_not_allowed">Este equipo no deja que este teléfono lo controle. En el equipo, activa \"Control the mouse and keyboard\" para este teléfono en la página Devices de Pocketdesk.</string>
+    <string name="err_sound_not_allowed">Este equipo no deja que este teléfono lo oiga ni sea su micrófono. En el equipo, activa \"Hear and change this computer\'s sound\" o \"Use the phone as a microphone\" para este teléfono en la página Devices de Pocketdesk.</string>
+    <string name="sound_here_refused">Este equipo no envía su sonido a este teléfono. En el equipo, activa \"Hear and change this computer\'s sound\" para este teléfono en la página Devices de Pocketdesk</string>
+    <string name="sound_mic_refused">Este equipo no usa el micrófono de este teléfono. En el equipo, activa \"Use the phone as a microphone\" para este teléfono en la página Devices de Pocketdesk</string>
+    <string name="err_permissions_changed">El propietario de este equipo cambió lo que puede hacer este teléfono, y eso terminó la sesión. Puede volver a cambiarlo en la página Devices de Pocketdesk.</string>
 </resources>

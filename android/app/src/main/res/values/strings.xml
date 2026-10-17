@@ -648,4 +648,19 @@
     <string name="mic_encoder_failed">This phone\'s Opus encoder did not start</string>
     <string name="mic_record_failed">The microphone did not open</string>
     <string name="mic_busy">The microphone is in use by another app</string>
+    <string name="sound_button">Sound</string>
+    <string name="sound_title">Sound with %1$s</string>
+    <string name="sound_on">This phone is the computer\'s speaker and can be its mic, with the screen off too. The notification ends it.</string>
+    <string name="sound_here">The computer\'s sound here</string>
+    <string name="sound_here_summary">What the computer plays comes out of this phone</string>
+    <string name="sound_mic">This phone\'s mic there</string>
+    <string name="sound_mic_summary">The computer hears this phone\'s microphone, for calls and recordings</string>
+    <string name="sound_controls">The computer\'s volume and output</string>
+    <string name="sound_too_old">This computer\'s Pocketdesk is too old for sound alone: update it, or open a session instead.</string>
+    <string name="sound_down">The sound stopped: %1$s</string>
+    <string name="err_input_not_allowed">This computer does not let this phone control it. On the computer, turn on \"Control the mouse and keyboard\" for this phone in Pocketdesk\'s Devices page.</string>
+    <string name="err_sound_not_allowed">This computer lets this phone neither hear it nor be its microphone. On the computer, turn on \"Hear and change this computer\'s sound\" or \"Use the phone as a microphone\" for this phone in Pocketdesk\'s Devices page.</string>
+    <string name="sound_here_refused">This computer does not send this phone its sound. On the computer, turn on \"Hear and change this computer\'s sound\" for this phone in Pocketdesk\'s Devices page</string>
+    <string name="sound_mic_refused">This computer does not take this phone\'s microphone. On the computer, turn on \"Use the phone as a microphone\" for this phone in Pocketdesk\'s Devices page</string>
+    <string name="err_permissions_changed">This computer\'s owner changed what this phone may do, which ended the session. They can change it back on Pocketdesk\'s Devices page.</string>
 </resources>
