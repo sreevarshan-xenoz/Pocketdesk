@@ -206,6 +206,19 @@ fun SettingsScreen(onBack: () -> Unit) {
                     runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
                 }
             }
+            // N1: the computer may ring this phone to find it.
+            boolRow(
+                LlIcons.Notifications,
+                stringResource(R.string.settings_ring_from_computer),
+                stringResource(R.string.settings_ring_from_computer_summary),
+                Prefs.ringFromComputer(context),
+            ) { on ->
+                Prefs.setRingFromComputer(context, on)
+                // The notification listener is what holds the link in the background.
+                if (on && !PhoneNotificationPrefs.accessGranted(context)) {
+                    runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
+                }
+            }
             boolRow(
                 LlIcons.Wifi,
                 stringResource(R.string.settings_clipboard_background),

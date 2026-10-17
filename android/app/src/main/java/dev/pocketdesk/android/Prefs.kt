@@ -32,6 +32,7 @@ object Prefs {
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
     private const val KEY_FILES_BACKGROUND = "files_in_background"
+    private const val KEY_RING_FROM_COMPUTER = "ring_from_computer"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_REVEAL_PIN = "reveal_pin"
@@ -182,6 +183,15 @@ object Prefs {
      * Whether files the computer sends arrive without a session (T10d): the
      * notification listener keeps a link for them. Off by default.
      */
+    /** Whether the computer may ring this phone to find it (N1); keeps the background link. Off by default. */
+    fun ringFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_RING_FROM_COMPUTER, false)
+
+    fun setRingFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_RING_FROM_COMPUTER, enabled) }
+        bump()
+    }
+
     fun filesInBackground(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_FILES_BACKGROUND, false)
 

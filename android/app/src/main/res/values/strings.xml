@@ -588,4 +588,12 @@
     <string name="settings_this_phone">This phone</string>
     <string name="settings_phone_name">This phone\'s name</string>
     <string name="settings_phone_name_summary">What computers call this phone, sent to each one it connects to. Blank: Android\'s device name</string>
+    <!-- N1: the computer rings this phone. -->
+    <string name="ring_title">Your computer is ringing this phone</string>
+    <string name="ring_text">Tap Stop to silence it.</string>
+    <string name="ring_stop">Stop</string>
+    <string name="ring_channel">Ring from the computer</string>
+    <string name="ring_channel_description">When your computer rings this phone to find it</string>
+    <string name="settings_ring_from_computer">Ring from the computer</string>
+    <string name="settings_ring_from_computer_summary">Your computer can ring this phone to find it: loud, for 30 seconds, through Do Not Disturb when alarms are allowed. Keeps a link to it in the background</string>
 </resources>
