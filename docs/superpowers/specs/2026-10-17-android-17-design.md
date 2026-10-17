@@ -21,4 +21,4 @@ Date: 2026-10-17. Plan: `docs/research/2026-10-17-finish-and-polish.md` §N4. So
 
 ## Check
 
-On the Android 17 emulator (API 37, x86_64, against a throwaway server on this box at 10.0.2.2): the local network prompt and a session; the ring from the computer in the background with `cmd audio set-enable-hardening enable`, its notification heard (no `AudioHardening` entry for the app) and the alarm volume untouched; Settings' two notes. On the A71 (Android 16): the ring still raises the volume and puts it back.
+Owed (checklist §98): the owner chose to run these later, after the API 37 emulator here stalled under both software and host rendering. On the Android 17 emulator (API 37, x86_64, against a throwaway server on this box at 10.0.2.2): the local network prompt and a session; the ring from the computer in the background with `cmd audio set-enable-hardening enable`, its notification heard (no `AudioHardening` entry for the app) and the alarm volume untouched; Settings' two notes. On the A71 (Android 16): the ring still raises the volume and puts it back.

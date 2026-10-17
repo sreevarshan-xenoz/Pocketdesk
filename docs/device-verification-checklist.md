@@ -1593,6 +1593,17 @@ On the A71 against this box (a throwaway server, the internet road):
 - [ ] Windows with VB-CABLE: the phone's mic heard in a recording or a call on the computer.
 - [ ] Linux: the computer's sound through PipeWire and the phone's mic as "Pocketdesk Mic" (`pw-loopback`).
 - [ ] An hour with the screen off: the session holds, and what it costs the phone's battery.
+## 98. An Android 17 pass (N4)
+
+Owed, on an Android 17 device or the API 37 emulator (the emulator here stalled under both software and host rendering, so none of this has run; the owner will check it):
+
+- [ ] The app starts, asks for local network access, and a session works once it is granted.
+- [ ] Ring from the computer with the app in the background and `adb shell cmd audio set-enable-hardening enable`: the notification sounds at the alarm volume, the volume is not raised, and no `AudioHardening` entry names the app.
+- [ ] On Android 16 and older (the A71): the ring still raises the alarm volume and puts it back.
+- [ ] Settings shows the Android 17 notes beside "Ring from the computer" and "Show texts on my computer".
+- [ ] A touchpad connected to the phone drives the computer's pointer and scrolls during a session.
+- [ ] A screen, remote and sound session with the screen off: the computer's sound keeps playing (the session's foreground service holds while-in-use).
+- [ ] A tablet-size window: the session lays out, rotates and resizes (orientation limits are ignored there).
 
 ## Recording results
 
