@@ -1,6 +1,6 @@
 # Working with KDE Connect devices (3a–3c)
 
-Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2.2 (the protocol's facts, with sources) and §3a–3c. Status: 3a built (see "As built" at the end); 3b and 3c to come.
+Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2.2 (the protocol's facts, with sources) and §3a–3c. Status: 3a and 3b built (see "As built" at the end); 3c to come.
 
 ## Goal
 
@@ -78,9 +78,20 @@ GSConnect, Valent, KDE Connect on a desktop, and iOS are not checkable here (no 
 
 ## As built (3a)
 
-- **Broadcasting is once per Find, not every 2 s while looking.** On the A71, KDE Connect dialed in again at every broadcast and dropped its link for the new one, so a minute of looking churned the link every 2 s. The identity now goes out when the desktop app asks (each press names a new time) and once after a network change; the network is looked at every 10 s (R6's idle cost), and `idle_cost.rs` measures the loop.
+- **Broadcasting is not every 2 s while looking.** On the A71, KDE Connect dialed in again at every broadcast and dropped its link for the new one, so a minute of looking churned the link every 2 s. A Find now broadcasts when pressed and every 10 s after until a device completes the handshake; a network change (this computer's IPv4 addresses, read every 10 s off the runtime) is told only with `lan_discovery` on; `idle_cost.rs` measures the loop.
 - **Only limited broadcast** (`255.255.255.255`), not each interface's directed broadcast; on Windows it leaves by the default interface.
-- **Dialing a broadcaster is not built:** UDP 1716 is not listened on, so a device that opens KDE Connect after the Find minute is found only by pressing Find again.
+- **Dialing a broadcaster is not built:** UDP 1716 is not listened on, so a device opened after the Find's minute is found only by pressing Find again.
 - **The device's name** is the one its identity inside TLS gives (the A71's connection packet said its model, the identity "Galaxy A71").
 - **Tests:** a fake v8 device over TLS 1.2 (the handshake, the CVE case, a certificate naming another id, a pin, an old or misaddressed identity, slow and long lines), the identity made once with its subject, the 42-link cap, the seen list and the Find request; the Pocketdesk road's TLS 1.2 refusal was already held by `the_control_channel_refuses_tls_1_2`.
 - **Device-checked** (checklist §87): the A71's KDE Connect dialed in after a Find, the handshake held, and it listed this computer.
+
+## The 3a review (0 Critical, 5 Important), fixed one commit each
+
+The packets test (it would have failed on the KDE identity), the identity made under a lock and taken only whole (two first uses at once could leave a mismatched set for good), unpaired links bounded per address and closed when quiet, discovery held to `lan_discovery` and IPv4 and retried, and a Find that looks until a device connects. Plus a device's packet type kept out of the log, its own id refused, an empty name, the seen list's writes, and tests that tell a certificate refusal from a timeout, hold the TLS version, and send `{` through the real handler.
+
+## As built (3b)
+
+- **Pairing** as designed, both ways; the code matched KDE Connect 1.36's on the A71 each time. A device's request waits 30 s with a desktop notification; a request from here waits for the device's Accept.
+- **Found on the device:** KDE Connect dropped the link at a packet with a null body (`NetworkPacket::new`'s default), so every packet on a KDE link goes with an object; and a device's new link was dropped from the list of live links by its old one going, so each link holds a token and removes only itself, and a newer link closes the older.
+- **Defaults** for a paired device's permissions are 3c's, with the plugins they gate; in 3b a paired device may ping.
+- **Tests:** the code against a vector worked out in Python, the clock skew, the pairing states (a device's request allowed, denied or let lapse; pairing from here; an answer to nothing; unpairing either way; ping only when paired), the live-link list, and every packet's body an object.

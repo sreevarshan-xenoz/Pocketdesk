@@ -1454,7 +1454,11 @@ The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box
 
 - [x] "Find" in the desktop app (the request file, as the app writes it): the phone dialed in, the v8 handshake completed over TLS, and the phone listed this computer under Available devices; one link, held.
 - [x] Found on the way: a broadcast every 2 s while looking made KDE Connect dial again at each one and drop its link; now once per Find.
-- [ ] The desktop app's Find button and list on screen.
+- [x] 3b, pairing from here: the phone showed the same code (260B880B) and Accept paired it; from the phone ("Request pairing"): the same code (EA788244) here, and Allow (the request file) paired it. Unpairing from the phone removed the pin here; it reconnected paired only with its certificate.
+- [x] 3b, ping: from here the phone showed "Ping!"; from the phone ("Send ping") the server took it.
+- [x] Found on the way: a null body (a ping's) made KDE Connect drop the link; a new link from one device was dropped from the list by its old one going.
+- [ ] The desktop app's Find button, list, Allow/Deny and Pair on screen.
+- [ ] Find again after the 3a review: broadcasts every 10 s until the device connects, then stops (no churn).
 - [ ] A device that broadcasts first (this computer dialing it): not built (the receive half waits).
 - [ ] Linux, with `kdeconnectd` holding UDP 1716.
 
