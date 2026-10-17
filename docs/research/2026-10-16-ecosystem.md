@@ -39,7 +39,7 @@ Labels:
 
 ## How close Pocketdesk is to KDE Connect [R]
 
-**Shared:** packet names and many bodies (`kdeconnect.identity`, `.pair`, `.clipboard`, `.battery`, `.notification`, `.share.request`, `.sms.*`, `.mousepad.request`, `.findmydevice`, `.ping`).
+**Shared:** packet names and many bodies (`kdeconnect.identity`, `.pair`, `.clipboard`, `.battery`, `.notification`, `.share.request`, `.sms.*`, `.mousepad.request`, `.ping`; not `.findmydevice`, Pocketdesk's siren, where KDE's is `.findmyphone.request`).
 
 **Not wire-compatible:**
 - TLS first on TCP 1716 with ALPN `pocketdesk-control/1`;

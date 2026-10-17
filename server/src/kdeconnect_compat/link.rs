@@ -27,8 +27,9 @@ pub const BATTERY: &str = "kdeconnect.battery";
 /// Clipboard text, both ways (3c).
 pub const CLIPBOARD: &str = "kdeconnect.clipboard";
 
-/// Ring a device, to find it (3c).
-pub const RING: &str = "kdeconnect.findmydevice.request";
+/// Ring a device, to find it (3c): KDE Connect's find-my-phone request
+/// (3c review: `kdeconnect.findmydevice` is Pocketdesk's own siren).
+pub const RING: &str = "kdeconnect.findmyphone.request";
 
 /// The longest line a paired device's link reads, as the Pocketdesk control
 /// channel's (a long copied text is one line); an unpaired one's is

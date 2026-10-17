@@ -563,6 +563,30 @@ mod tests {
         );
     }
 
+    /// The capabilities are KDE Connect's own packet types, as KDE Connect
+    /// 1.36 for Android names them (read from its app): a type it does not
+    /// know turns no plugin on, as Ring's first one did (3c review).
+    #[test]
+    fn the_capabilities_are_kde_connects_own_packet_types() {
+        assert_eq!(
+            INCOMING,
+            [
+                "kdeconnect.ping",
+                "kdeconnect.battery",
+                "kdeconnect.clipboard",
+                "kdeconnect.share.request"
+            ]
+        );
+        assert_eq!(
+            OUTGOING,
+            [
+                "kdeconnect.ping",
+                "kdeconnect.clipboard",
+                "kdeconnect.findmyphone.request"
+            ]
+        );
+    }
+
     #[test]
     fn ids_and_names_follow_kdes_rules() {
         assert!(valid_id(&"a".repeat(32)) && valid_id(&"a_b-".repeat(9)));

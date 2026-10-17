@@ -203,7 +203,7 @@ mod tests {
             // Connect device's link only, never on the Pocketdesk road.
             "kdeconnect.identity",
             // Ringing a paired KDE Connect device (3c), on its link only.
-            "kdeconnect.findmydevice.request",
+            "kdeconnect.findmyphone.request",
         ];
         let (_, outgoing) = crate::plugins::announced(&crate::plugins::register_all());
         let mut files = Vec::new();
