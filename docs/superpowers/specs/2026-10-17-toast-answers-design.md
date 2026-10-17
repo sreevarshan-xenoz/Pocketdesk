@@ -16,7 +16,7 @@ A phone notification that offers buttons or a reply (T10c: the phone's "Let the 
 
 ## Limits
 
-- An unpackaged Windows app gets the `Activated` event only while its process runs and the toast object lives; answering from the Action Center after the server restarted does nothing (the Notifications page still answers). A COM activator, which would cover that, needs a registered class: not now.
+- An unpackaged Windows app gets the `Activated` event only while its process runs and the toast object lives; answering from the Action Center after the server restarted does nothing (the Notifications page still answers). Reports differ on whether `Activated` fires from the Action Center at all for an app with no COM activator, and a server installed to run elevated may behave differently: unchecked until a press is tried (checklist §96). A COM activator, which would cover all of it, needs a registered class: not now.
 - The reply box text is the owner's; it is written owner-only, as the page's is.
 
 ## Tests
@@ -31,7 +31,15 @@ On this box with the A71 and a throwaway chat app (T10c's): an answerable notifi
 
 - **`server/src/toast_answers.rs`** (pure, tested on every OS): `Answerable` (whose, the buttons in the order shown, whether it takes a reply), `toast_xml` (the reply box with Send first, then the buttons, at most five actions in all, titles escaped), `toast_answer` (`reply` with non-empty text, or `action:<n>` into the buttons the toast showed), `dbus_actions`, `dbus_action_answer`, `dbus_reply_answer`, and `send`, which writes the answer with `phone_notes::request` as the Notifications page does.
 - **Windows** (`platform/windows.rs`): `show_toast` builds the XML from `toast_xml`; for an answerable phone toast it registers `Activated` (reading the arguments and the reply box from `ToastActivatedEventArgs.UserInput`) and keeps the toast in `ANSWERABLE` (the newest 30, dropped by `remove_tagged`). The `windows` crate gains `Foundation_Collections` for the reply's `ValueSet`.
-- **Linux** (`plugins/notification.rs`): an answerable one's `Notify` carries `a0`… and `inline-reply` with the `x-kde-reply-placeholder-text` hint, and stays 20 s; `listen_for_answers` starts one task for the server's life that takes `ActionInvoked` and `NotificationReplied` for the ids shown as answerable. Type-checked here against zbus 5.7 in a scratch crate; built and tested in CI.
+- **Linux** (`plugins/notification.rs`): an answerable one's `Notify` carries `a0`… and `inline-reply` with the `x-kde-reply-placeholder-text` hint, and stays 20 s; `listen_for_answers` starts one task for the server's life that takes `ActionInvoked` and `NotificationReplied` for the ids shown as answerable. Type-checked here against zbus 5 in a scratch crate (the lockfile has 5.15); built and tested in CI.
 - **Settings**: `toast_answers` (config, desktop Settings "Answer in the notification" under Notifications and texts), read through `current_config` at each notification, so it applies at once.
 - **Checked on this box with the A71**: a throwaway chat app (not committed) posting "Reply" and "Mark as read"; the phone forwarded it, the server kept it answerable and showed the toast, whose delivered XML in the notification history held the reply box, Send and "Mark as read"; clearing it on the phone took the toast back. Windows held the banner (a full-screen video was playing), so the toast was read from history, never pressed.
+
+## Review
+
+A fresh review (0 Critical, 2 Important, 4 Minor), fixed one commit each:
+
+- **A dead Reply button on Linux servers without KDE's inline reply** (GNOME draws every action as a button): the server's `GetCapabilities` is asked once, buttons only where it lists `actions`, the reply only where it lists `inline-reply`.
+- **SECURITY.md, docs/protocol.md and the phone's own words** said answers came only from the Notifications page; they name the notification itself, the stray-click risk, and `toast_answers` as the off switch.
+- Answerable entries now follow their notification (a toast kept once shown; a plain update, a cancel or a restarted notification server forgets it); a press that cannot be sent (a reply over 1000 characters, an unwritable state folder) says so in a notification; the README no longer states the unpressed toast as working.
 
