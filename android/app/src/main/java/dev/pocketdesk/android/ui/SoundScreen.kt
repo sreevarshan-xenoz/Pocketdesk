@@ -161,6 +161,10 @@ fun SoundScreen(
     // N1: a ring from the computer sounds here too.
     SirenWatcher(context)
 
+    // The session's control link, as a screen session keeps one: the sound
+    // sheet's requests ride it instead of a connection each (N5 review).
+    if (state == State.Ready) ControlLinkEffect(address, controlPort, attempt)
+
     val snackbar = remember { SnackbarHostState() }
     var micErrorRes by remember { mutableStateOf<Int?>(null) }
     val micErrorMessage = micErrorRes?.let { stringResource(R.string.mic_error, stringResource(it)) }
