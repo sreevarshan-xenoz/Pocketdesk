@@ -40,6 +40,20 @@ object ShortcutPlan {
      */
     fun shareable(schemes: List<String?>): Boolean = schemes.all { it == "content" }
 
+    /** The category that makes a connect shortcut a Direct Share target (N2). */
+    const val SHARE_CATEGORY = "dev.pocketdesk.android.category.SHARE_TO_COMPUTER"
+
+    /**
+     * The saved computer a Direct Share target names (N2): the share sheet
+     * gives the shortcut's id, and only a connect shortcut of a computer
+     * still saved is one. Any other id goes nowhere, never to another.
+     */
+    fun shortcutHost(shortcutId: String, hosts: List<HostStore.Host>): Share {
+        val prefix = Entry(Kind.CONNECT, "").id
+        if (!shortcutId.startsWith(prefix)) return Share.NotSaved
+        return savedHost(shortcutId.removePrefix(prefix), hosts)?.let { Share.To(it) } ?: Share.NotSaved
+    }
+
     /** Where a share goes, or why it goes nowhere. */
     sealed interface Share {
         data class To(val host: HostStore.Host) : Share

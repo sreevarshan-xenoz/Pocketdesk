@@ -71,6 +71,10 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="pocketdesk" android:host="pair" />
             </intent-filter>
+            <!-- N2: the saved computers as Direct Share targets. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <activity

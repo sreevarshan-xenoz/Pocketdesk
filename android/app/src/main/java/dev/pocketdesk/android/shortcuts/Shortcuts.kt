@@ -82,6 +82,13 @@ object Shortcuts {
                     ),
                 )
                 .setIntent(intent(app, entry.kind, entry.address))
+                .apply {
+                    // N2: a computer to share to from the share sheet.
+                    if (entry.kind != wake) {
+                        setCategories(setOf(ShortcutPlan.SHARE_CATEGORY))
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) setLongLived(true)
+                    }
+                }
                 .build()
         }
         val manager = app.getSystemService(ShortcutManager::class.java)

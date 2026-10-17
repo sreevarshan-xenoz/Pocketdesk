@@ -33,6 +33,16 @@ class ShortcutPlanTest {
         assertEquals(ShortcutPlan.Kind.CONNECT, plan.last().kind)
     }
 
+    /** N2: a Direct Share target goes to its own saved computer, never another. */
+    @Test
+    fun aDirectShareTargetGoesToItsSavedComputerOnly() {
+        val hosts = listOf(host("192.0.2.1"), host("192.0.2.2"))
+        assertEquals(ShortcutPlan.Share.To(host("192.0.2.2")), ShortcutPlan.shortcutHost("connect:192.0.2.2", hosts))
+        assertEquals(ShortcutPlan.Share.NotSaved, ShortcutPlan.shortcutHost("connect:192.0.2.9", hosts))
+        assertEquals(ShortcutPlan.Share.NotSaved, ShortcutPlan.shortcutHost("wake:192.0.2.1", hosts))
+        assertEquals(ShortcutPlan.Share.NotSaved, ShortcutPlan.shortcutHost("192.0.2.1", hosts))
+    }
+
     @Test
     fun noComputersNoShortcuts() {
         assertEquals(emptyList<ShortcutPlan.Entry>(), ShortcutPlan.plan(emptyList(), hasWake = { true }))

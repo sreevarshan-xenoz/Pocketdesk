@@ -48,7 +48,17 @@ class ShareActivity : ComponentActivity() {
         } else {
             null
         }
-        val host = when (val share = ShortcutPlan.shareHost(asked, HostStore.hosts(this), Prefs.othersChooseComputer(this))) {
+        // N2: a computer chosen in the share sheet's Direct Share row is the
+        // person's own choice; its id names a saved computer or nothing.
+        // Intent.EXTRA_SHORTCUT_ID, by value: the constant is API 29, where
+        // Direct Share through shortcuts starts; older share sheets send none.
+        val shortcut = intent.getStringExtra("android.intent.extra.shortcut.ID")
+        val share = if (shortcut != null) {
+            ShortcutPlan.shortcutHost(shortcut, HostStore.hosts(this))
+        } else {
+            ShortcutPlan.shareHost(asked, HostStore.hosts(this), Prefs.othersChooseComputer(this))
+        }
+        val host = when (share) {
             is ShortcutPlan.Share.To -> share.host
             ShortcutPlan.Share.NoneSaved -> return done(getString(R.string.share_no_host))
             ShortcutPlan.Share.NotSaved -> return done(getString(R.string.share_not_saved))
