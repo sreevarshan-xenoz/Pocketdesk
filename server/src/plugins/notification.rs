@@ -318,6 +318,10 @@ fn kde_to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
 /// same switch and flood limit, with an event, closed here when it closes
 /// there. Not answerable from here.
 pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
+    // A KDE device picks its own id, which may look like a phone's: its
+    // tags and its share of the flood limit are its own (N9 review).
+    let device_id = format!("kde:{device_id}");
+    let device_id = device_id.as_str();
     let id = body.get("id").and_then(|v| v.as_str()).unwrap_or("");
     let tag = (!id.is_empty()).then(|| tag_for(device_id, id));
     if body.get("isCancel").and_then(|v| v.as_bool()) == Some(true) {

@@ -29,9 +29,6 @@ pub const CLIPBOARD: &str = "kdeconnect.clipboard";
 /// A notification on the device (N9), shown here as a phone's.
 pub const NOTIFICATION: &str = "kdeconnect.notification";
 
-/// Notifications a link holds for its loop to show: a flood is cut here.
-const MAX_NOTES_WAITING: usize = 32;
-
 /// Ring a device, to find it (3c): KDE Connect's find-my-phone request
 /// (3c review: `kdeconnect.findmydevice` is Pocketdesk's own siren).
 pub const RING: &str = "kdeconnect.findmyphone.request";
@@ -364,8 +361,20 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
                 ),
             }
         }
+        // With a deadline, as the clipboard's: a stuck notification server
+        // must not stop the link reading (N9 review).
         for body in std::mem::take(&mut state.notes_in) {
-            crate::plugins::notification::show_from_kde(&device_id, &body).await;
+            if tokio::time::timeout(
+                WRITE_WAIT,
+                crate::plugins::notification::show_from_kde(&device_id, &body),
+            )
+            .await
+            .is_err()
+            {
+                tracing::warn!(
+                    "A KDE Connect device's notification was not shown: the notification server did not answer"
+                );
+            }
         }
         if let Some(text) = state.clipboard_in.take() {
             // Not sent back to the device it came from.
@@ -482,11 +491,9 @@ impl State {
                     self.clipboard_in = Some(text.to_string());
                 }
             }
-            NOTIFICATION if may.notifications => {
-                if self.notes_in.len() < MAX_NOTES_WAITING {
-                    self.notes_in.push(packet.body.clone());
-                }
-            }
+            // Shown by the loop after this packet; a flood is held to the
+            // phones' limit there.
+            NOTIFICATION if may.notifications => self.notes_in.push(packet.body.clone()),
             other => {
                 // The device's own text, kept short for the log.
                 let said: String = other.chars().take(60).collect();
@@ -1331,12 +1338,6 @@ mod tests {
         devices::set_permissions(&s.dir, &s.device_id, off).unwrap();
         assert!(s.packet(&note).is_empty());
         assert!(s.notes_in.is_empty(), "switch off: not taken");
-        // A flood is bounded while the loop catches up.
-        devices::set_permissions(&s.dir, &s.device_id, devices::KdePermissions::default()).unwrap();
-        for _ in 0..(MAX_NOTES_WAITING + 10) {
-            s.packet(&note);
-        }
-        assert_eq!(s.notes_in.len(), MAX_NOTES_WAITING);
     }
 
     #[test]
