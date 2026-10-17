@@ -560,4 +560,14 @@
     <string name="tasks_not_sent">அனுப்பப்படவில்லை: %1$s</string>
     <string name="tasks_no_answer">பதில் இல்லை: இந்தத் தொலைபேசி பணிகளைத் தொடங்க அனுமதிக்கப்படாமல் இருக்கலாம் (கணினியில், சாதனங்கள், \"என் பணிகளைத் தொடங்கு\")</string>
     <string name="card_checking">இது விழித்திருக்கிறதா என்று பார்க்கிறது…</string>
+    <!-- U2: Lock asks first; Lock, Ring and the shortcut keys say what happened. -->
+    <string name="lock_confirm_title">கணினியைப் பூட்டவா?</string>
+    <string name="lock_confirm_message">அதன் திரை பூட்டப்படும்; அதன் சொந்தக் கடவுச்சொல் மட்டுமே திறக்கும்.</string>
+    <string name="lock_confirm">பூட்டு</string>
+    <string name="lock_done">கணினி பூட்டப்பட்டது.</string>
+    <string name="lock_failed">கணினி பூட்டப்படவில்லை: %1$s</string>
+    <string name="ring_sent">கணினியை ஒலிக்கச் சொன்னோம்.</string>
+    <string name="ring_failed">கணினியை ஒலிக்கச் செய்ய முடியவில்லை: %1$s</string>
+    <string name="key_failed">அந்த விசை கணினியை அடையவில்லை: %1$s</string>
+    <string name="shortcut_failed">%1$s கணினியை அடையவில்லை: %2$s</string>
 </resources>

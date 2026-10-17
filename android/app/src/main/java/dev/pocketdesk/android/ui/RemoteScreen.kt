@@ -68,6 +68,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
@@ -125,6 +126,8 @@ fun RemoteScreen(
     port: Int,
     controlPort: Int,
     inPictureInPicture: Boolean = false,
+    // U2: bumped when the session notification's Lock asks for the question.
+    askLock: Int = 0,
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -203,6 +206,35 @@ fun RemoteScreen(
             snackbar.showSnackbar(it)
             sendTextNotice = null
         }
+    }
+    // U2: Lock asks first, and Lock and Ring say what happened.
+    var confirmLock by remember { mutableStateOf(false) }
+    // The session notification's Lock asks here too: only asks made since
+    // this screen opened (the count outlives a session).
+    val askLockAtStart = remember { askLock }
+    LaunchedEffect(askLock) {
+        if (askLock > askLockAtStart) confirmLock = true
+    }
+    val resources = LocalResources.current
+    fun ringComputer() {
+        scope.launch(Dispatchers.IO) {
+            val said = RustCore.sendFindMyDevice(address, controlPort).fold(
+                { resources.getString(R.string.ring_sent) },
+                { resources.getString(R.string.ring_failed, context.plainErrorText(it.message)) },
+            )
+            withContext(Dispatchers.Main) { sendTextNotice = said }
+        }
+    }
+    if (confirmLock) {
+        LockQuestion(
+            onDismiss = { confirmLock = false },
+            onLock = {
+                scope.launch(Dispatchers.IO) {
+                    val said = lockComputer(context, address, controlPort)
+                    withContext(Dispatchers.Main) { sendTextNotice = said }
+                }
+            },
+        )
     }
     val tooLongText = pluralStringResource(R.plurals.send_text_too_long, TextSend.MAX_CHARS, TextSend.MAX_CHARS)
     val noClipboardText = stringResource(R.string.phone_clipboard_no_text)
@@ -775,8 +807,16 @@ fun RemoteScreen(
         scope.launch(Dispatchers.IO) {
             val result =
                 RustCore.desktopPrivacy(address, controlPort, if (next) "grab" else "release")
+            val outcome = result.fold(
+                { PrivacyReply.read(it, askedLock = false) },
+                { PrivacyOutcome.Refused(context.plainErrorText(it.message)) },
+            )
             withContext(Dispatchers.Main) {
-                if (result.isSuccess) privacyGrab = next else privacyError = context.plainErrorText(result.exceptionOrNull()?.message)
+                when (outcome) {
+                    PrivacyOutcome.Done -> privacyGrab = next
+                    is PrivacyOutcome.Refused ->
+                        privacyError = context.plainErrorText(outcome.why)
+                }
             }
         }
     }
@@ -1329,6 +1369,7 @@ fun RemoteScreen(
                         ShortcutBar(
                             address = address,
                             port = port,
+                            onFailed = { sendTextNotice = it },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1350,7 +1391,12 @@ fun RemoteScreen(
                     Modifier.fillMaxWidth().height((maxHeight - streamHeight).coerceAtLeast(0.dp))
                         .align(Alignment.BottomCenter)
                 }
-            ControlDock(address = address, port = port, modifier = dockMod)
+            ControlDock(
+                address = address,
+                port = port,
+                modifier = dockMod,
+                onFailed = { sendTextNotice = it },
+            )
         }
 
         // F1: the IME's target (1 dp, invisible) and the bar above the keyboard.
@@ -1608,13 +1654,11 @@ fun RemoteScreen(
             },
             onRing = {
                 showQuick = false
-                scope.launch(Dispatchers.IO) { RustCore.sendFindMyDevice(address, controlPort) }
+                ringComputer()
             },
             onLock = {
                 showQuick = false
-                scope.launch(Dispatchers.IO) {
-                    RustCore.desktopPrivacy(address, controlPort, "status", lock = true)
-                }
+                confirmLock = true
             },
             onBlackout = {
                 showQuick = false

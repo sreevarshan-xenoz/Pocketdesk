@@ -172,9 +172,11 @@ fun ControlDock(
     address: String,
     port: Int,
     modifier: Modifier = Modifier,
+    // U2: what to say when a shortcut key did not reach the computer.
+    onFailed: (String) -> Unit = {},
 ) {
     Column(modifier) {
         TrackpadDock(address, port, modifier = Modifier.weight(1f).fillMaxWidth())
-        ShortcutBar(address, port, modifier = Modifier.fillMaxWidth())
+        ShortcutBar(address, port, modifier = Modifier.fillMaxWidth(), onFailed = onFailed)
     }
 }

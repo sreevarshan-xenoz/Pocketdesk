@@ -567,4 +567,14 @@
     <string name="tasks_not_sent">not sent: %1$s</string>
     <string name="tasks_no_answer">no answer: this phone may not be allowed to start tasks (on the computer, Devices, \"Start my tasks\")</string>
     <string name="card_checking">Checking whether it is awake…</string>
+    <!-- U2: Lock asks first; Lock, Ring and the shortcut keys say what happened. -->
+    <string name="lock_confirm_title">Lock the computer?</string>
+    <string name="lock_confirm_message">Its screen locks, and only its own password unlocks it.</string>
+    <string name="lock_confirm">Lock</string>
+    <string name="lock_done">The computer is locked.</string>
+    <string name="lock_failed">The computer did not lock: %1$s</string>
+    <string name="ring_sent">Asked the computer to ring.</string>
+    <string name="ring_failed">Could not ring the computer: %1$s</string>
+    <string name="key_failed">That key did not reach the computer: %1$s</string>
+    <string name="shortcut_failed">%1$s did not reach the computer: %2$s</string>
 </resources>

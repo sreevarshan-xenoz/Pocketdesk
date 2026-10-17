@@ -565,4 +565,14 @@
     <string name="tasks_not_sent">no enviada: %1$s</string>
     <string name="tasks_no_answer">sin respuesta: puede que este teléfono no tenga permiso para iniciar tareas (en el ordenador, Dispositivos, \"Iniciar mis tareas\")</string>
     <string name="card_checking">Comprobando si está encendido…</string>
+    <!-- U2: Lock asks first; Lock, Ring and the shortcut keys say what happened. -->
+    <string name="lock_confirm_title">¿Bloquear el ordenador?</string>
+    <string name="lock_confirm_message">Su pantalla se bloquea y solo su propia contraseña la desbloquea.</string>
+    <string name="lock_confirm">Bloquear</string>
+    <string name="lock_done">El ordenador está bloqueado.</string>
+    <string name="lock_failed">El ordenador no se bloqueó: %1$s</string>
+    <string name="ring_sent">Se pidió al ordenador que suene.</string>
+    <string name="ring_failed">No se pudo hacer sonar el ordenador: %1$s</string>
+    <string name="key_failed">Esa tecla no llegó al ordenador: %1$s</string>
+    <string name="shortcut_failed">%1$s no llegó al ordenador: %2$s</string>
 </resources>

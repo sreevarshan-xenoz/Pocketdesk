@@ -60,6 +60,9 @@ class MainActivity : ComponentActivity() {
 
     private val disconnectSignal = mutableIntStateOf(0)
 
+    /** Bumped by the notification's Lock: the session asks first (U2). */
+    private val lockAskSignal = mutableIntStateOf(0)
+
     /** A desktop pairing code to act on (pocketdesk://pair?...). */
     private val pairLink = mutableStateOf<String?>(null)
 
@@ -404,6 +407,7 @@ class MainActivity : ComponentActivity() {
                                         address = session.address,
                                         port = session.port,
                                         controlPort = session.controlPort,
+                                        askLock = lockAskSignal.intValue,
                                         onExit = { sessionKey = null },
                                     )
                                 }
@@ -413,6 +417,7 @@ class MainActivity : ComponentActivity() {
                                     port = session.port,
                                     controlPort = session.controlPort,
                                     inPictureInPicture = inPictureInPicture.value,
+                                    askLock = lockAskSignal.intValue,
                                     onExit = { sessionKey = null },
                                 )
                             }
@@ -441,19 +446,10 @@ class MainActivity : ComponentActivity() {
             Thread { runCatching { RustCore.stopStreaming() } }.start()
             disconnectSignal.intValue += 1
         }
+        // The session (or the remote) on screen asks first and says what
+        // happened (U2); it had locked at one tap from the shade.
         if (intent.getBooleanExtra(EXTRA_LOCK_DESKTOP, false)) {
-            val address = intent.getStringExtra(
-                dev.pocketdesk.android.service.SessionForegroundService.EXTRA_ADDRESS,
-            )
-            val controlPort = intent.getIntExtra(
-                dev.pocketdesk.android.service.SessionForegroundService.EXTRA_CONTROL_PORT,
-                HostStore.DEFAULT_CONTROL_PORT,
-            )
-            if (!address.isNullOrBlank()) {
-                Thread {
-                    runCatching { RustCore.desktopPrivacy(address, controlPort, "status", lock = true) }
-                }.start()
-            }
+            lockAskSignal.intValue += 1
         }
     }
 
