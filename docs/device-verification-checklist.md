@@ -1518,6 +1518,7 @@ On the A71, against a throwaway server reached through `adb reverse`; each ring 
 - [x] "Ring from the computer" on, the app in the background and the screen off: `pocketdesk ring` rang it on the alarm stream within about 4 s.
 - [x] It went by itself after 30 s; Stop from the shade silenced the next one at 8 s; the alarm volume was back as it was.
 - [x] With the switch off, the computer sent the ring and the phone dropped it ("not rung"); the switch shows its change at once (it had not, with eight others).
+- [x] After the review: with the remote open (and the background link up), a ring sounded through the remote's own watcher with its Silence dialog, the alarm stream at 7 of 7 while it rang and back at 6 after Silence, the notification gone.
 - [ ] The desktop's Ring button on screen (it needs a click), Ring off in Devices refusing it, and once a minute from the button.
 - [ ] Do Not Disturb with alarms allowed and not; a phone with a secure lock screen (the full-screen ring and Stop); a phone where the full-screen permission is not granted.
 - [ ] The Linux host.
