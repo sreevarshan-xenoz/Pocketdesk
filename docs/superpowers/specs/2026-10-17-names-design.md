@@ -44,3 +44,11 @@ The A71 against this box: a computer's name on its card after a connection, rena
 - **Found on the device:** the phone called itself "Pocketdesk Android Client" to every computer (a fixed string, recorded in `docs/protocol.md` as a choice not to send the model), so every phone would have shown the same name. It now sends Android's device name, or the name set in Settings ("This phone's name"; `PhoneName`), applied as Settings closes; a changed name closes the control link (`close_control_link`), since a name travels only in a handshake.
 - **Checked on the A71** against a throwaway server named "Test Desk" (reached through `adb reverse`; checklist §90): the card showed "Test Desk" with "127.0.0.1 · stream 4716 · control 1716" under it after a connection, renamed to "Lab box" and back by clearing; the computer kept the phone's name at pairing ("Galaxy A71", Android's default for it), "Test Phone" after setting it, "Test Phone 2" after changing it mid-run, and the device name again once cleared; `devices --json` gave it; the desktop app's Devices page showed the name over the id.
 
+## Review
+
+A fresh review (0 Critical, 1 Important), fixed one commit each:
+
+- **Two phones of one model read the same.** Android's default name is usually the model, so the Files, Messages and Phone pickers listed "Galaxy A71" twice. A name another device shares gets its short id on the computer, and a shortcut whose computer's name another shares gets its address on the phone.
+- Minors: names made of characters that draw nothing (Hangul fillers, tag characters, soft hyphens) are dropped, and the phone's cleaner reads white space as Rust does; "(calls itself)" follows the owner's rename itself (`chosen_name`), not a comparison; the v2 handshake holds a name to the names' rule, not the id's 128 bytes; the tile, the widget and the remote's title use the name; a doc comment had slid onto the wrong function.
+- **Accepted:** the session notification is made as the session starts, so the first session to a computer added by hand shows its address there; a paired phone that changes its name on every connection writes the trust store each time (connections are budgeted per address).
+
