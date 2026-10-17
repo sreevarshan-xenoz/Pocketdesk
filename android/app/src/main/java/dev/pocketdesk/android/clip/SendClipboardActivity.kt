@@ -95,7 +95,7 @@ class SendClipboardActivity : Activity() {
             .setPositiveButton(R.string.send_clipboard_private_send) { _, _ ->
                 window.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
                 Thread {
-                    send(app, host, text)
+                    send(app, host, text, private = true)
                     runOnUiThread { finish() }
                 }.start()
             }
@@ -104,7 +104,8 @@ class SendClipboardActivity : Activity() {
             .show()
     }
 
-    private fun send(app: Context, host: HostStore.Host, text: String) {
+    /** Send [text]; a [private] copy is not kept in the clipboard history (N2 review). */
+    private fun send(app: Context, host: HostStore.Host, text: String, private: Boolean = false) {
         val attempt = { RustCore.sendClipboard(host.address, host.controlPort, text) }
         var sent = attempt()
         if (sent.isFailure && RustCore.controlPeer() == null) {
@@ -115,7 +116,7 @@ class SendClipboardActivity : Activity() {
         }
         if (sent.isSuccess) {
             ClipboardShared.lastExchanged = text
-            ClipHistory.add(app, text)
+            if (!private) ClipHistory.add(app, text)
             say(app, app.getString(R.string.send_clipboard_sent, HostStore.shownName(app, host.address)))
         } else {
             say(app, app.getString(R.string.send_clipboard_failed, HostStore.shownName(app, host.address)))
