@@ -1459,12 +1459,17 @@ The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box
 - [x] Found on the way: a null body (a ping's) made KDE Connect drop the link; a new link from one device was dropped from the list by its old one going.
 - [ ] The desktop app's Find button, list, Allow/Deny and Pair on screen.
 - [x] Find again after the 3a review: the device connected (paired) and held for the minute, one link, no churn.
-- [ ] After the 3b review: Pair from here, Accept on the phone, then Confirm here with the same code (the pin kept only then); Cancel instead unpairs it on the phone; a second request from the phone while one waits shows nothing new.
+- [x] After the 3b review: Pair from here (the request file), the phone showed the same code, Accept there held it here as accepted with nothing pinned, then Confirm (Allow with the code) pinned it. A request left past 30 s lapsed and the phone's prompt went with it.
+- [ ] Cancel after the device's Accept unpairs it on the phone; a second request from the phone while one waits shows nothing new.
 - [x] 3c, battery: the A71's KDE Connect sent it as the link came up (100 %, charging), kept in `phone_status.json`.
 - [x] 3c, the clipboard from here (the clipboard stand-in file): pasted on the phone. Found: the watcher rested while only a KDE device was connected, so nothing went; fixed.
 - [x] 3c, the clipboard from the phone ("Send clipboard" in KDE Connect): the computer's set.
 - [x] 3c, files: with Files off, a 3 MB file from KDE Connect's "Send files" was refused and nothing written; with Files on (the permissions request), it arrived in Downloads (the stand-in folder), MD5 matching, marked as downloaded (ZoneId=3), listed in `received.json`.
-- [ ] 3c, Ring (loud; owed), a text or link share not taken, the low-battery warning from a KDE device, and the switches, battery and Ring on screen.
+- [x] After the 3c review: Ring (now `kdeconnect.findmyphone.request`) rang the A71, whose find-my-phone plugin turned on for this computer; stopped with FOUND IT.
+- [x] Unpaired here while away (the pins edited with the server stopped), the A71 came back thinking itself paired and was told it is not: KDE Connect moved this computer to Available devices.
+- [x] Found and fixed: the battery the A71 sent as it accepted was dropped while the owner confirmed; now held and kept at pairing (none before Confirm, 100 % right after).
+- [x] Files again after the review's intake changes: Files turned on with the one-switch request, a 3 MB file kept as `pd-kde-3c (1).bin` beside the first, MD5 matching, nothing left in `kdeconnect_parts/`.
+- [ ] 3c, a text or link share refused with its notice, the low-battery warning from a KDE device, and the switches, battery and Ring on screen.
 - [ ] A device that broadcasts first (this computer dialing it): not built (the receive half waits).
 - [ ] Linux, with `kdeconnectd` holding UDP 1716.
 

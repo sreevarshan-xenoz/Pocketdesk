@@ -70,7 +70,7 @@ On the A71 with KDE Connect from F-Droid, on a Wi-Fi it trusts, against this Win
 
 ## Docs it touches
 
-`docs/protocol.md` (UDP 1716 on demand, the compat certificate, TLS 1.2 on this path only, the files), SECURITY.md (a new limit: KDE devices, TLS 1.2, pairing by a verification code, narrower permissions), `docs/protocol-spec.md` §7, `docs/protocol-vectors/kdeconnect-v8.json` (replayed by a test), README, the desktop app's Settings.
+`docs/protocol.md` (UDP 1716 on demand, the compat certificate, TLS 1.2 on this path only, the files), SECURITY.md (a new limit: KDE devices, TLS 1.2, pairing by a verification code, narrower permissions), README, the desktop app's Settings.
 
 ## Not in this design
 
@@ -117,3 +117,13 @@ The packets test (it would have failed on the KDE identity), the identity made u
 - **Capabilities:** the identity now names incoming ping, battery, clipboard and share, outgoing ping, clipboard and findmyphone, each held by a test to the types KDE Connect 1.36 for Android knows (read from its app); KDE Connect turns a plugin on for this computer when these meet its packets.
 - **Found on the device:** the clipboard watcher rested while no phone or computer was connected, and a KDE link is neither, so nothing reached a KDE-only device; the links count now.
 - **Tests:** each plugin's gate (unpaired, permission off, on), the clipboard both ways and `.connect` not taken, a long line on a paired link and not an unpaired one, a file read whole and a short one leaving nothing, a file over TLS only from the paired certificate, offers held to the rules (a name made safe, no port, a port outside the range, over 8 GiB, a text share), and the sweep of every packet in `docs/packets.md`.
+
+## The 3c review (0 Critical, 3 Important), fixed one commit each
+
+- **Ring sent a type KDE Connect does not know** (`kdeconnect.findmydevice.request`; `kdeconnect.findmydevice` is Pocketdesk's siren), so the device's find-my-phone plugin was never turned on for this computer. It is `kdeconnect.findmyphone.request`, read from KDE Connect 1.36's app, and a test holds both capability lists to KDE's types. Device-checked: it rang.
+- **File intake was unbounded and unpaced:** each offer spawned a fetch of its own, and a file had only to send a byte every 30 s. A device now has at most 4 files on the way or waiting (more refused), a file waits up to 60 s for one of the 2 turns, and it must come at 32 KiB/s on the whole after its first 30 s.
+- **A file outlived its permission:** a transfer under way still landed after Files was turned off or the device unpaired. It now asks every 4 MiB, and before keeping the file.
+- **Minors fixed:** `payloadSize: -1` (a stream of no known length) failed the whole packet silently, and a share of no size or 0 bytes was taken; now read as no size, and each refused with a notice. The part grew in Downloads; now in `<state>/kdeconnect_parts/`, emptied at start. An unpaired link kept the clipboard watcher awake. A switch sent all four as they stood, ordered by the second, and the view flipped a box back before the server wrote it; now one switch per request, in the millisecond made, the click held on screen until written. Ring to an absent device said only "Asked."; the KDE section followed the box as edited, not the server as running; pings could spend the pairing prompts' notifications (now an allowance of their own, pings logged at debug); a device that stopped reading, or a clipboard that did not answer, held the link's loop (10 s deadlines now), and a newer link's "close" could be lost in a full queue (a token now). The fake sender in the TLS test now requires this computer's certificate. The spec named a vectors file and a protocol-spec section that were never written; dropped from what 3a–3c touch.
+- **Also from the review's open questions:** a device unpaired here while away came back thinking itself paired and was ignored; it is now told `{pair: false}` once, as KDE Connect's own desktop does (not while a pairing waits). Device-checked.
+- **Found on the device re-check:** the battery a device sends as it accepts this computer's request came while the owner was still to confirm, and was dropped; now held and kept at pairing.
+- **Accepted:** the sweep test's empty-answer check is weak (most paths answer nothing); it is held by what it watches (the clipboard, a fetch, the pairing, the battery). The 4 MiB line on a paired link is tested on the reader, not through the loop.
