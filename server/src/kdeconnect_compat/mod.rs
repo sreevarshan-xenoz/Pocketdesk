@@ -42,15 +42,14 @@ pub const MAX_UNPAIRED: usize = 42;
 /// every place (3a review).
 pub const MAX_UNPAIRED_PER_ADDRESS: usize = 4;
 
-/// The places for links from unpaired devices: so many in all, so many per
-/// address.
-pub struct UnpairedSlots {
+/// Places for links: so many in all, so many per address.
+pub struct Slots {
     total: usize,
     per_address: usize,
     taken: std::sync::Mutex<(usize, BTreeMap<IpAddr, usize>)>,
 }
 
-impl UnpairedSlots {
+impl Slots {
     pub const fn new(total: usize, per_address: usize) -> Self {
         Self {
             total,
@@ -60,7 +59,7 @@ impl UnpairedSlots {
     }
 
     /// A place for a link from `address`, if one is free.
-    pub fn take(&'static self, address: IpAddr) -> Option<UnpairedSlot> {
+    pub fn take(&'static self, address: IpAddr) -> Option<Slot> {
         let mut taken = self.taken.lock().unwrap_or_else(|e| e.into_inner());
         let (all, by_address) = &mut *taken;
         let here = by_address.get(&address).copied().unwrap_or(0);
@@ -69,7 +68,7 @@ impl UnpairedSlots {
         }
         *all += 1;
         by_address.insert(address, here + 1);
-        Some(UnpairedSlot {
+        Some(Slot {
             slots: self,
             address,
         })
@@ -77,12 +76,12 @@ impl UnpairedSlots {
 }
 
 /// One place, given back when dropped.
-pub struct UnpairedSlot {
-    slots: &'static UnpairedSlots,
+pub struct Slot {
+    slots: &'static Slots,
     address: IpAddr,
 }
 
-impl Drop for UnpairedSlot {
+impl Drop for Slot {
     fn drop(&mut self) {
         let mut taken = self.slots.taken.lock().unwrap_or_else(|e| e.into_inner());
         let (all, by_address) = &mut *taken;
@@ -96,8 +95,14 @@ impl Drop for UnpairedSlot {
     }
 }
 
-/// The server's places.
-static UNPAIRED: UnpairedSlots = UnpairedSlots::new(MAX_UNPAIRED, MAX_UNPAIRED_PER_ADDRESS);
+/// The server's places for unpaired links, taken once the handshake has
+/// shown the device is not paired (3b review: a paired device is never
+/// kept out by them).
+static UNPAIRED: Slots = Slots::new(MAX_UNPAIRED, MAX_UNPAIRED_PER_ADDRESS);
+
+/// Connections in the handshake at once, more than the unpaired places:
+/// each is over within the handshake's deadlines.
+static HANDSHAKING: Slots = Slots::new(64, 8);
 
 /// The compat identity in the state folder, read once.
 pub fn load_identity() -> anyhow::Result<identity::CompatIdentity> {
@@ -114,11 +119,13 @@ pub fn load_identity() -> anyhow::Result<identity::CompatIdentity> {
 /// device's connection packet. The handshake (a paired device held to its
 /// pin), then the link: pairing and ping (3b), until it closes.
 pub async fn serve(stream: TcpStream) {
-    let peer = stream.peer_addr().ok();
-    let Some(slot) = peer.and_then(|peer| UNPAIRED.take(peer.ip())) else {
+    let Ok(peer) = stream.peer_addr() else {
+        return;
+    };
+    let Some(handshaking) = HANDSHAKING.take(peer.ip()) else {
         tracing::warn!(
-            ?peer,
-            "A KDE Connect connection refused: too many unpaired already"
+            %peer,
+            "A KDE Connect connection refused: too many in the handshake already"
         );
         return;
     };
@@ -139,15 +146,27 @@ pub async fn serve(stream: TcpStream) {
     {
         Ok(link) => link,
         Err(why) => {
-            tracing::warn!(?peer, "A KDE Connect connection refused: {why}");
+            tracing::warn!(%peer, "A KDE Connect connection refused: {why}");
             return;
         }
     };
+    drop(handshaking);
     discovery::connected();
     // Held to its pin in the handshake: a paired device's link is not one
     // of the unpaired ones.
     let paired = link::pin_of(&dir, &link.hello.device_id) == Some(link.cert_hash);
-    let slot = (!paired).then_some(slot);
+    let slot = if paired {
+        None
+    } else {
+        let Some(slot) = UNPAIRED.take(peer.ip()) else {
+            tracing::warn!(
+                %peer,
+                "A KDE Connect connection refused: too many unpaired already"
+            );
+            return;
+        };
+        Some(slot)
+    };
     tracing::info!(
         device_id = %link.hello.device_id,
         name = %link.hello.device_name,
@@ -166,8 +185,7 @@ pub async fn serve(stream: TcpStream) {
     if let Err(e) = noted {
         tracing::debug!("Could not note the KDE Connect device: {e}");
     }
-    link::run(link, &identity.cert_der, paired).await;
-    drop(slot);
+    link::run(link, &identity.cert_der, slot).await;
 }
 
 /// The desktop app's requests about KDE Connect devices (3b), for the
@@ -239,8 +257,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unpaired_links_stop_at_kdes_cap_and_at_four_from_one_address() {
-        static SLOTS: UnpairedSlots = UnpairedSlots::new(6, 4);
+    fn places_stop_at_the_cap_and_at_so_many_from_one_address() {
+        static SLOTS: Slots = Slots::new(6, 4);
         let a: IpAddr = "192.0.2.1".parse().unwrap();
         let b: IpAddr = "192.0.2.2".parse().unwrap();
         let from_a: Vec<_> = std::iter::from_fn(|| SLOTS.take(a)).take(10).collect();

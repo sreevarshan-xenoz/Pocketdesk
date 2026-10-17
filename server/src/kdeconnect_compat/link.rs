@@ -177,12 +177,13 @@ fn notify(summary: &'static str, body: String) {
     });
 }
 
-/// The link, until it closes. `paired`: the device is paired with the
-/// certificate it brought (the handshake held it to the pin).
+/// The link, until it closes. `unpaired`: the place an unpaired device's
+/// link holds, given back once it pairs; none when the device is paired
+/// with the certificate it brought (the handshake held it to the pin).
 pub async fn run<S: AsyncRead + AsyncWrite + Unpin>(
     link: DeviceLink<S>,
     our_cert_der: &[u8],
-    paired: bool,
+    unpaired: Option<super::Slot>,
 ) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
@@ -207,9 +208,10 @@ pub async fn run<S: AsyncRead + AsyncWrite + Unpin>(
         name,
         cert_hash: link.cert_hash,
         keys,
-        paired,
+        paired: unpaired.is_none(),
         waiting: None,
         last_asked: 0,
+        unpaired,
     };
     let (reader, mut writer) = tokio::io::split(link.stream);
     let mut reader = BufReader::new(reader);
@@ -260,6 +262,8 @@ struct State {
     waiting: Option<Waiting>,
     /// When the device last asked to pair on this link, unix seconds.
     last_asked: u64,
+    /// The unpaired place this link holds, until it pairs.
+    unpaired: Option<super::Slot>,
 }
 
 impl State {
@@ -434,6 +438,8 @@ impl State {
         }
         self.paired = true;
         self.waiting = None;
+        // Paired, it is not one of the unpaired links any more.
+        self.unpaired = None;
         let _ = devices::clear_pending(&self.dir, &self.device_id, now);
         self.note_seen();
         tracing::info!(device_id = %self.device_id, "Paired with a KDE Connect device");
@@ -598,6 +604,7 @@ mod tests {
             paired,
             waiting: None,
             last_asked: 0,
+            unpaired: None,
         }
     }
 
@@ -758,6 +765,18 @@ mod tests {
         assert!(s.pair_packet(PairSays::Yes(None)).is_empty());
         assert!(!s.paired);
         assert_eq!(devices::pinned(&s.dir, &s.device_id), None);
+    }
+
+    #[test]
+    fn a_link_that_pairs_gives_its_unpaired_place_back() {
+        static PLACES: super::super::Slots = super::super::Slots::new(1, 1);
+        let address: std::net::IpAddr = "192.0.2.7".parse().unwrap();
+        let mut s = state("place", false);
+        s.unpaired = PLACES.take(address);
+        assert!(s.unpaired.is_some());
+        assert!(PLACES.take(address).is_none(), "held");
+        s.pair_now();
+        assert!(PLACES.take(address).is_some(), "given back");
     }
 
     #[test]
