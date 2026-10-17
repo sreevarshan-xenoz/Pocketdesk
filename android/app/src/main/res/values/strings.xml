@@ -231,16 +231,17 @@
 
     <!-- Pairing sheet -->
     <string name="pair_title">Pair with %1$s</string>
-    <string name="pair_read_pin">Read the PIN off the desktop screen…</string>
-    <string name="pair_pin_ready">A PIN is showing on the desktop (`pocketdesk pair`) — type it below.</string>
-    <string name="pair_error">Error: %1$s</string>
-    <string name="pair_no_pin">Desktop did not confirm a PIN.</string>
+    <string name="pair_read_pin">Read the PIN off the computer\'s screen…</string>
+    <string name="pair_pin_ready">A PIN is showing on the computer. Type it below.</string>
+    <string name="pair_error">Not paired: %1$s</string>
+    <string name="pair_no_pin">The computer did not confirm a PIN.</string>
     <string name="pair_wrong_pin">Wrong or expired PIN.</string>
-    <string name="pair_waiting">Waiting for desktop…</string>
-    <string name="pair_show_pin">Show PIN on desktop</string>
+    <string name="pair_waiting">Waiting for the computer…</string>
+    <string name="pair_show_pin">Show a PIN on the computer</string>
     <string name="pair_pin_label">6-digit PIN</string>
     <string name="pair_reveal_pin">Show PIN</string>
-    <string name="pair_enter_pin">Enter PIN from desktop</string>
+    <string name="pair_hide_pin">Hide PIN</string>
+    <string name="pair_submit">Pair</string>
     <string name="cancel">Cancel</string>
 
     <!-- Window picker -->

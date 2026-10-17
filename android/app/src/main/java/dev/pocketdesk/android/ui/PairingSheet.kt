@@ -173,8 +173,40 @@ fun PairingSheet(
             if (waiting) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
+            OutlinedTextField(
+                value = pinEntry,
+                onValueChange = { pinEntry = it.filter(Char::isDigit).take(6) },
+                label = { Text(stringResource(R.string.pair_pin_label)) },
+                keyboardOptions =
+                    KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                // The keyboard's Done key pairs, as the button does.
+                keyboardActions = KeyboardActions(onDone = { submitPin() }),
+                visualTransformation =
+                    if (revealed) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    // Says what a tap does, and changes with it (U2).
+                    IconButton(onClick = { revealed = !revealed }) {
+                        LlIcon(
+                            if (revealed) LlIcons.EyeOff else LlIcons.Eye,
+                            stringResource(if (revealed) R.string.pair_hide_pin else R.string.pair_reveal_pin),
+                        )
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(pinFocus),
+            )
             Button(
+                enabled = PinRules.canSubmit(pinEntry, success),
+                onClick = { submitPin() },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.pair_submit))
+            }
+            OutlinedButton(
                 enabled = !waiting && !success,
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     scope.launch {
                         val result =
@@ -196,35 +228,6 @@ fun PairingSheet(
                 },
             ) {
                 Text(if (waiting) stringResource(R.string.pair_waiting) else stringResource(R.string.pair_show_pin))
-            }
-            OutlinedTextField(
-                value = pinEntry,
-                onValueChange = { pinEntry = it.filter(Char::isDigit).take(6) },
-                label = { Text(stringResource(R.string.pair_pin_label)) },
-                keyboardOptions =
-                    KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                // The keyboard's Done key pairs, as the button does.
-                keyboardActions = KeyboardActions(onDone = { submitPin() }),
-                visualTransformation =
-                    if (revealed) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { revealed = !revealed }) {
-                        LlIcon(
-                            LlIcons.Eye,
-                            stringResource(R.string.pair_reveal_pin),
-                        )
-                    }
-                },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(pinFocus),
-            )
-            OutlinedButton(
-                enabled = PinRules.canSubmit(pinEntry, success),
-                onClick = { submitPin() },
-            ) {
-                Text(stringResource(R.string.pair_enter_pin))
             }
             TextButton(
                 onClick = {

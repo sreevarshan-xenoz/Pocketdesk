@@ -51,6 +51,7 @@ object LlIcons {
     val Notifications = LlGlyph(R.drawable.ic_ll_notifications)
     val Clipboard = LlGlyph(R.drawable.ic_ll_clipboard)
     val Eye = LlGlyph(R.drawable.ic_ll_eye)
+    val EyeOff = LlGlyph(R.drawable.ic_ll_eye_off)
     val Language = LlGlyph(R.drawable.ic_ll_language)
     val Sun = LlGlyph(R.drawable.ic_ll_sun)
     val Moon = LlGlyph(R.drawable.ic_ll_moon)

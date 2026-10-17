@@ -229,16 +229,17 @@
 
     <!-- Pairing sheet -->
     <string name="pair_title">Emparejar con %1$s</string>
-    <string name="pair_read_pin">Lee el PIN en la pantalla del escritorio…</string>
-    <string name="pair_pin_ready">Hay un PIN mostrando en el escritorio (`pocketdesk pair`) — escríbelo abajo.</string>
-    <string name="pair_error">Error: %1$s</string>
-    <string name="pair_no_pin">El escritorio no confirmó un PIN.</string>
+    <string name="pair_read_pin">Lee el PIN en la pantalla del ordenador…</string>
+    <string name="pair_pin_ready">Hay un PIN en la pantalla del ordenador. Escríbelo abajo.</string>
+    <string name="pair_error">No emparejado: %1$s</string>
+    <string name="pair_no_pin">El ordenador no confirmó un PIN.</string>
     <string name="pair_wrong_pin">PIN incorrecto o caducado.</string>
-    <string name="pair_waiting">Esperando al escritorio…</string>
-    <string name="pair_show_pin">Mostrar PIN en el escritorio</string>
+    <string name="pair_waiting">Esperando al ordenador…</string>
+    <string name="pair_show_pin">Mostrar un PIN en el ordenador</string>
     <string name="pair_pin_label">PIN de 6 dígitos</string>
     <string name="pair_reveal_pin">Mostrar PIN</string>
-    <string name="pair_enter_pin">Introducir PIN del escritorio</string>
+    <string name="pair_hide_pin">Ocultar PIN</string>
+    <string name="pair_submit">Emparejar</string>
     <string name="cancel">Cancelar</string>
 
     <!-- Window picker -->
