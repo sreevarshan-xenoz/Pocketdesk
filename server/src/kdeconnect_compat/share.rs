@@ -108,7 +108,12 @@ pub fn offer_of(packet: &NetworkPacket) -> Result<Offer, String> {
         .get("filename")
         .and_then(|v| v.as_str())
         .ok_or("not a file (a text or link share)")?;
-    let size = packet.payload_size.ok_or("no size")?;
+    let size = packet
+        .payload_size
+        .ok_or("no size (a stream of no known length)")?;
+    if size == 0 {
+        return Err("an empty file".to_string());
+    }
     if size > MAX_FILE_BYTES {
         return Err(format!("{size} bytes is more than this computer takes"));
     }
@@ -345,6 +350,7 @@ mod tests {
                 None,
             ),
             (serde_json::json!({ "filename": "a" }), None, Some(1739)),
+            (serde_json::json!({ "filename": "a" }), Some(0), Some(1739)),
             (serde_json::json!({ "filename": "a" }), Some(5), None),
             (serde_json::json!({ "filename": "a" }), Some(5), Some(22)),
             (

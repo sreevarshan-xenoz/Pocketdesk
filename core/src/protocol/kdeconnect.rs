@@ -37,8 +37,9 @@ pub struct NetworkPacket {
     #[serde(default)]
     pub body: Value,
     /// The size of the payload that follows on its own connection; KDE
-    /// Connect names it `payloadSize` (3c).
-    #[serde(default, alias = "payloadSize")]
+    /// Connect names it `payloadSize` (3c), and says -1 for a stream of no
+    /// known length, read as none (3c review: it had failed the packet).
+    #[serde(default, alias = "payloadSize", deserialize_with = "size_or_none")]
     pub payload_size: Option<u64>,
     /// Where a KDE Connect device offers the payload: `{port}` (3c).
     #[serde(
@@ -59,6 +60,13 @@ pub struct NetworkPacket {
     /// native types and readable-but-ignored by peers that predate the field.
     #[serde(default, rename = "llVersion", skip_serializing_if = "Option::is_none")]
     pub ll_version: Option<u32>,
+}
+
+/// A payload size, or none for anything that is not one (KDE Connect's -1).
+fn size_or_none<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<u64>, D::Error> {
+    Ok(Option::<Value>::deserialize(d)?.and_then(|v| v.as_u64()))
 }
 
 impl NetworkPacket {
@@ -815,6 +823,11 @@ mod tests {
         .unwrap();
         assert_eq!(packet.payload_size, Some(5));
         assert_eq!(packet.payload_transfer_info.unwrap()["port"], 1739);
+        let unknown = NetworkPacket::from_wire(
+            r#"{"type":"kdeconnect.share.request","body":{"filename":"a"},"payloadSize":-1}"#,
+        )
+        .unwrap();
+        assert_eq!(unknown.payload_size, None, "-1: no known length");
         let ours = NetworkPacket::from_wire(r#"{"type":"x","payload_size":7}"#).unwrap();
         assert_eq!(
             ours.payload_size,

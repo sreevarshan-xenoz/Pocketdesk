@@ -378,7 +378,11 @@ impl State {
             super::share::SHARE => match super::share::offer_of(packet) {
                 Ok(offer) => self.file_in = Some(offer),
                 Err(why) => {
-                    tracing::info!(device_id = %self.device_id, "A share from a KDE Connect device not taken: {why}")
+                    tracing::info!(device_id = %self.device_id, "A share from a KDE Connect device not taken: {why}");
+                    notify(
+                        "A share from a KDE Connect device was not taken",
+                        format!("{}: {why}", self.name),
+                    );
                 }
             },
             CLIPBOARD if may.clipboard => {
