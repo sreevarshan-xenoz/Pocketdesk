@@ -1203,6 +1203,61 @@ mod tests {
         assert_eq!(s.file_in.take().unwrap().name, "photo.jpg");
     }
 
+    /// Every packet the Pocketdesk road knows (`docs/packets.md`) but the
+    /// KDE link does not take is not taken from a paired device allowed
+    /// everything: nothing answered, nothing set, nothing fetched.
+    #[test]
+    fn a_paired_device_is_given_nothing_beyond_its_plugins() {
+        let packets = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/packets.md"),
+        )
+        .unwrap();
+        let mut types: Vec<&str> = packets
+            .split('`')
+            .filter(|t| t.starts_with("kdeconnect.") && !t.contains(' '))
+            .collect();
+        types.sort_unstable();
+        types.dedup();
+        assert!(types.len() > 40, "{} packet types read", types.len());
+        let taken = [
+            PING,
+            BATTERY,
+            CLIPBOARD,
+            super::super::share::SHARE,
+            super::super::pairing::PAIR,
+        ];
+        let mut s = state("sweep", false);
+        s.device_id = format!("sweep{}", uuid::Uuid::new_v4().simple());
+        s.pair_now();
+        let all = devices::KdePermissions {
+            clipboard: true,
+            battery: true,
+            find: true,
+            files: true,
+        };
+        devices::set_permissions(&s.dir, &s.device_id, all).unwrap();
+        for packet_type in types.into_iter().filter(|t| !taken.contains(t)) {
+            let mut packet = NetworkPacket::new(packet_type).with_body(serde_json::json!({
+                "content": "x",
+                "filename": "y",
+                "currentCharge": 5,
+                "url": "https://example.org",
+                "command": "calc",
+            }));
+            packet.payload_size = Some(1);
+            packet.payload_transfer_info = Some(serde_json::json!({ "port": 1739 }));
+            assert!(s.packet(&packet).is_empty(), "{packet_type} answered");
+            assert_eq!(s.clipboard_in, None, "{packet_type} set the clipboard");
+            assert_eq!(s.file_in, None, "{packet_type} fetched a file");
+            assert!(s.paired, "{packet_type} unpaired it");
+        }
+        assert_eq!(
+            crate::plugins::phone_battery::charge_of(&s.device_id),
+            None,
+            "no battery taken from another packet"
+        );
+    }
+
     #[test]
     fn only_a_paired_device_is_pinged() {
         let mut s = state("ping", false);
