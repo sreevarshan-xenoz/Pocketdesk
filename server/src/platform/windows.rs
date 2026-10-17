@@ -410,7 +410,7 @@ fn show_toast(
         toast.SetTag(&HSTRING::from(tag))?;
         toast.SetGroup(&HSTRING::from(PHONE_GROUP))?;
     }
-    if let (Some(answers), Some(tag)) = (answers, tag) {
+    if let (Some(answers), Some(_)) = (answers, tag) {
         let answers = answers.clone();
         toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
             move |_, args| {
@@ -424,14 +424,21 @@ fn show_toast(
                 Ok(())
             },
         ))?;
+    }
+    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)?;
+    // Kept only once shown, and only while the toast for this tag can be
+    // answered: a plain update of it drops the old one (N3 review).
+    if let Some(tag) = tag {
         let mut kept = answerable();
         kept.retain(|(t, _)| t != tag);
-        kept.push_back((tag.to_string(), toast.clone()));
-        while kept.len() > KEEP_ANSWERABLE {
-            kept.pop_front();
+        if answers.is_some() {
+            kept.push_back((tag.to_string(), toast));
+            while kept.len() > KEEP_ANSWERABLE {
+                kept.pop_front();
+            }
         }
     }
-    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)
+    Ok(())
 }
 
 /// What a press on an answerable toast answers: its arguments, and the reply

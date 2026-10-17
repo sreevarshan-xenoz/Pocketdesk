@@ -164,6 +164,12 @@ fn remember_answerable(id: u32, answers: crate::toast_answers::Answerable) {
 }
 
 #[cfg(target_os = "linux")]
+fn forget_answerable(id: u32) {
+    let mut ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
+    ids.retain(|(i, _)| *i != id);
+}
+
+#[cfg(target_os = "linux")]
 fn answerable_for(id: u32) -> Option<crate::toast_answers::Answerable> {
     let ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
     ids.iter().find(|(i, _)| *i == id).map(|(_, a)| a.clone())
@@ -181,6 +187,12 @@ fn listen_for_answers() {
         if let Err(e) = answer_signals().await {
             tracing::warn!("Answers from notifications stopped: {e}");
         }
+        // A notification server that restarted counts its ids from 1
+        // again: the ids kept no longer name ours (N3 review).
+        answerable_ids()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
         LISTENING.store(false, std::sync::atomic::Ordering::SeqCst);
     });
 }
@@ -601,9 +613,14 @@ async fn show_desktop_notification(
                 if let Some(tag) = tag {
                     remember_shown(tag, id);
                 }
-                if let Some(answers) = &answers {
-                    remember_answerable(id, answers.clone());
-                    listen_for_answers();
+                // A plain update of an answerable one is answerable no
+                // more (N3 review).
+                match &answers {
+                    Some(answers) => {
+                        remember_answerable(id, answers.clone());
+                        listen_for_answers();
+                    }
+                    None => forget_answerable(id),
                 }
                 tracing::info!("Desktop notification shown: {}", title);
                 return Ok(());
@@ -661,6 +678,7 @@ async fn close_desktop_notification(tag: &str) {
     }
     #[cfg(target_os = "linux")]
     if let Some(id) = take_shown(tag) {
+        forget_answerable(id);
         let closed = async {
             notifications_proxy()
                 .await?
