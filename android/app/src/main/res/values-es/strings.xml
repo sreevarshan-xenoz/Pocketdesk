@@ -654,4 +654,6 @@
     <string name="sound_controls">Volumen y salida del equipo</string>
     <string name="sound_too_old">El Pocketdesk de este equipo es demasiado antiguo para el sonido solo: actualízalo o abre una sesión.</string>
     <string name="sound_down">El sonido se detuvo: %1$s</string>
+    <string name="err_input_not_allowed">Este equipo no deja que este teléfono lo controle. En el equipo, activa \"Control the mouse and keyboard\" para este teléfono en la página Devices de Pocketdesk.</string>
+    <string name="err_sound_not_allowed">Este equipo no deja que este teléfono lo oiga ni sea su micrófono. En el equipo, activa \"Hear and change this computer\'s sound\" o \"Use the phone as a microphone\" para este teléfono en la página Devices de Pocketdesk.</string>
 </resources>

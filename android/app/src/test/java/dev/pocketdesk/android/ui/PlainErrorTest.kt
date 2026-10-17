@@ -20,6 +20,19 @@ class PlainErrorTest {
         }
     }
 
+    /** A session the computer's permissions turned down says which switch (N5). */
+    @Test
+    fun aRefusalForWantOfAPermissionNamesIt() {
+        assertEquals(
+            R.string.err_input_not_allowed,
+            humanizeError("stream closed by the desktop: input not allowed"),
+        )
+        assertEquals(
+            R.string.err_sound_not_allowed,
+            humanizeError("stream closed by the desktop: sound not allowed"),
+        )
+    }
+
     @Test
     fun aSentenceForAPersonIsKept() {
         for (said in listOf(

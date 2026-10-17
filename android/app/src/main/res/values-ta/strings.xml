@@ -649,4 +649,6 @@
     <string name="sound_controls">கணினியின் ஒலியளவும் வெளியீடும்</string>
     <string name="sound_too_old">இந்தக் கணினியின் Pocketdesk ஒலிக்கு மட்டும் மிகப் பழையது: அதைப் புதுப்பிக்கவும், அல்லது ஒரு அமர்வைத் திறக்கவும்.</string>
     <string name="sound_down">ஒலி நின்றது: %1$s</string>
+    <string name="err_input_not_allowed">இந்தக் கணினி இந்தத் தொலைபேசியைத் தன்னைக் கட்டுப்படுத்த விடவில்லை. கணினியில், Pocketdesk-இன் Devices பக்கத்தில் இந்தத் தொலைபேசிக்கு \"Control the mouse and keyboard\" என்பதை இயக்கவும்.</string>
+    <string name="err_sound_not_allowed">இந்தக் கணினி இந்தத் தொலைபேசியைத் தன் ஒலியைக் கேட்கவோ தன் மைக்காக இருக்கவோ விடவில்லை. கணினியில், Pocketdesk-இன் Devices பக்கத்தில் இந்தத் தொலைபேசிக்கு \"Hear and change this computer\'s sound\" அல்லது \"Use the phone as a microphone\" என்பதை இயக்கவும்.</string>
 </resources>
