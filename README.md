@@ -78,9 +78,9 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 
 | | Linux host | Windows host |
 |---|---|---|
-| Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE), X11 | Windows.Graphics.Capture, DXGI duplication |
+| Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; its grant kept until you revoke it with Settings "Remember the screen-sharing grant", so sessions start with no one at the desk), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
-| Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
+| Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
 | Clipboard: text and images, anywhere | `wl-clipboard` (Wayland only) | Win32 clipboard |
 | Files both ways, remote browsing (anywhere) | yes | yes |
 | Desktop sound on the phone | PipeWire | WASAPI loopback |
