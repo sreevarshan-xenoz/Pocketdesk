@@ -27,8 +27,9 @@ mod single_instance;
 mod theme;
 #[cfg(not(target_os = "linux"))]
 mod tray;
+// N6: a StatusNotifierItem over D-Bus, no GTK.
 #[cfg(target_os = "linux")]
-#[path = "tray_none.rs"]
+#[path = "tray_linux.rs"]
 mod tray;
 mod words;
 
@@ -105,8 +106,3 @@ fn main() -> eframe::Result {
         }),
     )
 }
-
-/// Type-check the Linux stub on the build hosts that cannot build Linux.
-#[cfg(all(test, not(target_os = "linux")))]
-#[path = "tray_none.rs"]
-mod tray_none_check;
