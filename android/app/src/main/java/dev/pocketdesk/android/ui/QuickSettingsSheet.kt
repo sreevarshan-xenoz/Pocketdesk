@@ -2,6 +2,7 @@ package dev.pocketdesk.android.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SegmentedButton
@@ -27,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.R
@@ -180,14 +183,24 @@ private fun ChoiceRow(label: String, options: List<String>, selected: Int, onSel
         )
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             options.forEachIndexed { i, option ->
+                // Four options leave little room ("Equilibrada", "அதிகபட்சம்"):
+                // no check (the fill says which), narrower sides, a smaller
+                // face, and two lines before an ellipsis (U4 review).
+                val crowded = options.size > 3
                 SegmentedButton(
                     selected = i == selected,
                     onClick = { onSelect(i) },
                     shape = SegmentedButtonDefaults.itemShape(index = i, count = options.size),
-                    // Four options leave no room for the check; the fill says which.
-                    icon = if (options.size > 3) ({}) else ({ SegmentedButtonDefaults.Icon(i == selected) }),
+                    icon = if (crowded) ({}) else ({ SegmentedButtonDefaults.Icon(i == selected) }),
+                    contentPadding = if (crowded) PaddingValues(horizontal = 4.dp) else SegmentedButtonDefaults.ContentPadding,
                 ) {
-                    Text(option, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        option,
+                        style = if (crowded) MaterialTheme.typography.labelMedium else LocalTextStyle.current,
+                        maxLines = if (crowded) 2 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
         }
