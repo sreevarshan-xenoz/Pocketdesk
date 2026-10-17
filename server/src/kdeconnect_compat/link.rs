@@ -188,6 +188,16 @@ pub async fn run<S: AsyncRead + AsyncWrite + Unpin>(
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
+    run_in(dir, link, our_cert_der, unpaired).await;
+}
+
+/// [`run`], with the state folder `dir`.
+async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
+    dir: PathBuf,
+    link: DeviceLink<S>,
+    our_cert_der: &[u8],
+    unpaired: Option<super::Slot>,
+) {
     let device_id = link.hello.device_id.clone();
     let name = link.hello.device_name.clone();
     let (tx, mut events) = mpsc::channel(8);
@@ -214,18 +224,18 @@ pub async fn run<S: AsyncRead + AsyncWrite + Unpin>(
         unpaired,
     };
     let (reader, mut writer) = tokio::io::split(link.stream);
-    let mut reader = BufReader::new(reader);
+    let mut reader = PacketReader::new(reader);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
-    let mut heard = std::time::Instant::now();
+    let mut heard = tokio::time::Instant::now();
     'link: loop {
         if !state.paired && state.waiting.is_none() && heard.elapsed() >= UNPAIRED_IDLE {
             tracing::info!(device_id, "An unpaired KDE Connect link went quiet; closed");
             break;
         }
         let out = tokio::select! {
-            line = read_packet(&mut reader) => match line {
+            line = reader.next() => match line {
                 Some(packet) => {
-                    heard = std::time::Instant::now();
+                    heard = tokio::time::Instant::now();
                     state.packet(&packet)
                 }
                 None => break,
@@ -573,22 +583,47 @@ async fn send<W: AsyncWrite + Unpin>(
     writer.flush().await
 }
 
-/// The next packet, `None` at the end or on a line too long; a line that
-/// is not a packet is skipped.
-async fn read_packet<R: AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Option<NetworkPacket> {
-    use tokio::io::AsyncReadExt;
-    loop {
-        let mut line = String::new();
-        let read = (&mut *reader)
-            .take(MAX_LINE as u64)
-            .read_line(&mut line)
-            .await
-            .ok()?;
-        if read == 0 || (read == MAX_LINE && !line.ends_with('\n')) {
-            return None;
+/// A device's packets, one a line.
+struct PacketReader<R> {
+    reader: BufReader<R>,
+    /// The line read so far: kept across a wait cut short, so a tick or an
+    /// event in the middle of a line loses none of it (3b review).
+    line: Vec<u8>,
+}
+
+impl<R: AsyncRead + Unpin> PacketReader<R> {
+    fn new(reader: R) -> Self {
+        Self {
+            reader: BufReader::new(reader),
+            line: Vec::new(),
         }
-        if let Ok(packet) = NetworkPacket::from_wire(&line) {
-            return Some(packet);
+    }
+
+    /// The next packet, `None` at the end or on a line longer than
+    /// [`MAX_LINE`]; a line that is not a packet is skipped. Safe to cut
+    /// short in `select!`: `read_until` keeps what it read in `line`.
+    async fn next(&mut self) -> Option<NetworkPacket> {
+        use tokio::io::AsyncReadExt;
+        loop {
+            let room = (MAX_LINE + 1).saturating_sub(self.line.len()) as u64;
+            let read = (&mut self.reader)
+                .take(room)
+                .read_until(b'\n', &mut self.line)
+                .await
+                .ok()?;
+            if read == 0 {
+                return None;
+            }
+            if !self.line.ends_with(b"\n") {
+                continue;
+            }
+            let line = std::mem::take(&mut self.line);
+            let packet = std::str::from_utf8(&line)
+                .ok()
+                .and_then(|text| NetworkPacket::from_wire(text).ok());
+            if packet.is_some() {
+                return packet;
+            }
         }
     }
 }
@@ -823,6 +858,83 @@ mod tests {
         let out = s.event(Event::Unpair);
         assert_eq!(says(&out[0]), Some(PairSays::No));
         assert_eq!(devices::pinned(&s.dir, &s.device_id), None);
+    }
+
+    #[tokio::test]
+    async fn a_packet_cut_by_another_wait_is_read_whole() {
+        let (mut device, ours) = tokio::io::duplex(64 * 1024);
+        let mut reader = PacketReader::new(ours);
+        let wire = NetworkPacket::new(PING).to_wire().unwrap();
+        let (first, rest) = wire.split_at(wire.len() / 2);
+        device.write_all(first).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), reader.next())
+                .await
+                .is_err(),
+            "half a line, cut short"
+        );
+        device.write_all(rest).await.unwrap();
+        device.write_all(b"not a packet\n").await.unwrap();
+        device.write_all(&wire).await.unwrap();
+        assert_eq!(reader.next().await.unwrap().packet_type, PING);
+        assert_eq!(
+            reader.next().await.unwrap().packet_type,
+            PING,
+            "a line that is not a packet is skipped"
+        );
+        device.write_all(&vec![b'x'; MAX_LINE + 2]).await.unwrap();
+        assert!(reader.next().await.is_none(), "a line too long ends it");
+    }
+
+    fn link_of(
+        id: &str,
+        cert_hash: [u8; 32],
+    ) -> (tokio::io::DuplexStream, DeviceLink<tokio::io::DuplexStream>) {
+        let (device, ours) = tokio::io::duplex(64 * 1024);
+        let link = DeviceLink {
+            stream: ours,
+            hello: super::super::handshake::Hello {
+                device_id: id.to_string(),
+                device_name: "Galaxy A71".to_string(),
+                protocol: 8,
+            },
+            cert_der: Vec::new(),
+            cert_hash,
+        };
+        (device, link)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unpaired_link_that_says_nothing_is_closed() {
+        static PLACES: super::super::Slots = super::super::Slots::new(4, 4);
+        let dir = state("idle", false).dir;
+        let id = format!("idle{}", uuid::Uuid::new_v4().simple());
+        let (_device, link) = link_of(&id, [3; 32]);
+        let place = PLACES.take("192.0.2.9".parse().unwrap());
+        let ran = tokio::time::timeout(
+            UNPAIRED_IDLE + Duration::from_secs(5),
+            run_in(dir, link, &[], place),
+        )
+        .await;
+        assert!(ran.is_ok(), "closed after {UNPAIRED_IDLE:?} quiet");
+    }
+
+    #[tokio::test]
+    async fn a_newer_link_from_the_device_closes_the_older() {
+        let dir = state("replace", true).dir;
+        let id = format!("replace{}", uuid::Uuid::new_v4().simple());
+        let (_old_device, old) = link_of(&id, [4; 32]);
+        let older = tokio::spawn(run_in(dir.clone(), old, &[], None));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let (_new_device, new) = link_of(&id, [4; 32]);
+        let newer = tokio::spawn(run_in(dir, new, &[], None));
+        tokio::time::timeout(Duration::from_secs(5), older)
+            .await
+            .expect("the older link closes")
+            .unwrap();
+        assert!(!newer.is_finished());
+        assert!(tell(&id, Event::Ping), "the newer one is live");
+        newer.abort();
     }
 
     #[tokio::test]
