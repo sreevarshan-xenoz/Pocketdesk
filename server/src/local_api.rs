@@ -505,6 +505,86 @@ pub fn link_in(state_dir: &Path, query: &str, url: &str, running: bool) -> (Valu
     }
 }
 
+/// Ask the running server in `state_dir` to ring the phone `query` names
+/// (N1): one with Ring on that keeps a link now (a session, or the
+/// background link its "Ring from the computer" keeps). What to print, and
+/// the exit code.
+pub fn ring_in(state_dir: &Path, query: &str, running: bool) -> (Value, i32) {
+    if !running {
+        return (
+            error("no Pocketdesk server is running to ring it"),
+            exit::NO_SERVER,
+        );
+    }
+    let store = match trust_store(state_dir) {
+        Ok(store) => store,
+        Err(reason) => return (error(reason), exit::FAILED),
+    };
+    let device_id = match resolve_phone(&store.trusted_devices(), query) {
+        Ok(id) => id,
+        Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
+    };
+    // The server would drop it: say so now, not "queued".
+    if !store.permissions(&device_id).allows(Capability::Ring) {
+        return (
+            error(format!("Ring is off for {device_id} (the Devices page)")),
+            exit::FAILED,
+        );
+    }
+    let now = pocketdesk_core::local::pin::now_unix();
+    let reachable = live_mirror(state_dir, now, running).is_some_and(|mirror| {
+        mirror
+            .sessions
+            .iter()
+            .any(|s| s.device_id.as_deref() == Some(device_id.as_str()))
+            || mirror.linked.iter().any(|p| p.device_id == device_id)
+    });
+    if !reachable {
+        return (
+            error(format!(
+                "{device_id} is not linked now: it rings in a session, or with Ring from the computer on in its Settings"
+            )),
+            exit::FAILED,
+        );
+    }
+    match pocketdesk_core::local::rings::request(state_dir, &device_id, now) {
+        Ok(request) => (
+            versioned(json!({
+                "id": request.id,
+                "device_id": device_id,
+                "state": "queued",
+            })),
+            exit::DONE,
+        ),
+        Err(e) => (error(format!("could not queue it: {e}")), exit::FAILED),
+    }
+}
+
+/// `pocketdesk ring`: prints the outcome and returns the exit code.
+pub fn run_ring(query: &str, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
+            return exit::FAILED;
+        }
+    };
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    let (out, code) = ring_in(&dir, query, running);
+    if as_json {
+        print(&out);
+    } else if let Some(reason) = out["error"].as_str() {
+        eprintln!("Error: {reason}");
+    } else {
+        println!("asked the phone to ring (at most once a minute)");
+    }
+    code
+}
+
 /// `pocketdesk link`: prints the outcome and returns the exit code.
 pub fn run_link(query: &str, url: &str, as_json: bool) -> i32 {
     let dir = match crate::state::state_dir() {
@@ -1471,6 +1551,59 @@ mod tests {
         let help = ["pocketdesk", "send", "--help", "--json"];
         let err = crate::cli::Cli::try_parse_from(help).unwrap_err();
         assert!(usage_error(&help.map(std::ffi::OsString::from), &err).is_none());
+    }
+
+    /// N1: a ring is queued for a phone that keeps a link (a session or
+    /// the background link) with Ring on, and refused at once otherwise.
+    #[test]
+    fn a_ring_is_queued_for_a_linked_phone_with_ring_on() {
+        let (dir, _) = send_setup("ring");
+        let (out, code) = ring_in(&dir, "5f1c9b", true);
+        assert_eq!(code, exit::DONE, "in a session: {out}");
+        assert_eq!(out["state"], "queued");
+        let now = pocketdesk_core::local::pin::now_unix();
+        assert_eq!(pocketdesk_core::local::rings::take_all(&dir, now).len(), 1);
+
+        // Only the background link, no session.
+        std::fs::write(
+            dir.join(LIVE_FILE),
+            json!({
+                "updated_unix": now,
+                "sessions": [],
+                "linked": [{ "device_id": "5f1c9b3d-6e70", "files": false }],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let (out, code) = ring_in(&dir, "5f1c9b", true);
+        assert_eq!(code, exit::DONE, "linked: {out}");
+
+        in_session(&dir, &[]);
+        let (out, code) = ring_in(&dir, "5f1c9b", true);
+        assert_eq!(code, exit::FAILED, "not linked: {out}");
+        assert!(
+            out["error"]
+                .as_str()
+                .unwrap()
+                .contains("Ring from the computer")
+        );
+        let (_, code) = ring_in(&dir, "5f1c9b", false);
+        assert_eq!(code, exit::NO_SERVER);
+
+        in_session(&dir, &["5f1c9b3d-6e70"]);
+        let mut store = TrustStore::read(dir.join(TRUST_FILE)).unwrap();
+        let mut permissions = store.permissions("5f1c9b3d-6e70");
+        permissions.ring = Some(false);
+        store.set_permissions("5f1c9b3d-6e70", permissions).unwrap();
+        let (out, code) = ring_in(&dir, "5f1c9b", true);
+        assert_eq!(code, exit::FAILED, "{out}");
+        assert!(out["error"].as_str().unwrap().contains("Ring is off"));
+        let now = pocketdesk_core::local::pin::now_unix();
+        assert_eq!(
+            pocketdesk_core::local::rings::take_all(&dir, now).len(),
+            1,
+            "only the linked one's ring, none refused"
+        );
     }
 
     #[test]

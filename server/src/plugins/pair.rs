@@ -131,6 +131,21 @@ pub fn permits(conn_key: &str, packet_type: &str) -> bool {
     permits_in(store.as_ref(), conn_key, packet_type)
 }
 
+/// May the paired device `device_id` have `capability` (N1: Ring, which
+/// gates what the computer sends, not a packet)? Not paired, or a store
+/// that cannot be read, is no.
+pub fn allows(
+    device_id: &str,
+    capability: pocketdesk_core::protocol::permissions::Capability,
+) -> bool {
+    let Ok(path) = state::trust_store_path() else {
+        return false;
+    };
+    TrustStore::read(path)
+        .map(|store| store.is_trusted(device_id) && store.permissions(device_id).allows(capability))
+        .unwrap_or(false)
+}
+
 /// [`permits`] against a given store; without one, nothing that needs a
 /// permission is allowed.
 fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) -> bool {

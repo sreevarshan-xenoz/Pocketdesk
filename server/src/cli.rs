@@ -85,6 +85,16 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Ring a paired phone that keeps a link now (a session, or "Ring from
+    /// the computer" on in its Settings), at most once a minute. Exit
+    /// codes: 0 asked, 1 failed, 2 bad arguments, 3 no server running
+    Ring {
+        /// The phone: its device id, or 6 or more of its first characters
+        phone: String,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Send files or folders to your phone, the one connected on this
     /// network (in a session first): what the file manager's "Send to
     /// phone" runs. Says how it went in a desktop notification too.

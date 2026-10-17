@@ -70,6 +70,9 @@ mod tests {
             ("links (links_out)", || {
                 Box::pin(crate::plugins::links::run_watcher())
             }),
+            ("ring_phone (rings_out)", || {
+                Box::pin(crate::ring_phone::run_watcher())
+            }),
             ("phone_battery (writer)", || {
                 Box::pin(crate::plugins::phone_battery::run_writer())
             }),

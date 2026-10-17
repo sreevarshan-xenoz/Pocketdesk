@@ -121,6 +121,9 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
         cli::Commands::Link { phone, url, json } => {
             std::process::exit(local_api::run_link(&phone, &url, json))
         }
+        cli::Commands::Ring { phone, json } => {
+            std::process::exit(local_api::run_ring(&phone, json))
+        }
         cli::Commands::Send {
             phone,
             path,
