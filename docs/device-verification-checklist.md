@@ -1587,6 +1587,8 @@ On the A71 against this box (a throwaway server, the internet road):
 - [x] The phone's mic share started and its frames reached the computer's mic relay (this box has no virtual cable: the relay said so).
 - [x] With Audio and Mic off for the phone: refused, the phone naming the switches to turn on.
 - [x] Disconnect in the notification ends it on both ends.
+- [x] After the review fixes: with Mic off, the mic switch greyed with its reason; the computer's notification says "a phone is this computer's speaker and mic"; the server stopped and started again, the session counted down and came back with the sound playing; Lock desktop from the notification asks (cancelled); a change of permissions ends it with that reason, no retry, the service released.
+- [ ] Ten minutes without the computer: it stops trying and releases the service.
 - [ ] By ear: the computer's sound on the phone (lag, quality, across the room).
 - [ ] Windows with VB-CABLE: the phone's mic heard in a recording or a call on the computer.
 - [ ] Linux: the computer's sound through PipeWire and the phone's mic as "Pocketdesk Mic" (`pw-loopback`).
