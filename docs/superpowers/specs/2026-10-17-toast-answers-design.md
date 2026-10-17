@@ -26,3 +26,12 @@ A phone notification that offers buttons or a reply (T10c: the phone's "Let the 
 ## Check
 
 On this box with the A71 and a throwaway chat app (T10c's): an answerable notification shows its buttons and reply box (read through UI Automation, never clicked). Clicking is owed to the owner.
+
+## As built
+
+- **`server/src/toast_answers.rs`** (pure, tested on every OS): `Answerable` (whose, the buttons in the order shown, whether it takes a reply), `toast_xml` (the reply box with Send first, then the buttons, at most five actions in all, titles escaped), `toast_answer` (`reply` with non-empty text, or `action:<n>` into the buttons the toast showed), `dbus_actions`, `dbus_action_answer`, `dbus_reply_answer`, and `send`, which writes the answer with `phone_notes::request` as the Notifications page does.
+- **Windows** (`platform/windows.rs`): `show_toast` builds the XML from `toast_xml`; for an answerable phone toast it registers `Activated` (reading the arguments and the reply box from `ToastActivatedEventArgs.UserInput`) and keeps the toast in `ANSWERABLE` (the newest 30, dropped by `remove_tagged`). The `windows` crate gains `Foundation_Collections` for the reply's `ValueSet`.
+- **Linux** (`plugins/notification.rs`): an answerable one's `Notify` carries `a0`… and `inline-reply` with the `x-kde-reply-placeholder-text` hint, and stays 20 s; `listen_for_answers` starts one task for the server's life that takes `ActionInvoked` and `NotificationReplied` for the ids shown as answerable. Type-checked here against zbus 5.7 in a scratch crate; built and tested in CI.
+- **Settings**: `toast_answers` (config, desktop Settings "Answer in the notification" under Notifications and texts), read through `current_config` at each notification, so it applies at once.
+- **Checked on this box with the A71**: a throwaway chat app (not committed) posting "Reply" and "Mark as read"; the phone forwarded it, the server kept it answerable and showed the toast, whose delivered XML in the notification history held the reply box, Send and "Mark as read"; clearing it on the phone took the toast back. Windows held the banner (a full-screen video was playing), so the toast was read from history, never pressed.
+

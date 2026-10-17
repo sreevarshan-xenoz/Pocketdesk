@@ -1568,6 +1568,16 @@ On the A71 with the app's language set by `cmd locale set-app-locales` (reset af
 - [ ] The keyboard bar's keys and the remote's presenter keys in Spanish.
 - [ ] Every screen in Spanish and Tamil for text that runs out of its box.
 
+## 96. Answer a phone notification in the toast itself (N3)
+
+On this box with the A71 and a throwaway chat app (not committed) posting Reply and "Mark as read":
+
+- [x] The phone's notification reached the computer as a toast whose delivered XML (read from the notification history) holds the reply box, Send and "Mark as read"; the server kept it answerable; clearing it on the phone took the toast back.
+- [ ] Typing a reply in the toast and pressing Send: the phone's app gets it (its RemoteInput), at most 10 a minute.
+- [ ] Pressing "Mark as read" in the toast, and from the Action Center after the banner has gone.
+- [ ] Settings "Answer in the notification" off: the toast is plain.
+- [ ] Linux: a notification server with actions (mako's `makoctl invoke`, dunst's menu) and KDE's inline reply.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
