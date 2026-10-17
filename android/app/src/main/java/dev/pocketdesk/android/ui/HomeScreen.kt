@@ -331,7 +331,9 @@ fun HomeScreen(
                     )
                 }
                 item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    // Wraps: a long label (Tamil's) takes a line of its own
+                    // rather than breaking a word per line (U6).
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         TextButton(onClick = onScan) {
                             Text(stringResource(R.string.scan_pairing_code))
                         }
