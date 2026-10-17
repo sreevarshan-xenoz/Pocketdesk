@@ -95,7 +95,6 @@ import dev.pocketdesk.android.service.SessionForegroundService
 import dev.pocketdesk.android.status.BatteryEffect
 import dev.pocketdesk.android.stream.DesktopAudio
 import dev.pocketdesk.android.stream.InputMode
-import dev.pocketdesk.android.stream.MicCapture
 import dev.pocketdesk.android.stream.RemoteDesktopView
 import dev.pocketdesk.android.stream.ShortcutBar
 import dev.pocketdesk.android.stream.StatsHud
@@ -497,7 +496,6 @@ fun RemoteScreen(
     // R4 E2 phone-mic share: MediaCodec-encodes the mic to Opus and streams
     // it to the desktop's "Pocketdesk Mic" PipeWire source. Independent of
     // view-only — the server routes mic packets before the input drop.
-    var mic by remember { mutableStateOf<MicCapture?>(null) }
     // Messages are carried as @StringRes ids and resolved during composition
     // (LocalContext.getString in a callback is lint-error: stale
     // configuration); a failure's details go to logcat (U6).
@@ -509,62 +507,8 @@ fun RemoteScreen(
             micErrorRes = null
         }
     }
-    var micPermissionReply by remember { mutableStateOf<Boolean?>(null) }
-    val micPermissionLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            micPermissionReply = granted
-        }
-    fun startMicShare() {
-        if (mic != null) return
-        if (!MicCapture.isAvailable()) {
-            micErrorRes = R.string.mic_unavailable
-            return
-        }
-        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            return
-        }
-        val capture = MicCapture()
-        scope.launch(Dispatchers.IO) {
-            // onDropped: the worker saw the QUIC session die; clear the toggle.
-            val error = capture.start { scope.launch(Dispatchers.Main) { mic = null } }
-            withContext(Dispatchers.Main) {
-                if (error != null) micErrorRes = error else mic = capture
-            }
-        }
-    }
-    fun stopMicShare() {
-        val capture = mic ?: return
-        mic = null
-        scope.launch(Dispatchers.IO) { capture.stop() }
-    }
-    LaunchedEffect(micPermissionReply) {
-        val granted = micPermissionReply ?: return@LaunchedEffect
-        micPermissionReply = null
-        if (!granted) {
-            micErrorRes = R.string.mic_permission_denied
-            return@LaunchedEffect
-        }
-        // Android 14+ pins mic access to the FGS types declared at
-        // startForeground; re-issue the start so a service launched before
-        // the grant picks up the microphone type.
-        val upgrade =
-            Intent(context, SessionForegroundService::class.java).apply {
-                action = SessionForegroundService.ACTION_START
-                putExtra(SessionForegroundService.EXTRA_ADDRESS, address)
-                putExtra(SessionForegroundService.EXTRA_PORT, port)
-                putExtra(SessionForegroundService.EXTRA_CONTROL_PORT, controlPort)
-            }
-        context.startForegroundService(upgrade)
-        startMicShare()
-    }
-    DisposableEffect(mic) {
-        onDispose {
-            mic?.let { capture -> Thread { capture.stop() }.start() }
-        }
-    }
+    // One mic share for sessions and sound sessions (N5).
+    val micShare = rememberMicShare(address, port, controlPort) { micErrorRes = it }
 
     // Tier-3 #15 remainder: phone-side blackout / pocket mode. The session
     // keeps streaming underneath; the phone shows a black, touch-consuming
@@ -1633,8 +1577,8 @@ fun RemoteScreen(
                 showQuick = false
                 showTasks = true
             },
-            micOn = mic != null,
-            onSetMic = { if (it) startMicShare() else stopMicShare() },
+            micOn = micShare.on,
+            onSetMic = { if (it) micShare.start() else micShare.stop() },
             privacyGrab = privacyGrab,
             onSetPrivacy = ::applyPrivacy,
             paired = pairedServerId != null,
