@@ -902,15 +902,7 @@ impl PocketdeskApp {
             }
             None => return,
         };
-        if form.show(ui) {
-            match Config::path() {
-                Ok(path) => match form.save_to(&path) {
-                    Ok(()) => self.notice = Some("Saved.".to_string()),
-                    Err(e) => self.notice = Some(format!("Not saved: {e}")),
-                },
-                Err(e) => self.notice = Some(format!("Not saved: {e}")),
-            }
-        }
+        form.show(ui);
         if form.restart_needed {
             ui.add_space(8.0);
             ui.label(RichText::new("Restart the server to apply the saved settings.").strong());
@@ -932,6 +924,32 @@ impl PocketdeskApp {
             self.snapshot.running && compat_on,
             now_unix(),
         );
+    }
+
+    /// Settings' Save and Undo, in a bar at the bottom while the form has
+    /// changes.
+    fn settings_save_bar(&mut self, ui: &mut egui::Ui) {
+        let Some(Ok(form)) = &mut self.settings else {
+            return;
+        };
+        if !form.dirty() {
+            return;
+        }
+        let mut save = false;
+        egui::Panel::bottom("save").show(ui, |ui| {
+            ui.add_space(6.0);
+            save = form.save_bar(ui);
+            ui.add_space(6.0);
+        });
+        if save {
+            match Config::path() {
+                Ok(path) => match form.save_to(&path) {
+                    Ok(()) => self.notice = Some("Saved.".to_string()),
+                    Err(e) => self.notice = Some(format!("Not saved: {e}")),
+                },
+                Err(e) => self.notice = Some(format!("Not saved: {e}")),
+            }
+        }
     }
 
     /// "Send from the browser" (ecosystem 1d): the extension's host,
@@ -1358,6 +1376,9 @@ impl eframe::App for PocketdeskApp {
                     }
                 });
             });
+        if self.tab == Tab::Settings {
+            self.settings_save_bar(ui);
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(notice) = &self.notice {
                 ui.label(RichText::new(notice).italics());

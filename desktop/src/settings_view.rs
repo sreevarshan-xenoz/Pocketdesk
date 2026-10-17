@@ -162,7 +162,9 @@ impl SettingsForm {
     }
 
     /// Draw the form. Returns true when the user asked to save.
-    pub fn show(&mut self, ui: &mut egui::Ui) -> bool {
+    /// The form. Save and Undo are in [`Self::save_bar`], shown in view
+    /// while there are changes.
+    pub fn show(&mut self, ui: &mut egui::Ui) {
         let home_assistant = if self.saved.home_assistant {
             self.home_assistant_status()
         } else {
@@ -578,22 +580,25 @@ impl SettingsForm {
                 }
             });
         self.apply_text_fields();
-        ui.add_space(10.0);
-        for problem in self.problems() {
+    }
+
+    /// Save and Undo, with what keeps Save off, for a bar that stays in
+    /// view while the form has changes (U1: at the end of the form they
+    /// were out of reach); whether Save was pressed.
+    pub fn save_bar(&mut self, ui: &mut egui::Ui) -> bool {
+        let problems = self.problems();
+        for problem in &problems {
             ui.label(RichText::new(problem).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
         }
-        let can_save = self.dirty() && self.problems().is_empty();
         let mut save = false;
         ui.horizontal(|ui| {
             save = ui
-                .add_enabled(can_save, egui::Button::new("Save"))
+                .add_enabled(problems.is_empty(), egui::Button::new("Save"))
                 .clicked();
-            if ui
-                .add_enabled(self.dirty(), egui::Button::new("Undo changes"))
-                .clicked()
-            {
+            if ui.button("Undo changes").clicked() {
                 *self = Self::from_config(self.saved.clone());
             }
+            ui.label(RichText::new("Settings have changes not saved yet.").weak());
         });
         save
     }
