@@ -564,7 +564,19 @@ impl StreamingServer {
                         is_keyframe: false,
                         timestamp_us: 0,
                     };
-                    if let Err(e) = ready.write_all(&header.as_bytes()).await {
+                    let mut said = header.as_bytes().to_vec();
+                    // A sound session hears what it may do (N5 review).
+                    if sound {
+                        let mut grant = super::client::SOUND_GRANT_SAID;
+                        if allow_audio {
+                            grant |= super::client::SOUND_GRANT_AUDIO;
+                        }
+                        if allow_mic {
+                            grant |= super::client::SOUND_GRANT_MIC;
+                        }
+                        said.push(grant);
+                    }
+                    if let Err(e) = ready.write_all(&said).await {
                         warn!(error = %e, "Could not say the input-only session is ready");
                     }
                     let _ = ready.finish();

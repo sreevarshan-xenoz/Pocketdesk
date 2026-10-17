@@ -76,6 +76,9 @@ fun SoundScreen(
     var reason by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
     var shownName by remember(address) { mutableStateOf(HostStore.shownName(context, address)) }
+    // What the computer allows this phone (N5 review): a switch it would
+    // ignore is not offered.
+    var grants by remember { mutableStateOf(RemoteSession.Grants(audio = true, mic = true)) }
 
     // Ecosystem 1f: other apps hear it start and end, as a session's.
     val tell = remember(address) { SessionTell("sound") }
@@ -170,8 +173,9 @@ fun SoundScreen(
                 val waitingSince = SystemClock.elapsedRealtime()
                 var readySince = 0L
                 while (isActive) {
-                    val (remote, closed) =
-                        withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
+                    val (json, closed) = withContext(Dispatchers.IO) { RustCore.remoteState() to RustCore.streamClosedReason }
+                    val remote = RemoteSession.parse(json)
+                    grants = RemoteSession.grants(json)
                     val next = RemoteSession.next(state, remote, closed)
                     if (next == State.Ready && state != State.Ready) {
                         DesktopAudio.streamUp(context, generation)
@@ -294,18 +298,20 @@ fun SoundScreen(
                 )
                 SettingSwitch(
                     stringResource(R.string.sound_here),
-                    stringResource(R.string.sound_here_summary),
-                    soundHere,
+                    stringResource(if (grants.audio) R.string.sound_here_summary else R.string.sound_here_refused),
+                    soundHere && grants.audio,
                     {
                         soundHere = it
                         DesktopAudio.setEnabled(context, it)
                     },
+                    enabled = grants.audio,
                 )
                 SettingSwitch(
                     stringResource(R.string.sound_mic),
-                    stringResource(R.string.sound_mic_summary),
+                    stringResource(if (grants.mic) R.string.sound_mic_summary else R.string.sound_mic_refused),
                     micShare.on,
                     { if (it) micShare.start() else micShare.stop() },
+                    enabled = grants.mic,
                 )
                 OutlinedButton(
                     onClick = { showControls = true },

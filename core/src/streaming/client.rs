@@ -61,6 +61,25 @@ pub const SESSION_MODE_CAST: u8 = 2;
 /// or input; it says when it is admitted with the ready stream.
 pub const SESSION_MODE_SOUND: u8 = 3;
 
+/// A sound session's ready stream carries one byte of what the computer
+/// allows (N5 review): this bit marks the byte as said, so a computer that
+/// says nothing reads as not known.
+pub const SOUND_GRANT_SAID: u8 = 0x80;
+/// The computer sends its sound (the phone's Audio permission).
+pub const SOUND_GRANT_AUDIO: u8 = 1;
+/// The computer plays the phone's mic (its Mic permission).
+pub const SOUND_GRANT_MIC: u8 = 2;
+
+/// What a sound session's ready stream says the computer allows, from its
+/// payload: 0 when it says nothing.
+pub fn sound_grant(payload: &[u8]) -> u8 {
+    payload
+        .first()
+        .copied()
+        .filter(|b| b & SOUND_GRANT_SAID != 0)
+        .unwrap_or(0)
+}
+
 /// What a session is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SessionMode {
@@ -261,6 +280,9 @@ pub struct RemoteFlags {
     pub keyframe_wanted: Arc<std::sync::atomic::AtomicBool>,
     /// The computer admitted it (its ready stream came).
     pub ready: Arc<std::sync::atomic::AtomicBool>,
+    /// A sound session's grants as the computer said them ([`sound_grant`]):
+    /// 0 until said, or from a computer that does not say.
+    pub sound_granted: Arc<std::sync::atomic::AtomicU8>,
     /// The computer sent a picture or sound anyway: it does not know
     /// input-only sessions, and the session was closed.
     pub too_old: Arc<std::sync::atomic::AtomicBool>,
@@ -776,6 +798,23 @@ mod remote_tests {
     }
 
     #[test]
+    fn a_sound_session_hears_what_the_computer_granted() {
+        // The computer says which of its sound and the phone's mic it allows.
+        assert_eq!(
+            sound_grant(&[SOUND_GRANT_SAID | SOUND_GRANT_AUDIO]),
+            SOUND_GRANT_SAID | SOUND_GRANT_AUDIO
+        );
+        assert_eq!(
+            sound_grant(&[SOUND_GRANT_SAID | SOUND_GRANT_AUDIO | SOUND_GRANT_MIC]),
+            SOUND_GRANT_SAID | SOUND_GRANT_AUDIO | SOUND_GRANT_MIC
+        );
+        // Nothing said (an empty ready stream, or a byte without the mark):
+        // not known.
+        assert_eq!(sound_grant(&[]), 0);
+        assert_eq!(sound_grant(&[SOUND_GRANT_AUDIO]), 0);
+    }
+
+    #[test]
     fn a_sound_session_takes_sound_and_refuses_a_picture() {
         assert_eq!(
             remote_stream(transport::STREAM_KIND_READY, true, true),
@@ -908,6 +947,15 @@ async fn recv_with_cancel(
                         // the mode): that one is closed, not read.
                         match remote_stream(header.stream_kind, remote.input_only, remote.sound) {
                             RemoteStream::Ready => {
+                                // A sound session hears what it may do (N5).
+                                if remote.sound
+                                    && let Ok(payload) = recv_stream.read_to_end(16).await
+                                {
+                                    remote.sound_granted.store(
+                                        sound_grant(&payload),
+                                        std::sync::atomic::Ordering::Release,
+                                    );
+                                }
                                 remote.ready.store(true, std::sync::atomic::Ordering::Release);
                                 info!("The computer admitted the input-only session");
                                 continue;

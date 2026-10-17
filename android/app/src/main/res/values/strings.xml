@@ -660,4 +660,6 @@
     <string name="sound_down">The sound stopped: %1$s</string>
     <string name="err_input_not_allowed">This computer does not let this phone control it. On the computer, turn on \"Control the mouse and keyboard\" for this phone in Pocketdesk\'s Devices page.</string>
     <string name="err_sound_not_allowed">This computer lets this phone neither hear it nor be its microphone. On the computer, turn on \"Hear and change this computer\'s sound\" or \"Use the phone as a microphone\" for this phone in Pocketdesk\'s Devices page.</string>
+    <string name="sound_here_refused">This computer does not send this phone its sound. On the computer, turn on \"Hear and change this computer\'s sound\" for this phone in Pocketdesk\'s Devices page</string>
+    <string name="sound_mic_refused">This computer does not take this phone\'s microphone. On the computer, turn on \"Use the phone as a microphone\" for this phone in Pocketdesk\'s Devices page</string>
 </resources>

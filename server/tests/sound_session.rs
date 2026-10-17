@@ -11,8 +11,8 @@ use std::time::Duration;
 use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
 use pocketdesk_core::streaming::transport::{CertManager, StreamServer, StreamTransportConfig};
 use pocketdesk_core::streaming::{
-    InputPacket, QuinnConnection, SessionMode, SharedConnection, StreamingClient, StreamingConfig,
-    StreamingServer,
+    InputPacket, QuinnConnection, SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID,
+    SessionMode, SharedConnection, StreamingClient, StreamingConfig, StreamingServer,
 };
 use tokio::sync::{broadcast, mpsc};
 
@@ -110,6 +110,14 @@ async fn a_sound_session_takes_the_mic_and_injects_nothing() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
+    // It hears that it may do both.
+    assert_eq!(
+        remote
+            .sound_granted
+            .load(std::sync::atomic::Ordering::Acquire),
+        SOUND_GRANT_SAID | SOUND_GRANT_AUDIO | SOUND_GRANT_MIC
+    );
+
     // The mic reaches the relay.
     let mic = InputPacket::Mic {
         enabled: true,
@@ -178,4 +186,38 @@ async fn a_sound_session_with_neither_audio_nor_mic_is_refused_with_the_reason()
     };
     assert!(reason.contains("sound not allowed"), "the reason: {reason}");
     assert!(mic_rx.try_recv().is_err(), "the relay heard nothing");
+}
+
+/// The phone hears which of the two it may use (N5 review): with Audio only,
+/// its mic switch is not offered.
+#[tokio::test]
+async fn a_sound_session_hears_what_it_may_do() {
+    let (addr, cert, _input_rx, _mic_rx, session) = serve(true, false).await;
+    let (mut client, _frames, _audio) = StreamingClient::connect(
+        &addr.to_string(),
+        cert,
+        None,
+        Some("sound-test"),
+        None,
+        None,
+        SessionMode::Sound,
+    )
+    .await
+    .expect("client connect");
+    let remote = client.remote();
+    let receiving = tokio::spawn(async move { client.start().await });
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !remote.ready.load(std::sync::atomic::Ordering::Acquire) {
+        assert!(tokio::time::Instant::now() < deadline, "never admitted");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        remote
+            .sound_granted
+            .load(std::sync::atomic::Ordering::Acquire),
+        SOUND_GRANT_SAID | SOUND_GRANT_AUDIO,
+        "sound, no mic"
+    );
+    receiving.abort();
+    session.abort();
 }
