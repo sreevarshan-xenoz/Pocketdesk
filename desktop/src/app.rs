@@ -794,7 +794,7 @@ impl PocketdeskApp {
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(device.name.as_deref().unwrap_or("A phone")).strong())
+                    ui.label(RichText::new(model::device_label(&self.snapshot.devices, &device.id)).strong())
                         .on_hover_text(&device.id);
                     let (place, why) = match row.place {
                         model::Place::Session => {
