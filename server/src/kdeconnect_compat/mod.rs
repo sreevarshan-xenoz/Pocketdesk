@@ -12,6 +12,7 @@ pub mod handshake;
 pub mod identity;
 pub mod link;
 pub mod pairing;
+pub mod share;
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -185,7 +186,7 @@ pub async fn serve(stream: TcpStream) {
     if let Err(e) = noted {
         tracing::debug!("Could not note the KDE Connect device: {e}");
     }
-    link::run(link, &identity.cert_der, slot).await;
+    link::run(link, &identity.cert_der, slot, Some(peer.ip())).await;
 }
 
 /// The desktop app's requests about KDE Connect devices (3b), for the

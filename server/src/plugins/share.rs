@@ -1061,7 +1061,7 @@ async fn present_key<S: tokio::io::AsyncWrite + Unpin>(stream: &mut S, key: &str
 /// A file from `from` was saved at `path`; `top` is the folder of the
 /// folder send (T6b) it belongs to, if it does. It is listed for the
 /// desktop app and announced.
-fn on_received(path: &Path, size: u64, from: &str, top: Option<&Path>) {
+pub(crate) fn on_received(path: &Path, size: u64, from: &str, top: Option<&Path>) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
@@ -1547,7 +1547,7 @@ pub(crate) async fn receive_offered(
 /// Move the finished `part` into `dir` under a name like `name` that no
 /// file has yet, and return where it went. A rename when the state folder
 /// and `dir` share a volume, else a copy.
-async fn place(part: &Path, dir: &Path, name: &str) -> Result<PathBuf> {
+pub(crate) async fn place(part: &Path, dir: &Path, name: &str) -> Result<PathBuf> {
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| io_error("create_dir", e))?;

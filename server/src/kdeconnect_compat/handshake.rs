@@ -35,6 +35,7 @@ pub const INCOMING: &[&str] = &[
     "kdeconnect.ping",
     super::link::BATTERY,
     super::link::CLIPBOARD,
+    super::share::SHARE,
 ];
 pub const OUTGOING: &[&str] = &["kdeconnect.ping", super::link::CLIPBOARD, super::link::RING];
 

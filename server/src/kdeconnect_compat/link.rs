@@ -1,7 +1,7 @@
 //! A KDE Connect device's link after the handshake (3b): pairing both ways,
 //! held for the owner with the code both screens show; unpairing; ping.
 //! Once paired (3c), what its permissions allow: its battery, the
-//! clipboard both ways, and ringing it from here. Anything else it sends, Pocketdesk's own packets
+//! clipboard both ways, ringing it from here, and files it sends. Anything else it sends, Pocketdesk's own packets
 //! among them, is not taken.
 
 use std::collections::HashMap;
@@ -184,7 +184,7 @@ static TOASTS: Mutex<Allowance> = Mutex::new(Allowance::new(TOASTS_PER_MINUTE));
 /// Show `summary` and `body` on the desktop, off the link's task, within
 /// [`TOASTS_PER_MINUTE`] (past it, the log has it). Not in tests: a toast's
 /// thread outliving the test process crashes it.
-fn notify(summary: &'static str, body: String) {
+pub(super) fn notify(summary: &'static str, body: String) {
     let allowed = TOASTS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -210,11 +210,12 @@ pub async fn run<S: AsyncRead + AsyncWrite + Unpin>(
     link: DeviceLink<S>,
     our_cert_der: &[u8],
     unpaired: Option<super::Slot>,
+    address: Option<std::net::IpAddr>,
 ) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
-    run_in(dir, link, our_cert_der, unpaired).await;
+    run_in(dir, link, our_cert_der, unpaired, address).await;
 }
 
 /// [`run`], with the state folder `dir`.
@@ -223,6 +224,7 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
     link: DeviceLink<S>,
     our_cert_der: &[u8],
     unpaired: Option<super::Slot>,
+    address: Option<std::net::IpAddr>,
 ) {
     let device_id = link.hello.device_id.clone();
     let name = link.hello.device_name.clone();
@@ -249,6 +251,7 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
         last_asked: 0,
         unpaired,
         clipboard_in: None,
+        file_in: None,
     };
     let (reader, mut writer) = tokio::io::split(link.stream);
     let mut reader = PacketReader::new(reader);
@@ -281,6 +284,16 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
                 break 'link;
             }
         }
+        if let Some(offer) = state.file_in.take() {
+            // Fetched beside the link, which keeps answering.
+            tokio::spawn(super::share::fetch(
+                state.dir.clone(),
+                device_id.clone(),
+                state.name.clone(),
+                address,
+                offer,
+            ));
+        }
         if let Some(text) = state.clipboard_in.take() {
             // Not sent back to the device it came from.
             crate::clipboard_push::note_from_phone(&device_id, &text);
@@ -309,6 +322,8 @@ struct State {
     unpaired: Option<super::Slot>,
     /// Clipboard text the device sent, for the loop to set.
     clipboard_in: Option<String>,
+    /// A file the device offers, for the loop to fetch.
+    file_in: Option<super::share::Offer>,
 }
 
 impl State {
@@ -340,6 +355,22 @@ impl State {
             // `kdeconnect.clipboard.connect`, the device's clipboard as it
             // connects, is not taken: each connection would replace the
             // computer's clipboard.
+            super::share::SHARE if !may.files => {
+                tracing::info!(device_id = %self.device_id, "A file from a KDE Connect device refused: Files is off for it");
+                notify(
+                    "A KDE Connect device tried to send a file",
+                    format!(
+                        "{}: allow Files for it in Settings, KDE Connect devices, then send it again",
+                        self.name
+                    ),
+                );
+            }
+            super::share::SHARE => match super::share::offer_of(packet) {
+                Ok(offer) => self.file_in = Some(offer),
+                Err(why) => {
+                    tracing::info!(device_id = %self.device_id, "A share from a KDE Connect device not taken: {why}")
+                }
+            },
             CLIPBOARD if may.clipboard => {
                 if let Some(text) = packet.body.get("content").and_then(|v| v.as_str()) {
                     self.clipboard_in = Some(text.to_string());
@@ -712,6 +743,7 @@ mod tests {
             last_asked: 0,
             unpaired: None,
             clipboard_in: None,
+            file_in: None,
         }
     }
 
@@ -987,7 +1019,7 @@ mod tests {
         let place = PLACES.take("192.0.2.9".parse().unwrap());
         let ran = tokio::time::timeout(
             UNPAIRED_IDLE + Duration::from_secs(5),
-            run_in(dir, link, &[], place),
+            run_in(dir, link, &[], place, None),
         )
         .await;
         assert!(ran.is_ok(), "closed after {UNPAIRED_IDLE:?} quiet");
@@ -998,10 +1030,10 @@ mod tests {
         let dir = state("replace", true).dir;
         let id = format!("replace{}", uuid::Uuid::new_v4().simple());
         let (_old_device, old) = link_of(&id, [4; 32]);
-        let older = tokio::spawn(run_in(dir.clone(), old, &[], None));
+        let older = tokio::spawn(run_in(dir.clone(), old, &[], None, None));
         tokio::time::sleep(Duration::from_millis(50)).await;
         let (_new_device, new) = link_of(&id, [4; 32]);
-        let newer = tokio::spawn(run_in(dir, new, &[], None));
+        let newer = tokio::spawn(run_in(dir, new, &[], None, None));
         tokio::time::timeout(Duration::from_secs(5), older)
             .await
             .expect("the older link closes")
@@ -1148,6 +1180,27 @@ mod tests {
         };
         devices::set_permissions(&s.dir, &s.device_id, off).unwrap();
         assert!(s.event(Event::Ring).is_empty());
+    }
+
+    #[test]
+    fn a_file_is_fetched_only_from_a_paired_device_allowed_files() {
+        let mut offer = NetworkPacket::new(super::super::share::SHARE)
+            .with_body(serde_json::json!({ "filename": "photo.jpg" }));
+        offer.payload_size = Some(5);
+        offer.payload_transfer_info = Some(serde_json::json!({ "port": 1739 }));
+        let mut s = state("files", false);
+        s.packet(&offer);
+        assert_eq!(s.file_in, None, "not paired");
+        s.pair_now();
+        s.packet(&offer);
+        assert_eq!(s.file_in, None, "Files is off by default");
+        let files = devices::KdePermissions {
+            files: true,
+            ..devices::KdePermissions::default()
+        };
+        devices::set_permissions(&s.dir, &s.device_id, files).unwrap();
+        s.packet(&offer);
+        assert_eq!(s.file_in.take().unwrap().name, "photo.jpg");
     }
 
     #[test]
