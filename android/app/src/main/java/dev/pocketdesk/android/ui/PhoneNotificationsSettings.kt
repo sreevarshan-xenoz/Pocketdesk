@@ -1,10 +1,7 @@
 package dev.pocketdesk.android.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -56,55 +53,24 @@ fun PhoneNotificationsSection() {
 
     val answer = version.let { Prefs.answerNotifications(context) }
 
-    Text(
-        stringResource(R.string.settings_phone_notifications),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 18.dp, bottom = 2.dp),
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_share),
+        stringResource(if (enabled && !granted) R.string.phone_notifications_no_access else R.string.phone_notifications_share_summary),
+        enabled,
+        ::setEnabled,
+        warning = enabled && !granted,
     )
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.phone_notifications_share), style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = {
-            val summary =
-                if (enabled && !granted) R.string.phone_notifications_no_access else R.string.phone_notifications_share_summary
-            Text(
-                stringResource(summary),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (enabled && !granted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        leadingContent = { LlIcon(LlIcons.Notifications, null) },
-        trailingContent = { Switch(checked = enabled, onCheckedChange = ::setEnabled) },
-        modifier =
-            Modifier.clickable {
-                if (enabled && !granted) {
-                    runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
-                } else {
-                    setEnabled(!enabled)
-                }
-            },
-    )
+    if (enabled && !granted) AllowNotificationAccess()
     // T10c: the computer may press buttons and reply, as this phone's owner.
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.phone_notifications_answer), style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = {
-            Text(
-                stringResource(R.string.phone_notifications_answer_summary),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_answer),
+        stringResource(R.string.phone_notifications_answer_summary),
+        answer,
+        {
+            Prefs.setAnswerNotifications(context, it)
+            version++
         },
-        leadingContent = { LlIcon(LlIcons.Notifications, null) },
-        trailingContent = {
-            Switch(
-                checked = answer,
-                enabled = enabled,
-                onCheckedChange = {
-                    Prefs.setAnswerNotifications(context, it)
-                    version++
-                },
-            )
-        },
+        enabled = enabled,
     )
     if (!enabled) return
     if (seen.isEmpty()) {
@@ -116,24 +82,15 @@ fun PhoneNotificationsSection() {
         )
     }
     seen.forEach { (pkg, label) ->
-        val on = pkg in shared
-        ListItem(
-            headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
-            supportingContent = { Text(pkg, style = MaterialTheme.typography.bodySmall) },
-            trailingContent = {
-                Switch(
-                    checked = on,
-                    onCheckedChange = {
-                        PhoneNotificationPrefs.setShared(context, pkg, it)
-                        version++
-                    },
-                )
+        SettingSwitch(
+            label,
+            pkg,
+            pkg in shared,
+            {
+                PhoneNotificationPrefs.setShared(context, pkg, it)
+                version++
             },
-            modifier =
-                Modifier.clickable {
-                    PhoneNotificationPrefs.setShared(context, pkg, !on)
-                    version++
-                },
+            indent = true,
         )
     }
 }

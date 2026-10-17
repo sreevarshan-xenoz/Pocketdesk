@@ -7,7 +7,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,21 +48,14 @@ fun PhoneFoldersSection() {
             }
         }
 
-    Text(
+    SettingRow(
         stringResource(R.string.settings_phone_folders),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 18.dp, bottom = 2.dp),
-    )
-    Text(
         stringResource(if (folders.isEmpty()) R.string.phone_folders_empty else R.string.settings_phone_folders_summary),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp),
     )
     folders.forEach { folder ->
         ListItem(
             headlineContent = { Text(folder.name) },
+            modifier = Modifier.padding(start = 24.dp),
             trailingContent = {
                 TextButton(onClick = {
                     PhoneFolders.remove(context, folder)

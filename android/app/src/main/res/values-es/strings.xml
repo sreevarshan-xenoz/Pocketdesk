@@ -310,17 +310,15 @@
     <string name="pair_link_calls_itself">Se hace llamar «%1$s».</string>
     <string name="pair_link_not_scanned">Este código lo abrió otra app o una página web, no lo escaneaste tú.</string>
     <string name="phone_notifications_service">Pocketdesk: mostrar en el ordenador</string>
-    <string name="settings_phone_notifications">Notificaciones de este teléfono</string>
-    <string name="phone_notifications_share">Mostrar en mi ordenador</string>
-    <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste. Desactivado por defecto.</string>
-    <string name="phone_notifications_no_access">Toca para permitir el acceso a las notificaciones</string>
+    <string name="phone_notifications_share">Notificaciones de este teléfono en mi ordenador</string>
+    <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste.</string>
+    <string name="phone_notifications_no_access">Necesita acceso a las notificaciones</string>
     <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Ninguna se comparte hasta que la actives.</string>
-    <string name="settings_texts">Mensajes en mi ordenador</string>
     <string name="texts_show">Mostrar mensajes en mi ordenador</string>
-    <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste. Desactivado por defecto.</string>
+    <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste.</string>
     <string name="texts_reply">Responder desde mi ordenador</string>
-    <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono. Desactivado por defecto.</string>
-    <string name="texts_reply_needs_access">Toca para permitir el acceso a las notificaciones: las respuestas llegan por ahí</string>
+    <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono.</string>
+    <string name="texts_reply_needs_access">Necesita acceso a las notificaciones: las respuestas llegan por ahí</string>
     <!-- N6: waking a computer from the phone -->
     <string name="save">Guardar</string>
     <string name="wake_settings">Ajustes de encendido</string>
@@ -453,7 +451,7 @@
     <string name="bg_allow">Permitir</string>
     <string name="bg_dont_remind">No volver a recordar</string>
     <string name="bg_maker_guide">Ajuste propio de este teléfono</string>
-    <string name="settings_background">Segundo plano</string>
+    <string name="settings_background">En segundo plano</string>
     <string name="settings_background_status">Funcionamiento en segundo plano</string>
     <string name="settings_background_remind">Recordármelo en Inicio</string>
     <string name="settings_background_remind_summary">Cuando las notificaciones o los mensajes están activados y Android puede frenarlos</string>
@@ -505,10 +503,9 @@
     <string name="phone_folders_remove">Quitar</string>
     <string name="phone_folders_storage">Almacenamiento</string>
     <string name="phone_folders_not_kept">Android no dejó que Pocketdesk conservara el acceso a esa carpeta</string>
-    <string name="settings_screenshots">Capturas nuevas al equipo</string>
     <string name="screenshots_on">Enviar capturas nuevas</string>
     <string name="screenshots_on_summary">Una captura de pantalla hecha en este teléfono llega a su equipo un momento después. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
-    <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano: toca para permitirlo</string>
+    <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano</string>
     <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
     <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>
     <string name="screenshots_save">Guardarlas en Descargas del equipo</string>
@@ -591,6 +588,13 @@
     <string name="rename_label">Nombre</string>
     <string name="rename_hint">En blanco: el nombre que se da a sí mismo</string>
     <string name="settings_this_phone">Este teléfono</string>
+    <string name="settings_files_links">Archivos y enlaces</string>
+    <string name="settings_notifications_texts">Notificaciones y SMS</string>
+    <string name="settings_automation">Automatización</string>
+    <string name="settings_pairing">Emparejamiento</string>
+    <string name="settings_allow_access">Permitir el acceso a las notificaciones</string>
+    <string name="settings_more_about">Más sobre %1$s</string>
+    <string name="settings_info_close">Cerrar</string>
     <string name="settings_phone_name">Nombre de este teléfono</string>
     <string name="settings_phone_name_summary">Cómo llaman los ordenadores a este teléfono; se envía a cada uno al que se conecta. En blanco: el nombre del dispositivo en Android</string>
     <!-- N1: the computer rings this phone. -->

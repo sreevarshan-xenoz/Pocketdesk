@@ -3,21 +3,13 @@ package dev.pocketdesk.android.ui
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 import dev.pocketdesk.android.notify.TextPrefs
@@ -86,47 +78,25 @@ fun TextsSection() {
         }
     }
 
-    Text(
-        stringResource(R.string.settings_texts),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 18.dp, bottom = 2.dp),
+    SettingSwitch(
+        stringResource(R.string.texts_show),
+        stringResource(R.string.texts_show_summary),
+        show && canReceive,
+        ::setShow,
     )
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.texts_show), style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = {
-            Text(stringResource(R.string.texts_show_summary), style = MaterialTheme.typography.bodySmall)
-        },
-        leadingContent = { LlIcon(LlIcons.Notifications, null) },
-        trailingContent = { Switch(checked = show && canReceive, onCheckedChange = ::setShow) },
-        modifier = Modifier.clickable { setShow(!(show && canReceive)) },
+    val needsAccess = reply && canSend && !listening
+    SettingSwitch(
+        stringResource(R.string.texts_reply),
+        stringResource(if (needsAccess) R.string.texts_reply_needs_access else R.string.texts_reply_summary),
+        reply && canSend,
+        ::setReply,
+        warning = needsAccess,
     )
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.texts_reply), style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = {
-            val needsAccess = reply && canSend && !listening
-            Text(
-                stringResource(if (needsAccess) R.string.texts_reply_needs_access else R.string.texts_reply_summary),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (needsAccess) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        trailingContent = { Switch(checked = reply && canSend, onCheckedChange = ::setReply) },
-        modifier =
-            Modifier.clickable {
-                if (reply && canSend && !listening) {
-                    runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
-                } else {
-                    setReply(!(reply && canSend))
-                }
-            },
-    )
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.texts_names), style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = {
-            Text(stringResource(R.string.texts_names_summary), style = MaterialTheme.typography.bodySmall)
-        },
-        trailingContent = { Switch(checked = names && canReadContacts, onCheckedChange = ::setNames) },
-        modifier = Modifier.clickable { setNames(!(names && canReadContacts)) },
+    if (needsAccess) AllowNotificationAccess()
+    SettingSwitch(
+        stringResource(R.string.texts_names),
+        stringResource(R.string.texts_names_summary),
+        names && canReadContacts,
+        ::setNames,
     )
 }

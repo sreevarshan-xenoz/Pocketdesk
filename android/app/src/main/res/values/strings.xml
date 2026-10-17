@@ -312,17 +312,15 @@
     <string name="pair_link_calls_itself">It calls itself “%1$s”.</string>
     <string name="pair_link_not_scanned">This code was opened by another app or a web page, not scanned by you.</string>
     <string name="phone_notifications_service">Pocketdesk: show on computer</string>
-    <string name="settings_phone_notifications">This phone\'s notifications</string>
-    <string name="phone_notifications_share">Show on my computer</string>
-    <string name="phone_notifications_share_summary">Notifications from this phone appear on the computer you used last. Off by default.</string>
-    <string name="phone_notifications_no_access">Tap to allow notification access</string>
+    <string name="phone_notifications_share">This phone\'s notifications on my computer</string>
+    <string name="phone_notifications_share_summary">Notifications from this phone appear on the computer you used last.</string>
+    <string name="phone_notifications_no_access">Needs notification access</string>
     <string name="phone_notifications_apps_empty">Apps appear here once they notify. None is shared until you switch it on.</string>
-    <string name="settings_texts">Texts on my computer</string>
     <string name="texts_show">Show texts on my computer</string>
-    <string name="texts_show_summary">Texts this phone receives appear in Messages on the computer you used last. Off by default.</string>
+    <string name="texts_show_summary">Texts this phone receives appear in Messages on the computer you used last.</string>
     <string name="texts_reply">Reply from my computer</string>
-    <string name="texts_reply_summary">The computer can send texts through this phone. Off by default.</string>
-    <string name="texts_reply_needs_access">Tap to allow notification access: replies arrive through it</string>
+    <string name="texts_reply_summary">The computer can send texts through this phone.</string>
+    <string name="texts_reply_needs_access">Needs notification access: replies arrive through it</string>
     <!-- N6: waking a computer from the phone -->
     <string name="save">Save</string>
     <string name="wake_settings">Wake settings</string>
@@ -455,7 +453,7 @@
     <string name="bg_allow">Allow</string>
     <string name="bg_dont_remind">Don\'t remind me</string>
     <string name="bg_maker_guide">This phone\'s own setting</string>
-    <string name="settings_background">Background</string>
+    <string name="settings_background">In the background</string>
     <string name="settings_background_status">Running in the background</string>
     <string name="settings_background_remind">Remind me on Home</string>
     <string name="settings_background_remind_summary">When phone notifications or texts are on and Android may hold them back</string>
@@ -507,10 +505,9 @@
     <string name="phone_folders_remove">Remove</string>
     <string name="phone_folders_storage">Storage</string>
     <string name="phone_folders_not_kept">Android did not let Pocketdesk keep access to that folder</string>
-    <string name="settings_screenshots">New screenshots to the computer</string>
     <string name="screenshots_on">Send new screenshots</string>
     <string name="screenshots_on_summary">A screenshot taken on this phone goes to its computer a moment later. Asks for access to photos, and uses notification access to run in the background</string>
-    <string name="screenshots_needs_access">Needs notification access to run in the background: tap to allow</string>
+    <string name="screenshots_needs_access">Needs notification access to run in the background</string>
     <string name="screenshots_needs_photos">Needs access to all photos: allow it in Android\'s settings for Pocketdesk</string>
     <string name="screenshots_clipboard">Put on the computer\'s clipboard</string>
     <string name="screenshots_save">Save in the computer\'s Downloads</string>
@@ -593,6 +590,13 @@
     <string name="rename_label">Name</string>
     <string name="rename_hint">Blank: the name it gives itself</string>
     <string name="settings_this_phone">This phone</string>
+    <string name="settings_files_links">Files and links</string>
+    <string name="settings_notifications_texts">Notifications and texts</string>
+    <string name="settings_automation">Automation</string>
+    <string name="settings_pairing">Pairing</string>
+    <string name="settings_allow_access">Allow notification access</string>
+    <string name="settings_more_about">More about %1$s</string>
+    <string name="settings_info_close">Close</string>
     <string name="settings_phone_name">This phone\'s name</string>
     <string name="settings_phone_name_summary">What computers call this phone, sent to each one it connects to. Blank: Android\'s device name</string>
     <!-- N1: the computer rings this phone. -->
