@@ -186,6 +186,9 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::spawn(crate::clipboard_push::run());
     }
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
+    // N8 review: a kept screen-sharing grant goes as the server starts when
+    // the setting is off, not only when a session next arrives.
+    let _ = state::screen_grant();
     // KDE Connect devices (3a): told where this computer is while the app
     // looks for them.
     crate::kdeconnect_compat::configure(config.kdeconnect_compat);
@@ -669,6 +672,7 @@ pub async fn run(config: Config) -> Result<()> {
                                 streaming_server.set_hevc_allowed(allow_hevc);
                                 streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);
                                 streaming_server.set_capture_backend(capture_backend);
+                                streaming_server.set_screen_grant(state::screen_grant());
                                 // The gate judges the deviceId the client announces in-band
                                 // against the key its TLS certificate proved (device keys). It
                                 // runs with pairing off too, so a paired device's own

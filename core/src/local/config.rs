@@ -62,6 +62,11 @@ pub struct Config {
     /// the same network list it (roadmap F6). Read at server start.
     #[serde(default = "default_lan_discovery")]
     pub lan_discovery: bool,
+    /// GNOME and KDE (N8): keep the screen-sharing portal's grant until the
+    /// owner revokes it, so later sessions start with no one at the desk.
+    /// Off, the portal asks at every session.
+    #[serde(default)]
+    pub remember_screen_grant: bool,
     /// Your own relays for phones away from home (`pocketdesk relay`), as
     /// URLs (`https://relay.example.org`, or `http://<address>:3340`). Empty
     /// uses n0's public relays. Read at server start.
@@ -253,6 +258,7 @@ impl Default for Config {
             capture_backend: CaptureBackend::Auto,
             mic_relay_device: None,
             lan_discovery: true,
+            remember_screen_grant: false,
             relay_urls: Vec::new(),
             dht_publish: DhtPublish::Relay,
             phone_notifications: true,
@@ -443,6 +449,7 @@ impl Config {
         "capture_backend",
         "mic_relay_device",
         "lan_discovery",
+        "remember_screen_grant",
         "relay_urls",
         "dht_publish",
         "phone_notifications",

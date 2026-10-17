@@ -16,6 +16,7 @@ pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
 pub mod iroh_connection;
+pub mod portal_input;
 pub mod session;
 pub mod session_telemetry;
 pub mod sessions;
