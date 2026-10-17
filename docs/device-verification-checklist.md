@@ -1414,6 +1414,7 @@ The A71 against this Windows box, LAN, the release build of `main` at 0461632, i
 
 - [x] What doubled the idle cost on Windows (R6b): the folder pollers and the mirror's rewrite each second led the harness's ranking. After R6c's watcher the whole idle server is at 0.53 % of one core (35 MB), 570 s after a 30 s settle (1.35 % in R6).
 - [x] A crash (exit 139) stopping the server 35 s into a session: about one round in 7 to 10, inside an unloaded GraphicsCapture.dll. With the library pinned, 30 rounds and no crash, then 10 on the reviewed build. Owed: whether the crashes after a reconnected session's setup were the same.
+- [x] R6g: overlapping sessions against the real capture and sound on this box (`server/tests/overlapping_sessions.rs`): 200 rounds, 400 sessions, no error and no crash (a debug build on this box, main at b9b690d).
 
 Owed:
 - [ ] The A71's reconnects on a slow link, reproduced: the VM with `tc qdisc add dev eth0 root tbf rate 1mbit burst 32kbit latency 400ms`, 10 minutes with no reconnect, then climbing back once it is removed (R6f).
