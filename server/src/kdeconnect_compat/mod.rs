@@ -204,12 +204,16 @@ pub async fn run_requests() {
                     continue;
                 }
                 KdeAsk::Pair { device_id } => (device_id, link::Event::PairFromHere),
-                KdeAsk::Allow { device_id } => (device_id, link::Event::Answer(true)),
-                KdeAsk::Deny { device_id } => (device_id, link::Event::Answer(false)),
+                KdeAsk::Allow { device_id, code } => {
+                    (device_id, link::Event::Answer { yes: true, code })
+                }
+                KdeAsk::Deny { device_id, code } => {
+                    (device_id, link::Event::Answer { yes: false, code })
+                }
                 KdeAsk::Unpair { device_id } => (device_id, link::Event::Unpair),
                 KdeAsk::Ping { device_id } => (device_id, link::Event::Ping),
             };
-            if link::tell(&device_id, event) {
+            if link::tell(&device_id, event.clone()) {
                 continue;
             }
             if event == link::Event::Unpair {

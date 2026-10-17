@@ -28,12 +28,13 @@ pub const BATTERY: &str = "kdeconnect.battery";
 const UNPAIRED_IDLE: Duration = Duration::from_secs(300);
 
 /// What the desktop app (through the server) asks of a device's link.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// Ask the device to pair.
     PairFromHere,
-    /// The owner's answer to the device's request.
-    Answer(bool),
+    /// The owner's answer to the device's request, with the code the owner
+    /// saw: taken only for the request that showed it.
+    Answer { yes: bool, code: String },
     /// Unpair the device.
     Unpair,
     /// Ping it.
@@ -90,10 +91,12 @@ impl Drop for Live {
 }
 
 /// A pairing in progress on this link.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Waiting {
     since: u64,
     from_device: bool,
+    /// The code shown for it.
+    code: String,
 }
 
 fn now_unix() -> u64 {
@@ -240,7 +243,7 @@ impl State {
         match says {
             PairSays::Yes(_) if self.paired => vec![pairing::answer(true)],
             // Its yes to ours, or its request while ours waits: paired.
-            PairSays::Yes(_) if self.waiting.is_some_and(|w| !w.from_device) => {
+            PairSays::Yes(_) if self.waiting.as_ref().is_some_and(|w| !w.from_device) => {
                 self.pair_now();
                 Vec::new()
             }
@@ -270,6 +273,7 @@ impl State {
                 self.waiting = Some(Waiting {
                     since: now,
                     from_device: true,
+                    code: code.clone(),
                 });
                 notify(
                     "A KDE Connect device asks to pair",
@@ -346,7 +350,7 @@ impl State {
                     Pending {
                         device_id: self.device_id.clone(),
                         name: self.name.clone(),
-                        code,
+                        code: code.clone(),
                         asked_unix: now,
                         from_device: false,
                     },
@@ -358,11 +362,17 @@ impl State {
                 self.waiting = Some(Waiting {
                     since: now,
                     from_device: false,
+                    code,
                 });
                 vec![pairing::ask(now)]
             }
             Event::PairFromHere => Vec::new(),
-            Event::Answer(yes) if self.waiting.is_some_and(|w| w.from_device) => {
+            Event::Answer { yes, code }
+                if self
+                    .waiting
+                    .as_ref()
+                    .is_some_and(|w| w.from_device && w.code == code) =>
+            {
                 if yes {
                     self.pair_now();
                 } else {
@@ -371,7 +381,10 @@ impl State {
                 }
                 vec![pairing::answer(yes)]
             }
-            Event::Answer(_) => Vec::new(),
+            Event::Answer { .. } => {
+                tracing::info!(device_id = %self.device_id, "A KDE pairing answer for another request; not taken");
+                Vec::new()
+            }
             Event::Unpair => {
                 let _ = devices::remove(&self.dir, &self.device_id);
                 self.paired = false;
@@ -385,7 +398,7 @@ impl State {
 
     /// A pairing past its time ends: a device's request with a no.
     fn expire(&mut self) -> Vec<NetworkPacket> {
-        let Some(waiting) = self.waiting else {
+        let Some(waiting) = self.waiting.clone() else {
             return Vec::new();
         };
         let now = now_unix();
@@ -484,7 +497,14 @@ mod tests {
         assert_eq!(held.len(), 1);
         assert!(held[0].from_device);
         assert_eq!(held[0].code.len(), 8);
-        let out = s.event(Event::Answer(true));
+        let code = held[0].code.clone();
+        let out = s.event(Event::Answer {
+            yes: true,
+            code: "00000000".to_string(),
+        });
+        assert!(out.is_empty(), "an answer naming another code is not taken");
+        assert!(devices::pinned(&s.dir, &s.device_id).is_none());
+        let out = s.event(Event::Answer { yes: true, code });
         assert_eq!(says(&out[0]), Some(PairSays::Yes(None)));
         assert_eq!(devices::pinned(&s.dir, &s.device_id), Some([9; 32]));
         assert!(devices::pending(&s.dir, now).is_empty());
@@ -495,7 +515,8 @@ mod tests {
         let mut s = state("deny", false);
         let now = now_unix();
         s.pair_packet(PairSays::Yes(Some(now)));
-        let out = s.event(Event::Answer(false));
+        let code = devices::pending(&s.dir, now)[0].code.clone();
+        let out = s.event(Event::Answer { yes: false, code });
         assert_eq!(says(&out[0]), Some(PairSays::No));
         assert_eq!(devices::pinned(&s.dir, &s.device_id), None);
 
@@ -509,6 +530,7 @@ mod tests {
         s.waiting = Some(Waiting {
             since: now - devices::PAIRING_TTL_SECS - 1,
             from_device: true,
+            code: String::new(),
         });
         let out = s.expire();
         assert_eq!(says(&out[0]), Some(PairSays::No), "no answer is a no");
@@ -527,7 +549,13 @@ mod tests {
     #[test]
     fn an_answer_without_a_request_and_a_yes_to_nothing_do_nothing() {
         let mut s = state("nothing", false);
-        assert!(s.event(Event::Answer(true)).is_empty());
+        assert!(
+            s.event(Event::Answer {
+                yes: true,
+                code: String::new()
+            })
+            .is_empty()
+        );
         assert!(s.pair_packet(PairSays::Yes(None)).is_empty());
         assert!(!s.paired);
         assert_eq!(devices::pinned(&s.dir, &s.device_id), None);

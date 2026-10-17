@@ -122,10 +122,20 @@ struct PendingFile {
 pub enum KdeAsk {
     /// Ask a device that is connected to pair.
     Pair { device_id: String },
-    /// Allow a device's pairing request.
-    Allow { device_id: String },
+    /// Allow a device's pairing request, naming the code the owner saw: an
+    /// answer to another request (a device with the same id that asked
+    /// since) is not taken (3b review).
+    Allow {
+        device_id: String,
+        #[serde(default)]
+        code: String,
+    },
     /// Deny it.
-    Deny { device_id: String },
+    Deny {
+        device_id: String,
+        #[serde(default)]
+        code: String,
+    },
     /// Unpair a device.
     Unpair { device_id: String },
     /// Ping a paired, connected device.
@@ -422,11 +432,23 @@ mod tests {
             &dir,
             KdeAsk::Allow {
                 device_id: "a".to_string(),
+                code: "1ACBAC75".to_string(),
             },
             100,
         )
         .unwrap();
         assert_eq!(take_all(&dir, 101), [asked]);
+        // A request from before the code was named reads with none.
+        let old: KdeRequest =
+            serde_json::from_str(r#"{"id":"x","ask":"allow","device_id":"a","created_unix":1}"#)
+                .unwrap();
+        assert_eq!(
+            old.ask,
+            KdeAsk::Allow {
+                device_id: "a".to_string(),
+                code: String::new()
+            }
+        );
         assert!(take_all(&dir, 101).is_empty());
         request(
             &dir,

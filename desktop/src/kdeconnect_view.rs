@@ -101,11 +101,13 @@ impl KdeConnectView {
                     if ui.button("Allow").clicked() {
                         ask = Some(KdeAsk::Allow {
                             device_id: pending.device_id.clone(),
+                            code: pending.code.clone(),
                         });
                     }
                     if ui.button("Deny").clicked() {
                         ask = Some(KdeAsk::Deny {
                             device_id: pending.device_id.clone(),
+                            code: pending.code.clone(),
                         });
                     }
                 } else {
