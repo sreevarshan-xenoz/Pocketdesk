@@ -577,10 +577,10 @@ impl PocketdeskApp {
         // with new keys) and bind them.
         let _ = pocketdesk_core::local::device_keys::clear(&self.state_dir, id);
         self.notice = crate::notice::Notice::outcome(match result {
-            Ok(()) => Ok(format!("Removed {who} — it must pair again to connect.")),
-            Err(e) => Err(format!("Could not remove {who}: {e}")),
+            Ok(()) => Ok(format!("Unpaired {who}: it must pair again to connect.")),
+            Err(e) => Err(format!("Could not unpair {who}: {e}")),
         });
-        // Removing a phone must not leave it in control of a running session.
+        // Unpairing a phone must not leave it in control of a running session.
         self.end_sessions_of(id);
         self.refresh();
     }
@@ -796,16 +796,23 @@ impl PocketdeskApp {
                     {
                         ring = Some(device.id.clone());
                     }
+                    // U5: "Unpair" for a pairing everywhere, asked by name.
                     if self.confirm_revoke.as_deref() == Some(&device.id) {
-                        ui.horizontal(|ui| {
-                            if ui.button("Remove").clicked() {
-                                confirmed = Some(device.id.clone());
-                            }
-                            if ui.button("Cancel").clicked() {
-                                revoke = Some(None);
-                            }
+                        ui.vertical(|ui| {
+                            ui.label(format!(
+                                "Unpair {}? It must pair again to connect.",
+                                model::device_label(&self.snapshot.devices, &device.id)
+                            ));
+                            ui.horizontal(|ui| {
+                                if ui.button("Unpair").clicked() {
+                                    confirmed = Some(device.id.clone());
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    revoke = Some(None);
+                                }
+                            });
                         });
-                    } else if ui.button("Remove…").clicked() {
+                    } else if ui.button("Unpair…").clicked() {
                         revoke = Some(Some(device.id.clone()));
                     }
                     ui.end_row();

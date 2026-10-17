@@ -349,7 +349,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/confi
 
 - **Status**: whether the server runs, with Start and Restart.
 - **Pair**: a QR code and the same PIN in digits. The phone's "Scan pairing code" reads it and pins the desktop's certificate before its first streaming connection.
-- **Devices**: paired phones, which one is connected, and Remove. Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
+- **Devices**: paired phones, which one is connected, and Unpair (it asks first, naming the phone). Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
 - **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
 - **Sessions**: live sessions, with End, and with several phones, which one drives and Give control.
 - **Files**: send a file to a connected phone (at home, or by the internet path with "Files over the internet" on), in a session or not (pick the phone, then a path, "Choose file…" on Windows, or drop files on the window), the files sent and whether each was saved, and files received from phones, newest first, with Show in folder.

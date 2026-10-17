@@ -33,8 +33,8 @@ Tailscale, when you use it, wraps all of these in WireGuard, which encrypts and 
 - **The phone's identity (device keys):**
   - Pairing binds the phone to the certificate it proves on the connection that pairs. The first LAN stream it then opens registers the iroh key it names there for the WAN. A WAN stream never binds a key by itself.
   - From then on, a connection that claims to be that phone with any other key, or with none, gets nothing: the stream is refused, the control channel may only pair again, and the desk is notified.
-  - Each control connection is known by the id it opened with, and held to its key on every packet: pairing, unpairing or Remove apply at once to connections already open.
-  - Pairing again with the desktop's own PIN binds the phone's new key (a phone whose certificate changed recovers this way). `pocketdesk unpair` and the app's Remove clear the keys.
+  - Each control connection is known by the id it opened with, and held to its key on every packet: pairing or unpairing (the command or the desktop app's Unpair) applies at once to connections already open.
+  - Pairing again with the desktop's own PIN binds the phone's new key (a phone whose certificate changed recovers this way). `pocketdesk unpair` and the desktop app's Unpair clear the keys.
   - A guest PIN binds only an id that no phone holds. It can never take over, or extend, a paired phone's id.
 - **Per-device permissions:**
   - Each paired phone can be limited to view-only, and denied the clipboard, files, sound, the microphone, power actions or commands.

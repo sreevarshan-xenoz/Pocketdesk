@@ -136,7 +136,7 @@ All of this is from `core/src/local/device_keys.rs`. The store is `<state>/devic
 - **What is stored.** Each device id maps to `{tls, iroh}`: the hex SHA-256 of its TLS client certificate, and its iroh endpoint id.
 - **First use.** A TLS key binds on first use only to a device that has no key at all, and only after the whole session gate has allowed the session (`check`, then `bind_first`).
 - **The WAN key.** It is never bound by first use. It is `register`ed from a LAN session that the device's TLS key already proves, through the `[0xFC,0x00]` stream marker (`core/src/streaming/client.rs`).
-- **Clearing keys.** Pairing again with the owner's PIN replaces the TLS key (`replace`). Unpair and Remove clear the keys (`clear`).
+- **Clearing keys.** Pairing again with the owner's PIN replaces the TLS key (`replace`). `pocketdesk unpair` and the desktop app's Unpair clear the keys (`clear`).
 - **Unreadable store.** An unreadable store refuses rather than forgets.
 
 ### 2.4 Device id rules
