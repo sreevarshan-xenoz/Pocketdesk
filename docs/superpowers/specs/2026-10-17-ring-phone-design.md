@@ -28,3 +28,13 @@ Only a paired computer's connection carries the ring, and only with the phone's 
 ## Device check
 
 The A71 with "Ring from the computer" on, against a throwaway server: rings from the background and locked, Stop from the lock screen, goes by itself; nothing with the switch off or Ring off. Kept to a second or two each.
+
+## As built
+
+- **The permission:** `Capability::Ring` (`ring` in `devices --json`), on by default for phones and off in `DevicePermissions::computer()`; its switch in Devices, "Ring this phone from here". `pair::allows` checks a capability that gates what the computer sends.
+- **The queue and the server:** `core::local::rings` (`rings_out/`, 60 s), `server/src/ring_phone.rs` (`run_watcher`, `Pace`: a phone at most once a minute, counted only when a ring goes), `FIND` in `plugins::SERVER_PUSHES`, so `docs/packets.md` lists `kdeconnect.findmydevice` both ways. `pocketdesk ring <phone> [--json]` (`local_api::ring_in`) refuses at once a phone with Ring off or no link (`live_sessions.json`'s sessions and `linked`).
+- **The desktop app:** a Ring button per phone in Devices, on while it is linked (`Device::linked`) with Ring on and not a computer; its tip says why it is off. The notice names the phone.
+- **The phone:** "Ring from the computer" (`Prefs.ringFromComputer`, off by default) asks for notification access; `ring/BackgroundRing` on the listener's own 2 s ticker keeps the link and applies `RingRule` (JVM-tested): outside a session the latch is always taken, rung only with the switch on, once a minute. `ring/PhoneRinger` posts the ring on channel `ring_from_computer` (the alarm sound, `USAGE_ALARM`, bypass DnD where allowed, public on the lock screen), insistent, with a full-screen intent, Stop (and dismissing) through `StopRingReceiver`, `setTimeoutAfter(30 s)`; the alarm stream is raised to its maximum and put back after. The notification names the computer. `USE_FULL_SCREEN_INTENT` is in the manifest.
+- **Found on the device:** eight Settings switches (and the new one) changed their setting without redrawing Settings, so they did not move until Settings was opened again; every setter now redraws.
+- **Checked on the A71** against a throwaway server (checklist §91): with the switch on and the app in the background, screen off, `pocketdesk ring` rang it on the alarm stream within seconds; it went by itself after 30 s; rung again a minute later, Stop from the shade silenced it at 8 s, and the alarm volume was back as before; with the switch off, the computer sent the ring and the phone dropped it. Notification access was granted for the check and revoked after.
+

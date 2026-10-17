@@ -1511,6 +1511,17 @@ On the A71, against a throwaway server named "Test Desk" (`COMPUTERNAME`) reache
 - [ ] A computer's name from a scanned pairing code, the session notification and launcher shortcuts by name, and "Lock <name>?".
 - [ ] The Linux host (its kernel host name), and a phone whose Android name holds a person's name.
 
+## 91. Ring the phone from the computer (N1)
+
+On the A71, against a throwaway server reached through `adb reverse`; each ring kept to seconds:
+
+- [x] "Ring from the computer" on, the app in the background and the screen off: `pocketdesk ring` rang it on the alarm stream within about 4 s.
+- [x] It went by itself after 30 s; Stop from the shade silenced the next one at 8 s; the alarm volume was back as it was.
+- [x] With the switch off, the computer sent the ring and the phone dropped it ("not rung"); the switch shows its change at once (it had not, with eight others).
+- [ ] The desktop's Ring button on screen (it needs a click), Ring off in Devices refusing it, and once a minute from the button.
+- [ ] Do Not Disturb with alarms allowed and not; a phone with a secure lock screen (the full-screen ring and Stop); a phone where the full-screen permission is not granted.
+- [ ] The Linux host.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
