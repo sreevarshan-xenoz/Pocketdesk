@@ -96,6 +96,7 @@ object PhoneRinger {
         // A notification that cannot sound rings nothing: the alarm tone
         // plays straight on the alarm stream then.
         if (!notificationSounds(manager)) {
+            // Android 17 silences it unless the app is open (N4).
             Log.i(TAG, "the ring's notification cannot sound; playing the tone itself")
             playTone(app)
         }
@@ -199,10 +200,16 @@ object PhoneRinger {
         val kept = saved(ctx).getInt(KEY_VOLUME_BEFORE, -1).takeIf { it >= 0 }
         val before = kept ?: volumeBefore ?: return
         volumeBefore = null
-        runCatching {
-            ctx.getSystemService(AudioManager::class.java).setStreamVolume(AudioManager.STREAM_ALARM, before, 0)
-        }
-        saved(ctx).edit { remove(KEY_VOLUME_BEFORE) }
+        val back = runCatching {
+            val audio = ctx.getSystemService(AudioManager::class.java)
+            audio.setStreamVolume(AudioManager.STREAM_ALARM, before, 0)
+            audio.getStreamVolume(AudioManager.STREAM_ALARM) == before
+        }.getOrDefault(false)
+        // Android 17 ignores a volume set from the background (N4 review): a
+        // volume a ring left raised (before an upgrade to 17, say) stays
+        // saved until it is really put back, at the latest when the app is
+        // next opened.
+        if (back) saved(ctx).edit { remove(KEY_VOLUME_BEFORE) }
     }
 
     /**
