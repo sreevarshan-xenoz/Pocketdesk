@@ -2022,7 +2022,10 @@ mod internet_control_tests {
 
     /// 2c: a transfer on a stream the computer opens on the phone's own
     /// iroh connection, behind the control stream, which keeps answering.
-    #[tokio::test]
+    /// On threads, as the server's and the bridge's runtimes are: on one,
+    /// the echo waited for the receiving end's hashing, which is the test's
+    /// scheduling, not the link's (a CI runner's ping took most of the file).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_transfer_rides_the_link_while_the_control_stream_keeps_answering() {
         use pocketdesk_core::protocol::kdeconnect::OpenLinkStream;
         use pocketdesk_core::protocol::transfer::{self, Pace};
