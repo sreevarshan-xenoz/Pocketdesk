@@ -44,15 +44,6 @@ fn answered(asked_unix: u64, kept_unix: Option<u64>, now_unix: u64) -> Option<bo
     }
 }
 
-/// An age in words.
-fn age_text(secs: u64) -> String {
-    match secs {
-        0..60 => format!("{secs} s"),
-        60..3600 => format!("{} min", secs / 60),
-        _ => format!("{} h", secs / 3600),
-    }
-}
-
 /// A size in words.
 pub fn size_text(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
@@ -167,8 +158,8 @@ impl PhoneFilesView {
         if age > STALE_SECS {
             ui.label(
                 RichText::new(format!(
-                    "Listed {} ago: Refresh to see the phone as it is now.",
-                    age_text(age)
+                    "Listed {}: Refresh to see the phone as it is now.",
+                    crate::words::ago(now_unix, at_unix)
                 ))
                 .color(crate::theme::muted(ui)),
             );
@@ -265,7 +256,7 @@ impl PhoneFilesView {
 
 #[cfg(test)]
 mod tests {
-    use super::{ANSWER_SECS, age_text, answered, size_text};
+    use super::{ANSWER_SECS, answered, size_text};
 
     #[test]
     fn a_list_request_is_answered_by_a_newer_listing_or_given_up() {
@@ -277,13 +268,6 @@ mod tests {
         );
         assert_eq!(answered(100, None, 100 + ANSWER_SECS), None);
         assert_eq!(answered(100, Some(50), 101 + ANSWER_SECS), Some(false));
-    }
-
-    #[test]
-    fn ages_read_as_people_say_them() {
-        assert_eq!(age_text(45), "45 s");
-        assert_eq!(age_text(125), "2 min");
-        assert_eq!(age_text(7300), "2 h");
     }
 
     #[test]

@@ -147,7 +147,7 @@ impl ActivityView {
                     .spacing([14.0, 6.0])
                     .show(ui, |ui| {
                         for event in shown {
-                            ui.label(RichText::new(ago(now_unix, event.at)).weak());
+                            ui.label(RichText::new(crate::words::ago(now_unix, event.at)).weak());
                             ui.label(phone(event, devices));
                             ui.label(describe(event));
                             match file_path(event, received) {
@@ -165,17 +165,6 @@ impl ActivityView {
                     });
             });
         action
-    }
-}
-
-/// "3 min ago", from `at` to `now`.
-fn ago(now: u64, at: u64) -> String {
-    match now.saturating_sub(at) {
-        0..10 => "just now".to_string(),
-        s @ 10..60 => format!("{s} s ago"),
-        s @ 60..3600 => format!("{} min ago", s / 60),
-        s @ 3600..86_400 => format!("{} h ago", s / 3600),
-        s => format!("{} d ago", s / 86_400),
     }
 }
 
@@ -521,18 +510,6 @@ mod tests {
         assert_eq!(view.events.len(), KEEP);
         assert_eq!(view.events.last().map(|e| e.at), Some(999));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn time_reads_as_how_long_ago() {
-        assert_eq!(ago(100, 95), "just now");
-        assert_eq!(ago(200, 100), "1 min ago");
-        assert_eq!(
-            ago(100, 200),
-            "just now",
-            "a clock behind is not the future"
-        );
-        assert_eq!(ago(90_000, 0), "1 d ago");
     }
 
     #[test]

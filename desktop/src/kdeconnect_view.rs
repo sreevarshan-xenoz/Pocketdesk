@@ -116,17 +116,6 @@ pub fn rows(paired: &[KdeDevice], seen: &[SeenDevice]) -> Vec<Row> {
     rows
 }
 
-/// How long ago `then` was, in words.
-pub fn ago(now_unix: u64, then: u64) -> String {
-    let secs = now_unix.saturating_sub(then);
-    match secs {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{} min ago", secs / 60),
-        3600..=86_399 => format!("{} h ago", secs / 3600),
-        _ => format!("{} days ago", secs / 86_400),
-    }
-}
-
 impl KdeConnectView {
     fn refresh(&mut self, state_dir: &Path, now_unix: u64) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
@@ -245,7 +234,7 @@ impl KdeConnectView {
                 };
                 ui.label(
                     RichText::new(match device.seen_unix {
-                        Some(at) => format!("{paired}, seen {}", ago(now_unix, at)),
+                        Some(at) => format!("{paired}, seen {}", crate::words::ago(now_unix, at)),
                         None => paired.to_string(),
                     })
                     .weak(),
@@ -494,14 +483,5 @@ mod tests {
     fn a_code_reads_in_two_groups() {
         assert_eq!(spaced("1ACBAC75"), "1ACB AC75");
         assert_eq!(spaced("odd"), "odd");
-    }
-
-    #[test]
-    fn a_time_reads_in_words() {
-        assert_eq!(ago(100, 90), "just now");
-        assert_eq!(ago(1000, 100), "15 min ago");
-        assert_eq!(ago(10_000, 100), "2 h ago");
-        assert_eq!(ago(300_000, 100), "3 days ago");
-        assert_eq!(ago(100, 200), "just now", "a clock behind is not negative");
     }
 }

@@ -1382,10 +1382,7 @@ impl PocketdeskApp {
                 for file in &self.snapshot.sent {
                     ui.label(&file.name).on_hover_text(&file.path);
                     ui.label(model::target_label(&self.snapshot, &file.device_id));
-                    ui.label(format!(
-                        "{} ago",
-                        human_duration(now.saturating_sub(file.sent_unix))
-                    ));
+                    ui.label(crate::words::ago(now, file.sent_unix));
                     // What a folder send left out goes beside its state.
                     let note = file
                         .note
@@ -1430,10 +1427,7 @@ impl PocketdeskApp {
                     let file = &row.file;
                     ui.label(&file.name).on_hover_text(&file.path);
                     ui.label(human_size(file.size));
-                    ui.label(format!(
-                        "{} ago",
-                        human_duration(now.saturating_sub(file.received_unix))
-                    ));
+                    ui.label(crate::words::ago(now, file.received_unix));
                     if row.exists {
                         if ui.button("Show in folder").clicked() {
                             show = Some(file.path.clone());
@@ -1675,9 +1669,11 @@ pub fn battery_text(
     if battery.charging {
         text.push_str(", charging");
     }
-    let age = now_unix.saturating_sub(battery.updated_unix);
-    if age >= 60 {
-        text.push_str(&format!(" · {} ago", human_duration(age)));
+    if now_unix.saturating_sub(battery.updated_unix) >= 60 {
+        text.push_str(&format!(
+            " · {}",
+            crate::words::ago(now_unix, battery.updated_unix)
+        ));
     }
     text
 }
@@ -1753,7 +1749,7 @@ mod tests {
         );
         assert_eq!(
             battery_text(Some(&battery(54, false)), 1000 + 180),
-            "54 % · 3m 0s ago"
+            "54 % · 3 min ago"
         );
         // A clock that went back is not "in the future".
         assert_eq!(battery_text(Some(&battery(9, false)), 900), "9 %");
