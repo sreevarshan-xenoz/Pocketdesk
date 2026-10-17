@@ -151,6 +151,7 @@ object HostStore {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_HOSTS, arr.toString())
             .apply()
+        changed()
     }
 
     /** WoL MAC of the sleeping desktop behind [address] (Tier-2 #12 relay). */
@@ -286,6 +287,19 @@ object HostStore {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString("$KEY_PAIRED_PREFIX$address", serverId)
             .apply()
+        changed()
+    }
+
+    /**
+     * Counts changes to the saved computers and their pairings, so what is
+     * worked out from them and kept a while (the phone's own computer, N7)
+     * is worked out again at once: a removed computer must not keep acting
+     * as this phone's (N7 review).
+     */
+    val generation = java.util.concurrent.atomic.AtomicInteger()
+
+    private fun changed() {
+        generation.incrementAndGet()
     }
 
     private const val KEY_PAIRED_PREFIX = "paired_desktop:"

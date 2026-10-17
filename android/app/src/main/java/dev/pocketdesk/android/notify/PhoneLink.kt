@@ -29,8 +29,28 @@ object PhoneLink {
     private var pausedUntilMs = 0L
 
     /** The computer the phone sends to. */
-    fun target(ctx: Context): HostStore.Host? =
-        HostStore.hosts(ctx).firstOrNull { HostStore.pairedDesktopId(ctx, it.address) != null }
+    fun target(ctx: Context): HostStore.Host? {
+        // A computer added, removed or paired is seen at once (N7 review).
+        val generation = HostStore.generation.get()
+        if (generation != seenGeneration) {
+            recentTarget.forget()
+            seenGeneration = generation
+        }
+        return recentTarget.get(SystemClock.elapsedRealtime()) {
+            HostStore.hosts(ctx).firstOrNull { HostStore.pairedDesktopId(ctx, it.address) != null }
+        }
+    }
+
+    /** The saved computers' change count [recentTarget] was last checked at. */
+    @Volatile
+    private var seenGeneration = -1
+
+    /**
+     * The answer, kept a few seconds (N7): the background timers ask every
+     * few seconds, and each answer read and parsed the saved computers; a
+     * computer added or paired is seen within that time.
+     */
+    private val recentTarget = Recent<HostStore.Host?>(ttlMs = 5_000L)
 
     /** Send `packetType` with [body] now (on the worker thread). Returns whether it went. */
     fun sendNow(ctx: Context, packetType: String, body: JSONObject): Boolean {
