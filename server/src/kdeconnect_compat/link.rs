@@ -40,6 +40,9 @@ const PAIRED_LINE: usize = 4 * 1024 * 1024;
 /// of the few unpaired places, and the device dials again at the next Find.
 const UNPAIRED_IDLE: Duration = Duration::from_secs(300);
 
+/// The longest a write to a device, or to the clipboard, may take.
+const WRITE_WAIT: Duration = Duration::from_secs(10);
+
 /// A device's next pairing request on a link is taken this long after its
 /// last (3b review: each one is a file written and a notification).
 const REQUEST_GAP_SECS: u64 = 10;
@@ -65,13 +68,18 @@ pub enum Event {
     Clipboard(String),
     /// Ring a paired device allowed it.
     Ring,
-    /// Close: a newer link from the same device took this one's place.
-    Replaced,
 }
 
-/// A live link: its token, the certificate it came with, and the way to
-/// tell it of an event.
-type LiveLink = (u64, [u8; 32], mpsc::Sender<Event>);
+/// A live link: its token, the certificate it came with, the way to tell
+/// it of an event, and what closes it when a newer link takes its place (a
+/// token, not an event: an event is dropped when the link's queue is full,
+/// 3c review).
+type LiveLink = (
+    u64,
+    [u8; 32],
+    mpsc::Sender<Event>,
+    tokio_util::sync::CancellationToken,
+);
 
 /// The links up now, by device id, each with a token of its own.
 static LIVE: LazyLock<Mutex<HashMap<String, LiveLink>>> = LazyLock::new(Default::default);
@@ -114,7 +122,7 @@ pub fn tell(device_id: &str, event: Event) -> bool {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(device_id)
-        .map(|(_, _, tx)| tx.clone());
+        .map(|(_, _, tx, _)| tx.clone());
     link.is_some_and(|tx| tx.try_send(event).is_ok())
 }
 
@@ -124,22 +132,29 @@ pub fn tell(device_id: &str, event: Event) -> bool {
 /// id would otherwise close the real one's link, and its pairing request
 /// with it). A link going removes only itself (the A71's new link had been
 /// dropped from the list by its old one going).
-struct Live(String, u64);
+struct Live(String, u64, tokio_util::sync::CancellationToken);
 
 impl Live {
     fn new(device_id: &str, cert_hash: [u8; 32], tx: mpsc::Sender<Event>) -> Option<Self> {
         let token = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let replaced = tokio_util::sync::CancellationToken::new();
         let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
         if live
             .get(device_id)
-            .is_some_and(|(_, theirs, _)| *theirs != cert_hash)
+            .is_some_and(|(_, theirs, _, _)| *theirs != cert_hash)
         {
             return None;
         }
-        if let Some((_, _, older)) = live.insert(device_id.to_string(), (token, cert_hash, tx)) {
-            let _ = older.try_send(Event::Replaced);
+        let entry = (token, cert_hash, tx, replaced.clone());
+        if let Some((_, _, _, older)) = live.insert(device_id.to_string(), entry) {
+            older.cancel();
         }
-        Some(Self(device_id.to_string(), token))
+        Some(Self(device_id.to_string(), token, replaced))
+    }
+
+    /// Cancelled when a newer link takes this one's place.
+    fn replaced(&self) -> tokio_util::sync::CancellationToken {
+        self.2.clone()
     }
 }
 
@@ -148,7 +163,7 @@ impl Drop for Live {
         let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
         if live
             .get(&self.0)
-            .is_some_and(|(token, _, _)| *token == self.1)
+            .is_some_and(|(token, _, _, _)| *token == self.1)
         {
             live.remove(&self.0);
         }
@@ -287,6 +302,7 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
         clipboard_in: None,
         file_in: None,
     };
+    let replaced = _live.replaced();
     let (reader, mut writer) = tokio::io::split(link.stream);
     let mut reader = PacketReader::new(reader);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -305,17 +321,20 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
                 }
                 None => break,
             },
-            Some(event) = events.recv() => {
-                if event == Event::Replaced {
-                    break;
-                }
-                state.event(event)
-            }
+            Some(event) = events.recv() => state.event(event),
+            _ = replaced.cancelled() => break,
             _ = tick.tick() => state.expire(),
         };
         for packet in out {
-            if send(&mut writer, &packet).await.is_err() {
-                break 'link;
+            // A device that stops reading must not hold the link's loop
+            // (its ticks, its time-outs, its replacing) for good.
+            match tokio::time::timeout(WRITE_WAIT, send(&mut writer, &packet)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => break 'link,
+                Err(_) => {
+                    tracing::info!(device_id, "A KDE Connect device stopped reading; closed");
+                    break 'link;
+                }
             }
         }
         if let Some(offer) = state.file_in.take() {
@@ -340,8 +359,16 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
         if let Some(text) = state.clipboard_in.take() {
             // Not sent back to the device it came from.
             crate::clipboard_push::note_from_phone(&device_id, &text);
-            if let Err(e) = crate::plugins::clipboard::set_clipboard(&text).await {
-                tracing::warn!("The clipboard from a KDE Connect device was not set: {e}");
+            match tokio::time::timeout(WRITE_WAIT, crate::plugins::clipboard::set_clipboard(&text))
+                .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!("The clipboard from a KDE Connect device was not set: {e}")
+                }
+                Err(_) => tracing::warn!(
+                    "The clipboard from a KDE Connect device was not set: the clipboard did not answer"
+                ),
             }
         }
     }
@@ -678,7 +705,7 @@ impl State {
             Event::Ring if self.paired && self.permissions().find => {
                 vec![NetworkPacket::new(RING)]
             }
-            Event::Ping | Event::Clipboard(_) | Event::Ring | Event::Replaced => Vec::new(),
+            Event::Ping | Event::Clipboard(_) | Event::Ring => Vec::new(),
         }
     }
 
@@ -1073,6 +1100,24 @@ mod tests {
         assert!(ran.is_ok(), "closed after {UNPAIRED_IDLE:?} quiet");
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn a_device_that_stops_reading_is_closed() {
+        let mut paired_state = state("stops", false);
+        let id = format!("stops{}", uuid::Uuid::new_v4().simple());
+        paired_state.device_id = id.clone();
+        paired_state.pair_now();
+        let dir = paired_state.dir.clone();
+        // The device reads nothing: a big clipboard fills the pipe.
+        let (_device, link) = link_of(&id, [9; 32]);
+        let running = tokio::spawn(run_in(dir, link, &[], None, None));
+        tokio::task::yield_now().await;
+        assert!(tell(&id, Event::Clipboard("x".repeat(512 * 1024))));
+        tokio::time::timeout(WRITE_WAIT * 2, running)
+            .await
+            .expect("closed once the write waited too long")
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn a_newer_link_from_the_device_closes_the_older() {
         let dir = state("replace", true).dir;
@@ -1103,21 +1148,23 @@ mod tests {
     #[tokio::test]
     async fn a_newer_link_takes_the_older_ones_place_and_its_going_leaves_the_new_one() {
         let id = "r".repeat(32);
-        let (old_tx, mut old_rx) = mpsc::channel(4);
+        let (old_tx, mut old_rx) = mpsc::channel(1);
         let old = Live::new(&id, [1; 32], old_tx).unwrap();
         let (other_tx, _other_rx) = mpsc::channel(4);
         assert!(
             Live::new(&id, [2; 32], other_tx).is_none(),
             "another certificate does not take a live link's place"
         );
-        assert!(old_rx.try_recv().is_err(), "and the live one is left alone");
+        assert!(
+            !old.replaced().is_cancelled(),
+            "and the live one is left alone"
+        );
+        // The old link's queue is full: its closing must not need room.
+        assert!(tell(&id, Event::Ping));
         let (new_tx, mut new_rx) = mpsc::channel(4);
         let new = Live::new(&id, [1; 32], new_tx).unwrap();
-        assert_eq!(
-            old_rx.try_recv().unwrap(),
-            Event::Replaced,
-            "the old link is closed"
-        );
+        assert!(old.replaced().is_cancelled(), "the old link is closed");
+        assert_eq!(old_rx.try_recv().unwrap(), Event::Ping);
         drop(old);
         assert!(tell(&id, Event::Ping), "the new link is still there");
         assert_eq!(new_rx.try_recv().unwrap(), Event::Ping);
