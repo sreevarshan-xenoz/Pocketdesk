@@ -36,8 +36,17 @@ pub struct NetworkPacket {
     pub id: u64,
     #[serde(default)]
     pub body: Value,
-    #[serde(default)]
+    /// The size of the payload that follows on its own connection; KDE
+    /// Connect names it `payloadSize` (3c).
+    #[serde(default, alias = "payloadSize")]
     pub payload_size: Option<u64>,
+    /// Where a KDE Connect device offers the payload: `{port}` (3c).
+    #[serde(
+        default,
+        rename = "payloadTransferInfo",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub payload_transfer_info: Option<Value>,
     /// Originating deviceId (KDE Connect convention), stamped by the sender.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -59,6 +68,7 @@ impl NetworkPacket {
             id: 0,
             body: Value::Null,
             payload_size: None,
+            payload_transfer_info: None,
             source: None,
             reply_id: None,
             ll_version: None,
@@ -796,6 +806,27 @@ pub fn is_invisible_format(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kde_connect_payload_offer_reads() {
+        let packet = NetworkPacket::from_wire(
+            r#"{"id":1,"type":"kdeconnect.share.request","body":{"filename":"a.jpg"},"payloadSize":5,"payloadTransferInfo":{"port":1739}}"#,
+        )
+        .unwrap();
+        assert_eq!(packet.payload_size, Some(5));
+        assert_eq!(packet.payload_transfer_info.unwrap()["port"], 1739);
+        let ours = NetworkPacket::from_wire(r#"{"type":"x","payload_size":7}"#).unwrap();
+        assert_eq!(
+            ours.payload_size,
+            Some(7),
+            "Pocketdesk's own name still reads"
+        );
+        let wire = NetworkPacket::new("x").to_wire().unwrap();
+        assert!(
+            !String::from_utf8_lossy(&wire).contains("payloadTransferInfo"),
+            "left out when there is none"
+        );
+    }
 
     #[test]
     fn a_device_id_is_short_and_printable() {
