@@ -100,6 +100,19 @@ mod tests {
     }
 
     #[test]
+    fn keys_are_ordered_by_unsigned_bytes() {
+        // A first byte of 0x80 is larger than 0x7f only unsigned: a signed
+        // comparison would put the other key first. From Python:
+        // sha256(bytes([0x80,0,0,0]) + bytes([0x7f,1,2,3]) +
+        // b"1792194097").hexdigest()[:8].upper(); the other order gives
+        // E2343559.
+        let high = [0x80, 0, 0, 0];
+        let low = [0x7f, 1, 2, 3];
+        assert_eq!(code(&low, &high, 1_792_194_097), "074479E5");
+        assert_eq!(code(&high, &low, 1_792_194_097), "074479E5");
+    }
+
+    #[test]
     fn a_requests_clock_may_be_off_half_an_hour() {
         assert!(timestamp_ok(1_000_000, 1_000_000 + MAX_SKEW_SECS));
         assert!(timestamp_ok(1_000_000 + MAX_SKEW_SECS, 1_000_000));
