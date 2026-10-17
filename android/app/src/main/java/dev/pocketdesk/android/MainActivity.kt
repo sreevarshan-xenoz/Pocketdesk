@@ -37,16 +37,10 @@ import dev.pocketdesk.android.ui.RemoteInputScreen
 import dev.pocketdesk.android.ui.RemoteScreen
 import dev.pocketdesk.android.ui.PairLinkScreen
 import dev.pocketdesk.android.ui.QrScanScreen
+import dev.pocketdesk.android.ui.Navigation
+import dev.pocketdesk.android.ui.Route
 import dev.pocketdesk.android.ui.SettingsScreen
 import dev.pocketdesk.android.ui.theme.PocketdeskTheme
-
-/** Home-family destinations; plain strings so rememberSaveable just works. */
-private object Route {
-    const val HOME = "home"
-    const val FORM = "form"
-    const val SETTINGS = "settings"
-    const val SCAN = "scan"
-}
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -276,6 +270,8 @@ class MainActivity : ComponentActivity() {
 
                     val pairing = pairLink.value
                     if (pairing != null) {
+                        // Back cancels the confirmation (U2: it left the app).
+                        androidx.activity.compose.BackHandler { pairLink.value = null }
                         Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
                             PairLinkScreen(
                                 uri = pairing,
@@ -303,6 +299,13 @@ class MainActivity : ComponentActivity() {
                         // session below runs edge-to-edge + immersive on
                         // purpose, so the inset padding is scoped here.
                         null -> Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                            // Back goes up a level, to Home (U2: it left the
+                            // app from Settings, Add computer and the scanner).
+                            androidx.activity.compose.BackHandler(
+                                enabled = Navigation.backTo(route) != null,
+                            ) {
+                                route = Navigation.backTo(route) ?: Route.HOME
+                            }
                             AnimatedContent(
                                 targetState = route,
                                 transitionSpec = {

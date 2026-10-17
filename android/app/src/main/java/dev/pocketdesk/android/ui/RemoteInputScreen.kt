@@ -80,6 +80,8 @@ fun RemoteInputScreen(
 ) {
     val context = LocalContext.current
     val haptics = rememberLlHaptics()
+    // Back ends the remote, as it ends a session (U2: it left the app).
+    androidx.activity.compose.BackHandler { onExit() }
     var state by remember { mutableStateOf(State.Connecting) }
     var reason by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
