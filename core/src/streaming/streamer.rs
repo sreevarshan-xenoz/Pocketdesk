@@ -73,6 +73,8 @@ struct ClientClaim {
     /// The phone shows its own screen here (T10k): input only too, as the
     /// computer sends it nothing to watch.
     cast: bool,
+    /// Sound both ways and nothing else (N5).
+    sound: bool,
 }
 
 /// Tells the relay a cast ended, however its session ends (T10k).
@@ -414,6 +416,10 @@ impl StreamingServer {
         let input_only = claim.input_only;
         // The phone's own screen, shown here (T10k).
         let cast = claim.cast;
+        // The phone as this computer's speaker and mic (N5).
+        let sound = claim.sound;
+        // No capture, encode, video or arbiter for any of those.
+        let no_picture = input_only || sound;
 
         // R4 A2 session telemetry: a shared recorder observes the connection
         // on a slow poll and an RAII guard emits the outcome report when the
@@ -460,7 +466,8 @@ impl StreamingServer {
         };
         // Without input, the session is view-only whatever the phone asks:
         // the phone's own view-only switch can tighten this, never lift it.
-        let force_view_only = !permissions.allows(Capability::Input);
+        // A sound session gives no input at all (N5).
+        let force_view_only = !permissions.allows(Capability::Input) || sound;
         let allow_mic = permissions.allows(Capability::Mic) && !input_only;
         let allow_audio = permissions.allows(Capability::Audio) && !input_only;
         // A cast needs its own permission, and somewhere to show it.
@@ -506,6 +513,20 @@ impl StreamingServer {
                 "input-only session refused: the device may not give input"
             ));
         }
+        // A sound session with neither sound nor mic has nothing to do (N5).
+        if sound && !allow_audio && !allow_mic {
+            warn!(
+                device_id = device_id.as_deref().unwrap_or("<none announced>"),
+                "Sound session refused: the device may neither hear this computer nor use its mic"
+            );
+            if let Some(guard) = &_telemetry_guard {
+                guard.record(SessionOutcome::Rejected);
+            }
+            connection.close(0u32, b"sound not allowed");
+            return Err(anyhow::anyhow!(
+                "sound session refused: the device may neither hear this computer nor use its mic"
+            ));
+        }
         if force_view_only || !allow_mic || !allow_audio {
             info!(
                 force_view_only,
@@ -524,14 +545,14 @@ impl StreamingServer {
                 input: !force_view_only,
                 audio: allow_audio,
                 mic: allow_mic,
-                video: !input_only,
+                video: !no_picture,
                 cast,
             },
         );
         // An input-only session says it was admitted, so the phone shows its
         // controls only now: taps made while the owner decided are not
         // queued and injected at once later.
-        if input_only {
+        if no_picture {
             match connection.open_uni().await {
                 Ok(mut ready) => {
                     let header = super::transport::PacketHeader {
@@ -626,8 +647,8 @@ impl StreamingServer {
         let capture_config = self.config.clone();
         let _capture_bitrate_rx = self.bitrate_watcher();
         let capture_cancel = cancel.clone();
-        // An input-only session (T10i) captures nothing.
-        let capture_session = if input_only {
+        // An input-only (T10i) or sound (N5) session captures nothing.
+        let capture_session = if no_picture {
             None
         } else {
             let session = capture::start_capture_auto(
@@ -654,8 +675,9 @@ impl StreamingServer {
         let conn_for_monitor = connection.clone();
         let _conn_for_audio = connection.clone();
 
-        // Tasks 2 and 3, the picture: none on an input-only session (T10i).
-        if !input_only {
+        // Tasks 2 and 3, the picture: none on an input-only (T10i) or sound
+        // (N5) session.
+        if !no_picture {
             // Task 2: Video encoding
             // Clone config for encoder (bitrate will be updated via watch channel)
             let mut encoder_config = self.config.clone();
@@ -1350,7 +1372,7 @@ impl StreamingServer {
                                                 }
                                                 // No picture or sound to steer,
                                                 // and no picture to point at.
-                                                if input_only && about_the_stream(&packet) {
+                                                if no_picture && about_the_stream(&packet) {
                                                     continue;
                                                 }
                                                 // A cast shows the phone here;
@@ -1539,8 +1561,8 @@ impl StreamingServer {
         // relay term is inert on quinn (LAN / Tailscale never report a
         // relayed path) and on iroh before punching, so this task runs for
         // every transport — that is what lets a LAN session pick a preset.
-        // An input-only session (T10i) has no encoder to steer.
-        if !input_only {
+        // An input-only (T10i) or sound (N5) session has no encoder to steer.
+        if !no_picture {
             let arb_conn = connection.clone();
             let arb_bitrate_tx = self.bitrate_tx.clone();
             let configured_bitrate = self.config.bitrate_bps;
@@ -1729,7 +1751,7 @@ async fn read_client_config(
 ) -> ClientClaim {
     use super::client::{
         CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER, MONITOR_CONFIG_MARKER,
-        SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER,
+        SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER, SESSION_MODE_SOUND,
     };
 
     let mut claim = ClientClaim::default();
@@ -1811,6 +1833,7 @@ async fn read_client_config(
             }
             claim.input_only = matches!(mode[0], SESSION_MODE_INPUT_ONLY | SESSION_MODE_CAST);
             claim.cast = mode[0] == SESSION_MODE_CAST;
+            claim.sound = mode[0] == SESSION_MODE_SOUND;
             info!(mode = mode[0], "Client session mode");
         } else {
             debug!("Unknown config marker: {:02X?}", &marker);
@@ -2270,6 +2293,47 @@ mod tests {
         assert_eq!(claim.device_id.as_deref(), Some("device-r1"));
         assert_eq!(config.monitor_index, 0, "no monitor asked for");
         assert_eq!(config.codec, VideoCodec::H264, "no codec caps sent");
+    }
+
+    /// N5: a sound session says so, and is not an input-only one: the
+    /// server sends it sound and no picture.
+    #[tokio::test]
+    async fn a_sound_client_says_so_and_asks_for_no_picture() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::StreamingClient;
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+
+        let (client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            None,
+            Some("device-n5"),
+            None,
+            None,
+            super::super::client::SessionMode::Sound,
+        )
+        .await
+        .expect("connect");
+        assert!(client.remote().sound);
+        assert!(client.remote().input_only, "no picture to the phone");
+
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.sound);
+        assert!(!claim.input_only && !claim.cast);
     }
 
     /// T10k: a cast says so, and is input only to the server: it is sent
