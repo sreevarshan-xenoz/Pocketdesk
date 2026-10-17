@@ -2419,6 +2419,8 @@ async fn install_streaming(
     let input_only = remote.input_only;
     let mode = if remote.cast {
         pocketdesk_core::streaming::SessionMode::Cast
+    } else if remote.sound {
+        pocketdesk_core::streaming::SessionMode::Sound
     } else if input_only {
         pocketdesk_core::streaming::SessionMode::InputOnly
     } else {

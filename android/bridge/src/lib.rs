@@ -524,6 +524,48 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     to_jstring(&mut env, json)
 }
 
+/// The phone as the computer's speaker and mic (N5): a sound session to
+/// `address:port` on the LAN, sound both ways and no picture or input. Its
+/// state is `nativeRemoteState`'s, as a remote's.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectSound(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope_unit(RUNTIME.block_on(api::connect_streaming(
+        address,
+        port as u16,
+        None,
+        0,
+        pocketdesk_core::streaming::SessionMode::Sound,
+    )));
+    to_jstring(&mut env, json)
+}
+
+/// [`Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectSound`] over
+/// the iroh WAN path, with the desktop's cached endpoint identity.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectSoundWan(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    identity_json: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let identity = jstring_to_string(&mut env, &identity_json);
+    let json = envelope_unit(RUNTIME.block_on(api::connect_streaming_wan(
+        address,
+        identity,
+        None,
+        0,
+        pocketdesk_core::streaming::SessionMode::Sound,
+    )));
+    to_jstring(&mut env, json)
+}
+
 /// Show this phone's screen on the computer (T10k): a cast session to
 /// `address:port` on the LAN. Its config and frames go through
 /// `nativeCastConfig` / `nativeCastFrame`; its state is `nativeCastState`'s.
