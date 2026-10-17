@@ -46,7 +46,7 @@ Tailscale, when you use it, wraps all of these in WireGuard, which encrypts and 
   - A control packet is at most 4 MiB, on both control channels: a longer line ends the connection, before anything is buffered past that.
   - The control and stream ports hold at most 8 connections from one address and 128 in all; more are refused. The stream port counts an address only once it has answered a QUIC Retry, so a forged source address cannot use up a phone's share. The internet (WAN) listener holds at most 128 in all.
   - One phone runs at most two file transfers at a time, within the desktop's four.
-  - A device id must be printable (no control or invisible formatting characters) and at most 128 bytes, on the control channel, the stream and the v2 handshake, where the device name is held to the same rule.
+  - A device id must be printable (no control or invisible formatting characters) and at most 128 bytes, on the control channel, the stream and the v2 handshake. A device's name is held to one printable line of at most 40 characters (`clean_device_name`): cleaned where it is kept, refused in the v2 handshake when it is not already so.
   - A folder listing fits in one packet: a huge folder is listed in part, and the phone says so.
   - Refusals are logged: the first on each connection at the default level.
 - **Files:**
