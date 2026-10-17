@@ -260,14 +260,17 @@ impl Plugin for NotificationPlugin {
                     return Ok(());
                 }
                 // One that offers buttons or a reply is kept for the desktop
-                // app to answer (T10c).
+                // app to answer (T10c), and answered in its notification here
+                // too (N3).
+                let answers = note.as_ref().map(crate::toast_answers::Answerable::of);
                 if let Some(note) = note
                     && let Ok(dir) = crate::state::state_dir()
                     && let Err(e) = phone_notes::keep(&dir, note)
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }
-                if let Err(e) = show_desktop_notification(tag.as_deref(), &app, &title, &text).await
+                if let Err(e) =
+                    show_desktop_notification(tag.as_deref(), &app, &title, &text, answers).await
                 {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
@@ -455,6 +458,7 @@ async fn show_desktop_notification(
     app: &str,
     title: &str,
     text: &str,
+    answers: Option<crate::toast_answers::Answerable>,
 ) -> Result<()> {
     let summary = format!("{}: {}", app, title);
 
@@ -479,7 +483,12 @@ async fn show_desktop_notification(
         #[cfg(windows)]
         {
             match &toast_tag {
-                Some(tag) => crate::platform::notify_tagged(&toast_summary, &toast_text, tag),
+                Some(tag) => crate::platform::notify_tagged(
+                    &toast_summary,
+                    &toast_text,
+                    tag,
+                    answers.as_ref(),
+                ),
                 None => crate::platform::notify(
                     &toast_summary,
                     &toast_text,
@@ -489,7 +498,7 @@ async fn show_desktop_notification(
         }
         #[cfg(not(windows))]
         {
-            let _ = toast_tag;
+            let _ = (toast_tag, answers);
             crate::platform::notify(
                 &toast_summary,
                 &toast_text,

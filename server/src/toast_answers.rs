@@ -11,8 +11,8 @@ use pocketdesk_core::local::phone_notes::{Answer, PhoneNote};
 /// Windows shows at most five actions on a toast.
 const MAX_TOAST_ACTIONS: usize = 5;
 
-/// The toast argument of the reply's Send button.
-const REPLY: &str = "reply";
+/// The toast argument of the reply's Send button, and its input's id.
+pub const REPLY: &str = "reply";
 
 /// The toast argument prefix of a button, followed by its index.
 const ACTION: &str = "action:";
@@ -131,6 +131,31 @@ pub fn dbus_action_answer(key: &str, answers: &Answerable) -> Option<Answer> {
 pub fn dbus_reply_answer(text: &str, answers: &Answerable) -> Option<Answer> {
     let text = text.trim();
     (answers.reply && !text.is_empty()).then(|| Answer::Reply(text.to_string()))
+}
+
+/// Hand `answer` to the server's answer loop, as the Notifications page
+/// does, which holds it to what the notification still offers.
+pub fn send(answers: &Answerable, answer: Answer) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let written = crate::state::state_dir()
+        .map_err(|e| e.to_string())
+        .and_then(|dir| {
+            pocketdesk_core::local::phone_notes::request(
+                &dir,
+                &answers.device_id,
+                &answers.key,
+                answer,
+                now,
+            )
+            .map_err(|e| e.to_string())
+        });
+    match written {
+        Ok(_) => tracing::info!("A phone notification was answered from its notification here"),
+        Err(e) => tracing::warn!("An answer from a notification was not kept: {e}"),
+    }
 }
 
 #[cfg(test)]
