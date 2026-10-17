@@ -222,7 +222,6 @@ pub fn phone_rows<'a>(
             } else {
                 Place::Away
             };
-            let reachable = device.connected || device.linked;
             let allows = |capability| device.permissions.allows(capability);
             PhoneRow {
                 device,
@@ -231,7 +230,7 @@ pub fn phone_rows<'a>(
                 ring: if !allows(Capability::Ring) {
                     Err("Ring is off for this phone, on the Devices page.")
                 } else if !device.linked {
-                    Err("Not linked now: it rings in a session, or with Ring from the computer on in its own Settings.")
+                    Err("Not linked now: it rings while it keeps a link to this computer, which a session or Ring from the computer in its own Settings opens.")
                 } else {
                     Ok(())
                 },
@@ -244,8 +243,9 @@ pub fn phone_rows<'a>(
                 },
                 link: if !allows(Capability::Links) {
                     Err("Links are off for this phone, on the Devices page.")
-                } else if !reachable {
-                    Err("Not linked now: links reach it in a session, or while a background feature keeps a link.")
+                } else if !device.linked {
+                    // The server pushes a link over the control link only.
+                    Err("Not linked now: a link reaches it while it keeps a link to this computer, which a session or a background feature opens.")
                 } else {
                     Ok(())
                 },
@@ -267,6 +267,11 @@ pub fn last_sessions(lines: &str) -> std::collections::HashMap<String, u64> {
         let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
+        // A refused attempt is no session: its id is only what the
+        // connecting client claimed (N6 review).
+        if record.get("outcome").and_then(|v| v.as_str()) == Some("rejected") {
+            continue;
+        }
         let (Some(id), Some(at)) = (
             record.get("device_id").and_then(|v| v.as_str()),
             record.get("unix_secs").and_then(|v| v.as_u64()),
@@ -547,7 +552,12 @@ mod tests {
             "not json\n",
             r#"{"unix_secs":300,"outcome":"ended","device_id":"b"}"#,
             "\n",
-            r#"{"unix_secs":200,"outcome":"refused","device_id":"a"}"#,
+            r#"{"unix_secs":200,"outcome":"completed","device_id":"a"}"#,
+            "
+",
+            // A refused attempt is no session (N6 review): its id is only
+            // what the connecting client claimed.
+            r#"{"unix_secs":250,"outcome":"rejected","device_id":"a"}"#,
             "\n",
             r#"{"unix_secs":400,"outcome":"ended"}"#,
             "\n",
@@ -614,6 +624,18 @@ mod tests {
         assert!(rows[2].ring.unwrap_err().contains("Not linked"));
         assert!(rows[2].file.unwrap_err().contains("in a session"));
         assert!(rows[2].link.unwrap_err().contains("Not linked"));
+    }
+
+    /// N6 review: the server pushes a link only over a control link.
+    #[test]
+    fn a_link_needs_the_phone_s_control_link_even_in_a_session() {
+        let mut snapshot = Snapshot::default();
+        let mut session_only = phone("s");
+        session_only.connected = true;
+        session_only.permissions.set(Capability::Links, true);
+        snapshot.devices = vec![session_only];
+        let rows = phone_rows(&snapshot, &Default::default());
+        assert!(rows[0].link.unwrap_err().contains("Not linked"));
     }
 
     const ONE_SESSION: &str = r#"{"updated_unix":100,"sessions":[{"device_id":"a","peer":"1.2.3.4:5","transport":"lan","started_unix":90}]}"#;
