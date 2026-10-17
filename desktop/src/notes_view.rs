@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use pocketdesk_core::local::phone_notes::{self, Answer, PhoneNote};
 
 /// How often the list is read again while the tab is open.
@@ -74,7 +74,7 @@ impl NotesView {
                      \"This phone's notifications\" is on, and lets you answer once \
                      \"Let the computer answer notifications\" is on, in the phone's Settings.",
                 )
-                .color(Color32::GRAY),
+                .color(crate::theme::muted(ui)),
             );
             return;
         }
@@ -89,7 +89,7 @@ impl NotesView {
                     ui.label(
                         RichText::new(format!("from {}", crate::app::short(&note.device_id)))
                             .small()
-                            .color(Color32::GRAY),
+                            .color(crate::theme::muted(ui)),
                     );
                     ui.horizontal(|ui| {
                         for action in &note.actions {

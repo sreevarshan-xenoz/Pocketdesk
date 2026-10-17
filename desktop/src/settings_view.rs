@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
@@ -79,6 +79,24 @@ impl SettingsForm {
 
     pub fn dirty(&self) -> bool {
         self.edited != self.saved
+    }
+
+    /// Whether the save bar shows: for changes, or for a problem in what
+    /// is saved (a hand-edited config), which would otherwise go unsaid
+    /// (U1 review).
+    pub fn shows_save_bar(&self) -> bool {
+        self.dirty() || !self.problems().is_empty()
+    }
+
+    /// Back to what is saved, keeping what the server read and whether a
+    /// saved change waits for a restart (U1 review: Undo had forgotten
+    /// both).
+    pub fn undo(&mut self) {
+        let running = std::mem::take(&mut self.running);
+        let restart_needed = self.restart_needed;
+        *self = Self::from_config(self.saved.clone());
+        self.running = running;
+        self.restart_needed = restart_needed;
     }
 
     /// What stops the edit from being saved, in words for the user.
@@ -162,7 +180,9 @@ impl SettingsForm {
     }
 
     /// Draw the form. Returns true when the user asked to save.
-    pub fn show(&mut self, ui: &mut egui::Ui) -> bool {
+    /// The form. Save and Undo are in [`Self::save_bar`], shown in view
+    /// while there are changes.
+    pub fn show(&mut self, ui: &mut egui::Ui) {
         let home_assistant = if self.saved.home_assistant {
             self.home_assistant_status()
         } else {
@@ -360,7 +380,7 @@ impl SettingsForm {
                                 unknown.join(", ")
                             ))
                             .small()
-                            .color(Color32::from_rgb(0xc0, 0x80, 0x00)),
+                            .color(crate::theme::warn(ui)),
                         );
                     }
                 });
@@ -369,7 +389,9 @@ impl SettingsForm {
                 ui.vertical(|ui| {
                     let mut remove = None;
                     for (i, task) in e.tasks.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
+                        // Wrapped: name, command, ask, deadline and Remove
+                        // are wider than a narrow page (U1 review).
+                        ui.horizontal_wrapped(|ui| {
                             ui.add(
                                 egui::TextEdit::singleline(&mut task.name)
                                     .desired_width(110.0)
@@ -578,22 +600,32 @@ impl SettingsForm {
                 }
             });
         self.apply_text_fields();
-        ui.add_space(10.0);
-        for problem in self.problems() {
-            ui.label(RichText::new(problem).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
+    }
+
+    /// Save and Undo, with what keeps Save off, for a bar that stays in
+    /// view while the form has changes (U1: at the end of the form they
+    /// were out of reach); whether Save was pressed.
+    pub fn save_bar(&mut self, ui: &mut egui::Ui) -> bool {
+        let problems = self.problems();
+        for problem in &problems {
+            ui.label(RichText::new(problem).color(crate::theme::bad(ui)));
         }
-        let can_save = self.dirty() && self.problems().is_empty();
+        if !self.dirty() {
+            ui.label(
+                RichText::new("The saved settings have a problem: change them here and save.")
+                    .weak(),
+            );
+            return false;
+        }
         let mut save = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             save = ui
-                .add_enabled(can_save, egui::Button::new("Save"))
+                .add_enabled(problems.is_empty(), egui::Button::new("Save"))
                 .clicked();
-            if ui
-                .add_enabled(self.dirty(), egui::Button::new("Undo changes"))
-                .clicked()
-            {
-                *self = Self::from_config(self.saved.clone());
+            if ui.button("Undo changes").clicked() {
+                self.undo();
             }
+            ui.label(RichText::new("Settings have changes not saved yet.").weak());
         });
         save
     }
@@ -707,6 +739,36 @@ fn parse_hooks(text: &str) -> (std::collections::BTreeMap<String, String>, Vec<S
 mod tests {
     use super::*;
     use pocketdesk_core::local::config::Config;
+
+    #[test]
+    fn undo_keeps_a_saved_change_waiting_for_a_restart() {
+        let mut form = SettingsForm::from_config(Config::default());
+        form.edited.control_port = 1800;
+        form.saved = form.edited.clone();
+        form.restart_needed = true;
+        form.edited.streaming_port = 4800;
+        form.undo();
+        assert_eq!(form.edited, form.saved, "the edit is undone");
+        assert!(form.restart_needed, "the saved change still waits");
+        assert_eq!(
+            form.running().control_port,
+            Config::default().control_port,
+            "the server still runs what it read"
+        );
+    }
+
+    #[test]
+    fn saved_settings_with_a_problem_show_the_bar_unedited() {
+        let mut saved = Config::default();
+        saved.streaming_port = saved.control_port;
+        let form = SettingsForm::from_config(saved);
+        assert!(!form.dirty());
+        assert!(
+            form.shows_save_bar(),
+            "a hand-edited config's problem is said"
+        );
+        assert!(!SettingsForm::from_config(Config::default()).shows_save_bar());
+    }
 
     #[test]
     fn hooks_are_one_event_and_command_per_line() {

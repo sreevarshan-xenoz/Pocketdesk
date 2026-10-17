@@ -144,6 +144,8 @@ fn next_step(shown: Option<&Shown>, on_file: Option<&pin::FilePin>, now_unix: u6
 /// The Pair tab's state between frames.
 #[derive(Default)]
 pub struct PairView {
+    /// When the link for another computer was last copied, for "Copied.".
+    copied: Option<std::time::Instant>,
     link: Option<PairLink>,
     shown: Option<Shown>,
     texture: Option<TextureHandle>,
@@ -209,7 +211,7 @@ impl PairView {
         if let Some(id) = &self.paired {
             ui.label(
                 RichText::new(format!("Paired ✓  {}", crate::app::short(id)))
-                    .color(Color32::from_rgb(0x2e, 0x9e, 0x6a))
+                    .color(crate::theme::good(ui))
                     .strong()
                     .size(18.0),
             );
@@ -274,7 +276,7 @@ impl PairView {
             return;
         }
         if let Some(error) = &self.error {
-            ui.label(RichText::new(error).color(Color32::from_rgb(0xd9, 0x5c, 0x4a)));
+            ui.label(RichText::new(error).color(crate::theme::bad(ui)));
             if ui.button("Try again").clicked() {
                 self.error = None;
             }
@@ -326,7 +328,9 @@ impl PairView {
                     .clicked()
                 {
                     ui.ctx().copy_text(link.to_uri());
+                    self.copied = Some(std::time::Instant::now());
                 }
+                crate::notice::copied(ui, &mut self.copied);
                 if link.fingerprint.is_none() {
                     ui.label(
                         RichText::new(

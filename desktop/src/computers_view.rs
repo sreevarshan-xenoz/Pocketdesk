@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use pocketdesk_core::local::computers::{self, ComputerAsk, ComputersFile, PeerComputer};
 
 /// How often the file is read again while the tab is open.
@@ -106,7 +106,7 @@ impl ComputersView {
             let failed = last.outcome.starts_with("failed");
             let text = format!("Last pairing, with {}: {}", last.name, last.outcome);
             ui.label(if failed {
-                RichText::new(text).color(Color32::from_rgb(0xd9, 0x5c, 0x4a))
+                RichText::new(text).color(crate::theme::bad(ui))
             } else {
                 RichText::new(text).weak()
             });
