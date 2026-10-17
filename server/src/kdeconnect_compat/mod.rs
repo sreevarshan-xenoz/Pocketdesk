@@ -13,7 +13,9 @@ pub mod identity;
 pub mod link;
 pub mod pairing;
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::collections::BTreeMap;
+use std::net::IpAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use pocketdesk_core::local::kdeconnect::{self, SeenDevice};
 use pocketdesk_core::local::kdeconnect_devices::{self, KdeAsk};
@@ -33,35 +35,69 @@ pub fn enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
 
-/// Links from devices that have not paired, at most [`MAX_UNPAIRED`].
-static UNPAIRED: AtomicUsize = AtomicUsize::new(0);
-
 /// KDE Connect's own cap on links from unpaired devices.
 pub const MAX_UNPAIRED: usize = 42;
 
-/// One of the [`MAX_UNPAIRED`] places, given back when dropped.
-struct UnpairedSlot;
+/// Unpaired links from one address at most: a few hosts must not take
+/// every place (3a review).
+pub const MAX_UNPAIRED_PER_ADDRESS: usize = 4;
 
-impl UnpairedSlot {
-    fn take() -> Option<Self> {
-        let mut now = UNPAIRED.load(Ordering::Relaxed);
-        loop {
-            if now >= MAX_UNPAIRED {
-                return None;
-            }
-            match UNPAIRED.compare_exchange(now, now + 1, Ordering::AcqRel, Ordering::Relaxed) {
-                Ok(_) => return Some(Self),
-                Err(seen) => now = seen,
+/// The places for links from unpaired devices: so many in all, so many per
+/// address.
+pub struct UnpairedSlots {
+    total: usize,
+    per_address: usize,
+    taken: std::sync::Mutex<(usize, BTreeMap<IpAddr, usize>)>,
+}
+
+impl UnpairedSlots {
+    pub const fn new(total: usize, per_address: usize) -> Self {
+        Self {
+            total,
+            per_address,
+            taken: std::sync::Mutex::new((0, BTreeMap::new())),
+        }
+    }
+
+    /// A place for a link from `address`, if one is free.
+    pub fn take(&'static self, address: IpAddr) -> Option<UnpairedSlot> {
+        let mut taken = self.taken.lock().unwrap_or_else(|e| e.into_inner());
+        let (all, by_address) = &mut *taken;
+        let here = by_address.get(&address).copied().unwrap_or(0);
+        if *all >= self.total || here >= self.per_address {
+            return None;
+        }
+        *all += 1;
+        by_address.insert(address, here + 1);
+        Some(UnpairedSlot {
+            slots: self,
+            address,
+        })
+    }
+}
+
+/// One place, given back when dropped.
+pub struct UnpairedSlot {
+    slots: &'static UnpairedSlots,
+    address: IpAddr,
+}
+
+impl Drop for UnpairedSlot {
+    fn drop(&mut self) {
+        let mut taken = self.slots.taken.lock().unwrap_or_else(|e| e.into_inner());
+        let (all, by_address) = &mut *taken;
+        *all = all.saturating_sub(1);
+        if let Some(here) = by_address.get_mut(&self.address) {
+            *here -= 1;
+            if *here == 0 {
+                by_address.remove(&self.address);
             }
         }
     }
 }
 
-impl Drop for UnpairedSlot {
-    fn drop(&mut self) {
-        UNPAIRED.fetch_sub(1, Ordering::AcqRel);
-    }
-}
+/// The server's places.
+static UNPAIRED: UnpairedSlots = UnpairedSlots::new(MAX_UNPAIRED, MAX_UNPAIRED_PER_ADDRESS);
 
 /// The compat identity in the state folder, read once.
 pub fn load_identity() -> anyhow::Result<identity::CompatIdentity> {
@@ -79,10 +115,10 @@ pub fn load_identity() -> anyhow::Result<identity::CompatIdentity> {
 /// pin), then the link: pairing and ping (3b), until it closes.
 pub async fn serve(stream: TcpStream) {
     let peer = stream.peer_addr().ok();
-    let Some(slot) = UnpairedSlot::take() else {
+    let Some(slot) = peer.and_then(|peer| UNPAIRED.take(peer.ip())) else {
         tracing::warn!(
             ?peer,
-            "A KDE Connect connection refused: {MAX_UNPAIRED} unpaired already"
+            "A KDE Connect connection refused: too many unpaired already"
         );
         return;
     };
@@ -176,11 +212,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unpaired_links_stop_at_kdes_cap_and_free_their_place() {
-        let held: Vec<_> = std::iter::from_fn(UnpairedSlot::take).take(100).collect();
-        assert_eq!(held.len(), MAX_UNPAIRED);
-        assert!(UnpairedSlot::take().is_none());
-        drop(held);
-        assert!(UnpairedSlot::take().is_some());
+    fn unpaired_links_stop_at_kdes_cap_and_at_four_from_one_address() {
+        static SLOTS: UnpairedSlots = UnpairedSlots::new(6, 4);
+        let a: IpAddr = "192.0.2.1".parse().unwrap();
+        let b: IpAddr = "192.0.2.2".parse().unwrap();
+        let from_a: Vec<_> = std::iter::from_fn(|| SLOTS.take(a)).take(10).collect();
+        assert_eq!(from_a.len(), 4, "four from one address");
+        let from_b: Vec<_> = std::iter::from_fn(|| SLOTS.take(b)).take(10).collect();
+        assert_eq!(from_b.len(), 2, "six in all");
+        drop(from_a);
+        assert!(SLOTS.take(a).is_some(), "given back");
     }
 }

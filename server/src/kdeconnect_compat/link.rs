@@ -19,6 +19,10 @@ use super::pairing::{self, PairSays};
 /// The packet type of a ping, both ways.
 pub const PING: &str = "kdeconnect.ping";
 
+/// An unpaired link silent this long is closed (3a review): it holds one
+/// of the few unpaired places, and the device dials again at the next Find.
+const UNPAIRED_IDLE: Duration = Duration::from_secs(300);
+
 /// What the desktop app (through the server) asks of a device's link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
@@ -135,10 +139,18 @@ pub async fn run<S: AsyncRead + AsyncWrite + Unpin>(
     let (reader, mut writer) = tokio::io::split(link.stream);
     let mut reader = BufReader::new(reader);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut heard = std::time::Instant::now();
     'link: loop {
+        if !state.paired && state.waiting.is_none() && heard.elapsed() >= UNPAIRED_IDLE {
+            tracing::info!(device_id, "An unpaired KDE Connect link went quiet; closed");
+            break;
+        }
         let out = tokio::select! {
             line = read_packet(&mut reader) => match line {
-                Some(packet) => state.packet(&packet),
+                Some(packet) => {
+                    heard = std::time::Instant::now();
+                    state.packet(&packet)
+                }
                 None => break,
             },
             Some(event) = events.recv() => {
