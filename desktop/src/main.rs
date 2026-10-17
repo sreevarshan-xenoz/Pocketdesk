@@ -13,6 +13,7 @@ mod icon;
 mod kdeconnect_view;
 mod messages_view;
 mod model;
+mod nav;
 mod notes_view;
 mod pair_view;
 mod phone_files_view;
@@ -36,6 +37,8 @@ fn main() -> eframe::Result {
         // Another copy is running; it has been brought to the front.
         return Ok(());
     };
+    // `--page <name>` opens on a page (nav.rs names them).
+    let page = nav::page_from_args(std::env::args());
     let state_dir = match pocketdesk_core::local::paths::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
@@ -74,7 +77,7 @@ fn main() -> eframe::Result {
             if tray.is_some() {
                 tray::Tray::wake_on_click(cc.egui_ctx.clone());
             }
-            Ok(Box::new(app::PocketdeskApp::new(state_dir, tray)))
+            Ok(Box::new(app::PocketdeskApp::new(state_dir, tray, page)))
         }),
     )
 }

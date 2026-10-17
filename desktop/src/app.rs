@@ -169,8 +169,9 @@ pub struct PocketdeskApp {
 }
 
 impl PocketdeskApp {
-    pub fn new(state_dir: PathBuf, tray: Option<Tray>) -> Self {
-        Self {
+    /// The app, open on `page` (`--page`) or the Overview.
+    pub fn new(state_dir: PathBuf, tray: Option<Tray>, page: Option<Tab>) -> Self {
+        let mut app = Self {
             state_dir,
             tray,
             tab: Tab::Status,
@@ -203,7 +204,11 @@ impl PocketdeskApp {
             task_requests: Vec::new(),
             raised_tasks: Vec::new(),
             answered_tasks: Vec::new(),
+        };
+        if let Some(page) = page {
+            app.switch_to(page);
         }
+        app
     }
 
     /// Run a start or restart off the UI thread; one at a time.
@@ -558,6 +563,51 @@ impl PocketdeskApp {
                 Err(e) => format!("Could not end the session: {e}"),
             },
         );
+    }
+
+    /// The page shown, under its heading.
+    fn page(&mut self, ui: &mut egui::Ui) {
+        match self.tab {
+            Tab::Status => self.status_tab(ui),
+            Tab::Activity => {
+                let log_on = self.config.as_ref().is_none_or(|c| c.events);
+                match self.activity.show(ui, log_on, now_unix()) {
+                    Some(crate::activity_view::Action::ShowFile(path)) => {
+                        if let Err(e) = crate::reveal::show_in_folder(&path) {
+                            self.notice = Some(format!("Could not show the file: {e}"));
+                        }
+                    }
+                    Some(crate::activity_view::Action::OpenSettings) => {
+                        self.switch_to(Tab::Settings)
+                    }
+                    None => {}
+                }
+            }
+            Tab::Pair => self.pair.show(
+                ui,
+                &self.state_dir,
+                self.config.as_ref(),
+                &self.snapshot.devices,
+                now_unix(),
+            ),
+            Tab::Devices => self.devices_tab(ui),
+            Tab::Sessions => self.sessions_tab(ui),
+            Tab::Files => self.files_tab(ui),
+            Tab::Messages => {
+                self.messages
+                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
+            }
+            Tab::Notifications => self.notes.show(ui, &self.state_dir, now_unix()),
+            Tab::Phone => {
+                self.phone_files
+                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
+            }
+            Tab::Settings => self.settings_tab(ui),
+            Tab::Diagnostics => self
+                .diagnostics
+                .show(ui, &self.state_dir, self.config.as_ref()),
+            Tab::Logs => self.logs_tab(ui),
+        }
     }
 
     fn status_tab(&mut self, ui: &mut egui::Ui) {
@@ -1288,75 +1338,40 @@ impl eframe::App for PocketdeskApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.take_files_to_send(ui.ctx());
-        egui::Panel::top("tabs").show(ui, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
+        egui::Panel::left("nav")
+            .resizable(false)
+            .exact_size(170.0)
+            .show(ui, |ui| {
+                ui.add_space(8.0);
                 ui.heading("Pocketdesk");
-                ui.add_space(12.0);
-                for (tab, label) in [
-                    (Tab::Status, "Status"),
-                    (Tab::Activity, "Activity"),
-                    (Tab::Pair, "Pair"),
-                    (Tab::Devices, "Devices"),
-                    (Tab::Sessions, "Sessions"),
-                    (Tab::Files, "Files"),
-                    (Tab::Messages, "Messages"),
-                    (Tab::Notifications, "Notifications"),
-                    (Tab::Phone, "Phone"),
-                    (Tab::Settings, "Settings"),
-                    (Tab::Diagnostics, "Diagnostics"),
-                    (Tab::Logs, "Logs"),
-                ] {
-                    if ui.selectable_label(self.tab == tab, label).clicked() {
-                        self.switch_to(tab);
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                    for group in crate::nav::GROUPS {
+                        ui.add_space(10.0);
+                        if let Some(title) = group.title {
+                            ui.label(RichText::new(title).small().color(MUTED));
+                        }
+                        for tab in group.pages {
+                            if ui.selectable_label(self.tab == *tab, tab.name()).clicked() {
+                                self.switch_to(*tab);
+                            }
+                        }
                     }
-                }
+                });
             });
+        egui::CentralPanel::default().show(ui, |ui| {
             if let Some(notice) = &self.notice {
                 ui.label(RichText::new(notice).italics());
             }
-            ui.add_space(4.0);
-        });
-        egui::CentralPanel::default().show(ui, |ui| match self.tab {
-            Tab::Status => self.status_tab(ui),
-            Tab::Activity => {
-                let log_on = self.config.as_ref().is_none_or(|c| c.events);
-                match self.activity.show(ui, log_on, now_unix()) {
-                    Some(crate::activity_view::Action::ShowFile(path)) => {
-                        if let Err(e) = crate::reveal::show_in_folder(&path) {
-                            self.notice = Some(format!("Could not show the file: {e}"));
-                        }
-                    }
-                    Some(crate::activity_view::Action::OpenSettings) => {
-                        self.switch_to(Tab::Settings)
-                    }
-                    None => {}
-                }
+            ui.heading(self.tab.name());
+            ui.label(RichText::new(self.tab.purpose()).color(MUTED));
+            ui.add_space(6.0);
+            if self.tab.scrolls_itself() {
+                self.page(ui);
+            } else {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.page(ui));
             }
-            Tab::Pair => self.pair.show(
-                ui,
-                &self.state_dir,
-                self.config.as_ref(),
-                &self.snapshot.devices,
-                now_unix(),
-            ),
-            Tab::Devices => self.devices_tab(ui),
-            Tab::Sessions => self.sessions_tab(ui),
-            Tab::Files => self.files_tab(ui),
-            Tab::Messages => {
-                self.messages
-                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
-            }
-            Tab::Notifications => self.notes.show(ui, &self.state_dir, now_unix()),
-            Tab::Phone => {
-                self.phone_files
-                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
-            }
-            Tab::Settings => self.settings_tab(ui),
-            Tab::Diagnostics => self
-                .diagnostics
-                .show(ui, &self.state_dir, self.config.as_ref()),
-            Tab::Logs => self.logs_tab(ui),
         });
         self.approval_prompt(ui);
         self.task_prompt(ui);
