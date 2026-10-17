@@ -301,6 +301,7 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
         unpaired,
         clipboard_in: None,
         file_in: None,
+        told_unpaired: false,
     };
     let replaced = _live.replaced();
     let (reader, mut writer) = tokio::io::split(link.stream);
@@ -394,6 +395,8 @@ struct State {
     clipboard_in: Option<String>,
     /// A file the device offers, for the loop to fetch.
     file_in: Option<super::share::Offer>,
+    /// The device was told it is not paired here.
+    told_unpaired: bool,
 }
 
 impl State {
@@ -410,7 +413,15 @@ impl State {
             return self.pair_packet(says);
         }
         if !self.paired {
-            // Unpaired, nothing else is taken.
+            // Unpaired, nothing else is taken. A device that sends more
+            // than pairing thinks itself paired (this computer forgot it
+            // while it was away): it is told it is not, once, as KDE
+            // Connect's own desktop does. Not while a pairing waits: a
+            // device that accepted ours sends its plugins' packets at once.
+            if self.waiting.is_none() && !std::mem::replace(&mut self.told_unpaired, true) {
+                tracing::info!(device_id = %self.device_id, "A KDE Connect device that is not paired here was told so");
+                return vec![pairing::answer(false)];
+            }
             return Vec::new();
         }
         let may = self.permissions();
@@ -819,6 +830,7 @@ mod tests {
             unpaired: None,
             clipboard_in: None,
             file_in: None,
+            told_unpaired: false,
         }
     }
 
@@ -1365,6 +1377,22 @@ mod tests {
         assert_eq!(
             paired_among(vec!["p".to_string(), "stranger".to_string()], &[paired]),
             ["p"]
+        );
+    }
+
+    #[test]
+    fn a_device_that_thinks_itself_paired_is_told_it_is_not_once() {
+        let mut s = state("forgot", false);
+        let out = s.packet(&battery(50));
+        assert_eq!(says(&out[0]), Some(PairSays::No));
+        assert!(s.packet(&battery(50)).is_empty(), "once");
+
+        let mut s = state("accepted", false);
+        s.event(Event::PairFromHere);
+        s.pair_packet(PairSays::Yes(None));
+        assert!(
+            s.packet(&battery(50)).is_empty(),
+            "not while the owner confirms the device's yes"
         );
     }
 
