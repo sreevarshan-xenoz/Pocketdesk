@@ -746,8 +746,16 @@ impl PocketdeskApp {
             .num_columns(2)
             .spacing([24.0, 6.0])
             .show(ui, |ui| {
+                // Phones, as listed below; other computers are in Settings.
                 ui.label("Paired phones");
-                ui.label(self.snapshot.devices.len().to_string());
+                ui.label(
+                    self.snapshot
+                        .devices
+                        .iter()
+                        .filter(|d| !d.computer)
+                        .count()
+                        .to_string(),
+                );
                 ui.end_row();
                 ui.label("Live sessions");
                 ui.label(self.snapshot.sessions.len().to_string());
