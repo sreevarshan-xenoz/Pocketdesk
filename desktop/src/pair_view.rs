@@ -144,6 +144,8 @@ fn next_step(shown: Option<&Shown>, on_file: Option<&pin::FilePin>, now_unix: u6
 /// The Pair tab's state between frames.
 #[derive(Default)]
 pub struct PairView {
+    /// When the link for another computer was last copied, for "Copied.".
+    copied: Option<std::time::Instant>,
     link: Option<PairLink>,
     shown: Option<Shown>,
     texture: Option<TextureHandle>,
@@ -326,7 +328,9 @@ impl PairView {
                     .clicked()
                 {
                     ui.ctx().copy_text(link.to_uri());
+                    self.copied = Some(std::time::Instant::now());
                 }
+                crate::notice::copied(ui, &mut self.copied);
                 if link.fingerprint.is_none() {
                     ui.label(
                         RichText::new(

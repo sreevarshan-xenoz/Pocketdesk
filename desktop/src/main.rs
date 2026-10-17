@@ -15,6 +15,7 @@ mod messages_view;
 mod model;
 mod nav;
 mod notes_view;
+mod notice;
 mod pair_view;
 mod phone_files_view;
 mod pick_file;

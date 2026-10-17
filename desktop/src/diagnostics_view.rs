@@ -16,6 +16,8 @@ pub struct DiagnosticsView {
     ran_at: u64,
     /// The last run failed (the checks' thread ended without a report).
     failed: bool,
+    /// When the debug report was last copied, for "Copied.".
+    copied: Option<std::time::Instant>,
 }
 
 impl DiagnosticsView {
@@ -117,7 +119,9 @@ impl DiagnosticsView {
                     self.ran_at,
                 );
                 ui.ctx().copy_text(text);
+                self.copied = Some(std::time::Instant::now());
             }
+            crate::notice::copied(ui, &mut self.copied);
             ui.label(
                 egui::RichText::new(
                     "For an issue. It includes this computer's addresses (local, and any public or Tailscale ones), but no PINs, keys or file names.",
