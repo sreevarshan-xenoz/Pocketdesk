@@ -248,7 +248,6 @@ object Prefs {
         bump()
     }
 
-    /** Connect checks first, and offers "Wake and connect" to a computer that does not answer (N6). */
     /** The name this phone gives computers (U3); blank: Android's device name. */
     fun phoneName(ctx: Context): String =
         prefs(ctx).getString(KEY_PHONE_NAME, null).orEmpty()
@@ -258,6 +257,7 @@ object Prefs {
         bump()
     }
 
+    /** Connect checks first, and offers "Wake and connect" to a computer that does not answer (N6). */
     fun offerWake(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_OFFER_WAKE, true)
 
