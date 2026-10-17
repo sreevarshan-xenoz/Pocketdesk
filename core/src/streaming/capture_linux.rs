@@ -69,6 +69,11 @@ pub async fn start_capture(
         "Starting screen capture: {}x{}@{}fps",
         config.width, config.height, config.fps
     );
+    // N8: input goes through the portal here, so the screen and the input
+    // come from one RemoteDesktop session, under one grant.
+    if crate::streaming::portal_input::wanted() {
+        return start_remote_desktop_capture(config, frame_tx, cancel, screen_grant).await;
+    }
 
     // Step 1: Create XDG Portal screencast session (with timeout to handle missing portal backends)
     let screencast = tokio::time::timeout(Duration::from_secs(10), Screencast::new())
@@ -99,10 +104,7 @@ pub async fn start_capture(
     // the dialog again.
     let saved = screen_grant.as_deref().and_then(crate::portal_grant::read);
     let (persist, token) = crate::portal_grant::request(screen_grant.is_some(), saved.as_deref());
-    let persist_mode = match persist {
-        crate::portal_grant::Persist::No => PersistMode::DoNot,
-        crate::portal_grant::Persist::UntilRevoked => PersistMode::ExplicitlyRevoked,
-    };
+    let persist_mode = persist_mode(persist);
     tokio::time::timeout(
         Duration::from_secs(10),
         screencast.select_sources(
@@ -173,23 +175,217 @@ pub async fn start_capture(
         node_id, config.monitor_index
     );
 
-    // Clone config for the capture thread
-    let thread_config = config.clone();
-
     // Step 5: Spawn the PipeWire capture thread
-    let pw_cancel = cancel.clone();
+    spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone())?;
+
+    Ok(CaptureSession::new(config, cancel))
+}
+
+/// The PipeWire capture thread for the stream `node_id`.
+fn spawn_pipewire_capture(
+    node_id: u32,
+    config: StreamingConfig,
+    frame_tx: mpsc::Sender<VideoFrame>,
+    cancel: CancellationToken,
+) -> Result<()> {
     std::thread::Builder::new()
         .name("pipewire-capture".into())
         .spawn(move || {
-            if let Err(e) = run_pipewire_capture(node_id, &thread_config, frame_tx, pw_cancel) {
+            if let Err(e) = run_pipewire_capture(node_id, &config, frame_tx, cancel) {
                 error!("PipeWire capture thread exited with error: {e}");
             } else {
                 info!("PipeWire capture thread exited normally");
             }
         })
         .context("Failed to spawn PipeWire capture thread")?;
+    Ok(())
+}
 
+/// What the portal is asked to do with its grant (N8).
+fn persist_mode(persist: crate::portal_grant::Persist) -> PersistMode {
+    match persist {
+        crate::portal_grant::Persist::No => PersistMode::DoNot,
+        crate::portal_grant::Persist::UntilRevoked => PersistMode::ExplicitlyRevoked,
+    }
+}
+
+/// N8: the screen with the keyboard and pointer, through one RemoteDesktop
+/// session, where the input injector has no other way in (GNOME and KDE
+/// without uinput). One grant covers both, kept as the screen's is when the
+/// owner chose so. A worker owns the session for the capture's life and
+/// takes the injector's events ([`crate::streaming::portal_input`]).
+async fn start_remote_desktop_capture(
+    config: StreamingConfig,
+    frame_tx: mpsc::Sender<VideoFrame>,
+    cancel: CancellationToken,
+    screen_grant: Option<std::path::PathBuf>,
+) -> Result<CaptureSession> {
+    use ashpd::desktop::remote_desktop::{DeviceType, RemoteDesktop, SelectDevicesOptions};
+    let unavailable =
+        || anyhow::anyhow!("Portal request timed out — is xdg-desktop-portal running?");
+    let remote = tokio::time::timeout(Duration::from_secs(10), RemoteDesktop::new())
+        .await
+        .map_err(|_| unavailable())?
+        .context("Failed to create the RemoteDesktop portal")?;
+    let screencast = tokio::time::timeout(Duration::from_secs(10), Screencast::new())
+        .await
+        .map_err(|_| unavailable())?
+        .context("Failed to create Screencast portal")?;
+    let session = tokio::time::timeout(
+        Duration::from_secs(10),
+        remote.create_session(Default::default()),
+    )
+    .await
+    .map_err(|_| unavailable())?
+    .context("Failed to create the remote desktop session")?;
+
+    let saved = screen_grant
+        .as_deref()
+        .and_then(crate::portal_grant::read_remote);
+    let (persist, token) = crate::portal_grant::request(screen_grant.is_some(), saved.as_deref());
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        remote.select_devices(
+            &session,
+            SelectDevicesOptions::default()
+                .set_devices(DeviceType::Keyboard | DeviceType::Pointer)
+                .set_persist_mode(persist_mode(persist))
+                .set_restore_token(token),
+        ),
+    )
+    .await
+    .map_err(|_| unavailable())?
+    .context("Failed to select the keyboard and pointer")?;
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        screencast.select_sources(
+            &session,
+            SelectSourcesOptions::default()
+                .set_sources(Some(ashpd::enumflags2::BitFlags::from(SourceType::Monitor)))
+                .set_multiple(Some(true)),
+        ),
+    )
+    .await
+    .map_err(|_| unavailable())?
+    .context("Failed to select sources")?;
+    // The owner answers the dialog here the first time: room to read it.
+    let started = tokio::time::timeout(
+        Duration::from_secs(60),
+        remote.start(&session, None, Default::default()),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("No answer to the screen-sharing dialog within a minute"))?
+    .context("Failed to start the remote desktop session")?
+    .response()
+    .context("No response from the remote desktop start")?;
+    if let (Some(dir), Some(token)) = (screen_grant.as_deref(), started.restore_token()) {
+        match crate::portal_grant::write_remote(dir, token) {
+            Ok(()) => info!("Screen-sharing grant kept for the next session"),
+            Err(e) => warn!(error = %e, "Could not keep the screen-sharing grant"),
+        }
+    }
+
+    let stream_infos: Vec<_> = started
+        .streams()
+        .iter()
+        .map(|s| (s.pipe_wire_node_id(), s.position()))
+        .collect();
+    let want = monitor_rect(config.monitor_index).map(|(x, y, _, _)| (x, y));
+    let node_id = pick_stream_node(&stream_infos, want)
+        .context("No PipeWire stream available from the remote desktop session")?;
+    let size = started
+        .streams()
+        .iter()
+        .find(|s| s.pipe_wire_node_id() == node_id)
+        .and_then(|s| s.size())
+        .map(|(w, h)| (w.max(1) as u32, h.max(1) as u32))
+        .unwrap_or((config.width, config.height));
+    info!(
+        "Remote desktop session: node_id={node_id}, {}x{}, input through the portal",
+        size.0, size.1
+    );
+
+    // The worker: the injector's events, in order, until the capture ends.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let registered = crate::streaming::portal_input::register(tx);
+    let worker_cancel = cancel.clone();
+    tokio::spawn(async move {
+        let _registered = registered;
+        loop {
+            tokio::select! {
+                _ = worker_cancel.cancelled() => break,
+                event = rx.recv() => match event {
+                    Some(event) => {
+                        if let Err(e) = apply_portal_event(&remote, &session, node_id, size, event).await {
+                            debug!(error = %e, "Portal input not taken");
+                        }
+                    }
+                    None => break,
+                },
+            }
+        }
+        let _ = session.close().await;
+    });
+
+    spawn_pipewire_capture(node_id, config.clone(), frame_tx, cancel.clone())?;
     Ok(CaptureSession::new(config, cancel))
+}
+
+/// Tell the portal one input event (N8).
+async fn apply_portal_event(
+    remote: &ashpd::desktop::remote_desktop::RemoteDesktop,
+    session: &ashpd::desktop::Session<ashpd::desktop::remote_desktop::RemoteDesktop>,
+    stream: u32,
+    size: (u32, u32),
+    event: crate::streaming::portal_input::PortalEvent,
+) -> ashpd::Result<()> {
+    use crate::streaming::portal_input::{PortalEvent, absolute_position};
+    use ashpd::desktop::remote_desktop::{Axis, KeyState};
+    let state = |pressed: bool| {
+        if pressed {
+            KeyState::Pressed
+        } else {
+            KeyState::Released
+        }
+    };
+    match event {
+        PortalEvent::Motion { dx, dy } => {
+            remote
+                .notify_pointer_motion(session, dx, dy, Default::default())
+                .await
+        }
+        PortalEvent::Absolute { x_norm, y_norm } => {
+            let (x, y) = absolute_position(x_norm, y_norm, size);
+            remote
+                .notify_pointer_motion_absolute(session, stream, x, y, Default::default())
+                .await
+        }
+        PortalEvent::Button { code, pressed } => {
+            remote
+                .notify_pointer_button(session, code, state(pressed), Default::default())
+                .await
+        }
+        PortalEvent::Scroll { axis, steps } => {
+            let axis = if axis == 0 {
+                Axis::Vertical
+            } else {
+                Axis::Horizontal
+            };
+            remote
+                .notify_pointer_axis_discrete(session, axis, steps, Default::default())
+                .await
+        }
+        PortalEvent::Key { code, pressed } => {
+            remote
+                .notify_keyboard_keycode(session, code, state(pressed), Default::default())
+                .await
+        }
+        PortalEvent::Keysym { sym, pressed } => {
+            remote
+                .notify_keyboard_keysym(session, sym, state(pressed), Default::default())
+                .await
+        }
+    }
 }
 
 /// Run the PipeWire capture loop in a dedicated thread.

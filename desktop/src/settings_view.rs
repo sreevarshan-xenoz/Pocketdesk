@@ -463,9 +463,10 @@ impl SettingsForm {
                         "GNOME and KDE: their screen-sharing dialog asks once, then sessions start without it until you revoke it in the desktop's own privacy settings, or Forget it here. Every session still needs a paired phone and its permissions.",
                     );
                     let state = pocketdesk_core::local::paths::state_dir().ok();
-                    let kept = state
-                        .as_deref()
-                        .is_some_and(|dir| pocketdesk_core::portal_grant::read(dir).is_some());
+                    let kept = state.as_deref().is_some_and(|dir| {
+                        pocketdesk_core::portal_grant::read(dir).is_some()
+                            || pocketdesk_core::portal_grant::read_remote(dir).is_some()
+                    });
                     if ui
                         .add_enabled(kept, egui::Button::new("Forget the grant"))
                         .on_hover_text("The next session asks at this computer again.")

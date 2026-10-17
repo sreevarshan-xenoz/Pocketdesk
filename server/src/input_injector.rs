@@ -17,6 +17,8 @@ use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
 use evdev::{
     AbsInfo, AbsoluteAxisCode, AttributeSet, InputEvent, KeyCode, RelativeAxisCode, UinputAbsSetup,
 };
+#[cfg(target_os = "linux")]
+use pocketdesk_core::streaming::portal_input::PortalEvent;
 // Off Linux the wire's evdev codes still need names; the core shim has the
 // same `KeyCode::KEY_*.0` shape as the evdev crate.
 #[cfg(not(target_os = "linux"))]
@@ -208,6 +210,36 @@ enum InputBackend {
     /// (T10f)
     #[cfg(target_os = "linux")]
     Wlr(pocketdesk_core::input::wlr_input::WlrInput),
+    /// GNOME's and KDE's RemoteDesktop portal, where uinput cannot be opened
+    /// (N8): through the capture's portal session, while one runs.
+    #[cfg(target_os = "linux")]
+    Portal,
+}
+
+/// Send `event` to the capture's RemoteDesktop session (N8). With none (a
+/// remote, which captures nothing) the input goes nowhere: said once, not
+/// for every packet.
+#[cfg(target_os = "linux")]
+fn portal(event: pocketdesk_core::streaming::portal_input::PortalEvent) -> Result<()> {
+    static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !pocketdesk_core::streaming::portal_input::send(event)
+        && !SAID.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        warn!(
+            "Input on this desktop goes through its screen-sharing session, and none runs: a remote without the screen gets none here"
+        );
+    }
+    Ok(())
+}
+
+/// Whether this desktop's portal offers RemoteDesktop input: GNOME's and
+/// KDE's do; wlroots compositors have their own way in.
+#[cfg(target_os = "linux")]
+fn portal_desktop() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| {
+        d.split(':')
+            .any(|part| part.eq_ignore_ascii_case("GNOME") || part.eq_ignore_ascii_case("KDE"))
+    })
 }
 
 /// Kernel-level backend state: the keyboard/mouse device plus an
@@ -345,6 +377,8 @@ impl Drop for InputInjector {
             InputBackend::Uinput(_) => "uinput",
             #[cfg(target_os = "linux")]
             InputBackend::Wlr(_) => "wlroots virtual pointer and keyboard",
+            #[cfg(target_os = "linux")]
+            InputBackend::Portal => "the RemoteDesktop portal",
             #[cfg(windows)]
             InputBackend::SendInput(_) => "sendinput",
         };
@@ -390,6 +424,19 @@ impl InputInjector {
                             );
                             return Ok(Self {
                                 backend: InputBackend::Wlr(wlr),
+                                gamepad_buttons: 0,
+                                vkeyboard: VkState::Untried,
+                            });
+                        }
+                        // GNOME and KDE: their RemoteDesktop portal, through
+                        // the capture's session (N8).
+                        Err(wlr) if portal_desktop() => {
+                            info!(
+                                "Input injector: using the RemoteDesktop portal (uinput: {e}; no virtual pointer: {wlr:?})"
+                            );
+                            pocketdesk_core::streaming::portal_input::want(true);
+                            return Ok(Self {
+                                backend: InputBackend::Portal,
                                 gamepad_buttons: 0,
                                 vkeyboard: VkState::Untried,
                             });
@@ -473,6 +520,11 @@ impl InputInjector {
             #[cfg(target_os = "linux")]
             InputBackend::Wlr(wlr) => wlr.motion(dx, dy).context("virtual pointer move"),
             #[cfg(target_os = "linux")]
+            InputBackend::Portal => portal(PortalEvent::Motion {
+                dx: f64::from(dx),
+                dy: f64::from(dy),
+            }),
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -509,6 +561,8 @@ impl InputInjector {
                 .motion_absolute(x_norm, y_norm)
                 .context("virtual pointer absolute move"),
             #[cfg(target_os = "linux")]
+            InputBackend::Portal => portal(PortalEvent::Absolute { x_norm, y_norm }),
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let events = [
@@ -544,6 +598,11 @@ impl InputInjector {
                 .button(button.as_evdev_key().0, pressed)
                 .context("virtual pointer button"),
             #[cfg(target_os = "linux")]
+            InputBackend::Portal => portal(PortalEvent::Button {
+                code: i32::from(button.as_evdev_key().0),
+                pressed,
+            }),
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let key = button.as_evdev_key();
@@ -576,6 +635,17 @@ impl InputInjector {
             }
             #[cfg(target_os = "linux")]
             InputBackend::Wlr(wlr) => wlr.scroll(x, y).context("virtual pointer scroll"),
+            // The portal's steps go down and right; the wheel's value goes up.
+            #[cfg(target_os = "linux")]
+            InputBackend::Portal => {
+                if y != 0 {
+                    portal(PortalEvent::Scroll { axis: 0, steps: -y })?;
+                }
+                if x != 0 {
+                    portal(PortalEvent::Scroll { axis: 1, steps: x })?;
+                }
+                Ok(())
+            }
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
@@ -604,6 +674,11 @@ impl InputInjector {
             InputBackend::SendInput(backend) => backend.key(code, pressed),
             #[cfg(target_os = "linux")]
             InputBackend::Wlr(wlr) => wlr.key(code, pressed).context("virtual keyboard key"),
+            #[cfg(target_os = "linux")]
+            InputBackend::Portal => portal(PortalEvent::Key {
+                code: i32::from(code),
+                pressed,
+            }),
             #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
@@ -652,6 +727,14 @@ impl InputInjector {
                 code => wlr.key(code.0, pressed).context("virtual keyboard key"),
             },
             #[cfg(target_os = "linux")]
+            InputBackend::Portal => match key_to_evdev(key) {
+                KeyCode::KEY_UNKNOWN => Ok(()),
+                code => portal(PortalEvent::Key {
+                    code: i32::from(code.0),
+                    pressed,
+                }),
+            },
+            #[cfg(target_os = "linux")]
             InputBackend::Uinput(state) => {
                 let guard = state.get_mut().unwrap();
                 let evdev_key = key_to_evdev(key);
@@ -673,6 +756,14 @@ impl InputInjector {
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
                 e.text(text).context("enigo text input failed")?;
+                Ok(())
+            }
+            // Any character, as keysyms: the compositor maps them (N8).
+            #[cfg(target_os = "linux")]
+            InputBackend::Portal => {
+                for event in pocketdesk_core::streaming::portal_input::text_events(text) {
+                    portal(event)?;
+                }
                 Ok(())
             }
             #[cfg(target_os = "linux")]
