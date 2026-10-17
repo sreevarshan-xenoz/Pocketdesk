@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 use pocketdesk_core::local::kdeconnect::{self, SeenDevice};
-use pocketdesk_core::local::kdeconnect_devices::{self as devices, KdeAsk, Pending};
+use pocketdesk_core::local::kdeconnect_devices::{self as devices, KdeAsk, KdeDevice, Pending};
 
 /// How often the list is read again while the tab is open.
 const REFRESH: Duration = Duration::from_secs(2);
@@ -20,11 +20,51 @@ const FIND_SECS: u64 = 60;
 
 #[derive(Default)]
 pub struct KdeConnectView {
-    seen: Vec<SeenDevice>,
+    rows: Vec<Row>,
     pending: Vec<Pending>,
     finding: bool,
     read_at: Option<Instant>,
     notice: Option<String>,
+}
+
+/// A device in the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub device_id: String,
+    pub name: String,
+    pub paired: bool,
+    /// When it last connected, if it is in the seen list.
+    pub seen_unix: Option<u64>,
+}
+
+/// The list: every paired device, from the pins (3b review: the seen list
+/// keeps only the latest few, so a paired device could drop out of it and
+/// take its Unpair with it, and it said "paired" after an unpairing made
+/// with the device away), then the others seen, newest first.
+pub fn rows(paired: &[KdeDevice], seen: &[SeenDevice]) -> Vec<Row> {
+    let seen_at = |id: &str| seen.iter().find(|d| d.device_id == id).map(|d| d.seen_unix);
+    let mut rows: Vec<Row> = paired
+        .iter()
+        .map(|d| Row {
+            device_id: d.device_id.clone(),
+            name: d.name.clone(),
+            paired: true,
+            seen_unix: seen_at(&d.device_id),
+        })
+        .collect();
+    let mut others: Vec<Row> = seen
+        .iter()
+        .filter(|d| !paired.iter().any(|p| p.device_id == d.device_id))
+        .map(|d| Row {
+            device_id: d.device_id.clone(),
+            name: d.name.clone(),
+            paired: false,
+            seen_unix: Some(d.seen_unix),
+        })
+        .collect();
+    others.sort_by_key(|r| std::cmp::Reverse(r.seen_unix));
+    rows.extend(others);
+    rows
 }
 
 /// How long ago `then` was, in words.
@@ -43,7 +83,7 @@ impl KdeConnectView {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
         }
-        self.seen = kdeconnect::read(state_dir);
+        self.rows = rows(&devices::devices(state_dir), &kdeconnect::read(state_dir));
         self.pending = devices::pending(state_dir, now_unix);
         self.finding = kdeconnect::finding(state_dir, now_unix);
         self.read_at = Some(Instant::now());
@@ -141,22 +181,22 @@ impl KdeConnectView {
                 }
             });
         }
-        if self.seen.is_empty() {
+        if self.rows.is_empty() {
             ui.label(RichText::new("None has connected yet.").weak());
         }
-        for device in &self.seen {
+        for device in &self.rows {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&device.name).strong());
+                let paired = if device.paired {
+                    "paired"
+                } else {
+                    "not paired"
+                };
                 ui.label(
-                    RichText::new(format!(
-                        "{}, seen {}",
-                        if device.paired {
-                            "paired"
-                        } else {
-                            "not paired"
-                        },
-                        ago(now_unix, device.seen_unix)
-                    ))
+                    RichText::new(match device.seen_unix {
+                        Some(at) => format!("{paired}, seen {}", ago(now_unix, at)),
+                        None => paired.to_string(),
+                    })
                     .weak(),
                 );
                 let device_id = device.device_id.clone();
@@ -204,6 +244,46 @@ pub fn spaced(code: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn paired(id: &str, name: &str) -> KdeDevice {
+        KdeDevice {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            cert_hash: String::new(),
+            paired_unix: 1,
+            permissions: Default::default(),
+        }
+    }
+
+    fn seen(id: &str, at: u64, said_paired: bool) -> SeenDevice {
+        SeenDevice {
+            device_id: id.to_string(),
+            name: format!("seen {id}"),
+            seen_unix: at,
+            paired: said_paired,
+        }
+    }
+
+    #[test]
+    fn the_list_is_the_paired_devices_then_the_others_seen() {
+        let list = rows(
+            &[paired("p", "Phone")],
+            &[
+                seen("a", 5, false),
+                seen("gone", 9, true),
+                seen("p", 7, true),
+            ],
+        );
+        let ids: Vec<_> = list.iter().map(|r| r.device_id.as_str()).collect();
+        assert_eq!(ids, ["p", "gone", "a"]);
+        assert!(list[0].paired && list[0].seen_unix == Some(7));
+        assert!(
+            !list[1].paired,
+            "unpaired while away, though the seen list says paired"
+        );
+        let list = rows(&[paired("p", "Phone")], &[]);
+        assert_eq!(list[0].seen_unix, None, "kept though no longer seen");
+    }
 
     #[test]
     fn a_code_reads_in_two_groups() {
