@@ -93,18 +93,21 @@ impl Drop for CastEnded {
     }
 }
 
-/// Whether an input-only session (T10i) drops `packet`: it is about a
-/// picture or a sound the session does not have.
-fn about_the_stream(packet: &InputPacket) -> bool {
-    matches!(
-        packet,
-        InputPacket::MouseMoveAbs { .. }
-            | InputPacket::RequestKeyframe
-            | InputPacket::WindowCrop { .. }
-            | InputPacket::FullQuality { .. }
-            | InputPacket::QualityPreset { .. }
-            | InputPacket::Mic { .. }
-    )
+/// Whether a session without a picture drops `packet`: it is about a
+/// picture, or a sound the session does not have. A remote (T10i) has no
+/// sound; a sound session (N5) is the computer's mic, so it keeps the mic.
+fn about_the_stream(packet: &InputPacket, sound: bool) -> bool {
+    match packet {
+        InputPacket::Mic { .. } => !sound,
+        _ => matches!(
+            packet,
+            InputPacket::MouseMoveAbs { .. }
+                | InputPacket::RequestKeyframe
+                | InputPacket::WindowCrop { .. }
+                | InputPacket::FullQuality { .. }
+                | InputPacket::QualityPreset { .. }
+        ),
+    }
 }
 
 /// Where a whole-monitor session's absolute pointer input has to land.
@@ -568,7 +571,11 @@ impl StreamingServer {
                 }
                 Err(e) => warn!(error = %e, "Could not say the input-only session is ready"),
             }
-            info!("Input-only session: no capture, encode or sound");
+            if sound {
+                info!("Sound session: no capture or encode, sound both ways");
+            } else {
+                info!("Input-only session: no capture, encode or sound");
+            }
         }
         // The relay learns of the cast, with a way to ask the phone for a
         // keyframe (a viewer joined, or its decoder lost its way).
@@ -1372,7 +1379,7 @@ impl StreamingServer {
                                                 }
                                                 // No picture or sound to steer,
                                                 // and no picture to point at.
-                                                if no_picture && about_the_stream(&packet) {
+                                                if no_picture && about_the_stream(&packet, sound) {
                                                     continue;
                                                 }
                                                 // A cast shows the phone here;
@@ -2379,12 +2386,38 @@ mod tests {
 
     #[test]
     fn an_input_only_session_drops_what_is_about_the_picture() {
-        assert!(about_the_stream(&InputPacket::MouseMoveAbs {
-            x_norm: 1,
-            y_norm: 1
-        }));
-        assert!(about_the_stream(&InputPacket::RequestKeyframe));
-        assert!(!about_the_stream(&InputPacket::MouseMove { dx: 1, dy: 1 }));
+        assert!(about_the_stream(
+            &InputPacket::MouseMoveAbs {
+                x_norm: 1,
+                y_norm: 1
+            },
+            false
+        ));
+        assert!(about_the_stream(&InputPacket::RequestKeyframe, false));
+        assert!(!about_the_stream(
+            &InputPacket::MouseMove { dx: 1, dy: 1 },
+            false
+        ));
+    }
+
+    #[test]
+    fn a_sound_session_keeps_the_mic_and_drops_the_picture() {
+        let mic = InputPacket::Mic {
+            enabled: true,
+            opus: vec![1, 2, 3],
+        };
+        // A remote has no sound: its mic frames go nowhere.
+        assert!(about_the_stream(&mic, false));
+        // A sound session (N5) is the computer's mic.
+        assert!(!about_the_stream(&mic, true));
+        assert!(about_the_stream(&InputPacket::RequestKeyframe, true));
+        assert!(about_the_stream(
+            &InputPacket::MouseMoveAbs {
+                x_norm: 1,
+                y_norm: 1
+            },
+            true
+        ));
     }
 
     #[test]
