@@ -18,6 +18,15 @@ class ComputerNameTest {
         assertNull(ComputerName.clean(null))
     }
 
+    /** The core's cases for characters that draw nothing (U3 review). */
+    @Test
+    fun blankCharactersAreDroppedAsTheCoreDrops() {
+        fun of(vararg cps: Int) = String(cps, 0, cps.size)
+        assertNull(ComputerName.clean(of(0x3164, 0x3164)))
+        assertEquals("A71", ComputerName.clean(of('A'.code, 0x00AD, '7'.code, 0xE0041, '1'.code)))
+        assertEquals("Anns phone", ComputerName.clean("Ann" + of(0x1F) + "s" + of(0x85) + "phone"))
+    }
+
     @Test
     fun theOwnersNameWinsThenItsOwnThenTheAddress() {
         assertEquals("Work", ComputerName.shown("Work", "DESKTOP-4F2K9QH", "192.0.2.40"))

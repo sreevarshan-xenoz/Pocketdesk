@@ -499,7 +499,7 @@ pub fn clean_device_name(raw: &str) -> Option<String> {
             space = !cleaned.is_empty();
             continue;
         }
-        if c.is_control() || is_invisible_format(c) {
+        if c.is_control() || is_invisible_format(c) || blank_in_names(c) {
             continue;
         }
         if cleaned.chars().count() >= MAX_NAME_CHARS {
@@ -906,6 +906,26 @@ pub fn valid_device_id(id: &str) -> bool {
         && !id.chars().any(|c| c.is_control() || is_invisible_format(c))
 }
 
+/// Characters that draw nothing, beyond [`is_invisible_format`]'s, dropped
+/// from names (U3 review): a name of Hangul fillers or tag characters would
+/// show as a blank label. Variation selectors stay, since emoji use them.
+fn blank_in_names(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{17B4}'
+            | '\u{17B5}'
+            | '\u{180B}'..='\u{180E}'
+            | '\u{2800}'
+            | '\u{3164}'
+            | '\u{FFA0}'
+            | '\u{E0000}'..='\u{E0FFF}'
+    )
+}
+
 /// Characters that change how text reads without being seen: a
 /// right-to-left override makes "invoice<RLO>fdp.exe" read as
 /// "invoiceexe.pdf", and zero-width ones make two names look alike.
@@ -1176,6 +1196,21 @@ mod tests {
             Some(40)
         );
         assert_eq!(clean_device_name(" \u{200B} "), None);
+        assert_eq!(
+            clean_device_name("\u{3164}\u{3164}"),
+            None,
+            "Hangul fillers draw nothing"
+        );
+        assert_eq!(
+            clean_device_name("A\u{00AD}7\u{E0041}1").as_deref(),
+            Some("A71"),
+            "a soft hyphen and a tag character dropped"
+        );
+        assert_eq!(
+            clean_device_name("Ann\u{1F}s\u{85}phone").as_deref(),
+            Some("Anns phone"),
+            "a control dropped; NEL is white space"
+        );
         assert_eq!(clean_device_name(""), None);
     }
 

@@ -13,6 +13,18 @@ object ComputerName {
         cp == 0x061C || cp in 0x200B..0x200F || cp in 0x202A..0x202E ||
             cp in 0x2060..0x2069 || cp == 0xFEFF
 
+    /** Characters that draw nothing, dropped from names (the core's `blank_in_names`). */
+    private fun blank(cp: Int): Boolean =
+        cp == 0x00AD || cp == 0x034F || cp == 0x115F || cp == 0x1160 || cp == 0x17B4 ||
+            cp == 0x17B5 || cp in 0x180B..0x180E || cp == 0x2800 || cp == 0x3164 ||
+            cp == 0xFFA0 || cp in 0xE0000..0xE0FFF
+
+    /** Unicode's White_Space, as Rust's `char::is_whitespace` reads it. */
+    private fun isSpace(cp: Int): Boolean =
+        cp in 0x09..0x0D || cp == 0x20 || cp == 0x85 || cp == 0xA0 || cp == 0x1680 ||
+            cp in 0x2000..0x200A || cp == 0x2028 || cp == 0x2029 || cp == 0x202F ||
+            cp == 0x205F || cp == 0x3000
+
     /**
      * [raw] as one short printable line: control and invisible characters
      * dropped, white space one space, at most [MAX_CHARS]; null when nothing
@@ -28,8 +40,8 @@ object ComputerName {
             val cp = raw.codePointAt(i)
             i += Character.charCount(cp)
             when {
-                Character.isWhitespace(cp) || Character.isSpaceChar(cp) -> space = out.isNotEmpty()
-                Character.isISOControl(cp) || invisible(cp) -> {}
+                isSpace(cp) -> space = out.isNotEmpty()
+                Character.isISOControl(cp) || invisible(cp) || blank(cp) -> {}
                 else -> {
                     if (space) {
                         out.append(' ')
