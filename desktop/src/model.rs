@@ -26,6 +26,9 @@ pub struct Device {
     /// Whether a file can be offered to it now: in a session, or holding a
     /// control link at home (T10d).
     pub takes_files: bool,
+    /// Whether it keeps a link now, a session's or the background one, so
+    /// a ring can reach it (N1).
+    pub linked: bool,
     /// What the owner lets it do (roadmap F5).
     pub permissions: DevicePermissions,
     /// Its last battery report (T8b), if it ever sent one.
@@ -93,6 +96,12 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                 grant_remaining: store.grant_remaining(&id),
                 connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
                 takes_files: takes_files(&id),
+                linked: mirror.as_ref().is_some_and(|m| {
+                    m.sessions
+                        .iter()
+                        .any(|s| s.device_id.as_deref() == Some(&id))
+                        || m.linked.iter().any(|p| p.device_id == id)
+                }),
                 permissions: store.permissions(&id),
                 battery: batteries.get(&id).copied(),
                 computer: store.is_computer(&id),
@@ -422,6 +431,27 @@ mod tests {
         std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
         assert!(snapshot_with(&dir, 200, true).sessions.is_empty());
         assert_eq!(snapshot_with(&dir, 101, true).sessions.len(), 1);
+    }
+
+    /// N1: a phone is linked, so a ring reaches it, in a session or with
+    /// only the background link; neither is not.
+    #[test]
+    fn a_phone_with_a_session_or_a_background_link_is_linked() {
+        let dir = temp_dir("linked");
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        for id in ["a", "b", "c"] {
+            store.trust_device(id).unwrap();
+        }
+        std::fs::write(
+            dir.join(LIVE_FILE),
+            r#"{"updated_unix":100,"sessions":[{"device_id":"a","peer":"192.0.2.7:5","transport":"lan","started_unix":90}],"linked":[{"device_id":"b","files":false}]}"#,
+        )
+        .unwrap();
+        let snap = snapshot_with(&dir, 101, true);
+        let linked = |id: &str| snap.devices.iter().find(|d| d.id == id).unwrap().linked;
+        assert!(linked("a"), "in a session");
+        assert!(linked("b"), "the background link");
+        assert!(!linked("c"));
     }
 
     #[test]
