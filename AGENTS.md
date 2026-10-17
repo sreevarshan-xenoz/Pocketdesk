@@ -42,6 +42,19 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-17: **The next cycle (plan `docs/research/2026-10-17-next-cycle.md`).** From the owed checks (about 525 open, perhaps a fifth runnable here), what the repo lacks (no transfer progress on the computer, no Cancel on the phone, Downloads only), and what users of these apps asked for in 2025–2026. Order:
+  - C1 transfers you can watch and stop;
+  - C2 choose where files land;
+  - C3 failed notifications that wait and go later;
+  - C4 a headless test harness for the desktop app;
+  - C5 TalkBack, large fonts and landscape on the phone;
+  - C6 the owed checks that run here;
+  - C7 recent photos on the computer;
+  - C8 control the phone from the computer;
+  - C9 a Windows package identity;
+  - C10 distribution;
+  - C11 Android 17 on a real device (the owner);
+  - C12 a second screen on Windows (a driver, the owner's OK).
 - 2026-10-17: **N9, KDE Connect next steps (branch `feat/kdeconnect-next`; spec `docs/superpowers/specs/2026-10-17-kdeconnect-next-design.md`).**
   - **Notifications:** a paired KDE device's notifications are shown here as a phone's, in full, as KDE sends them. They share the phone notifications' switch and limit, in a namespace of their own; the ones re-sent at connect are not shown; closing one there closes it here. A per-device switch, on by default (SECURITY.md limit 22 says the text is not filtered).
   - **CVEs:** re-checked against CVE-2025-32898 (the same residue as patched KDE, with the owner's Allow naming the code) and CVE-2025-32900 (no UDP is ever read).
