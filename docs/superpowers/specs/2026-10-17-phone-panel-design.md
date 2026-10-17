@@ -25,3 +25,24 @@ The Overview says whether the server runs and counts phones and sessions, but no
 ## Check
 
 On this box through the app's own window: the Overview with the A71 linked and in a session, Ring, Send file… and Send link… opening Files with it chosen. On the Linux VM (a session bus with a StatusNotifierWatcher stood in by a small script): the item registers, its menu lists the three entries, Activate and each menu entry reach the app (Quit quits); with no watcher, the app starts without a tray and closing quits.
+
+## As built
+
+As designed, with these found on the way:
+
+- **Each phone is a short block**, not a table row: the row with its three buttons was wider than the window at its default size (Send link… cut off). The name and where it is, then its battery and last session, then the buttons.
+- **No last session while one runs**: a session is recorded when it ends, so "last session 45 min ago" beside "In a session" read as wrong.
+- **Send link…** opens a box right on the Overview (the phone it is for, the link, Send and Cancel), since Files lists only the phones files can reach, and a link reaches more.
+- **The Linux tray** replaces the no-tray stub; the icon conversion (`icon::argb32`) is tested on every OS, the menu mapping on Linux.
+
+**Checked:**
+- **On this box through the app's own window** (a throwaway server, the A71): the phone in a session, then linked with its last session; Send link… opening its box (Cancel closes it); Send file… opening Files with the phone chosen. Typing into the box is not checked: egui takes no value through UI Automation, and nothing was typed into the desktop.
+- **The tray on Linux, in WSL** (Arch, a private D-Bus session, a stand-in watcher written for it, the tray module run on its own since WSL has no display libraries):
+  - registered, with title Pocketdesk, category ApplicationStatus and the icon's pixmaps;
+  - the menu's three entries;
+  - a click on the icon, Pair a phone… and Quit reaching the app as Open, Pair and Quit;
+  - with no watcher, no tray (closing quits).
+- **The whole desktop app built in WSL** registered its item before failing to open a window there (no Wayland or X11 libraries).
+
+**Owed:** the tray in a real panel (KDE Plasma, waybar, GNOME with AppIndicator), with the window hidden and brought back.
+

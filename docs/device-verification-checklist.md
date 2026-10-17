@@ -1608,6 +1608,14 @@ Owed, on an Android 17 device or the API 37 emulator (the emulator here stalled 
 - [ ] A screen, remote and sound session with the screen off: the computer's sound keeps playing (the session's foreground service holds while-in-use).
 - [ ] A tablet-size window: the session lays out, rotates and resizes (orientation limits are ignored there).
 
+## 99. The phone panel and a Linux tray (N6)
+
+- [x] Overview on this box with the A71 (a throwaway server): in a session, then linked with its last session; Send link… opens its box, Cancel closes it; Send file… opens Files with the phone chosen.
+- [x] Linux tray in WSL on a private D-Bus session with a stand-in watcher: registered with its title, category and icon; the menu's three entries; a click on the icon, Pair and Quit reach the app; no watcher, no tray.
+- [ ] Send link… sends a typed link from the Overview, and Ring rings from there.
+- [ ] The tray in a real panel: KDE Plasma, waybar or swaybar, GNOME with the AppIndicator extension. Closing hides the window to it, Open brings it back, Pair opens Pair, Quit quits.
+- [ ] A panel restarted while the window is hidden: the item comes back, or starting the app again raises the window.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
