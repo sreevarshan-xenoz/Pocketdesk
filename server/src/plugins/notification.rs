@@ -122,6 +122,22 @@ fn take_shown(tag: &str) -> Option<u32> {
     shown.remove(at).map(|(_, id)| id)
 }
 
+/// What the notification server shows (N3), asked once it answers.
+#[cfg(target_os = "linux")]
+async fn server_caps(proxy: &zbus::Proxy<'static>) -> crate::toast_answers::DbusCaps {
+    static CAPS: tokio::sync::OnceCell<crate::toast_answers::DbusCaps> =
+        tokio::sync::OnceCell::const_new();
+    CAPS.get_or_try_init(|| async {
+        proxy
+            .call::<_, _, Vec<String>>("GetCapabilities", &())
+            .await
+            .map(|caps| crate::toast_answers::DbusCaps::from_list(&caps))
+    })
+    .await
+    .copied()
+    .unwrap_or_default()
+}
+
 /// The answerable phone notifications shown over D-Bus (N3), by their
 /// D-Bus id, newest last: a press names only the id.
 #[cfg(target_os = "linux")]
@@ -526,12 +542,18 @@ async fn send_notification_dbus(
     let summary = crate::platform::markup_escaped(summary);
     let body = crate::platform::markup_escaped(body);
     // N3: an answerable one carries its buttons, and KDE's inline reply
-    // when it takes one; it stays longer, to be answered.
+    // when it takes one, as far as the server shows them; it stays longer,
+    // to be answered.
+    let caps = if answers.is_some() {
+        server_caps(&proxy).await
+    } else {
+        Default::default()
+    };
     let actions = answers
-        .map(crate::toast_answers::dbus_actions)
+        .map(|a| crate::toast_answers::dbus_actions(a, caps))
         .unwrap_or_default();
     let mut hints = std::collections::HashMap::<String, zbus::zvariant::Value>::new();
-    if answers.is_some_and(|a| a.reply) {
+    if caps.inline_reply && answers.is_some_and(|a| a.reply) {
         hints.insert(
             "x-kde-reply-placeholder-text".to_string(),
             zbus::zvariant::Value::from("Reply"),

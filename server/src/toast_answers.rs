@@ -103,15 +103,37 @@ pub fn toast_answer(
         .map(|title| Answer::Action(title.clone()))
 }
 
-/// The D-Bus notification's actions, as key and label pairs: `a0`… for its
-/// buttons, and KDE's inline reply when it takes one.
-pub fn dbus_actions(answers: &Answerable) -> Vec<String> {
-    let mut actions = Vec::new();
-    for (i, title) in answers.actions.iter().enumerate() {
-        actions.push(format!("a{i}"));
-        actions.push(title.clone());
+/// What the notification server says it can show (`GetCapabilities`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DbusCaps {
+    /// Buttons (`actions`).
+    pub actions: bool,
+    /// KDE's inline reply (`inline-reply`).
+    pub inline_reply: bool,
+}
+
+impl DbusCaps {
+    pub fn from_list(caps: &[String]) -> Self {
+        Self {
+            actions: caps.iter().any(|c| c == "actions"),
+            inline_reply: caps.iter().any(|c| c == DBUS_INLINE_REPLY),
+        }
     }
-    if answers.reply {
+}
+
+/// The D-Bus notification's actions, as key and label pairs: `a0`… for its
+/// buttons where the server shows actions, and KDE's inline reply where it
+/// offers one; a server that offers neither gets none, never a button that
+/// does nothing (N3 review).
+pub fn dbus_actions(answers: &Answerable, caps: DbusCaps) -> Vec<String> {
+    let mut actions = Vec::new();
+    if caps.actions {
+        for (i, title) in answers.actions.iter().enumerate() {
+            actions.push(format!("a{i}"));
+            actions.push(title.clone());
+        }
+    }
+    if answers.reply && caps.inline_reply {
         actions.push(DBUS_INLINE_REPLY.to_string());
         actions.push("Reply".to_string());
     }
@@ -252,9 +274,17 @@ mod tests {
     #[test]
     fn d_bus_actions_name_each_button_and_the_inline_reply() {
         let a = answerable(&["Mark read", "Mute"], true);
+        let kde = DbusCaps::from_list(&["actions".into(), "inline-reply".into(), "body".into()]);
         assert_eq!(
-            dbus_actions(&a),
+            dbus_actions(&a, kde),
             ["a0", "Mark read", "a1", "Mute", "inline-reply", "Reply"]
+        );
+        // GNOME shows buttons but has no inline reply: no dead Reply button.
+        let gnome = DbusCaps::from_list(&["actions".into(), "body".into()]);
+        assert_eq!(dbus_actions(&a, gnome), ["a0", "Mark read", "a1", "Mute"]);
+        assert!(
+            dbus_actions(&a, DbusCaps::default()).is_empty(),
+            "no actions at all"
         );
         assert_eq!(
             dbus_action_answer("a1", &a),
