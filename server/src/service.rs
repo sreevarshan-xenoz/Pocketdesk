@@ -95,6 +95,17 @@ pub async fn run(config: Config) -> Result<()> {
 
     // The inbox folders the app's requests land in, watched (R6c).
     crate::inbox::start(&state_dir);
+    // Test seams (2g, 2h): said, so one left set by mistake is noticed.
+    for seam in ["POCKETDESK_CLIPBOARD_FILE", "POCKETDESK_DOWNLOAD_DIR"] {
+        if let Some(value) = std::env::var_os(seam) {
+            let path = std::path::Path::new(&value);
+            if path.is_absolute() {
+                tracing::warn!("{seam} is set: {} stands in (a test seam)", path.display());
+            } else {
+                tracing::warn!("{seam} is not an absolute path; ignored");
+            }
+        }
+    }
     // R4 D2: mirror live streaming sessions to the state dir, notify the
     // desktop when one starts, and consume `pocketdesk kick` requests.
     tokio::spawn(crate::live_sessions::run_watcher());
@@ -167,8 +178,9 @@ pub async fn run(config: Config) -> Result<()> {
     crate::virtual_screen::configure(config.virtual_screens);
     // The desktop app's answers to the phones' notifications (T10c).
     tokio::spawn(crate::plugins::notification::run_answers());
-    // The clipboard to connected phones as it changes (T10b).
-    if config.clipboard_push {
+    // The clipboard to connected phones as it changes (T10b), and shared
+    // with the owner's other computers (2g).
+    if crate::clipboard_push::configure(config.clipboard_push, config.computer_clipboard) {
         tokio::spawn(crate::clipboard_push::run());
     }
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
@@ -381,6 +393,12 @@ pub async fn run(config: Config) -> Result<()> {
             None
         }
     };
+    // The owner's other computers (2f): pairing with one, and a link to
+    // each over this endpoint.
+    tokio::spawn(crate::peer_computers::run(
+        Arc::clone(&cert_manager),
+        wan_endpoint.clone(),
+    ));
     if let Some(endpoint) = wan_endpoint.as_ref() {
         // Relay URLs and direct addresses drift (relay reconnects, DHCP), and
         // the phone only ever dials its cached EndpointAddr — periodic

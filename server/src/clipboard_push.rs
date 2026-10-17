@@ -6,7 +6,13 @@
 //! pushes and has the Clipboard permission, so a phone holding a link in the
 //! background gets it too. Text only: an image needs a transfer that dials
 //! the phone back.
+//!
+//! The owner's other computers (2g) get it the same way when
+//! `computer_clipboard` is on: those linked to this one as its clients, and
+//! those this one keeps a link to (`peer_computers`). Never back to the
+//! device it came from.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -93,6 +99,37 @@ pub(crate) fn private_types(types: &str) -> bool {
         .any(|t| t.trim() == "x-kde-passwordManagerHint")
 }
 
+/// Pushes to phones (`clipboard_push`).
+static TO_PHONES: AtomicBool = AtomicBool::new(true);
+
+/// Shares with the owner's other computers (`computer_clipboard`, 2g).
+static WITH_COMPUTERS: AtomicBool = AtomicBool::new(false);
+
+/// What the watcher sends to, from the config at start; and whether it
+/// runs at all.
+pub(crate) fn configure(phones: bool, computers: bool) -> bool {
+    TO_PHONES.store(phones, Ordering::Relaxed);
+    WITH_COMPUTERS.store(computers, Ordering::Relaxed);
+    phones || computers
+}
+
+/// Whether the clipboard is shared with the owner's other computers.
+pub(crate) fn with_computers() -> bool {
+    WITH_COMPUTERS.load(Ordering::Relaxed)
+}
+
+/// Whether a connection may be pushed the clipboard: a computer while
+/// sharing with computers, a phone while pushing to phones, either with
+/// the Clipboard permission.
+fn may_push(device_id: &str) -> bool {
+    let wanted = if crate::plugins::pair::is_computer_device(device_id) {
+        with_computers()
+    } else {
+        TO_PHONES.load(Ordering::Relaxed)
+    };
+    wanted && crate::plugins::pair::permits(device_id, "kdeconnect.clipboard")
+}
+
 /// Which phone last set the computer's clipboard, and to what: that phone
 /// is not sent its own text back.
 static FROM_PHONE: Mutex<Option<(String, String)>> = Mutex::new(None);
@@ -109,6 +146,11 @@ fn take_from_phone() -> Option<(String, String)> {
     FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
+/// Whether `text` came from `device_id` (the note): not sent back to it.
+fn came_from(from: Option<&(String, String)>, device_id: &str, text: &str) -> bool {
+    from.is_some_and(|(id, sent)| id == device_id && sent == text)
+}
+
 /// The connections to push `text` to: those that may have it (`may`), but
 /// not the phone the text came from.
 pub(crate) fn targets(
@@ -119,7 +161,7 @@ pub(crate) fn targets(
 ) -> Vec<Arc<dyn DeviceSender>> {
     clients
         .into_iter()
-        .filter(|c| !from_phone.is_some_and(|(id, sent)| id == c.device_id() && sent == text))
+        .filter(|c| !came_from(from_phone, c.device_id(), text))
         .filter(|c| may(&**c))
         .collect()
 }
@@ -140,7 +182,8 @@ pub(crate) async fn run() {
     loop {
         tick.tick().await;
         let clients = crate::state::clone_clients().await;
-        if clients.is_empty() {
+        let linked = crate::peer_computers::linked();
+        if clients.is_empty() && linked.is_empty() {
             // No phone to tell: what is copied meanwhile is not pushed when
             // one comes back (a phone in a session asks for it itself).
             watch = Watch::default();
@@ -154,16 +197,19 @@ pub(crate) async fn run() {
         // changed, without opening the clipboard.
         #[cfg(windows)]
         {
-            let now = crate::platform::clipboard_windows::sequence();
-            if sequence == Some(now) {
+            // A stand-in clipboard (tests) has no sequence: read each tick.
+            let now = crate::plugins::clipboard::stand_in()
+                .is_none()
+                .then(crate::platform::clipboard_windows::sequence);
+            if now.is_some() && sequence == now {
                 continue;
             }
             // Noted only once the clipboard was read: a read that failed
             // (another app held it) is tried again next tick.
             match crate::plugins::clipboard::read_text().await {
                 Ok(text) => {
-                    sequence = Some(now);
-                    push_change(&mut watch, text, clients).await;
+                    sequence = now;
+                    push_change(&mut watch, text, clients, linked).await;
                 }
                 Err(e) => tracing::debug!("The clipboard was not read: {e}"),
             }
@@ -171,24 +217,35 @@ pub(crate) async fn run() {
         #[cfg(not(windows))]
         {
             let text = crate::plugins::clipboard::read_text().await.ok().flatten();
-            push_change(&mut watch, text, clients).await;
+            push_change(&mut watch, text, clients, linked).await;
         }
     }
 }
 
-/// Push `text` to `clients` if it is a change.
-async fn push_change(watch: &mut Watch, text: Option<String>, clients: Vec<Arc<dyn DeviceSender>>) {
+/// Push `text` to `clients`, and to the computers this one keeps a link to
+/// (`linked`), if it is a change.
+async fn push_change(
+    watch: &mut Watch,
+    text: Option<String>,
+    clients: Vec<Arc<dyn DeviceSender>>,
+    linked: Vec<crate::peer_computers::LinkedComputer>,
+) {
     let Some(text) = watch.observe(text.as_deref()) else {
         return;
     };
     let from_phone = take_from_phone();
     let targets = targets(clients, &text, from_phone.as_ref(), |c| {
-        crate::plugins::pair::permits(c.device_id(), "kdeconnect.clipboard")
+        may_push(c.device_id())
     });
     let packet = packet(&text);
     for target in targets {
         if let Err(e) = target.send_packet(&packet).await {
             tracing::debug!("Clipboard not pushed to {}: {e}", target.device_id());
+        }
+    }
+    for computer in linked {
+        if !came_from(from_phone.as_ref(), &computer.device_id, &text) {
+            computer.send(packet.clone());
         }
     }
 }
@@ -197,6 +254,18 @@ async fn push_change(watch: &mut Watch, text: Option<String>, clients: Vec<Arc<d
 mod tests {
     use super::*;
     use pocketdesk_core::protocol::kdeconnect::TcpDeviceSender;
+
+    #[test]
+    fn a_copy_is_not_sent_back_to_the_device_it_came_from() {
+        let from = ("desk-b".to_string(), "hello".to_string());
+        assert!(came_from(Some(&from), "desk-b", "hello"));
+        assert!(
+            !came_from(Some(&from), "desk-b", "a later copy"),
+            "its own copy goes"
+        );
+        assert!(!came_from(Some(&from), "phone", "hello"), "others get it");
+        assert!(!came_from(None, "desk-b", "hello"));
+    }
 
     #[test]
     fn a_copy_a_password_manager_marks_stays_on_the_computer() {

@@ -39,6 +39,7 @@ mod notification_listener_windows;
 pub mod notification_monitor;
 pub mod offers;
 pub mod packets;
+pub mod peer_computers;
 pub mod platform;
 pub mod plugins;
 pub mod privacy;

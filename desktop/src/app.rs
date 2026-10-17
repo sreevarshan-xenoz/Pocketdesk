@@ -144,6 +144,8 @@ pub struct PocketdeskApp {
     messages: crate::messages_view::MessagesView,
     /// The Notifications tab (T10c).
     notes: crate::notes_view::NotesView,
+    /// Settings → Computers (2f).
+    computers: crate::computers_view::ComputersView,
     /// The Phone tab (T10g).
     phone_files: crate::phone_files_view::PhoneFilesView,
     /// Whether "Send to phone" is in the file manager, as last read (T10e).
@@ -189,6 +191,7 @@ impl PocketdeskApp {
             diagnostics: Default::default(),
             messages: Default::default(),
             notes: Default::default(),
+            computers: Default::default(),
             phone_files: Default::default(),
             send_menu_installed: None,
             browser_registered: None,
@@ -613,6 +616,7 @@ impl PocketdeskApp {
                 for device in &self.snapshot.devices {
                     ui.monospace(short(&device.id)).on_hover_text(&device.id);
                     ui.label(match device.grant_remaining {
+                        None if device.computer => "a computer".to_string(),
                         None => "permanent".to_string(),
                         Some(secs) => format!("{} left", human_duration(secs)),
                     });
@@ -863,6 +867,8 @@ impl PocketdeskApp {
         }
         self.send_menu_setting(ui);
         self.browser_setting(ui);
+        self.computers
+            .show(ui, &self.state_dir, self.snapshot.running, now_unix());
     }
 
     /// "Send from the browser" (ecosystem 1d): the extension's host,
@@ -981,12 +987,12 @@ impl PocketdeskApp {
     /// The phone the send box shows (F7b): the one chosen while it is in a
     /// session, else the first phone that is.
     fn send_target(&self) -> Option<String> {
-        let targets = model::send_targets(&self.snapshot);
+        let targets = model::send_target_ids(&self.snapshot);
         self.send_to
             .as_ref()
-            .filter(|id| targets.iter().any(|d| &d.id == *id))
+            .filter(|id| targets.contains(id))
             .cloned()
-            .or_else(|| targets.first().map(|d| d.id.clone()))
+            .or_else(|| targets.first().cloned())
     }
 
     /// Queue `path` for the chosen phone and say what happened. A chosen
@@ -1002,7 +1008,10 @@ impl PocketdeskApp {
         };
         self.notice = Some(
             match model::queue_send(&self.state_dir, &device, path, now_unix()) {
-                Ok(name) => format!("Sending {name} to {}…", short(&device)),
+                Ok(name) => format!(
+                    "Sending {name} to {}…",
+                    model::target_label(&self.snapshot, &device)
+                ),
                 Err(e) => e,
             },
         );
@@ -1010,7 +1019,7 @@ impl PocketdeskApp {
     }
 
     fn send_box(&mut self, ui: &mut egui::Ui) {
-        ui.strong("Send to a phone");
+        ui.strong("Send a file");
         let Some(device) = self.send_target() else {
             ui.label(
                 RichText::new(
@@ -1021,18 +1030,16 @@ impl PocketdeskApp {
             );
             return;
         };
-        let targets: Vec<String> = model::send_targets(&self.snapshot)
-            .iter()
-            .map(|d| d.id.clone())
-            .collect();
+        let targets = model::send_target_ids(&self.snapshot);
         let mut chosen = device.clone();
+        let label = |id: &str| model::target_label(&self.snapshot, id);
         ui.horizontal(|ui| {
-            ui.label("Phone");
+            ui.label("To");
             egui::ComboBox::from_id_salt("send-to")
-                .selected_text(short(&chosen))
+                .selected_text(label(&chosen))
                 .show_ui(ui, |ui| {
                     for id in &targets {
-                        ui.selectable_value(&mut chosen, id.clone(), short(id));
+                        ui.selectable_value(&mut chosen, id.clone(), label(id));
                     }
                 });
         });
@@ -1078,6 +1085,16 @@ impl PocketdeskApp {
             }
         });
         if let Some(url) = link {
+            // A link opens on a phone; another computer takes files (2h).
+            if self
+                .snapshot
+                .linked_computers
+                .iter()
+                .any(|(id, _)| *id == device)
+            {
+                self.notice = Some("Links go to phones: choose a phone to send it to.".to_string());
+                return;
+            }
             self.notice = Some(
                 match model::queue_link(&self.state_dir, &device, &url, now_unix()) {
                     Ok(said) => {
@@ -1110,7 +1127,7 @@ impl PocketdeskApp {
             .show(ui, |ui| {
                 for file in &self.snapshot.sent {
                     ui.label(&file.name).on_hover_text(&file.path);
-                    ui.label(short(&file.device_id));
+                    ui.label(model::target_label(&self.snapshot, &file.device_id));
                     ui.label(format!(
                         "{} ago",
                         human_duration(now.saturating_sub(file.sent_unix))

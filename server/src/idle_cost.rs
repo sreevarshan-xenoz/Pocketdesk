@@ -94,6 +94,12 @@ mod tests {
             ("clipboard_push (watcher)", || {
                 Box::pin(crate::clipboard_push::run())
             }),
+            ("peer_computers (requests)", || {
+                Box::pin(async {
+                    let certs = pocketdesk_core::streaming::transport::CertManager::new().unwrap();
+                    crate::peer_computers::run(std::sync::Arc::new(certs), None).await
+                })
+            }),
             ("tailscale discovery (every 10 s)", || {
                 Box::pin(async {
                     if let Ok(client) = pocketdesk_core::tailscale::TailscaleClient::new() {

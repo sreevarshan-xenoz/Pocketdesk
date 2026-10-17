@@ -129,6 +129,17 @@ impl Plugin for ClipboardPlugin {
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
+        // Another computer (2f) has the clipboard, text or image, read or
+        // set, only while this one shares it with its computers (2g).
+        if !crate::clipboard_push::with_computers()
+            && crate::plugins::pair::is_computer_device(sender.device_id())
+        {
+            tracing::debug!(
+                "Another computer's {}, with the clipboard not shared here; ignored",
+                packet.packet_type
+            );
+            return Ok(());
+        }
         match packet.packet_type.as_str() {
             "kdeconnect.clipboard" => {
                 // Remote clipboard update - set local clipboard
@@ -144,10 +155,14 @@ impl Plugin for ClipboardPlugin {
                 // Remote requested our clipboard - get and send it. A
                 // clipboard that cannot be read is answered as empty, so the
                 // phone is not left waiting out its query.
-                let clip = read_clipboard().await.unwrap_or_else(|e| {
-                    tracing::debug!("Could not read the clipboard: {e}");
-                    Clip::Empty
-                });
+                let clip = match read_clipboard().await {
+                    Ok(Clip::Text(text)) if is_pairing_link(&text) => Clip::Empty,
+                    Ok(clip) => clip,
+                    Err(e) => {
+                        tracing::debug!("Could not read the clipboard: {e}");
+                        Clip::Empty
+                    }
+                };
                 let response =
                     NetworkPacket::new("kdeconnect.clipboard").with_body(reply_body(&clip));
                 sender.send_packet(&response).await?;
@@ -271,11 +286,46 @@ fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
     share::io_error("clipboard", e)
 }
 
+/// A file that stands in for the clipboard (`POCKETDESK_CLIPBOARD_FILE`, an
+/// absolute path): for tests that run two servers on one machine, which
+/// share its real one (2g). The server warns at start when it is set.
+pub(crate) fn stand_in() -> Option<std::path::PathBuf> {
+    std::env::var_os("POCKETDESK_CLIPBOARD_FILE")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
+/// Whether `text` is a pairing link (`pocketdesk://pair?...`), which the
+/// Pair tab copies for another computer (2f): it holds the PIN, so it goes
+/// to no phone or computer from the clipboard.
+pub(crate) fn is_pairing_link(text: &str) -> bool {
+    text.trim_start().starts_with("pocketdesk://pair?")
+}
+
 /// The clipboard's text, if it holds any (T10b's watcher): never an image,
-/// and never a copy a password manager marked private.
+/// a copy a password manager marked private, or a pairing link.
 /// An error says the clipboard could not be read (another app held it).
-#[cfg(windows)]
 pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
+    let text = match stand_in() {
+        Some(path) => std::fs::read_to_string(path).ok().filter(|t| !t.is_empty()),
+        None => read_system_text().await?,
+    };
+    Ok(text.filter(|t| !is_pairing_link(t)))
+}
+
+/// Set the clipboard's text.
+pub(crate) async fn set_clipboard(content: &str) -> Result<()> {
+    if let Some(path) = stand_in() {
+        // Clipboard text: owner-only, as the real one is.
+        return pocketdesk_core::secure_fs::write_private(&path, content.as_bytes())
+            .map_err(|e| share::io_error("clipboard", e));
+    }
+    set_system_clipboard(content).await
+}
+
+/// [`read_text`] from the system's clipboard.
+#[cfg(windows)]
+async fn read_system_text() -> std::io::Result<Option<String>> {
     use crate::platform::clipboard_windows as win;
     tokio::task::spawn_blocking(|| {
         if !win::has_text() || win::privacy_marks().private() {
@@ -292,7 +342,7 @@ pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
 /// password manager marked private.
 /// `wl-paste` fails on an empty clipboard, so a failure reads as no text.
 #[cfg(not(windows))]
-pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
+async fn read_system_text() -> std::io::Result<Option<String>> {
     let Ok(types) = wl_paste(&["--list-types"]).await else {
         return Ok(None);
     };
@@ -307,7 +357,7 @@ pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
 
 /// Set the system clipboard: the Win32 clipboard on Windows.
 #[cfg(windows)]
-async fn set_clipboard(content: &str) -> Result<()> {
+async fn set_system_clipboard(content: &str) -> Result<()> {
     let content = content.to_string();
     tokio::task::spawn_blocking(move || crate::platform::clipboard_windows::set_text(&content))
         .await
@@ -377,7 +427,7 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
 
 /// Set system clipboard using `wl-copy`.
 #[cfg(not(windows))]
-async fn set_clipboard(content: &str) -> Result<()> {
+async fn set_system_clipboard(content: &str) -> Result<()> {
     wl_copy(None, content.as_bytes()).await
 }
 
@@ -466,6 +516,14 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pairing_link_is_told_from_other_text() {
+        assert!(is_pairing_link("pocketdesk://pair?v=1&id=b&pin=123456"));
+        assert!(is_pairing_link("  pocketdesk://pair?v=1"));
+        assert!(!is_pairing_link("see pocketdesk://pair?v=1"));
+        assert!(!is_pairing_link("https://example.org/"));
+    }
 
     #[test]
     fn an_image_is_known_by_the_sha256_of_its_png() {

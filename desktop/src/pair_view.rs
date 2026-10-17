@@ -316,6 +316,17 @@ impl PairView {
                 ui.label(
                     RichText::new(format!("Reachable at {}", link.addresses.join(", "))).weak(),
                 );
+                // Another of the owner's computers pairs from the link
+                // itself (2f), pasted in its Settings → Computers.
+                if ui
+                    .button("Copy the link for another computer")
+                    .on_hover_text(
+                        "Paste it in the other computer's Settings, under Computers. It holds the                          code: Pocketdesk sends it to no phone, but copy something else after",
+                    )
+                    .clicked()
+                {
+                    ui.ctx().copy_text(link.to_uri());
+                }
                 if link.fingerprint.is_none() {
                     ui.label(
                         RichText::new(

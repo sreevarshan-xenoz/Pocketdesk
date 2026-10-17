@@ -449,6 +449,8 @@ pub struct TrustStore {
     /// F5: deviceId -> what it may do. Only devices whose permissions differ
     /// from the defaults have an entry.
     permissions: HashMap<String, DevicePermissions>,
+    /// 2f: the paired devices that are the owner's other computers.
+    computers: HashSet<String>,
 }
 
 fn unix_now_secs() -> u64 {
@@ -557,6 +559,7 @@ impl TrustStore {
                 trusted_device_ids: HashSet::new(),
                 grants: HashMap::new(),
                 permissions: HashMap::new(),
+                computers: HashSet::new(),
             });
         }
 
@@ -581,11 +584,17 @@ impl TrustStore {
             .into_iter()
             .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
             .collect();
+        let computers = decoded
+            .computers
+            .into_iter()
+            .filter(|id| trusted_device_ids.contains(id))
+            .collect();
         Ok(Self {
             path,
             trusted_device_ids,
             grants,
             permissions,
+            computers,
         })
     }
 
@@ -622,7 +631,25 @@ impl TrustStore {
         self.grants.remove(device_id);
         // A forgotten device that pairs again starts from the defaults.
         self.permissions.remove(device_id);
+        self.computers.remove(device_id);
         self.persist()
+    }
+
+    /// Trust `device_id` as one of the owner's other computers (2f), with
+    /// [`DevicePermissions::computer`]'s narrow permissions.
+    pub fn trust_computer(&mut self, device_id: impl Into<String>) -> Result<()> {
+        let id = device_id.into();
+        self.grants.remove(&id);
+        self.trusted_device_ids.insert(id.clone());
+        let permissions = DevicePermissions::computer();
+        self.permissions.insert(id.clone(), permissions);
+        self.computers.insert(id);
+        self.persist()
+    }
+
+    /// Whether `device_id` is a paired computer, not a phone.
+    pub fn is_computer(&self, device_id: &str) -> bool {
+        self.computers.contains(device_id)
     }
 
     /// The devices paired for good, without the time-boxed guest grants.
@@ -669,10 +696,13 @@ impl TrustStore {
     fn persist(&self) -> Result<()> {
         let mut permanent: Vec<String> = self.trusted_device_ids.iter().cloned().collect();
         permanent.sort();
+        let mut computers: Vec<String> = self.computers.iter().cloned().collect();
+        computers.sort();
         let payload = TrustStoreFile {
             trusted_device_ids: permanent,
             grants: self.grants.clone(),
             permissions: self.permissions.clone(),
+            computers,
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
         // Whole-file replace: the server and the desktop app both write this
@@ -699,6 +729,8 @@ struct TrustStoreFile {
     grants: HashMap<String, u64>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     permissions: HashMap<String, DevicePermissions>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    computers: Vec<String>,
 }
 
 #[derive(Default)]
@@ -902,6 +934,23 @@ mod tests {
         let reloaded = TrustStore::load_or_create(&path).expect("reload trust store");
         assert!(reloaded.is_trusted("device-a"));
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_paired_computer_is_remembered_as_one_with_its_narrow_permissions() {
+        let path = temp_store_path("computer");
+        let mut store = TrustStore::load_or_create(&path).unwrap();
+        store.trust_device("phone").unwrap();
+        store.trust_computer("desk").unwrap();
+        let reloaded = TrustStore::load_or_create(&path).unwrap();
+        assert!(reloaded.is_trusted("desk") && reloaded.is_computer("desk"));
+        assert!(!reloaded.is_computer("phone"));
+        assert_eq!(reloaded.permissions("desk"), DevicePermissions::computer());
+        let mut store = reloaded;
+        store.untrust_device("desk").unwrap();
+        let reloaded = TrustStore::load_or_create(&path).unwrap();
+        assert!(!reloaded.is_computer("desk"), "forgotten with its pairing");
         let _ = std::fs::remove_file(path);
     }
 

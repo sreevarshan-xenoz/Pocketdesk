@@ -26,6 +26,8 @@ pub struct Device {
     pub permissions: DevicePermissions,
     /// Its last battery report (T8b), if it ever sent one.
     pub battery: Option<pocketdesk_core::local::phone_status::PhoneBattery>,
+    /// Another of the owner's computers, paired as one (2f).
+    pub computer: bool,
 }
 
 /// Everything the window shows, read once per refresh.
@@ -45,6 +47,9 @@ pub struct Snapshot {
     /// What each phone in a session plays, as it last said (T8d).
     pub phone_media:
         std::collections::BTreeMap<String, pocketdesk_core::local::phone_media::PhoneMediaState>,
+    /// The other computers this one paired with whose link is up (2h), by
+    /// id and name: files can go to them.
+    pub linked_computers: Vec<(String, String)>,
 }
 
 /// A received file, and whether it is still where it was saved (checked
@@ -83,6 +88,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                 takes_files: takes_files(&id),
                 permissions: store.permissions(&id),
                 battery: batteries.get(&id).copied(),
+                computer: store.is_computer(&id),
                 id,
             })
             .collect(),
@@ -119,6 +125,16 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         } else {
             Default::default()
         },
+        linked_computers: if running {
+            pocketdesk_core::local::computers::read(state_dir)
+                .computers
+                .into_iter()
+                .filter(|c| c.link == "linked")
+                .map(|c| (c.device_id, c.name))
+                .collect()
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -153,21 +169,38 @@ pub fn send_targets(snapshot: &Snapshot) -> Vec<&Device> {
     snapshot.devices.iter().filter(|d| d.takes_files).collect()
 }
 
+/// Everything a file can be sent to now, by id: the phones files reach,
+/// then the other computers whose link is up (2h).
+pub fn send_target_ids(snapshot: &Snapshot) -> Vec<String> {
+    send_targets(snapshot)
+        .iter()
+        .map(|d| d.id.clone())
+        .chain(snapshot.linked_computers.iter().map(|(id, _)| id.clone()))
+        .collect()
+}
+
+/// How a send target is named: a computer by its name, a phone by its id.
+pub fn target_label(snapshot: &Snapshot, id: &str) -> String {
+    match snapshot.linked_computers.iter().find(|(c, _)| c == id) {
+        Some((_, name)) => format!("{name} (computer)"),
+        None => crate::app::short(id),
+    }
+}
+
 /// The phone a send goes to: the one the owner chose, while it is still in
 /// a session; with none chosen, the first phone that is. A chosen phone
 /// that left is an error, never a quiet switch to another phone.
 pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<String, String> {
-    let targets = send_targets(snapshot);
+    let targets = send_target_ids(snapshot);
     match chosen {
-        Some(id) if targets.iter().any(|d| d.id == id) => Ok(id.to_string()),
+        Some(id) if targets.iter().any(|t| t == id) => Ok(id.to_string()),
         Some(_) => Err(
-            "The phone you chose is no longer connected. Choose a phone, then send again."
+            "The phone or computer you chose is no longer connected. Choose one, then send again."
                 .to_string(),
         ),
-        None => targets
-            .first()
-            .map(|d| d.id.clone())
-            .ok_or_else(|| "No phone is connected where files can reach it.".to_string()),
+        None => targets.first().cloned().ok_or_else(|| {
+            "No phone or computer is connected where files can reach it.".to_string()
+        }),
     }
 }
 
@@ -598,6 +631,18 @@ mod tests {
         );
         let empty = snapshot_with(&temp_dir("chosen-none"), 101, true);
         assert!(target_for_send(&empty, None).is_err());
+
+        // A linked computer (2h) is a target too, named by its name.
+        let with_computer = Snapshot {
+            linked_computers: vec![("desk-b".to_string(), "Desk".to_string())],
+            ..Snapshot::default()
+        };
+        assert_eq!(
+            target_for_send(&with_computer, None),
+            Ok("desk-b".to_string())
+        );
+        assert_eq!(target_label(&with_computer, "desk-b"), "Desk (computer)");
+        assert_eq!(target_label(&with_computer, "phone-a"), "phone-a");
     }
 
     #[test]

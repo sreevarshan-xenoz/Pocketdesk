@@ -56,11 +56,13 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Send a file or a folder to a paired phone in a session, as the desktop
-    /// app's Files tab does. Exit codes: 0 done, 1 failed, 2 bad arguments,
-    /// 3 no server running, 4 still waiting when --wait ran out
+    /// Send a file or a folder to a paired phone in a session (or a file to a
+    /// paired computer whose link is up), as the desktop app's Files tab
+    /// does. Exit codes: 0 done, 1 failed, 2 bad arguments, 3 no server
+    /// running, 4 still waiting when --wait ran out
     Send {
-        /// The phone: its device id, or 6 or more of its first characters
+        /// The phone: its device id, or 6 or more of its first characters; or a
+        /// paired computer, also by its name
         phone: String,
         /// The file or folder to send
         path: std::path::PathBuf,

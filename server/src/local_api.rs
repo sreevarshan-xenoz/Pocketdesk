@@ -318,7 +318,8 @@ pub mod exit {
 }
 
 /// Ask the server in `state_dir` to send `path` to the phone `query`
-/// names, as the desktop app's Files tab does (an outbox request), and,
+/// names, or the paired computer (2h), as the desktop app's Files tab does
+/// (an outbox request), and,
 /// with `wait`, wait up to that long for the sent list to say how it went.
 /// What to print, and the exit code.
 pub fn send_in(
@@ -346,16 +347,28 @@ pub fn send_in(
         Ok(store) => store.trusted_devices(),
         Err(reason) => return refused(exit::FAILED, reason),
     };
+    let computers = pocketdesk_core::local::computers::read(state_dir).computers;
     let device_id = match resolve_phone(&ids, query) {
         Ok(id) => id,
-        Err(reason) => return refused(exit::BAD_ARGUMENTS, reason),
+        Err(reason) => match resolve_computer(&computers, query) {
+            Some(Ok(id)) => id,
+            Some(Err(ambiguous)) => return refused(exit::BAD_ARGUMENTS, ambiguous),
+            None => return refused(exit::BAD_ARGUMENTS, reason),
+        },
     };
     // An offer reaches only a phone files can reach (in a session, or
     // holding a control link at home, T10d, or by the internet road with
-    // `internet_files` on, 2c): say so now, not after queueing a send the
-    // server can only fail.
+    // `internet_files` on, 2c), and a computer only while its link is up
+    // (2h): say so now, not after queueing a send the server can only fail.
     let now = pocketdesk_core::local::pin::now_unix();
-    if !live_mirror(state_dir, now, true).is_some_and(|m| m.files_reach(&device_id)) {
+    if let Some(computer) = computers.iter().find(|c| c.device_id == device_id) {
+        if computer.link != "linked" {
+            return refused(
+                exit::FAILED,
+                format!("{} is not linked now ({})", computer.name, computer.link),
+            );
+        }
+    } else if !live_mirror(state_dir, now, true).is_some_and(|m| m.files_reach(&device_id)) {
         return refused(
             exit::FAILED,
             format!(
@@ -708,6 +721,46 @@ pub fn resolve_phone(ids: &[String], query: &str) -> Result<String, String> {
             matches.len()
         )),
     }
+}
+
+/// The paired computer (2h) `query` names: its id, its name in any case,
+/// or 6 or more of its id's first characters; each of one computer only.
+/// `None` when none is named, an error when more than one is.
+fn resolve_computer(
+    computers: &[pocketdesk_core::local::computers::PeerComputer],
+    query: &str,
+) -> Option<Result<String, String>> {
+    let query = query.trim();
+    if let Some(c) = computers.iter().find(|c| c.device_id == query) {
+        return Some(Ok(c.device_id.clone()));
+    }
+    let one_of =
+        |found: Vec<&pocketdesk_core::local::computers::PeerComputer>, by: &str| match found
+            .as_slice()
+        {
+            [] => None,
+            [one] => Some(Ok(one.device_id.clone())),
+            _ => Some(Err(format!(
+                "{} paired computers {by} {query:?}: give its id",
+                found.len()
+            ))),
+        };
+    one_of(
+        computers
+            .iter()
+            .filter(|c| c.name.eq_ignore_ascii_case(query))
+            .collect(),
+        "are named",
+    )
+    .or_else(|| {
+        one_of(
+            computers
+                .iter()
+                .filter(|c| query.chars().count() >= 6 && c.device_id.starts_with(query))
+                .collect(),
+            "have ids starting",
+        )
+    })
 }
 
 /// `pocketdesk devices`.
@@ -1447,6 +1500,42 @@ mod tests {
             pocketdesk_core::local::links::take_all(&dir, pocketdesk_core::local::pin::now_unix())
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_computer_is_named_by_its_id_its_name_or_a_unique_prefix() {
+        let computer = |id: &str, name: &str| pocketdesk_core::local::computers::PeerComputer {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            addresses: Vec::new(),
+            control_port: 1716,
+            fingerprint: String::new(),
+            endpoint: None,
+            paired_unix: 0,
+            link: "linked".to_string(),
+            link_unix: 0,
+        };
+        let computers = [
+            computer("a1b2c3d4e5", "Desk"),
+            computer("a1b2c3ffff", "Laptop"),
+            computer("ffff000011", "Laptop"),
+        ];
+        let id = |q: &str| resolve_computer(&computers, q);
+        assert_eq!(id("desk"), Some(Ok("a1b2c3d4e5".to_string())));
+        assert_eq!(id("a1b2c3ffff"), Some(Ok("a1b2c3ffff".to_string())));
+        assert_eq!(id("a1b2c3d4"), Some(Ok("a1b2c3d4e5".to_string())));
+        assert!(
+            id("a1b2c3")
+                .unwrap()
+                .unwrap_err()
+                .contains("2 paired computers")
+        );
+        assert!(
+            id("laptop").unwrap().unwrap_err().contains("are named"),
+            "never the first of two"
+        );
+        assert_eq!(id("a1b2"), None, "too short");
+        assert_eq!(id("Printer"), None);
     }
 
     #[test]

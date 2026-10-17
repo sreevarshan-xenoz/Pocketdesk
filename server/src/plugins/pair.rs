@@ -84,6 +84,16 @@ pub fn is_paired_device(device_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Is `device_id` one of the owner's other computers (2f)?
+pub fn is_computer_device(device_id: &str) -> bool {
+    let Ok(path) = state::trust_store_path() else {
+        return false;
+    };
+    TrustStore::load_or_create(path)
+        .map(|store| store.is_computer(device_id))
+        .unwrap_or(false)
+}
+
 /// F5: may this device send `packet_type`? Packets that use no capability
 /// always pass. [conn_key] is the deviceId a connection goes by: on TCP the
 /// one its identity named in the handshake and its TLS key backed (phase B),
@@ -590,6 +600,7 @@ impl Plugin for PairPlugin {
             "kdeconnect.pair",
             "kdeconnect.pocketdesk.pair",
             "kdeconnect.identity",
+            WAN_KEY,
         ]
     }
 
@@ -625,10 +636,70 @@ impl Plugin for PairPlugin {
             "kdeconnect.pair" => {
                 handle_pair(&conn, packet, sender).await;
             }
+            WAN_KEY => register_wan_key(&conn, packet, sender),
             _ => {}
         }
         Ok(())
     }
+}
+
+/// A paired computer names its iroh key (2f), as a phone's first LAN
+/// session does with its stream marker.
+pub const WAN_KEY: &str = "kdeconnect.pocketdesk.wan_key";
+
+fn register_wan_key(device_id: &str, packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    let Some(endpoint) = packet
+        .body
+        .get("endpointId")
+        .and_then(|v| v.as_str())
+        .filter(|id| id.parse::<iroh::EndpointId>().is_ok())
+    else {
+        tracing::warn!("A WAN key from {device_id} that names no iroh endpoint; ignored");
+        return;
+    };
+    let Ok(dir) = state::state_dir() else {
+        return;
+    };
+    match register_wan_key_in(
+        &dir,
+        device_id,
+        sender.peer_key().as_ref(),
+        is_paired_device(device_id),
+        is_computer_device(device_id),
+        endpoint,
+    ) {
+        Ok(()) => tracing::info!(device_id, "Registered the device's WAN key"),
+        Err(reason) => tracing::warn!(device_id, "WAN key not registered: {reason}"),
+    }
+}
+
+/// Register `endpoint` as `device_id`'s iroh key: only from a paired
+/// computer on the home road, whose TLS key is the one bound to it (the
+/// trust the stream marker `[0xFC,0x00]` has, `docs/protocol.md` §2.3). A
+/// phone registers its key through a session the owner allowed, as before.
+fn register_wan_key_in(
+    dir: &std::path::Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    paired: bool,
+    computer: bool,
+    endpoint: &str,
+) -> std::result::Result<(), String> {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    if !paired {
+        return Err("not paired".to_string());
+    }
+    if !computer {
+        return Err("only another computer names its key this way".to_string());
+    }
+    let Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) = key else {
+        return Err("only on the home network".to_string());
+    };
+    match device_keys::check(dir, device_id, Slot::Tls, Some(&hex(hash))) {
+        Verdict::Matches => {}
+        _ => return Err("its key is not the one bound to it".to_string()),
+    }
+    device_keys::register(dir, device_id, Slot::Iroh, endpoint).map_err(|e| e.to_string())
 }
 
 /// Generate + surface a PIN for this connection and tell the phone it is
@@ -823,11 +894,17 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                 return;
             }
         }
+        // Another of the owner's computers (2f) asks to be one: the PIN
+        // allowed the pairing, this chooses its narrow permissions. Never a
+        // guest's.
+        let computer = grant_secs.is_none()
+            && packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
             match grant_secs {
                 Some(secs) => {
                     store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
                 }
+                None if computer => store.trust_computer(phone_id.clone()),
                 None => store.trust_device(phone_id.clone()),
             }
         });
@@ -837,6 +914,9 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                     Some(secs) => tracing::info!(
                         "Paired phone {phone_id} on connection {conn} (scoped grant: {secs}s)"
                     ),
+                    None if computer => {
+                        tracing::info!("Paired computer {phone_id} on connection {conn}")
+                    }
                     None => tracing::info!("Paired phone {phone_id} on connection {conn}"),
                 }
                 respond_pair(sender, true, &desktop_id_field()).await;
@@ -1108,6 +1188,52 @@ mod tests {
             may_transfer_in(&dir, "stranger", &PeerKey::Tls([3; 32]), false).is_ok(),
             "unpaired: only possible with pairing off"
         );
+    }
+
+    #[test]
+    fn a_computer_names_its_wan_key_only_at_home_with_its_bound_key() {
+        use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+        let dir = key_dir("wan-key");
+        let tls = PeerKey::Tls([4; 32]);
+        let endpoint = "e".repeat(64);
+        assert!(
+            register_wan_key_in(&dir, "phone", Some(&tls), false, true, &endpoint).is_err(),
+            "unpaired"
+        );
+        assert!(
+            register_wan_key_in(&dir, "phone", Some(&tls), true, true, &endpoint).is_err(),
+            "no TLS key bound yet"
+        );
+        assert!(allowed(&dir, &claim(Some(tls.clone()), None)));
+        assert!(
+            register_wan_key_in(
+                &dir,
+                "phone",
+                Some(&PeerKey::Iroh("f".repeat(64))),
+                true,
+                true,
+                &endpoint
+            )
+            .is_err(),
+            "not by the internet road"
+        );
+        assert!(
+            register_wan_key_in(
+                &dir,
+                "phone",
+                Some(&PeerKey::Tls([5; 32])),
+                true,
+                true,
+                &endpoint
+            )
+            .is_err(),
+            "another TLS key"
+        );
+        register_wan_key_in(&dir, "phone", Some(&tls), true, true, &endpoint).unwrap();
+        assert!(matches!(
+            device_keys::check(&dir, "phone", Slot::Iroh, Some(&endpoint)),
+            Verdict::Matches
+        ));
     }
 
     #[test]
@@ -1474,6 +1600,9 @@ forged log line"
             "kdeconnect.findmydevice",
             "kdeconnect.mousepad.echo",
             "kdeconnect.filebrowse.response",
+            // A computer's iroh key (2f): it holds itself to a paired
+            // device's bound TLS key, on the home road.
+            "kdeconnect.pocketdesk.wan_key",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(
