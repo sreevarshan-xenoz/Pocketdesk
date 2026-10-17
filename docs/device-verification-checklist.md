@@ -1448,7 +1448,7 @@ Two real servers on this box passed `server/tests/two_computers.rs` (2026-10-17)
 - [ ] A folder from B to A lands under one new folder; a folder from A to B is refused with its reason.
 - [ ] Forget on A: the link goes, and B's Devices tab still lists A until removed there; after that, a pairing again works.
 
-## 87. KDE Connect devices (3a)
+## 87. KDE Connect devices (3a–3c)
 
 The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box (port 1720), 2026-10-17:
 
@@ -1460,6 +1460,11 @@ The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box
 - [ ] The desktop app's Find button, list, Allow/Deny and Pair on screen.
 - [x] Find again after the 3a review: the device connected (paired) and held for the minute, one link, no churn.
 - [ ] After the 3b review: Pair from here, Accept on the phone, then Confirm here with the same code (the pin kept only then); Cancel instead unpairs it on the phone; a second request from the phone while one waits shows nothing new.
+- [x] 3c, battery: the A71's KDE Connect sent it as the link came up (100 %, charging), kept in `phone_status.json`.
+- [x] 3c, the clipboard from here (the clipboard stand-in file): pasted on the phone. Found: the watcher rested while only a KDE device was connected, so nothing went; fixed.
+- [x] 3c, the clipboard from the phone ("Send clipboard" in KDE Connect): the computer's set.
+- [x] 3c, files: with Files off, a 3 MB file from KDE Connect's "Send files" was refused and nothing written; with Files on (the permissions request), it arrived in Downloads (the stand-in folder), MD5 matching, marked as downloaded (ZoneId=3), listed in `received.json`.
+- [ ] 3c, Ring (loud; owed), a text or link share not taken, the low-battery warning from a KDE device, and the switches, battery and Ring on screen.
 - [ ] A device that broadcasts first (this computer dialing it): not built (the receive half waits).
 - [ ] Linux, with `kdeconnectd` holding UDP 1716.
 

@@ -1,6 +1,6 @@
 # Working with KDE Connect devices (3a–3c)
 
-Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2.2 (the protocol's facts, with sources) and §3a–3c. Status: 3a and 3b built (see "As built" at the end); 3c to come.
+Date: 2026-10-17. Plan: `docs/research/2026-10-16-next-phase.md` §2.2 (the protocol's facts, with sources) and §3a–3c. Status: 3a–3c built (see the "As built" sections at the end).
 
 ## Goal
 
@@ -106,3 +106,14 @@ The packets test (it would have failed on the KDE identity), the identity made u
 - **The device list holds every paired device,** from the pins, then the others seen (the seen list keeps 32, so throwaway handshakes could push a paired device out, Unpair and all).
 - **Minors fixed:** a pairing that cannot be kept is answered no, and a pin that cannot be forgotten is told; packets are read whole across the loop's other waits (`read_until` into a kept buffer); a link's end clears only its own request; the desktop's answers need the server running; the identity's temporary names come from the path itself; a code vector whose keys straddle 0x80; tests that run the link's loop (a packet cut in half, the idle close in paused time, a newer link closing the older).
 - **Accepted:** any handshake ends a Find's re-broadcasts (a device could stop them early; pressing Find again starts them), and request files are written with default permissions, as `approvals/` are, inside the private state folder.
+
+## As built (3c)
+
+- **Permissions** per paired device in `kdeconnect_devices.json` (`KdePermissions`: Clipboard, Battery and Ring on, Files off), changed only by the server from the desktop app's request; a device paired before 3c reads with the defaults. Each link reads them as each packet comes, so a change holds at once.
+- **Battery:** `kdeconnect.battery` goes through the phone plugin's recording (`phone_battery::take_from`), so a KDE device's report is kept, evented and warned about as a phone's; the writer keeps paired KDE devices' reports. It shows in the KDE section of Settings, not the Devices tab, which lists Pocketdesk pairings.
+- **Clipboard:** taken with `kdeconnect.clipboard`; sent from `clipboard_push` to each live KDE link (the link checks the permission) while `clipboard_push` is on, with the same echo guard as phones. `kdeconnect.clipboard.connect` is neither taken nor sent, a change from the design: each connection would replace the computer's clipboard (or the device's), and the computer keeps no time of its last copy to compare. A paired link reads lines up to 4 MiB, so a long copy does not end it.
+- **Ring:** `kdeconnect.findmydevice.request` from the desktop app's Ring, with the permission.
+- **Files:** as designed, with two files at once, the device silent at most 30 s, the part file in Downloads (named `.pocketdesk-kde-<uuid>.part`, removed on failure) and `share.rs`'s `place`, listing and announcement. With Files off, the owner is told how to allow it. A text or link share (`text`, `url`) is not taken.
+- **Capabilities:** the identity now names incoming ping, battery, clipboard and share, outgoing ping, clipboard and findmydevice; KDE Connect turns a plugin on for this computer when these meet its packets.
+- **Found on the device:** the clipboard watcher rested while no phone or computer was connected, and a KDE link is neither, so nothing reached a KDE-only device; the links count now.
+- **Tests:** each plugin's gate (unpaired, permission off, on), the clipboard both ways and `.connect` not taken, a long line on a paired link and not an unpaired one, a file read whole and a short one leaving nothing, a file over TLS only from the paired certificate, offers held to the rules (a name made safe, no port, a port outside the range, over 8 GiB, a text share), and the sweep of every packet in `docs/packets.md`.
