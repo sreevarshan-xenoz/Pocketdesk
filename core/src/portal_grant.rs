@@ -4,7 +4,8 @@
 //! owner-only, so the next session starts with no one at the desk.
 //!
 //! Each start gives a new token, which replaces the last. A token the portal
-//! refuses (revoked, or lost) only means a dialog again.
+//! refuses (revoked, or lost) means its dialog again, which with no one at
+//! the desk times out and fails that session (N8 review).
 
 use std::path::Path;
 

@@ -1616,6 +1616,16 @@ Owed, on an Android 17 device or the API 37 emulator (the emulator here stalled 
 - [ ] The tray in a real panel: KDE Plasma, waybar or swaybar, GNOME with the AppIndicator extension. Closing hides the window to it, Open brings it back, Pair opens Pair, Quit quits.
 - [ ] A panel restarted while the window is hidden: the item comes back, and starting the app again raises the window.
 - [ ] Wayland (Sway, Hyprland, KDE's Wayland session): closing the window quits; the tray's entries work while it runs.
+## 100. GNOME and KDE hosts that work unattended (N8)
+
+Owed, on a GNOME VM (Ubuntu 24.04, a GNOME session) and KDE where one allows; none of this has run:
+
+- [ ] "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog.
+- [ ] Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there.
+- [ ] Two phones at once, then one leaving: the other's picture and input go on.
+- [ ] Revoking in GNOME's settings brings the dialog back; Forget the grant and turning the setting off make the next session ask.
+- [ ] No RemoteDesktop portal (or refused): the screen alone.
+- [ ] The server started as a systemd user service: does the portal keep its restore data with no desktop app id?
 
 ## Recording results
 
