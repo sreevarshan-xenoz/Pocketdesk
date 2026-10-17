@@ -658,4 +658,5 @@
     <string name="err_sound_not_allowed">Este equipo no deja que este teléfono lo oiga ni sea su micrófono. En el equipo, activa \"Hear and change this computer\'s sound\" o \"Use the phone as a microphone\" para este teléfono en la página Devices de Pocketdesk.</string>
     <string name="sound_here_refused">Este equipo no envía su sonido a este teléfono. En el equipo, activa \"Hear and change this computer\'s sound\" para este teléfono en la página Devices de Pocketdesk</string>
     <string name="sound_mic_refused">Este equipo no usa el micrófono de este teléfono. En el equipo, activa \"Use the phone as a microphone\" para este teléfono en la página Devices de Pocketdesk</string>
+    <string name="err_permissions_changed">El propietario de este equipo cambió lo que puede hacer este teléfono, y eso terminó la sesión. Puede volver a cambiarlo en la página Devices de Pocketdesk.</string>
 </resources>

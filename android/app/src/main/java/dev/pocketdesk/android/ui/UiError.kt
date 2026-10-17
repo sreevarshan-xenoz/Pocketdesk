@@ -22,6 +22,7 @@ fun humanizeError(raw: String): Int {
         // The computer's permissions turned the session down: say which.
         "input not allowed" in l -> R.string.err_input_not_allowed
         "sound not allowed" in l -> R.string.err_sound_not_allowed
+        "permissions changed" in l -> R.string.err_permissions_changed
         "declined" in l || "pairing" in l || PIN.containsMatchIn(l) -> R.string.err_pairing_declined
         "not connected" in l || "disconnected" in l || "closed" in l || "reset" in l ->
             R.string.err_link_dropped
