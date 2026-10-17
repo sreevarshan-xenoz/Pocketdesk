@@ -1,12 +1,15 @@
-//! Settings → KDE Connect devices (3a): look for devices that run KDE
+//! Settings → KDE Connect devices (3a, 3b): look for devices that run KDE
 //! Connect (the server tells the network this computer is here for a
-//! minute), and the devices that have connected. Pairing with one is 3b.
+//! minute), the devices that have connected, and pairing with them: a
+//! device's request waits here with the code both screens show, for Allow
+//! or Deny; Pair asks a device from here. Ping and Unpair once paired.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 use pocketdesk_core::local::kdeconnect::{self, SeenDevice};
+use pocketdesk_core::local::kdeconnect_devices::{self as devices, KdeAsk, Pending};
 
 /// How often the list is read again while the tab is open.
 const REFRESH: Duration = Duration::from_secs(2);
@@ -17,6 +20,7 @@ const FIND_SECS: u64 = 60;
 #[derive(Default)]
 pub struct KdeConnectView {
     seen: Vec<SeenDevice>,
+    pending: Vec<Pending>,
     finding: bool,
     read_at: Option<Instant>,
     notice: Option<String>,
@@ -39,6 +43,7 @@ impl KdeConnectView {
             return;
         }
         self.seen = kdeconnect::read(state_dir);
+        self.pending = devices::pending(state_dir, now_unix);
         self.finding = kdeconnect::finding(state_dir, now_unix);
         self.read_at = Some(Instant::now());
     }
@@ -81,6 +86,37 @@ impl KdeConnectView {
                 }
             }
         });
+        let mut ask = None;
+        for pending in &self.pending {
+            ui.horizontal(|ui| {
+                if pending.from_device {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} asks to pair. It shows the code {}: allow it only if it does.",
+                            pending.name,
+                            spaced(&pending.code)
+                        ))
+                        .strong(),
+                    );
+                    if ui.button("Allow").clicked() {
+                        ask = Some(KdeAsk::Allow {
+                            device_id: pending.device_id.clone(),
+                        });
+                    }
+                    if ui.button("Deny").clicked() {
+                        ask = Some(KdeAsk::Deny {
+                            device_id: pending.device_id.clone(),
+                        });
+                    }
+                } else {
+                    ui.label(format!(
+                        "Waiting for {} to accept: it shows the code {}.",
+                        pending.name,
+                        spaced(&pending.code)
+                    ));
+                }
+            });
+        }
         if self.seen.is_empty() {
             ui.label(RichText::new("None has connected yet.").weak());
         }
@@ -99,7 +135,32 @@ impl KdeConnectView {
                     ))
                     .weak(),
                 );
+                let device_id = device.device_id.clone();
+                if device.paired {
+                    if ui.add_enabled(running, egui::Button::new("Ping")).clicked() {
+                        ask = Some(KdeAsk::Ping {
+                            device_id: device_id.clone(),
+                        });
+                    }
+                    if ui.button("Unpair").clicked() {
+                        ask = Some(KdeAsk::Unpair { device_id });
+                    }
+                } else if ui
+                    .add_enabled(running, egui::Button::new("Pair"))
+                    .on_hover_text("Asks the device; accept it there if it shows the same code")
+                    .clicked()
+                {
+                    ask = Some(KdeAsk::Pair { device_id });
+                }
             });
+        }
+        if let Some(ask) = ask {
+            self.notice = Some(match devices::request(state_dir, ask, now_unix) {
+                Ok(_) => "Asked.".to_string(),
+                Err(e) => format!("Not asked: {e}"),
+            });
+            // Read again soon, for the answer.
+            self.read_at = None;
         }
         if let Some(notice) = &self.notice {
             ui.label(RichText::new(notice).weak());
@@ -107,9 +168,24 @@ impl KdeConnectView {
     }
 }
 
+/// A code as two groups of four, easier to compare by eye.
+pub fn spaced(code: &str) -> String {
+    if code.len() == 8 && code.is_ascii() {
+        format!("{} {}", &code[..4], &code[4..])
+    } else {
+        code.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_code_reads_in_two_groups() {
+        assert_eq!(spaced("1ACBAC75"), "1ACB AC75");
+        assert_eq!(spaced("odd"), "odd");
+    }
 
     #[test]
     fn a_time_reads_in_words() {
