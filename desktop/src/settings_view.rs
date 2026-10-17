@@ -481,17 +481,18 @@ impl SettingsForm {
             Section::Phones => {
                 row(ui, "video_quality", |ui| {
                     egui::ComboBox::from_id_salt("quality")
-                        .selected_text(format!("{:?}", e.video_quality))
+                        .selected_text(quality_label(&e.video_quality))
                         .show_ui(ui, |ui| {
                             for preset in [
                                 VideoQualityPreset::Low,
                                 VideoQualityPreset::Balanced,
                                 VideoQualityPreset::High,
                             ] {
-                                let label = format!("{preset:?}");
+                                let label = quality_label(&preset);
                                 ui.selectable_value(&mut e.video_quality, preset, label);
                             }
                         });
+                    note(ui, "A phone can choose a lower one for its own session.");
                 });
                 row(ui, "allow_hevc", |ui| {
                     ui.checkbox(&mut e.allow_hevc, "use it with phones that can decode it");
@@ -632,7 +633,7 @@ impl SettingsForm {
                 row(ui, "events", |ui| {
                     ui.checkbox(
                         &mut e.events,
-                        "keep a log of what happens, for `pocketdesk events` and scripts",
+                        "keep a log of what happens, for scripts and hooks",
                     );
                     let mut full = e.events_detail == EventsDetail::Full;
                     if ui
@@ -877,6 +878,17 @@ impl SettingsForm {
 }
 
 /// How the several-phones choice reads in the form.
+/// The video quality in the phone's words (U5: the phone said Economy,
+/// Balanced and Max where this page said Low, Balanced and High); the
+/// config's keys stay as they are.
+fn quality_label(preset: &VideoQualityPreset) -> &'static str {
+    match preset {
+        VideoQualityPreset::Low => "Economy",
+        VideoQualityPreset::Balanced => "Balanced",
+        VideoQualityPreset::High => "Max",
+    }
+}
+
 /// How the "Unfinished files" choice reads.
 fn keep_label(hours: u32) -> String {
     match hours {
@@ -1079,6 +1091,13 @@ mod tests {
         form.edited.mqtt_broker = "mqtt://192.0.2.5".into();
         assert!(form.problems().is_empty(), "{:?}", form.problems());
         assert!(split_changes(&Config::default(), &form.edited).1.is_empty());
+    }
+
+    #[test]
+    fn video_quality_reads_as_the_phone_says_it() {
+        assert_eq!(quality_label(&VideoQualityPreset::Low), "Economy");
+        assert_eq!(quality_label(&VideoQualityPreset::Balanced), "Balanced");
+        assert_eq!(quality_label(&VideoQualityPreset::High), "Max");
     }
 
     #[test]

@@ -43,7 +43,7 @@ const PERMISSIONS: [(Capability, &str, &str); 14] = [
     (
         Capability::Audio,
         "Hear and change this computer's sound, and its media",
-        "Plays desktop sound on the phone and sets the volume. Also shows the phone what is          playing here (title, artist, app) and lets it pause and skip.",
+        "Plays this computer's sound on the phone and sets the volume. Also shows the phone what is playing here (title, artist, app) and lets it pause and skip.",
     ),
     (
         Capability::Mic,
