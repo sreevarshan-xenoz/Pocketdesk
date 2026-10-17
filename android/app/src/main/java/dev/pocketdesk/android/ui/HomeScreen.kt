@@ -11,6 +11,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -663,11 +664,13 @@ private fun HostCard(
                     .padding(top = 8.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Button(onClick = onConnect) { Text(connectLabel) }
+                // Narrower than Material's 24 dp sides, so the three fit one row on a phone.
+                val pad = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                Button(onClick = onConnect, contentPadding = pad) { Text(connectLabel) }
                 // The phone as a remote (T10i): trackpad and keys, no picture.
-                OutlinedButton(onClick = onRemote) { Text(stringResource(R.string.remote_button)) }
+                OutlinedButton(onClick = onRemote, contentPadding = pad) { Text(stringResource(R.string.remote_button)) }
                 // This phone's screen on the computer (T10k).
-                OutlinedButton(onClick = onCast) { Text(stringResource(R.string.cast_button)) }
+                OutlinedButton(onClick = onCast, contentPadding = pad) { Text(stringResource(R.string.cast_button)) }
             }
         }
     }
