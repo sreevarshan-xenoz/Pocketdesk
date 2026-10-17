@@ -564,4 +564,5 @@
     <string name="tasks_output_cut">Solo se muestra el final de la salida.</string>
     <string name="tasks_not_sent">no enviada: %1$s</string>
     <string name="tasks_no_answer">sin respuesta: puede que este teléfono no tenga permiso para iniciar tareas (en el ordenador, Dispositivos, \"Iniciar mis tareas\")</string>
+    <string name="card_checking">Comprobando si está encendido…</string>
 </resources>

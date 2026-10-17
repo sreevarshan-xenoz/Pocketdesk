@@ -559,4 +559,5 @@
     <string name="tasks_output_cut">வெளியீட்டின் முடிவு மட்டுமே காட்டப்படுகிறது.</string>
     <string name="tasks_not_sent">அனுப்பப்படவில்லை: %1$s</string>
     <string name="tasks_no_answer">பதில் இல்லை: இந்தத் தொலைபேசி பணிகளைத் தொடங்க அனுமதிக்கப்படாமல் இருக்கலாம் (கணினியில், சாதனங்கள், \"என் பணிகளைத் தொடங்கு\")</string>
+    <string name="card_checking">இது விழித்திருக்கிறதா என்று பார்க்கிறது…</string>
 </resources>

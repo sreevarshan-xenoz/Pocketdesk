@@ -50,6 +50,7 @@ import dev.pocketdesk.android.doctor.BackgroundRunning
 import dev.pocketdesk.android.wake.Waker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -114,6 +115,8 @@ fun HomeScreen(
     var wakeVersion by remember { mutableIntStateOf(0) }
     // A computer that does not answer Connect, offered "Wake and connect".
     var offeringWake by remember { mutableStateOf<HostStore.Host?>(null) }
+    // The card whose tap is still deciding whether its computer is asleep.
+    var checkingAddress by remember { mutableStateOf<String?>(null) }
 
     // The computer is awake once its server answers on the control port
     // (whatever address it is saved under). Away, a LAN address never
@@ -252,6 +255,7 @@ fun HomeScreen(
                 items(hosts, key = { it.address }) { host ->
                     HostCard(
                         host = host,
+                        checking = checkingAddress == host.address,
                         online = host.address in network.savedOnline,
                         isAuto = autoConnect && host == hosts.first(),
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
@@ -261,14 +265,20 @@ fun HomeScreen(
                         onConnect = {
                             if (!Prefs.offerWake(context)) {
                                 onConnect(host)
-                            } else {
+                            } else if (checkingAddress == null) {
                                 // A computer that can be woken and does not
-                                // answer may be asleep: offer to wake it.
+                                // answer may be asleep: offer to wake it. The
+                                // check can take seconds, so the card says so
+                                // and takes no second tap meanwhile (U2).
+                                checkingAddress = host.address
                                 scope.launch {
-                                    val asleep = withContext(Dispatchers.IO) {
-                                        Waker.canWake(Waker.planFor(context, host.address)) &&
-                                            !Waker.answersSoon(host.address, host.controlPort) &&
-                                            !answersOverInternet(context, host)
+                                    val asleep = try {
+                                        withContext(Dispatchers.IO) {
+                                            Waker.canWake(Waker.planFor(context, host.address)) &&
+                                                !Waker.answersSoon(host.address, host.controlPort)
+                                        } && !answersOverInternetWithin(scope, context, host)
+                                    } finally {
+                                        checkingAddress = null
                                     }
                                     if (asleep) offeringWake = host else onConnect(host)
                                 }
@@ -483,6 +493,7 @@ private fun FoundCard(computer: FoundComputer, onConnect: () -> Unit) {
 @Composable
 private fun HostCard(
     host: HostStore.Host,
+    checking: Boolean,
     online: Boolean,
     isAuto: Boolean,
     paired: Boolean,
@@ -534,6 +545,19 @@ private fun HostCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (checking) {
+                Text(
+                    stringResource(R.string.card_checking),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                androidx.compose.material3.LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                )
+            }
             FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -619,6 +643,24 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
  * internet (T10a) before taking it for asleep. A link that comes up is the
  * session's.
  */
+/** How long the asleep check waits on the internet road (U2: a dial there
+ * could take about 30 s, the card waiting all that time). */
+private const val INTERNET_CHECK_MS = 10_000L
+
+/**
+ * [answersOverInternet], waited on for at most [INTERNET_CHECK_MS]: the dial
+ * is a blocking call that cannot be cut short, so it goes on in `scope`, and
+ * a link it makes later is kept; the check takes "no answer" meanwhile.
+ */
+private suspend fun answersOverInternetWithin(
+    scope: kotlinx.coroutines.CoroutineScope,
+    context: android.content.Context,
+    host: HostStore.Host,
+): Boolean {
+    val dial = scope.async(Dispatchers.IO) { answersOverInternet(context, host) }
+    return kotlinx.coroutines.withTimeoutOrNull(INTERNET_CHECK_MS) { dial.await() } ?: false
+}
+
 private fun answersOverInternet(context: android.content.Context, host: HostStore.Host): Boolean {
     val wan = HostStore.wanIdentity(context, host.address) ?: return false
     RustCore.connectToPeer(host.address, host.controlPort, wan)

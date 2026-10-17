@@ -566,4 +566,5 @@
     <string name="tasks_output_cut">Only the end of the output is shown.</string>
     <string name="tasks_not_sent">not sent: %1$s</string>
     <string name="tasks_no_answer">no answer: this phone may not be allowed to start tasks (on the computer, Devices, \"Start my tasks\")</string>
+    <string name="card_checking">Checking whether it is awake…</string>
 </resources>
