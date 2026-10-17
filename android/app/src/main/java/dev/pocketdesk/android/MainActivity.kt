@@ -275,8 +275,6 @@ class MainActivity : ComponentActivity() {
 
                     val pairing = pairLink.value
                     if (pairing != null) {
-                        // Back cancels the confirmation (U2: it left the app).
-                        androidx.activity.compose.BackHandler { pairLink.value = null }
                         Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
                             PairLinkScreen(
                                 uri = pairing,
