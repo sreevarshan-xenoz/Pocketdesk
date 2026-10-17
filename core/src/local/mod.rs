@@ -26,6 +26,7 @@ pub mod phone_media;
 pub mod phone_notes;
 pub mod phone_status;
 pub mod pin;
+pub mod portal_grant;
 pub mod received;
 pub mod rings;
 pub mod send_menu;
