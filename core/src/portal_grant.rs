@@ -11,6 +11,11 @@ use std::path::Path;
 /// Where the last restore token is kept, in the state folder.
 pub const TOKEN_FILE: &str = "portal_restore_token";
 
+/// Where a RemoteDesktop session's is kept (the screen with the keyboard and
+/// pointer, where input goes through the portal): apart, since a token from
+/// one kind of session is refused by the other.
+pub const REMOTE_TOKEN_FILE: &str = "portal_remote_token";
+
 /// The longest token kept; the portal's are UUIDs.
 const MAX_TOKEN: usize = 256;
 
@@ -35,7 +40,16 @@ pub fn request(remember: bool, saved: Option<&str>) -> (Persist, Option<&str>) {
 
 /// The kept token, if there is a usable one.
 pub fn read(state_dir: &Path) -> Option<String> {
-    let raw = std::fs::read_to_string(state_dir.join(TOKEN_FILE)).ok()?;
+    read_file(&state_dir.join(TOKEN_FILE))
+}
+
+/// The kept RemoteDesktop token, if there is a usable one.
+pub fn read_remote(state_dir: &Path) -> Option<String> {
+    read_file(&state_dir.join(REMOTE_TOKEN_FILE))
+}
+
+fn read_file(path: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
     let token = raw.trim();
     let usable = !token.is_empty()
         && token.len() <= MAX_TOKEN
@@ -45,21 +59,33 @@ pub fn read(state_dir: &Path) -> Option<String> {
 
 /// Keep `token`, owner-only, in place of the last.
 pub fn write(state_dir: &Path, token: &str) -> std::io::Result<()> {
+    write_file(&state_dir.join(TOKEN_FILE), token)
+}
+
+/// Keep a RemoteDesktop session's `token`, owner-only, in place of the last.
+pub fn write_remote(state_dir: &Path, token: &str) -> std::io::Result<()> {
+    write_file(&state_dir.join(REMOTE_TOKEN_FILE), token)
+}
+
+fn write_file(path: &Path, token: &str) -> std::io::Result<()> {
     if token.is_empty() || token.len() > MAX_TOKEN || !token.chars().all(|c| c.is_ascii_graphic()) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "not a restore token",
         ));
     }
-    crate::secure_fs::write_private(&state_dir.join(TOKEN_FILE), token.as_bytes())
+    crate::secure_fs::write_private(path, token.as_bytes())
 }
 
-/// Forget the kept token: the next session asks at the desk.
+/// Forget the kept tokens: the next session asks at the desk.
 pub fn forget(state_dir: &Path) -> std::io::Result<()> {
-    match std::fs::remove_file(state_dir.join(TOKEN_FILE)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-        _ => Ok(()),
+    for file in [TOKEN_FILE, REMOTE_TOKEN_FILE] {
+        match std::fs::remove_file(state_dir.join(file)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -91,6 +117,21 @@ mod tests {
         forget(&dir).unwrap();
         assert_eq!(read(&dir), None);
         forget(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A RemoteDesktop session's grant is kept apart from a screen's (a token
+    /// from one is refused by the other), and Forget forgets both.
+    #[test]
+    fn a_remote_desktop_grant_is_kept_apart_and_forgotten_with_the_screen_s() {
+        let dir = temp_dir("remote");
+        write(&dir, "screen").unwrap();
+        write_remote(&dir, "remote").unwrap();
+        assert_eq!(read(&dir).as_deref(), Some("screen"));
+        assert_eq!(read_remote(&dir).as_deref(), Some("remote"));
+        forget(&dir).unwrap();
+        assert_eq!(read(&dir), None);
+        assert_eq!(read_remote(&dir), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
