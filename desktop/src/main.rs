@@ -98,6 +98,7 @@ fn main() -> eframe::Result {
                 cc.storage
                     .and_then(|s| s.get_string(app::PAGE_KEY))
                     .and_then(|key| app::Tab::from_key(&key))
+                    .map(app::kept_page)
             });
             Ok(Box::new(app::PocketdeskApp::new(state_dir, tray, page)))
         }),

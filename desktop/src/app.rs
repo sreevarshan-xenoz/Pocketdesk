@@ -112,6 +112,9 @@ pub struct PocketdeskApp {
     state_dir: PathBuf,
     tray: Option<Tray>,
     tab: Tab,
+    /// The page last chosen, kept for the next run: not the Overview the
+    /// window goes back to when hidden to the tray (U1 review).
+    chosen: Tab,
     snapshot: Snapshot,
     config: Option<Config>,
     log: Vec<String>,
@@ -179,6 +182,7 @@ impl PocketdeskApp {
             state_dir,
             tray,
             tab: Tab::Status,
+            chosen: Tab::Status,
             snapshot: Snapshot::default(),
             config: None,
             log: Vec::new(),
@@ -212,6 +216,7 @@ impl PocketdeskApp {
         };
         if let Some(page) = page {
             app.switch_to(page);
+            app.chosen = page;
         }
         app
     }
@@ -1392,7 +1397,7 @@ impl eframe::App for PocketdeskApp {
     /// The page shown, kept for the next run (eframe keeps the window's
     /// size and place itself).
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        storage.set_string(PAGE_KEY, self.tab.key().to_string());
+        storage.set_string(PAGE_KEY, kept_page(self.chosen).key().to_string());
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1447,6 +1452,7 @@ impl eframe::App for PocketdeskApp {
                             for tab in group.pages {
                                 if ui.selectable_label(self.tab == *tab, tab.name()).clicked() {
                                     self.switch_to(*tab);
+                                    self.chosen = *tab;
                                 }
                             }
                         }
@@ -1483,6 +1489,17 @@ fn status_line(ui: &mut egui::Ui, token: crate::theme::Token, text: &str) {
         ui.painter().circle_filled(rect.center(), 5.0, color);
         ui.label(RichText::new(text).color(color).strong());
     });
+}
+
+/// The page kept for the next run when `chosen` was the last chosen: never
+/// Pair, whose page shows a fresh code (a PIN) nobody asked for at launch
+/// (U1 review).
+pub fn kept_page(chosen: Tab) -> Tab {
+    if chosen == Tab::Pair {
+        Tab::Status
+    } else {
+        chosen
+    }
 }
 
 /// A device id short enough for a table: the first 12 characters.
@@ -1557,6 +1574,17 @@ pub fn human_duration(secs: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_page_kept_is_the_one_chosen_and_never_pair() {
+        use super::{Tab, kept_page};
+        assert_eq!(kept_page(Tab::Settings), Tab::Settings);
+        assert_eq!(
+            kept_page(Tab::Pair),
+            Tab::Status,
+            "no code minted at launch"
+        );
+    }
+
     #[test]
     fn what_a_phone_plays_reads_as_one_line() {
         use pocketdesk_core::protocol::phone_media::PhoneMedia;
