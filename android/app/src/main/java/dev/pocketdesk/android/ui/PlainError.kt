@@ -50,6 +50,15 @@ fun plainError(raw: String?): Plain {
     }
 }
 
+/**
+ * Why a link closed (the transport's own words, "session refused" among
+ * them), as [humanizeError] says it; the raw reason goes to logcat.
+ */
+fun Context.closeReasonText(raw: String): String {
+    Log.w("Pocketdesk", "link closed: $raw")
+    return getString(humanizeError(raw))
+}
+
 /** [plainError] as text, the raw failure logged when it is not shown. */
 fun Context.plainErrorText(raw: String?): String = when (val plain = plainError(raw)) {
     is Plain.Sentence -> plain.text

@@ -138,7 +138,9 @@ fun RemoteInputScreen(
                 state = State.Down
             }
             if (state == State.Down || state == State.TooOld) {
-                reason = closed
+                // The transport's words, said plainly (U2 review), as the
+                // session's error card does.
+                reason = closed?.let { context.closeReasonText(it) }
                 break
             }
             delay(POLL_MS)
