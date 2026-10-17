@@ -79,6 +79,11 @@ pub struct Config {
     /// The most notifications shown from one phone in a minute.
     #[serde(default = "default_notifications_per_minute")]
     pub notifications_per_minute: u32,
+    /// A phone notification that can be answered shows its buttons and a
+    /// reply box here (N3); off, it is plain and the Notifications page
+    /// still answers.
+    #[serde(default = "default_true")]
+    pub toast_answers: bool,
     /// A notification for each text a phone forwards (roadmap N5b).
     #[serde(default = "default_true")]
     pub sms_notify: bool,
@@ -251,6 +256,7 @@ impl Default for Config {
             relay_urls: Vec::new(),
             dht_publish: DhtPublish::Relay,
             phone_notifications: true,
+            toast_answers: true,
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
             sms_keep: default_sms_keep(),
@@ -440,6 +446,7 @@ impl Config {
         "relay_urls",
         "dht_publish",
         "phone_notifications",
+        "toast_answers",
         "notifications_per_minute",
         "sms_notify",
         "open_links",

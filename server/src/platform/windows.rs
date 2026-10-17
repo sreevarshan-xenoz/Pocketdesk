@@ -1,7 +1,10 @@
 //! Windows implementations of [`super`]'s helpers.
 
 use windows::Data::Xml::Dom::XmlDocument;
-use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+use windows::Foundation::{IPropertyValue, TypedEventHandler};
+use windows::UI::Notifications::{
+    ToastActivatedEventArgs, ToastNotification, ToastNotificationManager,
+};
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
@@ -16,7 +19,7 @@ use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
-use windows::core::{HSTRING, PCWSTR, w};
+use windows::core::{HSTRING, IInspectable, Interface, PCWSTR, w};
 
 /// The identity toasts are shown under. An unpackaged app needs one registered
 /// under `HKCU\Software\Classes\AppUserModelId` for Windows to display them.
@@ -369,45 +372,106 @@ fn register_aumid() -> windows::core::Result<()> {
     }
 }
 
-/// Escape text for an XML text node.
-fn xml_text(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
-/// The toast payload: a title line and a body line.
-fn toast_xml(summary: &str, body: &str) -> String {
-    format!(
-        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
-        xml_text(summary),
-        xml_text(body)
-    )
-}
-
 /// The toast group a phone's notifications (N5a) are shown in, so a tag can
 /// address one of them for removal (N5c).
 const PHONE_GROUP: &str = "phone";
 
-fn show_toast(summary: &str, body: &str, tag: Option<&str>) -> windows::core::Result<()> {
+/// The answerable phone toasts (N3), newest last, by tag: each holds its
+/// `Activated` handler, which lives only as long as the toast object does.
+static ANSWERABLE: std::sync::Mutex<std::collections::VecDeque<(String, ToastNotification)>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+/// As many as the notes kept to answer (`phone_notes`).
+const KEEP_ANSWERABLE: usize = 30;
+
+fn answerable()
+-> std::sync::MutexGuard<'static, std::collections::VecDeque<(String, ToastNotification)>> {
+    ANSWERABLE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn show_toast(
+    summary: &str,
+    body: &str,
+    tag: Option<&str>,
+    answers: Option<&crate::toast_answers::Answerable>,
+) -> windows::core::Result<()> {
     // The calling thread may never have touched WinRT; an apartment that is
     // already initialized makes this a no-op error worth ignoring.
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
     register_aumid()?;
     let doc = XmlDocument::new()?;
-    doc.LoadXml(&HSTRING::from(toast_xml(summary, body)))?;
+    // Only a tagged (phone) toast is answered: its tag keeps it alive.
+    let answers = answers.filter(|_| tag.is_some());
+    doc.LoadXml(&HSTRING::from(crate::toast_answers::toast_xml(
+        summary, body, answers,
+    )))?;
     let toast = ToastNotification::CreateToastNotification(&doc)?;
     if let Some(tag) = tag {
         toast.SetTag(&HSTRING::from(tag))?;
         toast.SetGroup(&HSTRING::from(PHONE_GROUP))?;
     }
-    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)
+    if let (Some(answers), Some(_)) = (answers, tag) {
+        let answers = answers.clone();
+        toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
+            move |_, args| {
+                if let Some(answer) = args
+                    .as_ref()
+                    .and_then(|args| args.cast::<ToastActivatedEventArgs>().ok())
+                    .and_then(|args| activation_answer(&args, &answers))
+                {
+                    crate::toast_answers::send(&answers, answer);
+                }
+                Ok(())
+            },
+        ))?;
+    }
+    ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)?;
+    // Kept only once shown, and only while the toast for this tag can be
+    // answered: a plain update of it drops the old one (N3 review).
+    if let Some(tag) = tag {
+        let mut kept = answerable();
+        kept.retain(|(t, _)| t != tag);
+        if answers.is_some() {
+            kept.push_back((tag.to_string(), toast));
+            while kept.len() > KEEP_ANSWERABLE {
+                kept.pop_front();
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What a press on an answerable toast answers: its arguments, and the reply
+/// box's text when there is one.
+fn activation_answer(
+    args: &ToastActivatedEventArgs,
+    answers: &crate::toast_answers::Answerable,
+) -> Option<pocketdesk_core::local::phone_notes::Answer> {
+    let arguments = args.Arguments().ok()?.to_string();
+    let reply = args
+        .UserInput()
+        .ok()
+        .and_then(|input| {
+            input
+                .Lookup(&HSTRING::from(crate::toast_answers::REPLY))
+                .ok()
+        })
+        .and_then(|value| value.cast::<IPropertyValue>().ok())
+        .and_then(|value| value.GetString().ok())
+        .map(|text| text.to_string());
+    crate::toast_answers::toast_answer(&arguments, reply.as_deref(), answers)
 }
 
 /// Show a phone's notification as a toast that [`remove_tagged`] can take
-/// back by `tag` (at most 64 characters).
-pub(super) fn notify_tagged(summary: &str, body: &str, tag: &str) -> bool {
-    match show_toast(summary, body, Some(tag)) {
+/// back by `tag` (at most 64 characters), with its buttons and reply box
+/// when it can be `answers`ed (N3).
+pub(super) fn notify_tagged(
+    summary: &str,
+    body: &str,
+    tag: &str,
+    answers: Option<&crate::toast_answers::Answerable>,
+) -> bool {
+    match show_toast(summary, body, Some(tag), answers) {
         Ok(()) => true,
         Err(e) => {
             tracing::debug!("toast notification failed: {e}");
@@ -419,6 +483,7 @@ pub(super) fn notify_tagged(summary: &str, body: &str, tag: &str) -> bool {
 /// Take the phone toast tagged `tag` off the screen and out of the Action
 /// Center. A tag that is not there is no error.
 pub(super) fn remove_tagged(tag: &str) {
+    answerable().retain(|(t, _)| t != tag);
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
     let removed = ToastNotificationManager::History().and_then(|history| {
         history.RemoveGroupedTagWithId(
@@ -433,7 +498,7 @@ pub(super) fn remove_tagged(tag: &str) {
 }
 
 pub(super) fn notify(summary: &str, body: &str) -> bool {
-    match show_toast(summary, body, None) {
+    match show_toast(summary, body, None, None) {
         Ok(()) => true,
         Err(e) => {
             tracing::debug!("toast notification failed: {e}");
@@ -637,7 +702,8 @@ mod tests {
         assert!(notify_tagged(
             "Pocketdesk test",
             "This toast removes itself",
-            tag
+            tag,
+            None
         ));
         std::thread::sleep(std::time::Duration::from_millis(500));
         assert!(phone_tags_in_history().iter().any(|t| t == tag), "shown");
@@ -713,11 +779,56 @@ mod tests {
 
     #[test]
     fn toast_text_is_escaped_and_loads_as_xml() {
-        let xml = toast_xml("PIN <1234> & go", "a > b");
+        let xml = crate::toast_answers::toast_xml("PIN <1234> & go", "a > b", None);
         assert!(xml.contains("PIN &lt;1234&gt; &amp; go"));
         let doc = XmlDocument::new().unwrap();
         doc.LoadXml(&HSTRING::from(xml))
             .expect("well-formed toast XML");
+    }
+
+    fn answerable() -> crate::toast_answers::Answerable {
+        crate::toast_answers::Answerable {
+            device_id: "phone".into(),
+            key: "0|chat|1|null|10001".into(),
+            actions: vec!["Mark \"read\" & <go>".into(), "Mute".into()],
+            reply: true,
+        }
+    }
+
+    /// N3: Windows takes the reply box and buttons as a toast.
+    #[test]
+    fn an_answerable_toast_loads_as_toast_xml() {
+        let xml = crate::toast_answers::toast_xml("Chat: Ann", "hi", Some(&answerable()));
+        let doc = XmlDocument::new().unwrap();
+        doc.LoadXml(&HSTRING::from(xml.clone()))
+            .expect("well-formed");
+        ToastNotification::CreateToastNotification(&doc).expect("a toast Windows accepts");
+    }
+
+    /// Live (N3): an answerable phone toast is shown, with its reply box and
+    /// buttons, and taken back. Flashes one toast; pressing it is the owner's.
+    /// `cargo test -p pocketdesk-server --lib an_answerable_toast_is_shown -- --ignored`.
+    #[test]
+    #[ignore = "shows a real toast on an interactive Windows desktop"]
+    fn an_answerable_toast_is_shown() {
+        let tag = "fedcba9876543210";
+        assert!(notify_tagged(
+            "Pocketdesk test: Chat",
+            "Reply or press a button",
+            tag,
+            Some(&answerable())
+        ));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert!(phone_tags_in_history().iter().any(|t| t == tag), "shown");
+        assert!(
+            super::answerable().iter().any(|(t, _)| t == tag),
+            "kept to answer"
+        );
+        remove_tagged(tag);
+        assert!(
+            !super::answerable().iter().any(|(t, _)| t == tag),
+            "dropped with its toast"
+        );
     }
 
     /// Live: a toast actually reaches the Action Center. Run on a desktop:

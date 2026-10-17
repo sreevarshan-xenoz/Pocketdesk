@@ -95,8 +95,13 @@ pub fn markup_escaped(text: &str) -> String {
 /// [`remove_tagged`] can take it back (N5c). Windows only; Linux shows and
 /// closes them over D-Bus in the notification plugin.
 #[cfg(windows)]
-pub fn notify_tagged(summary: &str, body: &str, tag: &str) -> bool {
-    windows::notify_tagged(summary, body, tag)
+pub fn notify_tagged(
+    summary: &str,
+    body: &str,
+    tag: &str,
+    answers: Option<&crate::toast_answers::Answerable>,
+) -> bool {
+    windows::notify_tagged(summary, body, tag, answers)
 }
 
 /// Take back the toast [`notify_tagged`] showed with `tag`.

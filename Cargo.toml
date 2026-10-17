@@ -73,6 +73,7 @@ dirs = "5"
 # API families the Windows host uses are enabled.
 windows = { version = "0.62", features = [
     "Foundation",
+    "Foundation_Collections",
     "Graphics_Capture",
     "Graphics_DirectX",
     "ApplicationModel",

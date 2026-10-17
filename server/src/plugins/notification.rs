@@ -122,6 +122,122 @@ fn take_shown(tag: &str) -> Option<u32> {
     shown.remove(at).map(|(_, id)| id)
 }
 
+/// What the notification server shows (N3), asked once it answers.
+#[cfg(target_os = "linux")]
+async fn server_caps(proxy: &zbus::Proxy<'static>) -> crate::toast_answers::DbusCaps {
+    static CAPS: tokio::sync::OnceCell<crate::toast_answers::DbusCaps> =
+        tokio::sync::OnceCell::const_new();
+    CAPS.get_or_try_init(|| async {
+        proxy
+            .call::<_, _, Vec<String>>("GetCapabilities", &())
+            .await
+            .map(|caps| crate::toast_answers::DbusCaps::from_list(&caps))
+    })
+    .await
+    .copied()
+    .unwrap_or_default()
+}
+
+/// The answerable phone notifications shown over D-Bus (N3), by their
+/// D-Bus id, newest last: a press names only the id.
+#[cfg(target_os = "linux")]
+fn answerable_ids()
+-> &'static Mutex<std::collections::VecDeque<(u32, crate::toast_answers::Answerable)>> {
+    static IDS: std::sync::OnceLock<
+        Mutex<std::collections::VecDeque<(u32, crate::toast_answers::Answerable)>>,
+    > = std::sync::OnceLock::new();
+    IDS.get_or_init(Default::default)
+}
+
+/// As many as the notes kept to answer (`phone_notes`).
+#[cfg(target_os = "linux")]
+const MAX_ANSWERABLE: usize = 30;
+
+#[cfg(target_os = "linux")]
+fn remember_answerable(id: u32, answers: crate::toast_answers::Answerable) {
+    let mut ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
+    ids.retain(|(i, _)| *i != id);
+    ids.push_back((id, answers));
+    while ids.len() > MAX_ANSWERABLE {
+        ids.pop_front();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn forget_answerable(id: u32) {
+    let mut ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
+    ids.retain(|(i, _)| *i != id);
+}
+
+#[cfg(target_os = "linux")]
+fn answerable_for(id: u32) -> Option<crate::toast_answers::Answerable> {
+    let ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
+    ids.iter().find(|(i, _)| *i == id).map(|(_, a)| a.clone())
+}
+
+/// Listen, for the server's life, for presses on the answerable
+/// notifications (N3): started at the first, again after a failure.
+#[cfg(target_os = "linux")]
+fn listen_for_answers() {
+    static LISTENING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if LISTENING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    tokio::spawn(async {
+        if let Err(e) = answer_signals().await {
+            tracing::warn!("Answers from notifications stopped: {e}");
+        }
+        // A notification server that restarted counts its ids from 1
+        // again: the ids kept no longer name ours (N3 review).
+        answerable_ids()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        LISTENING.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// `ActionInvoked` (a button) and `NotificationReplied` (KDE's inline
+/// reply) on this computer's notifications, answered for the ones shown
+/// as answerable; any other notification's are not ours.
+#[cfg(target_os = "linux")]
+async fn answer_signals() -> Result<()> {
+    use futures_lite::StreamExt;
+    let failed = |e: zbus::Error| pocketdesk_core::error::PocketdeskError::Other {
+        detail: format!("D-Bus signals failed: {e}"),
+    };
+    let proxy = notifications_proxy().await?;
+    let mut invoked = proxy
+        .receive_signal("ActionInvoked")
+        .await
+        .map_err(failed)?;
+    let mut replied = proxy
+        .receive_signal("NotificationReplied")
+        .await
+        .map_err(failed)?;
+    loop {
+        tokio::select! {
+            Some(message) = invoked.next() => {
+                if let Ok((id, key)) = message.body().deserialize::<(u32, String)>()
+                    && let Some(answers) = answerable_for(id)
+                    && let Some(answer) = crate::toast_answers::dbus_action_answer(&key, &answers)
+                {
+                    crate::toast_answers::send(&answers, answer);
+                }
+            }
+            Some(message) = replied.next() => {
+                if let Ok((id, text)) = message.body().deserialize::<(u32, String)>()
+                    && let Some(answers) = answerable_for(id)
+                    && let Some(answer) = crate::toast_answers::dbus_reply_answer(&text, &answers)
+                {
+                    crate::toast_answers::send(&answers, answer);
+                }
+            }
+            else => return Ok(()),
+        }
+    }
+}
+
 /// The longest app name, title and text shown, in characters.
 const MAX_APP: usize = 64;
 const MAX_TITLE: usize = 200;
@@ -260,14 +376,20 @@ impl Plugin for NotificationPlugin {
                     return Ok(());
                 }
                 // One that offers buttons or a reply is kept for the desktop
-                // app to answer (T10c).
+                // app to answer (T10c), and answered in its notification here
+                // too (N3).
+                let answers = note
+                    .as_ref()
+                    .filter(|_| crate::events::current_config().toast_answers)
+                    .map(crate::toast_answers::Answerable::of);
                 if let Some(note) = note
                     && let Ok(dir) = crate::state::state_dir()
                     && let Err(e) = phone_notes::keep(&dir, note)
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }
-                if let Err(e) = show_desktop_notification(tag.as_deref(), &app, &title, &text).await
+                if let Err(e) =
+                    show_desktop_notification(tag.as_deref(), &app, &title, &text, answers).await
                 {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
@@ -421,23 +543,47 @@ async fn notifications_proxy() -> Result<zbus::Proxy<'static>> {
 /// replacing the one with id `replaces` (0: none), and return the id the
 /// notification server gave it.
 #[cfg(target_os = "linux")]
-async fn send_notification_dbus(summary: &str, body: &str, replaces: u32) -> Result<u32> {
+async fn send_notification_dbus(
+    summary: &str,
+    body: &str,
+    replaces: u32,
+    answers: Option<&crate::toast_answers::Answerable>,
+) -> Result<u32> {
     let proxy = notifications_proxy().await?;
     // Markup is escaped: the text may be a stranger's (N5a).
     let summary = crate::platform::markup_escaped(summary);
     let body = crate::platform::markup_escaped(body);
+    // N3: an answerable one carries its buttons, and KDE's inline reply
+    // when it takes one, as far as the server shows them; it stays longer,
+    // to be answered.
+    let caps = if answers.is_some() {
+        server_caps(&proxy).await
+    } else {
+        Default::default()
+    };
+    let actions = answers
+        .map(|a| crate::toast_answers::dbus_actions(a, caps))
+        .unwrap_or_default();
+    let mut hints = std::collections::HashMap::<String, zbus::zvariant::Value>::new();
+    if caps.inline_reply && answers.is_some_and(|a| a.reply) {
+        hints.insert(
+            "x-kde-reply-placeholder-text".to_string(),
+            zbus::zvariant::Value::from("Reply"),
+        );
+    }
+    let timeout: i32 = if actions.is_empty() { 5000 } else { 20_000 };
     proxy
         .call::<_, _, u32>(
             "Notify",
             &(
-                "Pocketdesk",                                                      // app_name
-                replaces,                                                          // replaces_id
-                "",                                                                // app_icon
-                summary.as_str(),                                                  // summary
-                body.as_str(),                                                     // body
-                Vec::<String>::new(),                                              // actions
-                std::collections::HashMap::<String, zbus::zvariant::Value>::new(), // hints
-                5000i32, // timeout (5 seconds)
+                "Pocketdesk", // app_name
+                replaces,     // replaces_id
+                "",           // app_icon
+                summary.as_str(),
+                body.as_str(),
+                actions,
+                hints,
+                timeout,
             ),
         )
         .await
@@ -455,16 +601,26 @@ async fn show_desktop_notification(
     app: &str,
     title: &str,
     text: &str,
+    answers: Option<crate::toast_answers::Answerable>,
 ) -> Result<()> {
     let summary = format!("{}: {}", app, title);
 
     #[cfg(target_os = "linux")]
     {
         let replaces = tag.and_then(shown_id).unwrap_or(0);
-        match send_notification_dbus(&summary, text, replaces).await {
+        match send_notification_dbus(&summary, text, replaces, answers.as_ref()).await {
             Ok(id) => {
                 if let Some(tag) = tag {
                     remember_shown(tag, id);
+                }
+                // A plain update of an answerable one is answerable no
+                // more (N3 review).
+                match &answers {
+                    Some(answers) => {
+                        remember_answerable(id, answers.clone());
+                        listen_for_answers();
+                    }
+                    None => forget_answerable(id),
                 }
                 tracing::info!("Desktop notification shown: {}", title);
                 return Ok(());
@@ -479,7 +635,12 @@ async fn show_desktop_notification(
         #[cfg(windows)]
         {
             match &toast_tag {
-                Some(tag) => crate::platform::notify_tagged(&toast_summary, &toast_text, tag),
+                Some(tag) => crate::platform::notify_tagged(
+                    &toast_summary,
+                    &toast_text,
+                    tag,
+                    answers.as_ref(),
+                ),
                 None => crate::platform::notify(
                     &toast_summary,
                     &toast_text,
@@ -489,7 +650,8 @@ async fn show_desktop_notification(
         }
         #[cfg(not(windows))]
         {
-            let _ = toast_tag;
+            // The D-Bus path above answers; notify-send cannot.
+            let _ = (toast_tag, answers);
             crate::platform::notify(
                 &toast_summary,
                 &toast_text,
@@ -516,6 +678,7 @@ async fn close_desktop_notification(tag: &str) {
     }
     #[cfg(target_os = "linux")]
     if let Some(id) = take_shown(tag) {
+        forget_answerable(id);
         let closed = async {
             notifications_proxy()
                 .await?
