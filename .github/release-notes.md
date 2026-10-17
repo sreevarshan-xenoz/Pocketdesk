@@ -43,7 +43,8 @@ Pocketdesk 0.4.0 opens Pocketdesk to the rest of your setup. Automations, Home A
 - On a slow link, the session lowers its bitrate to what the link actually carries and steps the frame rate down, instead of showing a frozen picture.
 
 **Reliability**
-- Fixed a crash when the server stopped during a session: code was running inside an unloaded Windows capture library. A stress test of 400 overlapping sessions now runs clean.
+- Fixed a crash when the server stopped during a session: code was running inside an unloaded Windows capture library. The server now also holds COM's apartment for its life, which closes that kind of crash for the other Windows libraries it uses. A stress test of 400 overlapping sessions runs clean.
+- When Windows Graphics Capture cannot start, the server now falls back to DXGI capture. Before, the fallback always failed.
 - The phone's control link comes up with the stream after a reconnect, so sends no longer fail with "phone not connected".
 - A Wi-Fi return no longer opens two streams.
 - The idle server uses much less CPU: one folder watcher replaces eight pollers, and on Linux the clipboard is watched by a single `wl-paste --watch`.
