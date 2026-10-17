@@ -46,3 +46,18 @@ As designed, with these found on the way:
 
 **Owed:** the tray in a real panel (KDE Plasma, waybar, GNOME with AppIndicator), with the window hidden and brought back.
 
+**Fresh review (0 Critical, 4 Important, 4 Minor), fixed one commit each:**
+- On Linux, a window hidden to a tray that then went away was out of reach: a second launch only exited, though this spec said it raised the window. The first instance now listens on its socket and raises its window for each later launch.
+- On Wayland, which lets no app hide its own window, close-to-tray cancelled the close and left the window where it was. There closing now quits.
+- The link box outlived its phone and sent anyway. It now closes when the phone is gone or the page is left, and says why while the phone cannot take a link.
+- Rows did not use `device_label`, so two phones of one model read alike.
+- Minors:
+  - Send link… needs the control link, as the server does.
+  - A refused attempt no longer counts as a last session.
+  - The log is read only when it changes.
+  - A tray host that never answers gets 3 s, then the app goes on without a tray.
+  - "Paired phones" counts phones only.
+  - A stale AGENTS line.
+
+The tray was checked again in WSL after the fixes, with the same results.
+

@@ -1614,7 +1614,8 @@ Owed, on an Android 17 device or the API 37 emulator (the emulator here stalled 
 - [x] Linux tray in WSL on a private D-Bus session with a stand-in watcher: registered with its title, category and icon; the menu's three entries; a click on the icon, Pair and Quit reach the app; no watcher, no tray.
 - [ ] Send link… sends a typed link from the Overview, and Ring rings from there.
 - [ ] The tray in a real panel: KDE Plasma, waybar or swaybar, GNOME with the AppIndicator extension. Closing hides the window to it, Open brings it back, Pair opens Pair, Quit quits.
-- [ ] A panel restarted while the window is hidden: the item comes back, or starting the app again raises the window.
+- [ ] A panel restarted while the window is hidden: the item comes back, and starting the app again raises the window.
+- [ ] Wayland (Sway, Hyprland, KDE's Wayland session): closing the window quits; the tray's entries work while it runs.
 
 ## Recording results
 
