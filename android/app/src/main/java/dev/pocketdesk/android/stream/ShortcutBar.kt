@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -23,19 +24,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.ui.plainErrorText
 import dev.pocketdesk.android.ui.rememberLlHaptics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import dev.pocketdesk.android.ui.plainErrorText
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
 
 /**
  * Desktop shortcut bar (Tier 1 #3): keys a touchscreen cannot produce.
@@ -141,11 +143,13 @@ private fun Shortcut(
     val haptics = rememberLlHaptics()
     Box(
         modifier = Modifier
-            .height(32.dp)
-            .widthIn(min = 32.dp)
-            .clip(RoundedCornerShape(16.dp))
+            // 48 dp to the touch, however small it looks (U4).
+            .minimumInteractiveComponentSize()
+            .height(36.dp)
+            .widthIn(min = 36.dp)
+            .clip(RoundedCornerShape(18.dp))
             .background(color.copy(alpha = 0.14f))
-            .clickable {
+            .clickable(role = Role.Button) {
                 haptics.tap()
                 scope.launch(Dispatchers.IO) {
                     action().onFailure {
