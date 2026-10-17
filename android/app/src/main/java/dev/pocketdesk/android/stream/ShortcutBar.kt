@@ -32,6 +32,10 @@ import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.rememberLlHaptics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import dev.pocketdesk.android.ui.plainErrorText
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 
 /**
  * Desktop shortcut bar (Tier 1 #3): keys a touchscreen cannot produce.
@@ -51,6 +55,8 @@ fun ShortcutBar(
     address: String,
     port: Int,
     modifier: Modifier = Modifier,
+    // U2: what to say when a key did not reach the computer.
+    onFailed: (String) -> Unit = {},
 ) {
     val content = Color.White
     Surface(
@@ -68,11 +74,11 @@ fun ShortcutBar(
         ) {
             val press = KeyEvent.KEYCODE_META_LEFT
             GroupLabel(stringResource(R.string.shortcut_system), content)
-            Shortcut("Super", content) { RustCore.tapKey(address, port, press) }
-            Shortcut("Alt+Tab", content) {
+            Shortcut("Super", content, onFailed) { RustCore.tapKey(address, port, press) }
+            Shortcut("Alt+Tab", content, onFailed) {
                 RustCore.hotkey(address, port, KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_ALT_LEFT)
             }
-            Shortcut("Ctrl+Alt+Del", content) {
+            Shortcut("Ctrl+Alt+Del", content, onFailed) {
                 RustCore.hotkey(
                     address,
                     port,
@@ -81,12 +87,12 @@ fun ShortcutBar(
                     KeyEvent.KEYCODE_ALT_LEFT,
                 )
             }
-            Shortcut("PrtSc", content) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_SYSRQ) }
-            Shortcut("Esc", content) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_ESCAPE) }
+            Shortcut("PrtSc", content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_SYSRQ) }
+            Shortcut("Esc", content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_ESCAPE) }
             Divider(content)
             GroupLabel(stringResource(R.string.shortcut_workspaces), content)
             (1..9).forEach { workspace ->
-                Shortcut("W$workspace", content) {
+                Shortcut("W$workspace", content, onFailed) {
                     RustCore.hotkey(
                         address,
                         port,
@@ -126,9 +132,12 @@ private fun Divider(color: Color) {
 private fun Shortcut(
     label: String,
     color: Color,
+    onFailed: (String) -> Unit,
     action: () -> Result<Unit>,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val resources = LocalResources.current
     val haptics = rememberLlHaptics()
     Box(
         modifier = Modifier
@@ -138,7 +147,16 @@ private fun Shortcut(
             .background(color.copy(alpha = 0.14f))
             .clickable {
                 haptics.tap()
-                scope.launch(Dispatchers.IO) { action() }
+                scope.launch(Dispatchers.IO) {
+                    action().onFailure {
+                        val said = resources.getString(
+                            R.string.shortcut_failed,
+                            label,
+                            context.plainErrorText(it.message),
+                        )
+                        withContext(Dispatchers.Main) { onFailed(said) }
+                    }
+                }
             }
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,

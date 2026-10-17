@@ -224,16 +224,17 @@
 
     <!-- Pairing sheet -->
     <string name="pair_title">%1$s உடன் இணை</string>
-    <string name="pair_read_pin">டெஸ்க்டாப் திரையில் PIN ஐப் படியுங்கள்…</string>
-    <string name="pair_pin_ready">டெஸ்க்டாப்பில் PIN காட்டுகிறது (`pocketdesk pair`) — கீழே தட்டிடுங்கள்.</string>
-    <string name="pair_error">பிழை: %1$s</string>
-    <string name="pair_no_pin">டெஸ்க்டாப் PIN ஐ உறுதிப்படுத்தவில்லை.</string>
+    <string name="pair_read_pin">கணினித் திரையில் PIN ஐப் படியுங்கள்…</string>
+    <string name="pair_pin_ready">கணினியில் PIN காட்டுகிறது. கீழே தட்டச்சு செய்யுங்கள்.</string>
+    <string name="pair_error">இணைக்கப்படவில்லை: %1$s</string>
+    <string name="pair_no_pin">கணினி PIN ஐ உறுதிப்படுத்தவில்லை.</string>
     <string name="pair_wrong_pin">தவறான அல்லது காலாவதியான PIN.</string>
-    <string name="pair_waiting">டெஸ்க்டாப்பிற்காகக் காத்திருக்கிறது…</string>
-    <string name="pair_show_pin">டெஸ்க்டாப்பில் PIN காட்டு</string>
+    <string name="pair_waiting">கணினிக்காகக் காத்திருக்கிறது…</string>
+    <string name="pair_show_pin">கணினியில் PIN காட்டு</string>
     <string name="pair_pin_label">6-இலக்க PIN</string>
     <string name="pair_reveal_pin">PIN-ஐக் காட்டு</string>
-    <string name="pair_enter_pin">டெஸ்க்டாப் PIN ஐ உள்ளிடுங்கள்</string>
+    <string name="pair_hide_pin">PIN-ஐ மறை</string>
+    <string name="pair_submit">இணை</string>
     <string name="cancel">ரத்து</string>
 
     <!-- Window picker -->
@@ -281,8 +282,8 @@
     <string name="err_lan_only">LAN மூலம் அணுக முடியவில்லை; இந்த டெஸ்க்டாப்பில் சேமித்த இணைய (WAN) அடையாளம் இல்லை. முதலில் ஒரே வலையத்தில் இருந்து இணையுங்கள்.</string>
     <string name="err_trust_mismatch">பாதுகாப்பு நற்சான்றங்கள் இந்த டெஸ்க்டாப்புடன் பொருந்தவில்லை. தொடர மீண்டும் இணையுங்கள்.</string>
     <string name="err_pairing_declined">டெஸ்க்டாப் இணைவை மறுத்தது — PIN தவறு அல்லது காலாவதியானது.</string>
-    <string name="err_link_dropped">வீடியோ இணைப்பு அறுந்தது. டெஸ்க்டாப் உறங்கியிருக்கலாம் அல்லது வலையத்தை விட்டு வெளியேறியிருக்கலாம்.</string>
-    <string name="err_generic">டெஸ்க்டாப்பை அணுகும்போது ஏதோ தவறு நடந்தது.</string>
+    <string name="err_link_dropped">கணினியுடனான இணைப்பு அறுந்தது. அது உறங்கியிருக்கலாம் அல்லது வலையத்தை விட்டு வெளியேறியிருக்கலாம்.</string>
+    <string name="err_generic">கணினியை அணுகும்போது ஏதோ தவறு நடந்தது.</string>
     <string name="connecting_still">முயற்சி தொடர்கிறது… டெஸ்க்டாப் விழிப்புடன் Pocketdesk-உடன் உள்ளதா பார்க்கவும்.</string>
     <string name="waiting_for_picture">இணைந்தது — திரைக்காகக் காத்திருக்கிறது…</string>
     <string name="waiting_for_approval">இந்தக் கணினி ஒவ்வொரு அமர்வுக்கும் முன் அனுமதி கேட்டால், அங்கே அனுமதிக்கவும்.</string>
@@ -295,7 +296,7 @@
     <string name="pair_link_unreachable">டெஸ்க்டாப்பை அதன் எந்த முகவரியிலும் அடைய முடியவில்லை. இந்த ஃபோன் அதே பிணையம் அல்லது tailnet-இல் உள்ளதா? (%1$s)</string>
     <string name="pair_link_invalid">அது Pocketdesk இணைப்புக் குறியீடு அல்ல.</string>
     <string name="scan_pairing_code">இணைப்புக் குறியீட்டை ஸ்கேன் செய்</string>
-    <string name="scan_hint">Pocketdesk டெஸ்க்டாப் செயலியில் உள்ள குறியீட்டை நோக்கி கேமராவைக் காட்டுங்கள் (Pair தாவல்).</string>
+    <string name="scan_hint">உங்கள் கணினியில் உள்ள Pocketdesk செயலியின் Pair பக்கத்தில் உள்ள குறியீட்டை நோக்கி கேமராவைக் காட்டுங்கள்.</string>
     <string name="scan_need_camera">குறியீட்டைப் படிக்க Pocketdesk-க்கு கேமரா தேவை. முகவரி மற்றும் PIN மூலமும் கணினியைச் சேர்க்கலாம்.</string>
     <string name="scan_allow_camera">கேமராவை அனுமதி</string>
     <string name="pair_link_confirm_title">%1$s இல் உள்ள கணினியுடன் இணைக்கவா?</string>
@@ -559,4 +560,15 @@
     <string name="tasks_output_cut">வெளியீட்டின் முடிவு மட்டுமே காட்டப்படுகிறது.</string>
     <string name="tasks_not_sent">அனுப்பப்படவில்லை: %1$s</string>
     <string name="tasks_no_answer">பதில் இல்லை: இந்தத் தொலைபேசி பணிகளைத் தொடங்க அனுமதிக்கப்படாமல் இருக்கலாம் (கணினியில், சாதனங்கள், \"என் பணிகளைத் தொடங்கு\")</string>
+    <string name="card_checking">இது விழித்திருக்கிறதா என்று பார்க்கிறது…</string>
+    <!-- U2: Lock asks first; Lock, Ring and the shortcut keys say what happened. -->
+    <string name="lock_confirm_title">கணினியைப் பூட்டவா?</string>
+    <string name="lock_confirm_message">அதன் திரை பூட்டப்படும்; அதன் சொந்தக் கடவுச்சொல் மட்டுமே திறக்கும்.</string>
+    <string name="lock_confirm">பூட்டு</string>
+    <string name="lock_done">கணினி பூட்டப்பட்டது.</string>
+    <string name="lock_failed">கணினி பூட்டப்படவில்லை: %1$s</string>
+    <string name="ring_sent">கணினியை ஒலிக்கச் சொன்னோம்.</string>
+    <string name="ring_failed">கணினியை ஒலிக்கச் செய்ய முடியவில்லை: %1$s</string>
+    <string name="key_failed">அந்த விசை கணினியை அடையவில்லை: %1$s</string>
+    <string name="shortcut_failed">%1$s கணினியை அடையவில்லை: %2$s</string>
 </resources>

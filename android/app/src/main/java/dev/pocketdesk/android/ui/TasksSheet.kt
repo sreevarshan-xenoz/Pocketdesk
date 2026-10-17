@@ -65,7 +65,7 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                     Task(task.optString("name"), task.optBoolean("ask", true))
                 }
             }.onSuccess { tasks = it }
-            .onFailure { failure = it.message ?: it.toString() }
+            .onFailure { failure = context.plainErrorText(it.message) }
     }
 
     // Follow the run until it ends.
@@ -76,7 +76,7 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
             RustCore.runTask(address, controlPort, started.task.name, started.id)
         }
         sent.exceptionOrNull()?.let {
-            val status = Status.NotSent(it.message ?: it.toString())
+            val status = Status.NotSent(context.plainErrorText(it.message))
             run = started.copy(status = status)
             tellFinished(context, address, started.task.name, status)
             return@LaunchedEffect

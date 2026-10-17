@@ -53,6 +53,12 @@ fun PairLinkScreen(
     var outcome by remember(uri) { mutableStateOf<PairOutcome?>(null) }
     var confirmed by remember(uri) { mutableStateOf(false) }
     val link = parsed.getOrNull()
+    // Back cancels as Cancel does (U2: it left the app), and only when
+    // Cancel shows: a pairing under way runs to its end, or the computer
+    // could keep this phone paired while the phone saved nothing.
+    androidx.activity.compose.BackHandler {
+        if (link == null || outcome != null || !confirmed) onBack()
+    }
 
     LaunchedEffect(uri, confirmed) {
         if (link == null || !confirmed) return@LaunchedEffect
@@ -119,14 +125,16 @@ fun PairLinkScreen(
             else -> Text(
                 stringResource(
                     R.string.pair_link_unreachable,
-                    (outcome as? PairOutcome.Unreachable)?.lastError.orEmpty(),
+                    androidx.compose.ui.platform.LocalContext.current.plainErrorText(
+                        (outcome as? PairOutcome.Unreachable)?.lastError,
+                    ),
                 ),
                 textAlign = TextAlign.Center,
             )
         }
         if (link == null || outcome != null || !confirmed) {
             Spacer(Modifier.height(16.dp))
-            TextButton(onClick = onBack) { Text(stringResource(R.string.exit)) }
+            TextButton(onClick = onBack) { Text(stringResource(R.string.cancel)) }
         }
     }
 }

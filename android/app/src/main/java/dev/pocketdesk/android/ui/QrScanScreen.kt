@@ -76,7 +76,7 @@ fun QrScanScreen(onCode: (String) -> Unit, onBack: () -> Unit) {
             Button(onClick = { askCamera.launch(Manifest.permission.CAMERA) }) {
                 Text(stringResource(R.string.scan_allow_camera))
             }
-            TextButton(onClick = onBack) { Text(stringResource(R.string.exit)) }
+            TextButton(onClick = onBack) { Text(stringResource(R.string.cancel)) }
         }
         return
     }
@@ -93,7 +93,7 @@ fun QrScanScreen(onCode: (String) -> Unit, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
             )
-            TextButton(onClick = onBack) { Text(stringResource(R.string.exit), color = Color.White) }
+            TextButton(onClick = onBack) { Text(stringResource(R.string.cancel), color = Color.White) }
         }
     }
 }

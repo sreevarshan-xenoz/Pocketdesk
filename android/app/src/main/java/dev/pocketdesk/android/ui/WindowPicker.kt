@@ -129,6 +129,7 @@ fun WindowPickerSheet(
     var error by remember { mutableStateOf<String?>(null) }
     val malformedMsg = stringResource(R.string.malformed_windows)
     val queryFailMsg = stringResource(R.string.window_query_failed)
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(address, controlPort) {
         val result =
@@ -141,7 +142,7 @@ fun WindowPickerSheet(
                     .onSuccess { listing = it }
                     .onFailure { error = malformedMsg }
             },
-            onFailure = { error = it.message ?: queryFailMsg },
+            onFailure = { error = it.message?.let { m -> context.plainErrorText(m) } ?: queryFailMsg },
         )
     }
 

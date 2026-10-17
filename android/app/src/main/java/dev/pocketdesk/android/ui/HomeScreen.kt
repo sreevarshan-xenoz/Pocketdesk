@@ -18,6 +18,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -50,6 +53,7 @@ import dev.pocketdesk.android.doctor.BackgroundRunning
 import dev.pocketdesk.android.wake.Waker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -79,8 +83,17 @@ fun HomeScreen(
     // Wake status is carried as a @StringRes id + arg and resolved during
     // composition (LocalContext.getString in a coroutine is lint-error:
     // stale configuration) — same discipline as the mic/view-only toasts.
-    var wakeStatusRes by remember { mutableStateOf<Int?>(null) }
-    var wakeStatusArg by remember { mutableStateOf<String?>(null) }
+    // U2: a wake's result in a snackbar, which is announced and goes by
+    // itself (a line at the bottom had stayed, unannounced).
+    val snackbar = remember { SnackbarHostState() }
+    val resources = LocalResources.current
+    var wakeSaid by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(wakeSaid) {
+        wakeSaid?.let {
+            snackbar.showSnackbar(it)
+            wakeSaid = null
+        }
+    }
     // F6: computers announcing themselves on this network, browsed while
     // this screen is in front.
     val found by rememberFoundComputers()
@@ -114,6 +127,8 @@ fun HomeScreen(
     var wakeVersion by remember { mutableIntStateOf(0) }
     // A computer that does not answer Connect, offered "Wake and connect".
     var offeringWake by remember { mutableStateOf<HostStore.Host?>(null) }
+    // The card whose tap is still deciding whether its computer is asleep.
+    var checkingAddress by remember { mutableStateOf<String?>(null) }
 
     // The computer is awake once its server answers on the control port
     // (whatever address it is saved under). Away, a LAN address never
@@ -132,8 +147,7 @@ fun HomeScreen(
                 if (w.connect) {
                     onConnect(w.host)
                 } else {
-                    wakeStatusRes = R.string.wake_awake
-                    wakeStatusArg = w.host.address
+                    wakeSaid = resources.getString(R.string.wake_awake, w.host.address)
                 }
                 return@LaunchedEffect
             }
@@ -143,14 +157,16 @@ fun HomeScreen(
         if (w.connect) {
             onConnect(w.host)
         } else {
-            wakeStatusRes = if (w.atHome) R.string.wake_no_answer else R.string.wake_sent
-            wakeStatusArg = w.host.address
+            wakeSaid = resources.getString(
+                if (w.atHome) R.string.wake_no_answer else R.string.wake_sent,
+                w.host.address,
+            )
         }
     }
 
     // Send the wake, then watch for the computer to answer.
     fun startWake(host: HostStore.Host, connect: Boolean) {
-        wakeStatusRes = null
+        snackbar.currentSnackbarData?.dismiss()
         scope.launch(Dispatchers.IO) {
             val result = Waker.wake(context, host.address)
             val atHome = Waker.atHome(context, host.address)
@@ -158,8 +174,10 @@ fun HomeScreen(
                 if (result.isSuccess) {
                     waking = Waking(host, atHome, connect)
                 } else {
-                    wakeStatusRes = R.string.wake_failed
-                    wakeStatusArg = result.exceptionOrNull()?.message
+                    wakeSaid = resources.getString(
+                        R.string.wake_failed,
+                        context.plainErrorText(result.exceptionOrNull()?.message),
+                    )
                 }
             }
         }
@@ -252,6 +270,7 @@ fun HomeScreen(
                 items(hosts, key = { it.address }) { host ->
                     HostCard(
                         host = host,
+                        checking = checkingAddress == host.address,
                         online = host.address in network.savedOnline,
                         isAuto = autoConnect && host == hosts.first(),
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
@@ -261,14 +280,20 @@ fun HomeScreen(
                         onConnect = {
                             if (!Prefs.offerWake(context)) {
                                 onConnect(host)
-                            } else {
+                            } else if (checkingAddress == null) {
                                 // A computer that can be woken and does not
-                                // answer may be asleep: offer to wake it.
+                                // answer may be asleep: offer to wake it. The
+                                // check can take seconds, so the card says so
+                                // and takes no second tap meanwhile (U2).
+                                checkingAddress = host.address
                                 scope.launch {
-                                    val asleep = withContext(Dispatchers.IO) {
-                                        Waker.canWake(Waker.planFor(context, host.address)) &&
-                                            !Waker.answersSoon(host.address, host.controlPort) &&
-                                            !answersOverInternet(context, host)
+                                    val asleep = try {
+                                        withContext(Dispatchers.IO) {
+                                            Waker.canWake(Waker.planFor(context, host.address)) &&
+                                                !Waker.answersSoon(host.address, host.controlPort)
+                                        } && !answersOverInternetWithin(scope, context, host)
+                                    } finally {
+                                        checkingAddress = null
                                     }
                                     if (asleep) offeringWake = host else onConnect(host)
                                 }
@@ -308,14 +333,7 @@ fun HomeScreen(
                     TextButton(onClick = { waking = null }) { Text(stringResource(R.string.cancel)) }
                 }
             }
-            wakeStatusRes?.let { res ->
-                Text(
-                    stringResource(res, wakeStatusArg.orEmpty()),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
+            SnackbarHost(snackbar)
         }
     }
 
@@ -483,6 +501,7 @@ private fun FoundCard(computer: FoundComputer, onConnect: () -> Unit) {
 @Composable
 private fun HostCard(
     host: HostStore.Host,
+    checking: Boolean,
     online: Boolean,
     isAuto: Boolean,
     paired: Boolean,
@@ -534,6 +553,19 @@ private fun HostCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (checking) {
+                Text(
+                    stringResource(R.string.card_checking),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                androidx.compose.material3.LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                )
+            }
             FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -611,6 +643,24 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
             }
         }
     }
+}
+
+/** How long the asleep check waits on the internet road (U2: a dial there
+ * could take about 30 s, the card waiting all that time). */
+private const val INTERNET_CHECK_MS = 10_000L
+
+/**
+ * [answersOverInternet], waited on for at most [INTERNET_CHECK_MS]: the dial
+ * is a blocking call that cannot be cut short, so it goes on in `scope`, and
+ * a link it makes later is kept; the check takes "no answer" meanwhile.
+ */
+private suspend fun answersOverInternetWithin(
+    scope: kotlinx.coroutines.CoroutineScope,
+    context: android.content.Context,
+    host: HostStore.Host,
+): Boolean {
+    val dial = scope.async(Dispatchers.IO) { answersOverInternet(context, host) }
+    return kotlinx.coroutines.withTimeoutOrNull(INTERNET_CHECK_MS) { dial.await() } ?: false
 }
 
 /**

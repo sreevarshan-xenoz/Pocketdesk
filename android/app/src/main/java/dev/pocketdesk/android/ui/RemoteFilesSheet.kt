@@ -106,7 +106,7 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
         result.onSuccess {
             folder = it
             if (it.error == null) lastGood = it
-        }.onFailure { failure = it.message ?: it.toString() }
+        }.onFailure { failure = context.plainErrorText(it.message) }
     }
 
     ModalBottomSheet(
@@ -228,7 +228,7 @@ fun RemoteFilesSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
                         asking = false
                         val message = answer.fold(
                             { askedText },
-                            { it.message ?: it.toString() },
+                            { appContext.plainErrorText(it.message) },
                         )
                         Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
                     }

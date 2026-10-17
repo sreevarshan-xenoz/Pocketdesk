@@ -229,16 +229,17 @@
 
     <!-- Pairing sheet -->
     <string name="pair_title">Emparejar con %1$s</string>
-    <string name="pair_read_pin">Lee el PIN en la pantalla del escritorio…</string>
-    <string name="pair_pin_ready">Hay un PIN mostrando en el escritorio (`pocketdesk pair`) — escríbelo abajo.</string>
-    <string name="pair_error">Error: %1$s</string>
-    <string name="pair_no_pin">El escritorio no confirmó un PIN.</string>
+    <string name="pair_read_pin">Lee el PIN en la pantalla del ordenador…</string>
+    <string name="pair_pin_ready">Hay un PIN en la pantalla del ordenador. Escríbelo abajo.</string>
+    <string name="pair_error">No emparejado: %1$s</string>
+    <string name="pair_no_pin">El ordenador no confirmó un PIN.</string>
     <string name="pair_wrong_pin">PIN incorrecto o caducado.</string>
-    <string name="pair_waiting">Esperando al escritorio…</string>
-    <string name="pair_show_pin">Mostrar PIN en el escritorio</string>
+    <string name="pair_waiting">Esperando al ordenador…</string>
+    <string name="pair_show_pin">Mostrar un PIN en el ordenador</string>
     <string name="pair_pin_label">PIN de 6 dígitos</string>
     <string name="pair_reveal_pin">Mostrar PIN</string>
-    <string name="pair_enter_pin">Introducir PIN del escritorio</string>
+    <string name="pair_hide_pin">Ocultar PIN</string>
+    <string name="pair_submit">Emparejar</string>
     <string name="cancel">Cancelar</string>
 
     <!-- Window picker -->
@@ -286,8 +287,8 @@
     <string name="err_lan_only">No es alcanzable por LAN y este escritorio aún no tiene identidad de internet (WAN) guardada. Conéctate primero desde la misma red.</string>
     <string name="err_trust_mismatch">Las credenciales de seguridad ya no coinciden con este escritorio. Vuelve a emparejar para continuar.</string>
     <string name="err_pairing_declined">El escritorio rechazó el emparejamiento: el PIN era incorrecto o expiró.</string>
-    <string name="err_link_dropped">Se cayó el enlace de video. El escritorio puede haberse dormido o salido de la red.</string>
-    <string name="err_generic">Algo salió mal al contactar el escritorio.</string>
+    <string name="err_link_dropped">Se cortó la conexión con el ordenador. Puede haberse dormido o salido de la red.</string>
+    <string name="err_generic">Algo salió mal al contactar el ordenador.</string>
     <string name="connecting_still">Siguiendo intentándolo… verifica que el escritorio esté despierto con Pocketdesk activo.</string>
     <string name="waiting_for_picture">Conectado: esperando la imagen…</string>
     <string name="waiting_for_approval">Si este ordenador pide permiso antes de cada sesión, acéptalo allí.</string>
@@ -300,7 +301,7 @@
     <string name="pair_link_unreachable">No se pudo llegar al escritorio en ninguna de sus direcciones. ¿Está este teléfono en la misma red o tailnet? (%1$s)</string>
     <string name="pair_link_invalid">Eso no es un código de emparejamiento de Pocketdesk.</string>
     <string name="scan_pairing_code">Escanear código de emparejamiento</string>
-    <string name="scan_hint">Apunta la cámara al código de la app de escritorio Pocketdesk (pestaña Pair).</string>
+    <string name="scan_hint">Apunta la cámara al código de la página Pair de la app Pocketdesk en tu ordenador.</string>
     <string name="scan_need_camera">Pocketdesk necesita la cámara para leer el código. También puedes añadir el equipo por dirección y PIN.</string>
     <string name="scan_allow_camera">Permitir cámara</string>
     <string name="pair_link_confirm_title">¿Emparejar con el equipo en %1$s?</string>
@@ -564,4 +565,15 @@
     <string name="tasks_output_cut">Solo se muestra el final de la salida.</string>
     <string name="tasks_not_sent">no enviada: %1$s</string>
     <string name="tasks_no_answer">sin respuesta: puede que este teléfono no tenga permiso para iniciar tareas (en el ordenador, Dispositivos, \"Iniciar mis tareas\")</string>
+    <string name="card_checking">Comprobando si está encendido…</string>
+    <!-- U2: Lock asks first; Lock, Ring and the shortcut keys say what happened. -->
+    <string name="lock_confirm_title">¿Bloquear el ordenador?</string>
+    <string name="lock_confirm_message">Su pantalla se bloquea y solo su propia contraseña la desbloquea.</string>
+    <string name="lock_confirm">Bloquear</string>
+    <string name="lock_done">El ordenador está bloqueado.</string>
+    <string name="lock_failed">El ordenador no se bloqueó: %1$s</string>
+    <string name="ring_sent">Se pidió al ordenador que suene.</string>
+    <string name="ring_failed">No se pudo hacer sonar el ordenador: %1$s</string>
+    <string name="key_failed">Esa tecla no llegó al ordenador: %1$s</string>
+    <string name="shortcut_failed">%1$s no llegó al ordenador: %2$s</string>
 </resources>

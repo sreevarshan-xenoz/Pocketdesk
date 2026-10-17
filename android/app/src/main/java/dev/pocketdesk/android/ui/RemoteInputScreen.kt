@@ -24,6 +24,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -76,10 +79,14 @@ fun RemoteInputScreen(
     address: String,
     port: Int,
     controlPort: Int,
+    // U2: bumped when the session notification's Lock asks for the question.
+    askLock: Int = 0,
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
     val haptics = rememberLlHaptics()
+    // Back ends the remote, as it ends a session (U2: it left the app).
+    androidx.activity.compose.BackHandler { onExit() }
     var state by remember { mutableStateOf(State.Connecting) }
     var reason by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
@@ -116,7 +123,7 @@ fun RemoteInputScreen(
             return@LaunchedEffect
         }
         if (connected.isFailure) {
-            reason = connected.exceptionOrNull()?.message
+            reason = connected.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
             state = State.Down
             return@LaunchedEffect
         }
@@ -131,7 +138,9 @@ fun RemoteInputScreen(
                 state = State.Down
             }
             if (state == State.Down || state == State.TooOld) {
-                reason = closed
+                // The transport's words, said plainly (U2 review), as the
+                // session's error card does.
+                reason = closed?.let { context.closeReasonText(it) }
                 break
             }
             delay(POLL_MS)
@@ -195,10 +204,43 @@ fun RemoteInputScreen(
             }
         }
     }
+    // U2: a key that did not reach the computer says so.
+    val snackbar = remember { SnackbarHostState() }
+    var notice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(notice) {
+        notice?.let {
+            snackbar.showSnackbar(it)
+            notice = null
+        }
+    }
+    var confirmLock by remember { mutableStateOf(false) }
+    // The session notification's Lock asks here too: only asks made since
+    // this screen opened (the count outlives a session).
+    val askLockAtStart = remember { askLock }
+    LaunchedEffect(askLock) {
+        if (askLock > askLockAtStart) confirmLock = true
+    }
     val keyScope = rememberCoroutineScope()
+    val resources = LocalResources.current
+    if (confirmLock) {
+        LockQuestion(
+            onDismiss = { confirmLock = false },
+            onLock = {
+                keyScope.launch(Dispatchers.IO) {
+                    val said = lockComputer(context, address, controlPort)
+                    withContext(Dispatchers.Main) { notice = said }
+                }
+            },
+        )
+    }
     fun tap(code: Int) {
         haptics.tap()
-        keyScope.launch(Dispatchers.IO) { RustCore.tapKey(address, port, code) }
+        keyScope.launch(Dispatchers.IO) {
+            RustCore.tapKey(address, port, code).onFailure {
+                val said = resources.getString(R.string.key_failed, context.plainErrorText(it.message))
+                withContext(Dispatchers.Main) { notice = said }
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -228,6 +270,7 @@ fun RemoteInputScreen(
                         address = address,
                         port = port,
                         modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
+                        onFailed = { notice = it },
                     )
                 }
                 else ->
@@ -260,6 +303,7 @@ fun RemoteInputScreen(
                 modifier = Modifier.align(Alignment.BottomCenter).imePadding(),
             )
         }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).imePadding())
     }
 
     if (showSendText) {

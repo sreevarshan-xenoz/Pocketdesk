@@ -1,5 +1,7 @@
 package dev.pocketdesk.android
 
+import dev.pocketdesk.android.ui.plainErrorText
+
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -37,16 +39,10 @@ import dev.pocketdesk.android.ui.RemoteInputScreen
 import dev.pocketdesk.android.ui.RemoteScreen
 import dev.pocketdesk.android.ui.PairLinkScreen
 import dev.pocketdesk.android.ui.QrScanScreen
+import dev.pocketdesk.android.ui.Navigation
+import dev.pocketdesk.android.ui.Route
 import dev.pocketdesk.android.ui.SettingsScreen
 import dev.pocketdesk.android.ui.theme.PocketdeskTheme
-
-/** Home-family destinations; plain strings so rememberSaveable just works. */
-private object Route {
-    const val HOME = "home"
-    const val FORM = "form"
-    const val SETTINGS = "settings"
-    const val SCAN = "scan"
-}
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -63,6 +59,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val disconnectSignal = mutableIntStateOf(0)
+
+    /** Bumped by the notification's Lock: the session asks first (U2). */
+    private val lockAskSignal = mutableIntStateOf(0)
 
     /** A desktop pairing code to act on (pocketdesk://pair?...). */
     private val pairLink = mutableStateOf<String?>(null)
@@ -125,7 +124,7 @@ class MainActivity : ComponentActivity() {
                 app.getString(R.string.wake_sent, host.address)
             } else {
                 val error = result.exceptionOrNull()
-                app.getString(R.string.wake_failed, error?.message ?: error.toString())
+                app.getString(R.string.wake_failed, app.plainErrorText(error?.message))
             }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 android.widget.Toast.makeText(app, message, android.widget.Toast.LENGTH_LONG).show()
@@ -303,6 +302,13 @@ class MainActivity : ComponentActivity() {
                         // session below runs edge-to-edge + immersive on
                         // purpose, so the inset padding is scoped here.
                         null -> Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                            // Back goes up a level, to Home (U2: it left the
+                            // app from Settings, Add computer and the scanner).
+                            androidx.activity.compose.BackHandler(
+                                enabled = Navigation.backTo(route) != null,
+                            ) {
+                                route = Navigation.backTo(route) ?: Route.HOME
+                            }
                             AnimatedContent(
                                 targetState = route,
                                 transitionSpec = {
@@ -399,6 +405,7 @@ class MainActivity : ComponentActivity() {
                                         address = session.address,
                                         port = session.port,
                                         controlPort = session.controlPort,
+                                        askLock = lockAskSignal.intValue,
                                         onExit = { sessionKey = null },
                                     )
                                 }
@@ -408,6 +415,7 @@ class MainActivity : ComponentActivity() {
                                     port = session.port,
                                     controlPort = session.controlPort,
                                     inPictureInPicture = inPictureInPicture.value,
+                                    askLock = lockAskSignal.intValue,
                                     onExit = { sessionKey = null },
                                 )
                             }
@@ -436,19 +444,10 @@ class MainActivity : ComponentActivity() {
             Thread { runCatching { RustCore.stopStreaming() } }.start()
             disconnectSignal.intValue += 1
         }
+        // The session (or the remote) on screen asks first and says what
+        // happened (U2); it had locked at one tap from the shade.
         if (intent.getBooleanExtra(EXTRA_LOCK_DESKTOP, false)) {
-            val address = intent.getStringExtra(
-                dev.pocketdesk.android.service.SessionForegroundService.EXTRA_ADDRESS,
-            )
-            val controlPort = intent.getIntExtra(
-                dev.pocketdesk.android.service.SessionForegroundService.EXTRA_CONTROL_PORT,
-                HostStore.DEFAULT_CONTROL_PORT,
-            )
-            if (!address.isNullOrBlank()) {
-                Thread {
-                    runCatching { RustCore.desktopPrivacy(address, controlPort, "status", lock = true) }
-                }.start()
-            }
+            lockAskSignal.intValue += 1
         }
     }
 

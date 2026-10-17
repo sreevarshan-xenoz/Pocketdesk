@@ -231,16 +231,17 @@
 
     <!-- Pairing sheet -->
     <string name="pair_title">Pair with %1$s</string>
-    <string name="pair_read_pin">Read the PIN off the desktop screen…</string>
-    <string name="pair_pin_ready">A PIN is showing on the desktop (`pocketdesk pair`) — type it below.</string>
-    <string name="pair_error">Error: %1$s</string>
-    <string name="pair_no_pin">Desktop did not confirm a PIN.</string>
+    <string name="pair_read_pin">Read the PIN off the computer\'s screen…</string>
+    <string name="pair_pin_ready">A PIN is showing on the computer. Type it below.</string>
+    <string name="pair_error">Not paired: %1$s</string>
+    <string name="pair_no_pin">The computer did not confirm a PIN.</string>
     <string name="pair_wrong_pin">Wrong or expired PIN.</string>
-    <string name="pair_waiting">Waiting for desktop…</string>
-    <string name="pair_show_pin">Show PIN on desktop</string>
+    <string name="pair_waiting">Waiting for the computer…</string>
+    <string name="pair_show_pin">Show a PIN on the computer</string>
     <string name="pair_pin_label">6-digit PIN</string>
     <string name="pair_reveal_pin">Show PIN</string>
-    <string name="pair_enter_pin">Enter PIN from desktop</string>
+    <string name="pair_hide_pin">Hide PIN</string>
+    <string name="pair_submit">Pair</string>
     <string name="cancel">Cancel</string>
 
     <!-- Window picker -->
@@ -288,8 +289,8 @@
     <string name="err_lan_only">Not reachable over LAN, and this desktop has no saved internet (WAN) identity yet. Connect once from the same network first.</string>
     <string name="err_trust_mismatch">Security credentials no longer match this desktop. Pair again to continue.</string>
     <string name="err_pairing_declined">The desktop declined pairing — the PIN was wrong or expired.</string>
-    <string name="err_link_dropped">The video link dropped. The desktop may have slept or left the network.</string>
-    <string name="err_generic">Something went wrong reaching the desktop.</string>
+    <string name="err_link_dropped">The connection to the computer dropped. It may have slept or left the network.</string>
+    <string name="err_generic">Something went wrong reaching the computer.</string>
     <string name="connecting_still">Still trying… check that the desktop is awake and running Pocketdesk.</string>
     <string name="waiting_for_picture">Connected — waiting for the picture…</string>
     <string name="waiting_for_approval">If this computer asks before each session, allow it there.</string>
@@ -302,7 +303,7 @@
     <string name="pair_link_unreachable">Could not reach the desktop at any of its addresses. Is this phone on the same network or tailnet? (%1$s)</string>
     <string name="pair_link_invalid">That is not a Pocketdesk pairing code.</string>
     <string name="scan_pairing_code">Scan pairing code</string>
-    <string name="scan_hint">Point the camera at the code in the Pocketdesk desktop app (Pair tab).</string>
+    <string name="scan_hint">Point the camera at the code on the Pair page of the Pocketdesk app on your computer.</string>
     <string name="scan_need_camera">Pocketdesk needs the camera to read the pairing code. You can also add the computer by address and PIN.</string>
     <string name="scan_allow_camera">Allow camera</string>
     <string name="pair_link_confirm_title">Pair with the computer at %1$s?</string>
@@ -566,4 +567,15 @@
     <string name="tasks_output_cut">Only the end of the output is shown.</string>
     <string name="tasks_not_sent">not sent: %1$s</string>
     <string name="tasks_no_answer">no answer: this phone may not be allowed to start tasks (on the computer, Devices, \"Start my tasks\")</string>
+    <string name="card_checking">Checking whether it is awake…</string>
+    <!-- U2: Lock asks first; Lock, Ring and the shortcut keys say what happened. -->
+    <string name="lock_confirm_title">Lock the computer?</string>
+    <string name="lock_confirm_message">Its screen locks, and only its own password unlocks it.</string>
+    <string name="lock_confirm">Lock</string>
+    <string name="lock_done">The computer is locked.</string>
+    <string name="lock_failed">The computer did not lock: %1$s</string>
+    <string name="ring_sent">Asked the computer to ring.</string>
+    <string name="ring_failed">Could not ring the computer: %1$s</string>
+    <string name="key_failed">That key did not reach the computer: %1$s</string>
+    <string name="shortcut_failed">%1$s did not reach the computer: %2$s</string>
 </resources>
