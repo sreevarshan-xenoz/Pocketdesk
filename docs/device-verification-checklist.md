@@ -1627,6 +1627,16 @@ Owed, on a GNOME VM (Ubuntu 24.04, a GNOME session) and KDE where one allows; no
 - [ ] No RemoteDesktop portal (or refused): the screen alone.
 - [ ] The server started as a systemd user service: does the portal keep its restore data with no desktop app id?
 
+## 101. KDE Connect, next steps (N9)
+
+On the A71 with KDE Connect 1.36 (F-Droid), paired with a throwaway server on this box, notification sync on:
+
+- [x] A notification posted on the phone shows here as a toast (its app, title and text); closing it there takes the toast away.
+- [x] Notifications already on the phone when it connects (marked silent) are not shown.
+- [x] With the device's "Show its notifications here" off, nothing shows.
+- [ ] A chat app's notification, an update to one (replacing the toast), and a flood held to the limit.
+- [ ] Linux: the notification over D-Bus, and closed by its id.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

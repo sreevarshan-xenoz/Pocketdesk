@@ -47,3 +47,10 @@ On the A71 with KDE Connect (paired to a throwaway server), notification sync on
   - CVE-2025-32898: the same residue as patched KDE, not "not affected".
   - Notifications posted while a device was away come back marked silent and are not shown.
 
+**Device-checked on the A71** with KDE Connect 1.36 paired with a throwaway server, notification sync on:
+- a notification posted on the phone showed here as a toast, and closing it there took the toast away;
+- the ones already there at connect, marked silent, did not show;
+- with the switch off, none did.
+
+Found there: KDE Connect loads its notification plugin only once it has notification access, which a restart picks up; and a restarted KDE Connect finds this computer again only while it broadcasts (Find), since this computer never listens on UDP (3a).
+
