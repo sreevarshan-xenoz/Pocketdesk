@@ -5436,6 +5436,7 @@ name = "pocketdesk-desktop"
 version = "0.4.0"
 dependencies = [
  "eframe",
+ "memmap2",
  "pocketdesk-core",
  "qrcode",
  "serde_json",

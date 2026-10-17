@@ -9,6 +9,7 @@ mod app;
 mod cast_view;
 mod computers_view;
 mod diagnostics_view;
+mod fonts;
 mod icon;
 mod kdeconnect_view;
 mod messages_view;
@@ -76,6 +77,8 @@ fn main() -> eframe::Result {
         TITLE,
         options,
         Box::new(move |cc| {
+            // Glyphs for scripts egui's own fonts lack (U1).
+            fonts::install(&cc.egui_ctx);
             if tray.is_some() {
                 tray::Tray::wake_on_click(cc.egui_ctx.clone());
             }
