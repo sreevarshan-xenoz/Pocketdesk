@@ -302,6 +302,7 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
         clipboard_in: None,
         file_in: None,
         told_unpaired: false,
+        held_battery: None,
     };
     let replaced = _live.replaced();
     let (reader, mut writer) = tokio::io::split(link.stream);
@@ -397,6 +398,8 @@ struct State {
     file_in: Option<super::share::Offer>,
     /// The device was told it is not paired here.
     told_unpaired: bool,
+    /// The battery a device that accepted sent before the owner confirmed.
+    held_battery: Option<serde_json::Value>,
 }
 
 impl State {
@@ -421,6 +424,12 @@ impl State {
             if self.waiting.is_none() && !std::mem::replace(&mut self.told_unpaired, true) {
                 tracing::info!(device_id = %self.device_id, "A KDE Connect device that is not paired here was told so");
                 return vec![pairing::answer(false)];
+            }
+            // A device that accepted this computer's request sends its
+            // battery at once, and again only when it changes: held for the
+            // owner's Confirm, not lost (found on the A71).
+            if packet.packet_type == BATTERY && self.waiting.as_ref().is_some_and(|w| w.accepted) {
+                self.held_battery = Some(packet.body.clone());
             }
             return Vec::new();
         }
@@ -626,6 +635,11 @@ impl State {
         }
         self.paired = true;
         self.end_waiting(now);
+        if let Some(body) = self.held_battery.take()
+            && self.permissions().battery
+        {
+            crate::plugins::phone_battery::take_from(&self.device_id, &body);
+        }
         // Paired, it is not one of the unpaired links any more.
         self.unpaired = None;
         self.note_seen();
@@ -831,6 +845,7 @@ mod tests {
             clipboard_in: None,
             file_in: None,
             told_unpaired: false,
+            held_battery: None,
         }
     }
 
@@ -1393,6 +1408,27 @@ mod tests {
         assert!(
             s.packet(&battery(50)).is_empty(),
             "not while the owner confirms the device's yes"
+        );
+    }
+
+    #[test]
+    fn a_battery_sent_while_the_owner_confirms_is_kept_at_pairing() {
+        let mut s = state("held", false);
+        s.device_id = format!("held{}", uuid::Uuid::new_v4().simple());
+        let now = now_unix();
+        s.event(Event::PairFromHere);
+        let code = devices::pending(&s.dir, now)[0].code.clone();
+        s.pair_packet(PairSays::Yes(None));
+        s.packet(&battery(42));
+        assert_eq!(
+            crate::plugins::phone_battery::charge_of(&s.device_id),
+            None,
+            "not yet"
+        );
+        s.event(Event::Answer { yes: true, code });
+        assert_eq!(
+            crate::plugins::phone_battery::charge_of(&s.device_id),
+            Some(42)
         );
     }
 
