@@ -1755,7 +1755,10 @@ impl eframe::App for PocketdeskApp {
         self.finish_job();
         self.finish_setting();
         // Closing hides to the tray; Quit (or no tray to come back from) exits.
-        if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.tray.is_some() {
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.quitting
+            && closes_to_tray(self.tray.is_some(), on_wayland())
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             // Nobody sees a hidden window, so it must not keep (or, on its
@@ -1974,8 +1977,30 @@ pub fn human_duration(secs: u64) -> String {
     }
 }
 
+/// Whether closing the window hides it to the tray: only with a tray, and
+/// not on Wayland, which lets no app hide its own window (closing there
+/// would do nothing at all, N6 review), so it quits as without a tray.
+fn closes_to_tray(has_tray: bool, wayland: bool) -> bool {
+    has_tray && !wayland
+}
+
+/// Whether the window is a Wayland one: winit takes Wayland when the
+/// session offers it.
+fn on_wayland() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
+    /// N6 review: Wayland lets no app hide its own window.
+    #[test]
+    fn closing_hides_to_the_tray_except_on_wayland() {
+        use super::closes_to_tray;
+        assert!(closes_to_tray(true, false));
+        assert!(!closes_to_tray(true, true), "Wayland: closing quits");
+        assert!(!closes_to_tray(false, false), "no tray: closing quits");
+    }
+
     #[test]
     fn the_page_kept_is_the_one_chosen_and_never_pair() {
         use super::{Tab, kept_page};

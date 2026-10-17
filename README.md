@@ -358,7 +358,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/confi
 - **Diagnostics**: why a phone might not connect. It checks the server, its ports, the firewall, the addresses phones can use and the internet path, shows the last session (encoder and latency), and copies a debug report for an issue.
 - **Logs**: the server's log.
 
-Closing the window keeps it in the tray. On Linux the tray is a StatusNotifierItem, which KDE Plasma, most panels (waybar, swaybar, xfce4-panel) and GNOME with the AppIndicator extension show; on a desktop with no tray host the app has none, and closing it quits.
+Closing the window keeps it in the tray, and starting the app again brings it back. On Wayland an app cannot hide its own window, so there closing quits. On Linux the tray is a StatusNotifierItem, which KDE Plasma, most panels (waybar, swaybar, xfce4-panel) and GNOME with the AppIndicator extension show; on a desktop with no tray host the app has none, and closing it quits.
 
 ```bash
 cargo run --release -p pocketdesk-desktop   # or run the installed pocketdesk / pocketdesk.exe
