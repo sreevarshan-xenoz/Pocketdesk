@@ -17,6 +17,7 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
+import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
@@ -388,6 +389,7 @@ class TransferService : Service() {
         part: RustCore.FolderPart?,
         onProgress: (Int) -> Unit,
     ): Result<Unit> = try {
+        ensureLink(address, port)
         val descriptor = contentResolver.openFileDescriptor(uri, "r")
             ?: return Result.failure(IllegalStateException("cannot open $name"))
         val size = descriptor.statSize
@@ -414,7 +416,20 @@ class TransferService : Service() {
     }
 
     /** Download one file into Downloads/Pocketdesk; the uri to open it, if any. */
+    /**
+     * A control link to the computer at [address] before an attempt (2d):
+     * away from home a transfer rides it, and a share from another app, or a
+     * retry after the link went, may find none up. At home it is a TLS link,
+     * away the internet road's; the same call the background features make.
+     */
+    private fun ensureLink(address: String, port: Int) {
+        if (RustCore.controlPeer() == address to port) return
+        val wan = HostStore.wanIdentity(this, address) ?: return
+        RustCore.connectToPeer(address, port, wan)
+    }
+
     private fun receiveOne(job: Job.Receive, onProgress: (Int) -> Unit): Result<Uri?> {
+        ensureLink(job.address, job.port)
         if (job.size > MAX_RECEIVE_BYTES || !DownloadTarget.hasRoomFor(this, job.size)) {
             return refuse(job, getString(R.string.transfer_no_space, job.name))
         }

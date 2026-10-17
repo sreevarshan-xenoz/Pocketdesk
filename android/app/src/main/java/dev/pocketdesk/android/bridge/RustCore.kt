@@ -27,6 +27,7 @@ object RustCore {
     private external fun nativeInit(context: Context)
     private external fun nativeSetDataDir(path: String)
     private external fun nativeNetworkChanged()
+    private external fun nativeSetInternetFiles(enabled: Boolean)
     private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
     private external fun nativeForgetPeerCertificate(address: String): String
     private external fun nativeIsDiscoveryActive(): Boolean
@@ -233,6 +234,7 @@ object RustCore {
     fun start(context: Context) {
         nativeInit(context.applicationContext)
         nativeSetDataDir(context.filesDir.absolutePath)
+        nativeSetInternetFiles(dev.pocketdesk.android.Prefs.internetFiles(context))
         watchNetwork(context.applicationContext)
     }
 
@@ -269,6 +271,9 @@ object RustCore {
             })
         }.onFailure { android.util.Log.w("RustCore", "No network callback: ${it.message}") }
     }
+
+    /** Settings "Files over the internet" (2d): transfers ride an internet link. */
+    fun setInternetFiles(enabled: Boolean) = nativeSetInternetFiles(enabled)
 
     // ---- Session / discovery ----
 

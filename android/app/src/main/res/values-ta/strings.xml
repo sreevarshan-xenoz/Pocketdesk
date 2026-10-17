@@ -36,6 +36,8 @@
     <string name="share_choosing_off">பிற செயலிகள் கணினியைத் தேர்ந்தெடுக்க முடியாது: Pocketdesk அமைப்புகளில் இதை இயக்கவும்</string>
     <string name="settings_retry_transfers">தோல்வியுற்ற கோப்புகளை மீண்டும் அனுப்பு</string>
     <string name="settings_retry_transfers_summary">பாதியில் நின்ற கோப்பு நின்ற இடத்திலிருந்து 3 முறை வரை மீண்டும் அனுப்பப்படும்</string>
+    <string name="settings_internet_files">இணையம் வழியே கோப்புகள்</string>
+    <string name="settings_internet_files_summary">வெளியிலிருந்து அணுகும் கணினியுடன் அதே இணைப்பில் கோப்புகளை அனுப்பி பெறுக. கணினியும் இதை அணைக்கலாம்</string>
     <string name="reconnecting_in">%1$d வினாடிகளில் மீண்டும் இணைகிறது…</string>
     <string name="reconnect_gave_up">10 நிமிடங்களுக்குப் பிறகு முயற்சி நிறுத்தப்பட்டது.</string>
     <string name="settings_reveal_pin">PIN-ஐ இயல்பாகக் காட்டு</string>
@@ -483,7 +485,7 @@
     <string name="offer_waiting_title">கணினி ஒரு கோப்பை அனுப்புகிறது</string>
     <string name="offer_save">சேமி</string>
     <string name="settings_files_background">பின்னணியில் கணினியிலிருந்து கோப்புகள்</string>
-    <string name="settings_files_background_summary">கணினி அனுப்புவது அமர்வு இல்லாமலும் இந்த நெட்வொர்க்கில் பதிவிறக்கங்களில் வந்து சேரும். இதற்கு அறிவிப்பு அணுகல் தேவை, அது இணைப்பை வைத்திருக்கும்</string>
+    <string name="settings_files_background_summary">கணினி அனுப்புவது அமர்வு இல்லாமலும் வீட்டிலோ, இணையம் வழியே கோப்புகள் இயக்கத்தில் இருந்தால் வெளியிலிருந்தோ பதிவிறக்கங்களில் வந்து சேரும். இதற்கு அறிவிப்பு அணுகல் தேவை, அது இணைப்பை வைத்திருக்கும்</string>
     <string name="settings_phone_folders">கணினி திறக்கக்கூடிய கோப்புறைகள்</string>
     <string name="settings_phone_folders_summary">கணினியின் ஃபோன் தாவல் இந்தக் கோப்புறைகளைப் பட்டியலிட்டு அவற்றின் கோப்புகளை நகலெடுக்கலாம். ஃபோனில் வேறு எதையும் அணுக முடியாது. ஏதேனும் கோப்புறை பகிரப்பட்டிருக்கும் வரை, அறிவிப்பு அணுகலைப் பயன்படுத்தி கணினியுடன் இணைப்பில் இருக்கும்</string>
     <string name="phone_folders_empty">இன்னும் இல்லை: கணினி இந்த ஃபோனில் எதையும் திறக்க முடியாது. அதன் ஃபோன் தாவல் பட்டியலிட ஒரு கோப்புறையைச் சேர்க்கவும்</string>

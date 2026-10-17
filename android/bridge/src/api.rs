@@ -1514,28 +1514,22 @@ pub async fn send_clipboard_image(address: String, port: u16, path: String) -> R
     if size == 0 || size > MAX_CLIPBOARD_IMAGE {
         return Err(format!("An image of {size} bytes is not sent"));
     }
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| format!("Failed to bind port: {e}"))?;
-    let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let key = uuid::Uuid::new_v4().simple().to_string();
-    let request = NetworkPacket::new(CLIPBOARD_IMAGE).with_body(serde_json::json!({
-        "size": size,
-        "port": transfer_port,
-        "key": key,
-    }));
+    // At home the computer dials a listener; by the internet road it opens a
+    // stream on this phone's link, and the request names no port (2e).
+    let arrival = crate::link::Arrival::new(&address, port, &key).await?;
+    let by_link = arrival.port().is_none();
+    let mut body = crate::link::transfer_info(&arrival, &key);
+    body["size"] = serde_json::json!(size);
+    let request = NetworkPacket::new(CLIPBOARD_IMAGE).with_body(body);
     let replies = crate::download::send_watching_replies(&address, port, &request)
         .await
         .map_err(|e| format!("Failed to offer the image: {e}"))?;
-    let tls = transfer_acceptor(&address)?;
     let refused = crate::download::refusal_on(replies, key.clone());
-    let accept = tokio::time::timeout(
-        Duration::from_secs(30),
-        accept_transfer(&listener, &key, &tls),
-    );
+    let accept = tokio::time::timeout(Duration::from_secs(30), arrival.take(&address, &key));
     let mut stream = tokio::select! {
         accepted = accept => accepted.map_err(|_| "The computer did not take the image".to_string())??,
-        reason = refused => return Err(reason),
+        reason = refused => return Err(refusal_text("image", &reason, by_link)),
     };
     send_over(&mut file, size, &mut stream, false, Pace::DEFAULT)
         .await
@@ -1671,14 +1665,14 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         TRANSFER_TOTAL.store(file_size, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| format!("Failed to bind port: {}", e))?;
-    let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let key = uuid::Uuid::new_v4().simple().to_string();
+    // At home the computer dials a listener; by the internet road it opens a
+    // stream on this phone's link, and the request names no port (2d).
+    let arrival = crate::link::Arrival::new(&address, port, &key).await?;
+    let by_link = arrival.port().is_none();
     let mut body = serde_json::json!({
         "filename": filename,
-        "payloadTransferInfo": { "port": transfer_port, "key": key },
+        "payloadTransferInfo": crate::link::transfer_info(&arrival, &key),
     });
     if let Some(source) = &source {
         body["sourceId"] = serde_json::json!(source);
@@ -1697,10 +1691,6 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
     let replies = crate::download::send_watching_replies(&address, port, &request)
         .await
         .map_err(|e| format!("Failed to send share request: {e}"))?;
-    // Only the desktop this phone pinned for `address` may take the bytes
-    // (phase C). Looked up once the request is out: a connection made for
-    // it may have pinned the desktop just now.
-    let tls = transfer_acceptor(&address)?;
     // The replies are read for the whole transfer: a refusal ends the wait
     // at once with its reason, and an offer the desktop pushes to a
     // connection of this transfer's own is not lost (F7b).
@@ -1712,17 +1702,16 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         }
     }));
     // The desktop connects back for the bytes, inside TLS with the pinned
-    // desktop's certificate, then presents the key from the request.
-    // Anything else that connects is dropped. (Its source address is no
-    // test: a desktop with several addresses may connect back from another.)
-    let accept = tokio::time::timeout(
-        Duration::from_secs(30),
-        accept_transfer(&listener, &key, &tls),
-    );
+    // desktop's certificate (only the desktop this phone pinned for
+    // `address` may take them, phase C), then presents the key from the
+    // request; anything else that connects is dropped. (Its source address
+    // is no test: a desktop with several addresses may connect back from
+    // another.) By the internet road the stream comes on the link instead.
+    let accept = tokio::time::timeout(Duration::from_secs(30), arrival.take(&address, &key));
     let mut client_stream = tokio::select! {
         accepted = accept => accepted
             .map_err(|_| "Timeout waiting for file receiver".to_string())??,
-        Ok(reason) = refused_rx => return Err(format!("The computer refused the file: {reason}")),
+        Ok(reason) = refused_rx => return Err(refusal_text("file", &reason, by_link)),
     };
     let from = send_over(
         &mut file,
@@ -1738,6 +1727,20 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
         tracing::info!("File sent: {filename} ({file_size} bytes)");
     }
     Ok(())
+}
+
+/// What the phone says of a computer's refusal of a transfer of `what`
+/// ("file", "download"): a computer from before 2c answers a request by the
+/// internet road, which names no port, as if it had none to use.
+pub(crate) fn refusal_text(what: &str, reason: &str, by_link: bool) -> String {
+    if by_link && crate::link::too_old(reason) {
+        // Worded as a refusal: the phone's retry rule takes it as final.
+        format!(
+            "The computer refused the {what}: it is too old for files over the internet; update Pocketdesk on it"
+        )
+    } else {
+        format!("The computer refused the {what}: {reason}")
+    }
 }
 
 /// Send `size` bytes of `file` over a transfer the desktop has opened, with
@@ -2134,11 +2137,16 @@ pub(crate) async fn dial_internet_control(
     )
     .await
     .map_err(|e| format!("{e:#}"))?;
+    // The streams the computer opens on this connection for transfers (2d).
+    let acceptor = stream.link_acceptor();
     let stream = pocketdesk_core::protocol::connection::internet_control_handshake(
         stream, address, identity,
     )
     .await
     .map_err(|e| e.to_string())?;
+    if let Some(acceptor) = acceptor {
+        crate::link::spawn_acceptor(acceptor);
+    }
     Ok(Box::new(stream))
 }
 

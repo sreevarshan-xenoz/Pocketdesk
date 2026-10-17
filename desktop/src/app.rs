@@ -945,7 +945,7 @@ impl PocketdeskApp {
         let mut on = installed;
         ui.checkbox(
             &mut on,
-            "\"Send to phone\" in the file manager (sends to the phone connected on this network)",
+            "\"Send to phone\" in the file manager (sends to the connected phone)",
         );
         if on == installed {
             return;

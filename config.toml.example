@@ -65,6 +65,11 @@ video_quality = "balanced"
 # them: its Settings, "Names from my contacts").
 # sms_names = true
 
+# Move files with a phone linked by the internet road, on a stream of its own
+# control connection (nothing dials the phone back). Relays see sizes and
+# timing, never content. Each phone's Files permission still applies.
+# internet_files = true
+
 # A link a phone hands over ("Open on computer"): opened in the default
 # browser, or, false, shown as a notification. Each phone's Links
 # permission (desktop app, Devices) still applies.

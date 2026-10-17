@@ -1044,6 +1044,7 @@ async fn handle_connection_with_kde(
                 peer: peer_addr,
                 local: local_ip,
             },
+            None,
             peer_key,
             identity_packet,
             registry,
@@ -1068,6 +1069,23 @@ enum Road {
     /// iroh, from anywhere (T10a): only a paired phone with its registered
     /// iroh key, no pairing, and no address to dial back.
     Internet,
+}
+
+/// Streams for transfers on an internet control connection (2c): each a
+/// bidirectional stream the computer opens on the phone's own connection,
+/// sent behind the control stream so packets keep flowing during a file.
+struct IrohLink(iroh::endpoint::Connection);
+
+#[async_trait::async_trait]
+impl pocketdesk_core::protocol::kdeconnect::OpenLinkStream for IrohLink {
+    async fn open(
+        &self,
+    ) -> std::io::Result<Box<dyn pocketdesk_core::protocol::kdeconnect::TransferIo>> {
+        let (send, recv) = self.0.open_bi().await.map_err(std::io::Error::other)?;
+        // The control stream keeps the default priority, 0.
+        let _ = send.set_priority(-1);
+        Ok(Box::new(tokio::io::join(recv, send)))
+    }
 }
 
 /// A control connection over the internet road (T10a): the phone opens one
@@ -1100,9 +1118,12 @@ pub(crate) async fn handle_internet_control(
             .await
             .context("control stream timeout")?
             .context("no control stream")?;
+        let link: Arc<dyn pocketdesk_core::protocol::kdeconnect::OpenLinkStream> =
+            Arc::new(IrohLink(conn.clone()));
         let served = serve_control(
             tokio::io::join(recv, send),
             Road::Internet,
+            Some(link),
             peer_key,
             identity_packet,
             registry,
@@ -1128,6 +1149,7 @@ pub(crate) async fn handle_internet_control(
 async fn serve_control<S>(
     stream: S,
     road: Road,
+    link: Option<Arc<dyn pocketdesk_core::protocol::kdeconnect::OpenLinkStream>>,
     peer_key: Option<pocketdesk_core::streaming::PeerKey>,
     identity_packet: Option<NetworkPacket>,
     registry: &Arc<PluginRegistry>,
@@ -1278,7 +1300,8 @@ where
         let sender: Arc<dyn DeviceSender> = Arc::new(
             TcpDeviceSender::from_arc(writer, device_id.clone())
                 .with_peer(peer)
-                .with_peer_key(peer_key.clone()),
+                .with_peer_key(peer_key.clone())
+                .with_link_streams(link),
         );
         let sender_ref = &*sender;
 
@@ -1995,6 +2018,106 @@ mod internet_control_tests {
             .bind()
             .await
             .unwrap()
+    }
+
+    /// 2c: a transfer on a stream the computer opens on the phone's own
+    /// iroh connection, behind the control stream, which keeps answering.
+    /// On threads, as the server's and the bridge's runtimes are: on one,
+    /// the echo waited for the receiving end's hashing, which is the test's
+    /// scheduling, not the link's (a CI runner's ping took most of the file).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_transfer_rides_the_link_while_the_control_stream_keeps_answering() {
+        use pocketdesk_core::protocol::kdeconnect::OpenLinkStream;
+        use pocketdesk_core::protocol::transfer::{self, Pace};
+        use tokio::io::AsyncReadExt;
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let desktop = endpoint(iroh::SecretKey::generate()).await;
+        let phone = endpoint(iroh::SecretKey::generate()).await;
+        let to_desktop =
+            iroh::EndpointAddr::new(desktop.id()).with_ip_addr(desktop.bound_sockets()[0]);
+        let accepting = {
+            let desktop = desktop.clone();
+            tokio::spawn(async move { desktop.accept().await.unwrap().await.unwrap() })
+        };
+        let phone_conn = phone.connect(to_desktop, ALPN_CONTROL).await.unwrap();
+        let desktop_conn = accepting.await.unwrap();
+
+        // The control stream: the phone pings, the desktop echoes.
+        let (mut ping_send, mut ping_recv) = phone_conn.open_bi().await.unwrap();
+        ping_send.write_all(b"p").await.unwrap();
+        let (mut echo_send, mut echo_recv) = desktop_conn.accept_bi().await.unwrap();
+        let echo = tokio::spawn(async move {
+            let mut byte = [0u8; 1];
+            while echo_recv.read_exact(&mut byte).await.is_ok() {
+                if echo_send.write_all(&byte).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let mut byte = [0u8; 1];
+        ping_recv.read_exact(&mut byte).await.unwrap();
+
+        // The phone's side of the transfer: the key line, then the bytes.
+        let data: Vec<u8> = (0..20_000_000u32).map(|i| (i % 251) as u8).collect();
+        let size = data.len() as u64;
+        let receiving = {
+            let phone_conn = phone_conn.clone();
+            tokio::spawn(async move {
+                let (mut send, recv) = phone_conn.accept_bi().await.unwrap();
+                let mut recv = tokio::io::BufReader::new(recv);
+                let mut key = [0u8; 33];
+                recv.read_exact(&mut key).await.unwrap();
+                let mut stream = tokio::io::join(recv, &mut send);
+                let mut memory = transfer::Memory::holding(&[]);
+                let got = transfer::receive(
+                    &mut stream,
+                    &mut memory,
+                    None,
+                    Some(size),
+                    size,
+                    Pace::DEFAULT,
+                    |_, _| {},
+                )
+                .await;
+                transfer::finish(&mut stream, got.is_ok(), Pace::DEFAULT).await;
+                (key, memory.into_bytes())
+            })
+        };
+        let sending = tokio::spawn(async move {
+            let link = IrohLink(desktop_conn);
+            let mut stream = link.open().await.unwrap();
+            stream
+                .write_all(b"0123456789abcdef0123456789abcdef\n")
+                .await
+                .unwrap();
+            let mut reader: &[u8] = &data;
+            transfer::send(&mut reader, size, &mut stream, Pace::DEFAULT, |_| {}).await
+        });
+
+        // Pings while the file moves.
+        let moving = std::time::Instant::now();
+        let mut slowest = std::time::Duration::ZERO;
+        while !sending.is_finished() {
+            let started = std::time::Instant::now();
+            ping_send.write_all(b"p").await.unwrap();
+            ping_recv.read_exact(&mut byte).await.unwrap();
+            slowest = slowest.max(started.elapsed());
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(sending.await.unwrap().unwrap(), 0, "sent from the start");
+        let (key, got) = receiving.await.unwrap();
+        assert_eq!(&key, b"0123456789abcdef0123456789abcdef\n");
+        assert_eq!(got.len() as u64, size);
+        // A control stream starved behind the transfer would wait out all of
+        // it; a busy runner slows every ping a little.
+        let took = moving.elapsed();
+        assert!(
+            slowest < (took / 3).max(std::time::Duration::from_millis(500)),
+            "the control stream answered within {slowest:?}, while the file took {took:?}"
+        );
+        echo.abort();
+        phone.close().await;
+        desktop.close().await;
     }
 
     /// Counts the pairing packets dispatched to it.

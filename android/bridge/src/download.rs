@@ -19,7 +19,7 @@ use pocketdesk_core::protocol::transfer::{self, Have, Pace, Partial, TransferErr
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{Mutex, broadcast};
 
-use crate::api::{TRANSFER_SENT, TRANSFER_TOTAL, accept_transfer, client_identity};
+use crate::api::{TRANSFER_SENT, TRANSFER_TOTAL, client_identity};
 use crate::{CONTROL_PEER, CONTROL_WRITER};
 use pocketdesk_core::protocol::clipboard::{CLIPBOARD_IMAGE_FETCH, MAX_CLIPBOARD_IMAGE};
 
@@ -164,18 +164,14 @@ async fn fetch_into<P: Partial>(
         TRANSFER_TOTAL.store(0, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
     }
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
-        .await
-        .map_err(|e| format!("Failed to bind port: {e}"))?;
-    let transfer_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let key = uuid::Uuid::new_v4().simple().to_string();
-    let mut body = serde_json::json!({ "port": transfer_port, "key": key });
+    // At home the desktop dials a listener; by the internet road it opens a
+    // stream on this phone's link, and the request names no port (2d).
+    let arrival = crate::link::Arrival::new(address, port, &key).await?;
+    let mut body = crate::link::transfer_info(&arrival, &key);
     let (packet_type, limit) = target.request(&mut body);
     let request = NetworkPacket::new(packet_type).with_body(body);
     let lines = send_watching_replies(address, port, &request).await?;
-    // Only the desktop this phone pinned for `address` may send (phase C),
-    // looked up once the request is out (its connection may have pinned it).
-    let tls = crate::api::transfer_acceptor(address)?;
     let refused = refusal_on(lines, key.clone());
     let store = partials();
     let kept = match (&resume, &store) {
@@ -186,7 +182,7 @@ async fn fetch_into<P: Partial>(
         }),
         _ => None,
     };
-    await_and_receive_limited(listener, &key, &tls, refused, out, limit, counted, kept).await
+    await_and_receive_limited(arrival, address, &key, refused, out, limit, counted, kept).await
 }
 
 /// Download the image on the desktop's clipboard, named `id` by its reply
@@ -409,9 +405,9 @@ where
     F: std::future::Future<Output = String>,
 {
     await_and_receive_limited(
-        listener,
+        crate::link::Arrival::Listen(listener, Some(tls.clone())),
+        "",
         key,
-        tls,
         refused,
         out,
         MAX_DOWNLOAD_BYTES,
@@ -425,9 +421,9 @@ where
 /// the transfer progress only when `counted`, and continuing `kept`.
 #[allow(clippy::too_many_arguments)]
 async fn await_and_receive_limited<P, F>(
-    listener: tokio::net::TcpListener,
+    arrival: crate::link::Arrival,
+    address: &str,
     key: &str,
-    tls: &tokio_rustls::TlsAcceptor,
     refused: F,
     out: &mut P,
     limit: u64,
@@ -438,13 +434,13 @@ where
     P: Partial,
     F: std::future::Future<Output = String>,
 {
-    let accept = tokio::time::timeout(
-        Duration::from_secs(30),
-        accept_transfer(&listener, key, tls),
-    );
+    let by_link = arrival.port().is_none();
+    // Only the desktop this phone pinned for `address` may send (phase C);
+    // by the internet road, the stream on the link.
+    let accept = tokio::time::timeout(Duration::from_secs(30), arrival.take(address, key));
     let mut stream = tokio::select! {
         accepted = accept => accepted.map_err(|_| "The computer did not send the file".to_string())??,
-        reason = refused => return Err(format!("The computer refused the download: {reason}")),
+        reason = refused => return Err(crate::api::refusal_text("download", &reason, by_link)),
     };
     receive_into(&mut stream, out, limit, counted, kept).await
 }

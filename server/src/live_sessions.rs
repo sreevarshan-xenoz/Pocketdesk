@@ -454,7 +454,8 @@ fn pairing_changes(seen: Option<&[String]>, paired: &[String]) -> Vec<(&'static 
 }
 
 /// Each phone with a control link, and whether files can reach it: its link
-/// has an address to dial back (T10d).
+/// has an address to dial back (T10d), or came by the internet road with
+/// `internet_files` on (2c).
 pub fn linked_phones(
     clients: &[std::sync::Arc<dyn pocketdesk_core::protocol::kdeconnect::DeviceSender>],
 ) -> Vec<shared::LinkedPhone> {
@@ -463,7 +464,7 @@ pub fn linked_phones(
         .iter()
         .map(|client| shared::LinkedPhone {
             device_id: client.device_id().to_string(),
-            files: client.peer_addr().is_some(),
+            files: crate::plugins::share::files_reach(client.as_ref()),
         })
         .collect()
 }
