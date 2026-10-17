@@ -27,6 +27,14 @@ pub const BATTERY: &str = "kdeconnect.battery";
 /// of the few unpaired places, and the device dials again at the next Find.
 const UNPAIRED_IDLE: Duration = Duration::from_secs(300);
 
+/// A device's next pairing request on a link is taken this long after its
+/// last (3b review: each one is a file written and a notification).
+const REQUEST_GAP_SECS: u64 = 10;
+
+/// Notifications about KDE Connect devices, at most so many a minute in
+/// all (3b review: requests and pings from many links).
+const TOASTS_PER_MINUTE: usize = 5;
+
 /// What the desktop app (through the server) asks of a device's link.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -115,9 +123,50 @@ fn now_unix() -> u64 {
     pocketdesk_core::local::pin::now_unix()
 }
 
-/// Show `summary` and `body` on the desktop, off the link's task. Not in
-/// tests: a toast's thread outliving the test process crashes it.
+/// At most `per_minute` in any minute.
+struct Allowance {
+    per_minute: usize,
+    given: std::collections::VecDeque<std::time::Instant>,
+}
+
+impl Allowance {
+    const fn new(per_minute: usize) -> Self {
+        Self {
+            per_minute,
+            given: std::collections::VecDeque::new(),
+        }
+    }
+
+    fn allow(&mut self, now: std::time::Instant) -> bool {
+        while self
+            .given
+            .front()
+            .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(60))
+        {
+            self.given.pop_front();
+        }
+        if self.given.len() >= self.per_minute {
+            return false;
+        }
+        self.given.push_back(now);
+        true
+    }
+}
+
+static TOASTS: Mutex<Allowance> = Mutex::new(Allowance::new(TOASTS_PER_MINUTE));
+
+/// Show `summary` and `body` on the desktop, off the link's task, within
+/// [`TOASTS_PER_MINUTE`] (past it, the log has it). Not in tests: a toast's
+/// thread outliving the test process crashes it.
 fn notify(summary: &'static str, body: String) {
+    let allowed = TOASTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .allow(std::time::Instant::now());
+    if !allowed {
+        tracing::info!("{summary}: {body}");
+        return;
+    }
     if cfg!(test) {
         return;
     }
@@ -160,6 +209,7 @@ pub async fn run<S: AsyncRead + AsyncWrite + Unpin>(
         keys,
         paired,
         waiting: None,
+        last_asked: 0,
     };
     let (reader, mut writer) = tokio::io::split(link.stream);
     let mut reader = BufReader::new(reader);
@@ -208,6 +258,8 @@ struct State {
     keys: (Option<Vec<u8>>, Option<Vec<u8>>),
     paired: bool,
     waiting: Option<Waiting>,
+    /// When the device last asked to pair on this link, unix seconds.
+    last_asked: u64,
 }
 
 impl State {
@@ -266,7 +318,15 @@ impl State {
                 self.accepted(now);
                 Vec::new()
             }
+            // One request at a time, and the next some seconds after.
+            PairSays::Yes(Some(_))
+                if self.waiting.is_some()
+                    || now.saturating_sub(self.last_asked) < REQUEST_GAP_SECS =>
+            {
+                Vec::new()
+            }
             PairSays::Yes(Some(timestamp)) => {
+                self.last_asked = now;
                 if !pairing::timestamp_ok(timestamp, now) {
                     tracing::warn!(device_id = %self.device_id, "A KDE pairing refused: its clock is off");
                     return vec![pairing::answer(false)];
@@ -537,6 +597,7 @@ mod tests {
             keys: (Some(vec![1; 91]), Some(vec![2; 91])),
             paired,
             waiting: None,
+            last_asked: 0,
         }
     }
 
@@ -594,6 +655,42 @@ mod tests {
         });
         let out = s.expire();
         assert_eq!(says(&out[0]), Some(PairSays::No), "no answer is a no");
+    }
+
+    #[test]
+    fn a_device_asks_once_at_a_time_and_not_again_at_once() {
+        let mut s = state("flood", false);
+        let now = now_unix();
+        s.pair_packet(PairSays::Yes(Some(now)));
+        let first = devices::pending(&s.dir, now)[0].clone();
+        assert!(s.pair_packet(PairSays::Yes(Some(now + 1))).is_empty());
+        assert_eq!(
+            devices::pending(&s.dir, now + 1)[0],
+            first,
+            "a repeat while one waits changes nothing"
+        );
+        s.event(Event::Answer {
+            yes: false,
+            code: first.code,
+        });
+        assert!(s.pair_packet(PairSays::Yes(Some(now))).is_empty());
+        assert!(
+            devices::pending(&s.dir, now).is_empty(),
+            "not again at once"
+        );
+        s.last_asked = now - REQUEST_GAP_SECS;
+        s.pair_packet(PairSays::Yes(Some(now)));
+        assert_eq!(devices::pending(&s.dir, now).len(), 1, "a while later");
+    }
+
+    #[test]
+    fn notifications_are_limited_to_a_few_a_minute() {
+        let mut toasts = Allowance::new(2);
+        let start = std::time::Instant::now();
+        assert!(toasts.allow(start));
+        assert!(toasts.allow(start));
+        assert!(!toasts.allow(start + Duration::from_secs(59)));
+        assert!(toasts.allow(start + Duration::from_secs(60)));
     }
 
     #[test]
