@@ -33,3 +33,13 @@ On the A71 with the app's language set to Spanish and to Tamil (`cmd locale set-
 - **The guard**: `StringsTranslatedTest` fails when a string is in English only, or only in a translation.
 - **Kept in English**, as designed: what the phone sends for the computer to show.
 
+## Review
+
+A fresh review (0 Critical, 0 Important, 7 Minor), fixed one commit each:
+
+- The strings file, the bars' comments and the checklist still called the HUD's and keys' words English (the checklist now looks for delay, lost, "rtt not measured yet").
+- Spanish "Áreas de trabajo" over workspaces captioned E1–E9 (now "Espacios de trabajo"), and two words for the trackpad in Spanish and in Tamil; Tamil seconds without the full stop.
+- The keyboard bar's modifiers printed the enum's names (Spanish: Mayús for Shift).
+- The mic share's failures were English sentences built from exceptions; now resources, the details in logcat.
+- The translation test counted names inside comments and let a dropped placeholder pass; it strips comments and compares each string's distinct placeholders.
+
