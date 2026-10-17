@@ -11,7 +11,8 @@
     <string name="app_name">Pocketdesk</string>
 
     <!-- ConnectScreen -->
-    <string name="host_address">Host address</string>
+    <string name="host_address">Computer\'s address</string>
+    <string name="host_address_example">For example 192.168.1.20 or mypc.local</string>
     <string name="home_subtitle">Your saved computers</string>
     <string name="found_on_network">On this network</string>
     <string name="saved_computers">Saved</string>
@@ -66,7 +67,7 @@
     <string name="streaming_port">Streaming port</string>
     <string name="control_port">Control port (clipboard, files)</string>
     <string name="wol_mac_label">Wake-on-LAN MAC address</string>
-    <string name="auto_connect">Auto-connect on launch</string>
+    <string name="auto_connect">Connect to it when the app opens</string>
     <string name="connect">Connect</string>
     <string name="send_wol">Send Wake-on-LAN</string>
     <string name="wake_sent">Wake sent to %1$s.</string>

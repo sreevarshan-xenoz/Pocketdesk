@@ -4,7 +4,8 @@
     <string name="app_name">Pocketdesk</string>
 
     <!-- ConnectScreen -->
-    <string name="host_address">Dirección del host</string>
+    <string name="host_address">Dirección del ordenador</string>
+    <string name="host_address_example">Por ejemplo, 192.168.1.20 o mipc.local</string>
     <string name="home_subtitle">Tus equipos guardados</string>
     <string name="found_on_network">En esta red</string>
     <string name="saved_computers">Guardados</string>
@@ -59,7 +60,7 @@
     <string name="streaming_port">Puerto de transmisión</string>
     <string name="control_port">Puerto de control (portapapeles, archivos)</string>
     <string name="wol_mac_label">Dirección MAC para encender por red</string>
-    <string name="auto_connect">Conectar automáticamente al iniciar</string>
+    <string name="auto_connect">Conectar al abrir la app</string>
     <string name="connect">Conectar</string>
     <string name="send_wol">Enviar Wake-on-LAN</string>
     <string name="wake_sent">Encendido enviado a %1$s.</string>

@@ -4,7 +4,8 @@
     <string name="app_name">Pocketdesk</string>
 
     <!-- ConnectScreen -->
-    <string name="host_address">ஹோஸ்ட் முகவரி</string>
+    <string name="host_address">கணினியின் முகவரி</string>
+    <string name="host_address_example">எ.கா. 192.168.1.20 அல்லது mypc.local</string>
     <string name="home_subtitle">உங்கள் சேமித்த கணினிகள்</string>
     <string name="found_on_network">இந்த நெட்வொர்க்கில்</string>
     <string name="saved_computers">சேமித்தவை</string>
@@ -59,7 +60,7 @@
     <string name="streaming_port">ஸ்ட்ரீமிங் போர்ட்</string>
     <string name="control_port">கண்ட்ரோல் போர்ட் (க்ளிப் போர்டு, கோப்புகள்)</string>
     <string name="wol_mac_label">Wake-on-LAN MAC முகவரி</string>
-    <string name="auto_connect">தொடங்கும்போது தானாக இணை</string>
+    <string name="auto_connect">செயலி திறக்கும்போது இதனுடன் இணை</string>
     <string name="connect">இணை</string>
     <string name="send_wol">Wake-on-LAN அனுப்பு</string>
     <string name="wake_sent">%1$s க்கு எழுப்புதல் அனுப்பப்பட்டது.</string>
