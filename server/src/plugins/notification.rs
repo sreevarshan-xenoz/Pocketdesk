@@ -350,7 +350,10 @@ impl Plugin for NotificationPlugin {
                 // One that offers buttons or a reply is kept for the desktop
                 // app to answer (T10c), and answered in its notification here
                 // too (N3).
-                let answers = note.as_ref().map(crate::toast_answers::Answerable::of);
+                let answers = note
+                    .as_ref()
+                    .filter(|_| crate::events::current_config().toast_answers)
+                    .map(crate::toast_answers::Answerable::of);
                 if let Some(note) = note
                     && let Ok(dir) = crate::state::state_dir()
                     && let Err(e) = phone_notes::keep(&dir, note)

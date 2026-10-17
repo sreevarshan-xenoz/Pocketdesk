@@ -56,6 +56,10 @@ video_quality = "balanced"
 # still applies.
 # phone_notifications = true
 # notifications_per_minute = 20
+# A phone notification the phone lets this computer answer shows its buttons
+# and a reply box (Windows toasts; Linux servers with actions, and KDE's
+# inline reply). Off: plain, and the desktop app's Notifications page answers.
+# toast_answers = true
 
 # Texts a phone forwards (Messages in the desktop app): a notification for
 # each, and how many the history keeps.

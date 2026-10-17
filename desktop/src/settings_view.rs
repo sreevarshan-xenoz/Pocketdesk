@@ -127,6 +127,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Notifications a minute, per phone",
         Section::Notifications,
     ),
+    (
+        "toast_answers",
+        "Answer in the notification",
+        Section::Notifications,
+    ),
     ("sms_notify", "Text notifications", Section::Notifications),
     (
         "sms_names",
@@ -186,7 +191,8 @@ fn section_of(key: &str) -> Option<Section> {
 
 /// Whether the running server reads `key` again on its own: the event log
 /// and hooks at each event, tasks at each start, Home Assistant every 2 s,
-/// files over the internet at each transfer. The rest wait for a restart.
+/// files over the internet at each transfer, answers in notifications at
+/// each notification. The rest wait for a restart.
 pub fn applies_live(key: &str) -> bool {
     matches!(
         key,
@@ -199,6 +205,7 @@ pub fn applies_live(key: &str) -> bool {
             | "mqtt_user"
             | "mqtt_password"
             | "internet_files"
+            | "toast_answers"
     )
 }
 
@@ -563,6 +570,16 @@ impl SettingsForm {
                         egui::DragValue::new(&mut e.notifications_per_minute)
                             .range(1..=600)
                             .suffix(" a minute"),
+                    );
+                });
+                row(ui, "toast_answers", |ui| {
+                    ui.checkbox(
+                        &mut e.toast_answers,
+                        "a phone notification you may answer shows its buttons and a reply box",
+                    );
+                    note(
+                        ui,
+                        "Only for notifications the phone lets this computer answer, while this server runs. The Notifications page answers them too.",
                     );
                 });
                 row(ui, "sms_notify", |ui| {
