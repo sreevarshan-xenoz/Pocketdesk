@@ -26,14 +26,71 @@ pub const PORTS: std::ops::RangeInclusive<u16> = 1739..=1764;
 /// The largest file taken, as from a phone.
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
-/// Dialing the device's port, its TLS handshake, and waiting for a turn.
+/// Dialing the device's port, and its TLS handshake.
 const STEP: Duration = Duration::from_secs(10);
 
-/// The longest the device may send nothing while a file is on the way.
-const QUIET: Duration = Duration::from_secs(30);
+/// How long a file waits for a turn.
+const TURN_WAIT: Duration = Duration::from_secs(60);
 
 /// Files from KDE Connect devices on the way at once.
 static AT_ONCE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// One device's files at once, on the way or waiting for a turn (3c
+/// review: each offer had been a task of its own, unbounded); more are
+/// refused.
+const PER_DEVICE: usize = 4;
+
+/// How many files each device has on the way or waiting.
+static TAKEN: std::sync::Mutex<std::collections::BTreeMap<String, usize>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// One of a device's places, given back when dropped.
+pub struct Ticket(String);
+
+impl Drop for Ticket {
+    fn drop(&mut self) {
+        let mut taken = TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(count) = taken.get_mut(&self.0) {
+            *count -= 1;
+            if *count == 0 {
+                taken.remove(&self.0);
+            }
+        }
+    }
+}
+
+/// A place for one of `device_id`'s files, while it has fewer than
+/// [`PER_DEVICE`].
+pub fn admit(device_id: &str) -> Option<Ticket> {
+    let mut taken = TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+    let count = taken.entry(device_id.to_string()).or_insert(0);
+    if *count >= PER_DEVICE {
+        return None;
+    }
+    *count += 1;
+    Some(Ticket(device_id.to_string()))
+}
+
+/// How slowly a file may come: silent at most `quiet`, and on the whole at
+/// least `min_rate` bytes a second after that (the phone road's floor), so
+/// a device trickling bytes cannot hold a turn for good (3c review).
+#[derive(Debug, Clone, Copy)]
+pub struct Pace {
+    pub quiet: Duration,
+    pub min_rate: u64,
+}
+
+impl Pace {
+    pub const DEFAULT: Pace = Pace {
+        quiet: Duration::from_secs(30),
+        min_rate: 32 * 1024,
+    };
+
+    /// How long `size` bytes may take in all.
+    fn allowed(&self, size: u64) -> Duration {
+        self.quiet + Duration::from_secs(size / self.min_rate.max(1))
+    }
+}
 
 /// A file a device offers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,14 +128,17 @@ pub fn offer_of(packet: &NetworkPacket) -> Result<Offer, String> {
 }
 
 /// Fetch `offer` from `device_id` (`name`, at `address`) and keep it, as a
-/// phone's file is kept; a failure is logged and told.
+/// phone's file is kept; a failure is logged and told. `ticket` is the
+/// device's place, held until it is done.
 pub async fn fetch(
     dir: PathBuf,
     device_id: String,
     name: String,
     address: Option<IpAddr>,
     offer: Offer,
+    ticket: Ticket,
 ) {
+    let _ticket = ticket;
     let fetched = async {
         let address = address
             .filter(|ip| crate::plugins::share::dialable(*ip))
@@ -122,7 +182,7 @@ async fn receive(
     offer: &Offer,
     downloads: &Path,
 ) -> Result<PathBuf, String> {
-    let _turn = tokio::time::timeout(STEP, AT_ONCE.acquire())
+    let _turn = tokio::time::timeout(TURN_WAIT, AT_ONCE.acquire())
         .await
         .map_err(|_| "busy with other files".to_string())?
         .map_err(|e| e.to_string())?;
@@ -140,7 +200,7 @@ async fn receive(
     .await
     .map_err(|_| "no TLS handshake in time".to_string())?
     .map_err(|e| format!("TLS: {e}"))?;
-    receive_into(&mut tls, offer, downloads).await
+    receive_into(&mut tls, offer, downloads, Pace::DEFAULT).await
 }
 
 /// A partial file, removed unless it was placed.
@@ -152,13 +212,15 @@ impl Drop for Part {
     }
 }
 
-/// Read exactly `offer.size` bytes from `stream` into a new file in
-/// `downloads`, named like `offer.name`.
+/// Read exactly `offer.size` bytes from `stream`, at `pace`, into a new
+/// file in `downloads`, named like `offer.name`.
 async fn receive_into<S: AsyncRead + Unpin>(
     stream: &mut S,
     offer: &Offer,
     downloads: &Path,
+    pace: Pace,
 ) -> Result<PathBuf, String> {
+    let deadline = tokio::time::Instant::now() + pace.allowed(offer.size);
     tokio::fs::create_dir_all(downloads)
         .await
         .map_err(|e| format!("Downloads: {e}"))?;
@@ -178,9 +240,18 @@ async fn receive_into<S: AsyncRead + Unpin>(
         let want = buffer
             .len()
             .min(usize::try_from(left).unwrap_or(usize::MAX));
-        let read = tokio::time::timeout(QUIET, stream.read(&mut buffer[..want]))
+        let wait = pace
+            .quiet
+            .min(deadline.saturating_duration_since(tokio::time::Instant::now()));
+        let read = tokio::time::timeout(wait, stream.read(&mut buffer[..want]))
             .await
-            .map_err(|_| "the device went quiet".to_string())?
+            .map_err(|_| {
+                if tokio::time::Instant::now() >= deadline {
+                    "the device sent it too slowly".to_string()
+                } else {
+                    "the device went quiet".to_string()
+                }
+            })?
             .map_err(|e| format!("the device's connection: {e}"))?;
         if read == 0 {
             return Err(format!("the device stopped {left} bytes before the end"));
@@ -271,7 +342,9 @@ mod tests {
         let (mut device, mut ours) = tokio::io::duplex(8 * 1024);
         let sent = bytes.clone();
         tokio::spawn(async move { device.write_all(&sent).await });
-        let path = receive_into(&mut ours, &offer, &downloads).await.unwrap();
+        let path = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT)
+            .await
+            .unwrap();
         assert_eq!(path, downloads.join("photo.jpg"));
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
 
@@ -279,10 +352,47 @@ mod tests {
         tokio::spawn(async move {
             let _ = device.write_all(&[1; 1000]).await;
         });
-        let short = receive_into(&mut ours, &offer, &downloads).await;
+        let short = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT).await;
         assert!(short.unwrap_err().contains("before the end"));
         let left: Vec<_> = std::fs::read_dir(&downloads).unwrap().flatten().collect();
         assert_eq!(left.len(), 1, "only the first file, no part left behind");
+        let _ = std::fs::remove_dir_all(&downloads);
+    }
+
+    #[test]
+    fn a_device_has_a_few_files_on_the_way_at_once() {
+        let id = format!("intake{}", uuid::Uuid::new_v4().simple());
+        let tickets: Vec<_> = std::iter::from_fn(|| admit(&id)).take(10).collect();
+        assert_eq!(tickets.len(), PER_DEVICE);
+        assert!(admit("another device").is_some(), "per device");
+        drop(tickets);
+        assert!(admit(&id).is_some(), "given back");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_file_that_trickles_in_is_given_up() {
+        let downloads = temp("slow");
+        let offer = Offer {
+            name: "slow.bin".to_string(),
+            size: 100,
+            port: 1739,
+        };
+        let (mut device, mut ours) = tokio::io::duplex(1024);
+        tokio::spawn(async move {
+            // A byte every 2 s: never quiet for long, far under the rate.
+            for _ in 0..100 {
+                if device.write_all(&[1]).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+        let pace = Pace {
+            quiet: Duration::from_secs(5),
+            min_rate: 10,
+        };
+        let slow = receive_into(&mut ours, &offer, &downloads, pace).await;
+        assert!(slow.unwrap_err().contains("too slowly"));
         let _ = std::fs::remove_dir_all(&downloads);
     }
 

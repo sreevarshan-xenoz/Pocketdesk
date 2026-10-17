@@ -286,14 +286,23 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
             }
         }
         if let Some(offer) = state.file_in.take() {
-            // Fetched beside the link, which keeps answering.
-            tokio::spawn(super::share::fetch(
-                state.dir.clone(),
-                device_id.clone(),
-                state.name.clone(),
-                address,
-                offer,
-            ));
+            match super::share::admit(&device_id) {
+                // Fetched beside the link, which keeps answering.
+                Some(ticket) => {
+                    tokio::spawn(super::share::fetch(
+                        state.dir.clone(),
+                        device_id.clone(),
+                        state.name.clone(),
+                        address,
+                        offer,
+                        ticket,
+                    ));
+                }
+                None => tracing::info!(
+                    device_id,
+                    "A file from a KDE Connect device refused: too many of its files on the way"
+                ),
+            }
         }
         if let Some(text) = state.clipboard_in.take() {
             // Not sent back to the device it came from.
