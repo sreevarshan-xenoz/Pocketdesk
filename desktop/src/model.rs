@@ -88,7 +88,8 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
             .into_iter()
             .map(|id| Device {
                 name: store.name(&id).map(str::to_string),
-                renamed: store.name(&id).is_some() && store.name(&id) != store.claimed_name(&id),
+                // The owner's, even when it matches the phone's own (U3 review).
+                renamed: store.chosen_name(&id).is_some(),
                 grant_remaining: store.grant_remaining(&id),
                 connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
                 takes_files: takes_files(&id),

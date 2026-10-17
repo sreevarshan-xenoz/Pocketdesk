@@ -721,6 +721,11 @@ impl TrustStore {
         self.names.get(device_id)?.claimed.as_deref()
     }
 
+    /// The owner's name for a device, if they gave one.
+    pub fn chosen_name(&self, device_id: &str) -> Option<&str> {
+        self.names.get(device_id)?.chosen.as_deref()
+    }
+
     /// Keep what a paired device calls itself in its identity; whether the
     /// store changed (and was written). A device not trusted, or a name
     /// unchanged or empty once cleaned, writes nothing.
@@ -1238,6 +1243,7 @@ mod tests {
             "a rename is never replaced"
         );
         assert_eq!(read.claimed_name("phone-n"), Some("Galaxy A72"));
+        assert_eq!(read.chosen_name("phone-n"), Some("Work phone"));
         let mut store = read;
         store.rename("phone-n", Some("  ")).unwrap();
         assert_eq!(
