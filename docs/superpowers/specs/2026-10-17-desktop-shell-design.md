@@ -35,3 +35,15 @@ The navigation table (every page in exactly one group, names unique, `--page` pa
 ## Device check
 
 The app on this box, at 720×480 and larger, each page opened with `--page`; screenshots of its own window only (no input into it).
+
+## As built
+
+- **Navigation:** `desktop/src/nav.rs` holds the groups, each page's name, purpose, `--page` key and whether it scrolls its own lists; the Overview is today's Status page under a new name.
+- **Save in view:** `SettingsForm::save_bar`, shown in a bottom panel while the form has changes; the restart line stays in the page.
+- **The notice:** `desktop/src/notice.rs`. A notice's kind comes from its words ("Not …", "Could not …", "failed" are errors; "…" is work under way, kept until what follows replaces it), so the app's 23 places that say something needed no change but the type. Done and information go after 6 s, an error after 12 s. "Copied." shows beside the debug report's and the pairing link's copy buttons for 3 s.
+- **Off the UI thread:** `run_setting` / `finish_setting`, beside the start and restart job; the two switches are off while a change runs.
+- **Colours:** `desktop/src/theme.rs`, four tokens (good, bad, warn, muted), each at least 4.5:1 on its panel, held by a test; every one-off colour in the views uses them.
+- **Fonts:** `desktop/src/fonts.rs`, mapped with `memmap2`, so the about 30 MB of fonts are not read into memory. egui draws without shaping: Arabic letters are not joined and Indic conjuncts are drawn plainly.
+- **AccessKit:** checked through Windows UI Automation, which lists the navigation, group titles, the page's heading and text by name.
+- **Persistence:** eframe's `persistence` feature (it adds `ron`); the page under the key `page`. With `POCKETDESK_CONFIG_DIR` set, the window's state is kept in `app-window.ron` beside that config.
+- **Checked on this box** (the app's own window, captured with `PrintWindow`; no input into it): Settings at 720×480 with the navigation and a scrolling page, file names in six scripts drawn, the accessibility tree, and the page kept across runs.
