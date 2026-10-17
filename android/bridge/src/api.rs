@@ -507,8 +507,12 @@ pub async fn connect_to_peer(
     let result = async move {
         // The stream, and whether it came by the internet road.
         let dialed: Result<(ControlDuplex, bool), _> =
-            match conn_mgr.connect(&address, port, &identity).await {
-                Ok(stream) => Ok((Box::new(stream) as ControlDuplex, false)),
+            match conn_mgr.connect_named(&address, port, &identity).await {
+                Ok((stream, name)) => {
+                    // U3: the computer's name, for the app to keep.
+                    crate::peer_names::note(&address, name);
+                    Ok((Box::new(stream) as ControlDuplex, false))
+                }
                 Err(home) => match wan_identity.as_deref().map(WanTarget::parse) {
                     Some(Ok(target)) if INTERNET_PAUSE.may_try(&address, Instant::now()) => {
                         tracing::info!(
@@ -2139,11 +2143,12 @@ pub(crate) async fn dial_internet_control(
     .map_err(|e| format!("{e:#}"))?;
     // The streams the computer opens on this connection for transfers (2d).
     let acceptor = stream.link_acceptor();
-    let stream = pocketdesk_core::protocol::connection::internet_control_handshake(
+    let (stream, name) = pocketdesk_core::protocol::connection::internet_control_handshake_named(
         stream, address, identity,
     )
     .await
     .map_err(|e| e.to_string())?;
+    crate::peer_names::note(address, name);
     if let Some(acceptor) = acceptor {
         crate::link::spawn_acceptor(acceptor);
     }
