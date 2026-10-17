@@ -340,6 +340,10 @@ impl PocketdeskApp {
     }
 
     fn switch_to(&mut self, tab: Tab) {
+        // The Overview's link box is for the moment it was opened in.
+        if tab != self.tab {
+            self.overview_link = None;
+        }
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
         }
@@ -778,6 +782,7 @@ impl PocketdeskApp {
             if ui.button("Pair a phone").clicked() {
                 self.switch_to(Tab::Pair);
             }
+            self.overview_link = None;
             return;
         }
         let mut ring = None;
@@ -854,6 +859,13 @@ impl PocketdeskApp {
                 });
             });
         }
+        // Whether the link box's phone can take a link now (N6 review): a
+        // phone gone from the list closes the box.
+        let link_state = self
+            .overview_link
+            .as_ref()
+            .map(|(id, _)| rows.iter().find(|r| &r.device.id == id).map(|r| r.link));
+        drop(rows);
         if let Some(id) = ring {
             self.ring(&id);
         }
@@ -861,15 +873,20 @@ impl PocketdeskApp {
             self.send_to = Some(id);
             self.switch_to(Tab::Files);
         }
+        match link_state {
+            Some(None) => self.overview_link = None,
+            Some(Some(reach)) => self.overview_link_box(ui, reach),
+            None => {}
+        }
         if let Some(id) = open_link {
             self.overview_link = Some((id, String::new()));
             self.overview_link_focus = true;
         }
-        self.overview_link_box(ui);
     }
 
-    /// The Overview's link box, for the phone its Send link… was pressed on.
-    fn overview_link_box(&mut self, ui: &mut egui::Ui) {
+    /// The Overview's link box, for the phone its Send link… was pressed on;
+    /// `reach` says whether a link reaches that phone now, or why not.
+    fn overview_link_box(&mut self, ui: &mut egui::Ui, reach: Result<(), &'static str>) {
         let Some((id, text)) = self.overview_link.as_mut() else {
             return;
         };
@@ -887,14 +904,18 @@ impl PocketdeskApp {
             if std::mem::take(&mut self.overview_link_focus) {
                 field.request_focus();
             }
-            if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            let can_send = !text.trim().is_empty() && reach.is_ok();
+            if can_send && field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 send = true;
             }
             send |= ui
-                .add_enabled(!text.trim().is_empty(), egui::Button::new("Send"))
+                .add_enabled(can_send, egui::Button::new("Send"))
                 .clicked();
             cancel = ui.button("Cancel").clicked();
         });
+        if let Err(why) = reach {
+            ui.label(RichText::new(why).color(crate::theme::muted(ui)));
+        }
         if cancel {
             self.overview_link = None;
         } else if send && let Some((id, url)) = self.overview_link.take() {
