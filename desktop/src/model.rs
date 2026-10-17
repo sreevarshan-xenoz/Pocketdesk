@@ -195,13 +195,27 @@ pub fn target_label(snapshot: &Snapshot, id: &str) -> String {
 }
 
 /// A paired device by its name (U3), else by the first characters of its
-/// id: one label for every page.
+/// id: one label for every page. A name another device shares (two phones
+/// of one model keep Android's default) gets its short id too, so a picker
+/// never lists the same words twice (U3 review).
 pub fn device_label(devices: &[Device], id: &str) -> String {
-    devices
+    let Some(name) = devices
         .iter()
         .find(|d| d.id == id)
-        .and_then(|d| d.name.clone())
-        .unwrap_or_else(|| crate::app::short(id))
+        .and_then(|d| d.name.as_deref())
+    else {
+        return crate::app::short(id);
+    };
+    let shared = devices
+        .iter()
+        .filter(|d| d.name.as_deref() == Some(name))
+        .count()
+        > 1;
+    if shared {
+        format!("{name} · {}", crate::app::short(id))
+    } else {
+        name.to_string()
+    }
 }
 
 /// Name the paired device `id` (U3); blank clears the owner's name, back
@@ -698,6 +712,21 @@ mod tests {
         rename_device(&dir, "phone-a", "  ").unwrap();
         let snapshot = snapshot_with(&dir, 101, true);
         assert_eq!(device_label(&snapshot.devices, "phone-a"), "Galaxy A71");
+
+        // Two phones of one model: each name says which (U3 review).
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store
+            .note_claimed_name("0a1b2c3d-4e5f-6789", "Galaxy A71")
+            .unwrap();
+        let snapshot = snapshot_with(&dir, 101, true);
+        assert_eq!(
+            device_label(&snapshot.devices, "0a1b2c3d-4e5f-6789"),
+            "Galaxy A71 · 0a1b2c3d-4e5…"
+        );
+        assert_eq!(
+            device_label(&snapshot.devices, "phone-a"),
+            "Galaxy A71 · phone-a"
+        );
     }
 
     #[test]

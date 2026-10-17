@@ -59,10 +59,14 @@ object Shortcuts {
             hasWake = { dev.pocketdesk.android.wake.Waker.canWake(dev.pocketdesk.android.wake.Waker.planFor(app, it)) },
         )
         val wake = ShortcutPlan.Kind.WAKE
+        // Its name tells computers apart, else its address (U3); two of one
+        // name get their addresses too (U3 review). The icon tells connect
+        // from wake.
+        val names = plan.associate { it.address to HostStore.shownName(app, it.address) }
+        val shared = names.values.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         val shortcuts = plan.map { entry ->
-            // Its name tells computers apart, else its address (U3); the
-            // icon tells connect from wake.
-            val shown = HostStore.shownName(app, entry.address)
+            val name = names.getValue(entry.address)
+            val shown = if (name in shared) "$name (${entry.address})" else name
             ShortcutInfo.Builder(app, entry.id)
                 .setShortLabel(shown)
                 .setLongLabel(
