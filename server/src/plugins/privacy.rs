@@ -58,6 +58,22 @@ pub(crate) fn release_if_owner(lost: impl Fn(&str) -> bool) {
 #[derive(Debug, Default)]
 pub struct PrivacyPlugin;
 
+/// Answer a privacy request (a grab, a release, a lock) from a phone with
+/// Power turned off, which the control gate drops: the phone waits for a
+/// reply, and is told why at once instead of after its timeout (U2).
+pub(crate) async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    if packet.packet_type != "kdeconnect.pocketdesk.privacy" {
+        return;
+    }
+    let body = json!({
+        "ok": false,
+        "error": "Power is turned off for this phone on the computer",
+    });
+    let _ = sender
+        .send_packet(&NetworkPacket::new("kdeconnect.pocketdesk.privacy").with_body(body))
+        .await;
+}
+
 #[async_trait::async_trait]
 impl Plugin for PrivacyPlugin {
     fn name(&self) -> &'static str {
@@ -162,6 +178,39 @@ mod tests {
                 .incoming_capabilities()
                 .contains(&"kdeconnect.pocketdesk.privacy")
         );
+    }
+
+    struct Phone(std::sync::Mutex<Vec<NetworkPacket>>);
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Phone {
+        fn device_id(&self) -> &str {
+            "phone-a"
+        }
+        fn connection_id(&self) -> &str {
+            "phone-a"
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.0.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    /// A phone with Power off asking to lock is told so at once (U2): it
+    /// had waited 5 s for a reply that never came, then said the computer
+    /// did not answer.
+    #[tokio::test]
+    async fn a_refused_privacy_request_is_answered_with_why() {
+        let phone = Phone(Default::default());
+        let asked = NetworkPacket::new("kdeconnect.pocketdesk.privacy")
+            .with_body(json!({"action": "status", "lock": true}));
+        crate::plugins::answer_denied(&asked, &phone).await;
+        let sent = phone.0.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].packet_type, "kdeconnect.pocketdesk.privacy");
+        assert_eq!(sent[0].body["ok"], false);
+        assert!(sent[0].body["error"].as_str().unwrap().contains("Power"));
+        assert!(sent[0].body.get("locked").is_none());
     }
 
     #[tokio::test]
