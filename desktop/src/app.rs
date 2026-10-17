@@ -782,7 +782,7 @@ impl PocketdeskApp {
                     } else if !device.linked {
                         "Not linked now: it rings in a session, or with Ring from the computer on in its own Settings."
                     } else {
-                        "Ring it at full volume for 30 seconds, even in Do Not Disturb. At most once a minute."
+                        "Ring it at full volume for 30 seconds, through Do Not Disturb when the phone lets alarms through. At most once a minute."
                     };
                     if ui
                         .add_enabled(can_ring, egui::Button::new("Ring"))
