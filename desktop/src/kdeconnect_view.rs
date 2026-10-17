@@ -139,13 +139,13 @@ impl KdeConnectView {
                         ))
                         .strong(),
                     );
-                    if ui.button("Allow").clicked() {
+                    if answer(ui, running, "Allow") {
                         ask = Some(KdeAsk::Allow {
                             device_id: pending.device_id.clone(),
                             code: pending.code.clone(),
                         });
                     }
-                    if ui.button("Deny").clicked() {
+                    if answer(ui, running, "Deny") {
                         ask = Some(KdeAsk::Deny {
                             device_id: pending.device_id.clone(),
                             code: pending.code.clone(),
@@ -160,13 +160,13 @@ impl KdeConnectView {
                         ))
                         .strong(),
                     );
-                    if ui.button("Confirm").clicked() {
+                    if answer(ui, running, "Confirm") {
                         ask = Some(KdeAsk::Allow {
                             device_id: pending.device_id.clone(),
                             code: pending.code.clone(),
                         });
                     }
-                    if ui.button("Cancel").clicked() {
+                    if answer(ui, running, "Cancel") {
                         ask = Some(KdeAsk::Deny {
                             device_id: pending.device_id.clone(),
                             code: pending.code.clone(),
@@ -206,7 +206,7 @@ impl KdeConnectView {
                             device_id: device_id.clone(),
                         });
                     }
-                    if ui.button("Unpair").clicked() {
+                    if answer(ui, running, "Unpair") {
                         ask = Some(KdeAsk::Unpair { device_id });
                     }
                 } else if ui
@@ -219,8 +219,9 @@ impl KdeConnectView {
             });
         }
         if let Some(ask) = ask {
+            let said = asked(&ask);
             self.notice = Some(match devices::request(state_dir, ask, now_unix) {
-                Ok(_) => "Asked.".to_string(),
+                Ok(_) => said.to_string(),
                 Err(e) => format!("Not asked: {e}"),
             });
             // Read again soon, for the answer.
@@ -229,6 +230,25 @@ impl KdeConnectView {
         if let Some(notice) = &self.notice {
             ui.label(RichText::new(notice).weak());
         }
+    }
+}
+
+/// A button that leaves the server a request: off while it is not running
+/// (the request would lapse unread); whether it was pressed.
+fn answer(ui: &mut egui::Ui, running: bool, label: &str) -> bool {
+    ui.add_enabled(running, egui::Button::new(label))
+        .on_disabled_hover_text("Start the server with KDE Connect devices on")
+        .clicked()
+}
+
+/// What the app says once it has asked: a pairing or a ping goes only to
+/// a device connected now.
+fn asked(ask: &KdeAsk) -> &'static str {
+    match ask {
+        KdeAsk::Pair { .. } | KdeAsk::Ping { .. } => {
+            "Asked: the device must be connected now, with KDE Connect open."
+        }
+        _ => "Asked.",
     }
 }
 
