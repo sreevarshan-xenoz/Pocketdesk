@@ -53,7 +53,7 @@ class FoundComputersTest {
         val found = FoundComputers.fromRecord(
             "x",
             1716,
-            mapOf("name" to "Desk‮gnp.exe"),
+            mapOf("name" to "Desk\u202Egnp.exe"),
             listOf("10.0.0.2"),
         )!!
         assertEquals("Deskgnp.exe", found.name)
