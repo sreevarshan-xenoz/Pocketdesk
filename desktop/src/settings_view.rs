@@ -595,7 +595,7 @@ impl SettingsForm {
                 row(ui, "phone_notifications", |ui| {
                     ui.checkbox(
                         &mut e.phone_notifications,
-                        "show the notifications phones share",
+                        "show the notifications phones and KDE Connect devices share",
                     );
                 });
                 row(ui, "notifications_per_minute", |ui| {
