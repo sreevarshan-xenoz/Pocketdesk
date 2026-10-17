@@ -150,6 +150,14 @@ pub struct PocketdeskApp {
     send_path: String,
     /// The link the send box hands to the phone (T8a).
     send_link: String,
+    /// Each phone's last session, for the Overview (N6), read while it shows.
+    last_sessions: std::collections::HashMap<String, u64>,
+    /// The session log as last read for [`Self::last_sessions`].
+    last_sessions_stamp: Option<(u64, std::time::SystemTime)>,
+    /// The Overview's link box: the phone it is for, and the link typed.
+    overview_link: Option<(String, String)>,
+    /// The link box was just opened: its field takes the cursor once.
+    overview_link_focus: bool,
     /// A "Choose file…" dialog that is open.
     picking: Option<std::thread::JoinHandle<Option<PathBuf>>>,
     /// The Diagnostics tab (F10).
@@ -207,6 +215,10 @@ impl PocketdeskApp {
             send_to: None,
             send_path: String::new(),
             send_link: String::new(),
+            last_sessions: Default::default(),
+            last_sessions_stamp: None,
+            overview_link: None,
+            overview_link_focus: false,
             picking: None,
             diagnostics: Default::default(),
             messages: Default::default(),
@@ -331,6 +343,10 @@ impl PocketdeskApp {
     }
 
     fn switch_to(&mut self, tab: Tab) {
+        // The Overview's link box is for the moment it was opened in.
+        if tab != self.tab {
+            self.overview_link = None;
+        }
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
         }
@@ -365,6 +381,15 @@ impl PocketdeskApp {
         self.config = Config::load().ok();
         if self.tab == Tab::Logs {
             self.log = model::log_tail(&self.state_dir, 400);
+        }
+        if self.tab == Tab::Status {
+            // Read again only when the log changed, not every second.
+            let stamp = model::session_log_stamp(&self.state_dir);
+            if stamp != self.last_sessions_stamp {
+                self.last_sessions =
+                    model::last_sessions(&model::session_log_tail(&self.state_dir));
+                self.last_sessions_stamp = stamp;
+            }
         }
         if self.tab == Tab::Activity {
             self.activity.refresh(&self.state_dir);
@@ -721,8 +746,16 @@ impl PocketdeskApp {
             .num_columns(2)
             .spacing([24.0, 6.0])
             .show(ui, |ui| {
+                // Phones, as listed below; other computers are in Settings.
                 ui.label("Paired phones");
-                ui.label(self.snapshot.devices.len().to_string());
+                ui.label(
+                    self.snapshot
+                        .devices
+                        .iter()
+                        .filter(|d| !d.computer)
+                        .count()
+                        .to_string(),
+                );
                 ui.end_row();
                 ui.label("Live sessions");
                 ui.label(self.snapshot.sessions.len().to_string());
@@ -739,6 +772,180 @@ impl PocketdeskApp {
                     ui.end_row();
                 }
             });
+        ui.add_space(16.0);
+        self.phones_panel(ui);
+    }
+
+    /// Ask the phone `id` to ring (N1), and say how that went.
+    fn ring(&mut self, id: &str) {
+        let who = self.label(id);
+        self.notice =
+            crate::notice::Notice::outcome(
+                match pocketdesk_core::local::rings::request(&self.state_dir, id, now_unix()) {
+                    Ok(_) => Ok(format!("Asked {who} to ring.")),
+                    Err(e) => Err(format!("Could not ring {who}: {e}")),
+                },
+            );
+    }
+
+    /// The Overview's phones (N6): where each is, its battery and last
+    /// session, and Ring, Send file… and Send link… for it.
+    fn phones_panel(&mut self, ui: &mut egui::Ui) {
+        ui.label(RichText::new("Your phones").strong());
+        let now = now_unix();
+        let rows = model::phone_rows(&self.snapshot, &self.last_sessions);
+        if rows.is_empty() {
+            ui.label("No phone is paired yet. The phone scans a code from the Pair page.");
+            if ui.button("Pair a phone").clicked() {
+                self.switch_to(Tab::Pair);
+            }
+            self.overview_link = None;
+            return;
+        }
+        let mut ring = None;
+        let mut send_file = None;
+        let mut open_link = None;
+        // One short block per phone, so it fits a narrow window (N6).
+        for row in &rows {
+            let device = row.device;
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(model::device_label(&self.snapshot.devices, &device.id)).strong())
+                        .on_hover_text(&device.id);
+                    let (place, why) = match row.place {
+                        model::Place::Session => {
+                            ("In a session", "It is in a session with this computer now.")
+                        }
+                        model::Place::Linked => (
+                            "Linked",
+                            "Not in a session, but a feature on the phone keeps a link to this computer.",
+                        ),
+                        model::Place::Away => (
+                            "Away",
+                            "Nothing reaches it now: not in a session, and no feature on the phone keeps a link.",
+                        ),
+                    };
+                    let color = if row.place == model::Place::Away {
+                        crate::theme::muted(ui)
+                    } else {
+                        crate::theme::good(ui)
+                    };
+                    ui.label(RichText::new(place).color(color)).on_hover_text(why);
+                });
+                // Its battery, and its last session unless one runs now
+                // (a session is recorded when it ends).
+                let mut facts = vec![format!("Battery {}", battery_text(device.battery.as_ref(), now))];
+                if row.place != model::Place::Session {
+                    facts.push(match row.last_session {
+                        Some(at) => format!("last session {}", crate::words::ago(now, at)),
+                        // The log's tail holds a few hundred sessions.
+                        None => "no recent session".to_string(),
+                    });
+                }
+                ui.label(RichText::new(facts.join(" · ")).color(crate::theme::muted(ui)));
+                ui.horizontal_wrapped(|ui| {
+                    let ring_why = row.ring.err().unwrap_or(
+                        "Ring it for 30 seconds, through Do Not Disturb when the phone lets alarms through. At most once a minute.",
+                    );
+                    if ui
+                        .add_enabled(row.ring.is_ok(), egui::Button::new("Ring"))
+                        .on_hover_text(ring_why)
+                        .on_disabled_hover_text(ring_why)
+                        .clicked()
+                    {
+                        ring = Some(device.id.clone());
+                    }
+                    let file_why = row.file.err().unwrap_or("Open Files with this phone chosen.");
+                    if ui
+                        .add_enabled(row.file.is_ok(), egui::Button::new("Send file…"))
+                        .on_hover_text(file_why)
+                        .on_disabled_hover_text(file_why)
+                        .clicked()
+                    {
+                        send_file = Some(device.id.clone());
+                    }
+                    let link_why = row.link.err().unwrap_or("A web link it opens from a notification.");
+                    if ui
+                        .add_enabled(row.link.is_ok(), egui::Button::new("Send link…"))
+                        .on_hover_text(link_why)
+                        .on_disabled_hover_text(link_why)
+                        .clicked()
+                    {
+                        open_link = Some(device.id.clone());
+                    }
+                });
+            });
+        }
+        // Whether the link box's phone can take a link now (N6 review): a
+        // phone gone from the list closes the box.
+        let link_state = self
+            .overview_link
+            .as_ref()
+            .map(|(id, _)| rows.iter().find(|r| &r.device.id == id).map(|r| r.link));
+        drop(rows);
+        if let Some(id) = ring {
+            self.ring(&id);
+        }
+        if let Some(id) = send_file {
+            self.send_to = Some(id);
+            self.switch_to(Tab::Files);
+        }
+        match link_state {
+            Some(None) => self.overview_link = None,
+            Some(Some(reach)) => self.overview_link_box(ui, reach),
+            None => {}
+        }
+        if let Some(id) = open_link {
+            self.overview_link = Some((id, String::new()));
+            self.overview_link_focus = true;
+        }
+    }
+
+    /// The Overview's link box, for the phone its Send link… was pressed on;
+    /// `reach` says whether a link reaches that phone now, or why not.
+    fn overview_link_box(&mut self, ui: &mut egui::Ui, reach: Result<(), &'static str>) {
+        let Some((id, text)) = self.overview_link.as_mut() else {
+            return;
+        };
+        let who = model::device_label(&self.snapshot.devices, id);
+        let mut send = false;
+        let mut cancel = false;
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("A link for {who}:"));
+            let field = ui.add(
+                egui::TextEdit::singleline(text)
+                    .hint_text("A web link (http or https)")
+                    .desired_width(320.0),
+            );
+            if std::mem::take(&mut self.overview_link_focus) {
+                field.request_focus();
+            }
+            let can_send = !text.trim().is_empty() && reach.is_ok();
+            if can_send && field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                send = true;
+            }
+            send |= ui
+                .add_enabled(can_send, egui::Button::new("Send"))
+                .clicked();
+            cancel = ui.button("Cancel").clicked();
+        });
+        if let Err(why) = reach {
+            ui.label(RichText::new(why).color(crate::theme::muted(ui)));
+        }
+        if cancel {
+            self.overview_link = None;
+        } else if send && let Some((id, url)) = self.overview_link.take() {
+            match model::queue_link(&self.state_dir, &id, &url, now_unix()) {
+                Ok(said) => self.notice = crate::notice::Notice::outcome(Ok(said)),
+                Err(e) => {
+                    // Keep the box, so the link can be fixed.
+                    self.notice = crate::notice::Notice::outcome(Err(e));
+                    self.overview_link = Some((id, url));
+                }
+            }
+        }
     }
 
     fn devices_tab(&mut self, ui: &mut egui::Ui) {
@@ -899,13 +1106,7 @@ impl PocketdeskApp {
             self.confirm_revoke = choice;
         }
         if let Some(id) = ring {
-            let who = self.label(&id);
-            self.notice = crate::notice::Notice::outcome(
-                match pocketdesk_core::local::rings::request(&self.state_dir, &id, now) {
-                    Ok(_) => Ok(format!("Asked {who} to ring.")),
-                    Err(e) => Err(format!("Could not ring {who}: {e}")),
-                },
-            );
+            self.ring(&id);
         }
         if let Some(id) = confirmed {
             self.confirm_revoke = None;
@@ -1584,10 +1785,19 @@ impl eframe::App for PocketdeskApp {
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_tray(ctx);
+        // Started again: bring this window forward, from the tray too.
+        if crate::single_instance::take_raise() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.finish_job();
         self.finish_setting();
         // Closing hides to the tray; Quit (or no tray to come back from) exits.
-        if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.tray.is_some() {
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.quitting
+            && closes_to_tray(self.tray.is_some(), on_wayland())
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             // Nobody sees a hidden window, so it must not keep (or, on its
@@ -1806,8 +2016,30 @@ pub fn human_duration(secs: u64) -> String {
     }
 }
 
+/// Whether closing the window hides it to the tray: only with a tray, and
+/// not on Wayland, which lets no app hide its own window (closing there
+/// would do nothing at all, N6 review), so it quits as without a tray.
+fn closes_to_tray(has_tray: bool, wayland: bool) -> bool {
+    has_tray && !wayland
+}
+
+/// Whether the window is a Wayland one: winit takes Wayland when the
+/// session offers it.
+fn on_wayland() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
+    /// N6 review: Wayland lets no app hide its own window.
+    #[test]
+    fn closing_hides_to_the_tray_except_on_wayland() {
+        use super::closes_to_tray;
+        assert!(closes_to_tray(true, false));
+        assert!(!closes_to_tray(true, true), "Wayland: closing quits");
+        assert!(!closes_to_tray(false, false), "no tray: closing quits");
+    }
+
     #[test]
     fn the_page_kept_is_the_one_chosen_and_never_pair() {
         use super::{Tab, kept_page};

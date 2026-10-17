@@ -25,7 +25,11 @@ serde_json = "1"
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
 
-# The tray. Linux has none yet (see src/tray_none.rs): its backend needs a
-# GTK main loop the app does not run, so GTK stays out of the Linux build.
+# The tray. tray-icon's Linux backend needs a GTK main loop the app does not
+# run, so Linux has its own (src/tray_linux.rs): a StatusNotifierItem over
+# D-Bus, no GTK (N6).
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tray-icon = "0.26"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", features = ["blocking"] }

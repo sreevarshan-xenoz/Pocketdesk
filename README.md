@@ -98,7 +98,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 | Another of your computers, paired (clipboard, files, over the internet) | yes | yes (two servers on one box) |
 | KDE Connect devices (pairing, ping, clipboard, battery, Ring, files to here) | yes, not yet beside `kdeconnectd` (which holds UDP 1716) | yes, with KDE Connect 1.36 on the A71 |
 | Events, hooks, named tasks, Home Assistant | yes | yes |
-| Desktop app tray | no (closing quits) | yes |
+| Desktop app tray | yes, where the desktop shows StatusNotifierItems (closing quits where it does not) | yes |
 | Device-checked | Hyprland on a laptop (2026-09: pairing, video with VAAPI, input, Tailscale, start at login); a headless Sway VM across the internet (2026-10-14: pairing, LAN and WAN sessions, clipboard; 2026-10-15: links both ways, the phone's battery, now-playing and Pause through `playerctl`). Not yet: files, notifications and texts, sound on the phone, GNOME/KDE, the desktop app | most rows, with a Galaxy A71 (2026-10). Not yet: start at login, the tray menu, single-window streaming |
 
 The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 (Android 16) and an OPPO Reno8 (ColorOS).
@@ -348,7 +348,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/confi
 
 `pocketdesk` is the companion window for the server; it runs on Linux and Windows. It works through the files the server already uses, so it runs whether or not the server is up, and it opens no port.
 
-- **Status**: whether the server runs, with Start and Restart.
+- **Overview**: whether the server runs, with Start and Restart, and your phones: where each is (in a session, linked, or away), its battery, its last session, and Ring, Send file… and Send link… for it, each saying why when it cannot reach the phone now.
 - **Pair**: a QR code and the same PIN in digits. The phone's "Scan pairing code" reads it and pins the desktop's certificate before its first streaming connection.
 - **Devices**: paired phones, which one is connected, and Unpair (it asks first, naming the phone). Each phone also has switches for what it may do: control, clipboard, files, sound, microphone, power and privacy, and running commands. Running commands is off until you turn it on. "Ask before each session" holds each of that phone's sessions until you allow it.
 - **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
@@ -358,7 +358,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/confi
 - **Diagnostics**: why a phone might not connect. It checks the server, its ports, the firewall, the addresses phones can use and the internet path, shows the last session (encoder and latency), and copies a debug report for an issue.
 - **Logs**: the server's log.
 
-Closing the window keeps it in the tray on Windows; Linux has no tray yet, so there closing it quits.
+Closing the window keeps it in the tray, and starting the app again brings it back. On Wayland an app cannot hide its own window, so there closing quits. On Linux the tray is a StatusNotifierItem, which KDE Plasma, most panels (waybar, swaybar, xfce4-panel) and GNOME with the AppIndicator extension show; on a desktop with no tray host the app has none, and closing it quits.
 
 ```bash
 cargo run --release -p pocketdesk-desktop   # or run the installed pocketdesk / pocketdesk.exe

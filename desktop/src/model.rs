@@ -12,7 +12,7 @@ use pocketdesk_core::protocol::kdeconnect::TrustStore;
 use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
 
 /// A paired phone.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Device {
     pub id: String,
     /// U3: the owner's name for it, else what it calls itself.
@@ -178,6 +178,134 @@ pub fn control_cell(
     } else {
         ControlCell::Give(session.id)
     }
+}
+
+/// Where a phone is now, for the Overview (N6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// In a session with this computer.
+    Session,
+    /// Not in a session, but a background feature keeps a link.
+    Linked,
+    /// Neither: nothing reaches it now.
+    Away,
+}
+
+/// One phone on the Overview (N6): where it is, its last session, and
+/// whether each quick action can reach it now, or why not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhoneRow<'a> {
+    pub device: &'a Device,
+    pub place: Place,
+    /// When its last session was recorded (unix seconds), if one is.
+    pub last_session: Option<u64>,
+    pub ring: Result<(), &'static str>,
+    pub file: Result<(), &'static str>,
+    pub link: Result<(), &'static str>,
+}
+
+/// The Overview's phones (N6): paired phones only (other computers have
+/// their own section in Settings), with `last` from [`last_sessions`].
+pub fn phone_rows<'a>(
+    snapshot: &'a Snapshot,
+    last: &std::collections::HashMap<String, u64>,
+) -> Vec<PhoneRow<'a>> {
+    snapshot
+        .devices
+        .iter()
+        .filter(|d| !d.computer)
+        .map(|device| {
+            let place = if device.connected {
+                Place::Session
+            } else if device.linked {
+                Place::Linked
+            } else {
+                Place::Away
+            };
+            let allows = |capability| device.permissions.allows(capability);
+            PhoneRow {
+                device,
+                place,
+                last_session: last.get(&device.id).copied(),
+                ring: if !allows(Capability::Ring) {
+                    Err("Ring is off for this phone, on the Devices page.")
+                } else if !device.linked {
+                    Err("Not linked now: it rings while it keeps a link to this computer, which a session or Ring from the computer in its own Settings opens.")
+                } else {
+                    Ok(())
+                },
+                file: if !allows(Capability::Files) {
+                    Err("Files are off for this phone, on the Devices page.")
+                } else if !device.takes_files {
+                    Err("Files reach it in a session, or at home with \"Files from the computer in the background\" on in its Settings.")
+                } else {
+                    Ok(())
+                },
+                link: if !allows(Capability::Links) {
+                    Err("Links are off for this phone, on the Devices page.")
+                } else if !device.linked {
+                    // The server pushes a link over the control link only.
+                    Err("Not linked now: a link reaches it while it keeps a link to this computer, which a session or a background feature opens.")
+                } else {
+                    Ok(())
+                },
+            }
+        })
+        .collect()
+}
+
+/// How much of the session log's end is read for [`last_sessions`]: its
+/// newest records, so a long log costs no more.
+pub const SESSION_LOG_TAIL: u64 = 256 * 1024;
+
+/// Each phone's newest session in the session log's `lines` (N6): its
+/// `unix_secs` by `device_id`. Lines that are not records, a partial first
+/// line from a read of the tail among them, are skipped.
+pub fn last_sessions(lines: &str) -> std::collections::HashMap<String, u64> {
+    let mut last = std::collections::HashMap::new();
+    for line in lines.lines() {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        // A refused attempt is no session: its id is only what the
+        // connecting client claimed (N6 review).
+        if record.get("outcome").and_then(|v| v.as_str()) == Some("rejected") {
+            continue;
+        }
+        let (Some(id), Some(at)) = (
+            record.get("device_id").and_then(|v| v.as_str()),
+            record.get("unix_secs").and_then(|v| v.as_u64()),
+        ) else {
+            continue;
+        };
+        let newest = last.entry(id.to_string()).or_insert(at);
+        *newest = (*newest).max(at);
+    }
+    last
+}
+
+/// The session log's size and change time, so it is read again only when
+/// it changes (N6 review); `None` when there is no log.
+pub fn session_log_stamp(state_dir: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta =
+        std::fs::metadata(state_dir.join(pocketdesk_core::local::paths::SESSIONS_FILE)).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
+/// The end of the session log under `state_dir`, at most
+/// [`SESSION_LOG_TAIL`] bytes; empty when there is none.
+pub fn session_log_tail(state_dir: &Path) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) =
+        std::fs::File::open(state_dir.join(pocketdesk_core::local::paths::SESSIONS_FILE))
+    else {
+        return String::new();
+    };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let _ = file.seek(SeekFrom::Start(len.saturating_sub(SESSION_LOG_TAIL)));
+    let mut tail = Vec::new();
+    let _ = file.take(SESSION_LOG_TAIL).read_to_end(&mut tail);
+    String::from_utf8_lossy(&tail).into_owned()
 }
 
 /// The phones a file can be sent to: in a session, or holding a control
@@ -414,6 +542,108 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn phone(id: &str) -> Device {
+        Device {
+            id: id.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// N6: the newest record per phone wins; other lines are skipped.
+    #[test]
+    fn each_phone_s_last_session_is_read_from_the_log() {
+        let log = concat!(
+            r#"{"unix_secs":100,"outcome":"ended","device_id":"a"}"#,
+            "\n",
+            "not json\n",
+            r#"{"unix_secs":300,"outcome":"ended","device_id":"b"}"#,
+            "\n",
+            r#"{"unix_secs":200,"outcome":"completed","device_id":"a"}"#,
+            "
+",
+            // A refused attempt is no session (N6 review): its id is only
+            // what the connecting client claimed.
+            r#"{"unix_secs":250,"outcome":"rejected","device_id":"a"}"#,
+            "\n",
+            r#"{"unix_secs":400,"outcome":"ended"}"#,
+            "\n",
+            // A partial first line, as a read from the file's tail leaves.
+        );
+        let last = last_sessions(&format!("_secs\":9}}\n{log}"));
+        assert_eq!(last.get("a"), Some(&200));
+        assert_eq!(last.get("b"), Some(&300));
+        assert_eq!(last.len(), 2);
+    }
+
+    #[test]
+    fn the_overview_lists_phones_with_where_they_are() {
+        let mut snapshot = Snapshot::default();
+        let mut in_session = phone("s");
+        in_session.connected = true;
+        in_session.linked = true;
+        let mut linked = phone("l");
+        linked.linked = true;
+        let mut computer = phone("c");
+        computer.computer = true;
+        snapshot.devices = vec![in_session, linked, phone("away"), computer];
+        let last = std::collections::HashMap::from([("away".to_string(), 50)]);
+        let rows = phone_rows(&snapshot, &last);
+        let places: Vec<_> = rows
+            .iter()
+            .map(|r| (r.device.id.as_str(), r.place))
+            .collect();
+        assert_eq!(
+            places,
+            [
+                ("s", Place::Session),
+                ("l", Place::Linked),
+                ("away", Place::Away)
+            ],
+            "phones only, computers have their own section"
+        );
+        assert_eq!(rows[2].last_session, Some(50));
+        assert_eq!(rows[0].last_session, None);
+    }
+
+    #[test]
+    fn each_action_says_why_it_cannot_reach_a_phone() {
+        let mut snapshot = Snapshot::default();
+        let mut ready = phone("ready");
+        ready.linked = true;
+        ready.takes_files = true;
+        ready.permissions.set(Capability::Ring, true);
+        ready.permissions.set(Capability::Links, true);
+        ready.permissions.set(Capability::Files, true);
+        let mut off = ready.clone();
+        off.id = "off".to_string();
+        off.permissions.set(Capability::Ring, false);
+        off.permissions.set(Capability::Links, false);
+        off.permissions.set(Capability::Files, false);
+        let mut away = phone("away");
+        away.permissions = ready.permissions.clone();
+        snapshot.devices = vec![ready, off, away];
+        let rows = phone_rows(&snapshot, &Default::default());
+        assert!(rows[0].ring.is_ok() && rows[0].file.is_ok() && rows[0].link.is_ok());
+        assert!(rows[1].ring.unwrap_err().contains("Devices"));
+        assert!(rows[1].file.unwrap_err().contains("Devices"));
+        assert!(rows[1].link.unwrap_err().contains("Devices"));
+        assert!(rows[2].ring.unwrap_err().contains("Not linked"));
+        assert!(rows[2].file.unwrap_err().contains("in a session"));
+        assert!(rows[2].link.unwrap_err().contains("Not linked"));
+    }
+
+    /// N6 review: the server pushes a link only over a control link.
+    #[test]
+    fn a_link_needs_the_phone_s_control_link_even_in_a_session() {
+        let mut snapshot = Snapshot::default();
+        let mut session_only = phone("s");
+        session_only.connected = true;
+        session_only.permissions.set(Capability::Links, true);
+        snapshot.devices = vec![session_only];
+        let rows = phone_rows(&snapshot, &Default::default());
+        assert!(rows[0].link.unwrap_err().contains("Not linked"));
     }
 
     const ONE_SESSION: &str = r#"{"updated_unix":100,"sessions":[{"device_id":"a","peer":"1.2.3.4:5","transport":"lan","started_unix":90}]}"#;

@@ -28,9 +28,28 @@ pub fn icon_rgba(size: u32) -> Vec<u8> {
     rgba
 }
 
+/// `rgba` as ARGB32 in network byte order, what a StatusNotifierItem's
+/// pixmaps hold (the Linux tray, N6).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn argb32(rgba: &[u8]) -> Vec<u8> {
+    rgba.chunks(4)
+        .flat_map(|p| [p[3], p[0], p[1], p[2]])
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// N6: StatusNotifierItem takes ARGB32 in network byte order.
+    #[test]
+    fn rgba_becomes_argb_for_the_linux_tray() {
+        let rgba = [0x10, 0x20, 0x30, 0x40, 0xaa, 0xbb, 0xcc, 0xff];
+        assert_eq!(
+            argb32(&rgba),
+            [0x40, 0x10, 0x20, 0x30, 0xff, 0xaa, 0xbb, 0xcc]
+        );
+    }
 
     #[test]
     fn the_icon_is_square_rgba_with_transparent_corners() {

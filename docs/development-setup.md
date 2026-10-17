@@ -12,8 +12,8 @@ This guide covers the Rust workspace and the native Android (Kotlin) client.
   libavfilter-dev libavformat-dev libavutil-dev libswresample-dev
   libswscale-dev`; on Arch, the `ffmpeg` package ships them.
 - The desktop app (`desktop/`, built by `cargo build --workspace`) needs no
-  extra packages: eframe loads X11/Wayland at runtime, and it has no tray on
-  Linux yet (tray-icon's GTK menu needs a GTK main loop the app does not run).
+  extra packages: eframe loads X11/Wayland at runtime, and its Linux tray is a
+  StatusNotifierItem over D-Bus (`ksni`, no GTK).
 
 ## 2. Rust Workspace Validation
 
