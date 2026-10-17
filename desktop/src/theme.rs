@@ -36,6 +36,18 @@ pub const MUTED: Token = Token {
     dark: Color32::from_rgb(0x8a, 0x93, 0x91),
 };
 
+/// egui's own lesser text, the muted token in each theme (U1 review: egui's
+/// "weak" text, the text colour at 0.6 alpha, is under 3:1 on the light
+/// panel, and some 20 hints use it).
+pub fn install(ctx: &egui::Context) {
+    ctx.style_mut_of(egui::Theme::Light, |style| {
+        style.visuals.weak_text_color = Some(MUTED.light);
+    });
+    ctx.style_mut_of(egui::Theme::Dark, |style| {
+        style.visuals.weak_text_color = Some(MUTED.dark);
+    });
+}
+
 /// `token` in the theme `ui` shows.
 pub fn pick(ui: &egui::Ui, token: Token) -> Color32 {
     if ui.visuals().dark_mode {

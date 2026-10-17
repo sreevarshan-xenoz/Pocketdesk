@@ -88,6 +88,8 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             // Glyphs for scripts egui's own fonts lack (U1).
             fonts::install(&cc.egui_ctx);
+            // Lesser text readable in both themes (U1 review).
+            theme::install(&cc.egui_ctx);
             if tray.is_some() {
                 tray::Tray::wake_on_click(cc.egui_ctx.clone());
             }
