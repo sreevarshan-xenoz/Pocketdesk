@@ -1,6 +1,7 @@
 //! A KDE Connect device's link after the handshake (3b): pairing both ways,
 //! held for the owner with the code both screens show; unpairing; ping.
-//! The rest a paired device sends is 3c's.
+//! Once paired (3c), what its permissions allow: its battery. Anything else
+//! it sends, Pocketdesk's own packets among them, is not taken.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,9 @@ use super::pairing::{self, PairSays};
 
 /// The packet type of a ping, both ways.
 pub const PING: &str = "kdeconnect.ping";
+
+/// A device's battery report (3c).
+pub const BATTERY: &str = "kdeconnect.battery";
 
 /// An unpaired link silent this long is closed (3a review): it holds one
 /// of the few unpaired places, and the device dials again at the next Find.
@@ -198,12 +202,37 @@ impl State {
         if let Some(says) = pairing::read(packet) {
             return self.pair_packet(says);
         }
-        if packet.packet_type == PING && self.paired {
-            tracing::info!(device_id = %self.device_id, "A ping from a KDE Connect device");
-            notify("Ping from a KDE Connect device", self.name.clone());
+        if !self.paired {
+            // Unpaired, nothing else is taken.
+            return Vec::new();
         }
-        // Unpaired, nothing else is taken; paired, the rest is 3c's.
+        let may = self.permissions();
+        match packet.packet_type.as_str() {
+            PING => {
+                tracing::info!(device_id = %self.device_id, "A ping from a KDE Connect device");
+                notify("Ping from a KDE Connect device", self.name.clone());
+            }
+            BATTERY if may.battery => {
+                crate::plugins::phone_battery::take_from(&self.device_id, &packet.body);
+            }
+            other => {
+                // The device's own text, kept short for the log.
+                let said: String = other.chars().take(60).collect();
+                tracing::debug!(device_id = %self.device_id, "Not taken from a KDE Connect device: {said:?}");
+            }
+        }
         Vec::new()
+    }
+
+    /// What the device may do now: read as each packet comes, so the
+    /// owner's change holds at once; nothing once it is not paired.
+    fn permissions(&self) -> devices::KdePermissions {
+        devices::permissions(&self.dir, &self.device_id).unwrap_or(devices::KdePermissions {
+            clipboard: false,
+            battery: false,
+            find: false,
+            files: false,
+        })
     }
 
     fn pair_packet(&mut self, says: PairSays) -> Vec<NetworkPacket> {
@@ -544,6 +573,42 @@ mod tests {
         assert_eq!(new_rx.try_recv().unwrap(), Event::Ping);
         drop(new);
         assert!(!tell(&id, Event::Ping));
+    }
+
+    fn battery(charge: u8) -> NetworkPacket {
+        let mut packet = NetworkPacket::new(BATTERY);
+        packet.body =
+            serde_json::json!({ "currentCharge": charge, "isCharging": true, "thresholdEvent": 0 });
+        packet
+    }
+
+    #[test]
+    fn a_paired_devices_battery_is_kept_while_it_may_share_it() {
+        let mut s = state("battery", false);
+        s.device_id = format!("battery{}", uuid::Uuid::new_v4().simple());
+        s.packet(&battery(50));
+        assert_eq!(
+            crate::plugins::phone_battery::charge_of(&s.device_id),
+            None,
+            "not paired"
+        );
+        s.pair_now();
+        s.packet(&battery(60));
+        assert_eq!(
+            crate::plugins::phone_battery::charge_of(&s.device_id),
+            Some(60)
+        );
+        let off = devices::KdePermissions {
+            battery: false,
+            ..devices::KdePermissions::default()
+        };
+        devices::set_permissions(&s.dir, &s.device_id, off).unwrap();
+        s.packet(&battery(70));
+        assert_eq!(
+            crate::plugins::phone_battery::charge_of(&s.device_id),
+            Some(60),
+            "the owner's change holds at once"
+        );
     }
 
     #[test]

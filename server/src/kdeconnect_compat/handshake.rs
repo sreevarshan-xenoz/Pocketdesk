@@ -28,9 +28,10 @@ pub const TLS_STEP: Duration = Duration::from_secs(5);
 /// The protocol version spoken, and the oldest taken.
 pub const PROTOCOL: u64 = 8;
 
-/// What this computer answers from a KDE Connect device, and sends one
-/// (pairing needs no capability; 3c adds the plugins).
-pub const INCOMING: &[&str] = &["kdeconnect.ping"];
+/// What this computer takes from a KDE Connect device, and sends one
+/// (pairing needs no capability). A device turns its plugin for this
+/// computer on when one of these meets the plugin's packets.
+pub const INCOMING: &[&str] = &["kdeconnect.ping", super::link::BATTERY];
 pub const OUTGOING: &[&str] = &["kdeconnect.ping"];
 
 /// Whether `id` is a KDE Connect device id: 32 to 38 letters, digits, `_`
