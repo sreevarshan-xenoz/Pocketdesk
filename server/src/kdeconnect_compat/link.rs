@@ -1,7 +1,7 @@
 //! A KDE Connect device's link after the handshake (3b): pairing both ways,
 //! held for the owner with the code both screens show; unpairing; ping.
-//! Once paired (3c), what its permissions allow: its battery, and the
-//! clipboard both ways. Anything else it sends, Pocketdesk's own packets
+//! Once paired (3c), what its permissions allow: its battery, the
+//! clipboard both ways, and ringing it from here. Anything else it sends, Pocketdesk's own packets
 //! among them, is not taken.
 
 use std::collections::HashMap;
@@ -26,6 +26,9 @@ pub const BATTERY: &str = "kdeconnect.battery";
 
 /// Clipboard text, both ways (3c).
 pub const CLIPBOARD: &str = "kdeconnect.clipboard";
+
+/// Ring a device, to find it (3c).
+pub const RING: &str = "kdeconnect.findmydevice.request";
 
 /// The longest line a paired device's link reads, as the Pocketdesk control
 /// channel's (a long copied text is one line); an unpaired one's is
@@ -59,6 +62,8 @@ pub enum Event {
     /// The computer's clipboard changed to this text: sent to a paired
     /// device allowed the clipboard.
     Clipboard(String),
+    /// Ring a paired device allowed it.
+    Ring,
     /// Close: a newer link from the same device took this one's place.
     Replaced,
 }
@@ -591,7 +596,10 @@ impl State {
                 packet.body = serde_json::json!({ "content": text });
                 vec![packet]
             }
-            Event::Ping | Event::Clipboard(_) | Event::Replaced => Vec::new(),
+            Event::Ring if self.paired && self.permissions().find => {
+                vec![NetworkPacket::new(RING)]
+            }
+            Event::Ping | Event::Clipboard(_) | Event::Ring | Event::Replaced => Vec::new(),
         }
     }
 
@@ -1126,6 +1134,20 @@ mod tests {
         reader.limit = MAX_LINE;
         assert!(reader.next().await.is_none());
         drop(writing);
+    }
+
+    #[test]
+    fn a_paired_device_allowed_it_is_rung() {
+        let mut s = state("ring", false);
+        assert!(s.event(Event::Ring).is_empty(), "not paired");
+        s.pair_now();
+        assert_eq!(s.event(Event::Ring)[0].packet_type, RING);
+        let off = devices::KdePermissions {
+            find: false,
+            ..devices::KdePermissions::default()
+        };
+        devices::set_permissions(&s.dir, &s.device_id, off).unwrap();
+        assert!(s.event(Event::Ring).is_empty());
     }
 
     #[test]

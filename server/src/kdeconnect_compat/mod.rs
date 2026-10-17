@@ -230,6 +230,7 @@ pub async fn run_requests() {
                 }
                 KdeAsk::Unpair { device_id } => (device_id, link::Event::Unpair),
                 KdeAsk::Ping { device_id } => (device_id, link::Event::Ping),
+                KdeAsk::Ring { device_id } => (device_id, link::Event::Ring),
             };
             if link::tell(&device_id, event.clone()) {
                 continue;

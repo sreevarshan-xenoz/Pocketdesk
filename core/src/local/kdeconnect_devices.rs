@@ -145,6 +145,8 @@ pub enum KdeAsk {
     Unpair { device_id: String },
     /// Ping a paired, connected device.
     Ping { device_id: String },
+    /// Ring it, to find it (3c).
+    Ring { device_id: String },
     /// Change what it may do (3c).
     Permissions {
         device_id: String,

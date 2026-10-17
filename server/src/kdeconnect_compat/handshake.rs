@@ -36,7 +36,7 @@ pub const INCOMING: &[&str] = &[
     super::link::BATTERY,
     super::link::CLIPBOARD,
 ];
-pub const OUTGOING: &[&str] = &["kdeconnect.ping", super::link::CLIPBOARD];
+pub const OUTGOING: &[&str] = &["kdeconnect.ping", super::link::CLIPBOARD, super::link::RING];
 
 /// Whether `id` is a KDE Connect device id: 32 to 38 letters, digits, `_`
 /// or `-`.
