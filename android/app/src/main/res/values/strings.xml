@@ -590,6 +590,7 @@
     <string name="settings_phone_name_summary">What computers call this phone, sent to each one it connects to. Blank: Android\'s device name</string>
     <!-- N1: the computer rings this phone. -->
     <string name="ring_title">Your computer is ringing this phone</string>
+    <string name="ring_title_named">%1$s is ringing this phone</string>
     <string name="ring_text">Tap Stop to silence it.</string>
     <string name="ring_stop">Stop</string>
     <string name="ring_channel">Ring from the computer</string>

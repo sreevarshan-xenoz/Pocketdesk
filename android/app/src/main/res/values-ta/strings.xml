@@ -583,6 +583,7 @@
     <string name="settings_phone_name_summary">கணினிகள் இந்தத் தொலைபேசியை அழைக்கும் பெயர்; இணையும் ஒவ்வொரு கணினிக்கும் அனுப்பப்படும். வெறுமையாக: Android சாதனப் பெயர்</string>
     <!-- N1: the computer rings this phone. -->
     <string name="ring_title">உங்கள் கணினி இந்தத் தொலைபேசியை ஒலிக்கச் செய்கிறது</string>
+    <string name="ring_title_named">%1$s இந்தத் தொலைபேசியை ஒலிக்கச் செய்கிறது</string>
     <string name="ring_text">நிறுத்த நிறுத்து என்பதைத் தட்டுங்கள்.</string>
     <string name="ring_stop">நிறுத்து</string>
     <string name="ring_channel">கணினியிலிருந்து ஒலித்தல்</string>

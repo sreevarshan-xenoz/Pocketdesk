@@ -883,10 +883,11 @@ impl PocketdeskApp {
             self.confirm_revoke = choice;
         }
         if let Some(id) = ring {
+            let who = self.label(&id);
             self.notice = crate::notice::Notice::outcome(
                 match pocketdesk_core::local::rings::request(&self.state_dir, &id, now) {
-                    Ok(_) => Ok(format!("Asked {} to ring.", short(&id))),
-                    Err(e) => Err(format!("Could not ring {}: {e}", short(&id))),
+                    Ok(_) => Ok(format!("Asked {who} to ring.")),
+                    Err(e) => Err(format!("Could not ring {who}: {e}")),
                 },
             );
         }

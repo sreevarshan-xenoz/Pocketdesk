@@ -588,6 +588,7 @@
     <string name="settings_phone_name_summary">Cómo llaman los ordenadores a este teléfono; se envía a cada uno al que se conecta. En blanco: el nombre del dispositivo en Android</string>
     <!-- N1: the computer rings this phone. -->
     <string name="ring_title">Tu ordenador está haciendo sonar este teléfono</string>
+    <string name="ring_title_named">%1$s está haciendo sonar este teléfono</string>
     <string name="ring_text">Toca Detener para silenciarlo.</string>
     <string name="ring_stop">Detener</string>
     <string name="ring_channel">Sonar desde el ordenador</string>

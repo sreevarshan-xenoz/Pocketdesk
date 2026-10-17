@@ -42,7 +42,8 @@ object PhoneRinger {
     @Volatile
     private var volumeBefore: Int? = null
 
-    fun ring(ctx: Context) {
+    /** Ring, naming [computer] (U3) when it has a name. */
+    fun ring(ctx: Context, computer: String? = null) {
         val app = ctx.applicationContext
         val manager = app.getSystemService(NotificationManager::class.java)
         ensureChannel(app, manager)
@@ -61,7 +62,13 @@ object PhoneRinger {
         )
         val notification = Notification.Builder(app, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
-            .setContentTitle(app.getString(R.string.ring_title))
+            .setContentTitle(
+                if (computer != null) {
+                    app.getString(R.string.ring_title_named, computer)
+                } else {
+                    app.getString(R.string.ring_title)
+                },
+            )
             .setContentText(app.getString(R.string.ring_text))
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
@@ -158,7 +165,8 @@ class BackgroundRing(private val ctx: Context) {
         // The latch is taken only outside a session, whose watcher takes it.
         val asked = !inSession && RustCore.checkSiren()
         when (rule.decide(asked, on, inSession, now)) {
-            RingRule.Act.RING -> PhoneRinger.ring(ctx)
+            RingRule.Act.RING ->
+                PhoneRinger.ring(ctx, PhoneLink.target(ctx)?.let { HostStore.name(ctx, it.address) })
             RingRule.Act.TAKE_AND_DROP -> Log.i("BackgroundRing", "a ring from the computer, not rung (switch off, or within a minute)")
             RingRule.Act.NOTHING -> {}
         }
