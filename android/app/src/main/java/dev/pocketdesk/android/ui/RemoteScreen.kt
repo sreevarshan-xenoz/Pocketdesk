@@ -458,8 +458,14 @@ fun RemoteScreen(
     LaunchedEffect(privacyGrab, address) {
         if (!privacyGrab) return@LaunchedEffect
         while (isActive) {
+            // Held only while the computer says so: an answer of
+            // `ok: false` (Power turned off, another phone's grab) is a
+            // refusal, not a refresh (U2 review).
             val ok = withContext(Dispatchers.IO) {
-                RustCore.desktopPrivacy(address, controlPort, "grab").isSuccess
+                RustCore.desktopPrivacy(address, controlPort, "grab").fold(
+                    { PrivacyReply.read(it, askedLock = false) == PrivacyOutcome.Done },
+                    { false },
+                )
             }
             if (!ok) {
                 privacyGrab = false
