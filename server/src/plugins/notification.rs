@@ -289,6 +289,68 @@ fn to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
     ))
 }
 
+/// A KDE Connect device's notification to show (N9): its app is
+/// `appName`, a ticker stands in for missing text, and one marked `silent`
+/// (already there when the device connected) is not shown.
+fn kde_to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
+    if body.get("silent").and_then(|v| v.as_bool()) == Some(true) {
+        return None;
+    }
+    let pick = |key: &str| {
+        body.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+    };
+    let mut ours = serde_json::json!({
+        "app": pick("appName").unwrap_or("KDE Connect"),
+        "isCancel": body.get("isCancel").cloned().unwrap_or(serde_json::Value::Null),
+    });
+    if let Some(title) = pick("title") {
+        ours["title"] = title.into();
+    }
+    if let Some(text) = pick("text").or_else(|| pick("ticker")) {
+        ours["text"] = text.into();
+    }
+    to_show(&ours)
+}
+
+/// Show a KDE Connect device's notification (N9), as a phone's: under the
+/// same switch and flood limit, with an event, closed here when it closes
+/// there. Not answerable from here.
+pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
+    let id = body.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let tag = (!id.is_empty()).then(|| tag_for(device_id, id));
+    if body.get("isCancel").and_then(|v| v.as_bool()) == Some(true) {
+        if let Some(tag) = &tag {
+            close_desktop_notification(tag).await;
+        }
+        return;
+    }
+    let Some((app, title, text)) = kde_to_show(body) else {
+        return;
+    };
+    let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
+    let admitted = flood_guard()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .admit(device_id, Instant::now(), limit);
+    if !admitted {
+        return;
+    }
+    crate::events::emit(
+        "notification",
+        Some(device_id),
+        serde_json::json!({ "app": app }),
+        serde_json::json!({ "title": title, "text": text }),
+    );
+    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    if let Err(e) = show_desktop_notification(tag.as_deref(), &app, &title, &text, None).await {
+        tracing::warn!("Failed to show a KDE Connect device's notification: {}", e);
+    }
+}
+
 #[derive(Debug)]
 pub struct NotificationPlugin;
 
@@ -838,6 +900,27 @@ mod tests {
             tag_for("phone-b", "0|com.chat|7|null|10123"),
             "another phone's cancel cannot close it"
         );
+    }
+
+    /// N9: KDE Connect names the app `appName`, and re-sends the phone's
+    /// notifications at connect marked `silent`, which must not each pop up.
+    #[test]
+    fn a_kde_connect_notification_is_read_in_its_own_words() {
+        assert_eq!(
+            kde_to_show(&json!({"id": "1", "appName": "Chat", "title": "Ana", "text": "hi"})),
+            Some(("Chat".into(), "Ana".into(), "hi".into()))
+        );
+        assert_eq!(
+            kde_to_show(&json!({"id": "2", "appName": "Chat", "ticker": "Ana: hi"})),
+            Some(("Chat".into(), "Notification".into(), "Ana: hi".into())),
+            "only a ticker: its text"
+        );
+        assert_eq!(
+            kde_to_show(&json!({"id": "3", "appName": "Chat", "title": "Ana", "silent": true})),
+            None,
+            "one already there at connect"
+        );
+        assert_eq!(kde_to_show(&json!({"id": "4", "isCancel": true})), None);
     }
 
     #[test]
