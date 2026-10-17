@@ -42,6 +42,13 @@ object PhoneRinger {
     @Volatile
     private var volumeBefore: Int? = null
 
+    /**
+     * The tone played straight on the alarm stream when the notification
+     * cannot sound (N1 review: notifications off, or the channel muted).
+     */
+    @Volatile
+    private var tone: android.media.Ringtone? = null
+
     /** Ring, naming [computer] (U3) when it has a name. */
     fun ring(ctx: Context, computer: String? = null) {
         val app = ctx.applicationContext
@@ -81,22 +88,60 @@ object PhoneRinger {
         // Repeat the sound until it is stopped, dismissed or times out.
         notification.flags = notification.flags or Notification.FLAG_INSISTENT
         runCatching { manager.notify(NOTIFICATION_ID, notification) }
-            .onFailure { Log.w(TAG, "could not ring", it) }
+            .onFailure { Log.w(TAG, "could not post the ring", it) }
+        // A notification that cannot sound rings nothing: the alarm tone
+        // plays straight on the alarm stream then.
+        if (!notificationSounds(manager)) {
+            Log.i(TAG, "the ring's notification cannot sound; playing the tone itself")
+            playTone(app)
+        }
         main.removeCallbacksAndMessages(null)
-        main.postDelayed({ restoreVolume(app) }, RING_MS)
+        main.postDelayed({ stopSound(app) }, RING_MS)
     }
 
     fun stop(ctx: Context) {
         val app = ctx.applicationContext
         app.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
         main.removeCallbacksAndMessages(null)
-        restoreVolume(app)
+        stopSound(app)
+    }
+
+    /** Whether the ring's notification can be heard: notifications on, the channel loud. */
+    private fun notificationSounds(manager: NotificationManager): Boolean {
+        if (!manager.areNotificationsEnabled()) return false
+        val channel = manager.getNotificationChannel(CHANNEL) ?: return false
+        return channel.importance >= NotificationManager.IMPORTANCE_DEFAULT && channel.sound != null
+    }
+
+    private fun alarmSound(ctx: Context): android.net.Uri =
+        RingtoneManager.getActualDefaultRingtoneUri(ctx, RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getActualDefaultRingtoneUri(ctx, RingtoneManager.TYPE_RINGTONE)
+            ?: android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
+
+    private fun playTone(ctx: Context) {
+        runCatching {
+            tone?.stop()
+            val ringtone = RingtoneManager.getRingtone(ctx, alarmSound(ctx)) ?: return
+            ringtone.audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) ringtone.isLooping = true
+            ringtone.play()
+            tone = ringtone
+        }.onFailure { Log.w(TAG, "could not play the ring's tone", it) }
+    }
+
+    /** The tone stopped, if one plays, and the alarm volume put back. */
+    private fun stopSound(ctx: Context) {
+        runCatching { tone?.stop() }
+        tone = null
+        restoreVolume(ctx)
     }
 
     private fun ensureChannel(ctx: Context, manager: NotificationManager) {
         if (manager.getNotificationChannel(CHANNEL) != null) return
-        val sound = RingtoneManager.getActualDefaultRingtoneUri(ctx, RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getActualDefaultRingtoneUri(ctx, RingtoneManager.TYPE_RINGTONE)
+        val sound = alarmSound(ctx)
         val channel = NotificationChannel(
             CHANNEL,
             ctx.getString(R.string.ring_channel),
