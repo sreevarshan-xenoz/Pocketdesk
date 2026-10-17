@@ -159,8 +159,12 @@ pub async fn fetch(
                 && pocketdesk_core::local::kdeconnect_devices::permissions(&dir, &device_id)
                     .is_some_and(|p| p.files)
         };
+        let places = Places {
+            parts: dir.join(PARTS_DIR),
+            downloads,
+        };
         receive(
-            &identity, &device_id, pin, address, &offer, &downloads, &allowed,
+            &identity, &device_id, pin, address, &offer, &places, &allowed,
         )
         .await
     }
@@ -195,7 +199,7 @@ async fn receive(
     pin: [u8; 32],
     address: IpAddr,
     offer: &Offer,
-    downloads: &Path,
+    places: &Places,
     allowed: &(dyn Fn() -> bool + Sync),
 ) -> Result<PathBuf, String> {
     let _turn = tokio::time::timeout(TURN_WAIT, AT_ONCE.acquire())
@@ -216,7 +220,7 @@ async fn receive(
     .await
     .map_err(|_| "no TLS handshake in time".to_string())?
     .map_err(|e| format!("TLS: {e}"))?;
-    receive_into(&mut tls, offer, downloads, Pace::DEFAULT, allowed).await
+    receive_into(&mut tls, offer, places, Pace::DEFAULT, allowed).await
 }
 
 /// Why a file stopped when its device was no longer allowed it.
@@ -231,33 +235,59 @@ impl Drop for Part {
     }
 }
 
+/// Where a file waits until it is whole, in the state folder (3c review:
+/// in Downloads a synced folder or an indexer saw it grow, and a crash left
+/// it there for good). Emptied at start.
+pub const PARTS_DIR: &str = "kdeconnect_parts";
+
+/// Empty [`PARTS_DIR`]: at start no file is on the way.
+pub fn sweep_parts(state_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(state_dir.join(PARTS_DIR)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "part") {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 /// How often a file on the way asks whether it is still allowed.
 const CHECK_EVERY: u64 = 4 * 1024 * 1024;
 
-/// Read exactly `offer.size` bytes from `stream`, at `pace`, into a new
-/// file in `downloads`, named like `offer.name`, while `allowed` says so
-/// (asked every [`CHECK_EVERY`] bytes and before it is kept).
+/// Where a file waits, and where it is kept.
+struct Places {
+    parts: PathBuf,
+    downloads: PathBuf,
+}
+
+/// Read exactly `offer.size` bytes from `stream`, at `pace`, into a part in
+/// `places.parts`, then keep it in `places.downloads` named like
+/// `offer.name`, while `allowed` says so (asked every [`CHECK_EVERY`]
+/// bytes and before it is kept).
 async fn receive_into<S: AsyncRead + Unpin>(
     stream: &mut S,
     offer: &Offer,
-    downloads: &Path,
+    places: &Places,
     pace: Pace,
     allowed: &(dyn Fn() -> bool + Sync),
 ) -> Result<PathBuf, String> {
     let deadline = tokio::time::Instant::now() + pace.allowed(offer.size);
-    tokio::fs::create_dir_all(downloads)
+    tokio::fs::create_dir_all(&places.parts)
         .await
-        .map_err(|e| format!("Downloads: {e}"))?;
-    let part = Part(downloads.join(format!(
-        ".pocketdesk-kde-{}.part",
-        uuid::Uuid::new_v4().simple()
-    )));
+        .map_err(|e| format!("the state folder: {e}"))?;
+    let part = Part(
+        places
+            .parts
+            .join(format!("{}.part", uuid::Uuid::new_v4().simple())),
+    );
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&part.0)
         .await
-        .map_err(|e| format!("could not write in Downloads: {e}"))?;
+        .map_err(|e| format!("could not write its part: {e}"))?;
     let mut left = offer.size;
     let mut buffer = vec![0u8; 64 * 1024];
     let mut since_check = 0u64;
@@ -289,7 +319,7 @@ async fn receive_into<S: AsyncRead + Unpin>(
         }
         file.write_all(&buffer[..read])
             .await
-            .map_err(|e| format!("could not write in Downloads: {e}"))?;
+            .map_err(|e| format!("could not write its part: {e}"))?;
         left -= read as u64;
         since_check += read as u64;
     }
@@ -298,9 +328,9 @@ async fn receive_into<S: AsyncRead + Unpin>(
     }
     file.flush()
         .await
-        .map_err(|e| format!("could not write in Downloads: {e}"))?;
+        .map_err(|e| format!("could not write its part: {e}"))?;
     drop(file);
-    crate::plugins::share::place(&part.0, downloads, &offer.name)
+    crate::plugins::share::place(&part.0, &places.downloads, &offer.name)
         .await
         .map_err(|e| e.to_string())
 }
@@ -318,6 +348,27 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Places beside `downloads`: the parts in a folder of their own.
+    fn places(downloads: &Path) -> Places {
+        Places {
+            parts: downloads.with_extension("parts"),
+            downloads: downloads.to_path_buf(),
+        }
+    }
+
+    #[test]
+    fn parts_left_by_a_crash_are_swept_at_start() {
+        let state = temp("sweep");
+        let parts = state.join(PARTS_DIR);
+        std::fs::create_dir_all(&parts).unwrap();
+        std::fs::write(parts.join("left.part"), b"x").unwrap();
+        std::fs::write(parts.join("other.txt"), b"x").unwrap();
+        sweep_parts(&state);
+        assert!(!parts.join("left.part").exists());
+        assert!(parts.join("other.txt").exists(), "only parts");
+        let _ = std::fs::remove_dir_all(&state);
     }
 
     fn offering(body: serde_json::Value, size: Option<u64>, port: Option<u64>) -> NetworkPacket {
@@ -378,9 +429,15 @@ mod tests {
         let (mut device, mut ours) = tokio::io::duplex(8 * 1024);
         let sent = bytes.clone();
         tokio::spawn(async move { device.write_all(&sent).await });
-        let path = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT, &|| true)
-            .await
-            .unwrap();
+        let path = receive_into(
+            &mut ours,
+            &offer,
+            &places(&downloads),
+            Pace::DEFAULT,
+            &|| true,
+        )
+        .await
+        .unwrap();
         assert_eq!(path, downloads.join("photo.jpg"));
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
 
@@ -388,7 +445,14 @@ mod tests {
         tokio::spawn(async move {
             let _ = device.write_all(&[1; 1000]).await;
         });
-        let short = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT, &|| true).await;
+        let short = receive_into(
+            &mut ours,
+            &offer,
+            &places(&downloads),
+            Pace::DEFAULT,
+            &|| true,
+        )
+        .await;
         assert!(short.unwrap_err().contains("before the end"));
         let left: Vec<_> = std::fs::read_dir(&downloads).unwrap().flatten().collect();
         assert_eq!(left.len(), 1, "only the first file, no part left behind");
@@ -426,7 +490,14 @@ mod tests {
         let asked = std::sync::atomic::AtomicUsize::new(0);
         // Allowed at the first look, not at the second.
         let allowed = || asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
-        let stopped = receive_into(&mut ours, &offer, &downloads, Pace::DEFAULT, &allowed).await;
+        let stopped = receive_into(
+            &mut ours,
+            &offer,
+            &places(&downloads),
+            Pace::DEFAULT,
+            &allowed,
+        )
+        .await;
         assert_eq!(stopped.unwrap_err(), NO_LONGER);
         assert_eq!(
             std::fs::read_dir(&downloads).unwrap().count(),
@@ -458,7 +529,7 @@ mod tests {
             quiet: Duration::from_secs(5),
             min_rate: 10,
         };
-        let slow = receive_into(&mut ours, &offer, &downloads, pace, &|| true).await;
+        let slow = receive_into(&mut ours, &offer, &places(&downloads), pace, &|| true).await;
         assert!(slow.unwrap_err().contains("too slowly"));
         let _ = std::fs::remove_dir_all(&downloads);
     }
@@ -511,7 +582,7 @@ mod tests {
             pin,
             localhost,
             &offer,
-            &downloads,
+            &places(&downloads),
             &|| true,
         )
         .await
@@ -526,7 +597,7 @@ mod tests {
             [7; 32],
             localhost,
             &offer,
-            &downloads,
+            &places(&downloads),
             &|| true,
         )
         .await;

@@ -196,6 +196,8 @@ pub async fn run_requests() {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
+    // No file is on the way at start: parts left are a crash's.
+    share::sweep_parts(&dir);
     loop {
         crate::inbox::wait(KDECONNECT_OUT_DIR, std::time::Duration::from_secs(1)).await;
         for request in kdeconnect_devices::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
