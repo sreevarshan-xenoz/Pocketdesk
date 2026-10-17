@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::audio::{AudioConfig, AudioEncoder as AudioOpusEncoder};
 use super::audio_capture;
-use super::bitrate::LossCeiling;
+use super::bitrate::{DeliveryCeiling, LossCeiling, slow_link_fps};
 use super::capture;
 use super::connection::{Connection, QuinnConnection, SharedConnection};
 use super::encoder::VideoEncoder;
@@ -167,6 +167,12 @@ pub struct StreamingServer {
     session_id: String,
     /// Watch channel for adaptive bitrate updates
     bitrate_tx: watch::Sender<u32>,
+    /// The encoder's frame rate, which the arbiter lowers on a slow link
+    /// (R6f); the session's own rate otherwise.
+    fps_tx: watch::Sender<u32>,
+    /// Whether a slow link may lower the frame rate (R6f,
+    /// `Config::slow_link_frame_rate`). On by default.
+    slow_link_frame_rate: bool,
     /// Channel for routing input events received from client over this QUIC connection
     input_tx: Option<tokio::sync::broadcast::Sender<SessionInput>>,
     /// R4 E2: routing for client→server mic audio. `InputPacket::Mic` frames
@@ -217,6 +223,7 @@ impl StreamingServer {
         cert_manager: std::sync::Arc<CertManager>,
     ) -> Self {
         let (bitrate_tx, _) = watch::channel(config.bitrate_bps);
+        let (fps_tx, _) = watch::channel(config.fps);
         Self {
             config,
             transport_config,
@@ -224,6 +231,8 @@ impl StreamingServer {
             cancel: CancellationToken::new(),
             session_id: Uuid::new_v4().to_string(),
             bitrate_tx,
+            fps_tx,
+            slow_link_frame_rate: true,
             input_tx: None,
             mic_tx: None,
             cast_tx: None,
@@ -248,6 +257,12 @@ impl StreamingServer {
     /// it (R4 C1). Off by default: sessions stay H.264.
     pub fn set_hevc_allowed(&mut self, allowed: bool) {
         self.hevc_allowed = allowed;
+    }
+
+    /// Let a slow link lower the frame rate (R6f; on by default). The phone's
+    /// "Full quality" turns it off for its session, as it does the relay floor.
+    pub fn set_slow_link_frame_rate(&mut self, enabled: bool) {
+        self.slow_link_frame_rate = enabled;
     }
 
     /// Choose the capture backend (R4 B3). `Auto` (default) detects the
@@ -629,6 +644,11 @@ impl StreamingServer {
             Some(session)
         };
 
+        // What the video transport waited for delivery (microseconds) and got
+        // onto the link (bytes), for the arbiter's delivery ceiling (R6f).
+        let delivery_waited_us = std::sync::Arc::new(AtomicU64::new(0));
+        let delivery_bytes = std::sync::Arc::new(AtomicU64::new(0));
+
         // Clone connection for use across multiple tasks
         let conn_for_transport = connection.clone();
         let conn_for_monitor = connection.clone();
@@ -640,6 +660,8 @@ impl StreamingServer {
             // Clone config for encoder (bitrate will be updated via watch channel)
             let mut encoder_config = self.config.clone();
             let mut encoder_bitrate_rx = self.bitrate_watcher();
+            let mut encoder_fps_rx = self.fps_tx.subscribe();
+            let capture_fps = self.config.fps.max(1);
 
             // Update encoder config with current bitrate
             encoder_config.bitrate_bps = *encoder_bitrate_rx.borrow();
@@ -680,6 +702,14 @@ impl StreamingServer {
             let mut frames_since_packet = 0u64;
             let mut last_packet_at = Instant::now();
             let mut used_fallback_rung = false;
+            // R6f: when the encoder runs slower than the capture, frames are
+            // passed on at its rate. The newest one too early is held and
+            // fed when its turn comes, so the last frame of a burst (the
+            // capture sends only on change) is not left for the next 1 s
+            // heartbeat.
+            let mut last_fed: Option<Instant> = None;
+            let mut held: Option<VideoFrame> = None;
+            let mut held_due: Option<tokio::time::Instant> = None;
             const ERR_REBUILD_AT: u64 = 5;
             const ERR_END_AT: u64 = 90;
             const STALL_FRAMES: u64 = 30;
@@ -739,6 +769,9 @@ impl StreamingServer {
                         if new_bitrate != encoder.config().bitrate_bps {
                             let mut cfg = encoder_preferred.clone();
                             cfg.bitrate_bps = new_bitrate;
+                            // A frame rate sent with it is taken in the same
+                            // rebuild (each one starts on a keyframe).
+                            cfg.fps = *encoder_fps_rx.borrow();
                             let rebuilt = match VideoEncoder::new(cfg.clone()) {
                                 Ok(e) => Ok(e),
                                 Err(e) => {
@@ -773,8 +806,75 @@ impl StreamingServer {
                         }
                     }
 
-                    // Process next frame
-                    Some(mut frame) = frame_rx.recv() => {
+                    // R6f: the arbiter's frame rate for a slow link, and back.
+                    Ok(()) = encoder_fps_rx.changed() => {
+                        let new_fps = (*encoder_fps_rx.borrow_and_update()).max(1);
+                        if new_fps == encoder.config().fps {
+                            continue;
+                        }
+                        let mut cfg = encoder_preferred.clone();
+                        cfg.fps = new_fps;
+                        cfg.bitrate_bps = *encoder_bitrate_rx.borrow();
+                        let rebuilt = match VideoEncoder::new(cfg.clone()) {
+                            Ok(e) => Ok(e),
+                            Err(e) => {
+                                error!(error = %e, "Frame-rate rebuild failed; degrading to software");
+                                VideoEncoder::new_software(cfg)
+                            }
+                        };
+                        match rebuilt {
+                            Ok(e) => {
+                                info!(
+                                    fps = new_fps,
+                                    backend = e.backend_name(),
+                                    "Encoder rebuilt for a new frame rate"
+                                );
+                                encoder_preferred = e.config().clone();
+                                encoder = e;
+                                encode_errs = 0;
+                                frames_since_packet = 0;
+                                last_packet_at = Instant::now();
+                            }
+                            Err(e) => {
+                                error!(error = %e, "Frame-rate rebuild failed; ending session");
+                                encode_cancel.cancel();
+                                break;
+                            }
+                        }
+                    }
+
+                    // Process next frame: from the capture, or the one held
+                    // back by pacing once its turn comes.
+                    Some(mut frame) = async {
+                        match held_due {
+                            Some(due) => tokio::select! {
+                                biased;
+                                frame = frame_rx.recv() => frame,
+                                _ = tokio::time::sleep_until(due) => held.take(),
+                            },
+                            None => frame_rx.recv().await,
+                        }
+                    } => {
+                        let from_hold = held.is_none() && held_due.is_some();
+                        // R6f: at a lower frame rate than the capture's, pass
+                        // frames on at the encoder's rate, holding the newest
+                        // early one.
+                        let target_fps = encoder.config().fps.max(1);
+                        if !from_hold && target_fps < capture_fps {
+                            let period = Duration::from_micros(1_000_000 / u64::from(target_fps));
+                            if let Some(fed) = last_fed
+                                && fed.elapsed() < period.mul_f64(0.9)
+                            {
+                                held = Some(frame);
+                                if held_due.is_none() {
+                                    held_due = Some(tokio::time::Instant::from_std(fed + period));
+                                }
+                                continue;
+                            }
+                        }
+                        held = None;
+                        held_due = None;
+                        last_fed = Some(Instant::now());
                         // In compositor-side window mode the frames already
                         // are exactly the window — the software crop would
                         // cut into it a second time.
@@ -967,8 +1067,10 @@ impl StreamingServer {
             // Task 3: Packet transport — sends packets over QUIC (newest-only),
             // at most `MAX_VIDEO_IN_FLIGHT` frames on the wire at once
             let telemetry_bytes_tx = telemetry.as_ref().map(|t| t.1.clone());
+            let transport_waited_us = delivery_waited_us.clone();
+            let transport_bytes = delivery_bytes.clone();
             let transport_cancel = cancel.clone();
-            let transport_fps = self.config.fps;
+            let transport_fps_rx = self.fps_tx.subscribe();
             let transport_span = tracing::info_span!("video_transport");
             tasks.spawn(async move {
             info!("Transport task started");
@@ -994,7 +1096,7 @@ impl StreamingServer {
                     Some(first) = packet_rx.recv() => {
                         // A round trip's worth of frames on the wire.
                         in_flight.set_max(in_flight_window(
-                            transport_fps,
+                            *transport_fps_rx.borrow(),
                             conn_for_transport.stats().rtt,
                         ));
                         let mut batch = vec![first];
@@ -1035,7 +1137,10 @@ impl StreamingServer {
 
                             // A slow link holds the next frame here, in the
                             // queue the next batch trims, not in the
-                            // connection's send buffer.
+                            // connection's send buffer. How long it is held,
+                            // with the writes below, is the delivery ceiling's
+                            // signal (R6f).
+                            let send_started = Instant::now();
                             if !in_flight.admit(&transport_cancel).await {
                                 connection_closed = true;
                                 packets_dropped += 1;
@@ -1078,6 +1183,11 @@ impl StreamingServer {
 
                                     packets_sent += 1;
                                     bytes_sent += data_len as u64;
+                                    transport_waited_us.fetch_add(
+                                        send_started.elapsed().as_micros() as u64,
+                                        Ordering::Relaxed,
+                                    );
+                                    transport_bytes.fetch_add(data_len as u64, Ordering::Relaxed);
                                     if let Some(counter) = &telemetry_bytes_tx {
                                         counter.fetch_add(data_len as u64, Ordering::Relaxed);
                                     }
@@ -1419,6 +1529,7 @@ impl StreamingServer {
         //                 .min(relay_cap)        // 2 Mbit/s while relayed
         //                 .min(preset_ceil)      // HUD profile, relative to native
         //                 .min(loss_cap)         // 20 % off per congested tick
+        //                 .min(delivery_cap)     // under what a slow link carried
         //
         // Unlike the other two, `loss_cap` has memory: it is a controller
         // reading the transport's counters once per tick, and it walks back up
@@ -1436,10 +1547,17 @@ impl StreamingServer {
             let arb_cancel = cancel.clone();
             let arb_full_quality = self.full_quality.clone();
             let arb_preset = self.preset.clone();
+            let (arb_waited_us, arb_bytes) = (delivery_waited_us.clone(), delivery_bytes.clone());
+            let arb_fps_tx = self.fps_tx.clone();
+            let configured_fps = self.config.fps.max(1);
+            let slow_link_frame_rate = self.slow_link_frame_rate;
             tasks.spawn(async move {
                 // Seed with the configured rate; the first tick reconciles.
                 let mut applied = configured_bitrate;
                 let mut loss = LossCeiling::new(configured_bitrate);
+                let mut delivery = DeliveryCeiling::new(configured_bitrate);
+                let mut last_tick = Instant::now();
+                let mut applied_fps = configured_fps;
                 loop {
                     tokio::select! {
                         _ = arb_cancel.cancelled() => break,
@@ -1448,6 +1566,12 @@ impl StreamingServer {
                     let stats = arb_conn.stats();
                     loss.sample(stats.lost_packets, stats.datagrams_sent);
                     let loss_cap = loss.ceiling();
+                    delivery.sample(
+                        arb_waited_us.load(Ordering::Relaxed),
+                        arb_bytes.load(Ordering::Relaxed),
+                        std::mem::replace(&mut last_tick, Instant::now()).elapsed(),
+                    );
+                    let delivery_cap = delivery.ceiling();
                     let relayed = stats.relayed && !arb_full_quality.load(Ordering::Relaxed);
                     let relay_cap = if relayed {
                         RELAY_BITRATE_CAP_BPS
@@ -1459,7 +1583,30 @@ impl StreamingServer {
                     let effective = configured_bitrate
                         .min(relay_cap)
                         .min(preset_ceil)
-                        .min(loss_cap);
+                        .min(loss_cap)
+                        .min(delivery_cap);
+                    // R6f: fewer frames when the rate cannot give each one
+                    // enough bits; "Full quality" keeps the session's own.
+                    let fps = if slow_link_frame_rate && !arb_full_quality.load(Ordering::Relaxed) {
+                        slow_link_fps(configured_fps, applied_fps, effective)
+                    } else {
+                        configured_fps
+                    };
+                    if fps == applied_fps && effective == applied {
+                        continue;
+                    }
+                    if fps != applied_fps {
+                        info!(
+                            fps,
+                            configured_fps,
+                            effective_bps = effective,
+                            "Encoder frame rate target changed"
+                        );
+                        applied_fps = fps;
+                        // Sent before the bitrate, so a rebuild for the
+                        // bitrate takes both.
+                        let _ = arb_fps_tx.send(fps);
+                    }
                     if effective == applied {
                         continue;
                     }
@@ -1469,6 +1616,7 @@ impl StreamingServer {
                         relayed,
                         preset = arb_preset.load(Ordering::Relaxed),
                         loss_cap = (loss_cap != u32::MAX).then_some(loss_cap),
+                        delivery_cap = (delivery_cap != u32::MAX).then_some(delivery_cap),
                         "Encoder bitrate target changed"
                     );
                     let _ = arb_bitrate_tx.send(effective);

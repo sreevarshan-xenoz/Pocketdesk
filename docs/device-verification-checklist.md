@@ -1406,7 +1406,7 @@ The A71 against this Windows box, LAN, the release build of `main` at 0461632, i
 - [x] The server stopped for 20 s: back 10 s after it listened, no tap.
 - [x] **The control link lagged the stream** (18 s, over 50 s), so a file sent then failed "phone not connected". Fixed (PR #94): the link 4 s after the stream, a 1 MB file sent and saved, MD5 matching.
 - [x] Seen: two streams opened on a Wi-Fi return (both encoded for about 4 s).
-- [x] Seen: a 1 Mbit/s Wi-Fi link (after many toggles) made the session reconnect every 30–60 s and a 150 MB download fail.
+- [x] Seen: a 1 Mbit/s Wi-Fi link (after many toggles) made the session reconnect every 30–60 s and a 150 MB download fail. In a test (R6e, `server/tests/slow_link_session.rs`), 1 Mbit/s held 5 minutes but at 5–12 fps; with R6f's delivery ceiling and frame-rate steps it settled at 30 fps and about 480 kbit/s.
 
 - [x] A 150 MB transfer broken by a 15 s Wi-Fi drop on a healthy link: stopped at 109 MB when the phone's Wi-Fi took about 60 s to rejoin and its retries ran out; sent again, it continued from there, MD5 matching.
 - [x] One stream on a Wi-Fi return after PR #96.
@@ -1416,6 +1416,7 @@ The A71 against this Windows box, LAN, the release build of `main` at 0461632, i
 - [x] A crash (exit 139) stopping the server 35 s into a session: about one round in 7 to 10, inside an unloaded GraphicsCapture.dll. With the library pinned, 30 rounds and no crash, then 10 on the reviewed build. Owed: whether the crashes after a reconnected session's setup were the same.
 
 Owed:
+- [ ] The A71's reconnects on a slow link, reproduced: the VM with `tc qdisc add dev eth0 root tbf rate 1mbit burst 32kbit latency 400ms`, 10 minutes with no reconnect, then climbing back once it is removed (R6f).
 - [ ] A download that waits for the network (next phase, R6i).
 - [ ] The idle cost on Linux after R6c (the VM), and with R6d's clipboard watch.
 

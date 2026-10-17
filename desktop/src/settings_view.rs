@@ -190,6 +190,12 @@ impl SettingsForm {
                 ui.label("H.265 (HEVC)");
                 ui.checkbox(&mut e.allow_hevc, "use it with phones that can decode it");
                 ui.end_row();
+                ui.label("Slow links");
+                ui.checkbox(
+                    &mut e.slow_link_frame_rate,
+                    "lower the frame rate to keep the picture moving",
+                );
+                ui.end_row();
                 ui.label("Screen capture");
                 egui::ComboBox::from_id_salt("capture")
                     .selected_text(e.capture_backend.config_key())

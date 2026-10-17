@@ -15,6 +15,12 @@ pub mod proxy {
         pub jitter_ms: u64,
         pub blackhole_duration_ms: Option<u64>,
         pub start_time: std::time::Instant,
+        /// A slow hop on the way back, server to client (where video goes):
+        /// `None` forwards return traffic as it comes.
+        pub downlink: Option<RateLimit>,
+        /// The share of return datagrams lost at random (0.0 to 1.0), as on
+        /// a weak Wi-Fi link, before any [`Self::downlink`] queue.
+        pub downlink_drop_rate: f64,
     }
 
     impl Default for ChaosConfig {
@@ -25,7 +31,52 @@ pub mod proxy {
                 jitter_ms: 0,
                 blackhole_duration_ms: None,
                 start_time: std::time::Instant::now(),
+                downlink: None,
+                downlink_drop_rate: 0.0,
             }
+        }
+    }
+
+    /// A link of fixed rate behind a router queue of bounded length, as a
+    /// slow Wi-Fi hop is: a packet waits for those ahead of it, and one that
+    /// finds the queue full is lost (drop tail), never delayed without end.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct RateLimit {
+        pub bits_per_sec: u64,
+        pub queue_packets: usize,
+    }
+
+    /// The state of a [`RateLimit`]ed link: when each queued packet leaves.
+    #[derive(Debug)]
+    pub struct SlowLink {
+        limit: RateLimit,
+        departures: std::collections::VecDeque<std::time::Instant>,
+    }
+
+    impl SlowLink {
+        pub fn new(limit: RateLimit) -> Self {
+            Self {
+                limit,
+                departures: std::collections::VecDeque::new(),
+            }
+        }
+
+        /// A `len`-byte packet arriving at `now`: when it has left the link,
+        /// or `None` when the queue is full and it is lost.
+        pub fn admit(&mut self, now: std::time::Instant, len: usize) -> Option<std::time::Instant> {
+            while self.departures.front().is_some_and(|&t| t <= now) {
+                self.departures.pop_front();
+            }
+            if self.departures.len() >= self.limit.queue_packets {
+                return None;
+            }
+            let free = self.departures.back().copied().unwrap_or(now).max(now);
+            let wire = Duration::from_nanos(
+                (len as u64 * 8).saturating_mul(1_000_000_000) / self.limit.bits_per_sec.max(1),
+            );
+            let leaves = free + wire;
+            self.departures.push_back(leaves);
+            Some(leaves)
         }
     }
 
@@ -37,6 +88,8 @@ pub mod proxy {
                 jitter_ms: 100,
                 blackhole_duration_ms: None,
                 start_time: std::time::Instant::now(),
+                downlink: None,
+                downlink_drop_rate: 0.0,
             }
         }
 
@@ -47,6 +100,8 @@ pub mod proxy {
                 jitter_ms: 10,
                 blackhole_duration_ms: Some(3000), // 3-second absolute blackhole
                 start_time: std::time::Instant::now(),
+                downlink: None,
+                downlink_drop_rate: 0.0,
             }
         }
 
@@ -97,6 +152,7 @@ pub mod proxy {
         cancel: tokio_util::sync::CancellationToken,
         forwarded: AtomicUsize,
         dropped: AtomicUsize,
+        downlink_lost: Arc<AtomicUsize>,
     }
 
     impl ChaosProxy {
@@ -115,6 +171,7 @@ pub mod proxy {
                 cancel: tokio_util::sync::CancellationToken::new(),
                 forwarded: AtomicUsize::new(0),
                 dropped: AtomicUsize::new(0),
+                downlink_lost: Arc::new(AtomicUsize::new(0)),
             })
         }
 
@@ -131,6 +188,12 @@ pub mod proxy {
         /// Datagrams the proxy discarded.
         pub fn dropped(&self) -> usize {
             self.dropped.load(Ordering::Relaxed)
+        }
+
+        /// Return datagrams lost at random ([`ChaosConfig::downlink_drop_rate`])
+        /// or at a full [`ChaosConfig::downlink`] queue.
+        pub fn downlink_lost(&self) -> usize {
+            self.downlink_lost.load(Ordering::Relaxed)
         }
 
         pub fn update_config(&self, config: ChaosConfig) {
@@ -193,6 +256,8 @@ pub mod proxy {
                         let target = self.target_addr;
                         let clients_ref = clients.clone();
                         let server_sock = socket.clone();
+                        let config_ref = self.config.clone();
+                        let downlink_lost = self.downlink_lost.clone();
 
                         tokio::spawn(async move {
                             if delay.as_millis() > 0 {
@@ -215,17 +280,53 @@ pub mod proxy {
                                         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(tokio::time::Instant, Vec<u8>)>();
                                         c_guard.insert(src_addr, (s.clone(), tx));
 
-                                        // Spawn a task to listen for return traffic from the server
+                                        // Spawn a task to listen for return traffic from the server,
+                                        // through the slow downlink when one is set, and one to
+                                        // send it on in order.
                                         let s_clone = s.clone();
                                         let mut ret_buf = vec![0u8; 65535];
+                                        let (down_tx, mut down_rx) = tokio::sync::mpsc::unbounded_channel::<(tokio::time::Instant, Vec<u8>)>();
                                         let server_sock_clone = server_sock.clone();
                                         tokio::spawn(async move {
+                                            while let Some((at, data)) = down_rx.recv().await {
+                                                tokio::time::sleep_until(at).await;
+                                                let _ = server_sock_clone.send_to(&data, src_addr).await;
+                                            }
+                                        });
+                                        tokio::spawn(async move {
+                                            let mut link: Option<SlowLink> = None;
                                             while let Ok((n, _)) =
                                                 s_clone.recv_from(&mut ret_buf).await
                                             {
-                                                let _ = server_sock_clone
-                                                    .send_to(&ret_buf[..n], src_addr)
-                                                    .await;
+                                                let (limit, drop_rate) = {
+                                                    let config = config_ref.read().await;
+                                                    (config.downlink, config.downlink_drop_rate)
+                                                };
+                                                if drop_rate > 0.0 && rand::thread_rng().gen_bool(drop_rate.min(1.0)) {
+                                                    downlink_lost.fetch_add(1, Ordering::Relaxed);
+                                                    continue;
+                                                }
+                                                let at = match limit {
+                                                    None => Some(std::time::Instant::now()),
+                                                    Some(limit) => {
+                                                        if link.as_ref().map(|l| l.limit) != Some(limit) {
+                                                            link = Some(SlowLink::new(limit));
+                                                        }
+                                                        link.as_mut()
+                                                            .and_then(|l| l.admit(std::time::Instant::now(), n))
+                                                    }
+                                                };
+                                                match at {
+                                                    Some(at) => {
+                                                        let _ = down_tx.send((
+                                                            tokio::time::Instant::from_std(at),
+                                                            ret_buf[..n].to_vec(),
+                                                        ));
+                                                    }
+                                                    None => {
+                                                        downlink_lost.fetch_add(1, Ordering::Relaxed);
+                                                    }
+                                                }
                                             }
                                         });
 
@@ -326,6 +427,163 @@ pub mod proxy {
                 let d = cfg.calculate_delay();
                 assert!((Duration::from_millis(50)..=Duration::from_millis(150)).contains(&d));
             }
+        }
+
+        #[test]
+        fn a_slow_link_spaces_packets_by_their_size() {
+            let start = std::time::Instant::now();
+            // 1 Mbit/s: a 1250-byte packet takes 10 ms on the wire.
+            let mut link = SlowLink::new(RateLimit {
+                bits_per_sec: 1_000_000,
+                queue_packets: 64,
+            });
+            let first = link.admit(start, 1250).unwrap();
+            let second = link.admit(start, 1250).unwrap();
+            assert_eq!(first - start, Duration::from_millis(10));
+            assert_eq!(second - start, Duration::from_millis(20));
+            // Once the queue has drained, a packet goes at once again.
+            let later = start + Duration::from_secs(1);
+            assert_eq!(
+                link.admit(later, 1250).unwrap() - later,
+                Duration::from_millis(10)
+            );
+        }
+
+        #[test]
+        fn a_full_queue_drops_its_tail() {
+            let start = std::time::Instant::now();
+            let mut link = SlowLink::new(RateLimit {
+                bits_per_sec: 1_000_000,
+                queue_packets: 4,
+            });
+            let admitted = (0..10)
+                .filter(|_| link.admit(start, 1250).is_some())
+                .count();
+            assert_eq!(admitted, 4, "the router holds four, the rest are lost");
+            // The head has left after 10 ms, so one more fits.
+            assert!(
+                link.admit(start + Duration::from_millis(10), 1250)
+                    .is_some()
+            );
+            assert!(
+                link.admit(start + Duration::from_millis(10), 1250)
+                    .is_none()
+            );
+        }
+
+        #[tokio::test]
+        async fn the_return_path_rides_the_slow_downlink() {
+            // An echo server stands in for the computer.
+            let echo = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+            let echo_addr = echo.local_addr().unwrap();
+            let echoing = {
+                let echo = echo.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 2048];
+                    while let Ok((n, from)) = echo.recv_from(&mut buf).await {
+                        let _ = echo.send_to(&buf[..n], from).await;
+                    }
+                })
+            };
+            let proxy = Arc::new(
+                ChaosProxy::new(
+                    "127.0.0.1:0",
+                    &echo_addr.to_string(),
+                    ChaosConfig {
+                        // 1250 bytes take 100 ms at 100 kbit/s.
+                        downlink: Some(RateLimit {
+                            bits_per_sec: 100_000,
+                            queue_packets: 3,
+                        }),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap(),
+            );
+            let addr = proxy.local_addr().unwrap();
+            let running = {
+                let proxy = proxy.clone();
+                tokio::spawn(async move { proxy.run().await })
+            };
+            let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let sent_at = tokio::time::Instant::now();
+            for _ in 0..10 {
+                client.send_to(&[7u8; 1250], addr).await.unwrap();
+            }
+            let mut buf = vec![0u8; 2048];
+            let mut arrivals = Vec::new();
+            while let Ok(Ok(_)) =
+                tokio::time::timeout(Duration::from_millis(600), client.recv_from(&mut buf)).await
+            {
+                arrivals.push(sent_at.elapsed());
+            }
+            assert_eq!(
+                arrivals.len() + proxy.downlink_lost(),
+                10,
+                "each echo arrives or is lost at the queue"
+            );
+            assert!(
+                (3..=5).contains(&arrivals.len()),
+                "about the queue's worth gets through: {arrivals:?}"
+            );
+            assert!(
+                arrivals[1] - arrivals[0] >= Duration::from_millis(80),
+                "spaced by the rate: {arrivals:?}"
+            );
+            proxy.stop();
+            running.await.unwrap().unwrap();
+            echoing.abort();
+        }
+
+        #[tokio::test]
+        async fn the_return_path_can_lose_datagrams_at_random() {
+            let echo = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+            let echo_addr = echo.local_addr().unwrap();
+            let echoing = {
+                let echo = echo.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 2048];
+                    while let Ok((n, from)) = echo.recv_from(&mut buf).await {
+                        let _ = echo.send_to(&buf[..n], from).await;
+                    }
+                })
+            };
+            let proxy = Arc::new(
+                ChaosProxy::new(
+                    "127.0.0.1:0",
+                    &echo_addr.to_string(),
+                    ChaosConfig {
+                        downlink_drop_rate: 1.0,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap(),
+            );
+            let addr = proxy.local_addr().unwrap();
+            let running = {
+                let proxy = proxy.clone();
+                tokio::spawn(async move { proxy.run().await })
+            };
+            let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            for _ in 0..5 {
+                client.send_to(b"payload", addr).await.unwrap();
+            }
+            let mut buf = vec![0u8; 64];
+            let got =
+                tokio::time::timeout(Duration::from_millis(400), client.recv_from(&mut buf)).await;
+            assert!(got.is_err(), "nothing comes back");
+            for _ in 0..50 {
+                if proxy.downlink_lost() == 5 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert_eq!(proxy.downlink_lost(), 5, "every echo counted as lost");
+            proxy.stop();
+            running.await.unwrap().unwrap();
+            echoing.abort();
         }
 
         #[tokio::test]

@@ -526,6 +526,8 @@ pub async fn push_endpoint_to(sender: &Arc<dyn DeviceSender>, endpoint: &Endpoin
 pub struct WanSettings {
     pub pairing_required: bool,
     pub allow_hevc: bool,
+    /// Whether a slow link may lower the frame rate (R6f).
+    pub slow_link_frame_rate: bool,
     pub capture_backend: pocketdesk_core::streaming::CaptureBackend,
     pub mic_relay_device: Option<String>,
     /// Where phones' casts go (T10k); `None` refuses them.
@@ -564,6 +566,7 @@ pub async fn spawn_wan_endpoint(
     let WanSettings {
         pairing_required,
         allow_hevc,
+        slow_link_frame_rate,
         capture_backend,
         mic_relay_device,
         cast,
@@ -669,6 +672,7 @@ pub async fn spawn_wan_endpoint(
                 }
                 streaming_server.set_session_telemetry(true);
                 streaming_server.set_hevc_allowed(allow_hevc);
+                streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);
                 streaming_server.set_capture_backend(capture_backend);
                 // The gate judges the deviceId the client announces in-band
                 // against the iroh key the connection proved (device keys). It

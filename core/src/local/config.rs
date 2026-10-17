@@ -36,6 +36,11 @@ pub struct Config {
     /// opening it fails at runtime the session still falls back (C2).
     #[serde(default)]
     pub allow_hevc: bool,
+    /// Let a slow link lower a session's frame rate (60, 30, 15) so each
+    /// frame keeps enough bits to stay readable (R6f). On by default; a
+    /// phone's "Full quality" turns it off for its session.
+    #[serde(default = "default_true")]
+    pub slow_link_frame_rate: bool,
     /// Capture backend selection (R4 B3). `"auto"` (default) detects the
     /// display server and falls back (screencopy → portal on Wayland, X11 on
     /// bare X11). `"screencopy"`, `"portal"` or `"x11"` pins the pipeline —
@@ -225,6 +230,7 @@ impl Default for Config {
             video_quality: VideoQualityPreset::Balanced,
             pairing_required: true,
             allow_hevc: false,
+            slow_link_frame_rate: true,
             capture_backend: CaptureBackend::Auto,
             mic_relay_device: None,
             lan_discovery: true,
@@ -397,6 +403,7 @@ impl Config {
         "video_quality",
         "pairing_required",
         "allow_hevc",
+        "slow_link_frame_rate",
         "capture_backend",
         "mic_relay_device",
         "lan_discovery",
@@ -688,6 +695,17 @@ phone_battery = \"x\"
         let back = Config::load_from(&path).unwrap();
         assert!(!back.wake_announce);
         assert_eq!(back.wake_port, 40009);
+    }
+
+    #[test]
+    fn a_slow_link_may_lower_the_frame_rate_by_default_and_the_choice_saves() {
+        assert!(Config::default().slow_link_frame_rate);
+        let path = temp("slow-link-fps");
+        let mut config = Config::load_from(&path).unwrap();
+        assert!(config.slow_link_frame_rate, "a file without the key");
+        config.slow_link_frame_rate = false;
+        config.save_to(&path).unwrap();
+        assert!(!Config::load_from(&path).unwrap().slow_link_frame_rate);
     }
 
     #[test]
