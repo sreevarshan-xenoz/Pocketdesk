@@ -73,7 +73,7 @@ With **Settings → Tell other apps what happens** on (off by default), Pocketde
 
 | Action | When | Extras besides the address and kind |
 |---|---|---|
-| `dev.pocketdesk.android.event.SESSION_STARTED` | A screen session's first picture arrived (after the owner allowed it, on a computer that asks), or a remote was admitted | `MODE`: `screen` or `remote` |
+| `dev.pocketdesk.android.event.SESSION_STARTED` | A screen session's first picture arrived (after the owner allowed it, on a computer that asks), or a remote or sound session was admitted | `MODE`: `screen`, `remote` or `sound` (N5: the phone as the computer's speaker and mic) |
 | `dev.pocketdesk.android.event.SESSION_ENDED` | It ended | `REASON`: `left` (you left it) or `lost` (the link went down, or the computer ended it) |
 | `dev.pocketdesk.android.event.FILE_RECEIVED` | A file from the computer is in Downloads; one per file of a folder | `MIME`, `SIZE` (bytes, as the computer gave it) |
 | `dev.pocketdesk.android.event.FILES_SENT` | A share or folder to the computer finished | `COUNT` (sent), `FAILED` (meant to be sent and not) |
