@@ -982,7 +982,7 @@ impl PocketdeskApp {
         let Some(Ok(form)) = &mut self.settings else {
             return;
         };
-        if !form.dirty() {
+        if !form.shows_save_bar() {
             return;
         }
         let mut save = false;

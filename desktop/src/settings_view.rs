@@ -81,6 +81,24 @@ impl SettingsForm {
         self.edited != self.saved
     }
 
+    /// Whether the save bar shows: for changes, or for a problem in what
+    /// is saved (a hand-edited config), which would otherwise go unsaid
+    /// (U1 review).
+    pub fn shows_save_bar(&self) -> bool {
+        self.dirty() || !self.problems().is_empty()
+    }
+
+    /// Back to what is saved, keeping what the server read and whether a
+    /// saved change waits for a restart (U1 review: Undo had forgotten
+    /// both).
+    pub fn undo(&mut self) {
+        let running = std::mem::take(&mut self.running);
+        let restart_needed = self.restart_needed;
+        *self = Self::from_config(self.saved.clone());
+        self.running = running;
+        self.restart_needed = restart_needed;
+    }
+
     /// What stops the edit from being saved, in words for the user.
     pub fn problems(&self) -> Vec<String> {
         let mut problems = Vec::new();
@@ -592,13 +610,20 @@ impl SettingsForm {
         for problem in &problems {
             ui.label(RichText::new(problem).color(crate::theme::bad(ui)));
         }
+        if !self.dirty() {
+            ui.label(
+                RichText::new("The saved settings have a problem: change them here and save.")
+                    .weak(),
+            );
+            return false;
+        }
         let mut save = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             save = ui
                 .add_enabled(problems.is_empty(), egui::Button::new("Save"))
                 .clicked();
             if ui.button("Undo changes").clicked() {
-                *self = Self::from_config(self.saved.clone());
+                self.undo();
             }
             ui.label(RichText::new("Settings have changes not saved yet.").weak());
         });
@@ -714,6 +739,36 @@ fn parse_hooks(text: &str) -> (std::collections::BTreeMap<String, String>, Vec<S
 mod tests {
     use super::*;
     use pocketdesk_core::local::config::Config;
+
+    #[test]
+    fn undo_keeps_a_saved_change_waiting_for_a_restart() {
+        let mut form = SettingsForm::from_config(Config::default());
+        form.edited.control_port = 1800;
+        form.saved = form.edited.clone();
+        form.restart_needed = true;
+        form.edited.streaming_port = 4800;
+        form.undo();
+        assert_eq!(form.edited, form.saved, "the edit is undone");
+        assert!(form.restart_needed, "the saved change still waits");
+        assert_eq!(
+            form.running().control_port,
+            Config::default().control_port,
+            "the server still runs what it read"
+        );
+    }
+
+    #[test]
+    fn saved_settings_with_a_problem_show_the_bar_unedited() {
+        let mut saved = Config::default();
+        saved.streaming_port = saved.control_port;
+        let form = SettingsForm::from_config(saved);
+        assert!(!form.dirty());
+        assert!(
+            form.shows_save_bar(),
+            "a hand-edited config's problem is said"
+        );
+        assert!(!SettingsForm::from_config(Config::default()).shows_save_bar());
+    }
 
     #[test]
     fn hooks_are_one_event_and_command_per_line() {
