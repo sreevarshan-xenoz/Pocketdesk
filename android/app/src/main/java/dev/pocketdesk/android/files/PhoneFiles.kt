@@ -27,6 +27,9 @@ class PhoneFiles(private val ctx: Context) {
 
     fun tick() {
         val folders = PhoneFolders.all(ctx)
+        val requests = takeRequests()
+        // Nothing shared and nothing asked: nothing to do (N7).
+        if (folders.isEmpty() && requests.isEmpty()) return
         val own = PhoneLink.target(ctx)
         if (folders.isNotEmpty() && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
@@ -35,7 +38,7 @@ class PhoneFiles(private val ctx: Context) {
                 RustCore.connectToPeer(own.address, own.controlPort, HostStore.wanIdentity(ctx, own.address))
             }
         }
-        for (request in takeRequests()) {
+        for (request in requests) {
             if (!PhoneFilesRule.fromOwnComputer(request.host, request.port, own?.address, own?.controlPort)) continue
             if (!PhoneFilesRule.reachable(request.path)) continue
             runCatching { if (request.fetch) fetch(request, folders) else list(request, folders) }
