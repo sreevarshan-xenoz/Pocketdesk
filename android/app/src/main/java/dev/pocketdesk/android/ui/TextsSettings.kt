@@ -24,13 +24,15 @@ import dev.pocketdesk.android.notify.TextPrefs
 fun TextsSection() {
     val context = LocalContext.current
     var version by remember { mutableIntStateOf(0) }
-    val show = version.let { TextPrefs.show(context) }
-    val reply = version.let { TextPrefs.reply(context) }
-    val canReceive = version.let { TextPrefs.granted(context, Manifest.permission.RECEIVE_SMS) }
-    val canSend = version.let { TextPrefs.granted(context, Manifest.permission.SEND_SMS) }
-    val names = version.let { TextPrefs.names(context) }
-    val canReadContacts = version.let { TextPrefs.granted(context, Manifest.permission.READ_CONTACTS) }
-    val listening = version.let { PhoneNotificationPrefs.accessGranted(context) }
+    // Read again on return: access may have been granted in Android's settings.
+    val resumes = rememberResumes()
+    val show = (version + resumes).let { TextPrefs.show(context) }
+    val reply = (version + resumes).let { TextPrefs.reply(context) }
+    val canReceive = (version + resumes).let { TextPrefs.granted(context, Manifest.permission.RECEIVE_SMS) }
+    val canSend = (version + resumes).let { TextPrefs.granted(context, Manifest.permission.SEND_SMS) }
+    val names = (version + resumes).let { TextPrefs.names(context) }
+    val canReadContacts = (version + resumes).let { TextPrefs.granted(context, Manifest.permission.READ_CONTACTS) }
+    val listening = (version + resumes).let { PhoneNotificationPrefs.accessGranted(context) }
 
     val askReceive =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->

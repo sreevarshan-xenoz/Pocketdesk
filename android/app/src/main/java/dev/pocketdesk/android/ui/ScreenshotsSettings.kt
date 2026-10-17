@@ -23,11 +23,13 @@ import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 fun ScreenshotsSection() {
     val context = LocalContext.current
     var version by remember { mutableIntStateOf(0) }
-    val on = version.let { ScreenshotPrefs.on(context) }
-    val granted = version.let { ScreenshotPrefs.granted(context) }
-    val clipboard = version.let { ScreenshotPrefs.clipboard(context) }
-    val save = version.let { ScreenshotPrefs.save(context) }
-    val listening = version.let { PhoneNotificationPrefs.accessGranted(context) }
+    // Read again on return: access may have been granted in Android's settings.
+    val resumes = rememberResumes()
+    val on = (version + resumes).let { ScreenshotPrefs.on(context) }
+    val granted = (version + resumes).let { ScreenshotPrefs.granted(context) }
+    val clipboard = (version + resumes).let { ScreenshotPrefs.clipboard(context) }
+    val save = (version + resumes).let { ScreenshotPrefs.save(context) }
+    val listening = (version + resumes).let { PhoneNotificationPrefs.accessGranted(context) }
 
     val ask =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
