@@ -411,8 +411,21 @@ impl Config {
         crate::secure_fs::write_private(path, updated.as_bytes()).map_err(io_error)
     }
 
+    /// The keys whose values differ between `self` and `other`, in
+    /// [`Self::KNOWN_KEYS`] order: what a save would change (U5: the
+    /// desktop app says which of them apply at once).
+    pub fn changed_keys(&self, other: &Config) -> Vec<&'static str> {
+        let a = toml::Table::try_from(self).unwrap_or_default();
+        let b = toml::Table::try_from(other).unwrap_or_default();
+        Self::KNOWN_KEYS
+            .iter()
+            .copied()
+            .filter(|key| a.get(*key) != b.get(*key))
+            .collect()
+    }
+
     /// Every key this version reads; others in the file are left alone.
-    const KNOWN_KEYS: &'static [&'static str] = &[
+    pub const KNOWN_KEYS: &'static [&'static str] = &[
         "control_port",
         "streaming_port",
         "log_level",
@@ -476,6 +489,30 @@ pub fn relay_url_problem(url: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::streaming::CaptureBackend;
+
+    #[test]
+    fn changed_keys_name_what_differs_and_nothing_else() {
+        let a = Config::default();
+        assert!(a.changed_keys(&a).is_empty());
+        let mut b = a.clone();
+        b.control_port = 1800;
+        b.internet_files = !a.internet_files;
+        b.mqtt_password = "x".to_string();
+        b.tasks.push(crate::local::tasks::TaskSpec {
+            name: "n".to_string(),
+            command: "c".to_string(),
+            ask: true,
+            deadline_secs: 60,
+        });
+        assert_eq!(
+            a.changed_keys(&b),
+            ["control_port", "internet_files", "tasks", "mqtt_password"]
+        );
+        // An option cleared to none is a change too.
+        let mut c = a.clone();
+        c.mic_relay_device = Some("CABLE".to_string());
+        assert_eq!(c.changed_keys(&a), ["mic_relay_device"]);
+    }
 
     fn temp(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-local-{name}-{}", std::process::id()));
