@@ -122,7 +122,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             SettingSwitch(
                 stringResource(R.string.settings_capture_mouse),
-                stringResource(R.string.settings_capture_mouse_summary),
+                // A touchpad too on Android 17 (N4).
+                stringResource(
+                    if (Android17.captures(android.os.Build.VERSION.SDK_INT, false, false, true)) {
+                        R.string.settings_capture_mouse_summary_17
+                    } else {
+                        R.string.settings_capture_mouse_summary
+                    },
+                ),
                 Prefs.captureMouse(context),
                 { Prefs.setCaptureMouse(context, it) },
             )

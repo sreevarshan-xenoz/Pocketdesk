@@ -85,7 +85,7 @@ fun TextsSection() {
         stringResource(R.string.texts_show),
         // Android 17 holds texts with a code for 3 hours (N4).
         if (Android17.holdsCodeTexts(android.os.Build.VERSION.SDK_INT)) {
-            stringResource(R.string.texts_show_summary) + ". " + stringResource(R.string.texts_codes_held)
+            stringResource(R.string.texts_show_summary_17)
         } else {
             stringResource(R.string.texts_show_summary)
         },

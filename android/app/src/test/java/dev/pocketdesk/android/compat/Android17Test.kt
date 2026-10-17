@@ -18,6 +18,7 @@ class Android17Test {
     fun aTouchpadIsCapturedFrom17() {
         assertTrue(Android17.captures(sdk = 36, virtual = false, mouse = true, touchpad = false))
         assertFalse(Android17.captures(sdk = 36, virtual = false, mouse = true, touchpad = true))
+        assertFalse(Android17.captures(sdk = 36, virtual = false, mouse = false, touchpad = true))
         assertTrue(Android17.captures(sdk = 37, virtual = false, mouse = true, touchpad = true))
         assertTrue(Android17.captures(sdk = 37, virtual = false, mouse = false, touchpad = true))
         assertFalse(Android17.captures(sdk = 37, virtual = true, mouse = true, touchpad = true))
