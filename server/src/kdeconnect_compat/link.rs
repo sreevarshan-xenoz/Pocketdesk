@@ -202,11 +202,24 @@ impl Allowance {
 
 static TOASTS: Mutex<Allowance> = Mutex::new(Allowance::new(TOASTS_PER_MINUTE));
 
+/// Pairing prompts have an allowance of their own (3c review: a paired
+/// device's pings had spent the shared one, hiding another's request).
+static PROMPTS: Mutex<Allowance> = Mutex::new(Allowance::new(TOASTS_PER_MINUTE));
+
 /// Show `summary` and `body` on the desktop, off the link's task, within
 /// [`TOASTS_PER_MINUTE`] (past it, the log has it). Not in tests: a toast's
 /// thread outliving the test process crashes it.
 pub(super) fn notify(summary: &'static str, body: String) {
-    let allowed = TOASTS
+    show(&TOASTS, summary, body);
+}
+
+/// [`notify`] for a pairing prompt, within its own allowance.
+fn prompt(summary: &'static str, body: String) {
+    show(&PROMPTS, summary, body);
+}
+
+fn show(allowance: &Mutex<Allowance>, summary: &'static str, body: String) {
+    let allowed = allowance
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .allow(std::time::Instant::now());
@@ -376,7 +389,8 @@ impl State {
         let may = self.permissions();
         match packet.packet_type.as_str() {
             PING => {
-                tracing::info!(device_id = %self.device_id, "A ping from a KDE Connect device");
+                // Quiet in the log: a device may ping as often as it likes.
+                tracing::debug!(device_id = %self.device_id, "A ping from a KDE Connect device");
                 notify("Ping from a KDE Connect device", self.name.clone());
             }
             BATTERY if may.battery => {
@@ -478,7 +492,7 @@ impl State {
                     code: code.clone(),
                     accepted: false,
                 });
-                notify(
+                prompt(
                     "A KDE Connect device asks to pair",
                     format!(
                         "{}: check the code {code} on it, then allow it in Settings",
@@ -526,7 +540,7 @@ impl State {
         if let Err(e) = noted {
             tracing::warn!("A KDE pairing could not be held for the owner: {e}");
         }
-        notify(
+        prompt(
             "A KDE Connect device accepted pairing",
             format!(
                 "{}: confirm it in Settings if it showed the code {code}",
