@@ -63,10 +63,15 @@ impl Drop for UnpairedSlot {
     }
 }
 
-/// The compat identity in the state folder.
+/// The compat identity in the state folder, read once.
 pub fn load_identity() -> anyhow::Result<identity::CompatIdentity> {
+    static LOADED: std::sync::OnceLock<identity::CompatIdentity> = std::sync::OnceLock::new();
+    if let Some(identity) = LOADED.get() {
+        return Ok(identity.clone());
+    }
     let dir = crate::state::state_dir()?.join("certs").join(identity::DIR);
-    identity::CompatIdentity::load_or_create(&dir)
+    let identity = identity::CompatIdentity::load_or_create(&dir)?;
+    Ok(LOADED.get_or_init(|| identity).clone())
 }
 
 /// A connection to the control port that opened with `{`: a KDE Connect

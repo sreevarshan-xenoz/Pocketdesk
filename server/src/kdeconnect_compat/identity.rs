@@ -24,12 +24,18 @@ impl CompatIdentity {
     /// each file written whole and renamed into place, the certificate last
     /// (it marks the set complete).
     pub fn load_or_create(dir: &Path) -> Result<Self> {
+        // One at a time: two first connections at once each made their own
+        // set and could leave a mismatched one in place for good.
+        static MAKING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one = MAKING.lock().unwrap_or_else(|e| e.into_inner());
         let (id_path, key_path, cert_path) = paths(dir);
+        // A set is taken only whole: an id, and a certificate naming it.
         if let (Ok(id), Ok(key_der), Ok(cert_der)) = (
             std::fs::read_to_string(&id_path),
             std::fs::read(&key_path),
             std::fs::read(&cert_path),
         ) && super::handshake::valid_id(id.trim())
+            && super::handshake::subject_id(&cert_der).as_deref() == Some(id.trim())
         {
             return Ok(Self {
                 id: id.trim().to_string(),
@@ -41,7 +47,9 @@ impl CompatIdentity {
         let id = uuid::Uuid::new_v4().to_string().replace('-', "_");
         let (cert_der, key_der) = make_certificate(&id)?;
         let write = |path: &PathBuf, bytes: &[u8], private: bool| -> Result<()> {
-            let tmp = path.with_extension("tmp");
+            // Its own temporary name: `with_extension` gave the key and the
+            // certificate the same one.
+            let tmp = PathBuf::from(format!("{}.tmp", path.display()));
             if private {
                 pocketdesk_core::secure_fs::write_private(&tmp, bytes)?;
             } else {
@@ -104,6 +112,38 @@ mod tests {
         assert_eq!(
             super::super::handshake::subject_id(&made.cert_der).as_deref(),
             Some(made.id.as_str())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_set_that_does_not_match_is_made_again_and_first_uses_side_by_side_agree() {
+        let dir = std::env::temp_dir().join(format!(
+            "pd-kde-identity-race-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let made = CompatIdentity::load_or_create(&dir).unwrap();
+        // An id that is not the certificate's: not taken.
+        std::fs::write(dir.join("id"), "z".repeat(36)).unwrap();
+        let again = CompatIdentity::load_or_create(&dir).unwrap();
+        assert_ne!(again.id, "z".repeat(36));
+        assert_ne!(again.id, made.id, "made afresh");
+        let fresh = dir.join("fresh");
+        let ids: Vec<String> = std::thread::scope(|scope| {
+            let runs: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| CompatIdentity::load_or_create(&fresh).unwrap().id))
+                .collect();
+            runs.into_iter().map(|run| run.join().unwrap()).collect()
+        });
+        assert!(
+            ids.windows(2).all(|w| w[0] == w[1]),
+            "one identity: {ids:?}"
+        );
+        let loaded = CompatIdentity::load_or_create(&fresh).unwrap();
+        assert_eq!(
+            super::super::handshake::subject_id(&loaded.cert_der).as_deref(),
+            Some(loaded.id.as_str())
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
