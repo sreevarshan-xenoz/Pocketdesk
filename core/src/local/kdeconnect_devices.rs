@@ -252,11 +252,17 @@ pub fn set_pending(state_dir: &Path, entry: Pending, now_unix: u64) -> io::Resul
     )
 }
 
-/// The pairing with `device_id` is no longer waiting.
-pub fn clear_pending(state_dir: &Path, device_id: &str, now_unix: u64) -> io::Result<()> {
+/// The pairing with `device_id` that showed `code` is no longer waiting;
+/// another for the device (a newer link's, 3b review) is left.
+pub fn clear_pending(
+    state_dir: &Path,
+    device_id: &str,
+    code: &str,
+    now_unix: u64,
+) -> io::Result<()> {
     let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let mut list = pending(state_dir, now_unix);
-    list.retain(|p| p.device_id != device_id);
+    list.retain(|p| p.device_id != device_id || p.code != code);
     write_private_json(
         &state_dir.join(KDECONNECT_PAIRING_FILE),
         &PendingFile { pending: list },
@@ -427,7 +433,9 @@ mod tests {
             pending(&dir, 106 + PAIRING_TTL_SECS + 1).is_empty(),
             "too old"
         );
-        clear_pending(&dir, "a", 110).unwrap();
+        clear_pending(&dir, "a", "00000000", 110).unwrap();
+        assert_eq!(pending(&dir, 110).len(), 2, "another request's code");
+        clear_pending(&dir, "a", "1ACBAC75", 110).unwrap();
         assert_eq!(pending(&dir, 110)[0].device_id, "b");
     }
 

@@ -254,9 +254,7 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
             }
         }
     }
-    if state.waiting.is_some() {
-        let _ = devices::clear_pending(&state.dir, &device_id, now_unix());
-    }
+    state.end_waiting(now_unix());
     tracing::info!(device_id, "A KDE Connect device went");
 }
 
@@ -388,9 +386,7 @@ impl State {
                     self.note_seen();
                     notify("A KDE Connect device unpaired", self.name.clone());
                 }
-                if self.waiting.take().is_some() {
-                    let _ = devices::clear_pending(&self.dir, &self.device_id, now);
-                }
+                self.end_waiting(now);
                 Vec::new()
             }
         }
@@ -429,6 +425,14 @@ impl State {
         );
     }
 
+    /// The pairing in progress on this link ends: its request leaves the
+    /// pending list, and a newer link's for the same device stays.
+    fn end_waiting(&mut self, now: u64) {
+        if let Some(waiting) = self.waiting.take() {
+            let _ = devices::clear_pending(&self.dir, &self.device_id, &waiting.code, now);
+        }
+    }
+
     /// Forget the device's pin; a failure is told (its pin would let it
     /// back in as paired).
     fn unpin(&self) {
@@ -459,10 +463,9 @@ impl State {
             return false;
         }
         self.paired = true;
-        self.waiting = None;
+        self.end_waiting(now);
         // Paired, it is not one of the unpaired links any more.
         self.unpaired = None;
-        let _ = devices::clear_pending(&self.dir, &self.device_id, now);
         self.note_seen();
         tracing::info!(device_id = %self.device_id, "Paired with a KDE Connect device");
         true
@@ -523,8 +526,7 @@ impl State {
                 // review): the device would think itself paired.
                 let yes = yes && self.pair_now();
                 if !yes {
-                    self.waiting = None;
-                    let _ = devices::clear_pending(&self.dir, &self.device_id, now);
+                    self.end_waiting(now);
                 }
                 match (from_device, yes) {
                     // The device accepted ours already: a yes needs no word.
@@ -558,8 +560,7 @@ impl State {
         if now.saturating_sub(waiting.since) <= devices::PAIRING_TTL_SECS {
             return Vec::new();
         }
-        self.waiting = None;
-        let _ = devices::clear_pending(&self.dir, &self.device_id, now);
+        self.end_waiting(now);
         vec![pairing::answer(false)]
     }
 }
@@ -826,6 +827,22 @@ mod tests {
         assert!(PLACES.take(address).is_none(), "held");
         s.pair_now();
         assert!(PLACES.take(address).is_some(), "given back");
+    }
+
+    #[test]
+    fn an_older_links_end_leaves_the_newer_ones_request() {
+        let mut old = state("ends", false);
+        let mut new = state("ends", false);
+        new.dir = old.dir.clone();
+        let now = now_unix();
+        old.pair_packet(PairSays::Yes(Some(now)));
+        new.pair_packet(PairSays::Yes(Some(now + 1)));
+        let newer = devices::pending(&new.dir, now + 1);
+        assert_eq!(newer.len(), 1);
+        old.end_waiting(now + 1);
+        assert_eq!(devices::pending(&new.dir, now + 1), newer, "left");
+        new.end_waiting(now + 1);
+        assert!(devices::pending(&new.dir, now + 1).is_empty());
     }
 
     #[test]
