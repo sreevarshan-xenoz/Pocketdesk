@@ -204,15 +204,17 @@ pub async fn run_requests() {
             let (device_id, event) = match request.ask {
                 // The owner's change of what a paired device may do (3c):
                 // the links read it as each packet comes.
-                KdeAsk::Permissions {
+                KdeAsk::Permission {
                     device_id,
-                    permissions,
+                    permission,
+                    on,
                 } => {
-                    match kdeconnect_devices::set_permissions(&dir, &device_id, permissions) {
+                    match kdeconnect_devices::set_permission(&dir, &device_id, permission, on) {
                         Ok(true) => tracing::info!(
                             device_id,
-                            ?permissions,
-                            "A KDE Connect device's permissions changed"
+                            ?permission,
+                            on,
+                            "A KDE Connect device's permission changed"
                         ),
                         Ok(false) => tracing::info!(
                             device_id,

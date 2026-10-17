@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, RichText};
 use pocketdesk_core::local::kdeconnect::{self, SeenDevice};
 use pocketdesk_core::local::kdeconnect_devices::{
-    self as devices, KdeAsk, KdeDevice, KdePermissions, Pending,
+    self as devices, KdeAsk, KdeDevice, KdePermission, KdePermissions, Pending,
 };
 use pocketdesk_core::local::phone_status::{self, PhoneBattery};
 use std::collections::BTreeMap;
@@ -32,6 +32,44 @@ pub struct KdeConnectView {
     finding: bool,
     read_at: Option<Instant>,
     notice: Option<String>,
+    /// Switches clicked, shown as clicked until the server has written
+    /// them (or a while has passed): a read in between would flip them
+    /// back (3c review).
+    held: Vec<Held>,
+}
+
+/// A switch clicked and not yet written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Held {
+    pub device_id: String,
+    pub permission: KdePermission,
+    pub on: bool,
+    pub since: Instant,
+}
+
+/// How long a clicked switch is held when the server does not write it.
+const HOLD: Duration = Duration::from_secs(10);
+
+/// Show `held` over `rows`, and keep those still to be written.
+pub fn hold(rows: &mut [Row], held: &mut Vec<Held>, now: Instant) {
+    held.retain(|h| {
+        if now.duration_since(h.since) >= HOLD {
+            return false;
+        }
+        let Some(permissions) = rows
+            .iter_mut()
+            .find(|r| r.device_id == h.device_id)
+            .and_then(|r| r.permissions.as_mut())
+        else {
+            return false;
+        };
+        if permissions.allows(h.permission) == h.on {
+            // Written.
+            return false;
+        }
+        *permissions = permissions.with(h.permission, h.on);
+        true
+    });
 }
 
 /// A device in the list.
@@ -95,6 +133,7 @@ impl KdeConnectView {
             return;
         }
         self.rows = rows(&devices::devices(state_dir), &kdeconnect::read(state_dir));
+        hold(&mut self.rows, &mut self.held, Instant::now());
         self.batteries = phone_status::read(state_dir);
         self.pending = devices::pending(state_dir, now_unix);
         self.finding = kdeconnect::finding(state_dir, now_unix);
@@ -251,10 +290,11 @@ impl KdeConnectView {
             if let Some(permissions) = device.permissions.as_mut() {
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
-                    if let Some(changed) = permission_boxes(ui, running, permissions) {
-                        ask = Some(KdeAsk::Permissions {
+                    if let Some((permission, on)) = permission_boxes(ui, running, permissions) {
+                        ask = Some(KdeAsk::Permission {
                             device_id: device.device_id.clone(),
-                            permissions: changed,
+                            permission,
+                            on,
                         });
                     }
                 });
@@ -262,8 +302,24 @@ impl KdeConnectView {
         }
         if let Some(ask) = ask {
             let said = asked(&ask);
+            let switch = match &ask {
+                KdeAsk::Permission {
+                    device_id,
+                    permission,
+                    on,
+                } => Some(Held {
+                    device_id: device_id.clone(),
+                    permission: *permission,
+                    on: *on,
+                    since: Instant::now(),
+                }),
+                _ => None,
+            };
             self.notice = Some(match devices::request(state_dir, ask, now_unix) {
-                Ok(_) => said.to_string(),
+                Ok(_) => {
+                    self.held.extend(switch);
+                    said.to_string()
+                }
                 Err(e) => format!("Not asked: {e}"),
             });
             // Read again soon, for the answer.
@@ -288,37 +344,44 @@ fn permission_boxes(
     ui: &mut egui::Ui,
     running: bool,
     permissions: &mut KdePermissions,
-) -> Option<KdePermissions> {
-    let mut changed = false;
-    for (on, label, hover) in [
+) -> Option<(KdePermission, bool)> {
+    let mut changed = None;
+    for (which, on, label, hover) in [
         (
+            KdePermission::Clipboard,
             &mut permissions.clipboard,
             "Clipboard",
             "Its copies here, and this computer's to it (with \"Clipboard to phones\" on)",
         ),
         (
+            KdePermission::Battery,
             &mut permissions.battery,
             "Battery",
             "Its battery, and a warning when it runs low",
         ),
         (
+            KdePermission::Find,
             &mut permissions.find,
             "Ring it from here",
             "Ring rings it, to find it",
         ),
         (
+            KdePermission::Files,
             &mut permissions.files,
             "Send files here",
             "Files it sends go to Downloads",
         ),
     ] {
-        changed |= ui
+        if ui
             .add_enabled(running, egui::Checkbox::new(on, label))
             .on_hover_text(hover)
             .on_disabled_hover_text("Start the server with KDE Connect devices on")
-            .changed();
+            .changed()
+        {
+            changed = Some((which, *on));
+        }
     }
-    changed.then_some(*permissions)
+    changed
 }
 
 /// What the app says once it has asked: a pairing or a ping goes only to
@@ -391,6 +454,40 @@ mod tests {
         );
         let list = rows(&[paired("p", "Phone")], &[]);
         assert_eq!(list[0].seen_unix, None, "kept though no longer seen");
+    }
+
+    #[test]
+    fn a_clicked_switch_is_shown_until_it_is_written() {
+        let start = Instant::now();
+        let read = || rows(&[paired("p", "Phone")], &[]);
+        let mut held = vec![Held {
+            device_id: "p".to_string(),
+            permission: KdePermission::Files,
+            on: false,
+            since: start,
+        }];
+        // Read before the server wrote it: shown as clicked.
+        let mut shown = read();
+        hold(&mut shown, &mut held, start);
+        assert!(!shown[0].permissions.unwrap().files);
+        assert_eq!(held.len(), 1);
+        // Written: let go.
+        let mut written = read();
+        written[0].permissions = written[0]
+            .permissions
+            .map(|p| p.with(KdePermission::Files, false));
+        hold(&mut written, &mut held, start);
+        assert!(held.is_empty());
+        // Never written: let go after a while, and the file shown.
+        let mut held = vec![Held {
+            device_id: "p".to_string(),
+            permission: KdePermission::Files,
+            on: false,
+            since: start,
+        }];
+        let mut late = read();
+        hold(&mut late, &mut held, start + HOLD);
+        assert!(held.is_empty() && late[0].permissions.unwrap().files);
     }
 
     #[test]

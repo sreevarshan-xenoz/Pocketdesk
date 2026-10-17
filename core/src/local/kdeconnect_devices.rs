@@ -63,12 +63,66 @@ impl Default for KdePermissions {
     }
 }
 
+/// One of a paired KDE Connect device's switches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KdePermission {
+    Clipboard,
+    Battery,
+    Find,
+    Files,
+}
+
+impl KdePermissions {
+    /// These, with `which` set to `on`.
+    pub fn with(mut self, which: KdePermission, on: bool) -> Self {
+        *match which {
+            KdePermission::Clipboard => &mut self.clipboard,
+            KdePermission::Battery => &mut self.battery,
+            KdePermission::Find => &mut self.find,
+            KdePermission::Files => &mut self.files,
+        } = on;
+        self
+    }
+
+    /// Whether `which` is on.
+    pub fn allows(&self, which: KdePermission) -> bool {
+        match which {
+            KdePermission::Clipboard => self.clipboard,
+            KdePermission::Battery => self.battery,
+            KdePermission::Find => self.find,
+            KdePermission::Files => self.files,
+        }
+    }
+}
+
 /// What `device_id` may do, if it is paired.
 pub fn permissions(state_dir: &Path, device_id: &str) -> Option<KdePermissions> {
     devices(state_dir)
         .into_iter()
         .find(|d| d.device_id == device_id)
         .map(|d| d.permissions)
+}
+
+/// Set one of a paired `device_id`'s switches (the server's side), the
+/// others as they are; whether it is paired.
+pub fn set_permission(
+    state_dir: &Path,
+    device_id: &str,
+    which: KdePermission,
+    on: bool,
+) -> io::Result<bool> {
+    let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut devices = try_devices(state_dir)?;
+    let Some(device) = devices.iter_mut().find(|d| d.device_id == device_id) else {
+        return Ok(false);
+    };
+    device.permissions = device.permissions.with(which, on);
+    write_private_json(
+        &state_dir.join(KDECONNECT_DEVICES_FILE),
+        &DevicesFile { devices },
+    )?;
+    Ok(true)
 }
 
 /// Set what a paired `device_id` may do (the server's side); whether it is
@@ -147,10 +201,12 @@ pub enum KdeAsk {
     Ping { device_id: String },
     /// Ring it, to find it (3c).
     Ring { device_id: String },
-    /// Change what it may do (3c).
-    Permissions {
+    /// Turn one of its switches on or off (3c): one at a time, so two
+    /// changes made close together never undo each other (3c review).
+    Permission {
         device_id: String,
-        permissions: KdePermissions,
+        permission: KdePermission,
+        on: bool,
     },
 }
 
@@ -161,6 +217,9 @@ pub struct KdeRequest {
     #[serde(flatten)]
     pub ask: KdeAsk,
     pub created_unix: u64,
+    /// When, in milliseconds: the order of requests made in one second.
+    #[serde(default)]
+    pub created_ms: u64,
 }
 
 /// The server's writes, one at a time.
@@ -277,6 +336,10 @@ pub fn request(state_dir: &Path, ask: KdeAsk, now_unix: u64) -> io::Result<KdeRe
         id: uuid::Uuid::new_v4().to_string(),
         ask,
         created_unix: now_unix,
+        created_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
     };
     let file = request_path(state_dir, &request.id)?;
     std::fs::create_dir_all(state_dir.join(KDECONNECT_OUT_DIR))?;
@@ -318,7 +381,7 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<KdeRequest> {
             taken.push(request);
         }
     }
-    taken.sort_by_key(|r| r.created_unix);
+    taken.sort_by_key(|r| (r.created_unix, r.created_ms));
     taken
 }
 
@@ -387,6 +450,11 @@ mod tests {
         assert!(set_permissions(&dir, "a", files).unwrap());
         assert!(permissions(&dir, "a").unwrap().files);
         assert!(!set_permissions(&dir, "b", files).unwrap(), "not paired");
+        // One switch at a time leaves the others as they are.
+        assert!(set_permission(&dir, "a", KdePermission::Clipboard, false).unwrap());
+        let now = permissions(&dir, "a").unwrap();
+        assert!(!now.clipboard && now.files && now.battery);
+        assert!(now.allows(KdePermission::Files));
         // A file from before 3c reads with the defaults.
         let old = r#"{"devices":[{"device_id":"c","name":"P","cert_hash":"00","paired_unix":1}]}"#;
         std::fs::write(dir.join(KDECONNECT_DEVICES_FILE), old).unwrap();
@@ -477,6 +545,25 @@ mod tests {
         assert!(
             take_all(&dir, 100 + REQUEST_TTL_SECS + 1).is_empty(),
             "stale"
+        );
+    }
+
+    #[test]
+    fn requests_made_in_one_second_come_in_the_order_made() {
+        let dir = temp_dir("order");
+        let switch = |on| KdeAsk::Permission {
+            device_id: "a".to_string(),
+            permission: KdePermission::Files,
+            on,
+        };
+        for on in [true, false, true, false] {
+            request(&dir, switch(on), 100).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+        let taken: Vec<_> = take_all(&dir, 100).into_iter().map(|r| r.ask).collect();
+        assert_eq!(
+            taken,
+            [switch(true), switch(false), switch(true), switch(false)]
         );
     }
 }
