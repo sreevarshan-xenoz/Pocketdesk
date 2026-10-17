@@ -1099,12 +1099,25 @@ impl PocketdeskApp {
         // As the running server read it, not the box as edited (3c
         // review: requests to a server with it off lapsed unread).
         let compat_on = form.running().kdeconnect_compat;
+        let kde_waiting = self.kdeconnect.waiting(&self.state_dir, now_unix());
         for section in crate::settings_view::Section::ALL {
-            let mut header = egui::CollapsingHeader::new(section_heading(ui, section))
-                .id_salt(section.title())
-                .default_open(section.opens());
-            // A section with a problem stays open until it is fixed.
-            if form.section_has_problem(section) {
+            // A section with a problem, or a pairing request waiting, stays
+            // open until it is dealt with, and its heading says why.
+            let held = if form.section_has_problem(section) {
+                Some("has a problem".to_string())
+            } else if section == crate::settings_view::Section::KdeConnect && kde_waiting > 0 {
+                Some(match kde_waiting {
+                    1 => "a pairing request waits".to_string(),
+                    n => format!("{n} pairing requests wait"),
+                })
+            } else {
+                None
+            };
+            let mut header =
+                egui::CollapsingHeader::new(section_heading(ui, section, held.as_deref()))
+                    .id_salt(section.title())
+                    .default_open(section.opens());
+            if held.is_some() {
                 header = header.open(Some(true));
             }
             header.show(ui, |ui| {
@@ -1740,7 +1753,11 @@ pub fn battery_text(
 }
 
 /// A Settings section's heading: its title, and what is in it, quieter.
-fn section_heading(ui: &egui::Ui, section: crate::settings_view::Section) -> egui::WidgetText {
+fn section_heading(
+    ui: &egui::Ui,
+    section: crate::settings_view::Section,
+    held: Option<&str>,
+) -> egui::WidgetText {
     let mut job = egui::text::LayoutJob::default();
     RichText::new(section.title()).strong().append_to(
         &mut job,
@@ -1757,6 +1774,18 @@ fn section_heading(ui: &egui::Ui, section: crate::settings_view::Section) -> egu
             egui::FontSelection::Default,
             egui::Align::Center,
         );
+    // Why it will not close: a problem, or a request waiting.
+    if let Some(held) = held {
+        RichText::new(format!("   · {held}"))
+            .small()
+            .color(crate::theme::warn(ui))
+            .append_to(
+                &mut job,
+                ui.style(),
+                egui::FontSelection::Default,
+                egui::Align::Center,
+            );
+    }
     job.into()
 }
 

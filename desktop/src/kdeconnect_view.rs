@@ -129,6 +129,14 @@ impl KdeConnectView {
         self.read_at = Some(Instant::now());
     }
 
+    /// How many pairing requests wait for the owner's answer, read again as
+    /// [`Self::show`] reads: Settings holds the section open while any do
+    /// (U5 review: the server's toast sends the owner there).
+    pub fn waiting(&mut self, state_dir: &Path, now_unix: u64) -> usize {
+        self.refresh(state_dir, now_unix);
+        self.pending.len()
+    }
+
     /// `running` is whether the server runs with the switch on.
     pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path, running: bool, now_unix: u64) {
         self.refresh(state_dir, now_unix);
