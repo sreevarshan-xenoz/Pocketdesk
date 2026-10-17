@@ -64,8 +64,10 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(TITLE)
-            .with_inner_size([720.0, 480.0])
-            .with_min_inner_size([520.0, 360.0])
+            // Room for the navigation and a page's widest rows (U1 review:
+            // at 520x360 the navigation's last group was cut off).
+            .with_inner_size([860.0, 600.0])
+            .with_min_inner_size([640.0, 440.0])
             .with_icon(egui::IconData {
                 rgba: icon::icon_rgba(64),
                 width: 64,

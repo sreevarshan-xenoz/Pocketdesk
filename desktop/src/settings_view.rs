@@ -371,7 +371,9 @@ impl SettingsForm {
                 ui.vertical(|ui| {
                     let mut remove = None;
                     for (i, task) in e.tasks.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
+                        // Wrapped: name, command, ask, deadline and Remove
+                        // are wider than a narrow page (U1 review).
+                        ui.horizontal_wrapped(|ui| {
                             ui.add(
                                 egui::TextEdit::singleline(&mut task.name)
                                     .desired_width(110.0)

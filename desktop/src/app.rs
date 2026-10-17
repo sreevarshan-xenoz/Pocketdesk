@@ -1188,7 +1188,8 @@ impl PocketdeskApp {
         });
         self.send_to = Some(chosen);
         let mut send = None;
-        ui.horizontal(|ui| {
+        // Wrapped: the box and three buttons are wider than a narrow page.
+        ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.send_path)
                     .hint_text("Path to a file or folder")
@@ -1217,7 +1218,7 @@ impl PocketdeskApp {
             self.send_path.clear();
         }
         let mut link = None;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.send_link)
                     .hint_text("A web link (http or https)")
@@ -1433,18 +1434,23 @@ impl eframe::App for PocketdeskApp {
             .show(ui, |ui| {
                 ui.add_space(8.0);
                 ui.heading("Pocketdesk");
-                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
-                    for group in crate::nav::GROUPS {
-                        ui.add_space(10.0);
-                        if let Some(title) = group.title {
-                            ui.label(RichText::new(title).small().color(crate::theme::muted(ui)));
-                        }
-                        for tab in group.pages {
-                            if ui.selectable_label(self.tab == *tab, tab.name()).clicked() {
-                                self.switch_to(*tab);
+                // Scrolls when the window is short (U1 review).
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                        for group in crate::nav::GROUPS {
+                            ui.add_space(10.0);
+                            if let Some(title) = group.title {
+                                ui.label(
+                                    RichText::new(title).small().color(crate::theme::muted(ui)),
+                                );
+                            }
+                            for tab in group.pages {
+                                if ui.selectable_label(self.tab == *tab, tab.name()).clicked() {
+                                    self.switch_to(*tab);
+                                }
                             }
                         }
-                    }
+                    });
                 });
             });
         if self.tab == Tab::Settings {
