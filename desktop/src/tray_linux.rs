@@ -44,8 +44,19 @@ impl Tray {
                 data: crate::icon::argb32(&crate::icon::icon_rgba(size)),
             })
             .collect();
-        let handle = Item { icon }.spawn().map_err(|e| e.to_string())?;
-        Ok(Self { _handle: handle })
+        // A tray host that never answers must not hold up the window (N6
+        // review): registration gets a few seconds, on a thread of its own.
+        let (sent, got) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sent.send(Item { icon }.spawn().map_err(|e| e.to_string()));
+        });
+        match got.recv_timeout(REGISTER_WAIT) {
+            Ok(handle) => Ok(Self { _handle: handle? }),
+            Err(_) => Err(format!(
+                "the tray host did not answer within {} s",
+                REGISTER_WAIT.as_secs()
+            )),
+        }
     }
 
     /// Wake the app on every pick, even while its window is hidden.
@@ -58,6 +69,10 @@ impl Tray {
         std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()))
     }
 }
+
+/// How long registering with the tray host may take before the app goes on
+/// without a tray.
+const REGISTER_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Picks waiting for the app, made on ksni's thread.
 static PENDING: Mutex<Vec<TrayAction>> = Mutex::new(Vec::new());
