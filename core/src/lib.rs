@@ -8,6 +8,7 @@ pub mod input;
 #[cfg(feature = "local")]
 pub mod local;
 pub mod metrics;
+pub mod portal_grant;
 pub mod protocol;
 pub mod secure_fs;
 pub mod streaming;
