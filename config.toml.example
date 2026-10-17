@@ -31,6 +31,11 @@ video_quality = "balanced"
 # it under "On this network". Turn off to stay unlisted, e.g. on public Wi-Fi.
 # lan_discovery = true
 
+# GNOME and KDE: keep the screen-sharing portal's grant until you revoke it,
+# so after you allow it once, sessions start with no one at this computer
+# (see SECURITY.md). Off, the portal asks at every session.
+# remember_screen_grant = false
+
 # Relays for phones away from home: your own (`pocketdesk relay`) instead of
 # n0's public ones. The phone learns it from this desktop; restart the server
 # after changing it.

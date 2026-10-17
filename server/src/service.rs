@@ -186,6 +186,9 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::spawn(crate::clipboard_push::run());
     }
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
+    // N8 review: a kept screen-sharing grant goes as the server starts when
+    // the setting is off, not only when a session next arrives.
+    let _ = state::screen_grant();
     // KDE Connect devices (3a): told where this computer is while the app
     // looks for them.
     crate::kdeconnect_compat::configure(config.kdeconnect_compat);
