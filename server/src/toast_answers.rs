@@ -7,6 +7,7 @@
 //! notification still offers.
 
 use pocketdesk_core::local::phone_notes::{Answer, PhoneNote};
+use pocketdesk_core::protocol::notification_action::MAX_REPLY_CHARS;
 
 /// Windows shows at most five actions on a toast.
 const MAX_TOAST_ACTIONS: usize = 5;
@@ -158,6 +159,11 @@ pub fn dbus_reply_answer(text: &str, answers: &Answerable) -> Option<Answer> {
 /// Hand `answer` to the server's answer loop, as the Notifications page
 /// does, which holds it to what the notification still offers.
 pub fn send(answers: &Answerable, answer: Answer) {
+    // A reply's length, for saying why one was refused.
+    let answer_kind = match &answer {
+        Answer::Reply(text) => Some(text.chars().count()),
+        Answer::Action(_) => None,
+    };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -176,7 +182,18 @@ pub fn send(answers: &Answerable, answer: Answer) {
         });
     match written {
         Ok(_) => tracing::info!("A phone notification was answered from its notification here"),
-        Err(e) => tracing::warn!("An answer from a notification was not kept: {e}"),
+        Err(e) => {
+            tracing::warn!("An answer from a notification was not kept: {e}");
+            // The toast is gone by now: say so, or the press seems to have
+            // worked (N3 review).
+            let why = match &answer_kind {
+                Some(len) if *len > MAX_REPLY_CHARS => format!(
+                    "The reply is longer than {MAX_REPLY_CHARS} characters, so it was not sent to the phone."
+                ),
+                _ => "The answer could not be sent to the phone.".to_string(),
+            };
+            crate::platform::notify("Pocketdesk", &why, std::time::Duration::from_secs(5));
+        }
     }
 }
 
