@@ -15,8 +15,19 @@ Pocketdesk carries sound both ways (the computer's sound on the phone, 2026-10-1
 
 ## Tests
 
-Core: the mode's wire byte and that it gets no picture. Server: a sound client says so and asks for no picture; a phone with neither Audio nor Mic is refused; one with Audio gets sound and no video (a loopback session, as `input_only_session.rs`). Kotlin: none beyond the existing state machine, which the screen reuses.
+Core: the mode's wire byte and that it gets no picture; a sound session keeps the mic's frames while a remote drops them. Server (`server/tests/sound_session.rs`, loopback QUIC): admitted, the mic reaching the relay, no input injected, no picture; refused with the reason with neither Audio nor Mic. Kotlin: a refusal for want of a permission names the switch (`PlainErrorTest`); otherwise the existing state machine, which the screen reuses.
 
 ## Check
 
 On the A71 against this box (a throwaway server): a sound session admitted, the computer's sound playing on the phone (its player started, the AudioTrack playing), going on with the phone's screen off; the mic share started; the Sessions page saying "sound only"; refused with Audio and Mic off.
+
+## As built
+
+As designed, with these found on the way:
+
+- **The mic never reached the computer (found on the device).** A session without a picture drops what is about the picture, and that filter took the mic's frames too, as is right for a remote. A sound session keeps them now (`about_the_stream(packet, sound)`), and the loopback test holds it.
+- **A refusal read as "Something went wrong" (found on the device).** The close reason ("sound not allowed", and the remote's "input not allowed", which had the same gap since T10i) now becomes a sentence naming the switch on the computer's Devices page.
+- **`MicShare`.** The screen session's mic share moved into `ui/MicShare.kt` (`rememberMicShare`), so both screens share the mic the same way, the permission prompt and the foreground service's restart after a grant included.
+- **The notification** is the session's ("Streaming to …", with Disconnect and Lock desktop); Disconnect ends a sound session as it does a screen session.
+
+Checked on the A71 against this box (a throwaway server, the internet road): admitted, "sound only" in `status --json` and the mirror; the computer's sound decoded and playing (`AudioTrack` started, not muted) with the phone's screen off and no background-playback warning; the mic share's frames reaching the relay (this box has no virtual cable, so the relay said so); refused with Audio and Mic off, the phone naming the switches; Disconnect from the notification ending it on both ends. Owed: by ear (lag, quality), a virtual cable on Windows, the Linux host (`pw-loopback`), a call on the computer through the phone's mic.

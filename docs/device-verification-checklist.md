@@ -1578,6 +1578,20 @@ On this box with the A71 and a throwaway chat app (not committed) posting Reply 
 - [ ] Settings "Answer in the notification" off: the toast is plain.
 - [ ] Linux: a notification server with actions (mako's `makoctl invoke`, dunst's menu) and KDE's inline reply.
 
+## 97. The phone as the computer's speaker and mic (N5)
+
+On the A71 against this box (a throwaway server, the internet road):
+
+- [x] "Sound" in the saved computer's menu opens a sound session: admitted, "sound only" in `pocketdesk status --json`.
+- [x] The computer's sound decoded and playing on the phone (its `AudioTrack` started, not muted), going on with the phone's screen off.
+- [x] The phone's mic share started and its frames reached the computer's mic relay (this box has no virtual cable: the relay said so).
+- [x] With Audio and Mic off for the phone: refused, the phone naming the switches to turn on.
+- [x] Disconnect in the notification ends it on both ends.
+- [ ] By ear: the computer's sound on the phone (lag, quality, across the room).
+- [ ] Windows with VB-CABLE: the phone's mic heard in a recording or a call on the computer.
+- [ ] Linux: the computer's sound through PipeWire and the phone's mic as "Pocketdesk Mic" (`pw-loopback`).
+- [ ] An hour with the screen off: the session holds, and what it costs the phone's battery.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
