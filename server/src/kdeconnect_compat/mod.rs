@@ -172,7 +172,7 @@ pub async fn serve(stream: TcpStream) {
 
 /// The desktop app's requests about KDE Connect devices (3b), for the
 /// server's life: each goes to the device's link; an unpairing of a device
-/// with none is done here.
+/// with none, and a change of what one may do (3c), are done here.
 pub async fn run_requests() {
     let Ok(dir) = crate::state::state_dir() else {
         return;
@@ -181,6 +181,28 @@ pub async fn run_requests() {
         crate::inbox::wait(KDECONNECT_OUT_DIR, std::time::Duration::from_secs(1)).await;
         for request in kdeconnect_devices::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             let (device_id, event) = match request.ask {
+                // The owner's change of what a paired device may do (3c):
+                // the links read it as each packet comes.
+                KdeAsk::Permissions {
+                    device_id,
+                    permissions,
+                } => {
+                    match kdeconnect_devices::set_permissions(&dir, &device_id, permissions) {
+                        Ok(true) => tracing::info!(
+                            device_id,
+                            ?permissions,
+                            "A KDE Connect device's permissions changed"
+                        ),
+                        Ok(false) => tracing::info!(
+                            device_id,
+                            "Permissions for a KDE Connect device that is not paired"
+                        ),
+                        Err(e) => tracing::warn!(
+                            "Could not change a KDE Connect device's permissions: {e}"
+                        ),
+                    }
+                    continue;
+                }
                 KdeAsk::Pair { device_id } => (device_id, link::Event::PairFromHere),
                 KdeAsk::Allow { device_id } => (device_id, link::Event::Answer(true)),
                 KdeAsk::Deny { device_id } => (device_id, link::Event::Answer(false)),

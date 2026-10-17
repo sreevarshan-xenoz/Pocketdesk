@@ -278,6 +278,7 @@ impl State {
                 name: self.name.clone(),
                 cert_hash: devices::hash_hex(self.cert_hash),
                 paired_unix: now,
+                permissions: devices::KdePermissions::default(),
             },
         );
         if let Err(e) = added {

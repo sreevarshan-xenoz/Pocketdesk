@@ -35,6 +35,60 @@ pub struct KdeDevice {
     /// from it afterwards.
     pub cert_hash: String,
     pub paired_unix: u64,
+    /// What it may do (3c).
+    #[serde(default)]
+    pub permissions: KdePermissions,
+}
+
+/// What a paired KDE Connect device may do (3c), narrower than a phone's:
+/// the clipboard both ways, its battery, ringing it from here, and, only
+/// when the owner turns it on, sending files here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KdePermissions {
+    pub clipboard: bool,
+    pub battery: bool,
+    pub find: bool,
+    pub files: bool,
+}
+
+impl Default for KdePermissions {
+    fn default() -> Self {
+        Self {
+            clipboard: true,
+            battery: true,
+            find: true,
+            files: false,
+        }
+    }
+}
+
+/// What `device_id` may do, if it is paired.
+pub fn permissions(state_dir: &Path, device_id: &str) -> Option<KdePermissions> {
+    devices(state_dir)
+        .into_iter()
+        .find(|d| d.device_id == device_id)
+        .map(|d| d.permissions)
+}
+
+/// Set what a paired `device_id` may do (the server's side); whether it is
+/// paired.
+pub fn set_permissions(
+    state_dir: &Path,
+    device_id: &str,
+    permissions: KdePermissions,
+) -> io::Result<bool> {
+    let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut devices = try_devices(state_dir)?;
+    let Some(device) = devices.iter_mut().find(|d| d.device_id == device_id) else {
+        return Ok(false);
+    };
+    device.permissions = permissions;
+    write_private_json(
+        &state_dir.join(KDECONNECT_DEVICES_FILE),
+        &DevicesFile { devices },
+    )?;
+    Ok(true)
 }
 
 /// A pairing waiting: asked by the device (the owner answers here) or from
@@ -76,6 +130,11 @@ pub enum KdeAsk {
     Unpair { device_id: String },
     /// Ping a paired, connected device.
     Ping { device_id: String },
+    /// Change what it may do (3c).
+    Permissions {
+        device_id: String,
+        permissions: KdePermissions,
+    },
 }
 
 /// One request, as a file in `kdeconnect_out/`.
@@ -286,7 +345,29 @@ mod tests {
             name: "Phone".to_string(),
             cert_hash: hash_hex(hash),
             paired_unix: 1,
+            permissions: KdePermissions::default(),
         }
+    }
+
+    #[test]
+    fn a_paired_device_may_do_little_by_default_and_the_owner_changes_it() {
+        let dir = temp_dir("permissions");
+        assert_eq!(permissions(&dir, "a"), None, "not paired");
+        add(&dir, device("a", [1; 32])).unwrap();
+        let given = permissions(&dir, "a").unwrap();
+        assert!(given.clipboard && given.battery && given.find);
+        assert!(!given.files, "files only when the owner turns it on");
+        let files = KdePermissions {
+            files: true,
+            ..given
+        };
+        assert!(set_permissions(&dir, "a", files).unwrap());
+        assert!(permissions(&dir, "a").unwrap().files);
+        assert!(!set_permissions(&dir, "b", files).unwrap(), "not paired");
+        // A file from before 3c reads with the defaults.
+        let old = r#"{"devices":[{"device_id":"c","name":"P","cert_hash":"00","paired_unix":1}]}"#;
+        std::fs::write(dir.join(KDECONNECT_DEVICES_FILE), old).unwrap();
+        assert_eq!(permissions(&dir, "c"), Some(KdePermissions::default()));
     }
 
     #[test]
