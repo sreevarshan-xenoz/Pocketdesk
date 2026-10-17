@@ -30,7 +30,16 @@ object PhoneLink {
 
     /** The computer the phone sends to. */
     fun target(ctx: Context): HostStore.Host? =
-        HostStore.hosts(ctx).firstOrNull { HostStore.pairedDesktopId(ctx, it.address) != null }
+        recentTarget.get(SystemClock.elapsedRealtime()) {
+            HostStore.hosts(ctx).firstOrNull { HostStore.pairedDesktopId(ctx, it.address) != null }
+        }
+
+    /**
+     * The answer, kept a few seconds (N7): the background timers ask every
+     * few seconds, and each answer read and parsed the saved computers; a
+     * computer added or paired is seen within that time.
+     */
+    private val recentTarget = Recent<HostStore.Host?>(ttlMs = 5_000L)
 
     /** Send `packetType` with [body] now (on the worker thread). Returns whether it went. */
     fun sendNow(ctx: Context, packetType: String, body: JSONObject): Boolean {
