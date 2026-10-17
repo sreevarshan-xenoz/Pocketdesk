@@ -143,6 +143,7 @@ pub async fn serve(stream: TcpStream) {
             return;
         }
     };
+    discovery::connected();
     // Held to its pin in the handshake: a paired device's link is not one
     // of the unpaired ones.
     let paired = link::pin_of(&dir, &link.hello.device_id) == Some(link.cert_hash);

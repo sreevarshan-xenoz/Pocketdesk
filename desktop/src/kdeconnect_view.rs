@@ -79,7 +79,7 @@ impl KdeConnectView {
                     Ok(()) => {
                         self.finding = true;
                         self.notice = Some(
-                            "Looking for a minute: refresh KDE Connect on the device.".to_string(),
+                            "Looking for a minute: open KDE Connect on the device.".to_string(),
                         );
                     }
                     Err(e) => self.notice = Some(format!("Not asked: {e}")),

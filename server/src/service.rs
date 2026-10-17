@@ -190,6 +190,7 @@ pub async fn run(config: Config) -> Result<()> {
     if config.kdeconnect_compat {
         tokio::spawn(crate::kdeconnect_compat::discovery::run(
             config.control_port,
+            config.lan_discovery,
         ));
         tokio::spawn(crate::kdeconnect_compat::run_requests());
     }

@@ -96,7 +96,7 @@ mod tests {
             }),
             (
                 "kdeconnect discovery (every 2 s, the network every 10 s)",
-                || Box::pin(crate::kdeconnect_compat::discovery::run(1716)),
+                || Box::pin(crate::kdeconnect_compat::discovery::run(1716, true)),
             ),
             ("peer_computers (requests)", || {
                 Box::pin(async {
