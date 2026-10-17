@@ -20,6 +20,7 @@ import dev.pocketdesk.android.MainActivity
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.compat.Android17
 import dev.pocketdesk.android.notify.PhoneLink
 
 /**
@@ -29,7 +30,9 @@ import dev.pocketdesk.android.notify.PhoneLink
  * heard in Do Not Disturb when alarms are allowed, Android's default, and a
  * notification's sound plays with the app in the background, so no
  * foreground service is needed. The alarm stream is at its loudest while it
- * rings, and put back after.
+ * rings, and put back after, before Android 17; from 17 it rings at the
+ * owner's alarm volume, since a volume set from the background is ignored
+ * there (N4).
  */
 object PhoneRinger {
     private const val TAG = "PhoneRinger"
@@ -174,6 +177,9 @@ object PhoneRinger {
         get() = volumeBefore != null || tone != null
 
     private fun loudest(ctx: Context) {
+        // Android 17: ignored from the background, and a raise made while
+        // the app was open might never be put back.
+        if (!Android17.ringRaisesVolume(android.os.Build.VERSION.SDK_INT)) return
         runCatching {
             val audio = ctx.getSystemService(AudioManager::class.java)
             if (volumeBefore == null) {
