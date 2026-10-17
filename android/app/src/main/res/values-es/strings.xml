@@ -640,4 +640,8 @@
     <string name="key_ctrl">Ctrl</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Mayús</string>
+    <string name="mic_start_failed">El ordenador no aceptó el micrófono</string>
+    <string name="mic_encoder_failed">El codificador Opus del teléfono no arrancó</string>
+    <string name="mic_record_failed">El micrófono no se abrió</string>
+    <string name="mic_busy">Otra app está usando el micrófono</string>
 </resources>

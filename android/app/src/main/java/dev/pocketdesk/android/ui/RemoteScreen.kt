@@ -498,21 +498,14 @@ fun RemoteScreen(
     // it to the desktop's "Pocketdesk Mic" PipeWire source. Independent of
     // view-only — the server routes mic packets before the input drop.
     var mic by remember { mutableStateOf<MicCapture?>(null) }
-    var micError by remember { mutableStateOf<String?>(null) }
-    // Static messages are carried as @StringRes ids and resolved during
-    // composition (LocalContext.getString in a callback is lint-error: stale
-    // configuration); dynamic reasons come as raw strings through micError.
+    // Messages are carried as @StringRes ids and resolved during composition
+    // (LocalContext.getString in a callback is lint-error: stale
+    // configuration); a failure's details go to logcat (U6).
     var micErrorRes by remember { mutableStateOf<Int?>(null) }
-    val micErrorMessage =
-        when {
-            micError != null -> stringResource(R.string.mic_error, micError!!)
-            micErrorRes != null -> stringResource(micErrorRes!!)
-            else -> null
-        }
+    val micErrorMessage = micErrorRes?.let { stringResource(R.string.mic_error, stringResource(it)) }
     LaunchedEffect(micErrorMessage) {
         if (micErrorMessage != null) {
             snackbar.showSnackbar(micErrorMessage)
-            micError = null
             micErrorRes = null
         }
     }
@@ -538,7 +531,7 @@ fun RemoteScreen(
             // onDropped: the worker saw the QUIC session die; clear the toggle.
             val error = capture.start { scope.launch(Dispatchers.Main) { mic = null } }
             withContext(Dispatchers.Main) {
-                if (error != null) micError = error else mic = capture
+                if (error != null) micErrorRes = error else mic = capture
             }
         }
     }

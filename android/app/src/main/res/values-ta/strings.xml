@@ -635,4 +635,8 @@
     <string name="key_ctrl">Ctrl</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Shift</string>
+    <string name="mic_start_failed">கணினி மைக் பகிர்வை ஏற்கவில்லை</string>
+    <string name="mic_encoder_failed">இந்தத் தொலைபேசியின் Opus குறியாக்கி தொடங்கவில்லை</string>
+    <string name="mic_record_failed">மைக்ரோஃபோன் திறக்கவில்லை</string>
+    <string name="mic_busy">மைக்ரோஃபோனை வேறொரு செயலி பயன்படுத்துகிறது</string>
 </resources>

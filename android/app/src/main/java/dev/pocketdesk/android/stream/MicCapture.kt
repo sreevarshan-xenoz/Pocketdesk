@@ -48,9 +48,17 @@ class MicCapture {
      * here can't be rejected.
      */
     @android.annotation.SuppressLint("MissingPermission")
-    fun start(onDropped: () -> Unit): String? {
+    /**
+     * Start sharing; null when it runs, else why not, as a string resource in
+     * the phone's language (U6), the details going to logcat.
+     */
+    @androidx.annotation.StringRes
+    fun start(onDropped: () -> Unit): Int? {
         if (running) return null
-        RustCore.startMic().exceptionOrNull()?.let { return it.message ?: "startMic failed" }
+        RustCore.startMic().exceptionOrNull()?.let {
+            android.util.Log.w(TAG, "mic share did not start: ${it.message}")
+            return dev.pocketdesk.android.R.string.mic_start_failed
+        }
         val encoder =
             try {
                 // createEncoderByType, not the ByString variant: API 37's
@@ -69,7 +77,8 @@ class MicCapture {
                 }
             } catch (e: Exception) {
                 RustCore.stopMic()
-                return "Opus encoder: ${e.message}"
+                android.util.Log.w(TAG, "Opus encoder: ${e.message}")
+                return dev.pocketdesk.android.R.string.mic_encoder_failed
             }
         val recorder =
             try {
@@ -84,13 +93,14 @@ class MicCapture {
             } catch (e: Exception) {
                 encoder.release()
                 RustCore.stopMic()
-                return "Microphone: ${e.message}"
+                android.util.Log.w(TAG, "Microphone: ${e.message}")
+                return dev.pocketdesk.android.R.string.mic_record_failed
             }
         if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
             recorder.release()
             encoder.release()
             RustCore.stopMic()
-            return "Microphone unavailable"
+            return dev.pocketdesk.android.R.string.mic_busy
         }
         codec = encoder
         record = recorder
@@ -194,6 +204,8 @@ class MicCapture {
     }
 
     companion object {
+
+        private const val TAG = "MicCapture"
         private const val MIME = "audio/opus"
         private const val SAMPLE_RATE = 48_000
         private const val BIT_RATE = 32_000

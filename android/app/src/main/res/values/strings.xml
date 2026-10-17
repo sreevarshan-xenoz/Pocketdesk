@@ -644,4 +644,8 @@
     <string name="key_ctrl">Ctrl</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Shift</string>
+    <string name="mic_start_failed">The computer did not take the mic share</string>
+    <string name="mic_encoder_failed">This phone\'s Opus encoder did not start</string>
+    <string name="mic_record_failed">The microphone did not open</string>
+    <string name="mic_busy">The microphone is in use by another app</string>
 </resources>
