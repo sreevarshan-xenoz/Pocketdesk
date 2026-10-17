@@ -76,11 +76,11 @@ fun ShortcutBar(
         ) {
             val press = KeyEvent.KEYCODE_META_LEFT
             GroupLabel(stringResource(R.string.shortcut_system), content)
-            Shortcut("Super", content, onFailed) { RustCore.tapKey(address, port, press) }
-            Shortcut("Alt+Tab", content, onFailed) {
+            Shortcut(stringResource(R.string.key_super), content, onFailed) { RustCore.tapKey(address, port, press) }
+            Shortcut(stringResource(R.string.key_alt_tab), content, onFailed) {
                 RustCore.hotkey(address, port, KeyEvent.KEYCODE_TAB, KeyEvent.KEYCODE_ALT_LEFT)
             }
-            Shortcut("Ctrl+Alt+Del", content, onFailed) {
+            Shortcut(stringResource(R.string.key_ctrl_alt_del), content, onFailed) {
                 RustCore.hotkey(
                     address,
                     port,
@@ -89,12 +89,12 @@ fun ShortcutBar(
                     KeyEvent.KEYCODE_ALT_LEFT,
                 )
             }
-            Shortcut("PrtSc", content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_SYSRQ) }
-            Shortcut("Esc", content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_ESCAPE) }
+            Shortcut(stringResource(R.string.key_print_screen), content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_SYSRQ) }
+            Shortcut(stringResource(R.string.key_escape), content, onFailed) { RustCore.tapKey(address, port, KeyEvent.KEYCODE_ESCAPE) }
             Divider(content)
             GroupLabel(stringResource(R.string.shortcut_workspaces), content)
             (1..9).forEach { workspace ->
-                Shortcut("W$workspace", content, onFailed) {
+                Shortcut(stringResource(R.string.key_workspace, workspace), content, onFailed) {
                     RustCore.hotkey(
                         address,
                         port,
