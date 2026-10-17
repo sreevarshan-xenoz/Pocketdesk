@@ -191,8 +191,13 @@ pub async fn start_capture_auto(
 ) -> Result<CaptureSession> {
     let attempts = capture_attempts(backend, detect_display_server())?;
     let mut last_err: Option<anyhow::Error> = None;
-    for attempt in attempts {
-        let result = match attempt {
+    for backend_tried in attempts {
+        // Each attempt has a token of its own under the session's (R6g
+        // review): a backend that fails cancels its token, which had been
+        // the session's, so the next backend started already cancelled and
+        // the fallback never worked.
+        let attempt = cancel.child_token();
+        let result = match backend_tried {
             CaptureBackend::Auto => continue,
             // window_rx/window_mode are cheap to clone (watch Receiver + Arc)
             // and only the screencopy backend uses them.
@@ -200,29 +205,29 @@ pub async fn start_capture_auto(
             CaptureBackend::Screencopy => super::capture_screencopy::start_screencopy_capture(
                 config.clone(),
                 frame_tx.clone(),
-                cancel.clone(),
+                attempt.clone(),
                 window_rx.clone(),
                 window_mode.clone(),
             ),
             #[cfg(target_os = "linux")]
             CaptureBackend::Portal => {
-                start_capture(config.clone(), frame_tx.clone(), cancel.clone()).await
+                start_capture(config.clone(), frame_tx.clone(), attempt.clone()).await
             }
             #[cfg(target_os = "linux")]
             CaptureBackend::X11 => {
-                start_x11_capture(config.clone(), frame_tx.clone(), cancel.clone()).await
+                start_x11_capture(config.clone(), frame_tx.clone(), attempt.clone()).await
             }
             // `capture_attempts` never lists a Linux backend off Linux; the arm
             // only keeps the match exhaustive.
             #[cfg(not(target_os = "linux"))]
             CaptureBackend::Screencopy | CaptureBackend::Portal | CaptureBackend::X11 => {
-                Err(anyhow::anyhow!("{attempt:?} capture is Linux-only"))
+                Err(anyhow::anyhow!("{backend_tried:?} capture is Linux-only"))
             }
             #[cfg(windows)]
             CaptureBackend::Wgc => super::capture_wgc::start_wgc_capture(
                 config.clone(),
                 frame_tx.clone(),
-                cancel.clone(),
+                attempt.clone(),
                 window_rx.clone(),
                 window_mode.clone(),
             ),
@@ -230,27 +235,37 @@ pub async fn start_capture_auto(
             CaptureBackend::Dxgi => super::capture_dxgi::start_dxgi_capture(
                 config.clone(),
                 frame_tx.clone(),
-                cancel.clone(),
+                attempt.clone(),
                 window_rx.clone(),
                 window_mode.clone(),
             ),
             #[cfg(not(windows))]
             CaptureBackend::Wgc | CaptureBackend::Dxgi => {
-                Err(anyhow::anyhow!("{attempt:?} capture is Windows-only"))
+                Err(anyhow::anyhow!("{backend_tried:?} capture is Windows-only"))
             }
         };
         match result {
             Ok(session) => {
-                info!("Capture started via backend {attempt:?}");
+                info!("Capture started via backend {backend_tried:?}");
+                // A capture that dies once started ends the session, as it
+                // did when it held the session's token.
+                tokio::spawn(end_session_with_capture(attempt, cancel.clone()));
                 return Ok(session);
             }
             Err(e) => {
-                info!("Capture backend {attempt:?} unavailable ({e:#}); trying next");
+                info!("Capture backend {backend_tried:?} unavailable ({e:#}); trying next");
                 last_err = Some(e);
             }
         }
     }
     Err(last_err.unwrap_or_else(|| anyhow::Error::msg("no capture backend available")))
+}
+
+/// When a started capture's token is cancelled (it died, or the session is
+/// over), the session's is too.
+async fn end_session_with_capture(capture: CancellationToken, session: CancellationToken) {
+    capture.cancelled().await;
+    session.cancel();
 }
 
 /// Pure decision table: which backends to try, in order, for a configured
@@ -336,6 +351,21 @@ pub fn create_test_frame(width: u32, height: u32) -> VideoFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_failed_attempt_leaves_the_session_and_a_started_capture_ends_it() {
+        let session = CancellationToken::new();
+        // A backend that fails cancels its own token only.
+        let failed = session.child_token();
+        failed.cancel();
+        assert!(!session.is_cancelled(), "the next backend starts live");
+        // One that started and then died ends the session.
+        let started = session.child_token();
+        let watching = tokio::spawn(end_session_with_capture(started.clone(), session.clone()));
+        started.cancel();
+        watching.await.unwrap();
+        assert!(session.is_cancelled());
+    }
 
     #[test]
     fn test_create_test_frame() {
