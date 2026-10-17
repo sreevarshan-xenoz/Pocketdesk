@@ -39,3 +39,15 @@ The A71: Home's card (Connect, the ⋮ menu, the status line), the Add form, Set
 - **The session menu** (`QuickSettingsSheet.kt`): Screen and input (input mode, view-only, quality, pane, window, monitor), Share, Computer, This phone (desktop sound, pairing, picture-in-picture). `SingleChoiceSegmentedButtonRow`s set the input mode, quality preset and pane directly (`setQuality`, no cycling), the four quality options without the check mark to fit. Rows take the sheet's colour (found on the A71: the list's own colour painted bands).
 - **Targets**: the mode and keyboard chips and the shortcut chips take `minimumInteractiveComponentSize()`, Exit is 48 dp across; the screen chips grow to 36 dp and rely on Compose widening their touch, so a third screen still fits the row.
 
+## Review
+
+A fresh review (0 Critical, 0 Important, 7 Minor), fixed one commit each where it asked for a change:
+
+- The screenshots and texts sections never read notification access again on return, so the new Allow row stayed after access was granted (`rememberResumes`).
+- A tap on the chosen quality could not retry a failed send (the old cycling always sent).
+- Four segmented options risked an ellipsis in Spanish and Tamil: narrower sides, a smaller face, two lines; checked on the A71 in both.
+- An indented row's padding sat outside its toggle; `onRowClick` had no caller; an info button is a second TalkBack stop, as the parts' doc now says.
+- Kept: the shortcut chips' 48 dp height, which makes the bottom chrome taller in landscape (the targets are the point); the design's "three groups" is four as built (This phone holds the desktop's sound, pairing and picture-in-picture).
+
+Seen for U6: Home's bottom row ("Scan pairing code", "Add computer") breaks a Tamil label one word per line, and Spanish calls direct touch "Tacto directo" on the chip but "Toque directo" in the menu.
+

@@ -1545,7 +1545,8 @@ On the A71, against a throwaway server (`adb reverse`, input off for the phone):
 - [ ] TalkBack on a card ("Connect"), a Settings row (one stop) and a heading.
 - [ ] "Show connection details" on, during a session: the numbers and the computer's battery.
 - [ ] A row's "Allow notification access" with a feature on and access off.
-- [ ] Spanish and Tamil: the card's buttons and the segmented choices fit.
+- [x] Spanish and Tamil (the app's own language set by `cmd locale`): the card's buttons fit (Tamil wraps Show screen to a second row), and the four quality choices fit after the review.
+- [ ] Landscape: the bottom chrome with 48 dp chips.
 
 ## Recording results
 
