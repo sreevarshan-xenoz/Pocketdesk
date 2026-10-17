@@ -6,37 +6,29 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 
-/// What a notice says happened.
+/// What a notice says happened, given where it is made (U1 review: guessed
+/// from its words, real errors had shown as done, and successes naming a
+/// file such as "failed-login.log" as errors).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
+    /// It worked, or was asked for.
     Done,
-    Info,
+    /// It did not work.
     Error,
+    /// Work under way (a start, a restart, a setting's change), shown until
+    /// its outcome replaces it.
+    Working,
 }
 
 impl Kind {
-    /// The kind a message's words say: the app's failures begin "Not …",
-    /// "Could not …" or say "failed", and work under way ends in "…".
-    pub fn of(text: &str) -> Kind {
-        let lower = text.to_lowercase();
-        if lower.starts_with("not ")
-            || lower.starts_with("could not")
-            || lower.contains("failed")
-            || lower.contains(": not ")
-        {
-            Kind::Error
-        } else if text.trim_end().ends_with('…') {
-            Kind::Info
-        } else {
-            Kind::Done
-        }
-    }
-
-    /// How long a notice of this kind stays.
+    /// How long a notice of this kind stays. Work under way stays until its
+    /// outcome replaces it, but never past a few minutes (a program that
+    /// hung would otherwise leave it for good).
     pub fn lasts(self) -> Duration {
         match self {
+            Kind::Done => Duration::from_secs(6),
             Kind::Error => Duration::from_secs(12),
-            Kind::Done | Kind::Info => Duration::from_secs(6),
+            Kind::Working => Duration::from_secs(300),
         }
     }
 }
@@ -50,21 +42,40 @@ pub struct Notice {
 }
 
 impl Notice {
-    /// A notice saying `text`, its kind from its words.
-    pub fn say(text: impl Into<String>) -> Option<Notice> {
-        let text = text.into();
+    fn new(kind: Kind, text: impl Into<String>) -> Option<Notice> {
         Some(Notice {
-            kind: Kind::of(&text),
-            text,
+            text: text.into(),
+            kind,
             since: Instant::now(),
         })
     }
 
-    /// Whether it still shows at `now`. Work under way stays until what
-    /// follows it replaces it.
+    /// It worked, or was asked for.
+    pub fn done(text: impl Into<String>) -> Option<Notice> {
+        Self::new(Kind::Done, text)
+    }
+
+    /// It did not work.
+    pub fn error(text: impl Into<String>) -> Option<Notice> {
+        Self::new(Kind::Error, text)
+    }
+
+    /// Work under way, until its outcome replaces it.
+    pub fn working(text: impl Into<String>) -> Option<Notice> {
+        Self::new(Kind::Working, text)
+    }
+
+    /// Done or an error, as `outcome` says.
+    pub fn outcome(outcome: Result<String, String>) -> Option<Notice> {
+        match outcome {
+            Ok(text) => Self::done(text),
+            Err(text) => Self::error(text),
+        }
+    }
+
+    /// Whether it still shows at `now`.
     pub fn showing(&self, now: Instant) -> bool {
-        self.kind == Kind::Info && self.text.trim_end().ends_with('…')
-            || now.duration_since(self.since) < self.kind.lasts()
+        now.duration_since(self.since) < self.kind.lasts()
     }
 }
 
@@ -78,13 +89,13 @@ pub fn show(ui: &mut egui::Ui, notice: &mut Option<Notice>) {
     };
     let color = match shown.kind {
         Kind::Done => crate::theme::good(ui),
-        Kind::Info => ui.visuals().text_color(),
+        Kind::Working => ui.visuals().text_color(),
         Kind::Error => crate::theme::bad(ui),
     };
     let mut close = false;
     ui.horizontal(|ui| {
         ui.label(RichText::new(&shown.text).color(color));
-        close = ui.small_button("✕").on_hover_text("Close").clicked();
+        close = ui.small_button("Dismiss").clicked();
     });
     if close {
         *notice = None;
@@ -112,44 +123,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_notice_is_an_error_done_or_under_way_by_its_words() {
-        for failed in [
-            "Not saved: the disk is full",
-            "Not changed: the server program is not beside this app",
-            "Could not show the file: gone",
-            "Restart: failed.",
-            "Send: not sent",
-        ] {
-            assert_eq!(Kind::of(failed), Kind::Error, "{failed}");
-        }
-        for done in ["Saved.", "Restart: done.", "Added to the file manager."] {
-            assert_eq!(Kind::of(done), Kind::Done, "{done}");
-        }
-        assert_eq!(Kind::of("Restart…"), Kind::Info);
+    fn each_kind_lasts_its_time() {
+        let start = Instant::now();
+        let at = |kind, secs| {
+            Notice {
+                text: String::new(),
+                kind,
+                since: start,
+            }
+            .showing(start + Duration::from_secs(secs))
+        };
+        assert!(at(Kind::Done, 5) && !at(Kind::Done, 7));
+        assert!(at(Kind::Error, 11) && !at(Kind::Error, 13));
+        assert!(
+            at(Kind::Working, 60),
+            "work under way waits for its outcome"
+        );
+        assert!(!at(Kind::Working, 301), "but not for good");
     }
 
     #[test]
-    fn a_notice_goes_after_its_time_and_work_under_way_stays() {
-        let start = Instant::now();
-        let done = Notice {
-            text: "Saved.".into(),
-            kind: Kind::Done,
-            since: start,
-        };
-        assert!(done.showing(start + Duration::from_secs(5)));
-        assert!(!done.showing(start + Duration::from_secs(7)));
-        let failed = Notice {
-            text: "Not saved: x".into(),
-            kind: Kind::Error,
-            since: start,
-        };
-        assert!(failed.showing(start + Duration::from_secs(11)));
-        assert!(!failed.showing(start + Duration::from_secs(13)));
-        let busy = Notice {
-            text: "Restart…".into(),
-            kind: Kind::Info,
-            since: start,
-        };
-        assert!(busy.showing(start + Duration::from_secs(60)));
+    fn an_outcome_is_done_or_an_error() {
+        assert_eq!(
+            Notice::outcome(Ok("Saved.".into())).unwrap().kind,
+            Kind::Done
+        );
+        let failed = Notice::outcome(Err("Sending failed-login.log: x".into())).unwrap();
+        assert_eq!(failed.kind, Kind::Error);
+        assert_eq!(
+            Notice::done("Sent failed-login.log.").unwrap().kind,
+            Kind::Done,
+            "a file's name says nothing of the kind"
+        );
     }
 }

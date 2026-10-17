@@ -225,7 +225,7 @@ impl PocketdeskApp {
         if self.job.is_some() {
             return;
         }
-        self.notice = crate::notice::Notice::say(format!("{what}…"));
+        self.notice = crate::notice::Notice::working(format!("{what}…"));
         self.job = Some((what, std::thread::spawn(job)));
     }
 
@@ -239,7 +239,7 @@ impl PocketdeskApp {
         if self.setting_job.is_some() {
             return;
         }
-        self.notice = crate::notice::Notice::say(format!("{doing}…"));
+        self.notice = crate::notice::Notice::working(format!("{doing}…"));
         self.setting_job = Some(std::thread::spawn(job));
     }
 
@@ -250,10 +250,10 @@ impl PocketdeskApp {
         let Some(handle) = self.setting_job.take() else {
             return;
         };
-        self.notice = crate::notice::Notice::say(match handle.join() {
-            Ok(Ok(said)) => said,
-            Ok(Err(e)) => format!("Not changed: {e}"),
-            Err(_) => "Not changed: the change failed.".to_string(),
+        self.notice = crate::notice::Notice::outcome(match handle.join() {
+            Ok(Ok(said)) => Ok(said),
+            Ok(Err(e)) => Err(format!("Not changed: {e}")),
+            Err(_) => Err("Not changed: the change failed.".to_string()),
         });
         // Read again: they changed.
         self.send_menu_installed = None;
@@ -267,10 +267,10 @@ impl PocketdeskApp {
         let Some((what, handle)) = self.job.take() else {
             return;
         };
-        self.notice = crate::notice::Notice::say(match handle.join() {
-            Ok(Ok(())) => format!("{what}: done."),
-            Ok(Err(e)) => format!("{what}: {e}"),
-            Err(_) => format!("{what}: failed."),
+        self.notice = crate::notice::Notice::outcome(match handle.join() {
+            Ok(Ok(())) => Ok(format!("{what}: done.")),
+            Ok(Err(e)) => Err(format!("{what}: {e}")),
+            Err(_) => Err(format!("{what}: failed.")),
         });
         if let Some(Ok(form)) = &mut self.settings {
             form.restarted();
@@ -449,7 +449,8 @@ impl PocketdeskApp {
             });
         if let Some(verdict) = verdict {
             if let Err(e) = tasks::answer(&self.state_dir, &request.id, verdict, now_unix()) {
-                self.notice = crate::notice::Notice::say(format!("Could not answer the task: {e}"));
+                self.notice =
+                    crate::notice::Notice::error(format!("Could not answer the task: {e}"));
             }
             self.task_requests.retain(|r| r.id != request.id);
             self.answered_tasks.push(request.id.clone());
@@ -519,13 +520,13 @@ impl PocketdeskApp {
         let result = ids
             .iter()
             .try_for_each(|id| model::answer_approval(&self.state_dir, id, verdict, now_unix()));
-        self.notice = crate::notice::Notice::say(match result {
-            Ok(()) => match verdict {
+        self.notice = crate::notice::Notice::outcome(match result {
+            Ok(()) => Ok(match verdict {
                 Verdict::AllowOnce => format!("Allowed {who} this once."),
                 Verdict::AlwaysAllow => format!("Allowed {who}; it will not be asked again."),
                 Verdict::Deny => format!("Denied {who}."),
-            },
-            Err(e) => format!("Could not answer {who}: {e}"),
+            }),
+            Err(e) => Err(format!("Could not answer {who}: {e}")),
         });
         // Off the screen at once; the server drops it from the list when it
         // takes the answer.
@@ -537,7 +538,7 @@ impl PocketdeskApp {
     fn set_ask_first(&mut self, id: &str, ask_first: bool) {
         if let Err(e) = model::set_ask_first(&self.state_dir, id, ask_first) {
             self.notice =
-                crate::notice::Notice::say(format!("Could not change {}: {e}", short(id)));
+                crate::notice::Notice::error(format!("Could not change {}: {e}", short(id)));
         }
         self.refresh();
     }
@@ -549,9 +550,12 @@ impl PocketdeskApp {
         // Its keys go too, so the phone can pair again (perhaps reinstalled,
         // with new keys) and bind them.
         let _ = pocketdesk_core::local::device_keys::clear(&self.state_dir, id);
-        self.notice = crate::notice::Notice::say(match result {
-            Ok(()) => format!("Removed {} — it must pair again to connect.", short(id)),
-            Err(e) => format!("Could not remove {}: {e}", short(id)),
+        self.notice = crate::notice::Notice::outcome(match result {
+            Ok(()) => Ok(format!(
+                "Removed {} — it must pair again to connect.",
+                short(id)
+            )),
+            Err(e) => Err(format!("Could not remove {}: {e}", short(id))),
         });
         // Removing a phone must not leave it in control of a running session.
         self.end_sessions_of(id);
@@ -571,7 +575,7 @@ impl PocketdeskApp {
         }
         if let Err(e) = sessions::request_kick(&self.state_dir, id, now_unix()) {
             self.notice =
-                crate::notice::Notice::say(format!("Could not end {}'s session: {e}", short(id)));
+                crate::notice::Notice::error(format!("Could not end {}'s session: {e}", short(id)));
         }
     }
 
@@ -583,7 +587,7 @@ impl PocketdeskApp {
             Ok(()) => {}
             Err(e) => {
                 self.notice =
-                    crate::notice::Notice::say(format!("Could not change {}: {e}", short(id)))
+                    crate::notice::Notice::error(format!("Could not change {}: {e}", short(id)))
             }
         }
         self.refresh();
@@ -598,10 +602,10 @@ impl PocketdeskApp {
                 .rsplit_once(':')
                 .map_or(session.peer.clone(), |(ip, _)| ip.to_string())
         });
-        self.notice = crate::notice::Notice::say(
+        self.notice = crate::notice::Notice::outcome(
             match sessions::request_kick(&self.state_dir, &target, now_unix()) {
-                Ok(()) => format!("Ending the session from {} …", short(&target)),
-                Err(e) => format!("Could not end the session: {e}"),
+                Ok(()) => Ok(format!("Asked the session from {} to end.", short(&target))),
+                Err(e) => Err(format!("Could not end the session: {e}")),
             },
         );
     }
@@ -615,8 +619,9 @@ impl PocketdeskApp {
                 match self.activity.show(ui, log_on, now_unix()) {
                     Some(crate::activity_view::Action::ShowFile(path)) => {
                         if let Err(e) = crate::reveal::show_in_folder(&path) {
-                            self.notice =
-                                crate::notice::Notice::say(format!("Could not show the file: {e}"));
+                            self.notice = crate::notice::Notice::error(format!(
+                                "Could not show the file: {e}"
+                            ));
                         }
                     }
                     Some(crate::activity_view::Action::OpenSettings) => {
@@ -897,19 +902,19 @@ impl PocketdeskApp {
             });
         }
         if let Some((id, command)) = pressed {
-            self.notice = crate::notice::Notice::say(
+            self.notice = crate::notice::Notice::outcome(
                 match model::press_phone_media(&self.state_dir, &id, command, now_unix()) {
                     // Asked, not done: the phone acts while Pocketdesk is
                     // in front there, with its media setting on.
-                    Ok(()) => format!(
+                    Ok(()) => Ok(format!(
                         "Asked the phone to {}.",
                         match command {
                             "next" => "skip ahead",
                             "previous" => "go back",
                             _ => "play or pause",
                         }
-                    ),
-                    Err(e) => e,
+                    )),
+                    Err(e) => Err(e),
                 },
             );
         }
@@ -920,10 +925,10 @@ impl PocketdeskApp {
             self.end_session(&session);
         }
         if let Some(id) = give {
-            self.notice = crate::notice::Notice::say(
+            self.notice = crate::notice::Notice::outcome(
                 match sessions::request_control(&self.state_dir, id, now_unix()) {
-                    Ok(()) => "Handing control over …".to_string(),
-                    Err(e) => format!("Could not hand control over: {e}"),
+                    Ok(()) => Ok("Asked to hand control over.".to_string()),
+                    Err(e) => Err(format!("Could not hand control over: {e}")),
                 },
             );
         }
@@ -984,10 +989,10 @@ impl PocketdeskApp {
         if save {
             match Config::path() {
                 Ok(path) => match form.save_to(&path) {
-                    Ok(()) => self.notice = crate::notice::Notice::say("Saved.".to_string()),
-                    Err(e) => self.notice = crate::notice::Notice::say(format!("Not saved: {e}")),
+                    Ok(()) => self.notice = crate::notice::Notice::done("Saved."),
+                    Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),
                 },
-                Err(e) => self.notice = crate::notice::Notice::say(format!("Not saved: {e}")),
+                Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),
             }
         }
     }
@@ -1039,7 +1044,7 @@ impl PocketdeskApp {
             return;
         }
         let Some(exe) = crate::restart::server_exe_beside_app() else {
-            self.notice = crate::notice::Notice::say(
+            self.notice = crate::notice::Notice::error(
                 "Not changed: the server program is not beside this app",
             );
             return;
@@ -1094,7 +1099,7 @@ impl PocketdeskApp {
         }
         if on {
             let Some(exe) = crate::restart::server_exe_beside_app() else {
-                self.notice = crate::notice::Notice::say(
+                self.notice = crate::notice::Notice::error(
                     "Not changed: the server program is not beside this app",
                 );
                 return;
@@ -1140,17 +1145,17 @@ impl PocketdeskApp {
             Ok(device) => device,
             Err(e) => {
                 self.send_to = None;
-                self.notice = crate::notice::Notice::say(e);
+                self.notice = crate::notice::Notice::error(e);
                 return;
             }
         };
-        self.notice = crate::notice::Notice::say(
+        self.notice = crate::notice::Notice::outcome(
             match model::queue_send(&self.state_dir, &device, path, now_unix()) {
-                Ok(name) => format!(
-                    "Sending {name} to {}…",
+                Ok(name) => Ok(format!(
+                    "Queued {name} for {}: the Sent list says when it has gone.",
                     model::target_label(&self.snapshot, &device)
-                ),
-                Err(e) => e,
+                )),
+                Err(e) => Err(e),
             },
         );
         self.refreshed = None;
@@ -1230,18 +1235,18 @@ impl PocketdeskApp {
                 .iter()
                 .any(|(id, _)| *id == device)
             {
-                self.notice = crate::notice::Notice::say(
-                    "Links go to phones: choose a phone to send it to.".to_string(),
+                self.notice = crate::notice::Notice::error(
+                    "Links go to phones: choose a phone to send it to.",
                 );
                 return;
             }
-            self.notice = crate::notice::Notice::say(
+            self.notice = crate::notice::Notice::outcome(
                 match model::queue_link(&self.state_dir, &device, &url, now_unix()) {
                     Ok(said) => {
                         self.send_link.clear();
-                        said
+                        Ok(said)
                     }
-                    Err(e) => e,
+                    Err(e) => Err(e),
                 },
             );
         }
@@ -1333,7 +1338,7 @@ impl PocketdeskApp {
         if let Some(path) = show
             && let Err(e) = crate::reveal::show_in_folder(std::path::Path::new(&path))
         {
-            self.notice = crate::notice::Notice::say(format!("Could not open the folder: {e}"));
+            self.notice = crate::notice::Notice::error(format!("Could not open the folder: {e}"));
         }
     }
 
