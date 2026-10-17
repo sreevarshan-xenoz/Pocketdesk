@@ -3,14 +3,20 @@
 //! minute), the devices that have connected, and pairing with them: a
 //! device's request waits here with the code both screens show, for Allow
 //! or Deny; Pair asks a device from here, and its acceptance waits for
-//! Confirm with the same code. Ping and Unpair once paired.
+//! Confirm with the same code. Once paired (3c): its battery, what it may
+//! do (the clipboard, its battery, ringing it, sending files here), Ping,
+//! Ring and Unpair.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 use pocketdesk_core::local::kdeconnect::{self, SeenDevice};
-use pocketdesk_core::local::kdeconnect_devices::{self as devices, KdeAsk, KdeDevice, Pending};
+use pocketdesk_core::local::kdeconnect_devices::{
+    self as devices, KdeAsk, KdeDevice, KdePermissions, Pending,
+};
+use pocketdesk_core::local::phone_status::{self, PhoneBattery};
+use std::collections::BTreeMap;
 
 /// How often the list is read again while the tab is open.
 const REFRESH: Duration = Duration::from_secs(2);
@@ -21,6 +27,7 @@ const FIND_SECS: u64 = 60;
 #[derive(Default)]
 pub struct KdeConnectView {
     rows: Vec<Row>,
+    batteries: BTreeMap<String, PhoneBattery>,
     pending: Vec<Pending>,
     finding: bool,
     read_at: Option<Instant>,
@@ -35,6 +42,8 @@ pub struct Row {
     pub paired: bool,
     /// When it last connected, if it is in the seen list.
     pub seen_unix: Option<u64>,
+    /// What it may do, when paired.
+    pub permissions: Option<KdePermissions>,
 }
 
 /// The list: every paired device, from the pins (3b review: the seen list
@@ -50,6 +59,7 @@ pub fn rows(paired: &[KdeDevice], seen: &[SeenDevice]) -> Vec<Row> {
             name: d.name.clone(),
             paired: true,
             seen_unix: seen_at(&d.device_id),
+            permissions: Some(d.permissions),
         })
         .collect();
     let mut others: Vec<Row> = seen
@@ -60,6 +70,7 @@ pub fn rows(paired: &[KdeDevice], seen: &[SeenDevice]) -> Vec<Row> {
             name: d.name.clone(),
             paired: false,
             seen_unix: Some(d.seen_unix),
+            permissions: None,
         })
         .collect();
     others.sort_by_key(|r| std::cmp::Reverse(r.seen_unix));
@@ -84,6 +95,7 @@ impl KdeConnectView {
             return;
         }
         self.rows = rows(&devices::devices(state_dir), &kdeconnect::read(state_dir));
+        self.batteries = phone_status::read(state_dir);
         self.pending = devices::pending(state_dir, now_unix);
         self.finding = kdeconnect::finding(state_dir, now_unix);
         self.read_at = Some(Instant::now());
@@ -184,7 +196,7 @@ impl KdeConnectView {
         if self.rows.is_empty() {
             ui.label(RichText::new("None has connected yet.").weak());
         }
-        for device in &self.rows {
+        for device in &mut self.rows {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&device.name).strong());
                 let paired = if device.paired {
@@ -201,8 +213,27 @@ impl KdeConnectView {
                 );
                 let device_id = device.device_id.clone();
                 if device.paired {
+                    if let Some(battery) = self.batteries.get(&device_id) {
+                        ui.label(crate::app::battery_text(Some(battery), now_unix))
+                            .on_hover_text("Its battery, as it last reported it");
+                    }
                     if ui.add_enabled(running, egui::Button::new("Ping")).clicked() {
                         ask = Some(KdeAsk::Ping {
+                            device_id: device_id.clone(),
+                        });
+                    }
+                    let may_ring = device.permissions.is_some_and(|p| p.find);
+                    if ui
+                        .add_enabled(running && may_ring, egui::Button::new("Ring"))
+                        .on_hover_text("Rings it, to find it")
+                        .on_disabled_hover_text(if running {
+                            "Turn on \"Ring it from here\" for it"
+                        } else {
+                            "Start the server with KDE Connect devices on"
+                        })
+                        .clicked()
+                    {
+                        ask = Some(KdeAsk::Ring {
                             device_id: device_id.clone(),
                         });
                     }
@@ -217,6 +248,17 @@ impl KdeConnectView {
                     ask = Some(KdeAsk::Pair { device_id });
                 }
             });
+            if let Some(permissions) = device.permissions.as_mut() {
+                ui.horizontal(|ui| {
+                    ui.add_space(16.0);
+                    if let Some(changed) = permission_boxes(ui, running, permissions) {
+                        ask = Some(KdeAsk::Permissions {
+                            device_id: device.device_id.clone(),
+                            permissions: changed,
+                        });
+                    }
+                });
+            }
         }
         if let Some(ask) = ask {
             let said = asked(&ask);
@@ -239,6 +281,44 @@ fn answer(ui: &mut egui::Ui, running: bool, label: &str) -> bool {
     ui.add_enabled(running, egui::Button::new(label))
         .on_disabled_hover_text("Start the server with KDE Connect devices on")
         .clicked()
+}
+
+/// A paired device's switches; what they are now, when one was changed.
+fn permission_boxes(
+    ui: &mut egui::Ui,
+    running: bool,
+    permissions: &mut KdePermissions,
+) -> Option<KdePermissions> {
+    let mut changed = false;
+    for (on, label, hover) in [
+        (
+            &mut permissions.clipboard,
+            "Clipboard",
+            "Its copies here, and this computer's to it (with \"Clipboard to phones\" on)",
+        ),
+        (
+            &mut permissions.battery,
+            "Battery",
+            "Its battery, and a warning when it runs low",
+        ),
+        (
+            &mut permissions.find,
+            "Ring it from here",
+            "Ring rings it, to find it",
+        ),
+        (
+            &mut permissions.files,
+            "Send files here",
+            "Files it sends go to Downloads",
+        ),
+    ] {
+        changed |= ui
+            .add_enabled(running, egui::Checkbox::new(on, label))
+            .on_hover_text(hover)
+            .on_disabled_hover_text("Start the server with KDE Connect devices on")
+            .changed();
+    }
+    changed.then_some(*permissions)
 }
 
 /// What the app says once it has asked: a pairing or a ping goes only to
@@ -271,7 +351,10 @@ mod tests {
             name: name.to_string(),
             cert_hash: String::new(),
             paired_unix: 1,
-            permissions: Default::default(),
+            permissions: KdePermissions {
+                files: true,
+                ..Default::default()
+            },
         }
     }
 
@@ -297,6 +380,11 @@ mod tests {
         let ids: Vec<_> = list.iter().map(|r| r.device_id.as_str()).collect();
         assert_eq!(ids, ["p", "gone", "a"]);
         assert!(list[0].paired && list[0].seen_unix == Some(7));
+        assert!(
+            list[0].permissions.is_some_and(|p| p.files),
+            "its own switches"
+        );
+        assert_eq!(list[1].permissions, None, "none for a device not paired");
         assert!(
             !list[1].paired,
             "unpaired while away, though the seen list says paired"
