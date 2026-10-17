@@ -26,6 +26,9 @@ pub struct SettingsForm {
     pub hooks_text: String,
     /// Saved since the server last read it.
     pub restart_needed: bool,
+    /// The settings as the running server read them: saved changes wait
+    /// for a restart (the KDE section's buttons follow this, not the box).
+    running: Config,
     /// The adapter a phone on this network would wake this computer
     /// through, read when the tab opens (N6).
     wake: Option<WakeFacts>,
@@ -35,12 +38,24 @@ pub struct SettingsForm {
 }
 
 impl SettingsForm {
+    /// The settings as the running server read them.
+    pub fn running(&self) -> &Config {
+        &self.running
+    }
+
+    /// The server was restarted: it has read what is saved.
+    pub fn restarted(&mut self) {
+        self.restart_needed = false;
+        self.running = self.saved.clone();
+    }
+
     pub fn from_config(config: Config) -> Self {
         Self {
             mic_device_text: config.mic_relay_device.clone().unwrap_or_default(),
             relay_urls_text: config.relay_urls.join("\n"),
             hooks_text: hooks_text(&config.hooks),
             saved: config.clone(),
+            running: config.clone(),
             edited: config,
             restart_needed: false,
             wake: pocketdesk_core::local::wake::wake_facts(None),
@@ -260,6 +275,12 @@ impl SettingsForm {
                 ui.checkbox(
                     &mut e.clipboard_push,
                     "send what I copy to connected phones (those with Clipboard on)",
+                );
+                ui.end_row();
+                ui.label("KDE Connect devices");
+                ui.checkbox(
+                    &mut e.kdeconnect_compat,
+                    "work with devices that run KDE Connect (pairing asks you first)",
                 );
                 ui.end_row();
                 ui.label("Clipboard with my computers");
@@ -829,8 +850,16 @@ mod tests {
         let path = dir.join("config.toml");
         let mut form = SettingsForm::from_config(Config::default());
         form.edited.allow_hevc = true;
+        form.edited.kdeconnect_compat = false;
         form.save_to(&path).unwrap();
         assert!(!form.dirty() && form.restart_needed);
+        assert!(
+            form.running().kdeconnect_compat,
+            "the running server read it before the save"
+        );
+        form.restarted();
+        assert!(!form.running().kdeconnect_compat && !form.restart_needed);
+        form.edited.kdeconnect_compat = true;
         assert!(Config::load_from(&path).unwrap().allow_hevc);
         form.edited.control_port = 1;
         assert!(form.save_to(&path).is_err(), "an invalid form is not saved");

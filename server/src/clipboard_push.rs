@@ -247,7 +247,12 @@ pub(crate) async fn run() {
         tick.tick().await;
         let clients = crate::state::clone_clients().await;
         let linked = crate::peer_computers::linked();
-        if clients.is_empty() && linked.is_empty() {
+        // A paired KDE Connect device's link counts too (3c): it is no
+        // client of the control channel's.
+        if clients.is_empty()
+            && linked.is_empty()
+            && crate::kdeconnect_compat::link::live_paired().is_empty()
+        {
             // No phone to tell: what is copied meanwhile is not pushed when
             // one comes back (a phone in a session asks for it itself).
             watch = Watch::default();
@@ -345,6 +350,18 @@ async fn push_change(
     for computer in linked {
         if !came_from(from_phone.as_ref(), &computer.device_id, &text) {
             computer.send(packet.clone());
+        }
+    }
+    // Paired KDE Connect devices, as phones (3c): each link sends it only
+    // to a device allowed the clipboard.
+    if TO_PHONES.load(Ordering::Relaxed) {
+        for device_id in crate::kdeconnect_compat::link::live_paired() {
+            if !came_from(from_phone.as_ref(), &device_id, &text) {
+                crate::kdeconnect_compat::link::tell(
+                    &device_id,
+                    crate::kdeconnect_compat::link::Event::Clipboard(text.clone()),
+                );
+            }
         }
     }
 }

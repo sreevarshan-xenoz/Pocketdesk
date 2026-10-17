@@ -94,6 +94,10 @@ mod tests {
             ("clipboard_push (watcher)", || {
                 Box::pin(crate::clipboard_push::run())
             }),
+            (
+                "kdeconnect discovery (every 2 s, the network every 10 s)",
+                || Box::pin(crate::kdeconnect_compat::discovery::run(1716, true)),
+            ),
             ("peer_computers (requests)", || {
                 Box::pin(async {
                     let certs = pocketdesk_core::streaming::transport::CertManager::new().unwrap();

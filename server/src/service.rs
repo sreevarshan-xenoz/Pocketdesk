@@ -184,6 +184,16 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::spawn(crate::clipboard_push::run());
     }
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
+    // KDE Connect devices (3a): told where this computer is while the app
+    // looks for them.
+    crate::kdeconnect_compat::configure(config.kdeconnect_compat);
+    if config.kdeconnect_compat {
+        tokio::spawn(crate::kdeconnect_compat::discovery::run(
+            config.control_port,
+            config.lan_discovery,
+        ));
+        tokio::spawn(crate::kdeconnect_compat::run_requests());
+    }
     crate::wake_info::configure(config.wake_announce, config.wake_port);
     crate::driving::configure(config.input_control, config.input_idle_secs);
     crate::plugins::share::configure(config.transfer_keep_hours);
@@ -1042,6 +1052,11 @@ async fn handle_connection_with_kde(
             tracing::info!("Connection closed by peer before handshake");
             return Ok(());
         }
+        // A KDE Connect device's connection packet (3a).
+        if first[0] == b'{' && crate::kdeconnect_compat::enabled() {
+            crate::kdeconnect_compat::serve(stream).await;
+            return Ok(());
+        }
         if first[0] != pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD {
             tracing::warn!("Refused a control connection without TLS (an outdated app?)");
             refuse_plain(stream).await;
@@ -1787,6 +1802,41 @@ mod control_tls_tests {
             }
         });
         addr
+    }
+
+    #[tokio::test]
+    async fn a_kde_connect_devices_packet_goes_to_the_bridge_not_the_refusal() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // The bridge makes its identity in a throwaway state folder.
+        pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        let addr = control_port().await;
+        let mut tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let hello = serde_json::json!({
+            "id": 1,
+            "type": "kdeconnect.identity",
+            "body": {"deviceId": "a".repeat(32), "deviceName": "Phone", "protocolVersion": 8},
+        });
+        tcp.write_all(
+            format!(
+                "{hello}
+"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+        let mut first = [0u8; 1];
+        tokio::time::timeout(Duration::from_secs(5), tcp.read_exact(&mut first))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first[0],
+            pocketdesk_core::protocol::TLS_HANDSHAKE_RECORD,
+            "this computer opens TLS as the client (KDE's roles), no plain refusal"
+        );
     }
 
     /// Counts the packets the connection handler dispatches to it.

@@ -10,6 +10,7 @@ mod cast_view;
 mod computers_view;
 mod diagnostics_view;
 mod icon;
+mod kdeconnect_view;
 mod messages_view;
 mod model;
 mod notes_view;

@@ -190,49 +190,67 @@ impl Plugin for PhoneBatteryPlugin {
             );
             return Ok(());
         }
-        let Some(report) = BatteryReport::from_body(&packet.body) else {
-            tracing::debug!("A battery report from {} was not read", sender.device_id());
-            return Ok(());
-        };
-        let (warning, changed, low) = {
-            let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
-            let before = reports
-                .batteries
-                .get(sender.device_id())
-                .map(|b| (b.charge, b.charging));
-            let warning = reports.take(
-                sender.device_id(),
-                &report,
-                ALERTS.load(Ordering::Relaxed),
-                pocketdesk_core::local::pin::now_unix(),
-                Instant::now(),
-            );
-            let changed = before != Some((report.charge, report.charging));
-            (warning, changed, reports.last_low)
-        };
-        if changed {
-            crate::events::emit(
-                "phone_battery",
-                Some(sender.device_id()),
-                serde_json::json!({ "charge": report.charge, "charging": report.charging }),
-                serde_json::json!({}),
-            );
-        }
-        if low {
-            crate::events::emit(
-                "phone_battery_low",
-                Some(sender.device_id()),
-                serde_json::json!({ "charge": report.charge }),
-                serde_json::json!({}),
-            );
-        }
-        if let Some(warning) = warning {
-            tracing::info!("{warning}");
-            std::thread::spawn(move || {
-                crate::platform::notify("Pocketdesk", &warning, Duration::from_secs(15));
-            });
-        }
+        take_from(sender.device_id(), &packet.body);
         Ok(())
+    }
+}
+
+/// The charge last kept for `device`.
+#[cfg(test)]
+pub(crate) fn charge_of(device: &str) -> Option<u8> {
+    REPORTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .batteries
+        .get(device)
+        .map(|b| b.charge)
+}
+
+/// Keep `device`'s battery report `body` (a paired phone's, or a paired KDE
+/// Connect device's, 3c): kept, an event when it changed, a warning when
+/// it runs low.
+pub(crate) fn take_from(device: &str, body: &serde_json::Value) {
+    let Some(report) = BatteryReport::from_body(body) else {
+        tracing::debug!("A battery report from {device} was not read");
+        return;
+    };
+    let (warning, changed, low) = {
+        let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
+        let before = reports
+            .batteries
+            .get(device)
+            .map(|b| (b.charge, b.charging));
+        let warning = reports.take(
+            device,
+            &report,
+            ALERTS.load(Ordering::Relaxed),
+            pocketdesk_core::local::pin::now_unix(),
+            Instant::now(),
+        );
+        let changed = before != Some((report.charge, report.charging));
+        (warning, changed, reports.last_low)
+    };
+    if changed {
+        crate::events::emit(
+            "phone_battery",
+            Some(device),
+            serde_json::json!({ "charge": report.charge, "charging": report.charging }),
+            serde_json::json!({}),
+        );
+    }
+    if low {
+        crate::events::emit(
+            "phone_battery_low",
+            Some(device),
+            serde_json::json!({ "charge": report.charge }),
+            serde_json::json!({}),
+        );
+    }
+    if let Some(warning) = warning {
+        tracing::info!("{warning}");
+        std::thread::spawn(move || {
+            crate::platform::notify("Pocketdesk", &warning, Duration::from_secs(15));
+        });
     }
 }
 
@@ -254,10 +272,19 @@ pub async fn run_writer() {
     loop {
         tokio::time::sleep(WRITE_EVERY).await;
         // An unreadable store forgets no one.
+        // Paired phones, and paired KDE Connect devices (3c); either store
+        // unreadable forgets no one.
         let paired: Option<std::collections::HashSet<String>> =
             pocketdesk_core::protocol::kdeconnect::TrustStore::read(dir.join(TRUST_FILE))
                 .ok()
-                .map(|store| store.trusted_devices().into_iter().collect());
+                .zip(pocketdesk_core::local::kdeconnect_devices::try_devices(&dir).ok())
+                .map(|(store, kde)| {
+                    store
+                        .trusted_devices()
+                        .into_iter()
+                        .chain(kde.into_iter().map(|d| d.device_id))
+                        .collect()
+                });
         let batteries = {
             let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(paired) = &paired {

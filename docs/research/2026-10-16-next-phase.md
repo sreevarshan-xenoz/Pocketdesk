@@ -539,7 +539,7 @@ KDE Connect is GPL. Pocketdesk's rule (`AGENTS.md`) allows its ideas only, never
 - **Goal:**
   - `kdeconnect.clipboard` and `.clipboard.connect` both ways, through the existing plugin and `clipboard_push`, held to the compat permissions;
   - `kdeconnect.battery` into `phone_status.json` (marked compat);
-  - "Ring this phone" (`kdeconnect.findmydevice`) from the desktop app;
+  - "Ring this phone" (`kdeconnect.findmyphone.request`, KDE Connect's type) from the desktop app;
   - a phone → computer share: `kdeconnect.share.request {filename, payloadSize, payloadTransferInfo{port}}` is answered by dialing the phone's IP at that port (1739–1764 only), running client TLS with the compat certificate against the paired phone's pinned one, reading exactly `payloadSize` bytes, and saving through `share.rs`'s part/place (no resume) with Mark of the Web;
   - every Pocketdesk-only packet refused for compat devices (a test iterating `docs/packets.md`).
 - **Touches:** `server/src/kdeconnect_compat/`, `server/src/plugins/{clipboard,phone_battery,siren,share}.rs` (compat entry points), desktop Devices tab.
