@@ -26,26 +26,30 @@ pub enum PortalEvent {
     Keysym { sym: i32, pressed: bool },
 }
 
-/// The X keysym that types `c`: Latin-1 as itself, a few controls by name,
-/// anything else as a Unicode keysym.
-pub fn keysym_for(c: char) -> i32 {
-    match c {
+/// The X keysym that types `c`: Latin-1 as itself, the controls a
+/// keyboard has by name, others none (N8 review: a control character as a
+/// Unicode keysym is not one), anything else as a Unicode keysym.
+pub fn keysym_for(c: char) -> Option<i32> {
+    Some(match c {
         '\n' | '\r' => 0xff0d, // Return
         '\t' => 0xff09,        // Tab
         '\u{8}' => 0xff08,     // BackSpace
+        '\u{1b}' => 0xff1b,    // Escape
+        '\u{7f}' => 0xffff,    // Delete
+        c if c.is_control() => return None,
         ' '..='~' | '\u{a0}'..='\u{ff}' => c as i32,
         _ => 0x0100_0000 | c as i32,
-    }
+    })
 }
 
 /// `text` as key presses and releases, one keysym a character (a CRLF is
-/// one Return).
+/// one Return; a control with no key is skipped).
 pub fn text_events(text: &str) -> Vec<PortalEvent> {
     let normalized = text.replace("\r\n", "\n");
     normalized
         .chars()
-        .flat_map(|c| {
-            let sym = keysym_for(c);
+        .filter_map(keysym_for)
+        .flat_map(|sym| {
             [
                 PortalEvent::Keysym { sym, pressed: true },
                 PortalEvent::Keysym {
@@ -79,12 +83,15 @@ pub fn wanted() -> bool {
 
 type Sender = tokio::sync::mpsc::UnboundedSender<PortalEvent>;
 
-/// The live session's worker, while a capture holds one.
-static SESSION: Mutex<Option<(u64, Sender)>> = Mutex::new(None);
+/// The sessions' workers while their captures hold them, oldest first.
+/// Input goes to the newest; an older one is kept until its capture ends,
+/// since dropping its sender would end its worker and close the portal
+/// session another phone still watches (N8 review).
+static SESSIONS: Mutex<Vec<(u64, Sender)>> = Mutex::new(Vec::new());
 
-/// Tell the live session `event`; false when there is none.
+/// Tell the newest session `event`; false when there is none.
 pub fn send(event: PortalEvent) -> bool {
-    match SESSION.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    match SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).last() {
         Some((_, tx)) => tx.send(event).is_ok(),
         None => false,
     }
@@ -98,16 +105,19 @@ pub struct Registered(u64);
 pub fn register(tx: Sender) -> Registered {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    *SESSION.lock().unwrap_or_else(|e| e.into_inner()) = Some((id, tx));
+    SESSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((id, tx));
     Registered(id)
 }
 
 impl Drop for Registered {
     fn drop(&mut self) {
-        let mut session = SESSION.lock().unwrap_or_else(|e| e.into_inner());
-        if session.as_ref().is_some_and(|(id, _)| *id == self.0) {
-            *session = None;
-        }
+        SESSIONS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(id, _)| *id != self.0);
     }
 }
 
@@ -140,10 +150,14 @@ mod tests {
         );
         assert_eq!(
             keysym_for('€'),
-            0x0100_20ac,
+            Some(0x0100_20ac),
             "outside Latin-1: Unicode keysym"
         );
-        assert_eq!(keysym_for('\n'), 0xff0d);
+        assert_eq!(keysym_for('\n'), Some(0xff0d));
+        assert_eq!(keysym_for('\u{1b}'), Some(0xff1b), "Escape");
+        assert_eq!(keysym_for('\u{7f}'), Some(0xffff), "Delete");
+        assert_eq!(keysym_for('\u{7}'), None, "a bell types nothing");
+        assert_eq!(text_events("a\u{7}").len(), 2, "skipped");
         assert_eq!(text_events("a\r\nb").len(), 6, "a CRLF is one Return");
     }
 
@@ -169,7 +183,11 @@ mod tests {
             pressed: true
         }));
         assert!(new_rx.try_recv().is_ok());
-        assert!(old_rx.try_recv().is_err(), "the newest wins");
+        assert_eq!(
+            old_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty),
+            "the newest wins, and the older one's worker is not ended by it (N8 review)"
+        );
         drop(old);
         assert!(
             send(PortalEvent::Key {

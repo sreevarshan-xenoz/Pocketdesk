@@ -320,7 +320,11 @@ async fn start_remote_desktop_capture(
                             debug!(error = %e, "Portal input not taken");
                         }
                     }
-                    None => break,
+                    // Only its own capture's end closes the session.
+                    None => {
+                        worker_cancel.cancelled().await;
+                        break;
+                    }
                 },
             }
         }
