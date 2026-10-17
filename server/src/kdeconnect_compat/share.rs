@@ -536,10 +536,67 @@ mod tests {
 
     /// A device offering `bytes` on a port of its own, TLS as the server
     /// with `cert_of`'s certificate; the port.
-    async fn device_offering(cert_of: &CompatIdentity, bytes: Vec<u8>) -> u16 {
+    /// The certificate a client presented, which the device requires (as
+    /// KDE Connect's sender does).
+    type Presented = Arc<std::sync::Mutex<Option<Vec<u8>>>>;
+
+    #[derive(Debug)]
+    struct RequiresOne(Presented);
+
+    impl rustls::server::danger::ClientCertVerifier for RequiresOne {
+        fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+            &[]
+        }
+        fn client_auth_mandatory(&self) -> bool {
+            true
+        }
+        fn verify_client_cert(
+            &self,
+            end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _: &[rustls::pki_types::CertificateDer<'_>],
+            _: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+            *self.0.lock().unwrap() = Some(end_entity.as_ref().to_vec());
+            Ok(rustls::server::danger::ClientCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            m: &[u8],
+            c: &rustls::pki_types::CertificateDer<'_>,
+            d: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls12_signature(
+                m,
+                c,
+                d,
+                &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+            )
+        }
+        fn verify_tls13_signature(
+            &self,
+            m: &[u8],
+            c: &rustls::pki_types::CertificateDer<'_>,
+            d: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls13_signature(
+                m,
+                c,
+                d,
+                &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+            )
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            rustls::crypto::ring::default_provider()
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+
+    async fn device_offering(cert_of: &CompatIdentity, bytes: Vec<u8>) -> (u16, Presented) {
         let _ = rustls::crypto::ring::default_provider().install_default();
+        let presented = Presented::default();
         let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
+            .with_client_cert_verifier(Arc::new(RequiresOne(presented.clone())))
             .with_single_cert(
                 vec![rustls::pki_types::CertificateDer::from(
                     cert_of.cert_der.clone(),
@@ -559,7 +616,7 @@ mod tests {
                 let _ = tls.shutdown().await;
             }
         });
-        port
+        (port, presented)
     }
 
     #[tokio::test]
@@ -570,7 +627,7 @@ mod tests {
         let downloads = temp("tls");
         let localhost: IpAddr = "127.0.0.1".parse().unwrap();
 
-        let port = device_offering(&phone, b"hello".to_vec()).await;
+        let (port, presented) = device_offering(&phone, b"hello".to_vec()).await;
         let offer = Offer {
             name: "note.txt".to_string(),
             size: 5,
@@ -588,8 +645,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(std::fs::read(path).unwrap(), b"hello");
+        assert_eq!(
+            presented.lock().unwrap().as_deref(),
+            Some(ours.cert_der.as_slice()),
+            "this computer's KDE certificate, as the device requires"
+        );
 
-        let port = device_offering(&phone, b"hello".to_vec()).await;
+        let (port, _) = device_offering(&phone, b"hello".to_vec()).await;
         let offer = Offer { port, ..offer };
         let refused = receive(
             &ours,
