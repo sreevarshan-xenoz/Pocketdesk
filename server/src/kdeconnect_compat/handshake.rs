@@ -36,6 +36,7 @@ pub const INCOMING: &[&str] = &[
     super::link::BATTERY,
     super::link::CLIPBOARD,
     super::share::SHARE,
+    super::link::NOTIFICATION,
 ];
 pub const OUTGOING: &[&str] = &["kdeconnect.ping", super::link::CLIPBOARD, super::link::RING];
 
@@ -574,7 +575,8 @@ mod tests {
                 "kdeconnect.ping",
                 "kdeconnect.battery",
                 "kdeconnect.clipboard",
-                "kdeconnect.share.request"
+                "kdeconnect.share.request",
+                "kdeconnect.notification"
             ]
         );
         assert_eq!(

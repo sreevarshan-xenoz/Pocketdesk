@@ -50,6 +50,8 @@ pub struct KdePermissions {
     pub battery: bool,
     pub find: bool,
     pub files: bool,
+    /// Its notifications shown here (N9), as a phone's are.
+    pub notifications: bool,
 }
 
 impl Default for KdePermissions {
@@ -59,6 +61,9 @@ impl Default for KdePermissions {
             battery: true,
             find: true,
             files: false,
+            // Sent only if the owner turned notification sync on in the
+            // device's own KDE Connect app.
+            notifications: true,
         }
     }
 }
@@ -71,6 +76,7 @@ pub enum KdePermission {
     Battery,
     Find,
     Files,
+    Notifications,
 }
 
 impl KdePermissions {
@@ -81,6 +87,7 @@ impl KdePermissions {
             KdePermission::Battery => &mut self.battery,
             KdePermission::Find => &mut self.find,
             KdePermission::Files => &mut self.files,
+            KdePermission::Notifications => &mut self.notifications,
         } = on;
         self
     }
@@ -92,6 +99,7 @@ impl KdePermissions {
             KdePermission::Battery => self.battery,
             KdePermission::Find => self.find,
             KdePermission::Files => self.files,
+            KdePermission::Notifications => self.notifications,
         }
     }
 }

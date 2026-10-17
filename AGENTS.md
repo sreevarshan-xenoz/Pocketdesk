@@ -42,6 +42,13 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-17: **N9, KDE Connect next steps (branch `feat/kdeconnect-next`; spec `docs/superpowers/specs/2026-10-17-kdeconnect-next-design.md`).**
+  - **Notifications:** a paired KDE device's notifications are shown here as a phone's, in full, as KDE sends them. They share the phone notifications' switch and limit, in a namespace of their own; the ones re-sent at connect are not shown; closing one there closes it here. A per-device switch, on by default (SECURITY.md limit 22 says the text is not filtered).
+  - **CVEs:** re-checked against CVE-2025-32898 (the same residue as patched KDE, with the owner's Allow naming the code) and CVE-2025-32900 (no UDP is ever read).
+  - **`kdeconnectd`:** the conflict documented (whichever starts second loses TCP 1716; Pocketdesk's server is the one that fails).
+  - **Fresh review (0 Critical, 1 Important), fixed:** the privacy note, a deadline on showing, the namespace, and the words.
+  - **Device-checked** with KDE Connect 1.36 on the A71 (checklist §101).
+  - **Next:** sending files to a KDE device (a TLS listener on 1739–1764 and a firewall rule).
 - 2026-10-17: **N8, GNOME and KDE hosts that work unattended (branch `feat/unattended-portal`; spec `docs/superpowers/specs/2026-10-17-unattended-portal-design.md`, with an as-built section).**
   - **Remember the grant:** with "Remember the screen-sharing grant" on (Linux, off by default), the portal capture asks to keep its grant until revoked and restores it with the last token (owner-only in the state folder), so the dialog shows once (SECURITY.md limit 24).
   - **Portal input:** where uinput cannot be opened on GNOME or KDE, input goes through a RemoteDesktop portal session that also shares the screen. One grant covers both; a worker owns the session for the capture's life (`core::streaming::portal_input`).

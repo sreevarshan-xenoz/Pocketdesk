@@ -368,6 +368,12 @@ fn permission_boxes(
             "Send files here",
             "Files it sends go to Downloads",
         ),
+        (
+            KdePermission::Notifications,
+            &mut permissions.notifications,
+            "Show its notifications here",
+            "In full, as KDE Connect sends them (it does not keep private ones back), with notification sync on in its KDE Connect app and Settings, Notifications, Phone notifications on here",
+        ),
     ] {
         if ui
             .add_enabled(running, egui::Checkbox::new(on, label))

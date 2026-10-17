@@ -26,6 +26,8 @@ pub const BATTERY: &str = "kdeconnect.battery";
 
 /// Clipboard text, both ways (3c).
 pub const CLIPBOARD: &str = "kdeconnect.clipboard";
+/// A notification on the device (N9), shown here as a phone's.
+pub const NOTIFICATION: &str = "kdeconnect.notification";
 
 /// Ring a device, to find it (3c): KDE Connect's find-my-phone request
 /// (3c review: `kdeconnect.findmydevice` is Pocketdesk's own siren).
@@ -301,6 +303,7 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
         unpaired,
         clipboard_in: None,
         file_in: None,
+        notes_in: Vec::new(),
         told_unpaired: false,
         held_battery: None,
     };
@@ -358,6 +361,21 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
                 ),
             }
         }
+        // With a deadline, as the clipboard's: a stuck notification server
+        // must not stop the link reading (N9 review).
+        for body in std::mem::take(&mut state.notes_in) {
+            if tokio::time::timeout(
+                WRITE_WAIT,
+                crate::plugins::notification::show_from_kde(&device_id, &body),
+            )
+            .await
+            .is_err()
+            {
+                tracing::warn!(
+                    "A KDE Connect device's notification was not shown: the notification server did not answer"
+                );
+            }
+        }
         if let Some(text) = state.clipboard_in.take() {
             // Not sent back to the device it came from.
             crate::clipboard_push::note_from_phone(&device_id, &text);
@@ -396,6 +414,8 @@ struct State {
     clipboard_in: Option<String>,
     /// A file the device offers, for the loop to fetch.
     file_in: Option<super::share::Offer>,
+    /// Notifications the device sent, for the loop to show (N9).
+    notes_in: Vec<serde_json::Value>,
     /// The device was told it is not paired here.
     told_unpaired: bool,
     /// The battery a device that accepted sent before the owner confirmed.
@@ -471,6 +491,9 @@ impl State {
                     self.clipboard_in = Some(text.to_string());
                 }
             }
+            // Shown by the loop after this packet; a flood is held to the
+            // phones' limit there.
+            NOTIFICATION if may.notifications => self.notes_in.push(packet.body.clone()),
             other => {
                 // The device's own text, kept short for the log.
                 let said: String = other.chars().take(60).collect();
@@ -488,6 +511,7 @@ impl State {
             battery: false,
             find: false,
             files: false,
+            notifications: false,
         })
     }
 
@@ -844,6 +868,7 @@ mod tests {
             unpaired: None,
             clipboard_in: None,
             file_in: None,
+            notes_in: Vec::new(),
             told_unpaired: false,
             held_battery: None,
         }
@@ -1293,6 +1318,28 @@ mod tests {
         drop(writing);
     }
 
+    /// N9: a paired device's notifications are taken while its switch is on.
+    #[test]
+    fn a_paired_device_s_notifications_are_taken_with_its_switch_on() {
+        let mut s = state("notes", false);
+        let note = NetworkPacket::new(NOTIFICATION).with_body(serde_json::json!({
+            "id": "1", "appName": "Chat", "title": "Ana", "text": "hi",
+        }));
+        assert!(s.packet(&note).len() <= 1, "not paired: told so at most");
+        assert!(s.notes_in.is_empty(), "not paired: not taken");
+        s.pair_now();
+        assert!(s.packet(&note).is_empty());
+        assert_eq!(s.notes_in.len(), 1);
+        s.notes_in.clear();
+        let off = devices::KdePermissions {
+            notifications: false,
+            ..devices::KdePermissions::default()
+        };
+        devices::set_permissions(&s.dir, &s.device_id, off).unwrap();
+        assert!(s.packet(&note).is_empty());
+        assert!(s.notes_in.is_empty(), "switch off: not taken");
+    }
+
     #[test]
     fn a_paired_device_allowed_it_is_rung() {
         let mut s = state("ring", false);
@@ -1350,6 +1397,7 @@ mod tests {
             CLIPBOARD,
             super::super::share::SHARE,
             super::super::pairing::PAIR,
+            NOTIFICATION,
         ];
         let mut s = state("sweep", false);
         s.device_id = format!("sweep{}", uuid::Uuid::new_v4().simple());
@@ -1359,6 +1407,7 @@ mod tests {
             battery: true,
             find: true,
             files: true,
+            notifications: true,
         };
         devices::set_permissions(&s.dir, &s.device_id, all).unwrap();
         for packet_type in types.into_iter().filter(|t| !taken.contains(t)) {
