@@ -1442,12 +1442,12 @@ The A71 against this Windows box, 2026-10-17, debug builds of the branches, inpu
 
 Two real servers on this box passed `server/tests/two_computers.rs` (2026-10-17): a forged certificate and a wrong PIN paired nothing, the code paired, B listed A as a computer with the narrow profile and held A's iroh key, the link came up over iroh, a copy crossed each way (stand-in clipboards), a 3 MB file each way byte for byte, Forget dropped the link. Owed on two real computers (Windows, the R6a throwaway instance for A so the installed server is untouched, and the Azure VM for B):
 
-- [ ] Pairing from the Pair tab's copied link pasted in Settings → Computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first.
+- [ ] Pairing from the Pair tab's copied link pasted in Settings → Other computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first.
 - [ ] The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute).
 - [ ] The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays.
 - [ ] A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`.
 - [ ] A folder from B to A lands under one new folder; a folder from A to B is refused with its reason.
-- [ ] Forget on A: the link goes, and B's Devices tab still lists A until removed there; after that, a pairing again works.
+- [ ] Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works.
 
 ## 87. KDE Connect devices (3a–3c)
 

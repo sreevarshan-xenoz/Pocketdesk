@@ -557,7 +557,7 @@ fn report_refusal(
     let body = match refusal {
         Refusal::StoreUnreadable => format!(
             "Pocketdesk could not read its device key store, so it refused your phone {short}… \
-             Remove the phone in the Pocketdesk app and pair it again."
+             Unpair the phone in the Pocketdesk app's Devices page and pair it again."
         ),
         _ => format!(
             "A connection from {} claimed to be your paired phone {short}… without its key, and was refused.",

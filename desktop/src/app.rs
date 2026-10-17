@@ -158,7 +158,7 @@ pub struct PocketdeskApp {
     messages: crate::messages_view::MessagesView,
     /// The Notifications tab (T10c).
     notes: crate::notes_view::NotesView,
-    /// Settings → Computers (2f).
+    /// Settings → Other computers (2f).
     computers: crate::computers_view::ComputersView,
     /// Settings → KDE Connect devices (3a).
     kdeconnect: crate::kdeconnect_view::KdeConnectView,
