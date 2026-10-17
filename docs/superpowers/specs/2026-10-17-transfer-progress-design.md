@@ -55,7 +55,7 @@ A file on its way between the phone and the computer has two lives:
 ## Not in this change
 
 - **A whole folder's totals:** the bytes of all its files, and which file of how many is under way. Each file of a folder is its own row, named with its folder.
-- **Transfers between two computers (2h).** They ride the same registry but have no phone notification; they get rows, and Cancel stops them, with no other change.
+- **Transfers between two computers (2h).** They run on the computers' link, outside the registry, and are not shown.
 - **Pause.**
 
 ## Tests
