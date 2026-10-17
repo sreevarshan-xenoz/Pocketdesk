@@ -10,8 +10,11 @@ import dev.pocketdesk.android.R
  * failed: … (os error 111)", TLS and QUIC noise, a timeout) becomes the
  * plain sentence [humanizeError] gives, and the raw text goes to logcat; a
  * sentence the computer or the app wrote for a person ("The computer refused
- * the folder: files over the internet are off on that computer") is kept,
- * since it says more than any generic line could.
+ * the folder: files over the internet are off on that computer", "wake is
+ * off for this computer") is kept, with a capital, since it says more than
+ * any generic line could. Only the marks below make text technical: the
+ * app's and the computer's own sentences often start in lower case (U2
+ * review: a rule that took that for Rust's text hid them).
  */
 sealed interface Plain {
     /** A sentence meant for a person, shown as it is. */
@@ -27,22 +30,24 @@ private val TECHNICAL = listOf(
     "certificate", "handshake", "timed out", "timeout", "connection refused",
     "connection reset", "connection failed", "broken pipe", "no route to host",
     "unreachable", "panicked", "exception", "jni", "eof", "rustls", "alpn",
-    "iroh",
+    "iroh", "failed to ", "not available after", "no active streaming session",
 )
 
 /** Whether `text` reads as a developer's message rather than a person's. */
 fun looksTechnical(text: String): Boolean {
     val l = text.lowercase()
-    // A person's sentence starts with a capital; Rust's errors, as a rule,
-    // with a lowercase word ("no file descriptor", "without the key").
-    return TECHNICAL.any { it in l } || text.first().isLowerCase()
+    return TECHNICAL.any { it in l }
 }
 
 /** What to show for the failure `raw` (null or blank: a generic line). */
 fun plainError(raw: String?): Plain {
     val text = raw?.trim().orEmpty()
     if (text.isEmpty()) return Plain.Res(R.string.err_generic)
-    return if (looksTechnical(text)) Plain.Res(humanizeError(text)) else Plain.Sentence(text)
+    return if (looksTechnical(text)) {
+        Plain.Res(humanizeError(text))
+    } else {
+        Plain.Sentence(text.replaceFirstChar { it.uppercase() })
+    }
 }
 
 /** [plainError] as text, the raw failure logged when it is not shown. */

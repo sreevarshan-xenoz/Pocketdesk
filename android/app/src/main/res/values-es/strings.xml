@@ -287,8 +287,8 @@
     <string name="err_lan_only">No es alcanzable por LAN y este escritorio aún no tiene identidad de internet (WAN) guardada. Conéctate primero desde la misma red.</string>
     <string name="err_trust_mismatch">Las credenciales de seguridad ya no coinciden con este escritorio. Vuelve a emparejar para continuar.</string>
     <string name="err_pairing_declined">El escritorio rechazó el emparejamiento: el PIN era incorrecto o expiró.</string>
-    <string name="err_link_dropped">Se cayó el enlace de video. El escritorio puede haberse dormido o salido de la red.</string>
-    <string name="err_generic">Algo salió mal al contactar el escritorio.</string>
+    <string name="err_link_dropped">Se cortó la conexión con el ordenador. Puede haberse dormido o salido de la red.</string>
+    <string name="err_generic">Algo salió mal al contactar el ordenador.</string>
     <string name="connecting_still">Siguiendo intentándolo… verifica que el escritorio esté despierto con Pocketdesk activo.</string>
     <string name="waiting_for_picture">Conectado: esperando la imagen…</string>
     <string name="waiting_for_approval">Si este ordenador pide permiso antes de cada sesión, acéptalo allí.</string>

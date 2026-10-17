@@ -289,8 +289,8 @@
     <string name="err_lan_only">Not reachable over LAN, and this desktop has no saved internet (WAN) identity yet. Connect once from the same network first.</string>
     <string name="err_trust_mismatch">Security credentials no longer match this desktop. Pair again to continue.</string>
     <string name="err_pairing_declined">The desktop declined pairing — the PIN was wrong or expired.</string>
-    <string name="err_link_dropped">The video link dropped. The desktop may have slept or left the network.</string>
-    <string name="err_generic">Something went wrong reaching the desktop.</string>
+    <string name="err_link_dropped">The connection to the computer dropped. It may have slept or left the network.</string>
+    <string name="err_generic">Something went wrong reaching the computer.</string>
     <string name="connecting_still">Still trying… check that the desktop is awake and running Pocketdesk.</string>
     <string name="waiting_for_picture">Connected — waiting for the picture…</string>
     <string name="waiting_for_approval">If this computer asks before each session, allow it there.</string>

@@ -11,9 +11,9 @@ class PlainErrorTest {
             "Connection failed: Connection refused (os error 111)" to R.string.err_host_unreachable,
             "connect timed out after 10s" to R.string.err_timeout,
             "TLS handshake failed: invalid peer certificate" to R.string.err_trust_mismatch,
-            "no file descriptor" to R.string.err_generic,
-            "without the key" to R.string.err_generic,
             "quic::ConnectionError::ApplicationClosed" to R.string.err_link_dropped,
+            "Failed to create endpoint: bind" to R.string.err_generic,
+            "Connection not available after connect" to R.string.err_generic,
         )
         for ((raw, expected) in cases) {
             assertEquals(raw, Plain.Res(expected), plainError(raw))
@@ -28,6 +28,21 @@ class PlainErrorTest {
             "This file is hidden.",
         )) {
             assertEquals(Plain.Sentence(said), plainError(said))
+        }
+    }
+
+    /** The app's and the computer's own lowercase sentences (U2 review). */
+    @Test
+    fun aLowercaseSentenceForAPersonIsKeptWithACapital() {
+        val cases = mapOf(
+            "wake is off for this computer" to "Wake is off for this computer",
+            "another phone holds privacy mode" to "Another phone holds privacy mode",
+            "this phone already trusts a different computer at 192.0.2.1; remove it first" to
+                "This phone already trusts a different computer at 192.0.2.1; remove it first",
+            "screen lock is not supported on this OS yet" to "Screen lock is not supported on this OS yet",
+        )
+        for ((said, shown) in cases) {
+            assertEquals(Plain.Sentence(shown), plainError(said))
         }
     }
 
