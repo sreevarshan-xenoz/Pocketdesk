@@ -130,16 +130,13 @@ class SessionForegroundService : Service() {
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        // Tier-3 #15 carry-over from Tier 1 #5: lock the *desktop* straight
-        // from the notification — MainActivity routes it to the privacy
-        // plugin without disturbing the open session.
+        // Tier-3 #15: Lock from the notification. MainActivity has the
+        // session (or the remote) on screen ask first (U2), then lock.
         val lockDesktop = PendingIntent.getActivity(
             this,
             2,
             Intent(this, MainActivity::class.java)
                 .putExtra(MainActivity.EXTRA_LOCK_DESKTOP, true)
-                .putExtra(EXTRA_ADDRESS, sessionAddress)
-                .putExtra(EXTRA_CONTROL_PORT, sessionControlPort)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )

@@ -645,12 +645,6 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
     }
 }
 
-/**
- * Away from home a computer's control port does not answer, though it is
- * awake: with its WAN identity known, try the control link over the
- * internet (T10a) before taking it for asleep. A link that comes up is the
- * session's.
- */
 /** How long the asleep check waits on the internet road (U2: a dial there
  * could take about 30 s, the card waiting all that time). */
 private const val INTERNET_CHECK_MS = 10_000L
@@ -669,6 +663,12 @@ private suspend fun answersOverInternetWithin(
     return kotlinx.coroutines.withTimeoutOrNull(INTERNET_CHECK_MS) { dial.await() } ?: false
 }
 
+/**
+ * Away from home a computer's control port does not answer, though it is
+ * awake: with its WAN identity known, try the control link over the
+ * internet (T10a) before taking it for asleep. A link that comes up is the
+ * session's.
+ */
 private fun answersOverInternet(context: android.content.Context, host: HostStore.Host): Boolean {
     val wan = HostStore.wanIdentity(context, host.address) ?: return false
     RustCore.connectToPeer(host.address, host.controlPort, wan)
