@@ -637,4 +637,7 @@
     <string name="key_workspace">E%1$d</string>
     <string name="key_volume_down">Vol −</string>
     <string name="key_volume_up">Vol +</string>
+    <string name="key_ctrl">Ctrl</string>
+    <string name="key_alt">Alt</string>
+    <string name="key_shift">Mayús</string>
 </resources>

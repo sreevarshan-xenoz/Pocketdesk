@@ -180,6 +180,15 @@ private fun ModifierCap(key: KeyModifier, state: LatchState, latchVersion: Int, 
             .padding(horizontal = 12.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(key.name, color = text, fontSize = 14.sp)
+        // Named as the language's keyboards print it (U6: Spanish "Mayús").
+        val label = stringResource(
+            when (key) {
+                KeyModifier.Ctrl -> R.string.key_ctrl
+                KeyModifier.Alt -> R.string.key_alt
+                KeyModifier.Shift -> R.string.key_shift
+                KeyModifier.Super -> R.string.key_super
+            },
+        )
+        Text(label, color = text, fontSize = 14.sp)
     }
 }
