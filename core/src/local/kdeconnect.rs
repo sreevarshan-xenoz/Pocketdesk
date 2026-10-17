@@ -48,6 +48,9 @@ pub fn read(state_dir: &Path) -> Vec<SeenDevice> {
 /// Note `device` (the server's side): it goes first, in place of an older
 /// note of the same id, and the list keeps [`KEEP`].
 pub fn record(state_dir: &Path, device: SeenDevice) -> io::Result<()> {
+    // One writer at a time: links come and go side by side.
+    static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let mut devices = read(state_dir);
     devices.retain(|d| d.device_id != device.device_id);
     devices.insert(0, device);

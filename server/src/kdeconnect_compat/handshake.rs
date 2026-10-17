@@ -65,7 +65,9 @@ pub struct Hello {
 /// id, version 8 or later, and, if it names one, meant for `our_id`.
 pub fn read_hello(packet: &NetworkPacket, our_id: &str) -> Result<Hello, String> {
     if packet.packet_type != "kdeconnect.identity" {
-        return Err(format!("{} where an identity belongs", packet.packet_type));
+        // The device's own text, kept short and printable for the log.
+        let said: String = packet.packet_type.chars().take(40).collect();
+        return Err(format!("{said:?} where an identity belongs"));
     }
     let body = &packet.body;
     let device_id = body
@@ -74,6 +76,9 @@ pub fn read_hello(packet: &NetworkPacket, our_id: &str) -> Result<Hello, String>
         .ok_or("no device id")?;
     if !valid_id(device_id) {
         return Err("not a KDE Connect device id".to_string());
+    }
+    if device_id == our_id {
+        return Err("this computer's own id".to_string());
     }
     let protocol = body
         .get("protocolVersion")
@@ -87,13 +92,18 @@ pub fn read_hello(packet: &NetworkPacket, our_id: &str) -> Result<Hello, String>
     {
         return Err("meant for another device".to_string());
     }
+    let name = clean_name(
+        body.get("deviceName")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+    );
     Ok(Hello {
         device_id: device_id.to_string(),
-        device_name: clean_name(
-            body.get("deviceName")
-                .and_then(|v| v.as_str())
-                .unwrap_or(""),
-        ),
+        device_name: if name.is_empty() {
+            "KDE Connect device".to_string()
+        } else {
+            name
+        },
         protocol,
     })
 }
@@ -417,6 +427,13 @@ mod tests {
         let (a, b) = tokio::io::duplex(64 * 1024);
         let device = tokio::spawn(device(b, phone, first, second));
         let link = accept(a, &computer, &ours, |_| pinned).await;
+        if let Ok(link) = &link {
+            // The device speaks TLS 1.2 only, as KDE Connect Android: so did we.
+            assert_eq!(
+                link.stream.get_ref().1.protocol_version(),
+                Some(rustls::ProtocolVersion::TLSv1_2)
+            );
+        }
         let heard = match &link {
             Ok(_) => device.await.unwrap(),
             Err(_) => {
@@ -437,6 +454,7 @@ mod tests {
         assert_eq!(hello.device_name, "Phone A71", "KDE's name rules");
         let heard = heard.unwrap();
         assert_eq!(heard.packet_type, "kdeconnect.identity");
+        assert_eq!(heard.body["deviceType"], "desktop");
         assert_eq!(heard.body["protocolVersion"], 8);
         assert_eq!(heard.body["tcpPort"], 1716);
     }
@@ -452,11 +470,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_same_id_with_another_version_inside_tls_is_refused() {
+        let phone = identity("phone-version");
+        let id = phone.id.clone();
+        let (hello, _) = run(phone, hello_of(&id, 8), hello_of(&id, 9), None).await;
+        assert!(hello.unwrap_err().contains("not the one it gave"));
+    }
+
+    #[tokio::test]
     async fn a_certificate_that_does_not_name_the_id_is_refused() {
         let phone = identity("phone-cn");
         let claimed = "b".repeat(32);
         let (hello, _) = run(phone, hello_of(&claimed, 8), hello_of(&claimed, 8), None).await;
-        assert!(hello.unwrap_err().contains("TLS"));
+        assert!(
+            hello.unwrap_err().contains("does not name the device's id"),
+            "refused for its certificate, not a timeout"
+        );
     }
 
     #[tokio::test]
@@ -464,7 +493,11 @@ mod tests {
         let phone = identity("phone-pin");
         let id = phone.id.clone();
         let (hello, _) = run(phone, hello_of(&id, 8), hello_of(&id, 8), Some([7; 32])).await;
-        assert!(hello.is_err());
+        assert!(
+            hello
+                .unwrap_err()
+                .contains("not the certificate this device paired with")
+        );
     }
 
     #[test]
@@ -487,6 +520,22 @@ mod tests {
         );
         elsewhere.body["targetDeviceId"] = serde_json::json!(ours.clone());
         assert!(read_hello(&elsewhere, &ours).is_ok());
+        assert!(
+            read_hello(&hello_of(&ours, 8), &ours)
+                .unwrap_err()
+                .contains("own id")
+        );
+        let mut nameless = hello_of(&id, 8);
+        nameless.body["deviceName"] = serde_json::json!("();");
+        assert_eq!(
+            read_hello(&nameless, &ours).unwrap().device_name,
+            "KDE Connect device"
+        );
+        let long = NetworkPacket::new("x\n".repeat(5000));
+        assert!(
+            read_hello(&long, &ours).unwrap_err().len() < 120,
+            "kept short for the log"
+        );
     }
 
     #[tokio::test]
