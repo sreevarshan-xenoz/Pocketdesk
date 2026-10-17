@@ -13,6 +13,12 @@ import android.os.Looper
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,20 +28,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -48,6 +54,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,33 +69,29 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.viewinterop.AndroidView
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
+import dev.pocketdesk.android.R
 import dev.pocketdesk.android.automation.PhoneEventBroadcast
 import dev.pocketdesk.android.automation.SessionTell
-import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
-import dev.pocketdesk.android.service.SessionForegroundService
 import dev.pocketdesk.android.media.PhoneMediaEffect
+import dev.pocketdesk.android.service.SessionForegroundService
 import dev.pocketdesk.android.status.BatteryEffect
 import dev.pocketdesk.android.stream.DesktopAudio
 import dev.pocketdesk.android.stream.InputMode
@@ -100,11 +103,10 @@ import dev.pocketdesk.android.stream.StreamStatus
 import dev.pocketdesk.android.stream.StreamTransportKind
 import dev.pocketdesk.android.stream.keyboard.KeyAction
 import dev.pocketdesk.android.stream.keyboard.KeyboardBar
-import dev.pocketdesk.android.stream.keyboard.keyboardBarHeight
 import dev.pocketdesk.android.stream.keyboard.KeyboardSession
 import dev.pocketdesk.android.stream.keyboard.KeyboardSinkView
 import dev.pocketdesk.android.stream.keyboard.TextSend
-import androidx.compose.ui.viewinterop.AndroidView
+import dev.pocketdesk.android.stream.keyboard.keyboardBarHeight
 import dev.pocketdesk.android.ui.theme.Space
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -185,13 +187,6 @@ fun RemoteScreen(
     var paneMode by remember { mutableStateOf(PaneMode.Auto) }
     val activity = remember(context) { context.findActivity() }
     val foldSplit = rememberFoldingSplit(activity)
-    fun cyclePane() {
-        paneMode = when (paneMode) {
-            PaneMode.Auto -> PaneMode.Dual
-            PaneMode.Dual -> PaneMode.Single
-            PaneMode.Single -> PaneMode.Auto
-        }
-    }
     var clipboardSync by remember { mutableStateOf(true) }
     var desktopSound by remember { mutableStateOf(Prefs.desktopSound(context)) }
     var showHistory by remember { mutableStateOf(false) }
@@ -827,13 +822,9 @@ fun RemoteScreen(
             }
         }
     }
-    fun cycleQuality() {
-        val next = when (qualityPreset) {
-            RustCore.PRESET_AUTO -> RustCore.PRESET_QUALITY
-            RustCore.PRESET_QUALITY -> RustCore.PRESET_BALANCED
-            RustCore.PRESET_BALANCED -> RustCore.PRESET_ECONOMY
-            else -> RustCore.PRESET_AUTO
-        }
+    // Sent again even when unchanged: a tap on the chosen one retries a
+    // send that failed (U4 review).
+    fun setQuality(next: Int) {
         qualityPreset = next
         scope.launch(Dispatchers.IO) {
             RustCore.sendQualityPreset(next).onFailure { qualityPresetError = context.plainErrorText(it.message) }
@@ -1182,7 +1173,12 @@ fun RemoteScreen(
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     Column(modifier = Modifier.padding(8.dp)) {
-                        StatsHud(address = address, controlPort = controlPort)
+                        StatsHud(
+                            address = address,
+                            controlPort = controlPort,
+                            details = dev.pocketdesk.android.Prefs.connectionDetails(context),
+                            live = status is StreamStatus.Up,
+                        )
                         // A live WAN link keeps a small badge reporting *how* it
                         // is connected (R4 A1) — punched-direct vs relayed, since
                         // relayed is a normal first-class state iroh keeps trying
@@ -1270,7 +1266,8 @@ fun RemoteScreen(
                             stringResource(R.string.exit),
                             tint = Color.White,
                             size = 22.dp,
-                            modifier = Modifier.padding(9.dp),
+                            // 48 dp across (U4).
+                            modifier = Modifier.padding(13.dp),
                         )
                     }
                 }
@@ -1312,12 +1309,14 @@ fun RemoteScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                        // U4: 48 dp to the touch, however small it looks.
                         Row(
                             modifier = Modifier
+                                .minimumInteractiveComponentSize()
                                 .clip(RoundedCornerShape(18.dp))
                                 .background(Color.White.copy(alpha = 0.16f))
-                                .clickable { haptics.toggle(); toggleMode() }
-                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                                .clickable(role = Role.Button) { haptics.toggle(); toggleMode() }
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
@@ -1334,14 +1333,15 @@ fun RemoteScreen(
                         // three-finger gestures).
                         Box(
                             modifier = Modifier
+                                .minimumInteractiveComponentSize()
                                 .clip(RoundedCornerShape(18.dp))
                                 .background(Color.White.copy(alpha = 0.16f))
-                                .clickable {
+                                .clickable(role = Role.Button) {
                                     haptics.tap()
                                     keyboardOpen = true
                                     keyboard.open()
                                 }
-                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
                         ) {
                             LlIcon(
                                 LlIcons.Keyboard,
@@ -1584,21 +1584,12 @@ fun RemoteScreen(
     if (showQuick) {
         QuickSettingsSheet(
             onDismiss = { showQuick = false },
-            inputModeValue = stringResource(
-                if (mode == InputMode.DirectTouch) R.string.value_direct_touch else R.string.value_trackpad,
-            ),
-            onCycleInputMode = ::toggleMode,
+            trackpad = mode == InputMode.Trackpad,
+            onSetTrackpad = { mode = if (it) InputMode.Trackpad else InputMode.DirectTouch },
             viewOnly = viewOnly,
             onSetViewOnly = ::applyViewOnly,
-            qualityValue = stringResource(
-                when (qualityPreset) {
-                    RustCore.PRESET_QUALITY -> R.string.value_quality_max
-                    RustCore.PRESET_BALANCED -> R.string.value_quality_balanced
-                    RustCore.PRESET_ECONOMY -> R.string.value_quality_economy
-                    else -> R.string.value_quality_auto
-                },
-            ),
-            onCycleQuality = ::cycleQuality,
+            qualityPreset = qualityPreset,
+            onSetQuality = ::setQuality,
             windowValue = cropWindow?.title?.take(18) ?: stringResource(R.string.value_window_all),
             onPickWindow = {
                 showQuick = false
@@ -1614,14 +1605,8 @@ fun RemoteScreen(
                 showQuick = false
                 showMonitorPicker = true
             },
-            paneValue = stringResource(
-                when (paneMode) {
-                    PaneMode.Auto -> R.string.value_pane_auto
-                    PaneMode.Dual -> R.string.value_pane_dual
-                    PaneMode.Single -> R.string.value_pane_single
-                },
-            ),
-            onCyclePane = ::cyclePane,
+            paneMode = paneMode,
+            onSetPane = { paneMode = it },
             desktopSound = desktopSound,
             onSetDesktopSound = {
                 desktopSound = it

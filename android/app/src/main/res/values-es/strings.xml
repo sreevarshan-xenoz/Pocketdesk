@@ -4,7 +4,8 @@
     <string name="app_name">Pocketdesk</string>
 
     <!-- ConnectScreen -->
-    <string name="host_address">Dirección del host</string>
+    <string name="host_address">Dirección del ordenador</string>
+    <string name="host_address_example">Por ejemplo, 192.168.1.20 o mipc.local</string>
     <string name="home_subtitle">Tus equipos guardados</string>
     <string name="found_on_network">En esta red</string>
     <string name="saved_computers">Guardados</string>
@@ -44,6 +45,12 @@
     <string name="settings_reveal_pin_summary">Dígitos de emparejamiento visibles sin tocar el ojo</string>
     <string name="settings_haptics">Vibración</string>
     <string name="settings_haptics_summary">Vibrar con botones y selecciones</string>
+    <string name="settings_connection_details">Mostrar detalles de la conexión</string>
+    <string name="settings_connection_details_summary">Durante una sesión, las cifras (fotogramas, tasa de bits, ida y vuelta, retardo, fotogramas perdidos y la batería del ordenador) en lugar de un punto para la conexión</string>
+    <string name="link_measuring">Midiendo</string>
+    <string name="link_good">Buena conexión</string>
+    <string name="link_fair">Conexión regular</string>
+    <string name="link_poor">Mala conexión</string>
     <string name="settings_trackpad_speed">Velocidad del trackpad</string>
     <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo trackpad</string>
     <string name="settings_system">Sistema</string>
@@ -55,12 +62,11 @@
     <string name="wake">Encender</string>
     <string name="remove_host">Quitar</string>
     <string name="remove_host_message">¿Quitar %1$s de este teléfono? Se van el emparejamiento y los ajustes guardados.</string>
-    <string name="auto_badge">Auto</string>
     <string name="host_ports">transmisión %1$d · control %2$d</string>
     <string name="streaming_port">Puerto de transmisión</string>
     <string name="control_port">Puerto de control (portapapeles, archivos)</string>
     <string name="wol_mac_label">Dirección MAC para encender por red</string>
-    <string name="auto_connect">Conectar automáticamente al iniciar</string>
+    <string name="auto_connect">Conectar al abrir la app</string>
     <string name="connect">Conectar</string>
     <string name="send_wol">Enviar Wake-on-LAN</string>
     <string name="wake_sent">Encendido enviado a %1$s.</string>
@@ -100,9 +106,9 @@
 
     <!-- Actualización de UI: hoja de ajustes rápidos + HUD que se desvanece -->
     <string name="quick_settings_title">Ajustes de sesión</string>
-    <string name="group_input">Entrada</string>
-    <string name="group_stream">Transmisión</string>
-    <string name="group_desktop">Escritorio</string>
+    <string name="group_view">Pantalla y control</string>
+    <string name="group_share">Compartir</string>
+    <string name="group_computer">Ordenador</string>
     <string name="row_input_mode">Modo de entrada</string>
     <string name="row_view_only">Solo lectura</string>
     <string name="row_quality">Calidad</string>
@@ -310,17 +316,15 @@
     <string name="pair_link_calls_itself">Se hace llamar «%1$s».</string>
     <string name="pair_link_not_scanned">Este código lo abrió otra app o una página web, no lo escaneaste tú.</string>
     <string name="phone_notifications_service">Pocketdesk: mostrar en el ordenador</string>
-    <string name="settings_phone_notifications">Notificaciones de este teléfono</string>
-    <string name="phone_notifications_share">Mostrar en mi ordenador</string>
-    <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste. Desactivado por defecto.</string>
-    <string name="phone_notifications_no_access">Toca para permitir el acceso a las notificaciones</string>
+    <string name="phone_notifications_share">Notificaciones de este teléfono en mi ordenador</string>
+    <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste</string>
+    <string name="phone_notifications_no_access">Necesita acceso a las notificaciones</string>
     <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Ninguna se comparte hasta que la actives.</string>
-    <string name="settings_texts">Mensajes en mi ordenador</string>
     <string name="texts_show">Mostrar mensajes en mi ordenador</string>
-    <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste. Desactivado por defecto.</string>
+    <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste</string>
     <string name="texts_reply">Responder desde mi ordenador</string>
-    <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono. Desactivado por defecto.</string>
-    <string name="texts_reply_needs_access">Toca para permitir el acceso a las notificaciones: las respuestas llegan por ahí</string>
+    <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono</string>
+    <string name="texts_reply_needs_access">Necesita acceso a las notificaciones: las respuestas llegan por ahí</string>
     <!-- N6: waking a computer from the phone -->
     <string name="save">Guardar</string>
     <string name="wake_settings">Ajustes de encendido</string>
@@ -453,7 +457,7 @@
     <string name="bg_allow">Permitir</string>
     <string name="bg_dont_remind">No volver a recordar</string>
     <string name="bg_maker_guide">Ajuste propio de este teléfono</string>
-    <string name="settings_background">Segundo plano</string>
+    <string name="settings_background">En segundo plano</string>
     <string name="settings_background_status">Funcionamiento en segundo plano</string>
     <string name="settings_background_remind">Recordármelo en Inicio</string>
     <string name="settings_background_remind_summary">Cuando las notificaciones o los mensajes están activados y Android puede frenarlos</string>
@@ -505,10 +509,9 @@
     <string name="phone_folders_remove">Quitar</string>
     <string name="phone_folders_storage">Almacenamiento</string>
     <string name="phone_folders_not_kept">Android no dejó que Pocketdesk conservara el acceso a esa carpeta</string>
-    <string name="settings_screenshots">Capturas nuevas al equipo</string>
     <string name="screenshots_on">Enviar capturas nuevas</string>
     <string name="screenshots_on_summary">Una captura de pantalla hecha en este teléfono llega a su equipo un momento después. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
-    <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano: toca para permitirlo</string>
+    <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano</string>
     <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
     <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>
     <string name="screenshots_save">Guardarlas en Descargas del equipo</string>
@@ -583,11 +586,21 @@
     <!-- U3: names for computers. -->
     <string name="lock_confirm_title_named">¿Bloquear %1$s?</string>
     <string name="card_rename">Renombrar</string>
+    <string name="card_more">Más opciones para %1$s</string>
+    <string name="status_paired">Emparejado</string>
+    <string name="status_not_paired">Sin emparejar</string>
+    <string name="status_auto">Se conecta al abrir</string>
     <string name="rename_title">Renombrar %1$s</string>
     <string name="rename_label">Nombre</string>
     <string name="rename_hint">En blanco: el nombre que se da a sí mismo</string>
-    <string name="host_address_ports">%1$s · transmisión %2$d · control %3$d</string>
     <string name="settings_this_phone">Este teléfono</string>
+    <string name="settings_files_links">Archivos y enlaces</string>
+    <string name="settings_notifications_texts">Notificaciones y SMS</string>
+    <string name="settings_automation">Automatización</string>
+    <string name="settings_pairing">Emparejamiento</string>
+    <string name="settings_allow_access">Permitir el acceso a las notificaciones</string>
+    <string name="settings_more_about">Más sobre %1$s</string>
+    <string name="settings_info_close">Cerrar</string>
     <string name="settings_phone_name">Nombre de este teléfono</string>
     <string name="settings_phone_name_summary">Cómo llaman los ordenadores a este teléfono; se envía a cada uno al que se conecta. En blanco: el nombre del dispositivo en Android</string>
     <!-- N1: the computer rings this phone. -->

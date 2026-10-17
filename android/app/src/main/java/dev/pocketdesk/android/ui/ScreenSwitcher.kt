@@ -75,7 +75,9 @@ fun ScreenSwitcher(
             )
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    // 36 dp drawn; Compose widens the touch to 48 dp where
+                    // there is room (U4), and a third screen still fits the row.
+                    .size(36.dp)
                     .clip(CircleShape)
                     .background(if (shown) MaterialTheme.colorScheme.primary else Color.Transparent)
                     .selectable(selected = shown, role = Role.Tab) { onPick(screen.index) }

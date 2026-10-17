@@ -1533,6 +1533,21 @@ On the A71, against a throwaway server with a stand-in clipboard (`POCKETDESK_CL
 - [ ] "To computer" in a real app's selection menu, on screen; the Sharesheet's Direct Share row showing the computers (adb opens only the app chooser).
 - [ ] A copy marked sensitive (a password manager's) asking first through the tile.
 
+## 93. The phone's Home card, Add form, Settings and session menu (U4)
+
+On the A71, against a throwaway server (`adb reverse`, input off for the phone):
+
+- [x] Home's card: the name with its status line, Connect, Remote and Show screen on one row, the ⋮ menu with Remove last in red.
+- [x] The Add form: the top bar's arrow goes back, the example address shows, the URI keyboard with Go, and the label toggles the switch.
+- [x] Settings scrolled through in its groups; an ⓘ shows a summary in full without toggling its switch; Ring from the computer still off.
+- [x] A session: no dot while connecting, "Good connection" once streaming over the internet road; a refused session shows none.
+- [x] The session menu: the groups, segmented choices (Trackpad chosen, the chip followed), no chevron on Ring, Lock, Blackout and picture-in-picture.
+- [ ] TalkBack on a card ("Connect"), a Settings row (one stop) and a heading.
+- [ ] "Show connection details" on, during a session: the numbers and the computer's battery.
+- [ ] A row's "Allow notification access" with a feature on and access off.
+- [x] Spanish and Tamil (the app's own language set by `cmd locale`): the card's buttons fit (Tamil wraps Show screen to a second row), and the four quality choices fit after the review.
+- [ ] Landscape: the bottom chrome with 48 dp chips.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
