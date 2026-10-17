@@ -28,10 +28,10 @@ pub const TLS_STEP: Duration = Duration::from_secs(5);
 /// The protocol version spoken, and the oldest taken.
 pub const PROTOCOL: u64 = 8;
 
-/// What this computer answers from a KDE Connect device (3a: nothing yet;
-/// 3b and 3c add pairing, ping and the plugins).
-pub const INCOMING: &[&str] = &[];
-pub const OUTGOING: &[&str] = &[];
+/// What this computer answers from a KDE Connect device, and sends one
+/// (pairing needs no capability; 3c adds the plugins).
+pub const INCOMING: &[&str] = &["kdeconnect.ping"];
+pub const OUTGOING: &[&str] = &["kdeconnect.ping"];
 
 /// Whether `id` is a KDE Connect device id: 32 to 38 letters, digits, `_`
 /// or `-`.
@@ -256,6 +256,8 @@ pub fn cert_hash(der: &[u8]) -> [u8; 32] {
 pub struct DeviceLink<S> {
     pub stream: S,
     pub hello: Hello,
+    /// Its certificate, for the pairing code.
+    pub cert_der: Vec<u8>,
     /// SHA-256 of its certificate: what pairing pins.
     pub cert_hash: [u8; 32],
 }
@@ -285,13 +287,14 @@ where
     .await
     .map_err(|_| "no TLS handshake in time".to_string())?
     .map_err(|e| format!("TLS: {e}"))?;
-    let cert_hash = tls
+    let cert_der = tls
         .get_ref()
         .1
         .peer_certificates()
         .and_then(|certs| certs.first())
-        .map(|cert| cert_hash(cert.as_ref()))
+        .map(|cert| cert.as_ref().to_vec())
         .ok_or("no certificate")?;
+    let cert_hash = cert_hash(&cert_der);
     let wire = ours.to_wire().map_err(|e| e.to_string())?;
     tls.write_all(&wire).await.map_err(|e| e.to_string())?;
     tls.flush().await.map_err(|e| e.to_string())?;
@@ -304,6 +307,7 @@ where
     Ok(DeviceLink {
         stream: tls,
         hello: again,
+        cert_der,
         cert_hash,
     })
 }

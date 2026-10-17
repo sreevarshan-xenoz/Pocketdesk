@@ -13,8 +13,8 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
 use pocketdesk_core::local::paths::{
-    COMPUTERS_DIR, CONTROL_DIR, KICKS_DIR, LINKS_DIR, NOTIFICATION_OUT_DIR, OUTBOX_DIR,
-    PHONE_FILES_DIR, PHONE_MEDIA_DIR,
+    COMPUTERS_DIR, CONTROL_DIR, KDECONNECT_OUT_DIR, KICKS_DIR, LINKS_DIR, NOTIFICATION_OUT_DIR,
+    OUTBOX_DIR, PHONE_FILES_DIR, PHONE_MEDIA_DIR,
 };
 use tokio::sync::Notify;
 
@@ -31,6 +31,7 @@ pub const FOLDERS: &[&str] = &[
     KICKS_DIR,
     CONTROL_DIR,
     COMPUTERS_DIR,
+    KDECONNECT_OUT_DIR,
 ];
 
 /// One wake-up per folder; a change while its consumer is busy is kept for

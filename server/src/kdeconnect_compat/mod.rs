@@ -10,10 +10,14 @@
 pub mod discovery;
 pub mod handshake;
 pub mod identity;
+pub mod link;
+pub mod pairing;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use pocketdesk_core::local::kdeconnect::{self, SeenDevice};
+use pocketdesk_core::local::kdeconnect_devices::{self, KdeAsk};
+use pocketdesk_core::local::paths::KDECONNECT_OUT_DIR;
 use tokio::net::TcpStream;
 
 /// `kdeconnect_compat`, on by default (the owner's decision).
@@ -66,15 +70,18 @@ pub fn load_identity() -> anyhow::Result<identity::CompatIdentity> {
 }
 
 /// A connection to the control port that opened with `{`: a KDE Connect
-/// device's connection packet. The handshake, then (3a) the link held,
-/// its packets ignored, until it closes.
+/// device's connection packet. The handshake (a paired device held to its
+/// pin), then the link: pairing and ping (3b), until it closes.
 pub async fn serve(stream: TcpStream) {
     let peer = stream.peer_addr().ok();
-    let Some(_slot) = UnpairedSlot::take() else {
+    let Some(slot) = UnpairedSlot::take() else {
         tracing::warn!(
             ?peer,
             "A KDE Connect connection refused: {MAX_UNPAIRED} unpaired already"
         );
+        return;
+    };
+    let Ok(dir) = crate::state::state_dir() else {
         return;
     };
     let port = stream.local_addr().map(|a| a.port()).unwrap_or(0);
@@ -87,49 +94,76 @@ pub async fn serve(stream: TcpStream) {
     };
     let ours =
         handshake::identity_packet(&identity.id, &crate::kde::host_identity().device_name, port);
-    let link = match handshake::accept(stream, &identity, &ours, |_| None).await {
+    let link = match handshake::accept(stream, &identity, &ours, |id| link::pin_of(&dir, id)).await
+    {
         Ok(link) => link,
         Err(why) => {
             tracing::warn!(?peer, "A KDE Connect connection refused: {why}");
             return;
         }
     };
+    // Held to its pin in the handshake: a paired device's link is not one
+    // of the unpaired ones.
+    let paired = link::pin_of(&dir, &link.hello.device_id) == Some(link.cert_hash);
+    let slot = (!paired).then_some(slot);
     tracing::info!(
         device_id = %link.hello.device_id,
         name = %link.hello.device_name,
-        "A KDE Connect device connected (not paired)"
+        paired,
+        "A KDE Connect device connected"
     );
-    if let Ok(dir) = crate::state::state_dir() {
-        let noted = kdeconnect::record(
-            &dir,
-            SeenDevice {
-                device_id: link.hello.device_id.clone(),
-                name: link.hello.device_name.clone(),
-                seen_unix: pocketdesk_core::local::pin::now_unix(),
-                paired: false,
-            },
-        );
-        if let Err(e) = noted {
-            tracing::debug!("Could not note the KDE Connect device: {e}");
-        }
+    let noted = kdeconnect::record(
+        &dir,
+        SeenDevice {
+            device_id: link.hello.device_id.clone(),
+            name: link.hello.device_name.clone(),
+            seen_unix: pocketdesk_core::local::pin::now_unix(),
+            paired,
+        },
+    );
+    if let Err(e) = noted {
+        tracing::debug!("Could not note the KDE Connect device: {e}");
     }
-    hold(link).await;
+    link::run(link, &identity.cert_der, paired).await;
+    drop(slot);
 }
 
-/// Keep an unpaired device's link until it closes, taking nothing from it
-/// (pairing is 3b).
-async fn hold<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
-    mut link: handshake::DeviceLink<S>,
-) {
-    use tokio::io::AsyncReadExt;
-    let mut sink = [0u8; 4096];
+/// The desktop app's requests about KDE Connect devices (3b), for the
+/// server's life: each goes to the device's link; an unpairing of a device
+/// with none is done here.
+pub async fn run_requests() {
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
     loop {
-        match link.stream.read(&mut sink).await {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
+        crate::inbox::wait(KDECONNECT_OUT_DIR, std::time::Duration::from_secs(1)).await;
+        for request in kdeconnect_devices::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
+            let (device_id, event) = match request.ask {
+                KdeAsk::Pair { device_id } => (device_id, link::Event::PairFromHere),
+                KdeAsk::Allow { device_id } => (device_id, link::Event::Answer(true)),
+                KdeAsk::Deny { device_id } => (device_id, link::Event::Answer(false)),
+                KdeAsk::Unpair { device_id } => (device_id, link::Event::Unpair),
+                KdeAsk::Ping { device_id } => (device_id, link::Event::Ping),
+            };
+            if link::tell(&device_id, event) {
+                continue;
+            }
+            if event == link::Event::Unpair {
+                match kdeconnect_devices::remove(&dir, &device_id) {
+                    Ok(_) => {
+                        tracing::info!(device_id, "Unpaired a KDE Connect device (not connected)")
+                    }
+                    Err(e) => tracing::warn!("Could not unpair a KDE Connect device: {e}"),
+                }
+            } else {
+                tracing::info!(
+                    device_id,
+                    ?event,
+                    "A KDE Connect device is not connected now"
+                );
+            }
         }
     }
-    tracing::info!(device_id = %link.hello.device_id, "A KDE Connect device went");
 }
 
 #[cfg(test)]

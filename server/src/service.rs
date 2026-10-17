@@ -191,6 +191,7 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::spawn(crate::kdeconnect_compat::discovery::run(
             config.control_port,
         ));
+        tokio::spawn(crate::kdeconnect_compat::run_requests());
     }
     crate::wake_info::configure(config.wake_announce, config.wake_port);
     crate::driving::configure(config.input_control, config.input_idle_secs);
