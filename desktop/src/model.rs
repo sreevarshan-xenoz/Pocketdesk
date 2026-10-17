@@ -57,6 +57,8 @@ pub struct Snapshot {
     /// The other computers this one paired with whose link is up (2h), by
     /// id and name: files can go to them.
     pub linked_computers: Vec<(String, String)>,
+    /// Files moving now, as the running server last wrote (C1).
+    pub under_way: Vec<pocketdesk_core::local::transfers::Transfer>,
 }
 
 /// A received file, and whether it is still where it was saved (checked
@@ -149,7 +151,44 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         } else {
             Vec::new()
         },
+        under_way: if running {
+            pocketdesk_core::local::transfers::under_way(state_dir, now_unix)
+        } else {
+            Vec::new()
+        },
     }
+}
+
+/// A file under way by its place: "Holiday/beach.jpg" for a file of a
+/// folder send (C1).
+pub fn transfer_title(transfer: &pocketdesk_core::local::transfers::Transfer) -> String {
+    match &transfer.folder {
+        Some(folder) => format!("{folder}/{}", transfer.name),
+        None => transfer.name.clone(),
+    }
+}
+
+/// How far a file under way is, for its bar: 0 to 1.
+pub fn transfer_fraction(transfer: &pocketdesk_core::local::transfers::Transfer) -> f32 {
+    if transfer.size == 0 {
+        return 0.0;
+    }
+    (transfer.done.min(transfer.size) as f64 / transfer.size as f64) as f32
+}
+
+/// What a file under way's bar says: "42 % · 3.1 MB/s", the rate left out
+/// until there is one, and the bytes when the size is not known.
+pub fn transfer_words(transfer: &pocketdesk_core::local::transfers::Transfer) -> String {
+    let rate = if transfer.rate > 0 {
+        format!(" · {}/s", crate::app::human_size(transfer.rate))
+    } else {
+        String::new()
+    };
+    if transfer.size == 0 {
+        return format!("{}{rate}", crate::app::human_size(transfer.done));
+    }
+    let percent = transfer.done.min(transfer.size) * 100 / transfer.size;
+    format!("{percent} %{rate}")
 }
 
 /// What the Sessions tab shows about who drives (roadmap N7).
@@ -533,6 +572,45 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn under_way(size: u64, done: u64, rate: u64) -> pocketdesk_core::local::transfers::Transfer {
+        pocketdesk_core::local::transfers::Transfer {
+            id: "t1".to_string(),
+            direction: pocketdesk_core::local::transfers::Direction::ToPhone,
+            device_id: "phone".to_string(),
+            name: "beach.jpg".to_string(),
+            folder: None,
+            size,
+            done,
+            rate,
+            started_unix: 1,
+        }
+    }
+
+    #[test]
+    fn a_file_under_way_says_how_far_and_how_fast() {
+        assert_eq!(transfer_words(&under_way(1_000, 420, 0)), "42 %");
+        assert_eq!(
+            transfer_words(&under_way(10_000_000, 5_000_000, 3_250_000)),
+            "50 % · 3.1 MB/s"
+        );
+        assert_eq!(
+            transfer_words(&under_way(0, 2048, 0)),
+            "2.0 KB",
+            "no size known: the bytes so far"
+        );
+        assert_eq!(transfer_fraction(&under_way(1_000, 250, 0)), 0.25);
+        assert_eq!(transfer_fraction(&under_way(1_000, 5_000, 0)), 1.0);
+        assert_eq!(transfer_fraction(&under_way(0, 5, 0)), 0.0);
+    }
+
+    #[test]
+    fn a_file_of_a_folder_is_named_with_its_folder() {
+        let mut transfer = under_way(1, 0, 0);
+        assert_eq!(transfer_title(&transfer), "beach.jpg");
+        transfer.folder = Some("Holiday".to_string());
+        assert_eq!(transfer_title(&transfer), "Holiday/beach.jpg");
+    }
     use pocketdesk_core::local::paths::{LIVE_FILE, LOG_DIR, TRUST_FILE};
     use pocketdesk_core::protocol::kdeconnect::TrustStore;
     use std::time::Duration;
