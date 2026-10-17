@@ -388,7 +388,7 @@ fn permission_boxes(
 /// a device connected now.
 fn asked(ask: &KdeAsk) -> &'static str {
     match ask {
-        KdeAsk::Pair { .. } | KdeAsk::Ping { .. } => {
+        KdeAsk::Pair { .. } | KdeAsk::Ping { .. } | KdeAsk::Ring { .. } => {
             "Asked: the device must be connected now, with KDE Connect open."
         }
         _ => "Asked.",
