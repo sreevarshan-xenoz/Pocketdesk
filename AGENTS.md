@@ -42,6 +42,16 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-17: **N7, the phone's background cost (branch `perf/background-cost`; spec `docs/superpowers/specs/2026-10-17-background-cost-design.md`, with as-built and review sections).**
+  - **Measured:** an hour each on the A71 against a throwaway server, with the clipboard, files and ringing on and the screen off.
+  - **Profiled:** simpleperf put 94 % of the app's cycles in its six timer threads. Each worked out the phone's own computer on every tick, every 2 to 5 s, by reading and parsing the saved computers.
+  - **Cut:**
+    - that answer is kept 5 s (`Recent`), forgotten at once when the saved computers change (`HostStore.generation`);
+    - the folders timer does nothing with no folder shared and nothing asked.
+  - **Results:** 21.0 s → 15.9 s of CPU in the hour (0.58 → 0.44 % of one core), no wake locks or alarms either way, deep idle all hour.
+  - **These are upper bounds:** USB kept the phone from suspending.
+  - **Fresh review (0 Critical, 1 Important), fixed:** a removed computer stayed the phone's own for up to 5 s.
+  - **Owed (checklist §102):** on battery without USB, the Wi-Fi keepalives, and a release build.
 - 2026-10-17: **The next cycle (plan `docs/research/2026-10-17-next-cycle.md`).** From the owed checks (about 525 open, perhaps a fifth runnable here), what the repo lacks (no transfer progress on the computer, no Cancel on the phone, Downloads only), and what users of these apps asked for in 2025–2026. Order:
   - C1 transfers you can watch and stop;
   - C2 choose where files land;
