@@ -23,7 +23,9 @@ class ConnectWidget : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.widget_connect).apply {
                 setTextViewText(
                     R.id.widget_host,
-                    host?.address ?: context.getString(R.string.tile_no_computer),
+                    // U3: by its name, else its address.
+                    host?.let { HostStore.shownName(context, it.address) }
+                        ?: context.getString(R.string.tile_no_computer),
                 )
                 setTextViewText(
                     R.id.widget_action,
