@@ -13,6 +13,7 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -146,9 +147,18 @@ class TransferService : Service() {
         return if (uris.isEmpty()) null else Job.Send(address, port, uris)
     }
 
+    /**
+     * The wait for a network during an outage (R6i), shared by every job,
+     * since a folder from the computer is one job per file. Only [worker]
+     * touches it.
+     */
+    private val offline = TransferRetry.OfflineBudget()
+
     /** Runs on [worker]; the last job queued reports everything done since. */
     private fun run(job: Job, startId: Int) {
         lastAddress = job.address
+        // A job that starts with a network ends any outage.
+        if (NetworkWait.usable(this, job.address)) offline.reset()
         val (sentBefore, countBefore) = sentTotal to sendCount
         plannedSends = 0
         var threw = false
@@ -245,15 +255,32 @@ class TransferService : Service() {
             show(progressNotification(title, name, percent))
         }
         // A failed file goes again a few times: the computer kept what
-        // arrived, so each retry continues where the last one stopped.
+        // arrived, so each retry continues where the last one stopped. With
+        // no network it first waits for one (R6i).
         var attempt = 1
-        while (result.isFailure) {
-            val error = result.exceptionOrNull()?.message
-            val wait = TransferRetry.delayBefore(attempt, error, Prefs.retryTransfers(this)) ?: break
-            Log.i(TAG, "sending $name failed ($error); trying again in $wait s")
-            show(progressNotification(getString(R.string.transfer_retrying, attempt), name, 0))
-            Thread.sleep(wait * 1000)
-            attempt++
+        retry@ while (result.isFailure) {
+            val error = result.exceptionOrNull()
+            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this, address), offline.waited(SystemClock.elapsedRealtime()))) {
+                is TransferRetry.Next.Stop -> {
+                    if (next.noNetwork) result = Result.failure(java.io.IOException(getString(R.string.transfer_no_network)))
+                    break@retry
+                }
+                is TransferRetry.Next.WhenOnline -> {
+                    Log.i(TAG, "sending $name failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
+                    show(progressNotification(getString(R.string.transfer_waiting_network), name, 0))
+                    val started = SystemClock.elapsedRealtime()
+                    val back = NetworkWait.await(this, address, next.seconds)
+                    val ended = SystemClock.elapsedRealtime()
+                    offline.add((ended - started + 999) / 1000, ended)
+                    if (!back) continue@retry
+                }
+                is TransferRetry.Next.After -> {
+                    Log.i(TAG, "sending $name failed (${error?.message}); trying again in ${next.seconds} s")
+                    show(progressNotification(getString(R.string.transfer_retrying, attempt), name, 0))
+                    Thread.sleep(next.seconds * 1000)
+                    attempt++
+                }
+            }
             result = sendOne(address, port, uri, name, part) { percent ->
                 show(progressNotification(title, name, percent))
             }
@@ -261,6 +288,7 @@ class TransferService : Service() {
         sendCount++
         if (result.isSuccess) {
             sentTotal++
+            offline.reset()
         } else {
             lastError = result.exceptionOrNull()?.message
             Log.w(TAG, "sending $name failed: $lastError")
@@ -308,20 +336,38 @@ class TransferService : Service() {
         show(progressNotification(title, job.name, 0))
         receiveCount++
         var result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
-        // A broken download goes again a few times, continuing what it kept.
+        // A broken download goes again a few times, continuing what it kept;
+        // with no network it first waits for one (R6i).
         var attempt = 1
-        while (result.isFailure) {
+        retry@ while (result.isFailure) {
             val error = result.exceptionOrNull()
-            val wait = TransferRetry.delayAfter(attempt, error, Prefs.retryTransfers(this)) ?: break
-            Log.i(TAG, "receiving ${job.name} failed (${error?.message}); trying again in $wait s")
-            show(progressNotification(getString(R.string.transfer_retrying, attempt), job.name, 0))
-            Thread.sleep(wait * 1000)
-            attempt++
+            when (val next = TransferRetry.next(attempt, error, Prefs.retryTransfers(this), NetworkWait.usable(this, job.address), offline.waited(SystemClock.elapsedRealtime()))) {
+                is TransferRetry.Next.Stop -> {
+                    if (next.noNetwork) result = Result.failure(java.io.IOException(getString(R.string.transfer_no_network)))
+                    break@retry
+                }
+                is TransferRetry.Next.WhenOnline -> {
+                    Log.i(TAG, "receiving ${job.name} failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
+                    show(progressNotification(getString(R.string.transfer_waiting_network), job.name, 0))
+                    val started = SystemClock.elapsedRealtime()
+                    val back = NetworkWait.await(this, job.address, next.seconds)
+                    val ended = SystemClock.elapsedRealtime()
+                    offline.add((ended - started + 999) / 1000, ended)
+                    if (!back) continue@retry
+                }
+                is TransferRetry.Next.After -> {
+                    Log.i(TAG, "receiving ${job.name} failed (${error?.message}); trying again in ${next.seconds} s")
+                    show(progressNotification(getString(R.string.transfer_retrying, attempt), job.name, 0))
+                    Thread.sleep(next.seconds * 1000)
+                    attempt++
+                }
+            }
             result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
         }
         result.onSuccess { uri ->
             savedTotal++
             lastSaved = uri
+            offline.reset()
             // Ecosystem 1f: its type and size, never its name.
             val mime = uri?.let { runCatching { contentResolver.getType(it) }.getOrNull() } ?: "application/octet-stream"
             PhoneEventBroadcast.send(
