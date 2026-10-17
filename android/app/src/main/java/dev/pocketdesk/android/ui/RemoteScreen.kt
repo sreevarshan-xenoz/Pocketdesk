@@ -1172,7 +1172,9 @@ fun RemoteScreen(
                     .windowInsetsPadding(WindowInsets.systemBars),
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    Column(modifier = Modifier.padding(8.dp)) {
+                    // Clear of Exit (48 dp at the top end): the details run
+                    // wider in some languages (U6, found in Tamil).
+                    Column(modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 72.dp)) {
                         StatsHud(
                             address = address,
                             controlPort = controlPort,
