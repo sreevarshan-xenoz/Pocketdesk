@@ -20,6 +20,9 @@ use crate::tray::{Tray, TrayAction};
 
 const REFRESH: Duration = Duration::from_secs(1);
 
+/// Where the last page shown is kept between runs.
+pub const PAGE_KEY: &str = "page";
+
 /// The Devices tab's switches, in the order a person thinks of them.
 const PERMISSIONS: [(Capability, &str, &str); 13] = [
     (
@@ -1380,6 +1383,12 @@ impl PocketdeskApp {
 }
 
 impl eframe::App for PocketdeskApp {
+    /// The page shown, kept for the next run (eframe keeps the window's
+    /// size and place itself).
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(PAGE_KEY, self.tab.key().to_string());
+    }
+
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.pair.reset(&self.state_dir);
     }

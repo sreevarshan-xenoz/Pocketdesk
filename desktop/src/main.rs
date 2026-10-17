@@ -71,6 +71,13 @@ fn main() -> eframe::Result {
                 width: 64,
                 height: 64,
             }),
+        // A throwaway instance (`POCKETDESK_CONFIG_DIR`, as R6a's second
+        // server) keeps its window and page beside its config, never the
+        // installed app's.
+        persistence_path: std::env::var_os(pocketdesk_core::local::paths::CONFIG_DIR_VAR)
+            .map(std::path::PathBuf::from)
+            .filter(|dir| dir.is_absolute())
+            .map(|dir| dir.join("app-window.ron")),
         ..Default::default()
     };
     eframe::run_native(
@@ -82,6 +89,12 @@ fn main() -> eframe::Result {
             if tray.is_some() {
                 tray::Tray::wake_on_click(cc.egui_ctx.clone());
             }
+            // `--page`, else the page shown when the app last closed.
+            let page = page.or_else(|| {
+                cc.storage
+                    .and_then(|s| s.get_string(app::PAGE_KEY))
+                    .and_then(|key| app::Tab::from_key(&key))
+            });
             Ok(Box::new(app::PocketdeskApp::new(state_dir, tray, page)))
         }),
     )
