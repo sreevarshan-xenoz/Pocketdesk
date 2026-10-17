@@ -20,6 +20,7 @@ import dev.pocketdesk.android.MainActivity
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.compat.Android17
 import dev.pocketdesk.android.notify.PhoneLink
 
 /**
@@ -29,7 +30,9 @@ import dev.pocketdesk.android.notify.PhoneLink
  * heard in Do Not Disturb when alarms are allowed, Android's default, and a
  * notification's sound plays with the app in the background, so no
  * foreground service is needed. The alarm stream is at its loudest while it
- * rings, and put back after.
+ * rings, and put back after, before Android 17; from 17 it rings at the
+ * owner's alarm volume, since a volume set from the background is ignored
+ * there (N4).
  */
 object PhoneRinger {
     private const val TAG = "PhoneRinger"
@@ -93,6 +96,7 @@ object PhoneRinger {
         // A notification that cannot sound rings nothing: the alarm tone
         // plays straight on the alarm stream then.
         if (!notificationSounds(manager)) {
+            // Android 17 silences it unless the app is open (N4).
             Log.i(TAG, "the ring's notification cannot sound; playing the tone itself")
             playTone(app)
         }
@@ -174,6 +178,9 @@ object PhoneRinger {
         get() = volumeBefore != null || tone != null
 
     private fun loudest(ctx: Context) {
+        // Android 17: ignored from the background, and a raise made while
+        // the app was open might never be put back.
+        if (!Android17.ringRaisesVolume(android.os.Build.VERSION.SDK_INT)) return
         runCatching {
             val audio = ctx.getSystemService(AudioManager::class.java)
             if (volumeBefore == null) {
@@ -193,10 +200,16 @@ object PhoneRinger {
         val kept = saved(ctx).getInt(KEY_VOLUME_BEFORE, -1).takeIf { it >= 0 }
         val before = kept ?: volumeBefore ?: return
         volumeBefore = null
-        runCatching {
-            ctx.getSystemService(AudioManager::class.java).setStreamVolume(AudioManager.STREAM_ALARM, before, 0)
-        }
-        saved(ctx).edit { remove(KEY_VOLUME_BEFORE) }
+        val back = runCatching {
+            val audio = ctx.getSystemService(AudioManager::class.java)
+            audio.setStreamVolume(AudioManager.STREAM_ALARM, before, 0)
+            audio.getStreamVolume(AudioManager.STREAM_ALARM) == before
+        }.getOrDefault(false)
+        // Android 17 ignores a volume set from the background (N4 review): a
+        // volume a ring left raised (before an upgrade to 17, say) stays
+        // saved until it is really put back, at the latest when the app is
+        // next opened.
+        if (back) saved(ctx).edit { remove(KEY_VOLUME_BEFORE) }
     }
 
     /**

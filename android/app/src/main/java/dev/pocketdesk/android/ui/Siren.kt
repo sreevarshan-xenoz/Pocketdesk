@@ -34,7 +34,8 @@ private const val SIREN_POLL_MS = 2_000L
  * the computer pushes `kdeconnect.findmydevice` `{ring:true}`, and ring.
  *
  * N1: the ring is [PhoneRinger]'s, the same as in the background (its
- * notification with Stop, the alarm volume put back after), and while a
+ * notification with Stop, the alarm volume raised and put back after before
+ * Android 17, left as the owner set it on 17 (N4)), and while a
  * watcher is on screen the latch is its own ([RingOwner]): the background
  * tick leaves it alone. C8's dialog still says what is happening, with a
  * Silence button.

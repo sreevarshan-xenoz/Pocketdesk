@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.compat.Android17
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.doctor.BackgroundLimit
 import dev.pocketdesk.android.doctor.BackgroundRunning
@@ -121,7 +122,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             SettingSwitch(
                 stringResource(R.string.settings_capture_mouse),
-                stringResource(R.string.settings_capture_mouse_summary),
+                // A touchpad too on Android 17 (N4).
+                stringResource(
+                    if (Android17.captures(android.os.Build.VERSION.SDK_INT, false, false, true)) {
+                        R.string.settings_capture_mouse_summary_17
+                    } else {
+                        R.string.settings_capture_mouse_summary
+                    },
+                ),
                 Prefs.captureMouse(context),
                 { Prefs.setCaptureMouse(context, it) },
             )
@@ -191,7 +199,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             // N1: the computer may ring this phone to find it.
             SettingSwitch(
                 stringResource(R.string.settings_ring_from_computer),
-                stringResource(R.string.settings_ring_from_computer_summary),
+                // Android 17 rings at the owner's alarm volume (N4).
+                stringResource(
+                    if (Android17.ringRaisesVolume(android.os.Build.VERSION.SDK_INT)) {
+                        R.string.settings_ring_from_computer_summary
+                    } else {
+                        R.string.settings_ring_from_computer_summary_17
+                    },
+                ),
                 Prefs.ringFromComputer(context),
                 {
                     Prefs.setRingFromComputer(context, it)

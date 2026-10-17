@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.compat.Android17
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 import dev.pocketdesk.android.notify.TextPrefs
 
@@ -82,7 +83,12 @@ fun TextsSection() {
 
     SettingSwitch(
         stringResource(R.string.texts_show),
-        stringResource(R.string.texts_show_summary),
+        // Android 17 holds texts with a code for 3 hours (N4).
+        if (Android17.holdsCodeTexts(android.os.Build.VERSION.SDK_INT)) {
+            stringResource(R.string.texts_show_summary_17)
+        } else {
+            stringResource(R.string.texts_show_summary)
+        },
         show && canReceive,
         ::setShow,
     )

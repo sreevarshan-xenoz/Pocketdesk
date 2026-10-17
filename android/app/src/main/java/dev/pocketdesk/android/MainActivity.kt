@@ -133,6 +133,13 @@ class MainActivity : ComponentActivity() {
         }.start()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Android 17 puts an alarm volume back only while the app shows: a
+        // ring that left it raised is put back here (N4 review).
+        dev.pocketdesk.android.ring.PhoneRinger.restoreAfterDeath(this)
+    }
+
     override fun onStop() {
         super.onStop()
         // The saved computers may have changed; shortcuts follow them.
