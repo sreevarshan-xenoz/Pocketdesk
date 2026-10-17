@@ -43,9 +43,8 @@ import kotlinx.coroutines.withContext
  * Desktop shortcut bar (Tier 1 #3): keys a touchscreen cannot produce.
  * C9 groups it into System (Super, window switching, safety screen,
  * screenshots, Esc) and Workspaces (W1–9 — Super+1..9 drives Hyprland
- * workspace switching on the server). Key-cap labels stay literal by
- * design (see the i18n exemption note in strings.xml); only the group
- * captions are localized.
+ * workspace switching on the server). The key captions are string
+ * resources, named as each language's keyboards print them (U6).
  *
  * Rendered as a dark, rounded floating pill rather than a theme-coloured
  * sheet: it lives on top of remote video (or the dock) where a surfaceVariant

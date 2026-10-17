@@ -39,11 +39,11 @@ of exactly that, including the one fix that merged without its confirming observ
 
 ## 2. Session shell + video (Tier 1 #5, R2#2, R2#5)
 
-- [ ] Video appears within ~1 s; stats HUD shows fps/bitrate/rtt/e2e/drops, plus the caption naming what
+- [ ] Video appears within ~1 s; with "Show connection details" on, the HUD shows fps/kbps/rtt/delay/lost, plus the caption naming what
       the rates and the link figure were measured over (§2d).
 - [ ] FGS notification is present ("Streaming to <ip>"), survives home/swipe-away attempts; its Disconnect action ends the session.
 - [ ] Screen-off for 1 min, wake → stream still live (wake lock + keepalive; plan #13).
-- [ ] Drop phone far from AP / saturate link → frames stall, then recover; drops counter rises but no permanent freeze (gap-driven keyframe request, R2#5).
+- [ ] Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5).
       "Drops" means **frames the phone never received** — the holes in the server's per-frame sequence
       numbers, counted where only the client can count them. So a saturated link must move it (the
       desktop's transport task trims its backlog before a stall clears), while a frame that arrives late
@@ -141,15 +141,15 @@ not part of C4.
 
 ## 2b. Compositor-true latency read (R4 E3)
 
-- [ ] Sanity: on-LAN idle desktop → HUD `e2e` should sit in the low tens of ms and track the
-      `rtt` chip sensibly (e2e ≈ capture age + rtt/2); heavy desktop motion → `e2e` rises
+- [ ] Sanity: on-LAN idle desktop → HUD `delay` (the e2e estimate) should sit in the low tens of ms and track the
+      `rtt` chip sensibly (e2e ≈ capture age + rtt/2); heavy desktop motion → `delay` rises
       (encoder/queue age grows), never reads 0 once video is flowing.
-- [ ] The old bug-shape check: `e2e` must NOT equal `rtt` while frames are under load (it used
+- [ ] The old bug-shape check: `delay` must NOT equal `rtt` while frames are under load (it used
       to be a literal RTT proxy).
 - [ ] Cross-check (eyes, optional): point the phone camera at the desktop with an on-screen
       clock/stopwatch — the phone's rendered image lags the physical panel by roughly the HUD
-      `e2e` figure (± the phone's own present latency, which the probe can't see).
-- [ ] WAN session: `e2e` should ≈ rtt/2 higher than a LAN session on the same desktop motion
+      `delay` figure (± the phone's own present latency, which the probe can't see).
+- [ ] WAN session: `delay` should ≈ rtt/2 higher than a LAN session on the same desktop motion
       (the network-leg term is RTT/2 by construction).
 
 ## 2d. Rate and link basis (roadmap 2056)
@@ -158,8 +158,8 @@ The HUD's fps/kbps are now diffs over the newest 3 s of received video and its `
 the session's last ≤8 one-second polls; a caption under the numbers names both, and a figure whose basis
 is still filling in is dimmed. What to confirm on a real phone:
 
-- [ ] Right after connect: the caption starts at something like `rates over 0.5s · rtt unsampled` and
-      reaches `rates over 3.0s · rtt median of 8` within ~8 s; fps/kbps are dim until the caption says
+- [ ] Right after connect: the caption starts at something like `rates over 0.5 s · rtt not measured yet` and
+      reaches `rates over 3.0 s · rtt median of 8` within ~8 s; fps/kbps are dim until the caption says
       ~2.5 s or more, and `rtt` is dim until its first poll (~1 s). A number that arrives already bright
       means the basis is not being reported.
 - [ ] The stall check this replaces: freeze the desktop's output (sleep the display, or `SIGSTOP` the
@@ -172,7 +172,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 - [ ] Portrait legibility: the caption is one line of 10 sp monospace; in portrait on a narrow phone it
       must not wrap into a single-character column the way the six metric chips did before they became a
       `FlowRow`, and must not be clipped by the HUD panel's padding.
-- [ ] Optional cross-check: while the caption reads `rates over 3.0s`, `pocketdesk sessions` for the same
+- [ ] Optional cross-check: while the caption reads `rates over 3.0 s`, `pocketdesk sessions` for the same
       session should report a mean kbps within the same order of magnitude — the session record averages
       over the whole session, the HUD does not, and a large disagreement is a measurement bug in one of
       them.
@@ -575,7 +575,7 @@ Built on `feat/phone-audio`; spec `docs/superpowers/specs/2026-10-12-phone-audio
 - [ ] Connecting to a silent desktop does not pause music already playing on the phone; the first desktop sound takes over. "Silent" means no app holds an audio stream open: Windows loopback sends packets of silence while any app has one (seen on the A71 with a browser open: focus was taken 1.3 s after connect), and focus follows packets, not loudness.
 - [ ] A phone call silences it, and it resumes after the call. Another app starting music takes over for good: switching "Desktop sound on this phone" off and on brings it back.
 - [ ] In PiP the sound continues; Exit stops it.
-- [ ] With sound on, the HUD's fps and e2e match a session with it off, and taps on a still desktop feel immediate (the bridge lock fixes).
+- [ ] With sound on, the HUD's fps and delay match a session with it off, and taps on a still desktop feel immediate (the bridge lock fixes).
 - [ ] `adb logcat -s DesktopAudio`: "desktop sound started", and on exit "stopped (N underruns)" with N small.
 
 ## 26. In-session keyboard

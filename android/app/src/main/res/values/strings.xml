@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  UI chrome strings (Tier-3 #17 remainder: per-app language). Telemetry HUD
-  units (fps/kbps/rtt/e2e/drops), shortcut key labels (Super, Alt+Tab, …) and
-  desktop-supplied data (window titles, monitor names, Rust-side error
-  reasons) are deliberately NOT localized — they are technical tokens or
-  remote content. Locales must stay in sync with res/xml/locales_config.xml.
+  UI chrome strings (Tier-3 #17 remainder: per-app language). The connection
+  details' labels and the key captions are localized too (U6: keys by the
+  names each language's keyboards print). Desktop-supplied data (window
+  titles, monitor names, Rust-side error reasons) and what the phone sends
+  for the computer to show stay as they are. Every string here must be in
+  values-es and values-ta (StringsTranslatedTest). Locales must stay in sync
+  with res/xml/locales_config.xml.
 -->
 <resources>
     <string name="share_target_label">Send to Pocketdesk</string>
@@ -273,7 +275,7 @@
     <string name="clipboard_empty">Nothing captured yet — copy something or turn on clipboard sync.</string>
     <string name="clipboard_clear_message">This deletes every saved clipboard entry from this phone.</string>
 
-    <!-- Shortcut bar group captions (C9); key caps stay literal -->
+    <!-- Shortcut bar group captions (C9); the key captions are the key_* strings (U6) -->
     <string name="shortcut_system">System</string>
     <string name="shortcut_workspaces">Workspaces</string>
 

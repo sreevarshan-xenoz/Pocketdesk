@@ -49,8 +49,9 @@ private val KeyShape = RoundedCornerShape(8.dp)
  * The accessory rows docked above the phone keyboard (spec K7). The latching
  * modifiers, Esc, Tab, the arrows and a hide button come first. Then come the
  * navigation keys, F1-F12 and Ctrl+Alt+Del, on a second scrolling row, or on
- * the same row when [compact]. Key-cap labels are literal (Esc, F5), like the
- * shortcut bar's.
+ * the same row when [compact]. Key captions are string resources, named as
+ * each language's keyboards print them (U6); F1-F12 and the arrows are the
+ * same everywhere.
  *
  * A modifier latches the moment it is tapped, and a second tap within the
  * double-tap window locks it ([ModifierLatch.tap]). [latchVersion] changes
