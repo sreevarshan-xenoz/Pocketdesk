@@ -45,6 +45,14 @@ pub(super) fn init_process() {
     {
         tracing::debug!("DPI awareness not changed: {e}");
     }
+    // Hold the multithreaded apartment for the process's life (R6g review):
+    // threads enter and leave COM (capture, sound, toasts), and once the last
+    // had left, COM could unload a library a cached WinRT factory still
+    // points into (windows-core keeps those factories for good).
+    // GraphicsCapture.dll is pinned besides; this covers the others.
+    if let Err(e) = unsafe { windows::Win32::System::Com::CoIncrementMTAUsage() } {
+        tracing::warn!("The COM apartment is not held for the process: {e}");
+    }
 }
 
 /// Every module this process has had loaded, as last seen: base, size and
@@ -545,6 +553,27 @@ pub(super) fn force_stop(pid: u32) -> std::io::Result<bool> {
 mod tests {
     use super::*;
     use windows::Win32::UI::HiDpi::{AreDpiAwarenessContextsEqual, GetThreadDpiAwarenessContext};
+
+    #[test]
+    fn the_process_holds_the_multithreaded_apartment() {
+        init_process();
+        // A thread that never entered COM is in the apartment the process
+        // holds (the implicit MTA), not outside COM.
+        let (kind, qualifier) = std::thread::spawn(|| {
+            let mut kind = windows::Win32::System::Com::APTTYPE::default();
+            let mut qualifier = windows::Win32::System::Com::APTTYPEQUALIFIER::default();
+            unsafe { windows::Win32::System::Com::CoGetApartmentType(&mut kind, &mut qualifier) }
+                .expect("in an apartment");
+            (kind, qualifier)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(kind, windows::Win32::System::Com::APTTYPE_MTA);
+        assert_eq!(
+            qualifier,
+            windows::Win32::System::Com::APTTYPEQUALIFIER_IMPLICIT_MTA
+        );
+    }
 
     #[test]
     fn a_fault_is_described_with_its_module_and_what_is_there() {
