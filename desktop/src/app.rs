@@ -1746,6 +1746,12 @@ impl eframe::App for PocketdeskApp {
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_tray(ctx);
+        // Started again: bring this window forward, from the tray too.
+        if crate::single_instance::take_raise() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.finish_job();
         self.finish_setting();
         // Closing hides to the tray; Quit (or no tray to come back from) exits.

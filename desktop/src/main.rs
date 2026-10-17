@@ -38,7 +38,7 @@ use eframe::egui;
 const TITLE: &str = "Pocketdesk";
 
 fn main() -> eframe::Result {
-    let Some(_instance) = single_instance::acquire(TITLE) else {
+    let Some(instance) = single_instance::acquire(TITLE) else {
         // Another copy is running; it has been brought to the front.
         return Ok(());
     };
@@ -84,6 +84,8 @@ fn main() -> eframe::Result {
             .map(|dir| dir.join("app-window.ron")),
         ..Default::default()
     };
+    // A later launch brings this window forward.
+    instance.listen_for_launches();
     eframe::run_native(
         TITLE,
         options,
@@ -95,6 +97,7 @@ fn main() -> eframe::Result {
             if tray.is_some() {
                 tray::Tray::wake_on_click(cc.egui_ctx.clone());
             }
+            single_instance::wake_with(cc.egui_ctx.clone());
             // `--page`, else the page shown when the app last closed.
             let page = page.or_else(|| {
                 cc.storage
