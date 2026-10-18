@@ -198,7 +198,9 @@ internal fun ChoiceRow(label: String, options: List<String>, selected: Int, onSe
             // broke it mid-word; such a row is a list instead.
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
-            val sides = if (crowded) 8.dp else 48.dp
+            // Crowded: 4 dp each side. Else 12 dp each side, and a selected
+            // segment's 18 dp check with 8 dp after it (C5 review: 50, not 48).
+            val sides = if (crowded) 8.dp else 50.dp
             val segment = with(density) { (maxWidth / options.size - sides).toPx() }
             val widths = remember(options, face, density, segment) {
                 // Four wrap between words; up to three keep each on one line.
