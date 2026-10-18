@@ -62,14 +62,14 @@ impl ConnectionManager {
             .map(|(stream, _)| stream)
     }
 
-    /// [`ConnectionManager::connect`], with the name the desktop gives
-    /// itself in its identity, cleaned (U3).
+    /// [`ConnectionManager::connect`], with what the desktop says of itself
+    /// in its identity: its name, cleaned (U3), and what it sends (C3).
     pub async fn connect_named(
         &self,
         address: &str,
         port: u16,
         identity: &DeviceIdentity,
-    ) -> Result<(ControlStream, Option<String>)> {
+    ) -> Result<(ControlStream, PeerClaims)> {
         let conn_id = uuid::Uuid::new_v4().to_string();
         let span = info_span!(
             "handshake",
@@ -140,26 +140,65 @@ where
         .map(|(stream, _)| stream)
 }
 
-/// The name a desktop gives itself in its identity line, cleaned (U3):
-/// its own claim, for a person to tell computers apart.
-fn identity_name(line: &str) -> Option<String> {
-    let packet = super::kdeconnect::NetworkPacket::from_wire(line.trim()).ok()?;
-    if packet.packet_type != "kdeconnect.identity" {
-        return None;
+/// What a desktop says of itself in its identity line: its claims, not
+/// proof of anything.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PeerClaims {
+    /// The name it gives itself, cleaned (U3), for a person to tell
+    /// computers apart.
+    pub name: Option<String>,
+    /// The packet types it says it sends (`outgoingCapabilities`); `None`
+    /// when it sent no identity.
+    pub sends: Option<Vec<String>>,
+}
+
+impl PeerClaims {
+    /// Whether it says it answers a phone notification that asks (C3):
+    /// `None` when it sent no identity to say either way.
+    pub fn acks_notifications(&self) -> Option<bool> {
+        self.sends
+            .as_ref()
+            .map(|sends| sends.iter().any(|t| t == "kdeconnect.notification.ack"))
     }
-    packet
+}
+
+/// What a desktop says of itself in its identity line.
+fn identity_claims(line: &str) -> PeerClaims {
+    let Ok(packet) = super::kdeconnect::NetworkPacket::from_wire(line.trim()) else {
+        return PeerClaims::default();
+    };
+    if packet.packet_type != "kdeconnect.identity" {
+        return PeerClaims::default();
+    }
+    let name = packet
         .body
         .get("deviceName")
         .and_then(|v| v.as_str())
-        .and_then(super::kdeconnect::clean_device_name)
+        .and_then(super::kdeconnect::clean_device_name);
+    let sends = packet
+        .body
+        .get("outgoingCapabilities")
+        .and_then(|v| v.as_array())
+        .map(|types| {
+            types
+                .iter()
+                .filter_map(|t| t.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    PeerClaims {
+        name,
+        sends: Some(sends),
+    }
 }
 
-/// [`control_handshake`], with the desktop's name from its identity (U3).
+/// [`control_handshake`], with what the desktop says of itself in its
+/// identity (U3, C3).
 pub async fn control_handshake_named<S>(
     stream: S,
     peer: &str,
     identity: &DeviceIdentity,
-) -> Result<(S, Option<String>)>
+) -> Result<(S, PeerClaims)>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -233,7 +272,7 @@ where
         detail: e.to_string(),
     })?;
 
-    Ok((stream, identity_name(&identity_response)))
+    Ok((stream, identity_claims(&identity_response)))
 }
 
 /// The control channel's opening over the internet road (T10a). The desktop
@@ -256,13 +295,13 @@ where
         .map(|(stream, _)| stream)
 }
 
-/// [`internet_control_handshake`], with the desktop's name from the
-/// identity that admits the phone (U3).
+/// [`internet_control_handshake`], with what the desktop says of itself in
+/// the identity that admits the phone (U3, C3).
 pub async fn internet_control_handshake_named<S>(
     mut stream: S,
     peer: &str,
     identity: &DeviceIdentity,
-) -> Result<(S, Option<String>)>
+) -> Result<(S, PeerClaims)>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -308,7 +347,7 @@ where
     match super::kdeconnect::NetworkPacket::from_wire(admitted.trim()) {
         Ok(packet) if packet.packet_type == "kdeconnect.identity" => {
             debug!("Admitted over the internet");
-            Ok((stream, identity_name(&admitted)))
+            Ok((stream, identity_claims(&admitted)))
         }
         _ => Err(failed(admitted.trim().to_string())),
     }
@@ -461,9 +500,10 @@ mod tests {
             let mut ours = String::new();
             desktop.read_line(&mut ours).await.unwrap();
         });
-        let (_stream, name) = control_handshake_named(phone, "duplex", &identity)
-            .await
-            .unwrap();
+        let (_stream, PeerClaims { name, .. }) =
+            control_handshake_named(phone, "duplex", &identity)
+                .await
+                .unwrap();
         assert_eq!(name.as_deref(), Some("Desktop"));
 
         let identity = DeviceIdentity::new("road-phone", "Road Phone");
@@ -472,17 +512,38 @@ mod tests {
             desktop,
             "{\"type\":\"kdeconnect.identity\",\"body\":{\"deviceName\":\"Study PC\"}}\n",
         );
-        let (_stream, name) = internet_control_handshake_named(phone, "desktop", &identity)
-            .await
-            .expect("admitted");
+        let (_stream, PeerClaims { name, .. }) =
+            internet_control_handshake_named(phone, "desktop", &identity)
+                .await
+                .expect("admitted");
         assert_eq!(name.as_deref(), Some("Study PC"));
 
         let (phone, desktop) = tokio::io::duplex(64 * 1024);
         internet_desktop(desktop, "{\"type\":\"kdeconnect.identity\"}\n");
-        let (_stream, name) = internet_control_handshake_named(phone, "desktop", &identity)
-            .await
-            .expect("admitted");
+        let (_stream, PeerClaims { name, .. }) =
+            internet_control_handshake_named(phone, "desktop", &identity)
+                .await
+                .expect("admitted");
         assert_eq!(name, None);
+    }
+
+    /// C3: whether the computer answers notifications is what its identity
+    /// says it sends; a computer that sent no identity says nothing.
+    #[test]
+    fn the_identity_says_whether_the_computer_answers_notifications() {
+        let new = identity_claims(
+            r#"{"type":"kdeconnect.identity","body":{"deviceName":"Desk","outgoingCapabilities":["kdeconnect.notification","kdeconnect.notification.ack"]}}"#,
+        );
+        assert_eq!(new.name.as_deref(), Some("Desk"));
+        assert_eq!(new.acks_notifications(), Some(true));
+        let old = identity_claims(
+            r#"{"type":"kdeconnect.identity","body":{"deviceName":"Desk","outgoingCapabilities":["kdeconnect.notification"]}}"#,
+        );
+        assert_eq!(old.acks_notifications(), Some(false));
+        let bare = identity_claims(r#"{"type":"kdeconnect.identity","body":{}}"#);
+        assert_eq!(bare.acks_notifications(), Some(false));
+        assert_eq!(identity_claims("").acks_notifications(), None);
+        assert_eq!(identity_claims("POCKETDESK_OK").acks_notifications(), None);
     }
 
     #[tokio::test]

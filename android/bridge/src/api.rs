@@ -547,9 +547,9 @@ pub async fn connect_to_peer(
         // The stream, and whether it came by the internet road.
         let dialed: Result<(ControlDuplex, bool), _> =
             match conn_mgr.connect_named(&address, port, &identity).await {
-                Ok((stream, name)) => {
+                Ok((stream, claims)) => {
                     // U3: the computer's name, for the app to keep.
-                    crate::peer_names::note(&address, name);
+                    crate::peer_names::note(&address, claims);
                     Ok((Box::new(stream) as ControlDuplex, false))
                 }
                 Err(home) => match wan_identity.as_deref().map(WanTarget::parse) {
@@ -1320,6 +1320,14 @@ mod reply_tests {
         );
     }
 
+    /// C3 review: a computer from before C3 is never asked.
+    #[test]
+    fn only_a_notification_to_a_computer_that_answers_asks() {
+        let note = json!({"id": "k", "title": "Ann"});
+        assert!(super::asks_answer(&note, true));
+        assert!(!super::asks_answer(&note, false));
+    }
+
     /// Several audio requests share one reply type: a reply naming another
     /// request's action is not this one's (T8c).
     #[test]
@@ -1358,12 +1366,12 @@ async fn oneshot_request(
 ) -> Result<serde_json::Value, String> {
     let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
-    let (stream, name) = conn_mgr
+    let (stream, claims) = conn_mgr
         .connect_named(address, port, &identity)
         .await
         .map_err(|e| format!("Connection failed: {e}"))?;
     // U3: every connection hears the computer's name, a one-off one too.
-    crate::peer_names::note(address, name);
+    crate::peer_names::note(address, claims);
     let (reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));
     let sender = TcpDeviceSender::from_arc(writer.clone(), address.to_string());
@@ -1480,12 +1488,12 @@ pub(crate) async fn push_packet(
 
     let conn_mgr = control_manager(Duration::from_secs(5))?;
     let identity = client_identity();
-    let (stream, name) = conn_mgr
+    let (stream, claims) = conn_mgr
         .connect_named(address, port, &identity)
         .await
         .map_err(|e| format!("Connection failed: {e}"))?;
     // U3: every connection hears the computer's name, a one-off one too.
-    crate::peer_names::note(address, name);
+    crate::peer_names::note(address, claims);
     let (mut reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));
     let sender = TcpDeviceSender::from_arc(writer.clone(), address.to_string());
@@ -1544,18 +1552,24 @@ pub async fn get_clipboard(address: String, port: u16) -> Result<String, String>
 /// How long a computer has to say it read a phone notification (C3).
 const NOTIFICATION_ACK_WAIT: Duration = Duration::from_secs(5);
 
-/// Send one of this phone's notifications asking the computer to say it
-/// read it (C3), and say what became of it: `acked`, `refused` (the
-/// computer's Notifications permission is off), `unanswered` (sent on the
-/// live link, nothing back: a computer from before C3, or a link that has
-/// died unseen), or `pushed` (no live link, sent on a connection of its own,
-/// which cannot carry the answer). A send that fails is an error.
+/// Send one of this phone's notifications, asking the computer to say it
+/// read it when its identity says it answers (C3), and say what became of
+/// it: `acked`, `refused` (the computer's Notifications permission is off),
+/// `unanswered` (sent on the live link, nothing back in time: the link has
+/// died unseen), `pushed` (no live link, sent on a connection of its own,
+/// which cannot carry the answer) or `sent` (not asked: a computer from
+/// before C3). A send that fails is an error.
 pub async fn send_notification_acked(
     address: String,
     port: u16,
     body: String,
 ) -> Result<&'static str, String> {
-    let body = ack_body(notification_body(&body)?);
+    let body = notification_body(&body)?;
+    if !asks_answer(&body, crate::peer_names::acks_notifications(&address)) {
+        let packet = NetworkPacket::new("kdeconnect.notification").with_body(body);
+        return push_packet(&address, port, &packet).await.map(|()| "sent");
+    }
+    let body = ack_body(body);
     let id = body["id"].as_str().unwrap_or_default().to_string();
     let packet = NetworkPacket::new("kdeconnect.notification").with_body(body);
     let answer = request_answer(
@@ -1575,6 +1589,12 @@ pub async fn send_notification_acked(
         Err(Unanswered::Silent) => Ok("unanswered"),
         Err(Unanswered::NotSent) => Err("The notification could not be sent".to_string()),
     }
+}
+
+/// Whether to ask the computer to answer `body`: only a computer that says
+/// it answers (C3).
+fn asks_answer(_body: &serde_json::Value, computer_answers: bool) -> bool {
+    computer_answers
 }
 
 /// `body`, asking the computer to answer (C3).
@@ -2276,12 +2296,12 @@ pub(crate) async fn dial_internet_control(
     .map_err(|e| format!("{e:#}"))?;
     // The streams the computer opens on this connection for transfers (2d).
     let acceptor = stream.link_acceptor();
-    let (stream, name) = pocketdesk_core::protocol::connection::internet_control_handshake_named(
+    let (stream, claims) = pocketdesk_core::protocol::connection::internet_control_handshake_named(
         stream, address, identity,
     )
     .await
     .map_err(|e| e.to_string())?;
-    crate::peer_names::note(address, name);
+    crate::peer_names::note(address, claims);
     if let Some(acceptor) = acceptor {
         crate::link::spawn_acceptor(acceptor);
     }

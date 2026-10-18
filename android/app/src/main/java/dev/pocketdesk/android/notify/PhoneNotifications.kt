@@ -29,7 +29,6 @@ object PhoneNotificationPrefs {
     private const val KEY_SEEN = "seen"
     private const val MAX_SEEN = 100
     private const val KEY_WAIT = "wait_minutes"
-    private const val KEY_ANSWERS = "computers_answer"
 
     /** How long a notification may wait for the computer, in minutes (C3): the choices, the default first. */
     val WAIT_CHOICES = listOf(60, 10, 0)
@@ -43,15 +42,6 @@ object PhoneNotificationPrefs {
     }
 
     /** The apps whose notifications go to the computer. */
-    /** Whether the computer at [address] has said it read a notification (C3): its silence then means a dead link. */
-    fun computerAnswers(ctx: Context, address: String): Boolean =
-        address in prefs(ctx).getStringSet(KEY_ANSWERS, emptySet()).orEmpty()
-
-    fun noteComputerAnswers(ctx: Context, address: String) {
-        val now = prefs(ctx).getStringSet(KEY_ANSWERS, emptySet()).orEmpty()
-        if (address !in now) prefs(ctx).edit { putStringSet(KEY_ANSWERS, now + address) }
-    }
-
     /** How long a notification that could not be sent waits for the computer, in minutes (C3). */
     fun waitMinutes(ctx: Context): Int =
         prefs(ctx).getInt(KEY_WAIT, WAIT_CHOICES.first()).takeIf { it in WAIT_CHOICES } ?: WAIT_CHOICES.first()
