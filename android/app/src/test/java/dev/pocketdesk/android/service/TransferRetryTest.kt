@@ -10,11 +10,12 @@ import org.junit.Test
 
 class TransferRetryTest {
     @Test
-    fun aCancelledDownloadsPartIsDropped() {
+    fun aDownloadCancelledOnTheComputerDropsItsPart() {
         // C6, found on the A71: a folder cancelled on the computer left its
         // first file's part behind, waiting for a retry that never comes.
-        assertFalse(TransferRetry.keepsPart(resumable = true, error = "refused: cancelled on the computer"))
-        assertFalse(TransferRetry.keepsPart(resumable = true, error = "cancelled on the phone"))
+        assertFalse(TransferRetry.keepsPart(resumable = true, error = "The computer refused the download: cancelled on the computer"))
+        // The phone's own Cancel keeps it: sending again continues (C1).
+        assertTrue(TransferRetry.keepsPart(resumable = true, error = "cancelled on the phone"))
         // A broken one keeps its part, to continue.
         assertTrue(TransferRetry.keepsPart(resumable = true, error = "connection reset"))
         assertTrue(TransferRetry.keepsPart(resumable = true, error = null))

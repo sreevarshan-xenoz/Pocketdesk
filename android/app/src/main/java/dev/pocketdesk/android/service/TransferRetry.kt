@@ -197,15 +197,18 @@ object TransferRetry {
 
     /**
      * Whether a download that failed with [error] keeps its part for a
-     * retry: only one the bridge recorded ([resumable]), and never a Cancel,
-     * which is not sent again (C6, found on the device: a folder cancelled on
-     * the computer left its first file's part behind).
+     * retry: only one the bridge recorded ([resumable]), and not one the
+     * computer's owner cancelled, which no one sends again (C6, found on the
+     * device: a folder cancelled on the computer left its first file's part
+     * behind). The phone's own Cancel keeps it, as designed in C1: sending
+     * the file again continues from it (C6 review).
      */
-    fun keepsPart(resumable: Boolean, error: String?): Boolean = resumable && !isCancel(error)
+    fun keepsPart(resumable: Boolean, error: String?): Boolean =
+        resumable && error?.contains(CANCELLED_ON_COMPUTER, ignoreCase = true) != true
 
     /** Whether [error] is a Cancel, on either side (C1). */
     fun isCancel(error: String?): Boolean =
-        error != null && (error.contains(CANCELLED_ON_PHONE) || error.contains(CANCELLED_ON_COMPUTER))
+        error != null && (error.contains(CANCELLED_ON_PHONE, ignoreCase = true) || error.contains(CANCELLED_ON_COMPUTER, ignoreCase = true))
 
     /** What a transfer the phone's Cancel stopped fails with (the bridge's words too). */
     const val CANCELLED_ON_PHONE = "cancelled on the phone"
