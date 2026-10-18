@@ -99,6 +99,24 @@ class TransferService : Service() {
 
     private fun stopped() = runningJob <= cancelThrough
 
+    /** Woken by a Cancel, so a wait between attempts ends at once. */
+    private val pause = Object()
+
+    /** Wait [ms] between attempts, or until a Cancel (C1). */
+    private fun pauseFor(ms: Long) {
+        val until = SystemClock.elapsedRealtime() + ms
+        synchronized(pause) {
+            while (!stopped()) {
+                val left = until - SystemClock.elapsedRealtime()
+                if (left <= 0) return
+                pause.wait(left)
+            }
+        }
+    }
+
+    private fun cancelledHere(): Result<Nothing> =
+        Result.failure(java.io.IOException(TransferRetry.CANCELLED_ON_PHONE))
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -128,9 +146,12 @@ class TransferService : Service() {
         if (intent?.action == ACTION_CANCEL) {
             synchronized(lock) {
                 cancelThrough = enqueued
+                // Under the lock: a job queued after the press cannot have
+                // started its call yet, so only what was asked stops.
+                RustCore.cancelTransfer()
                 if (queued == 0) stopSelf(startId)
             }
-            RustCore.cancelTransfer()
+            synchronized(pause) { pause.notifyAll() }
             return START_NOT_STICKY
         }
         val job = intent?.let(::jobOf)
@@ -289,8 +310,12 @@ class TransferService : Service() {
         title: String,
     ): Result<Unit> {
         show(progressNotification(title, name, 0))
-        var result = sendOne(address, port, uri, name, part) { percent ->
-            show(progressNotification(title, name, percent))
+        var result = if (stopped()) {
+            cancelledHere()
+        } else {
+            sendOne(address, port, uri, name, part) { percent ->
+                show(progressNotification(title, name, percent))
+            }
         }
         // A failed file goes again a few times: the computer kept what
         // arrived, so each retry continues where the last one stopped. With
@@ -307,7 +332,7 @@ class TransferService : Service() {
                     Log.i(TAG, "sending $name failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_waiting_network), name, 0))
                     val started = SystemClock.elapsedRealtime()
-                    val back = NetworkWait.await(this, address, next.seconds)
+                    val back = NetworkWait.await(this, address, next.seconds, ::stopped)
                     val ended = SystemClock.elapsedRealtime()
                     offline.add((ended - started + 999) / 1000, ended)
                     if (!back) continue@retry
@@ -315,16 +340,21 @@ class TransferService : Service() {
                 is TransferRetry.Next.After -> {
                     Log.i(TAG, "sending $name failed (${error?.message}); trying again in ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_retrying, attempt), name, 0))
-                    Thread.sleep(next.seconds * 1000)
+                    pauseFor(next.seconds * 1000)
                     attempt++
                 }
             }
-            result = sendOne(address, port, uri, name, part) { percent ->
-                show(progressNotification(title, name, percent))
+            result = if (stopped()) {
+                cancelledHere()
+            } else {
+                sendOne(address, port, uri, name, part) { percent ->
+                    show(progressNotification(title, name, percent))
+                }
             }
         }
         sendCount++
-        if (stopped()) cancelledAny = true
+        // A file that went before the press is sent, not cancelled.
+        if (result.isFailure && stopped()) cancelledAny = true
         if (result.isSuccess) {
             sentTotal++
             offline.reset()
@@ -379,7 +409,7 @@ class TransferService : Service() {
             return
         }
         show(progressNotification(title, job.name, 0))
-        var result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
+        var result: Result<Uri?> = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
         // A broken download goes again a few times, continuing what it kept;
         // with no network it first waits for one (R6i).
         var attempt = 1
@@ -394,7 +424,7 @@ class TransferService : Service() {
                     Log.i(TAG, "receiving ${job.name} failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_waiting_network), job.name, 0))
                     val started = SystemClock.elapsedRealtime()
-                    val back = NetworkWait.await(this, job.address, next.seconds)
+                    val back = NetworkWait.await(this, job.address, next.seconds, ::stopped)
                     val ended = SystemClock.elapsedRealtime()
                     offline.add((ended - started + 999) / 1000, ended)
                     if (!back) continue@retry
@@ -402,11 +432,11 @@ class TransferService : Service() {
                 is TransferRetry.Next.After -> {
                     Log.i(TAG, "receiving ${job.name} failed (${error?.message}); trying again in ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_retrying, attempt), job.name, 0))
-                    Thread.sleep(next.seconds * 1000)
+                    pauseFor(next.seconds * 1000)
                     attempt++
                 }
             }
-            result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
+            result = if (stopped()) cancelledHere() else receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
         }
         result.onSuccess { uri ->
             savedTotal++
@@ -749,7 +779,7 @@ class TransferService : Service() {
         private const val PROGRESS_MS = 500L
         private const val ACTION_CANCEL = "dev.pocketdesk.android.action.CANCEL_TRANSFER"
         /** What the computer's Sent list says of an offer cancelled here (C1). */
-        private const val CANCELLED_HERE = "cancelled on the phone"
+        private const val CANCELLED_HERE = TransferRetry.CANCELLED_ON_PHONE
         private const val MAX_RECEIVE_BYTES = 8L * 1024 * 1024 * 1024
         private const val EXTRA_ADDRESS = "address"
         private const val EXTRA_PORT = "port"

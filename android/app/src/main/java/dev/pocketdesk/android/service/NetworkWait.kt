@@ -47,9 +47,11 @@ internal object NetworkWait {
         }.getOrDefault(false)
 
     /** Block up to [seconds] for [usable]; true once it is, after a moment to settle. */
-    fun await(context: Context, address: String, seconds: Long): Boolean {
+    fun await(context: Context, address: String, seconds: Long, stop: () -> Boolean = { false }): Boolean {
         val deadline = SystemClock.elapsedRealtime() + seconds * 1000
         while (SystemClock.elapsedRealtime() < deadline) {
+            // A Cancel (C1) ends the wait; the caller sees it is stopped.
+            if (stop()) return false
             if (usable(context, address)) {
                 Thread.sleep(SETTLE_MS)
                 return true
