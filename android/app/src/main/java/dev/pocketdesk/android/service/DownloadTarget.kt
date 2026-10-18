@@ -51,9 +51,12 @@ object DownloadTarget {
                 // The part takes its name; a provider that cannot rename
                 // leaves the file whole under the part's name.
                 val part = displayName(context, document) ?: return
-                runCatching {
-                    DocumentsContract.renameDocument(context.contentResolver, document, DownloadPlace.finishedName(part))
-                }.getOrNull()?.let { documentUri = it }
+                if (!part.endsWith(DownloadPlace.PART_SUFFIX)) return
+                // A name taken since the part was made: the next free one.
+                val renamed = DownloadPlace.candidates(DownloadPlace.finishedName(part)).take(20).firstNotNullOfOrNull { name ->
+                    runCatching { DocumentsContract.renameDocument(context.contentResolver, document, name) }.getOrNull()
+                }
+                renamed?.let { documentUri = it }
                 return
             }
             val uri = mediaUri ?: return
@@ -200,6 +203,12 @@ object DownloadTarget {
             ?.use { if (it.moveToFirst()) it.getString(0) else null }
     }.getOrNull()
 
+    private fun canRename(context: Context, document: Uri): Boolean = runCatching {
+        context.contentResolver.query(document, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)
+            ?.use { it.moveToFirst() && it.getInt(0) and DocumentsContract.Document.FLAG_SUPPORTS_RENAME != 0 }
+            ?: false
+    }.getOrDefault(false)
+
     /** The child of [parent] in [tree] named [name], by its document id. */
     private fun child(context: Context, tree: Uri, parent: String, name: String): String? {
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent)
@@ -232,14 +241,25 @@ object DownloadTarget {
                 )?.let { DocumentsContract.getDocumentId(it) }
                 ?: return null
         }
+        // A name the folder does not hold yet, so the part's rename finds it
+        // free (a provider refuses a rename onto a name it holds).
+        val folder = parent
+        val free = DownloadPlace.freeName(name) { child(context, tree, folder, it) != null }
         // A plain type for the part: a provider adds the extension a type
         // implies, and the finished name brings its own.
-        val document = DocumentsContract.createDocument(
+        val dir = DocumentsContract.buildDocumentUriUsingTree(tree, parent)
+        var document = DocumentsContract.createDocument(
             resolver,
-            DocumentsContract.buildDocumentUriUsingTree(tree, parent),
+            dir,
             "application/octet-stream",
-            DownloadPlace.partName(name),
+            DownloadPlace.partName(free),
         ) ?: return null
+        // A provider that cannot rename keeps a part's name for good: the
+        // file is written under its own name there instead.
+        if (!canRename(context, document)) {
+            runCatching { DocumentsContract.deleteDocument(resolver, document) }
+            document = DocumentsContract.createDocument(resolver, dir, mimeOf(free), free) ?: return null
+        }
         val descriptor = resolver.openFileDescriptor(document, "rw")
         if (descriptor == null) {
             runCatching { DocumentsContract.deleteDocument(resolver, document) }

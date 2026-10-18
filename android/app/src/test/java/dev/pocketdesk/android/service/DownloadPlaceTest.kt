@@ -25,6 +25,15 @@ class DownloadPlaceTest {
     }
 
     @Test
+    fun aNameTheFolderHoldsGetsTheNextFree() {
+        val taken = setOf("photo.jpg", "photo (1).jpg.part", "notes")
+        assertEquals("photo (2).jpg", DownloadPlace.freeName("photo.jpg") { it in taken })
+        assertEquals("notes (1)", DownloadPlace.freeName("notes") { it in taken })
+        assertEquals("free.txt", DownloadPlace.freeName("free.txt") { it in taken })
+        assertEquals("a dot first is no extension", ".bashrc (1)", DownloadPlace.freeName(".bashrc") { it == ".bashrc" })
+    }
+
+    @Test
     fun aFileIsAPartUntilItIsWhole() {
         assertEquals("photo.jpg.part", DownloadPlace.partName("photo.jpg"))
         assertEquals("photo.jpg", DownloadPlace.finishedName("photo.jpg.part"))

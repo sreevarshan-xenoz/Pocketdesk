@@ -21,6 +21,18 @@ object DownloadPlace {
     /** The name of [name] while it arrives. */
     fun partName(name: String): String = name + PART_SUFFIX
 
+    /** The names [name] may take in a folder, in order: itself, then `stem (1).ext`… */
+    fun candidates(name: String): Sequence<String> {
+        val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+        val stem = name.substring(0, dot)
+        val ext = name.substring(dot)
+        return generateSequence(0) { it + 1 }.take(1000).map { n -> if (n == 0) name else "$stem ($n)$ext" }
+    }
+
+    /** The first of [name]'s [candidates] that neither it nor its part already takes in a folder. */
+    fun freeName(name: String, taken: (String) -> Boolean): String =
+        candidates(name).firstOrNull { !taken(it) && !taken(partName(it)) } ?: name
+
     /** The name of the part [part] once it is whole. */
     fun finishedName(part: String): String = part.removeSuffix(PART_SUFFIX).ifEmpty { part }
 }
