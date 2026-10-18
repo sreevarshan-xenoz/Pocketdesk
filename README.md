@@ -242,6 +242,12 @@ curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/s
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --dry-run
 ```
 
+### The phone app, and Windows through winget
+
+- **Android, kept up to date with Obtainium:** add `https://github.com/sreevarshan-xenoz/Pocketdesk`; each release has one APK (`pocketdesk-vX.Y.Z-android-arm64.apk`), signed with the release key, whose certificate's SHA-256 is `3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e8ac3a0f` (for AppVerifier or `apksigner verify --print-certs`). Or download the APK from the release page.
+- **Windows with winget:** the manifests are in `packaging/winget/` (not yet in winget's own catalogue). `winget install --manifest packaging/winget/manifests/s/SreevarshanXenoz/Pocketdesk/0.4.0` installs `pocketdesk` and `pocketdesk-app` as commands (it needs `winget settings --enable LocalManifestFiles` from an administrator); then run `pocketdesk install` once.
+- **F-Droid:** the metadata is ready in `packaging/fdroid/`, not yet submitted. [packaging/README.md](packaging/README.md) has the steps.
+
 ### Install Script Options
 
 | Flag | Description |

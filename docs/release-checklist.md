@@ -38,3 +38,9 @@ Run from the dry run's files, not from a dev build.
 
 - [ ] Push the tag. When the workflow ends, open the release page and check the files and the notes once more.
 - [ ] If anything is wrong, delete the release and the tag at once, fix it, and release the next patch version. Never move a published tag.
+
+## 6. Where people install it (packaging/README.md)
+
+- [ ] `python3 scripts/winget_manifest.py <version> SHA256SUMS` (the release's), `winget validate --manifest` on the folder it wrote, and commit it. Sending it to winget-pkgs is the owner's call.
+- [ ] `packaging/fdroid/dev.pocketdesk.android.yml`: a new `Builds` entry (`versionName`, `versionCode`, `commit: vX.Y.Z`), and `CurrentVersion`/`CurrentVersionCode`. Once it is in fdroiddata, its update check does this.
+- [ ] The release has exactly one APK, named `pocketdesk-vX.Y.Z-android-arm64.apk` (Obtainium picks it without a filter), signed with the same key (the certificate in packaging/README.md).
