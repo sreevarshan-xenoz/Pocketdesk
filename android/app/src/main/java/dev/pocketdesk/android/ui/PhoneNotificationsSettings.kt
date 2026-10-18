@@ -1,7 +1,12 @@
 package dev.pocketdesk.android.ui
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -13,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -73,6 +79,28 @@ fun PhoneNotificationsSection() {
         enabled = enabled,
     )
     if (!enabled) return
+    // C3: how long a notification waits for a computer out of reach.
+    val wait = version.let { PhoneNotificationPrefs.waitMinutes(context) }
+    SettingRow(stringResource(R.string.phone_notifications_wait), stringResource(R.string.phone_notifications_wait_summary))
+    Column(Modifier.selectableGroup()) {
+        PhoneNotificationPrefs.WAIT_CHOICES.forEach { minutes ->
+            val label = when (minutes) {
+                60 -> R.string.phone_notifications_wait_60
+                10 -> R.string.phone_notifications_wait_10
+                else -> R.string.phone_notifications_wait_0
+            }
+            ListItem(
+                headlineContent = { Text(stringResource(label), style = MaterialTheme.typography.bodyLarge) },
+                leadingContent = { RadioButton(selected = wait == minutes, onClick = null) },
+                modifier = Modifier
+                    .selectable(selected = wait == minutes, role = Role.RadioButton) {
+                        PhoneNotificationPrefs.setWaitMinutes(context, minutes)
+                        version++
+                    }
+                    .padding(start = 24.dp),
+            )
+        }
+    }
     if (seen.isEmpty()) {
         Text(
             stringResource(R.string.phone_notifications_apps_empty),

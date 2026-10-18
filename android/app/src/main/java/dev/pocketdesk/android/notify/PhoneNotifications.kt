@@ -28,6 +28,10 @@ object PhoneNotificationPrefs {
     private const val KEY_SHARED = "shared"
     private const val KEY_SEEN = "seen"
     private const val MAX_SEEN = 100
+    private const val KEY_WAIT = "wait_minutes"
+
+    /** How long a notification may wait for the computer, in minutes (C3): the choices, the default first. */
+    val WAIT_CHOICES = listOf(60, 10, 0)
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -38,6 +42,14 @@ object PhoneNotificationPrefs {
     }
 
     /** The apps whose notifications go to the computer. */
+    /** How long a notification that could not be sent waits for the computer, in minutes (C3). */
+    fun waitMinutes(ctx: Context): Int =
+        prefs(ctx).getInt(KEY_WAIT, WAIT_CHOICES.first()).takeIf { it in WAIT_CHOICES } ?: WAIT_CHOICES.first()
+
+    fun setWaitMinutes(ctx: Context, minutes: Int) {
+        prefs(ctx).edit { putInt(KEY_WAIT, minutes) }
+    }
+
     fun shared(ctx: Context): Set<String> = prefs(ctx).getStringSet(KEY_SHARED, emptySet()).orEmpty().toSet()
 
     fun setShared(ctx: Context, pkg: String, shared: Boolean) {
@@ -267,6 +279,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
+        outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
         outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
             .forEach { rule.removed(it) }
     }
@@ -373,6 +386,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     /** Send what waited, oldest first, until one fails. */
     private fun sendWaiting() {
         if (outbox.isEmpty()) return
+        outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
         outbox.flush(SystemClock.elapsedRealtime(), ::sendable, ::sendBody).forEach { rule.removed(it) }
     }
 

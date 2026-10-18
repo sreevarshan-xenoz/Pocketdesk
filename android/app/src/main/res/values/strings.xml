@@ -503,6 +503,11 @@
     <string name="settings_clipboard_background_summary">What you copy on the computer reaches this phone without a session, also away from home. It needs notification access, which keeps the connection</string>
     <string name="phone_notifications_answer">Let the computer answer notifications</string>
     <string name="phone_notifications_answer_summary">The computer can press a notification\'s buttons and reply to chats, as you: from its Notifications tab, or from the notification it shows. Only notifications sent in full, and only from your own computer</string>
+    <string name="phone_notifications_wait">When the computer is out of reach</string>
+    <string name="phone_notifications_wait_summary">Notifications wait on this phone, in memory only, and go when the computer answers, marked late with how long they waited. At most 20 wait</string>
+    <string name="phone_notifications_wait_10">Wait up to 10 minutes</string>
+    <string name="phone_notifications_wait_60">Wait up to an hour</string>
+    <string name="phone_notifications_wait_0">Don\'t wait</string>
     <string name="channel_offers">Files from the computer</string>
     <string name="offer_waiting_title">The computer sends a file</string>
     <string name="offer_save">Save</string>
