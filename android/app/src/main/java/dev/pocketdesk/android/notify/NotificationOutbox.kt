@@ -40,6 +40,16 @@ class NotificationOutbox<T>(
         sendable: (id: String, pkg: String) -> Boolean,
         send: (T, waitedMs: Long) -> Boolean,
     ): List<String> {
+        // "Don't wait" (C3): sent now or given up on, never queued; what
+        // waited from before the setting changed is given up on first.
+        if (pending.maxAgeMs <= 0) {
+            val forgotten = flush(nowMs, sendable, send)
+            if (send(body, 0)) {
+                markShown(id)
+                return forgotten
+            }
+            return forgotten + id
+        }
         val othersWait = !pending.isEmpty()
         if (!othersWait && send(body, 0)) {
             markShown(id)

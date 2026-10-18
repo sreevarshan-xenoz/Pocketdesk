@@ -42,6 +42,28 @@ class NotificationOutboxTest {
     }
 
     @Test
+    fun `with no wait a notification is sent at once or given up on, never queued`() {
+        val outbox = NotificationOutbox<String>(PendingNotifications(maxAgeMs = 0))
+        val computer = Computer().apply { up = false }
+        assertEquals(listOf("a"), outbox.post("a", "app", "A", nowMs = 0, sendable = any, send = computer::send))
+        assertTrue(outbox.isEmpty())
+        computer.up = true
+        assertEquals(emptyList<String>(), outbox.post("b", "app", "B", nowMs = 1, sendable = any, send = computer::send))
+        assertEquals(listOf("B"), computer.shown)
+    }
+
+    @Test
+    fun `turning waiting off gives up on what waited`() {
+        val outbox = NotificationOutbox<String>(PendingNotifications(maxAgeMs = 60_000))
+        val computer = Computer().apply { up = false }
+        outbox.post("a", "app", "A", nowMs = 0, sendable = any, send = computer::send)
+        outbox.maxAgeMs = 0
+        computer.up = true
+        assertEquals(listOf("a"), outbox.post("b", "app", "B", nowMs = 1_000, sendable = any, send = computer::send))
+        assertEquals(listOf("B"), computer.shown)
+    }
+
+    @Test
     fun `an update cannot be overtaken by the older version that waited`() {
         val outbox = NotificationOutbox<String>()
         val computer = Computer().apply { up = false }
