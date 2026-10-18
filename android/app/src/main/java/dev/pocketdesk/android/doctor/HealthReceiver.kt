@@ -70,7 +70,9 @@ class HealthReceiver : BroadcastReceiver() {
             val problems = HealthCheck.problems(ctx)
             if (problems.isEmpty()) {
                 cancel(ctx)
-            } else {
+            } else if (Health.notifyAfterUpdate(problems, Prefs.healthSeen(ctx), Prefs.healthDismissed(ctx))) {
+                // Only news (D1 review): a problem Home showed, or the owner put
+                // off, before the update was not the update's doing.
                 notify(ctx, problems.size)
             }
         }

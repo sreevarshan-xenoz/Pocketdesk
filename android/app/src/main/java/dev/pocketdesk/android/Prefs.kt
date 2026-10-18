@@ -39,6 +39,7 @@ object Prefs {
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_HEALTH_ALERTS = "health_alerts"
     private const val KEY_HEALTH_DISMISSED = "health_dismissed"
+    private const val KEY_HEALTH_SEEN = "health_seen"
     private const val KEY_LAST_FINGERPRINT = "last_fingerprint"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
@@ -122,6 +123,16 @@ object Prefs {
     fun setHealthDismissed(ctx: Context, key: String?) {
         prefs(ctx).edit { putString(KEY_HEALTH_DISMISSED, key) }
         bump()
+    }
+
+    /**
+     * D1: the problems Home last found ([dev.pocketdesk.android.doctor.Health.key]),
+     * so an update tells only of new ones. No [bump]: Home writes it as it reads.
+     */
+    fun healthSeen(ctx: Context): String? = prefs(ctx).getString(KEY_HEALTH_SEEN, null)
+
+    fun setHealthSeen(ctx: Context, key: String) {
+        if (healthSeen(ctx) != key) prefs(ctx).edit { putString(KEY_HEALTH_SEEN, key) }
     }
 
     /** D1: the system build seen at the last boot, to tell a system update from a restart. */

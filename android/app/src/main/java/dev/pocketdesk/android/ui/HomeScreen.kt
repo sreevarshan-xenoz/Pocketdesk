@@ -158,6 +158,8 @@ fun HomeScreen(
     }
     val healthProblems = remember(resumes, listenerKnown, prefsVersion) { HealthCheck.problems(context, listenerKnown) }
     LaunchedEffect(healthProblems) {
+        // What an update's check compares with: it tells only of new problems.
+        Prefs.setHealthSeen(context, Health.key(healthProblems))
         // Fixed: the notification posted after an update goes too.
         if (healthProblems.isEmpty()) HealthReceiver.cancel(context)
     }
