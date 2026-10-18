@@ -42,6 +42,23 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-18: **D1, health after updates (branch `feat/health`; spec `docs/superpowers/specs/2026-10-18-health-design.md`, with as-built and review sections).**
+  - **The phone checks what is on but cannot work:**
+    - notification access, or a stopped listener (asked to bind again first);
+    - the texts, contacts and photos permissions, and its own notifications for ring and files;
+    - C8's control service, or Advanced Protection blocking it;
+    - a lost download folder, and screenshots that turned themselves off.
+  - **Where it says so:** a card on Home lists each with its fix. After the app or Android updates, one notification names what is new.
+  - **The setting:** Settings "Tell me when something stops working" (`doctor/Health`, JVM-tested).
+  - **Fresh review (0 Critical, 8 Important), fixed one commit each:**
+    - the first update after installing went unseen;
+    - updates re-announced old problems;
+    - links flagged phones that refused notifications;
+    - "Not now" was never forgotten;
+    - a card flashed on opening;
+    - one sample judged the listener;
+    - the feature list was wrong three ways.
+  - **Device-checked on the A71** (checklist §111), which found screenshots turning themselves off without a word. A real system update and Advanced Protection are owed.
 - 2026-10-18: **C10, getting it to people (branch `chore/distribution`; `packaging/README.md`).** What can be done without the owner's sign-off:
   - Obtainium: the releases already carry one APK named so it is picked; README gives the repo and the signing certificate's SHA-256.
   - winget: 0.4.0's manifests (`packaging/winget/`, validated with `winget validate`) and `scripts/winget_manifest.py` for each release.

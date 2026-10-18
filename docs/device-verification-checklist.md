@@ -1754,6 +1754,21 @@ On the A71 against a throwaway server:
 - [ ] HEIC photos: thumbnails shown, Copy saying it cannot.
 - [ ] Android 8 or 9: the legacy thumbnail path.
 
+## 111. Health after updates (D1)
+
+On the A71 (Android 16), no server needed:
+
+- [x] An app update with nothing broken posts nothing. One with only what Home already showed posts nothing. One with something new (contact names without contacts access) posts one notification.
+- [x] Screenshots on without photo access, and notification access off: both on Home's card. Fix opens Android's notification access page.
+- [x] Access granted: the listener runs, and the screenshots switch turning itself off is said as such (found here: it had vanished without a word).
+- [x] Not now hides the set, across a reopen. A new problem (control on, its service off) brings the card back.
+- [x] After a force-stop and reopen, the listener is live again and nothing is called stopped.
+- [x] Everything fixed: the card and the notification go.
+- [ ] A real system update (the fingerprint path), and a listener that stays unbound after one.
+- [ ] Advanced Protection on, with control on (needs the owner's Google account).
+- [ ] A low-RAM phone on Android 10 or older: no "stopped" card.
+- [ ] The card in Spanish and Tamil, and with TalkBack.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
