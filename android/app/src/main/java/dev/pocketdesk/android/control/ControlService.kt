@@ -2,6 +2,7 @@ package dev.pocketdesk.android.control
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
 import android.graphics.Path
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -76,8 +77,20 @@ class ControlService : AccessibilityService() {
         return metrics.widthPixels to metrics.heightPixels
     }
 
+    /**
+     * Whether the phone is locked: then nothing is touched or typed, so the
+     * computer cannot enter its PIN or pattern (C8 review); Back and Home
+     * still go. A finger already down is lifted.
+     */
+    private fun locked(): Boolean = getSystemService(KeyguardManager::class.java).isDeviceLocked
+
     /** A touch at a fraction of the screen ([ControlPlan.place]). */
     fun touch(action: String, x: Int, y: Int) = main.post {
+        if (locked()) {
+            strokes.lift(SystemClock.uptimeMillis())
+            pump()
+            return@post
+        }
         val (w, h) = screen()
         val point = ControlPlan.place(x, y, w, h)
         val now = SystemClock.uptimeMillis()
@@ -163,7 +176,7 @@ class ControlService : AccessibilityService() {
 
     /** A wheel's notches at a fraction of the screen, as a swipe; not while a finger is down. */
     fun scroll(x: Int, y: Int, notches: Int) = main.post {
-        if (strokes.active || busy || notches == 0) return@post
+        if (strokes.active || busy || notches == 0 || locked()) return@post
         val (w, h) = screen()
         val points = ControlPlan.scroll(ControlPlan.place(x, y, w, h), notches, h)
         perform(ControlPlan.Segment(points, SCROLL_MS, start = true, willContinue = false))
@@ -178,17 +191,20 @@ class ControlService : AccessibilityService() {
             "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
             else -> return@post
         }
+        // Locked, only Back and Home: the shade and Recents could reach
+        // what the lock keeps.
+        if (locked() && code != GLOBAL_ACTION_BACK && code != GLOBAL_ACTION_HOME) return@post
         performGlobalAction(code)
     }
 
     /**
-     * The field that takes typing now, if any, read fresh: this service
+     * The field that takes typing now, if any (none while locked), read fresh: this service
      * listens for no text events, so Android's cached copy can still hold
      * the text before the last edit (a Backspace right after typing undid
      * the typing).
      */
     private fun field(): AccessibilityNodeInfo? =
-        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (locked()) null else rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             ?.also { it.refresh() }
             ?.takeIf { it.isEditable }
 

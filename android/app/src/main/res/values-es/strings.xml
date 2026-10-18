@@ -669,7 +669,7 @@
     <string name="settings_control_from_computer">Dejar que el ordenador controle este teléfono</string>
     <string name="settings_control_summary_off">Mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar y escribir en él. Usa un servicio de accesibilidad, que la Protección avanzada de Android no permite.</string>
     <string name="settings_control_summary_needs_service">Casi: activa «Control de Pocketdesk» en los ajustes de Accesibilidad de Android.</string>
-    <string name="settings_control_summary_on">Activado: mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar, escribir y pulsar Atrás e Inicio.</string>
+    <string name="settings_control_summary_on">Activado: mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar, escribir y pulsar Atrás e Inicio. No con el teléfono bloqueado, salvo Atrás e Inicio.</string>
     <string name="cast_showing_controlled">La pantalla de este teléfono se muestra y se controla en %1$s</string>
     <string name="settings_control_open_accessibility">Abrir los ajustes de Accesibilidad</string>
 </resources>
