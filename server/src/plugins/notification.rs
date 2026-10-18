@@ -289,6 +289,38 @@ fn to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
     ))
 }
 
+/// The computer's answer to a phone notification that asked for one (C3):
+/// `{id}`, or `{id, refused: true}` when its Notifications permission is
+/// off. A phone that hears nothing back keeps the notification to send
+/// again, so one written into a link that had died is not lost.
+pub const ACK: &str = "kdeconnect.notification.ack";
+
+/// The answer to `body`, if it asked (`ack: true`) and names itself.
+fn ack_for(body: &serde_json::Value, refused: bool) -> Option<NetworkPacket> {
+    if body.get("ack").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|id| notification_action::valid_key(id))?;
+    let mut answer = serde_json::json!({ "id": id });
+    if refused {
+        answer["refused"] = true.into();
+    }
+    Some(NetworkPacket::new(ACK).with_body(answer))
+}
+
+/// A phone notification the phone may not send here: refused, if it asked.
+pub(crate) async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    if packet.packet_type != "kdeconnect.notification" {
+        return;
+    }
+    if let Some(ack) = ack_for(&packet.body, true) {
+        let _ = sender.send_packet(&ack).await;
+    }
+}
+
 /// The longest wait a phone's notification may claim, in seconds (a day).
 const MAX_WAITED_SECS: u64 = 86_400;
 
@@ -420,6 +452,7 @@ impl Plugin for NotificationPlugin {
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
         &[
             "kdeconnect.notification",
+            ACK,
             pocketdesk_core::protocol::notification_action::NOTIFICATION_REPLY,
             pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION,
         ]
@@ -428,6 +461,10 @@ impl Plugin for NotificationPlugin {
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         match packet.packet_type.as_str() {
             "kdeconnect.notification" => {
+                // Here, whatever is done with it: said at once (C3).
+                if let Some(ack) = ack_for(&packet.body, false) {
+                    let _ = sender.send_packet(&ack).await;
+                }
                 let id = packet.body.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 // A notification without an id cannot be closed or updated
                 // later, and is shown untagged so it never replaces another.
@@ -1017,6 +1054,53 @@ mod tests {
         assert_eq!(with_late("Lunch?", 120), "Lunch?\nSent 2 min late");
         assert_eq!(with_late("", 120), "Sent 2 min late");
         assert_eq!(with_late("Lunch?", 10), "Lunch?");
+    }
+
+    #[test]
+    fn a_notification_that_asks_is_acknowledged_by_its_id() {
+        let ack = ack_for(&json!({"id": "0|com.chat|1", "ack": true}), false).unwrap();
+        assert_eq!(ack.packet_type, ACK);
+        assert_eq!(ack.body, json!({"id": "0|com.chat|1"}));
+        let refused = ack_for(&json!({"id": "k", "ack": true}), true).unwrap();
+        assert_eq!(refused.body, json!({"id": "k", "refused": true}));
+        assert!(ack_for(&json!({"id": "k"}), false).is_none(), "not asked");
+        assert!(ack_for(&json!({"id": "k", "ack": "yes"}), false).is_none());
+        assert!(ack_for(&json!({"ack": true}), false).is_none(), "no id");
+        assert!(ack_for(&json!({"id": "", "ack": true}), false).is_none());
+    }
+
+    struct Phone(std::sync::Mutex<Vec<NetworkPacket>>);
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Phone {
+        fn device_id(&self) -> &str {
+            "phone-a"
+        }
+        fn connection_id(&self) -> &str {
+            "phone-a"
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.0.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    /// A phone with Notifications off is told its notification was refused
+    /// (C3), so it does not keep it waiting to send again.
+    #[tokio::test]
+    async fn a_refused_notification_that_asked_is_answered_refused() {
+        let phone = Phone(Default::default());
+        let asked = NetworkPacket::new("kdeconnect.notification")
+            .with_body(json!({"id": "k", "app": "Chat", "title": "Ann", "ack": true}));
+        crate::plugins::answer_denied(&asked, &phone).await;
+        let sent = phone.0.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].packet_type, ACK);
+        assert_eq!(sent[0].body, json!({"id": "k", "refused": true}));
+        // One that did not ask gets nothing, as before.
+        let plain = NetworkPacket::new("kdeconnect.notification").with_body(json!({"id": "k"}));
+        crate::plugins::answer_denied(&plain, &phone).await;
+        assert_eq!(phone.0.lock().unwrap().len(), 1);
     }
 
     #[test]
