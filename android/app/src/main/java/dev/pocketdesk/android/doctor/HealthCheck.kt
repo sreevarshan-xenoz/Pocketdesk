@@ -100,6 +100,7 @@ object HealthCheck {
             readContacts = granted(Manifest.permission.READ_CONTACTS),
             photoFeatures = ScreenshotPrefs.on(ctx) || RecentPhotoPrefs.on(ctx),
             photoAccess = ScreenshotPrefs.granted(ctx),
+            screenshotsStopped = ScreenshotPrefs.stopped(ctx),
             // Turned on by the owner, both off by default (D1 review): links
             // from the computer are on by default and post only in a session,
             // so they would flag every phone that said no to notifications.
@@ -141,7 +142,7 @@ object HealthCheck {
         HealthProblem.APP_NOTIFICATIONS ->
             Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
         HealthProblem.CONTROL_SERVICE -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-        HealthProblem.CONTROL_BLOCKED, HealthProblem.DOWNLOAD_FOLDER -> null
+        HealthProblem.CONTROL_BLOCKED, HealthProblem.DOWNLOAD_FOLDER, HealthProblem.SCREENSHOTS_STOPPED -> null
     }?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     /** Open [problem]'s fix; the app's page where that one is missing. */

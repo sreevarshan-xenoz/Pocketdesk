@@ -705,6 +705,8 @@
     <string name="health_control_service">El ordenador no puede controlar este teléfono: «Control de Pocketdesk» está desactivado en los ajustes de Accesibilidad de Android.</string>
     <string name="health_control_blocked">El ordenador no puede controlar este teléfono: la Protección avanzada solo permite servicios de accesibilidad a las herramientas de accesibilidad.</string>
     <string name="health_download_folder">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>
+    <string name="health_screenshots_stopped">Las capturas nuevas dejaron de ir al ordenador cuando se retiró el acceso a las fotos. Vuelve a activarlo en Ajustes.</string>
+    <string name="health_settings">Ajustes</string>
     <string name="settings_health">Avisarme cuando algo deje de funcionar</string>
     <string name="settings_health_summary">En Inicio, y en una notificación tras una actualización</string>
     <plurals name="health_count">

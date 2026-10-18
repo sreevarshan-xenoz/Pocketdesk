@@ -767,6 +767,7 @@ private fun HealthCard(
     problems: List<HealthProblem>,
     onFix: (HealthProblem) -> Unit,
     onTurnOffControl: () -> Unit,
+    /** Pocketdesk's Settings: the download folder, screenshots. */
     onChooseFolder: () -> Unit,
     onNotNow: () -> Unit,
 ) {
@@ -796,6 +797,8 @@ private fun HealthCard(
                             TextButton(onClick = onTurnOffControl) { Text(stringResource(R.string.health_turn_off)) }
                         HealthProblem.DOWNLOAD_FOLDER ->
                             TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.health_choose)) }
+                        HealthProblem.SCREENSHOTS_STOPPED ->
+                            TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.health_settings)) }
                         else -> TextButton(onClick = { onFix(problem) }) { Text(stringResource(R.string.health_fix)) }
                     }
                 }
@@ -814,6 +817,7 @@ private fun healthText(problem: HealthProblem): Int = when (problem) {
     HealthProblem.TEXTS_SEND -> R.string.health_texts_send
     HealthProblem.CONTACTS -> R.string.health_contacts
     HealthProblem.PHOTOS -> R.string.health_photos
+    HealthProblem.SCREENSHOTS_STOPPED -> R.string.health_screenshots_stopped
     HealthProblem.APP_NOTIFICATIONS -> R.string.health_app_notifications
     HealthProblem.CONTROL_SERVICE -> R.string.health_control_service
     HealthProblem.CONTROL_BLOCKED -> R.string.health_control_blocked

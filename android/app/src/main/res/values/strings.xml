@@ -709,6 +709,8 @@
     <string name="health_control_service">The computer can\'t control this phone: \"Pocketdesk control\" is off in Android\'s Accessibility settings.</string>
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>
     <string name="health_download_folder">The folder picked for files from computers is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
+    <string name="health_screenshots_stopped">New screenshots stopped going to the computer when photo access was taken away. Turn it on again in Settings.</string>
+    <string name="health_settings">Settings</string>
     <string name="settings_health">Tell me when something stops working</string>
     <string name="settings_health_summary">On Home, and in a notification after an update</string>
     <plurals name="health_count">

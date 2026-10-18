@@ -177,4 +177,12 @@ class HealthTest {
             Health.problems(media.copy(listenerAccess = true, listenerConnected = false)),
         )
     }
+
+    @Test
+    fun `screenshots that turned themselves off are said`() {
+        assertEquals(
+            listOf(HealthProblem.SCREENSHOTS_STOPPED),
+            Health.problems(nothingOn.copy(screenshotsStopped = true, advancedProtection = false)),
+        )
+    }
 }
