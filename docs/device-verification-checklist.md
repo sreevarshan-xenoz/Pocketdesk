@@ -1687,6 +1687,19 @@ On the A71 against a throwaway server, the phone in the background with files on
 - [ ] A picked folder on an SD card or a cloud provider.
 - [ ] Linux.
 
+## 106. Notifications that wait and go later (C3)
+
+On the A71 against a throwaway server:
+
+- [x] The computer stopped, a notification posted 2 s later, the computer back 65 s after: it arrives within 10 s, "Sent 1 min late", `late_secs` in its event.
+- [x] A notification closed on the phone closes its toast at once.
+- [x] An hour in forced deep idle (USB in): all 12 arrive within a second.
+- [ ] Doze on battery without USB, where the phone suspends; a notification waiting through it and arriving marked late.
+- [ ] Settings "When the computer is out of reach": each choice on screen, and Don't wait dropping a notification posted while the computer is away.
+- [ ] A computer from before C3: notifications arrive once each, as before.
+- [ ] The computer's Notifications permission off: nothing waits on the phone.
+- [ ] Linux: the late line in a D-Bus notification.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
