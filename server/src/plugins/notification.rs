@@ -512,7 +512,8 @@ impl Plugin for NotificationPlugin {
                 // An event whether or not it is shown here (a script may want
                 // the phone's notifications without the toasts), as it would
                 // be shown: one the phone hides stays hidden in the log too.
-                let meta = if waited > 0 {
+                // Late as the toast says it (a minute or more, C3 review).
+                let meta = if late_line(waited).is_some() {
                     serde_json::json!({ "app": app, "late_secs": waited })
                 } else {
                     serde_json::json!({ "app": app })

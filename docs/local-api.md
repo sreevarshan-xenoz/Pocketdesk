@@ -101,7 +101,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `phone_linked`, `phone_unlinked` | — (any connection the phone holds to this computer, a brief one for a single send included) | — |
 | `phone_battery` | `charge`, `charging` | — |
 | `phone_battery_low` | `charge` | — |
-| `notification` | `app`, and `late_secs` for one that waited on the phone (C3) | `title`, `text` |
+| `notification` | `app`, and `late_secs` (seconds) for one that waited on the phone a minute or more (C3) | `title`, `text` |
 | `text_received` | — | `from`, `body` |
 | `file_received` | `size`; or `folder: true`, once, as a folder starts arriving; `key`, the first 16 hex digits of the SHA-256 of where it was saved (its `path` in `received --json`) | `name` (`folder/` for a folder) |
 | `link_received` | `host` | `url` |
