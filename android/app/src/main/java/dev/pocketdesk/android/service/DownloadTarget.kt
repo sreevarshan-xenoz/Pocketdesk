@@ -85,7 +85,7 @@ object DownloadTarget {
         // (its grant taken back, or the folder gone) means Downloads/Pocketdesk.
         fellBack = false
         tree(context)?.let { tree ->
-            createInTree(context, tree, safe, folders)?.let { return@runCatching it }
+            runCatching { createInTree(context, tree, safe, folders) }.getOrNull()?.let { return@runCatching it }
             fellBack = true
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -265,7 +265,7 @@ object DownloadTarget {
             runCatching { DocumentsContract.deleteDocument(resolver, document) }
             document = DocumentsContract.createDocument(resolver, dir, mimeOf(free), free) ?: return null
         }
-        val descriptor = resolver.openFileDescriptor(document, "rw")
+        val descriptor = runCatching { resolver.openFileDescriptor(document, "rw") }.getOrNull()
         if (descriptor == null) {
             runCatching { DocumentsContract.deleteDocument(resolver, document) }
             return null
