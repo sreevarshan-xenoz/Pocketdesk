@@ -866,6 +866,8 @@ fun RemoteScreen(
             widthDp = window.width / density.density,
             heightDp = window.height / density.density,
             pip = inPictureInPicture,
+            // A phone on its side is wide, not a tablet (C5).
+            smallestWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp.toFloat(),
         )
         val dualPane = split != PaneSplit.None
         val vertical = split == PaneSplit.Vertical
