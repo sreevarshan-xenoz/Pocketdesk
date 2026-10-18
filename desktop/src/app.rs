@@ -1435,9 +1435,16 @@ impl PocketdeskApp {
             ui.add_space(6.0);
         });
         if save {
+            // D3: the history turned off is emptied at once.
+            let history_off = form.turns_history_off();
             match Config::path() {
                 Ok(path) => match form.save_to(&path) {
-                    Ok(()) => self.notice = crate::notice::Notice::done("Saved."),
+                    Ok(()) => {
+                        if history_off {
+                            let _ = pocketdesk_core::local::clip_history::clear(&self.state_dir);
+                        }
+                        self.notice = crate::notice::Notice::done("Saved.");
+                    }
                     Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),
                 },
                 Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),

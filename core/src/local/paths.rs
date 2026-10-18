@@ -35,6 +35,10 @@ pub const LINKS_DIR: &str = "links_out";
 pub const RINGS_DIR: &str = "rings_out";
 /// Mutes the desktop app or the local API asks the server to send to a phone (D2).
 pub const QUIET_DIR: &str = "quiet_out";
+/// The texts that crossed between this computer and its phones (D3).
+pub const CLIP_HISTORY_FILE: &str = "clip_history.json";
+/// Texts the desktop app or the local API asks the server to put on a phone's clipboard (D3).
+pub const CLIPBOARD_OUT_DIR: &str = "clipboard_out";
 /// KDE Connect devices this computer has seen (3a), for the desktop app.
 pub const KDECONNECT_SEEN_FILE: &str = "kdeconnect_seen.json";
 /// The desktop app's request to look for KDE Connect devices: until when.
