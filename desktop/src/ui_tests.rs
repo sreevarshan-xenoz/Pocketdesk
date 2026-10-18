@@ -103,7 +103,8 @@ fn every_page_opens_from_the_left() {
     let mut app = fixture.open(None);
     for page in Tab::ALL {
         if page == Tab::Pair {
-            // Opening Pair mints a code into the state folder; its own test.
+            // Opening Pair mints a code into the state folder; its own test,
+            // `pair_opens_from_the_left`.
             continue;
         }
         go_to(&app, page);
@@ -125,6 +126,17 @@ fn pair_phone(state: &Path, id: &str, name: &str) {
 
 /// A test phone's id: as long as a real one, and no real phone's.
 const PHONE: &str = "00000000-0000-4000-8000-0000000000c4";
+
+/// Pair opens from the left too, with its purpose (it mints a code into
+/// the throwaway state folder as it does).
+#[test]
+fn pair_opens_from_the_left() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    go_to(&app, Tab::Pair);
+    app.run_steps(3);
+    assert!(app.query_by_label(Tab::Pair.purpose()).is_some());
+}
 
 /// With no phone paired, Devices says how to pair one, and its button goes
 /// there.
