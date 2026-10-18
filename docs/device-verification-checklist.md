@@ -1742,6 +1742,18 @@ On the A71 (1080×2400 at 420 dpi):
 - [x] The batch run here on 2026-10-18 (each ticked in its own section): sound underruns (§25), the background clipboard's two switches (§65), a folder with no session (§67), a folder cancelled on the computer (§103). Found and fixed: a download cancelled on the computer kept its part on the phone.
 - [ ] The rest of "here", in later batches.
 
+## 110. Recent photos on the computer (C7)
+
+On the A71 against a throwaway server:
+
+- [x] Three JPEGs pushed into DCIM/Camera: listed newest first with thumbnails; one fetched into the received files, checksums matching.
+- [x] The grid with each photo's Save, Copy and Open (a picture only), in the desktop's headless harness.
+- [ ] The Phone page by hand: Refresh, Save, Open and Copy.
+- [ ] The phone's switch off, and photo access denied: the page says why.
+- [ ] A phone with thousands of photos: the newest 24, quickly.
+- [ ] HEIC photos: thumbnails shown, Copy saying it cannot.
+- [ ] Android 8 or 9: the legacy thumbnail path.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -232,6 +232,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 },
             )
             ScreenshotsSection()
+            RecentPhotosSection()
             // T2: whether Android holds those back while the phone sleeps.
             BackgroundSection()
             SettingSwitch(

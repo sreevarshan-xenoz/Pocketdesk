@@ -19,6 +19,7 @@ mod notes_view;
 mod notice;
 mod pair_view;
 mod phone_files_view;
+mod photos_view;
 mod pick_file;
 mod restart;
 mod reveal;

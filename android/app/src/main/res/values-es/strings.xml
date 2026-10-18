@@ -518,6 +518,10 @@
     <string name="phone_folders_not_kept">Android no dejó que Pocketdesk conservara el acceso a esa carpeta</string>
     <string name="screenshots_on">Enviar capturas nuevas</string>
     <string name="screenshots_on_summary">Una captura de pantalla hecha en este teléfono llega a su equipo un momento después. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
+    <string name="recent_photos_on">Fotos recientes en el equipo</string>
+    <string name="recent_photos_on_summary">La página Teléfono del equipo muestra tus fotos de cámara más nuevas (DCIM) en pequeño, y trae una cuando la pides. Desactivado hasta que lo actives</string>
+    <string name="recent_photos_needs_photos">Pocketdesk necesita acceso a las fotos para esto: actívalo de nuevo para permitirlo</string>
+    <string name="recent_photos_needs_access">El equipo pregunta a través del acceso a notificaciones del teléfono, que está desactivado: permítelo abajo</string>
     <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano</string>
     <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
     <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>

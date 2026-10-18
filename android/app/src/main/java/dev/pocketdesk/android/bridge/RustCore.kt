@@ -163,6 +163,7 @@ object RustCore {
     private external fun nativeTakeClipboardPush(): String
     private external fun nativeTakeNotificationAnswers(): String
     private external fun nativeTakePhoneFileRequests(): String
+    private external fun nativeTakePhotoRequests(): String
     private external fun nativeDeclineOffer(address: String, port: Int, id: String, reason: String): String
     private external fun nativeFetchFolder(address: String, port: Int, path: String): String
     private external fun nativeVideoBytes(): Long
@@ -849,6 +850,9 @@ object RustCore {
 
     /** The computer's requests to browse this phone's shared folders, as a JSON array (T10g). */
     fun takePhoneFileRequests(): String = envelope(nativeTakePhoneFileRequests()).getOrDefault("[]")
+
+    /** The computer's requests for this phone's recent photos since the last call (C7), as a JSON array. */
+    fun takePhotoRequests(): String = envelope(nativeTakePhotoRequests()).getOrDefault("[]")
 
     /** The computer's answers to this phone's notifications since the last call (T10c). */
     fun takeNotificationAnswers(): List<NotificationAnswer> =

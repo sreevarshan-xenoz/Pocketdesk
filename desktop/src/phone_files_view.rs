@@ -94,6 +94,11 @@ impl PhoneFilesView {
         }
     }
 
+    /// The phone the page shows (C7: its recent photos follow it).
+    pub fn phone(&self) -> Option<&str> {
+        self.phone.as_deref()
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path, devices: &[Device], now_unix: u64) {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(REFRESH);

@@ -12,6 +12,7 @@ pub mod pair;
 pub mod phone_battery;
 pub mod phone_files;
 pub mod phone_media;
+pub mod phone_photos;
 pub mod power;
 pub mod privacy;
 pub mod share;
@@ -66,6 +67,7 @@ pub fn register_all() -> PluginSet {
     registry.register(phone_battery::PhoneBatteryPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
     registry.register(phone_files::PhoneFilesPlugin);
+    registry.register(phone_photos::PhonePhotosPlugin);
     registry.register(crate::virtual_screen::VirtualScreenPlugin);
     registry.register(clipboard::ClipboardPlugin::new());
     registry.register(notification::NotificationPlugin::new());

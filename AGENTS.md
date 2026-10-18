@@ -42,6 +42,11 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-18: **C7, recent photos on the computer (branch `feat/recent-photos`; spec `docs/superpowers/specs/2026-10-18-recent-photos-design.md`, with as-built and device-run sections).**
+  - **The phone:** "Recent photos on the computer" (off; asks for photo access). It answers its own computer's list with its newest camera photos (DCIM, at most 24), each with a small JPEG thumbnail, and a fetch by sharing that photo, only one it listed.
+  - **The computer:** the answer kept owner-only (`phone_photos.json`, a thumbnail per photo), the app's requests sent to a connected phone with Files on; the Phone page shows the grid with Save, Open (a picture only) and Copy (SECURITY.md limit 26).
+  - **Device-checked** on the A71 (checklist §110): three photos listed with thumbnails, one fetched with its checksum matching. Owed: the page by hand, HEIC, a big library.
+  - **Fresh review (0 Critical, 3 Important), fixed:** a thumbnail declaring a huge picture could crash the desktop, the request folder was not watched, and Copy was sideways and unbounded; plus nine minors.
 - 2026-10-18: **C6, the owed checks by where they run (branch `docs/owed-checks`; spec `docs/superpowers/specs/2026-10-18-owed-checks-design.md`).**
   - **The index:** `docs/owed-checks.md`, generated from the checklist by `scripts/owed_checks.py` and held to it in CI. Of about 550 open items, roughly 320 can run here; the rest need Linux, a SIM, a second phone or computer, other hardware, the owner's OK or hands, or never run here (power, lock).
   - **The first batch,** by script on the A71 against a throwaway server: sound underruns, the background clipboard's switches, a folder with no session, a folder cancelled on the computer.

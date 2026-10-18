@@ -740,6 +740,18 @@ pub async fn connect_to_peer(
                                         from_peer.1,
                                     );
                                 }
+                                // The computer's requests for this phone's
+                                // recent photos (C7).
+                                if trimmed.contains("phone_photos.")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                {
+                                    crate::photo_requests::receive(
+                                        &pkt.packet_type,
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    );
+                                }
                                 // The computer's answers to this phone's
                                 // notifications (T10c), kept for the app.
                                 if trimmed.contains("kdeconnect.notification.")
@@ -836,6 +848,7 @@ pub async fn connect_to_peer(
                         crate::clipboard_push::forget();
                         crate::notification_answers::forget();
                         crate::phone_file_requests::forget();
+                        crate::photo_requests::forget();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );
@@ -1098,13 +1111,15 @@ pub fn take_sms_requests() -> String {
 
 /// The packets the app may send through [`send_phone_packet`]: its texts
 /// and the results of the replies it sent (N5b), its battery (T8b), and
-/// what it plays (T8d).
-const PHONE_PACKETS: [&str; 5] = [
+/// what it plays (T8d), its folders' listings (T10g) and its recent photos
+/// (C7).
+const PHONE_PACKETS: [&str; 6] = [
     "kdeconnect.sms.messages",
     "kdeconnect.pocketdesk.sms_sent",
     "kdeconnect.battery",
     pocketdesk_core::protocol::phone_media::PHONE_MEDIA,
     pocketdesk_core::protocol::phone_files::LISTING,
+    pocketdesk_core::protocol::phone_photos::PHOTOS,
 ];
 
 /// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.

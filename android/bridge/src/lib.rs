@@ -17,6 +17,7 @@ mod media_presses;
 mod notification_answers;
 mod peer_names;
 mod phone_file_requests;
+mod photo_requests;
 mod rates;
 mod session;
 mod tasks;
@@ -1366,6 +1367,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePho
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(phone_file_requests::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's requests for this phone's recent photos since the last
+/// call (C7): `{"ok": "[{host, port, fetch, id?}]"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePhotoRequests(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(photo_requests::take_json()));
     to_jstring(&mut env, json)
 }
 

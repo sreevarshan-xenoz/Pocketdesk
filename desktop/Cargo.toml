@@ -21,6 +21,8 @@ memmap2 = "0.9"
 # does not parse would panic the app at its first frame.
 skrifa = "0.44"
 serde_json = "1"
+# The phone's recent photos (C7): thumbnails, and a photo to copy.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 # C4: the snapshots need a GPU renderer; a feature, so the usual test run
 # does not build one (a feature cannot turn on a dev-dependency's features).
@@ -46,4 +48,6 @@ snapshots = ["dep:egui_kittest"]
 [dev-dependencies]
 # C4: the app driven headless through AccessKit.
 egui_kittest = { version = "=0.36.2", features = ["eframe"] }
+# C7: a fixture answer's thumbnails, as the phone encodes them.
+base64 = "0.22"
 

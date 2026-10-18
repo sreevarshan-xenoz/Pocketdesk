@@ -138,6 +138,10 @@ class PhoneNotificationListener : NotificationListenerService() {
      * of its own: a slow folder or a connect must not hold up answers.
      */
     private val phoneFiles by lazy { dev.pocketdesk.android.files.PhoneFiles(applicationContext) }
+
+    /** The computer asking for this phone's recent photos (C7), on a 2 s tick of its own: thumbnails take seconds. */
+    private val recentPhotos by lazy { dev.pocketdesk.android.files.RecentPhotos(applicationContext) }
+    private val recentPhotosTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     private val phoneFilesTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
     /** The computer ringing this phone (N1), on a 2 s tick of its own: its connect can take seconds. */
@@ -178,6 +182,12 @@ class PhoneNotificationListener : NotificationListenerService() {
             2,
             TimeUnit.SECONDS,
         )
+        recentPhotosTicker.scheduleWithFixedDelay(
+            { runCatching { recentPhotos.tick() }.onFailure { Log.w("PhoneNotifications", "recent photos failed", it) } },
+            2,
+            2,
+            TimeUnit.SECONDS,
+        )
         ringTicker.scheduleWithFixedDelay(
             { runCatching { ring.tick() }.onFailure { Log.w("PhoneNotifications", "ring tick failed", it) } },
             2,
@@ -205,6 +215,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     override fun onDestroy() {
         answerTicker.shutdownNow()
         phoneFilesTicker.shutdownNow()
+        recentPhotosTicker.shutdownNow()
         ringTicker.shutdownNow()
         screenshotsTicker.shutdownNow()
         screenshots.close()
