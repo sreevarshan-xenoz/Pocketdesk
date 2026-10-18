@@ -123,6 +123,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ),
     ("mic_relay_device", "Phone mic plays into", Section::Phones),
     (
+        "downloads_folder",
+        "Received files land in",
+        Section::Phones,
+    ),
+    (
         "cast_control",
         "Control phones from their screen window",
         Section::Phones,
@@ -217,6 +222,7 @@ pub fn applies_live(key: &str) -> bool {
             | "internet_files"
             | "toast_answers"
             | "cast_control"
+            | "downloads_folder"
             | "remember_screen_grant"
     )
 }
@@ -255,6 +261,8 @@ pub struct SettingsForm {
     /// The Home Assistant bridge's status as last read, and when (it is
     /// read again every 2 s, not every frame).
     home_assistant: Option<(std::time::Instant, Option<ha::Status>)>,
+    /// A folder being picked for received files (C2).
+    picking_downloads: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
 }
 
 impl SettingsForm {
@@ -278,6 +286,7 @@ impl SettingsForm {
             edited: config,
             wake: pocketdesk_core::local::wake::wake_facts(None),
             home_assistant: None,
+            picking_downloads: None,
         }
     }
 
@@ -588,6 +597,38 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.virtual_screens,
                         "a phone with Input can add a screen of its own shape (Sway)",
+                    );
+                });
+                // A folder picked for received files (C2) fills the box.
+                if self
+                    .picking_downloads
+                    .as_ref()
+                    .is_some_and(|h| h.is_finished())
+                    && let Some(Ok(Some(path))) = self.picking_downloads.take().map(|h| h.join())
+                {
+                    e.downloads_folder = path.display().to_string();
+                }
+                let picking = &mut self.picking_downloads;
+                row(ui, "downloads_folder", |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut e.downloads_folder)
+                            .hint_text("Downloads")
+                            .desired_width(320.0),
+                    );
+                    if crate::pick_file::AVAILABLE
+                        && ui
+                            .add_enabled(picking.is_none(), egui::Button::new("Choose folder…"))
+                            .clicked()
+                    {
+                        *picking = Some(crate::pick_file::spawn(true));
+                    }
+                    if !e.downloads_folder.trim().is_empty() && ui.button("Use Downloads").clicked()
+                    {
+                        e.downloads_folder.clear();
+                    }
+                    note(
+                        ui,
+                        "Files from phones, other computers and KDE Connect devices. A folder that is gone means Downloads.",
                     );
                 });
                 row(ui, "cast_control", |ui| {
