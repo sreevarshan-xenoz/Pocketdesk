@@ -34,8 +34,9 @@ fun DownloadFolderSetting() {
                 val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 val kept = runCatching { context.contentResolver.takePersistableUriPermission(chosen, flags) }.isSuccess
                 if (kept) {
-                    // The folder before it is let go, so grants do not pile up.
-                    release(context, picked)
+                    // The folder before it is let go, so grants do not pile
+                    // up; the same one picked again keeps its grant.
+                    if (picked != chosen.toString()) release(context, picked)
                     Prefs.setDownloadTree(context, chosen.toString())
                 }
                 version++
@@ -58,8 +59,18 @@ fun DownloadFolderSetting() {
     }
 }
 
+/**
+ * Let go of this setting's grant on [tree]: the write, and the read too
+ * unless "Folders the computer may open" shares the folder (grants are per
+ * folder, not per feature).
+ */
 private fun release(context: android.content.Context, tree: String?) {
     tree ?: return
-    val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    val shared = dev.pocketdesk.android.files.PhoneFolders.all(context).any { it.uri == tree }
+    val flags = if (shared) {
+        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    } else {
+        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    }
     runCatching { context.contentResolver.releasePersistableUriPermission(tree.toUri(), flags) }
 }
