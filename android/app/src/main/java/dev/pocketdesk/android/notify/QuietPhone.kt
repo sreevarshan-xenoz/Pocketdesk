@@ -118,6 +118,7 @@ class BackgroundQuiet(
             // Kept first: a process killed between the two still ends it.
             QuietPrefs.setMute(ctx, QuietPlan.Mute(System.currentTimeMillis() + minutes * 60_000L, QuietPlan.PRIORITY))
             setFilter(QuietPlan.PRIORITY)
+            Log.i(TAG, "muted for $minutes minutes by the computer")
         } else {
             // The owner's own Do Not Disturb stands; the computer is told it.
             Log.i(TAG, "a mute from the computer, not taken: already in Do Not Disturb")
@@ -132,10 +133,12 @@ class BackgroundQuiet(
                 setFilter(QuietPlan.ALL)
                 QuietPrefs.setMute(ctx, null)
                 told = null
+                Log.i(TAG, "the computer's mute ended")
             }
             QuietPlan.Next.FORGET -> {
                 QuietPrefs.setMute(ctx, null)
                 told = null
+                Log.i(TAG, "the computer's mute forgotten: the owner changed Do Not Disturb")
             }
             QuietPlan.Next.WAIT -> {}
         }
@@ -148,7 +151,19 @@ class BackgroundQuiet(
             .put("quiet", state?.quiet ?: false)
             .put("byComputer", state?.byComputer ?: false)
             .put("refused", true)
-        PhoneLink.sendNow(ctx, STATE, body)
+        send(body)
+    }
+
+    /**
+     * Over the link already up to the phone's own computer only, never a
+     * dial: a failure here must not pause the notifications' sends, as
+     * [PhoneLink.sendNow]'s does.
+     */
+    private fun send(body: JSONObject): Boolean {
+        val own = PhoneLink.target(ctx) ?: return false
+        return RustCore.sendPhonePacketOnLink(own.address, own.controlPort, STATE, body.toString())
+            .onFailure { Log.d(TAG, "quiet state not sent: ${it.message}") }
+            .isSuccess
     }
 
     private fun report() {
@@ -157,7 +172,7 @@ class BackgroundQuiet(
         if (told == state to peer) return
         val body = JSONObject().put("quiet", state.quiet).put("byComputer", state.byComputer)
         state.untilUnix?.let { body.put("until", it) }
-        if (PhoneLink.sendNow(ctx, STATE, body)) told = state to peer
+        if (send(body)) told = state to peer
     }
 
     private companion object {
