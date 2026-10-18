@@ -32,7 +32,14 @@ object QuietPlan {
     fun minutes(asked: Int): Int? = asked.takeIf { it in 0..MAX_MINUTES }
 
     /** The computer's mute: until when (wall clock), and the filter it set. */
-    data class Mute(val untilMs: Long, val filter: Int)
+    data class Mute(val untilMs: Long, val filter: Int, val startedMs: Long = 0)
+
+    /**
+     * How long a mute's filter is given to take (found on the device):
+     * Android applies a requested filter later, so the filter read just after
+     * asking is still the old one, not the owner's change.
+     */
+    const val SETTLE_MS = 10_000L
 
     enum class Next {
         /** Not yet, or nothing to do. */
@@ -47,7 +54,7 @@ object QuietPlan {
 
     fun next(mute: Mute?, nowMs: Long, filter: Int): Next = when {
         mute == null || filter == UNKNOWN -> Next.WAIT
-        filter != mute.filter -> Next.FORGET
+        filter != mute.filter -> if (nowMs - mute.startedMs < SETTLE_MS) Next.WAIT else Next.FORGET
         nowMs >= mute.untilMs -> Next.END
         // Further off than any mute: the clock was set back. Ended, not
         // stretched by however far it went (D2 review).

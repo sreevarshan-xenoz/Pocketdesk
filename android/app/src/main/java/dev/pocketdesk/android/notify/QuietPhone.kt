@@ -17,6 +17,7 @@ object QuietPrefs {
     private const val KEY_LET_MUTE = "let_computer_mute"
     private const val KEY_UNTIL = "mute_until_ms"
     private const val KEY_FILTER = "mute_filter"
+    private const val KEY_STARTED = "mute_started_ms"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -34,16 +35,22 @@ object QuietPrefs {
     fun mute(ctx: Context): QuietPlan.Mute? {
         val until = prefs(ctx).getLong(KEY_UNTIL, -1)
         if (until < 0) return null
-        return QuietPlan.Mute(until, prefs(ctx).getInt(KEY_FILTER, QuietPlan.PRIORITY))
+        return QuietPlan.Mute(
+            until,
+            prefs(ctx).getInt(KEY_FILTER, QuietPlan.PRIORITY),
+            prefs(ctx).getLong(KEY_STARTED, 0),
+        )
     }
 
     fun setMute(ctx: Context, mute: QuietPlan.Mute?) = prefs(ctx).edit {
         if (mute == null) {
             remove(KEY_UNTIL)
             remove(KEY_FILTER)
+            remove(KEY_STARTED)
         } else {
             putLong(KEY_UNTIL, mute.untilMs)
             putInt(KEY_FILTER, mute.filter)
+            putLong(KEY_STARTED, mute.startedMs)
         }
     }
 }
@@ -117,7 +124,8 @@ class BackgroundQuiet(
             QuietPrefs.setMute(ctx, null)
         } else if (QuietPlan.mayMute(filter())) {
             // Kept first: a process killed between the two still ends it.
-            QuietPrefs.setMute(ctx, QuietPlan.Mute(System.currentTimeMillis() + minutes * 60_000L, QuietPlan.PRIORITY))
+            val now = System.currentTimeMillis()
+            QuietPrefs.setMute(ctx, QuietPlan.Mute(now + minutes * 60_000L, QuietPlan.PRIORITY, startedMs = now))
             setFilter(QuietPlan.PRIORITY)
             Log.i(TAG, "muted for $minutes minutes by the computer")
         } else {

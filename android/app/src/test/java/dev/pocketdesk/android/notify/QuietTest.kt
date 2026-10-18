@@ -35,7 +35,8 @@ class QuietTest {
 
     @Test
     fun `a mute ends at its time, only while the filter is still the one it set`() {
-        val mute = QuietPlan.Mute(untilMs = 10_000, filter = QuietPlan.PRIORITY)
+        // Started long enough ago for its filter to have taken.
+        val mute = QuietPlan.Mute(untilMs = 10_000, filter = QuietPlan.PRIORITY, startedMs = -QuietPlan.SETTLE_MS)
         assertEquals(QuietPlan.Next.WAIT, QuietPlan.next(mute, nowMs = 9_999, filter = QuietPlan.PRIORITY))
         assertEquals(QuietPlan.Next.END, QuietPlan.next(mute, nowMs = 10_000, filter = QuietPlan.PRIORITY))
         // The owner turned Do Not Disturb off, or to another kind, meanwhile: theirs stands.
@@ -82,5 +83,20 @@ class QuietTest {
         assertFalse(QuietPlan.ownMode(34))
         assertTrue(QuietPlan.ownMode(35))
         assertTrue(QuietPlan.ownMode(37))
+    }
+
+    @Test
+    fun `a mute's filter is given time to take before another is the owner's`() {
+        val mute = QuietPlan.Mute(untilMs = 1_000_000, filter = QuietPlan.PRIORITY, startedMs = 100_000)
+        // Just asked: the filter still reads "all".
+        assertEquals(QuietPlan.Next.WAIT, QuietPlan.next(mute, nowMs = 100_011, filter = QuietPlan.ALL))
+        assertEquals(
+            QuietPlan.Next.WAIT,
+            QuietPlan.next(mute, nowMs = 100_000 + QuietPlan.SETTLE_MS - 1, filter = QuietPlan.ALL),
+        )
+        assertEquals(
+            QuietPlan.Next.FORGET,
+            QuietPlan.next(mute, nowMs = 100_000 + QuietPlan.SETTLE_MS, filter = QuietPlan.ALL),
+        )
     }
 }
