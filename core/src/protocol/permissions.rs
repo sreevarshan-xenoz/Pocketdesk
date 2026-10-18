@@ -99,7 +99,11 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         // The phone's storage on the computer (T10g).
         | crate::protocol::phone_files::LIST
         | crate::protocol::phone_files::LISTING
-        | crate::protocol::phone_files::FETCH => Capability::Files,
+        | crate::protocol::phone_files::FETCH
+        // Its recent photos (C7).
+        | crate::protocol::phone_photos::LIST
+        | crate::protocol::phone_photos::PHOTOS
+        | crate::protocol::phone_photos::FETCH => Capability::Files,
         "kdeconnect.pocketdesk.audio" => Capability::Audio,
         // Waking another machine through this one is a power action too.
         "kdeconnect.pocketdesk.power"
