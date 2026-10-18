@@ -68,9 +68,12 @@ impl Fixture {
     /// The app over these folders, open on `page`.
     pub fn open(&self, page: Option<Tab>) -> Harness<'static, PocketdeskApp> {
         let state = self.state().to_path_buf();
-        let mut harness = Harness::builder()
-            .with_size(SIZE)
-            .build_eframe(move |_cc| PocketdeskApp::new(state, None, page));
+        let mut harness = Harness::builder().with_size(SIZE).build_eframe(move |cc| {
+            // As the app sets itself up (main.rs), less the system's
+            // fonts: egui's own draw the same on every machine.
+            crate::theme::install(&cc.egui_ctx);
+            PocketdeskApp::new(state, None, page)
+        });
         harness.run_steps(3);
         harness
     }
@@ -258,4 +261,43 @@ fn empty_sessions_and_files_say_what_to_do_next() {
         app.query_by_label(Tab::Pair.purpose()).is_some(),
         "Pair opened"
     );
+}
+
+/// The Overview, Devices and Settings at 720×480 in both themes, compared
+/// with the pictures under `desktop/tests/snapshots/` (C4). They need a GPU
+/// renderer, so only with the `snapshots` feature; CI draws them with
+/// Mesa's software Vulkan, where they were made. `UPDATE_SNAPSHOTS=1`
+/// draws them anew.
+#[cfg(feature = "snapshots")]
+mod snapshots {
+    use super::*;
+
+    #[test]
+    fn the_pages_look_as_they_did() {
+        let fixture = Fixture::new();
+        pair_phone(fixture.state(), PHONE, "Test Phone");
+        let mut failed = Vec::new();
+        for (page, name) in [
+            (None, "overview"),
+            (Some(Tab::Devices), "devices"),
+            (Some(Tab::Settings), "settings"),
+        ] {
+            for (theme, shade) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+                let state = fixture.state().to_path_buf();
+                let mut app = Harness::builder()
+                    .with_size(SIZE)
+                    .with_theme(theme)
+                    .wgpu()
+                    .build_eframe(move |cc| {
+                        crate::theme::install(&cc.egui_ctx);
+                        PocketdeskApp::new(state, None, page)
+                    });
+                app.run_steps(3);
+                if let Err(e) = app.try_snapshot(format!("{name}_{shade}")) {
+                    failed.push(e.to_string());
+                }
+            }
+        }
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
 }

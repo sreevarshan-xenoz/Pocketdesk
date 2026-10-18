@@ -22,6 +22,10 @@ memmap2 = "0.9"
 skrifa = "0.44"
 serde_json = "1"
 
+# C4: the snapshots need a GPU renderer; a feature, so the usual test run
+# does not build one (a feature cannot turn on a dev-dependency's features).
+egui_kittest = { version = "=0.36.2", optional = true, features = ["eframe", "snapshot", "wgpu"] }
+
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
 
@@ -33,6 +37,9 @@ tray-icon = "0.26"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", features = ["blocking"] }
+
+[features]
+snapshots = ["dep:egui_kittest"]
 
 [dev-dependencies]
 # C4: the app driven headless through AccessKit.
