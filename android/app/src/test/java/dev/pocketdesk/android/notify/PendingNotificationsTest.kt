@@ -33,12 +33,16 @@ class PendingNotificationsTest {
     }
 
     @Test
-    fun `each one due says how long it waited`() {
-        val pending = PendingNotifications<String>()
+    fun `each one due says how long it waited, an update from when it was posted`() {
+        val pending = PendingNotifications<String>(maxAgeMs = 8_500)
         pending.add("a", "first", nowMs = 1_000)
         pending.add("b", "second", nowMs = 4_000)
         pending.add("a", "first, edited", nowMs = 5_000)
-        assertEquals(mapOf("a" to 9_000L, "b" to 6_000L), pending.due(nowMs = 10_000).waited)
+        val due = pending.due(nowMs = 9_000)
+        assertEquals(mapOf("a" to 4_000L, "b" to 5_000L), due.waited)
+        // Its place and its age are still the first version's.
+        assertEquals(listOf("a", "b"), due.send.map { it.first })
+        assertEquals(listOf("a"), pending.due(nowMs = 9_500).expired)
     }
 
     @Test
