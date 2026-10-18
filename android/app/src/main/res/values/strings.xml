@@ -701,10 +701,10 @@
     <string name="health_choose">Choose</string>
     <string name="health_notification_access">Notification access is off, so what Pocketdesk does in the background has stopped.</string>
     <string name="health_listener_stopped">Android stopped the part of Pocketdesk that runs in the background. Turning its notification access off and on again starts it.</string>
-    <string name="health_texts_receive">Texts can\'t reach the computer: the permission to receive them was taken away.</string>
-    <string name="health_texts_send">Replies from the computer can\'t be sent: the permission to send texts was taken away.</string>
-    <string name="health_contacts">Texts show numbers, not names: contacts access was taken away.</string>
-    <string name="health_photos">Screenshots and photos can\'t reach the computer: photo access was taken away.</string>
+    <string name="health_texts_receive">Texts can\'t reach the computer: Pocketdesk isn\'t allowed to receive them.</string>
+    <string name="health_texts_send">Replies from the computer can\'t be sent: Pocketdesk isn\'t allowed to send texts.</string>
+    <string name="health_contacts">Texts show numbers, not names: Pocketdesk isn\'t allowed to read contacts.</string>
+    <string name="health_photos">Screenshots and photos can\'t reach the computer: Pocketdesk isn\'t allowed to see photos.</string>
     <string name="health_app_notifications">Pocketdesk can\'t show notifications, so rings and files from the computer go unseen.</string>
     <string name="health_control_service">The computer can\'t control this phone: \"Pocketdesk control\" is off in Android\'s Accessibility settings.</string>
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>

@@ -67,7 +67,7 @@ object HealthCheck {
      * True when a rebind was asked, so the caller waits [REBIND_WAIT_MS].
      */
     fun rebindIfStopped(ctx: Context): Boolean {
-        if (ListenerState.connected || !listenerFeatures(ctx) || !PhoneNotificationPrefs.accessGranted(ctx)) return false
+        if (lowRamListener(ctx) || ListenerState.connected || !listenerFeatures(ctx) || !PhoneNotificationPrefs.accessGranted(ctx)) return false
         return runCatching {
             NotificationListenerService.requestRebind(ComponentName(ctx, PhoneNotificationListener::class.java))
         }.isSuccess
@@ -86,7 +86,12 @@ object HealthCheck {
             listenerFeatures = listenerFeatures(ctx),
             accessFeatures = accessFeatures(ctx),
             listenerAccess = PhoneNotificationPrefs.accessGranted(ctx),
-            listenerConnected = if (ListenerState.connected) true else if (listenerKnown) false else null,
+            // Android 10 and older bind no listener on low-RAM phones: nothing to judge.
+            listenerConnected = when {
+                ListenerState.connected -> true
+                lowRamListener(ctx) || !listenerKnown -> null
+                else -> false
+            },
             textsShow = TextPrefs.show(ctx),
             receiveSms = granted(Manifest.permission.RECEIVE_SMS),
             textsReply = TextPrefs.reply(ctx),
@@ -116,8 +121,13 @@ object HealthCheck {
         return runCatching {
             ctx.getSystemService(android.security.advancedprotection.AdvancedProtectionManager::class.java)
                 ?.isAdvancedProtectionEnabled == true
-        }.getOrDefault(false)
+        }.onFailure { android.util.Log.w("HealthCheck", "Advanced Protection unreadable", it) }.getOrDefault(false)
     }
+
+    /** A low-RAM phone on Android 10 or older, where no notification listener is bound. */
+    private fun lowRamListener(ctx: Context): Boolean =
+        Build.VERSION.SDK_INT <= 29 &&
+            ctx.getSystemService(android.app.ActivityManager::class.java)?.isLowRamDevice == true
 
     /**
      * The page that fixes [problem], or null where there is none: Advanced

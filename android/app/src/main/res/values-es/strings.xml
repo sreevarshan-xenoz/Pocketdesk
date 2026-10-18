@@ -697,10 +697,10 @@
     <string name="health_choose">Elegir</string>
     <string name="health_notification_access">El acceso a las notificaciones está desactivado, así que lo que Pocketdesk hace en segundo plano se ha detenido.</string>
     <string name="health_listener_stopped">Android detuvo la parte de Pocketdesk que funciona en segundo plano. Desactivar y volver a activar su acceso a las notificaciones la pone en marcha.</string>
-    <string name="health_texts_receive">Los mensajes no pueden llegar al ordenador: se retiró el permiso para recibirlos.</string>
-    <string name="health_texts_send">Las respuestas desde el ordenador no se pueden enviar: se retiró el permiso para enviar mensajes.</string>
-    <string name="health_contacts">Los mensajes muestran números, no nombres: se retiró el acceso a los contactos.</string>
-    <string name="health_photos">Las capturas y las fotos no pueden llegar al ordenador: se retiró el acceso a las fotos.</string>
+    <string name="health_texts_receive">Los mensajes no pueden llegar al ordenador: Pocketdesk no tiene permiso para recibirlos.</string>
+    <string name="health_texts_send">Las respuestas desde el ordenador no se pueden enviar: Pocketdesk no tiene permiso para enviar mensajes.</string>
+    <string name="health_contacts">Los mensajes muestran números, no nombres: Pocketdesk no tiene permiso para leer los contactos.</string>
+    <string name="health_photos">Las capturas y las fotos no pueden llegar al ordenador: Pocketdesk no tiene permiso para ver las fotos.</string>
     <string name="health_app_notifications">Pocketdesk no puede mostrar notificaciones, así que los timbres y archivos del ordenador pasan desapercibidos.</string>
     <string name="health_control_service">El ordenador no puede controlar este teléfono: «Control de Pocketdesk» está desactivado en los ajustes de Accesibilidad de Android.</string>
     <string name="health_control_blocked">El ordenador no puede controlar este teléfono: la Protección avanzada solo permite servicios de accesibilidad a las herramientas de accesibilidad.</string>
