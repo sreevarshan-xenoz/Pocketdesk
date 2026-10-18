@@ -10,7 +10,13 @@ class NotificationOutboxTest {
     private class Computer {
         var up = true
         val shown = mutableListOf<String>()
-        fun send(body: String): Boolean = up.also { if (it) shown += body }
+        val waited = mutableListOf<Long>()
+        fun send(body: String, waitedMs: Long): Boolean = up.also {
+            if (it) {
+                shown += body
+                waited += waitedMs
+            }
+        }
     }
 
     private val any = { _: String, _: String -> true }
@@ -21,6 +27,18 @@ class NotificationOutboxTest {
         val computer = Computer()
         outbox.post("k", "app", "A", nowMs = 0, sendable = any, send = computer::send)
         assertEquals(listOf("A"), computer.shown)
+    }
+
+    @Test
+    fun `one sent from the wait says how long it waited, one sent at once says none`() {
+        val outbox = NotificationOutbox<String>()
+        val computer = Computer().apply { up = false }
+        outbox.post("a", "app", "A", nowMs = 1_000, sendable = any, send = computer::send)
+        computer.up = true
+        outbox.flush(nowMs = 61_000, sendable = any, send = computer::send)
+        outbox.post("b", "app", "B", nowMs = 62_000, sendable = any, send = computer::send)
+        assertEquals(listOf("A", "B"), computer.shown)
+        assertEquals(listOf(60_000L, 0L), computer.waited)
     }
 
     @Test

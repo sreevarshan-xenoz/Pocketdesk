@@ -10,6 +10,8 @@ package dev.pocketdesk.android.notify
  * - What the computer was shown is remembered apart from the queue, so a
  *   close on the phone reaches the computer even when a later update to
  *   that notification waited and expired.
+ * - Each one is sent with how long it waited, in ms (0 when it went at
+ *   once), so the computer can say it came late (C3).
  */
 class NotificationOutbox<T>(
     private val pending: PendingNotifications<Item<T>> = PendingNotifications(),
@@ -18,6 +20,13 @@ class NotificationOutbox<T>(
     data class Item<T>(val pkg: String, val body: T)
 
     private val shown = LinkedHashSet<String>()
+
+    /** How long notifications may wait for the computer, in ms. */
+    var maxAgeMs: Long
+        get() = pending.maxAgeMs
+        set(value) {
+            pending.maxAgeMs = value
+        }
 
     /**
      * A notification to send. Returns the ids given up on (pushed out of a
@@ -29,10 +38,10 @@ class NotificationOutbox<T>(
         body: T,
         nowMs: Long,
         sendable: (id: String, pkg: String) -> Boolean,
-        send: (T) -> Boolean,
+        send: (T, waitedMs: Long) -> Boolean,
     ): List<String> {
         val othersWait = !pending.isEmpty()
-        if (!othersWait && send(body)) {
+        if (!othersWait && send(body, 0)) {
             markShown(id)
             return emptyList()
         }
@@ -45,7 +54,11 @@ class NotificationOutbox<T>(
      * Send what waited, oldest first, until one fails. Returns the ids given
      * up on: expired, or no longer allowed ([sendable] false).
      */
-    fun flush(nowMs: Long, sendable: (id: String, pkg: String) -> Boolean, send: (T) -> Boolean): List<String> {
+    fun flush(
+        nowMs: Long,
+        sendable: (id: String, pkg: String) -> Boolean,
+        send: (T, waitedMs: Long) -> Boolean,
+    ): List<String> {
         if (pending.isEmpty()) return emptyList()
         val due = pending.due(nowMs)
         val forgotten = due.expired.toMutableList()
@@ -55,7 +68,7 @@ class NotificationOutbox<T>(
                 forgotten += id
                 continue
             }
-            if (!send(item.body)) break
+            if (!send(item.body, due.waited[id] ?: 0)) break
             pending.sent(id)
             markShown(id)
         }

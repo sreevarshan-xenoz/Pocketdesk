@@ -225,7 +225,15 @@ class PhoneNotificationListener : NotificationListenerService() {
     private fun sendable(id: String, pkg: String): Boolean =
         id !in closedKeys && PhoneNotificationPrefs.enabled(this) && pkg in PhoneNotificationPrefs.shared(this)
 
-    private fun sendBody(body: JSONObject): Boolean = PhoneLink.sendNow(this, "kdeconnect.notification", body)
+    /**
+     * Send [body]; one that waited says for how long, in whole seconds, so
+     * the computer can mark it late (C3). The phone's monotonic clock
+     * measures it, so the two clocks need not agree.
+     */
+    private fun sendBody(body: JSONObject, waitedMs: Long): Boolean {
+        val out = if (waitedMs >= 1_000) JSONObject(body.toString()).put("waited", waitedMs / 1_000) else body
+        return PhoneLink.sendNow(this, "kdeconnect.notification", out)
+    }
 
     private fun handle(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>) {
         if (!PhoneNotificationPrefs.enabled(this)) return
