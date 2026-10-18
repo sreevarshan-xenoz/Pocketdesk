@@ -4,12 +4,16 @@
 //! uni streams, each starting with a marker no input packet starts with:
 //!
 //! - [`CAST_CONFIG`] `+ w u16 LE + h u16 LE`, on every encoder start;
-//! - [`CAST_FRAME`] `+ keyframe u8 + seq u64 LE + Annex-B access unit`.
+//! - [`CAST_FRAME`] `+ keyframe u8 + seq u64 LE + Annex-B access unit`;
+//! - [`CAST_CONTROL_STATE`] `+ flags u8` (C8: bit 0, the computer may
+//!   control the phone now).
 
 /// The size of the phone's screen as it is encoded now.
 pub const CAST_CONFIG: [u8; 2] = [0xFA, 0x01];
 /// One encoded access unit.
 pub const CAST_FRAME: [u8; 2] = [0xFA, 0x00];
+/// Whether the phone takes control from the computer now (C8).
+pub const CAST_CONTROL_STATE: [u8; 2] = [0xFA, 0x02];
 
 /// The first byte of every cast stream; no input packet tag is this high.
 pub const CAST_PREFIX: u8 = 0xFA;
@@ -29,6 +33,17 @@ pub enum CastPayload {
         seq: u64,
         data: Vec<u8>,
     },
+    /// The phone takes control now, or no longer (C8).
+    ControlState {
+        on: bool,
+    },
+}
+
+/// The stream the phone sends to say whether it takes control (C8).
+pub fn control_state_bytes(on: bool) -> Vec<u8> {
+    let mut out = CAST_CONTROL_STATE.to_vec();
+    out.push(u8::from(on));
+    out
 }
 
 /// The stream the phone sends for a config.
@@ -62,6 +77,9 @@ pub fn parse(stream: &[u8]) -> Option<CastPayload> {
             keyframe: stream[2] != 0,
             seq: u64::from_le_bytes(stream[3..11].try_into().ok()?),
             data: stream[11..].to_vec(),
+        }),
+        m if m == CAST_CONTROL_STATE && stream.len() == 3 => Some(CastPayload::ControlState {
+            on: stream[2] & 1 != 0,
         }),
         _ => None,
     }
@@ -123,6 +141,9 @@ pub enum CastEvent {
         session_id: u64,
         device_id: Option<String>,
         want_keyframe: tokio::sync::mpsc::Sender<()>,
+        /// Control batches for the phone (C8), sent while it said it takes
+        /// them.
+        control: tokio::sync::mpsc::Sender<Vec<u8>>,
     },
     /// Its config or one of its frames.
     Payload {
@@ -158,11 +179,28 @@ mod tests {
     }
 
     #[test]
+    fn the_phone_says_whether_it_takes_control() {
+        assert_eq!(
+            parse(&control_state_bytes(true)),
+            Some(CastPayload::ControlState { on: true })
+        );
+        assert_eq!(
+            parse(&control_state_bytes(false)),
+            Some(CastPayload::ControlState { on: false })
+        );
+    }
+
+    #[test]
     fn what_is_not_a_cast_stream_is_not_read_as_one() {
         assert_eq!(parse(&[]), None);
         assert_eq!(parse(&[0xFA, 0x01, 1, 2]), None, "a short config");
         assert_eq!(parse(&[0xFA, 0x00, 1, 2, 3]), None, "a short frame");
         assert_eq!(parse(&[0xFA, 0x07, 0, 0, 0, 0]), None, "an unknown marker");
+        assert_eq!(
+            parse(&[0xFA, 0x02]),
+            None,
+            "a control state without its flags"
+        );
         // No input packet tag reaches the cast prefix.
         assert!(super::super::input_packet::InputPacket::decode(&[CAST_PREFIX]).is_err());
     }

@@ -1110,6 +1110,9 @@ pub const STREAM_KIND_READY: u8 = 2;
 /// Server to client, on a cast session (T10k): send a keyframe now (a viewer
 /// joined or lost its way). No payload.
 pub const STREAM_KIND_CAST_KEYFRAME: u8 = 3;
+/// Server → phone on a cast: a batch of control events (C8,
+/// [`super::cast_control`]), sent only after the phone said control is on.
+pub const STREAM_KIND_CAST_CONTROL: u8 = 4;
 
 /// Packet header for streaming transport
 ///

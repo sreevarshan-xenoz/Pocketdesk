@@ -22,8 +22,16 @@ pub const FRAME: u8 = 2;
 pub const END: u8 = 3;
 /// Server → app: still here (a still phone sends no frames).
 pub const HEARTBEAT: u8 = 4;
+/// Server → app: whether the phone takes control now (C8), `[on u8]`.
+pub const CONTROL_STATE: u8 = 5;
 /// App → server: send a keyframe (the decoder started or lost its way).
 pub const WANT_KEYFRAME: u8 = 0x11;
+/// App → server: a batch of control events for the phone (C8,
+/// `streaming::cast_control`), at most [`MAX_CONTROL`] bytes.
+pub const CONTROL: u8 = 0x12;
+
+/// The longest control batch the app sends.
+pub const MAX_CONTROL: usize = 16 * 1024;
 
 /// The longest message either side takes: a 1920-line keyframe fits well.
 pub const MAX_MESSAGE: usize = 4 * 1024 * 1024;
@@ -46,6 +54,10 @@ pub enum Message {
     End,
     Heartbeat,
     WantKeyframe,
+    ControlState {
+        on: bool,
+    },
+    Control(Vec<u8>),
 }
 
 impl Message {
@@ -72,6 +84,8 @@ impl Message {
             Message::End => (END, Vec::new()),
             Message::Heartbeat => (HEARTBEAT, Vec::new()),
             Message::WantKeyframe => (WANT_KEYFRAME, Vec::new()),
+            Message::ControlState { on } => (CONTROL_STATE, vec![u8::from(*on)]),
+            Message::Control(batch) => (CONTROL, batch.clone()),
         };
         let mut out = Vec::with_capacity(5 + payload.len());
         out.push(kind);
@@ -108,6 +122,10 @@ impl Message {
             END if len == 0 => Message::End,
             HEARTBEAT if len == 0 => Message::Heartbeat,
             WANT_KEYFRAME if len == 0 => Message::WantKeyframe,
+            CONTROL_STATE if len == 1 => Message::ControlState {
+                on: payload[0] != 0,
+            },
+            CONTROL if len > 0 && len <= MAX_CONTROL => Message::Control(payload),
             _ => return Err(bad()),
         })
     }
@@ -210,6 +228,9 @@ mod tests {
             Message::End,
             Message::Heartbeat,
             Message::WantKeyframe,
+            Message::ControlState { on: true },
+            Message::ControlState { on: false },
+            Message::Control(vec![1, 2, 3]),
         ];
         let mut wire = Vec::new();
         for m in &messages {

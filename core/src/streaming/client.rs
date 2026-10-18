@@ -286,6 +286,41 @@ pub struct RemoteFlags {
     /// The computer sent a picture or sound anyway: it does not know
     /// input-only sessions, and the session was closed.
     pub too_old: Arc<std::sync::atomic::AtomicBool>,
+    /// Control batches the computer sent a cast (C8), for the phone to take.
+    pub control: Arc<ControlInbox>,
+}
+
+/// Control batches waiting for the phone's control service (C8): bounded,
+/// the oldest dropped first, taken with a wait so nothing polls.
+#[derive(Debug, Default)]
+pub struct ControlInbox {
+    batches: std::sync::Mutex<std::collections::VecDeque<Vec<u8>>>,
+    arrived: std::sync::Condvar,
+}
+
+impl ControlInbox {
+    /// Most batches kept: a phone that falls behind keeps the newest.
+    pub const MAX: usize = 64;
+
+    /// A batch arrived.
+    pub fn put(&self, batch: Vec<u8>) {
+        let mut batches = self.batches.lock().unwrap_or_else(|e| e.into_inner());
+        if batches.len() >= Self::MAX {
+            batches.pop_front();
+        }
+        batches.push_back(batch);
+        self.arrived.notify_one();
+    }
+
+    /// The oldest waiting batch, waiting up to `timeout` for one.
+    pub fn take(&self, timeout: std::time::Duration) -> Option<Vec<u8>> {
+        let batches = self.batches.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut batches, _) = self
+            .arrived
+            .wait_timeout_while(batches, timeout, |b| b.is_empty())
+            .unwrap_or_else(|e| e.into_inner());
+        batches.pop_front()
+    }
 }
 
 impl StreamingClient {
@@ -747,6 +782,8 @@ enum RemoteStream {
     Ready,
     /// The computer asks the cast for a keyframe (T10k).
     KeyframeWanted,
+    /// The computer sends the cast control events (C8).
+    Control,
     /// A picture or sound on an input-only session, or a picture on a
     /// sound session: the computer does not know the mode.
     TooOld,
@@ -762,12 +799,17 @@ fn remote_stream(kind: u8, input_only: bool, sound: bool) -> RemoteStream {
         RemoteStream::Media
     } else if input_only && !sound && kind == transport::STREAM_KIND_CAST_KEYFRAME {
         RemoteStream::KeyframeWanted
+    } else if input_only && !sound && kind == transport::STREAM_KIND_CAST_CONTROL {
+        RemoteStream::Control
     } else if input_only {
         RemoteStream::TooOld
     } else {
         RemoteStream::Media
     }
 }
+
+/// The largest control batch a cast reads (C8).
+const CONTROL_STREAM_MAX: usize = 16 * 1024;
 
 #[cfg(test)]
 mod remote_tests {
@@ -794,6 +836,41 @@ mod remote_tests {
         assert_eq!(
             remote_stream(transport::STREAM_KIND_CAST_KEYFRAME, true, false),
             RemoteStream::KeyframeWanted
+        );
+        assert_eq!(
+            remote_stream(transport::STREAM_KIND_CAST_CONTROL, true, false),
+            RemoteStream::Control
+        );
+        assert_eq!(
+            remote_stream(transport::STREAM_KIND_CAST_CONTROL, false, false),
+            RemoteStream::Media,
+            "a session that streams is not a cast"
+        );
+    }
+
+    #[test]
+    fn control_waits_for_its_service_and_keeps_the_newest() {
+        let inbox = ControlInbox::default();
+        assert_eq!(inbox.take(std::time::Duration::from_millis(1)), None);
+        for n in 0..(ControlInbox::MAX + 3) {
+            inbox.put(vec![n as u8]);
+        }
+        assert_eq!(
+            inbox.take(std::time::Duration::ZERO),
+            Some(vec![3]),
+            "the oldest three were dropped"
+        );
+        let inbox = std::sync::Arc::new(ControlInbox::default());
+        let waiting = {
+            let inbox = inbox.clone();
+            std::thread::spawn(move || inbox.take(std::time::Duration::from_secs(5)))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        inbox.put(vec![9]);
+        assert_eq!(
+            waiting.join().unwrap(),
+            Some(vec![9]),
+            "a waiting take wakes"
         );
     }
 
@@ -964,6 +1041,18 @@ async fn recv_with_cancel(
                                 remote
                                     .keyframe_wanted
                                     .store(true, std::sync::atomic::Ordering::Release);
+                                continue;
+                            }
+                            RemoteStream::Control => {
+                                // Only a cast takes control (C8), and only
+                                // what it can read.
+                                if remote.cast
+                                    && let Ok(batch) =
+                                        recv_stream.read_to_end(CONTROL_STREAM_MAX).await
+                                    && !batch.is_empty()
+                                {
+                                    remote.control.put(batch);
+                                }
                                 continue;
                             }
                             RemoteStream::TooOld => {
