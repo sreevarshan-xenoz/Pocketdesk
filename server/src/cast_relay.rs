@@ -203,6 +203,14 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                 if viewer.as_ref().is_some_and(|v| v.tx.try_send(Message::Heartbeat).is_err() && v.tx.is_closed()) {
                     viewer = None;
                 }
+                // The phone says its control state once: a viewer whose queue
+                // was full then hears it again (C8 review).
+                if let (Some(c), Some(v)) = (&cast, &viewer)
+                    && v.session_id == c.session_id
+                    && c.control_on.load(std::sync::atomic::Ordering::Acquire)
+                {
+                    let _ = v.tx.try_send(Message::ControlState { on: true });
+                }
             }
         }
     }
