@@ -350,6 +350,28 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_cancel_stops_the_running_transfer_and_refuses_its_retry() {
+        let key = "share:test-cancel:file".to_string();
+        let tracker = track(shown(&key));
+        let id = tracker.id().to_string();
+        crate::plugins::share::running()
+            .spawn(key.clone(), async move {
+                let _tracker = tracker;
+                std::future::pending::<()>().await;
+            })
+            .await;
+        cancel(&id).await;
+        assert!(
+            rows_at(&mut lock(), Instant::now())
+                .iter()
+                .all(|r| r.id != id),
+            "the task was stopped and its row went with it"
+        );
+        assert!(take_cancelled(&key), "its retry is refused");
+        assert!(!take_cancelled(&key), "once");
+    }
+
     #[test]
     fn the_rate_is_what_moved_over_the_last_seconds() {
         let start = Instant::now();
