@@ -1657,6 +1657,22 @@ On the A71 against a throwaway server on this box, a 1.5 GB file over the intern
 - [x] Sending the same file again continued from what arrived (615 MB), its speed starting from 0 rather than counting the jump, and was saved whole.
 - [ ] A folder: one Cancel stops the whole folder, each way.
 - [ ] A share from the phone cancelled on the computer, then shared again.
+## 104. Control the phone from the computer (C8)
+
+On the A71 against a throwaway server, the cast over the internet road through a relay, control sent by a test client that speaks the window's relay messages:
+
+- [x] Home, Recents, Back and the shade.
+- [x] A tap into Settings' search, text typed into its field, and Backspace and Enter; quick typing then Backspace.
+- [x] A drag scrolled a list, the wheel scrolled it both ways, and a long press opened an icon's menu.
+- [x] The service turned off: the phone said control is off within a second, and its notification changed.
+- [x] Latency: 40 to 75 ms from a click to the first changed frame from a still screen; 85 to 200 ms to a transition's first large frame.
+- [ ] The window by hand: a click, a drag, the wheel, the right and middle buttons, typing, the bar's buttons, Watch only, and a drag that leaves the window.
+- [ ] The phone locked with a PIN: taps and typing refused, Back and Home taken.
+- [ ] A password field.
+- [ ] Over the home network (not the relay): latency again.
+- [ ] Rotation: taps land right after the phone turns.
+- [ ] Android 13+ sideloaded: the restricted-settings step.
+- [ ] Advanced Protection (Android 17): the service refused.
 - [ ] Linux.
 
 ## Recording results

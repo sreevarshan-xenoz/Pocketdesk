@@ -36,9 +36,10 @@ Android gives an app one way to act on the whole screen without adb or root: an 
    - **Global actions:** Back, Home, Recents, the notification shade.
    - **Text:** typed into the focused field (`ACTION_SET_TEXT`) at its selection. Backspace deletes before the selection. Enter is the field's action (`ACTION_IME_ENTER`, Android 11+).
 5. **Limits on the phone side:**
-   - At most 200 events a second are taken; more are dropped.
-   - An event older than 2 s is dropped.
-   - A finger left down is lifted when the cast ends or after 2 s without an event.
+   - At most 200 moves, scrolls and texts a second are taken; more are dropped. A press or release always goes.
+   - A batch that waited on the phone longer than 2 s is dropped. The age is the phone's own clock, since the computer's differs.
+   - A finger left down is lifted when the cast ends, when control goes off, when a new press comes, or after 2 s without an event.
+   - Nothing is touched or typed while the phone is locked, so the computer cannot enter its PIN; Back and Home still go.
 
 ### The wire
 
@@ -98,3 +99,77 @@ Each hop is kept short:
   - the text edit at a selection;
   - the stale and rate limits.
 - **Device (A71, a throwaway server):** taps, a drag (a list scrolled), a long press, the wheel, Back, Home, Recents, text into a field, the switch off, control refused with the setting off, Advanced Protection where available, and the latency numbers.
+
+## As built
+
+As above, with these differences and additions:
+- **The relay tells the viewer the phone's control state only once control is on.** It says it again each heartbeat while on. A desktop app from before C8 cannot read the message, so a cast without control never sends it one, and the phone's first word is only ever "on".
+- **A replaced viewer** (another joined, or a new cast) can no longer reach the phone.
+- **Typing:**
+  - It runs on a thread of its own, not the main one, and adjacent text in a batch is typed at once.
+  - Each edit reads the focused field fresh: this service listens for no text events, so Android's cached copy could still hold the text before the last edit.
+  - A password field, whose text Android hides from the service, is typed from what was typed into it here.
+- **The window:**
+  - It sends one move a pass, the newest, so a fast mouse does not send hundreds a second.
+  - A release the window never saw (focus went mid-drag), or control turned off mid-press, lifts the finger where it last was.
+  - The bar's buttons give up the keyboard after a click, so Enter and Space go to the phone.
+  - Control is written outside the window's lock and stops at the first broken write.
+  - Nothing is sent while the picture still has the old shape after the phone turned.
+- **The service** listens for no events. Its description says Android lets it read the screen, and that Pocketdesk reads only the field it types into.
+- **The Settings hint** says how to allow restricted settings for a sideloaded app on Android 13+.
+- **Not built:**
+  - an Advanced Protection check (the Settings text says Android's Advanced Protection does not allow the service);
+  - the window's bar under screen readers: the second window has no AccessKit tree, an owed gap.
+
+## The device run
+
+On the A71 against a throwaway server on this box. The cast rode the internet road through n0's relay (`wan_relayed`): the phone's saved address for it was 127.0.0.1, and the cast's QUIC cannot use `adb reverse`. So every number below includes a relay round trip, the slowest path a cast takes.
+
+Checked through a test client acting as the window (same relay messages):
+- Home, Recents, Back and the shade were performed.
+- A tap opened Settings' search, and "wifi" was typed into its field.
+- Backspace and Enter worked; "wifiz", Backspace, "!" gave "wifi!" after the fix below.
+- A drag scrolled the Settings list.
+- The wheel scrolled it up and down.
+- A long press opened a home-screen icon's menu (App info, Widgets).
+- With the service turned off, the phone told the computer within a second, and its notification went back to "shown".
+
+**The window itself, on this box:** it showed the phone's screen with its bar (Back, Home, Recents, Watch only). Clicks into it are owed by hand: messages posted to egui windows do not reach them, and the window has no UI Automation tree.
+
+**Latency:**
+- **From a click to the first changed frame:** 40 to 75 ms from a still screen. This covers the relay, the gesture, Android drawing it, the phone's encoder and the relay back.
+- **To the first large frame of a transition:** 85 to 200 ms, most of it Android's own animation.
+- **The transport alone** (window to phone) could not be separated: the two clocks, set against each other through adb, agreed only to about ±30 ms.
+
+**Again after the review's fixes (the same run):** Home, Back, a long press, the wheel to the top and a drag down the list, and "wifiz", Backspace, "!" giving "wifi!", with no crash.
+
+**Found on the device run, fixed:**
+- A Backspace soon after typing undid the typing (the cached field).
+- A desktop app from before C8, watching the same state folder, reconnected twice a second without showing the picture.
+
+## Review
+
+**Fresh review (0 Critical, 7 Important, 9 Minor), fixed one commit each:**
+- the rate limit could drop a release and leave a finger down;
+- nothing lifted the finger when the cast ended;
+- a replaced viewer kept a path to the phone;
+- password fields, and typing on the main thread;
+- stale batches replayed;
+- an "off" reaching older desktop apps;
+- a locked phone's PIN reachable from the computer.
+
+**Minors fixed:**
+- a press left down on the desktop;
+- the bar's buttons taking Enter;
+- writes under the window's lock;
+- a dangling stroke after a lost release;
+- moves unbounded while a segment ran;
+- the service's events and description;
+- the restricted-settings hint;
+- the rotation transient;
+- the runner reading the main thread's state.
+
+**Left as is:**
+- On an old server, the phone's notification can say "controlled" though nothing will come. The server drops the phone's state as a malformed cast stream.
+- `cast_control` off is the desktop app's choice. Any process of the owner's with the cast token can send control while the phone allows it (SECURITY.md).
+
