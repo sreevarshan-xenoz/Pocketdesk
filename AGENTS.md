@@ -42,6 +42,17 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-18: **D2, quiet hours kept in step (branch `feat/quiet`; spec `docs/superpowers/specs/2026-10-18-quiet-design.md`, with as-built and review sections).**
+  - **The phone:** a notification its Do Not Disturb silences is not sent to the computer (on by default). With "Let the computer mute this phone" (off by default), its own computer may turn Do Not Disturb on for up to a day:
+    - only from "all";
+    - ended at its time, or left alone if the owner changed it;
+    - on Android 15+, through the app's own mode, which an end always retires.
+
+    The phone tells its computer when it is quiet, and refuses a mute it may not take.
+  - **The computer:** a per-phone Mute permission, `quiet_out/`, `phone_quiet.json`, the Overview's state with Mute for an hour and Unmute, `pocketdesk quiet`, and the `phone_quiet` event (SECURITY.md limit 27).
+  - **Fresh review (0 Critical, 6 Important), fixed one commit each:** a mute took over the owner's own Do Not Disturb, an unknown filter read as "not quiet", stale states, silent refusals, the writer's order, no report after a reconnect.
+  - **Device-checked on the A71** (checklist §112). Found and fixed there: no state reached the computer (and each try paused the notifications), Android 15's mode outlived a forgotten mute, a filter read too soon forgot every mute, and an end during the owner's own left the mode on.
+  - **Owed:** the Overview by hand, and Android 14.
 - 2026-10-18: **D1, health after updates (branch `feat/health`; spec `docs/superpowers/specs/2026-10-18-health-design.md`, with as-built and review sections).**
   - **The phone checks what is on but cannot work:**
     - notification access, or a stopped listener (asked to bind again first);

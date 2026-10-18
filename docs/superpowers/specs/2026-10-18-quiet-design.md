@@ -39,7 +39,7 @@ Today a phone in Do Not Disturb still sends every notification, and the computer
 
 - **A per-phone permission, "Mute",** on for phones and off for computers. It gates `quiet` going out, and `quiet_state` coming in.
 - **Requests:** `<state>/quiet_out/<id>.json` (`core::local::quiet`, like rings: a TTL of 60 s, taken by the server and sent over the live link).
-- **State:** the phone's last report is kept in `phone_status.json` (`quiet`, `quiet_until`), shown in the Overview's phone block and in Devices: "Do Not Disturb", or "Muted until 15:30".
+- **State:** the phone's last report is kept in `phone_quiet.json` (`quiet`, `until_unix`, `by_computer`, `refused_unix`), shown in the Overview's phone block and in Devices: "Do Not Disturb", or "Muted until 15:30".
 - **Buttons:** "Mute for an hour" and "Unmute", beside Ring, each saying why when the phone cannot be reached or did not allow it.
 - **Local API:** `pocketdesk quiet <phone> [--minutes N | --off] [--json]`.
 - **Events:** `phone_quiet` (quiet or not, never why).
@@ -62,3 +62,42 @@ Today a phone in Do Not Disturb still sends every notification, and the computer
   - Changing the filter by hand meanwhile keeps the owner's choice.
   - The switch off: refused.
   - The owner's Do Not Disturb settings are put back afterwards.
+
+## As built, and the review
+
+- **Where it is:**
+  - phone: `notify/Quiet.kt` (the rules) and `notify/QuietPhone.kt` (the settings and the tick);
+  - bridge: `quiet_requests.rs`;
+  - core: `protocol/quiet.rs`, `local/quiet.rs` and `local/phone_quiet.rs`;
+  - server: `quiet_phone.rs` and `pocketdesk quiet`;
+  - desktop: the Overview, and the permission row in Devices.
+- **A mute starts only from "all".** A phone already in Do Not Disturb is the owner's, and the Overview offers no Mute then.
+- **Android 15 and newer** keep an app's filter as its own mode, "Do Not Disturb (Pocketdesk)". Asking for "all" ends only that mode, so an end, an Unmute or a forgotten mute always retires it. Before 15, an end asks for "all" only while the mute's filter stands.
+- **Settling.** A mute's filter is given 10 s to take: Android applies a requested filter later, so a filter read just after asking is not the owner's change.
+- **What the computer is told:**
+  - The phone says nothing while its listener is not connected, since the filter is unknown then.
+  - It tells its state again whenever its link comes back.
+  - It answers a mute it may not take with `refused`. The Overview shows that for two minutes.
+- **The computer** shows a phone's quiet only while that phone is linked. The state file is written one at a time, always the newest. A first "not quiet" makes no event.
+- **Hold back:** a notification Do Not Disturb silences (`Ranking.matchesInterruptionFilter()` false) is not sent, whether or not the shade still lists it.
+- **Fresh review: 0 Critical, 6 Important, 12 Minor.** Fixed one commit each:
+  - a mute took over the owner's own Do Not Disturb and turned it off at its end;
+  - an unknown filter read as "not quiet";
+  - stale states were shown as now's;
+  - refusals were silent;
+  - the writer could leave an older state;
+  - no report after a reconnect.
+
+  Minors fixed: the order of keeping and asking, a clock set back, a minute's limit on a waiting mute, "silences", the first event, `--minutes 0`, the doc's exit codes.
+
+  Left:
+  - two dials a minute when ring and mute both keep a link to a computer away;
+  - requests in the same second in either order;
+  - Unmute refused once Mute is off in Devices.
+- **Found on the device (A71, Android 16), fixed one commit each:**
+  - the bridge did not list `quiet_state` among what the phone sends, so no state reached the computer and each failure paused the phone's notifications for a minute;
+  - Android 15's mode outlived a forgotten mute and kept the phone quiet;
+  - every mute was forgotten 11 ms after it began;
+  - an end during the owner's own Do Not Disturb left the mode running.
+
+  After the fixes every step of the run passed (checklist §112).

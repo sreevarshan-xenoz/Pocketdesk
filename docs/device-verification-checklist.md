@@ -1769,6 +1769,22 @@ On the A71 (Android 16), no server needed:
 - [ ] A low-RAM phone on Android 10 or older: no "stopped" card.
 - [ ] The card in Spanish and Tamil, and with TalkBack.
 
+## 112. Quiet hours kept in step (D2)
+
+On the A71 (Android 16) against a throwaway server, phone notifications shown nowhere (`phone_notifications = false`; arrivals read from its events):
+
+- [x] With Do Not Disturb off, a notification reaches the computer. With it on, one it silences does not, and the computer sees the phone quiet, then not.
+- [x] "Mute for 2 minutes" from `pocketdesk quiet`: the phone goes quiet, the computer sees it muted from here, and it ends by itself at its time.
+- [x] The owner's own Do Not Disturb (set to alarms) during a mute stands, and an end then leaves it as the owner's.
+- [x] Unmute ends a mute from here.
+- [x] A mute asked while the owner's own Do Not Disturb is on leaves it the owner's: the phone stays quiet, not muted from here.
+- [x] With "Let the computer mute this phone" off, nothing changes and the phone answers with a refusal.
+- [x] Found here and fixed: the state never reached the computer (and paused the phone's notifications), Android 15's own mode outlived the mute, and a filter read too soon forgot every mute.
+- [ ] The Overview's Mute and Unmute by hand, and the refusal's words.
+- [ ] Android 14 and older (one filter for all, no app mode).
+- [ ] A Do Not Disturb that silences but still lists notifications.
+- [ ] A phone with a bedtime mode switching on during a mute.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
