@@ -42,6 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-18: **C6, the owed checks by where they run (branch `docs/owed-checks`; spec `docs/superpowers/specs/2026-10-18-owed-checks-design.md`).**
+  - **The index:** `docs/owed-checks.md`, generated from the checklist by `scripts/owed_checks.py` and held to it in CI. Of about 550 open items, roughly 320 can run here; the rest need Linux, a SIM, a second phone or computer, other hardware, the owner's OK or hands, or never run here (power, lock).
+  - **The first batch,** by script on the A71 against a throwaway server: sound underruns, the background clipboard's switches, a folder with no session, a folder cancelled on the computer.
+  - **Found and fixed:** a download cancelled on the computer kept its part on the phone for a retry that never comes (the phone's own Cancel keeps it, as C1 designed).
+  - **Fresh review (0 Critical, 4 Important), fixed:** the phone's Cancel had lost its resume, forbidden checks sat under "here" (now a self-test in CI), a mistyped place dropped its item, and wrapped items were read by their first line.
+  - **Owed:** a folder cancelled on the phone, and the rest of "here" (checklist §109).
 - 2026-10-18: **C5, the phone with large fonts, landscape and TalkBack (branch `fix/phone-accessibility`; spec `docs/superpowers/specs/2026-10-18-phone-accessibility-design.md`, with as-built and device-run sections).**
   - **Audited on the A71:** every clickable node on Home, the Add form, Settings, a session and its menu has a label and is at least 48 dp; 1.3 fits everywhere.
   - **Fixed, found at font scale 2.0:** the session menu's choices broke words ("Balanc / ed"; now radio buttons when a word does not fit, `ChoiceFit`), and the chrome's chips ran into each other over a portrait stream (its text now stops at 1.3, `ChromeText`; no nodes overlap between its groups at 1.0, 1.3 or 2.0).
