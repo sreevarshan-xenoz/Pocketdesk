@@ -89,6 +89,32 @@ class ControlPlanTest {
     }
 
     @Test
+    fun aFingerDownIsLiftedWhereItIs() {
+        val strokes = ControlPlan.Strokes()
+        strokes.down(Point(1f, 1f), 0)
+        strokes.move(Point(2f, 2f), 10)
+        strokes.next(10)
+        strokes.move(Point(3f, 3f), 20)
+        strokes.lift(30)
+        val last = strokes.next(30)!!
+        assertFalse(last.willContinue)
+        assertEquals(Point(3f, 3f), last.points.last())
+        assertFalse(strokes.active)
+        strokes.lift(40)
+        assertNull("nothing down: nothing to lift", strokes.next(40))
+    }
+
+    @Test
+    fun movesWaitingForASegmentAreBounded() {
+        val strokes = ControlPlan.Strokes()
+        strokes.down(Point(0f, 0f), 0)
+        repeat(ControlPlan.MAX_PENDING + 50) { strokes.move(Point(it.toFloat(), 0f), it.toLong()) }
+        val segment = strokes.next(1_000)!!
+        assertEquals(ControlPlan.MAX_PENDING + 1, segment.points.size)
+        assertEquals("ends where the pointer is", Point((ControlPlan.MAX_PENDING + 49).toFloat(), 0f), segment.points.last())
+    }
+
+    @Test
     fun aMoveOrReleaseWithoutAPressIsIgnored() {
         val strokes = ControlPlan.Strokes()
         strokes.move(Point(1f, 1f), 0)

@@ -28,9 +28,10 @@ class ControlRunner(private val context: Context, private val onState: (Boolean)
         Thread(::loop, "cast-control").start()
     }
 
-    /** The cast ended: the thread stops at its next wait. */
+    /** The cast ended: the thread stops at its next wait, and a finger down is lifted. */
     fun stop() {
         running = false
+        ControlService.instance?.release()
     }
 
     private fun loop() {
@@ -40,6 +41,7 @@ class ControlRunner(private val context: Context, private val onState: (Boolean)
             if (on != said && RustCore.castControlState(on) == CastPlan.QUEUED) {
                 said = on
                 onState(on)
+                if (!on) ControlService.instance?.release()
             }
             // A press waiting to start (or to be lifted) needs a look soon.
             val wait = if (service?.waiting() == true) BUSY_WAIT_MS else IDLE_WAIT_MS

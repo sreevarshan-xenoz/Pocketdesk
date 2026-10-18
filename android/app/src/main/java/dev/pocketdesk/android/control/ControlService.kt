@@ -37,7 +37,18 @@ class ControlService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         if (instance === this) instance = null
+        release()
         return super.onUnbind(intent)
+    }
+
+    /**
+     * Lift a finger that is down (C8 review): the cast ended, control went
+     * off, or the service is going. A continued stroke left with its
+     * finger down would stay a touch on the screen.
+     */
+    fun release() = main.post {
+        strokes.lift(SystemClock.uptimeMillis())
+        pump()
     }
 
     override fun onDestroy() {
@@ -64,7 +75,20 @@ class ControlService : AccessibilityService() {
         val point = ControlPlan.place(x, y, w, h)
         val now = SystemClock.uptimeMillis()
         when (action) {
-            "down" -> strokes.down(point, now)
+            "down" -> {
+                // A press while one is down (its release was lost): the old
+                // finger lifts first, or Android keeps its stroke going.
+                if (strokes.active || stroke != null) {
+                    strokes.lift(now)
+                    pump()
+                }
+                if (busy || stroke != null) {
+                    // The lift is still performed: this press waits for it.
+                    main.postDelayed({ touch(action, x, y) }, ControlPlan.MIN_SEGMENT_MS)
+                    return@post
+                }
+                strokes.down(point, now)
+            }
             "move" -> strokes.move(point, now)
             "up" -> strokes.up(point, now)
         }

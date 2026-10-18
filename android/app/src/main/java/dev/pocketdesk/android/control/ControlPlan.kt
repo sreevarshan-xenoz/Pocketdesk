@@ -43,6 +43,8 @@ object ControlPlan {
     const val START_WAIT_MS = 80L
     /** A finger left down this long with no event is lifted. */
     const val IDLE_LIFT_MS = 2_000L
+    /** Most moves waiting for the next segment. */
+    const val MAX_PENDING = 256
 
     /**
      * Touches from the computer as gestures. The phone performs one segment
@@ -73,6 +75,9 @@ object ControlPlan {
 
         fun move(point: Point, nowMs: Long) {
             if (down == null || up) return
+            // Bounded while a segment is held up: the newest point replaces
+            // the last, so the finger still ends where the pointer is.
+            if (pending.size >= MAX_PENDING) pending.removeAt(pending.size - 1)
             pending += point
             lastEvent = nowMs
         }
@@ -82,6 +87,11 @@ object ControlPlan {
             pending += point
             up = true
             lastEvent = nowMs
+        }
+
+        /** Lift a finger that is down now, wherever it is (the cast ended, control went off). */
+        fun lift(nowMs: Long) {
+            if (down != null && !up) up(pending.lastOrNull() ?: last ?: down!!, nowMs)
         }
 
         /** Lift a finger left down with nothing from the computer for [IDLE_LIFT_MS]. */
