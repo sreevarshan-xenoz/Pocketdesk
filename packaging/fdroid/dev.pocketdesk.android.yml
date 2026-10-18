@@ -1,0 +1,50 @@
+# Pocketdesk's metadata for F-Droid (fdroiddata's metadata/dev.pocketdesk.android.yml),
+# modelled on Ruffle and Fatto (Rust through cargo-ndk, developer-signed). A draft:
+# opening the merge request is the owner's call (packaging/README.md).
+Categories:
+  - Connectivity
+  - System
+# The code is MIT OR Apache-2.0; fdroiddata takes one SPDX id.
+License: MIT
+AuthorName: sreevarshan-xenoz
+SourceCode: https://github.com/sreevarshan-xenoz/Pocketdesk
+IssueTracker: https://github.com/sreevarshan-xenoz/Pocketdesk/issues
+Changelog: https://github.com/sreevarshan-xenoz/Pocketdesk/releases
+
+AutoName: Pocketdesk
+
+RepoType: git
+Repo: https://github.com/sreevarshan-xenoz/Pocketdesk.git
+# The release's own APK: F-Droid builds the same bytes (the Reproducible APK workflow
+# checks it across machines) and ships the developer's signature.
+Binaries: https://github.com/sreevarshan-xenoz/Pocketdesk/releases/download/v%v/pocketdesk-v%v-android-arm64.apk
+
+Builds:
+  - versionName: 0.4.0
+    versionCode: 4
+    commit: v0.4.0
+    subdir: android/app
+    sudo:
+      - apt-get update
+      - apt-get install -y cmake
+    gradle:
+      - yes
+    srclibs:
+      - rustup@1.28.2
+    # The bridge as CI builds it: the pinned Rust, cargo-ndk 4.1.2, one script.
+    prebuild:
+      - $$rustup$$/rustup-init.sh -y --default-toolchain "$(cat ../bridge/rust-toolchain-version)"
+        --profile minimal --target aarch64-linux-android
+      - source $HOME/.cargo/env
+      - cargo install cargo-ndk --version 4.1.2 --locked
+      - export ANDROID_NDK_HOME=$$NDK$$
+      - sh ../bridge/build-android.sh
+    ndk: 29.0.14206865
+
+# The release key's certificate (SHA-256), as apksigner prints it.
+AllowedAPKSigningKeys: 3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e8ac3a0f
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+CurrentVersion: 0.4.0
+CurrentVersionCode: 4
