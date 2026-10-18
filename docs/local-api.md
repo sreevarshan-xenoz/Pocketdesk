@@ -154,7 +154,7 @@ Asks the server to ring the phone (N1): `{"api": 1, "id": "…", "device_id": "�
 
 ### `pocketdesk quiet <phone> [--minutes N | --off] --json`
 
-Asks the server to turn on the phone's Do Not Disturb for `N` minutes (1 to 1440, 60 by default), or with `--off` to end the mute this computer asked for (D2): `{"api": 1, "id": "…", "device_id": "…", "minutes": 60, "state": "queued"}` (`minutes` 0 for `--off`). Refused at once (exit 1) when the phone's Mute permission is off or it keeps no link now: it is muted with "Let the computer mute this phone" on in its own Settings. The phone keeps the owner's own Do Not Disturb settings; it ends the mute only while it is still the one it set. `devices --json` shows what each phone last said in `quiet`.
+Asks the server to turn on the phone's Do Not Disturb for `N` minutes (1 to 1440, 60 by default), or with `--off` to end the mute this computer asked for (D2): `{"api": 1, "id": "…", "device_id": "…", "minutes": 60, "state": "queued"}` (`minutes` 0 for `--off`). Refused at once (exit 1) when the phone's Mute permission is off or it keeps no link now: it is muted with "Let the computer mute this phone" on in its own Settings. The phone keeps the owner's own Do Not Disturb settings; it ends the mute only while it is still the one it set. `devices --json` shows what each phone last said in `quiet`. Exit 2 for an unknown phone or minutes outside 1 to 1440 (`--off` asks for the end; `--minutes 0` is a usage error), 3 when no server runs.
 
 ### `pocketdesk kick <target> --json`
 

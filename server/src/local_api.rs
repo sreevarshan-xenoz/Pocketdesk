@@ -1758,6 +1758,16 @@ mod tests {
     /// D2: a mute is queued for a linked phone with Mute on, refused at once
     /// otherwise, and a day at most.
     #[test]
+    fn quiet_minutes_are_1_to_1440_and_off_is_its_own_flag() {
+        use clap::Parser;
+        let parse = |args: &[&str]| crate::cli::Cli::try_parse_from(args);
+        assert!(parse(&["pocketdesk", "quiet", "5f1c9b", "--minutes", "0"]).is_err());
+        assert!(parse(&["pocketdesk", "quiet", "5f1c9b", "--minutes", "1441"]).is_err());
+        assert!(parse(&["pocketdesk", "quiet", "5f1c9b", "--minutes", "30"]).is_ok());
+        assert!(parse(&["pocketdesk", "quiet", "5f1c9b", "--off"]).is_ok());
+    }
+
+    #[test]
     fn a_mute_is_queued_for_a_linked_phone_with_mute_on() {
         let (dir, _) = send_setup("quiet");
         let now = pocketdesk_core::local::pin::now_unix();

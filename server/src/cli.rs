@@ -103,7 +103,12 @@ pub enum Commands {
         /// The phone: its device id, or 6 or more of its first characters
         phone: String,
         /// For how many minutes, 1 to 1440 (a day)
-        #[arg(long, default_value_t = 60, conflicts_with = "off")]
+        #[arg(
+            long,
+            default_value_t = 60,
+            conflicts_with = "off",
+            value_parser = clap::value_parser!(u32).range(1..=1440)
+        )]
         minutes: u32,
         /// End the mute this computer asked for
         #[arg(long)]

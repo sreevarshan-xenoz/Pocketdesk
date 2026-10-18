@@ -130,8 +130,9 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             off,
             json,
         } => {
-            // 0 is the wire's "end"; --minutes 0 would read as a mistake.
-            let minutes = if off { 0 } else { minutes.max(1) };
+            // 0 is the wire's "end", asked for with --off; --minutes takes
+            // 1 to 1440, so --minutes 0 is a usage error (D2 review).
+            let minutes = if off { 0 } else { minutes };
             std::process::exit(local_api::run_quiet(&phone, minutes, json))
         }
         cli::Commands::Send {

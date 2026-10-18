@@ -94,7 +94,12 @@ fn take(
             states.remove(&oldest);
         }
     }
-    let changed = states.get(device).map(|s| s.quiet) != Some(state.quiet);
+    // A first report says something only when quiet (D2 review): a lost
+    // file would otherwise log "off" for every phone.
+    let changed = match states.get(device) {
+        Some(before) => before.quiet != state.quiet,
+        None => state.quiet,
+    };
     states.insert(device.to_string(), state);
     Some(changed)
 }
@@ -257,6 +262,11 @@ mod tests {
     #[test]
     fn a_state_is_kept_and_a_change_is_told() {
         let mut states = BTreeMap::new();
+        assert_eq!(
+            take(&mut states, "q", &json!({"quiet": false}), 9),
+            Some(false),
+            "a first report of not quiet tells nothing"
+        );
         assert_eq!(
             take(&mut states, "p", &json!({"quiet": true}), 10),
             Some(true)
