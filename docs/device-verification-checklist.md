@@ -1647,6 +1647,18 @@ On the A71 against a throwaway server, with the clipboard, files and ringing on 
 - [ ] Over Wi-Fi rather than `adb reverse`: the radio's wakes and bytes for the link's keepalives.
 - [ ] A release build (R8): the CPU again.
 
+## 103. Transfers you can watch and stop (C1)
+
+On the A71 against a throwaway server on this box, a 1.5 GB file over the internet road (the computer's ports out of the phone's reach), the phone in the background with files on:
+
+- [x] A large file sent to the phone: "Under way" on the Files page with its bar and speed ("32 % · 10.2 MB/s"), and the phone's notification with the speed ("9.4 MB/s") and Cancel.
+- [x] Cancel on the computer (the app's button, through UI Automation): the phone's retry was refused and it stopped ("cancelled on the computer"), and the Sent list says "cancelled on this computer".
+- [x] Cancel on the phone (the notification's button): the computer's row went, the Sent list says "the phone declined it: cancelled on the phone", and the phone's transfer service stopped.
+- [x] Sending the same file again continued from what arrived (615 MB), its speed starting from 0 rather than counting the jump, and was saved whole.
+- [ ] A folder: one Cancel stops the whole folder, each way.
+- [ ] A share from the phone cancelled on the computer, then shared again.
+- [ ] Linux.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

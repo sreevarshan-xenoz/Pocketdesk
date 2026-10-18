@@ -19,13 +19,10 @@ A file on its way between the phone and the computer has two lives:
    - The bytes come from the transfer's own progress (`transfer::send`'s callback; `transfer::receive` gains one), and count what the other end already had.
    - The row goes when the transfer ends, however it ends.
 2. **A mirror for the app.**
-   - The server writes the rows to `<state>/transfers.json`, owner-only:
+   - The server writes the rows to `<state>/transfers.json`, in the owner's state folder as `sent.json` is:
      - each row with its bytes and a rate over the last few seconds;
-     - an `updated_ms` stamp.
-   - It is written:
-     - when a row comes or goes;
-     - at most once a second while bytes move;
-     - every 2 s while any row exists, so a reader can tell a live list from one a stopped server left (the 5 s rule of `live_sessions.json`).
+     - an `updated_unix` stamp.
+   - It is written every second while any row exists (`HEARTBEAT_SECS`), so a reader can tell a live list from one a stopped server left (the 5 s rule of `live_sessions.json`).
    - With no rows, the list is written empty once.
 3. **Cancel.**
    - The app's Cancel writes `<state>/transfer_cancels/<request>.json`, naming the row's id. It is consumed by the inbox watcher (R6c), and requests older than a minute are dropped.
@@ -72,3 +69,38 @@ A file on its way between the phone and the computer has two lives:
   - a large offer and a large share, each watched on the Files page and cancelled from each side;
   - the refusal on retry;
   - sending again continues from the part.
+
+## As built
+
+As above, with these differences and additions:
+- **A whole folder stops at one Cancel.** Cancelling a file of a folder sent to the phone fails the rest of that folder's offers, each refused with why when the phone asks for it. On the phone, a file of a folder refused as cancelled stops the rest of its folder.
+- **A transfer at its end is left to finish.** A Cancel pressed when all the bytes are there does nothing: the other end may have kept the file already. It also leaves no refusal behind.
+- **Folder rows:** a file of a folder the phone sends is named with its folder. A file of a folder the computer sends is named alone, since an offer does not carry its folder's name.
+- **The phone's Cancel also reaches:**
+  - the wait between attempts and the wait for a network;
+  - a copied share (a provider that cannot say a file's size);
+  - an attempt not yet begun.
+- **The service stops itself** after a Cancel, with the newest start id.
+- **The speed starts over** at a resumed attempt's first reading (the offset the other end had), on both sides.
+- **Left as is:** the row is made a moment before its task is registered. A Cancel in that gap leaves the transfer running, its row then going when it ends.
+
+## Review
+
+**Fresh review (0 Critical, 4 Important), fixed one commit each:**
+- A Cancel between attempts, during the wait for a network, or before an attempt began was lost, so the next attempt ran the whole file.
+- The service never stopped itself after a Cancel (Android stops a service only for its newest start id).
+- One Cancel stopped one file of a folder, on both sides.
+- A resumed transfer showed its offset as speed for a few seconds, on both sides.
+
+**Minors, fixed:**
+- a Cancel at the very end;
+- a Cancel reaching a job queued after the press;
+- "Cancelled" beside a file that was sent;
+- a file descriptor that a cancel could leak;
+- the bare word "cancelled" made final for retries;
+- the copied share;
+- a notice that lingered;
+- the heartbeat constant;
+- the spec's claims;
+- an end-to-end test of the Cancel.
+
