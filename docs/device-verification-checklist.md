@@ -1637,6 +1637,16 @@ On the A71 with KDE Connect 1.36 (F-Droid), paired with a throwaway server on th
 - [ ] A chat app's notification, an update to one (replacing the toast), and a flood held to the limit.
 - [ ] Linux: the notification over D-Bus, and closed by its id.
 
+## 102. The phone's background cost (N7)
+
+On the A71 against a throwaway server, with the clipboard, files and ringing on in the background, the screen off for an hour, USB in, the battery logically unplugged:
+
+- [x] Before the cuts: 21.0 s of CPU in the hour (0.58 % of one core), no wake locks, no alarms, deep idle all hour.
+- [x] After the cuts: 15.9 s (0.44 %), the same otherwise.
+- [ ] The same hour on battery, without USB: the battery's drop, and the CPU while the phone really sleeps.
+- [ ] Over Wi-Fi rather than `adb reverse`: the radio's wakes and bytes for the link's keepalives.
+- [ ] A release build (R8): the CPU again.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

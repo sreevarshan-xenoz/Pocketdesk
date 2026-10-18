@@ -27,6 +27,8 @@ object PhoneFolders {
      */
     fun all(ctx: Context): List<Folder> {
         val saved = stored(ctx)
+        // None shared: no call to the system for the grants (N7 review).
+        if (saved.isEmpty()) return saved
         val granted =
             runCatching {
                 ctx.contentResolver.persistedUriPermissions.filter { it.isReadPermission }.map { it.uri.toString() }.toSet()
