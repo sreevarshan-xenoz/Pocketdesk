@@ -408,7 +408,9 @@ pub(crate) fn running() -> &'static Running {
 pub struct SharePlugin {
     /// Where received files go; `None` when this system has neither a
     /// downloads nor a home folder, and files are then refused.
-    download_dir: Option<PathBuf>,
+    /// A fixed folder for received files (tests); otherwise each file goes
+    /// where [`download_dir`] says at that moment.
+    fixed_dir: Option<PathBuf>,
 }
 
 impl Default for SharePlugin {
@@ -422,24 +424,48 @@ impl Default for SharePlugin {
 /// servers on one machine (2h), which would share its real Downloads. The
 /// server warns at start when it is set.
 pub(crate) fn download_dir() -> Option<PathBuf> {
-    std::env::var_os("POCKETDESK_DOWNLOAD_DIR")
+    if let Some(seam) = std::env::var_os("POCKETDESK_DOWNLOAD_DIR")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
+    {
+        return Some(seam);
+    }
+    // The owner's folder (C2), read at each file so a change applies at once.
+    let chosen = pocketdesk_core::local::config::Config::load()
+        .map(|c| c.downloads_folder)
+        .unwrap_or_default();
+    chosen_folder(&chosen)
         .or_else(dirs::download_dir)
         .or_else(dirs::home_dir)
 }
 
+/// The owner's folder for received files when it can take them: set,
+/// absolute and a folder. Anything else is Downloads, and the log says why.
+fn chosen_folder(chosen: &str) -> Option<PathBuf> {
+    let chosen = chosen.trim();
+    if chosen.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(chosen);
+    if path.is_absolute() && path.is_dir() {
+        Some(path)
+    } else {
+        tracing::warn!(
+            "Received files go to Downloads: the folder chosen for them ({chosen}) is not there"
+        );
+        None
+    }
+}
+
 impl SharePlugin {
     pub fn new() -> Self {
-        Self {
-            download_dir: download_dir(),
-        }
+        Self { fixed_dir: None }
     }
 
     #[allow(dead_code)]
     pub fn with_download_dir(dir: PathBuf) -> Self {
         Self {
-            download_dir: Some(dir),
+            fixed_dir: Some(dir),
         }
     }
 }
@@ -537,7 +563,7 @@ impl Plugin for SharePlugin {
                     ))
                     .await;
                 }
-                let Some(dir) = self.download_dir.clone() else {
+                let Some(dir) = self.fixed_dir.clone().or_else(download_dir) else {
                     return refused("no downloads or home folder".into()).await;
                 };
                 // At home the bytes travel inside TLS with the phone that
@@ -1687,6 +1713,26 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn received_files_go_to_the_chosen_folder_only_when_it_is_one() {
+        let dir = std::env::temp_dir().join(format!("pd-c2-folder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(chosen_folder(&dir.display().to_string()), Some(dir.clone()));
+        assert_eq!(chosen_folder(""), None, "unset: Downloads");
+        assert_eq!(chosen_folder("   "), None);
+        assert_eq!(chosen_folder("relative/folder"), None, "not absolute");
+        let gone = dir.join("gone");
+        assert_eq!(chosen_folder(&gone.display().to_string()), None, "gone");
+        let file = dir.join("a-file");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(
+            chosen_folder(&file.display().to_string()),
+            None,
+            "not a folder"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
 
