@@ -79,8 +79,12 @@ object DownloadTarget {
     fun create(context: Context, name: String, folders: List<String> = emptyList()): Target? = runCatching {
         val safe = DownloadName.safe(name)
         // The picked folder first (C2); one that can no longer be written
-        // means Downloads/Pocketdesk.
-        tree(context)?.let { tree -> createInTree(context, tree, safe, folders)?.let { return@runCatching it } }
+        // (its grant taken back, or the folder gone) means Downloads/Pocketdesk.
+        fellBack = false
+        tree(context)?.let { tree ->
+            createInTree(context, tree, safe, folders)?.let { return@runCatching it }
+            fellBack = true
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             createMedia(context, safe, folders)
         } else {
@@ -180,6 +184,11 @@ object DownloadTarget {
     /** A folder was picked but can no longer be written: files went to Downloads/Pocketdesk. */
     fun treeLost(context: Context): Boolean =
         DownloadPlace.lost(dev.pocketdesk.android.Prefs.downloadTree(context), granted(context))
+
+    /** The last [create] meant the picked folder, which took nothing (it is gone): the file went to Downloads/Pocketdesk. */
+    @Volatile
+    var fellBack = false
+        private set
 
     /** What the picked folder is called, for Settings. */
     fun treeName(context: Context, tree: Uri): String? = runCatching {

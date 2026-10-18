@@ -602,7 +602,9 @@ class TransferService : Service() {
             ?: return refuse(job, "cannot create ${job.name}")
         // The picked folder can no longer be written (C2): the owner hears
         // where the file went instead.
-        if (kept == null && DownloadTarget.treeLost(this)) notice = getString(R.string.transfer_folder_gone)
+        if (kept == null && (DownloadTarget.treeLost(this) || DownloadTarget.fellBack)) {
+            notice = getString(R.string.transfer_folder_gone)
+        }
         return try {
             val saved = withProgress({ job.size }, onProgress) {
                 RustCore.fetchFile(
