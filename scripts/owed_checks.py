@@ -37,13 +37,30 @@ HERE = ('here', 'Here: this Windows box and the A71, without touching the owner\
 
 
 def items(text):
+    """Each open item with its section, read whole: an item wrapped onto
+    indented lines is joined (C6 review), and fenced blocks are skipped."""
     section = ''
+    current = None
+    fenced = False
     for line in text.splitlines():
+        if line.lstrip().startswith('```'):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        m = re.match(r'^\s*- \[ \] (.*)', line)
+        if current is not None and line.startswith(' ') and line.strip() and not re.match(r'^\s*- ', line):
+            current = (current[0], current[1] + ' ' + line.strip())
+            continue
+        if current is not None:
+            yield current
+            current = None
         if line.startswith('## '):
             section = line[3:].strip()
-        m = re.match(r'^\s*- \[ \] (.*)', line)
         if m:
-            yield section, m.group(1).strip()
+            current = (section, m.group(1).strip())
+    if current is not None:
+        yield current
 
 
 def place(section, item):
@@ -62,10 +79,15 @@ def place(section, item):
 
 
 def render(text):
+    order = [HERE] + [(k, d) for k, d, _ in PLACES]
+    known = {k for k, _ in order}
     grouped = {}
     for section, item in items(text):
-        grouped.setdefault(place(section, item), []).append((section, item))
-    order = [HERE] + [(k, d) for k, d, _ in PLACES]
+        key = place(section, item)
+        if key not in known:
+            # A mistyped `(where: …)` would drop the item from the index.
+            raise SystemExit(f'unknown place {key!r} (one of: {", ".join(sorted(known))}): {item}')
+        grouped.setdefault(key, []).append((section, item))
     total = sum(len(v) for v in grouped.values())
     out = [
         '# Owed checks, by where they can run',
@@ -105,7 +127,8 @@ def main():
             print('docs/owed-checks.md is stale: run `python3 scripts/owed_checks.py`', file=sys.stderr)
             return 1
         return 0
-    OUT.write_text(rendered, encoding='utf-8', newline='\n')
+    with open(OUT, 'w', encoding='utf-8', newline='\n') as out:
+        out.write(rendered)
     print(f'wrote {OUT.relative_to(ROOT)}')
     return 0
 

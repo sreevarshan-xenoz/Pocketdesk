@@ -6,24 +6,23 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 318 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 12 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 22 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 308 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 13 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 24 |
 | A phone with a SIM | 22 |
 | A second phone | 5 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 4 |
-| A Linux desktop (the Azure VM serves for some) | 82 |
+| A Linux desktop (the Azure VM serves for some) | 88 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 50 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 51 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
 **0. Prerequisites**
 
-- Desktop: `cargo run -p pocketdesk-server` (or installed server) on the
-- Phone: `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`
-- Both on the same Wi-Fi LAN; phone can reach desktop port 1716 (TCP)
+- Phone: `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` (build it first: `cargo ndk` for the bridge `.so`, then `assembleDebug`).
+- Both on the same Wi-Fi LAN; phone can reach desktop port 1716 (TCP) and the QUIC streaming port (default 50000-range per config).
 - Grant the app POST_NOTIFICATIONS when prompted (connect screen).
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -33,55 +32,50 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Second connect to same host: no pairing prompt (persisted both sides).
 - Manual flow: `pocketdesk pair` on desktop → type 6-digit PIN on phone → paired.
 - Wrong/expired PIN → clear error, retry works.
-- QUIC gate (v2 + video): before pairing completes, video must not flow — desktop log shows
+- QUIC gate (v2 + video): before pairing completes, video must not flow — desktop log shows "Streaming session rejected: device not paired" (or "Unpaired device … on v2 QUIC") and the phone's status chip goes Down; after pairing, video works with no app restart beyond Retry.
 - QUIC gate over WAN (iroh): unpaired dial is rejected the same way (desktop log + no frames).
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
-- Video appears within ~1 s; with "Show connection details" on, the HUD shows fps/kbps/rtt/delay/lost, plus the caption naming what
+- Video appears within ~1 s; with "Show connection details" on, the HUD shows fps/kbps/rtt/delay/lost, plus the caption naming what the rates and the link figure were measured over (§2d).
 - FGS notification is present ("Streaming to <ip>"), survives home/swipe-away attempts; its Disconnect action ends the session.
 - Screen-off for 1 min, wake → stream still live (wake lock + keepalive; plan #13).
 - Status chip: kill the server → "Down: <reason>" chip + Retry rebuilds after restarting the server.
-- R4 B1 screencopy backend (desktop-observable): starting a stream on
-- R4 B3 capture_backend config override: set `capture_backend = "portal"` in
-- R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10
-- R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at
-- R4 C1 codec negotiation, default off: connect normally → server log shows
-- R4 C1 HEVC + window crop: pick a window during a HEVC session → encoder rebuild at
-- R4 C2 startup ladder (desktop-observable): on a box where hardware encoding is broken
-- R4 C2 mid-session encoder kill (HEVC session): during a live `codec=H.265` session,
-- R4 C2 mid-session stall, same-codec: force the supervisor on an H.264 session (kill its
-- R4 C2 bottom rung exhausted: with software already live, keep killing encoders until the
-- R4 C2 crop stability: during a software-fallback session, pick/clear a window crop →
+- R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing or upside-down frames (YInvert handling).
+- R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (x,y)" shows that monitor's wl_output origin and frames are its size.
+- R4 C1 codec negotiation, default off: connect normally → server log shows "Client codec caps negotiated" with `codec=H.264` even on a HEVC-capable phone (allow_hevc defaults false); video unaffected.
+- R4 C1 HEVC + window crop: pick a window during a HEVC session → encoder rebuild at window size keeps HEVC and the phone reconfigures on size change without codec change.
+- R4 C2 mid-session stall, same-codec: force the supervisor on an H.264 session (kill its sidecar child) → video recovers on software x264 with NO phone toast (identical bitstream — the server log line is the only signal; that is expected).
+- R4 C2 bottom rung exhausted: with software already live, keep killing encoders until the log shows "Encoder bottom rung exhausted; ending session" → stream goes Down cleanly (status chip + Retry works), never a silent infinite stall.
+- R4 C2 crop stability: during a software-fallback session, pick/clear a window crop → encoder rebuild must NOT re-log the hardware fallback (sticky `encoder_preferred` — a rebuild must not re-probe the dead hardware).
 
 **2a. Desktop-side session visibility + kick (R4 D2)**
 
-- Consent notice: first phone connect → desktop shows a "Pocketdesk: a device is
-- `pocketdesk status` during the session → tailscale output plus a "Streaming sessions
-- `pocketdesk kick <id-prefix>` (≥6 chars, or full id, or peer IP) → phone shows the Down
+- Consent notice: first phone connect → desktop shows a "Pocketdesk: a device is streaming this desktop" notification with device id + LAN/WAN + peer (headless: the same line appears in the server log instead).
+- `pocketdesk status` during the session → tailscale output plus a "Streaming sessions (live):" line (short device id, transport, peer, up-seconds). With no session: "none live".
+- `pocketdesk kick <id-prefix>` (≥6 chars, or full id, or peer IP) → phone shows the Down status chip within ~2 s and the status line disappears; other sessions are untouched.
 - `pocketdesk kick all` ends every live session at once.
-- kick with no running server → "no running Pocketdesk server to kick through", nothing
-- Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/pocketdesk/kick`
-- Phone disconnect (normal Exit) → status line goes away within ~2 s; no leftover session in
+- kick with no running server → "no running Pocketdesk server to kick through", nothing written; a bogus target logs "kick: no live session matched" and the live session survives.
+- Phone disconnect (normal Exit) → status line goes away within ~2 s; no leftover session in `live_sessions.json` (registry deregisters on pipeline exit).
 
 **2b. Compositor-true latency read (R4 E3)**
 
-- Sanity: on-LAN idle desktop → HUD `delay` (the e2e estimate) should sit in the low tens of ms and track the
-- The old bug-shape check: `delay` must NOT equal `rtt` while frames are under load (it used
-- WAN session: `delay` should ≈ rtt/2 higher than a LAN session on the same desktop motion
+- Sanity: on-LAN idle desktop → HUD `delay` (the e2e estimate) should sit in the low tens of ms and track the `rtt` chip sensibly (e2e ≈ capture age + rtt/2); heavy desktop motion → `delay` rises (encoder/queue age grows), never reads 0 once video is flowing.
+- The old bug-shape check: `delay` must NOT equal `rtt` while frames are under load (it used to be a literal RTT proxy).
+- WAN session: `delay` should ≈ rtt/2 higher than a LAN session on the same desktop motion (the network-leg term is RTT/2 by construction).
 
 **2d. Rate and link basis (roadmap 2056)**
 
-- Right after connect: the caption starts at something like `rates over 0.5 s · rtt not measured yet` and
-- Basis reset: end the session and reconnect to the same (or a different) desktop → the caption must
-- Portrait legibility: the caption is one line of 10 sp monospace; in portrait on a narrow phone it
-- Optional cross-check: while the caption reads `rates over 3.0 s`, `pocketdesk sessions` for the same
+- Right after connect: the caption starts at something like `rates over 0.5 s · rtt not measured yet` and reaches `rates over 3.0 s · rtt median of 8` within ~8 s; fps/kbps are dim until the caption says ~2.5 s or more, and `rtt` is dim until its first poll (~1 s). A number that arrives already bright means the basis is not being reported.
+- Basis reset: end the session and reconnect to the same (or a different) desktop → the caption must come back up from a small span and `rtt median of 1`, never showing a figure or a sample count carried over from the session that just died.
+- Portrait legibility: the caption is one line of 10 sp monospace; in portrait on a narrow phone it must not wrap into a single-character column the way the six metric chips did before they became a `FlowRow`, and must not be clipped by the HUD panel's padding.
+- Optional cross-check: while the caption reads `rates over 3.0 s`, `pocketdesk sessions` for the same session should report a mean kbps within the same order of magnitude — the session record averages over the whole session, the HUD does not, and a large disagreement is a measurement bug in one of them.
 
 **3. Input paths (R2#4, Tier 1 #2)**
 
 - Mode toggle switches behavior live, no session restart.
 - holdKey/repeat (e.g. hold an arrow key) behaves.
-- R4 D1 view-only: tap "View-only: off" on the session bar → label flips
+- R4 D1 view-only: tap "View-only: off" on the session bar → label flips ("View-only: on", amber), desktop log shows "View-only mode changed" (enabled=true), and EVERY remote input goes dead on the desktop (taps, shortcuts, workspace chips) while video, StatsHud, clipboard sync and monitor/window pickers keep working. Toggle back → input restored without reconnect. Re-arm check: while view-only is ON, trigger a stream Retry / monitor switch (fresh server pipeline starts interactive) — the phone must re-send the latch once the stream is Up again; verify input stays blocked across that rebuild.
 
 **4. Zoom + display mapping (Tier 1 #6, R3#7)**
 
@@ -116,8 +110,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **8a. Control-channel versioning (R4 D4)**
 
-- Reply still works end-to-end after the `kdeconnect.notification-reply` →
-- `llVersion` tag is present on our extension packets only: capture the control-channel line
+- Reply still works end-to-end after the `kdeconnect.notification-reply` → `kdeconnect.pocketdesk.notification_reply` rename (desktop-side check): reply from the phone shade → `replies.log` records it + confirmation popup (the server only matches the new type now, so an old client build's reply would silently no-op — both ends must be from this build).
+- `llVersion` tag is present on our extension packets only: capture the control-channel line (e.g. `journalctl`/strace the JSON, or a debug log of `to_wire` output) — a `kdeconnect.pocketdesk.privacy`/`.audio`/`.state` packet carries `"llVersion":1`; a native `kdeconnect.identity`/`kdeconnect.pair`/`kdeconnect.clipboard` packet does NOT.
 
 **9. Privacy mode + lock (Tier-3 #15, R4 E4)**
 
@@ -222,24 +216,20 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **22. Owed verification register**
 
-- **PASS condition:** zero `Incoming v1 TCP connection from` lines (`server/src/service.rs:330`) after
+- **PASS condition:** zero `Incoming v1 TCP connection from` lines (`server/src/service.rs:330`) after the single session-establishing connection, while every sheet and picker above is used.
 - **PASS condition:** zero `Broken pipe (os error 32)` WARN lines from any plugin.
 - **PASS condition:** zero `Kicked 1 stale session(s) due to reconnect storm` from the server.
-- Battery/clipboard/monitors/window rows still show *current* values — the shared connection must not
-- The no-session fallback still works: a query issued with **no** live control session must take the
+- Battery/clipboard/monitors/window rows still show *current* values — the shared connection must not trade churn for staleness.
+- The no-session fallback still works: a query issued with **no** live control session must take the `oneshot_request` branch (`android/bridge/src/api.rs`, reached from `control_request` when `CONTROL_WRITER` is `None`) and still get an answer — that is the path that runs before you connect, and it is the one the rewrite could plausibly have broken. Same for `push_packet`'s dedicated socket.
 
 **23. Windows host (W1: core remote desktop)**
 
-- `install` registers the "Pocketdesk" task (Task Scheduler → Task Scheduler Library), removes a
-- A toast "Pocketdesk pairing PIN: …" appears for `pair` (the `a_toast_is_shown` test only proves
-- The phone discovers the PC on the LAN (mDNS) and over the tailnet, pairs with the PIN, and the
-- Video is live and correct-sized on a 100 % and on a scaled (125/150 %) display; a still desktop
-- Phone keyboard: letters, digits, shifted capitals, arrows, F11/F12, Esc, Super (Start menu),
-- Focusing an elevated window (e.g. an admin terminal) makes input stop with one `Windows refused
+- `install` registers the "Pocketdesk" task (Task Scheduler → Task Scheduler Library), removes a "Pocketdesk" task an older version left, starts the server with no console window, and the log file appears under `%LOCALAPPDATA%\pocketdesk\logs`.
+- A toast "Pocketdesk pairing PIN: …" appears for `pair` (the `a_toast_is_shown` test only proves Windows accepted it).
+- Phone keyboard: letters, digits, shifted capitals, arrows, F11/F12, Esc, Super (Start menu), right Alt, the app key; pasted text with capitals, accents and an emoji arrives intact. *Run 1: not testable — the app has no in-session keyboard (only the shortcut bar); Android Share sends text to the PC clipboard, not as typing.*
 - Window crop: picking a window streams just that window; closing it returns to the monitor.
-- A UAC prompt or Win+L mid-session: the stream recovers after it is dismissed (WGC keeps running; on
-- `pocketdesk stop` from a second terminal stops the server cleanly (the log ends with
-- `uninstall` removes the task and the firewall rules (`wf.msc`), including the "Pocketdesk" ones an
+- A UAC prompt or Win+L mid-session: the stream recovers after it is dismissed (WGC keeps running; on the DXGI fallback, access-lost rebuilds the duplication).
+- `uninstall` removes the task and the firewall rules (`wf.msc`), including the "Pocketdesk" ones an older version created.
 
 **24. Desktop app and QR pairing**
 
@@ -641,11 +631,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
-- R4 C1 forced HEVC round-trip: `allow_hevc = true` in config.toml, restart server,
+- R4 C1 forced HEVC round-trip: `allow_hevc = true` in config.toml, restart server, reconnect → log shows `codec=H.265 (HEVC)`; phone decodes (sniffed `video/hevc`) with video within ~1 s and input still mapped. A pre-C1 phone build (no caps stream) must still get H.264.
 
 **2d. Rate and link basis (roadmap 2056)**
 
-- The stall check this replaces: freeze the desktop's output (sleep the display, or `SIGSTOP` the
+- The stall check this replaces: freeze the desktop's output (sleep the display, or `SIGSTOP` the server) → HUD `fps` and `kbps` must reach 0 within ~3 s and stay there, with the caption still naming a real span. Under the old lifetime average this was the bug: a dead link read healthy for minutes. Resume → the rates recover within ~3 s, not within a session's worth of averaging.
 
 **7. Clipboard + files (Tier 1 #4)**
 
@@ -658,6 +648,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **18. Login autostart + tailnet access (server-side)**
 
 - Reboot the desktop → after reaching the Hyprland session, `systemctl --user status pocketdesk` is active without any manual start (WantedBy=graphical-session.target).
+
+**23. Windows host (W1: core remote desktop)**
+
+- `pocketdesk stop` from a second terminal stops the server cleanly (the log ends with `Shutdown requested (pocketdesk stop)`) — run this yourself; it is deliberately not automated.
 
 **24. Desktop app and QR pairing**
 
@@ -682,10 +676,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **3. Input paths (R2#4, Tier 1 #2)**
 
+- ...and a tap is actually a **click** (roadmap 2061, re-verify 2026-09-24). The 2026-09-22 note above claimed "click (BTN_LEFT) lands", but the code that ran sent absolute motion plus a left *release* and never a press — so that half was either an inference or a window reacting to something else. A tap must now put `BTN_LEFT` down (value 1) and up (value 0) at the touched point: check with `evtest` on the abs-pointer device rather than by whether a window happened to react.
 - Drag (roadmap 2061, shipped 2026-09-24, device-unverified): start a slow drag-select across desktop text — `evtest` should show the pointer warp to the touched point, `BTN_LEFT 1`, moving `ABS_X/ABS_Y` while held, `BTN_LEFT 0` on lift, and the selection must follow the finger (before this change a drag was motion-with-button-up: nothing began, and the release landed on a button that was never pressed). Then the leak check: begin a one-finger drag and add a second finger mid-drag (pinch) — the button must still come up, and the desktop must not be left dragging. Note there is no server-side safety net for a lost release packet yet (roadmap 2272): a session that dies mid-drag leaves `BTN_LEFT` held on the uinput device until the next release.
 - Trackpad mode: pointer moves without jumping to touch point; tap = click; two-finger = scroll.
 - Keyboard: type letters/digits/modifiers via on-screen shortcuts + remote input — check against `evtest`: Super, Alt+Tab, Ctrl+Alt+Del, PrtSc, Esc, Super+1..9 work (ShortcutBar). (Esc tap verified 2026-09-22; this box binds workspace cycling to Super+Tab, so the bar's Alt+Tab is config-dependent, not a pipeline failure.)
-- The same keyboard list **run twice, once per injection backend** (roadmap 2057-2060). Under
+- The same keyboard list **run twice, once per injection backend** (roadmap 2057-2060). Under Wayland the server prefers uinput and emits the evdev code the phone sent, so nothing is translated; the enigo/X11 rung is the one that has to name every key, and it is the rung a machine without `/dev/uinput` access lands on. Read which one is live from the server log ("using uinput" vs "using enigo"), then re-run the list with the other by starting the server as a user who cannot open `/dev/uinput`. Symbols matter most here: `- = [ ] ; ' \` , . /` and the dialpad `*`/`+` were refused outright on that rung before the table was completed.
 
 **4. Zoom + display mapping (Tier 1 #6, R3#7)**
 
@@ -701,7 +696,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **8a. Control-channel versioning (R4 D4)**
 
-- Forward-compat: hand-inject a `kdeconnect.pocketdesk.privacy` line with an extra unknown
+- Forward-compat: hand-inject a `kdeconnect.pocketdesk.privacy` line with an extra unknown top-level field and an unknown body key → server still parses and acts (unknown fields ignored).
 
 **10a. Phone mic share (R4 E2)**
 
@@ -725,7 +720,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **23. Windows host (W1: core remote desktop)**
 
-- Taps land on the pixel tapped, on a single monitor and on a secondary monitor left of/above the
+- Taps land on the pixel tapped, on a single monitor and on a secondary monitor left of/above the primary (negative origin); drag selects text. *Run 1: taps on the primary land within 5 px with a second screen present, after the monitor → layout remap fix. Not tried: streaming the secondary, a monitor left of the primary, drag.*
+- Focusing an elevated window (e.g. an admin terminal) makes input stop with one `Windows refused injected input` log line, and input resumes on returning to a normal window.
 
 **26. In-session keyboard**
 
@@ -895,8 +891,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **0. Prerequisites**
 
-- Desktop: user in `input` group (uinput + `/dev/input/event*` read for
-- Note which items are Hyprland-specific (window picker, workspace HUD,
+- Desktop: `cargo run -p pocketdesk-server` (or installed server) on the Hyprland machine; FFmpeg + PipeWire + xdg-desktop-portal present.
+- Desktop: user in `input` group (uinput + `/dev/input/event*` read for privacy mode) — `groups $USER` should show `input`.
+- Note which items are Hyprland-specific (window picker, workspace HUD, monitor geometry) — retest on a plain session if that's a target.
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
 
@@ -904,13 +901,17 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
+- R4 B1 screencopy backend (desktop-observable): starting a stream on Hyprland must NOT raise the portal screen-share grant dialog; server log shows "Capture started via backend Screencopy". If instead it shows "Capture backend Screencopy unavailable (…); trying next" followed by "Capture started via backend Portal", the reason is in the line — that's the fallback working, but note it as a finding. `POCKETDESK_SCREENCOPY=0` forces the portal path.
+- R4 B3 capture_backend config override: set `capture_backend = "portal"` in config.toml, restart, start a stream → log shows "Capture started via backend Portal" and NO screencopy attempt line (pipeline pinned). With `capture_backend = "screencopy"` on a NON-wlroots/portal-only Wayland, the server must fail the session with a "Capture backend Screencopy unavailable" error rather than silently falling back to the portal (explicit intent surfaces). Omitting the key (or `"auto"`) restores the screencopy→portal fallback above. An unknown value (e.g. `"v4l2"`) makes the server refuse to start with a TOML parse error.
+- R4 C2 startup ladder (desktop-observable): on a box where hardware encoding is broken (e.g. force `hardware_encoder = "nvenc"` here — this box's NVIDIA driver predates FFmpeg 9 NVENC, so the sidecar dies), start a session → server log shows "Hardware encoder unavailable (…); falling back to software (C2)" and video still appears within ~2 s on x264.
+- R4 C2 mid-session encoder kill (HEVC session): during a live `codec=H.265` session, `pkill -f 'ffmpeg .*vaapi'` (or kill the encoder child seen in `pstree` of the server) → log shows "Rebuilt encoder on software rung (C2)", video resuming within ~2 s and the phone toasts "Desktop switched encoder — now H.264" (MediaCodec swap re-sniffed from the first software IDR).
 - R4 C3 NVENC power pin (**NVIDIA hardware only — skip on non-NVIDIA boxes**): start an NVENC session (server log "Video encoder sidecar" on `h264_nvenc`/`hevc_nvenc`) → server log "pinned NVENC GPU 0 graphics clock to N MHz"; `nvidia-smi -q -d CLOCK -i 0` shows the graphics clock held at its max. End the session → log "restored NVENC GPU 0 to default clock management" and `nvidia-smi -q -d CLOCK` shows clocks back under adaptive management. On an unprivileged desktop the pin self-declines (log "clock lock refused ... running unpinned") and no reset is issued.
 
 **2c. In-process VAAPI encode (R4 C4) — desktop/box-observable, no device needed**
 
-- R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` →
-- R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the
-- R4 C4 quality (needs a phone): a VAAPI-encoded session decodes with correct color (no NV12 chroma
+- R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` → `test_vaapi_encode_roundtrip` encodes 40 real frames through `h264_vaapi` on this box's Intel iHD node and asserts Annex-B packets + ≥1 keyframe (self-skips green where no VA node exists).
+- R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the VA-capable node, NOT the hardcoded NVIDIA `renderD128` — `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD129` starts a session → server log "Video encoder: in-process VAAPI (h264_vaapi) on /dev/dri/renderD129" and **no `ffmpeg` sidecar child** is spawned for the vaapi path (`pstree` of the server). Point the override at a VA-less node (e.g. `/dev/dri/renderD128`) → it degrades to sidecar-then-software (C2), never hangs.
+- R4 C4 quality (needs a phone): a VAAPI-encoded session decodes with correct color (no NV12 chroma shift) and the GOP (fps×2) keyframe lets first-frame render land within ~2 s.
 
 **5. Window + monitor streaming (R3#7, Tier-2 #10)**
 
@@ -935,6 +936,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **18. Login autostart + tailnet access (server-side)**
 
 - `install.sh` run → unit lands in `~/.config/systemd/user/`, ExecStart points at the real prefix path, prompt enables it; `--status` reports the user unit; `--uninstall` removes it and any legacy `/etc/systemd/system` unit.
+
+**23. Windows host (W1: core remote desktop)**
+
+- The phone discovers the PC on the LAN (mDNS) and over the tailnet, pairs with the PIN, and the log shows `Auto-detect: selecting NVENC` (or AMF/MF on other GPUs) and `WGC capture started`. *Run 1: PIN pairing, NVENC and WGC confirmed over USB; LAN discovery and the tailnet not tried.*
 
 **24. Desktop app and QR pairing**
 
@@ -1228,15 +1233,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
-- Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5).
+- Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5). "Drops" means **frames the phone never received** — the holes in the server's per-frame sequence numbers, counted where only the client can count them. So a saturated link must move it (the desktop's transport task trims its backlog before a stall clears), while a frame that arrives late and intact must not: the number can come back down when an out-of-order frame lands, and that is correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the desktop's `src` rate, not here.
+
+**2a. Desktop-side session visibility + kick (R4 D2)**
+
+- Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/pocketdesk/kick` (`all\n<unix-secs older than 60s>`), start the daemon, connect a phone → the session must NOT be killed (the expired request is dropped with a warn on first tick).
 
 **2b. Compositor-true latency read (R4 E3)**
 
-- Cross-check (eyes, optional): point the phone camera at the desktop with an on-screen
-
-**3. Input paths (R2#4, Tier 1 #2)**
-
-- ...and a tap is actually a **click** (roadmap 2061, re-verify 2026-09-24). The 2026-09-22 note above
+- Cross-check (eyes, optional): point the phone camera at the desktop with an on-screen clock/stopwatch — the phone's rendered image lags the physical panel by roughly the HUD `delay` figure (± the phone's own present latency, which the probe can't see).
 
 **5. Window + monitor streaming (R3#7, Tier-2 #10)**
 
@@ -1253,6 +1258,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **17. Foldable / tablet dual-pane (R4 E6)**
 
 - Toggling panes mid-session does NOT drop the stream (the decode session survives the fold — check fps continuity / no re-Keyframe gap).
+
+**23. Windows host (W1: core remote desktop)**
+
+- Video is live and correct-sized on a 100 % and on a scaled (125/150 %) display; a still desktop keeps the HUD alive (the 1 s heartbeat) instead of tripping the 10 s dead-link card. *Run 1: live, correct-sized and kept alive on a still desktop at 100 %; no scaled display tried.*
 
 **24. Desktop app and QR pairing**
 
