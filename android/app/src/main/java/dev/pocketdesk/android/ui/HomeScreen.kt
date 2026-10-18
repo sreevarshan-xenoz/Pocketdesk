@@ -701,7 +701,7 @@ private fun HostCard(
                             add(R.string.doctor_title to onCheck)
                             add(R.string.card_rename to onRename)
                             // D3: an earlier copy, sent to this computer again.
-                            add(R.string.clipboard_history to onHistory)
+                            add(R.string.card_send_earlier_copy to onHistory)
                         }
                         entries.forEach { (label, action) ->
                             DropdownMenuItem(

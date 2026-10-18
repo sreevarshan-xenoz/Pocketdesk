@@ -722,4 +722,6 @@
     <string name="settings_let_computer_mute_summary">Your computer can turn on Do Not Disturb for a while, up to a day, and sees when this phone is quiet. Calls and messages your Do Not Disturb settings let through still come. Keeps a link to the computer, so it needs notification access.</string>
     <string name="phone_notifications_hold_back">Hold back in Do Not Disturb</string>
     <string name="phone_notifications_hold_back_summary">While Do Not Disturb silences a notification on this phone, it is not sent to the computer either</string>
+    <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
+    <string name="card_send_earlier_copy">Send an earlier copy</string>
 </resources>
