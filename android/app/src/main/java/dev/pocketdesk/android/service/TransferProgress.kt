@@ -15,4 +15,23 @@ object TransferProgress {
      */
     fun forFile(sent: Long, total: Long, fileSize: Long): Int =
         if (fileSize > 0 && total == fileSize) percent(sent, total) else 0
+
+    /**
+     * Bytes a second over the last [windowMs] of the readings it is given
+     * (C1): what moved between the oldest kept and the newest. A reading
+     * lower than the last (a new attempt resuming) starts it over.
+     */
+    class Speed(private val windowMs: Long = 4_000L) {
+        private val readings = ArrayDeque<Pair<Long, Long>>()
+
+        /** Add the reading [done] bytes at [atMs]; the speed now, 0 until it can tell. */
+        fun add(atMs: Long, done: Long): Long {
+            if (readings.lastOrNull()?.let { it.second > done } == true) readings.clear()
+            readings.addLast(atMs to done)
+            while (readings.size > 1 && atMs - readings.first().first > windowMs) readings.removeFirst()
+            val (firstAt, firstDone) = readings.first()
+            val span = atMs - firstAt
+            return if (span < 500) 0 else (done - firstDone) * 1000 / span
+        }
+    }
 }

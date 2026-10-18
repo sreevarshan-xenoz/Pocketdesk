@@ -190,6 +190,8 @@ object TransferRetry {
         "larger than",
         "not accepted",
         "permission",
+        // Cancelled on the phone, or on the computer (C1).
+        "cancelled",
     )
 
     /**

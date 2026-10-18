@@ -141,6 +141,7 @@ object RustCore {
         pathJson: String,
     ): String
     private external fun nativeTransferProgress(): LongArray?
+    private external fun nativeCancelTransfer()
     private external fun nativeFetchFile(
         address: String,
         port: Int,
@@ -758,6 +759,9 @@ object RustCore {
     data class FolderPart(val folderId: String, val folder: String, val path: List<String>)
 
     /** The running file transfer as (bytes sent, total). */
+    /** Stop the file transfer running now, if any (C1): its call fails with "cancelled on the phone". */
+    fun cancelTransfer() = nativeCancelTransfer()
+
     fun transferProgress(): Pair<Long, Long> {
         val values = nativeTransferProgress() ?: return 0L to 0L
         return if (values.size == 2) values[0] to values[1] else 0L to 0L

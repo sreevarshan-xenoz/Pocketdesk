@@ -18,6 +18,15 @@ class TransferRetryTest {
     }
 
     @Test
+    fun aCancelledTransferIsNeverRetried() {
+        assertNull(TransferRetry.delayBefore(1, "cancelled on the phone", enabled = true))
+        assertNull(
+            "the computer's Cancel arrives as its refusal",
+            TransferRetry.delayBefore(1, "The computer refused the download: cancelled on the computer", enabled = true),
+        )
+    }
+
+    @Test
     fun aRefusalOrAFileThatCannotBeSentIsNotRetried() {
         for (error in listOf(
             "The computer refused the file: the phone may not send files",

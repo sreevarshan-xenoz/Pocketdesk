@@ -217,6 +217,8 @@
     <string name="transfer_done_mixed">Listo. Enviados: %1$d, guardados: %2$d</string>
     <string name="transfer_some_failed">Fallidas: %1$d de %2$d</string>
     <string name="transfer_no_space">No hay espacio para %1$s</string>
+    <string name="transfer_name_speed">%1$s · %2$s/s</string>
+    <string name="transfer_cancelled">Cancelado. Si lo vuelves a enviar, sigue donde se quedó.</string>
     <plurals name="transfer_saved">
         <item quantity="one">%1$d archivo guardado en Descargas</item>
         <item quantity="many">%1$d archivos guardados en Descargas</item>
