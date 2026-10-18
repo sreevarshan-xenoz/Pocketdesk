@@ -73,6 +73,9 @@ mod tests {
             ("ring_phone (rings_out)", || {
                 Box::pin(crate::ring_phone::run_watcher())
             }),
+            ("quiet_phone (quiet_out)", || {
+                Box::pin(crate::quiet_phone::run_watcher())
+            }),
             ("phone_battery (writer)", || {
                 Box::pin(crate::plugins::phone_battery::run_writer())
             }),

@@ -44,6 +44,7 @@ pub mod peer_computers;
 pub mod platform;
 pub mod plugins;
 pub mod privacy;
+pub mod quiet_phone;
 pub mod relay;
 pub mod ring_phone;
 pub mod service;
