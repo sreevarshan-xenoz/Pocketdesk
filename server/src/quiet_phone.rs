@@ -133,16 +133,15 @@ impl Plugin for PhoneQuietPlugin {
             return Ok(());
         }
         let now = pocketdesk_core::local::pin::now_unix();
-        let (changed, snapshot) = {
+        let (changed, quiet) = {
             let mut states = STATES.lock().unwrap_or_else(|e| e.into_inner());
             let Some(changed) = take(&mut states, device, &packet.body, now) else {
                 tracing::debug!("A quiet state from {device} was not read");
                 return Ok(());
             };
-            (changed, states.clone())
+            (changed, states.get(device).is_some_and(|s| s.quiet))
         };
         if changed {
-            let quiet = snapshot.get(device).is_some_and(|s| s.quiet);
             crate::events::emit(
                 "phone_quiet",
                 Some(device),
@@ -150,13 +149,13 @@ impl Plugin for PhoneQuietPlugin {
                 serde_json::json!({}),
             );
         }
-        write(snapshot);
+        write();
         Ok(())
     }
 }
 
 /// Write the states, without the phones no longer paired, off the packet loop.
-fn write(mut states: BTreeMap<String, PhoneQuiet>) {
+fn write() {
     if cfg!(test) {
         return;
     }
@@ -164,13 +163,22 @@ fn write(mut states: BTreeMap<String, PhoneQuiet>) {
         return;
     };
     std::thread::spawn(move || {
-        if let Ok(store) =
+        // One write at a time, each of the newest states (D2 review): a
+        // thread per report, each with its own snapshot, could write an
+        // older one last.
+        static WRITING: Mutex<()> = Mutex::new(());
+        let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+        let paired: Option<HashSet<String>> =
             pocketdesk_core::protocol::kdeconnect::TrustStore::read(dir.join(TRUST_FILE))
-        {
-            let paired: HashSet<String> = store.trusted_devices().into_iter().collect();
-            keep_only(&mut states, &paired);
-            *STATES.lock().unwrap_or_else(|e| e.into_inner()) = states.clone();
-        }
+                .ok()
+                .map(|store| store.trusted_devices().into_iter().collect());
+        let states = {
+            let mut states = STATES.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(paired) = &paired {
+                keep_only(&mut states, paired);
+            }
+            states.clone()
+        };
         if let Err(e) = pocketdesk_core::local::phone_quiet::write(&dir, &states) {
             tracing::warn!("Could not keep the phones' quiet state: {e}");
         }
