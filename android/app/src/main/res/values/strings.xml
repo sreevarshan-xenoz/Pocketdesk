@@ -522,6 +522,10 @@
     <string name="phone_folders_not_kept">Android did not let Pocketdesk keep access to that folder</string>
     <string name="screenshots_on">Send new screenshots</string>
     <string name="screenshots_on_summary">A screenshot taken on this phone goes to its computer a moment later. Asks for access to photos, and uses notification access to run in the background</string>
+    <string name="recent_photos_on">Recent photos on the computer</string>
+    <string name="recent_photos_on_summary">Your computer\'s Phone page shows your newest camera photos (DCIM) as small pictures, and fetches one when you ask. Off until you turn it on</string>
+    <string name="recent_photos_needs_photos">Pocketdesk needs access to photos for this: turn it on again to allow it</string>
+    <string name="recent_photos_needs_access">The computer asks through the phone\'s notification access, which is off: allow it below</string>
     <string name="screenshots_needs_access">Needs notification access to run in the background</string>
     <string name="screenshots_needs_photos">Needs access to all photos: allow it in Android\'s settings for Pocketdesk</string>
     <string name="screenshots_clipboard">Put on the computer\'s clipboard</string>
