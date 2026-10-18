@@ -295,9 +295,12 @@ fn to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
 /// again, so one written into a link that had died is not lost.
 pub const ACK: &str = "kdeconnect.notification.ack";
 
-/// The answer to `body`, if it asked (`ack: true`) and names itself.
+/// The answer to `body`, if it asked (`ack: true`) and names itself. A
+/// cancel needs no answer.
 fn ack_for(body: &serde_json::Value, refused: bool) -> Option<NetworkPacket> {
-    if body.get("ack").and_then(|v| v.as_bool()) != Some(true) {
+    if body.get("ack").and_then(|v| v.as_bool()) != Some(true)
+        || body.get("isCancel").and_then(|v| v.as_bool()) == Some(true)
+    {
         return None;
     }
     let id = body
@@ -1067,6 +1070,10 @@ mod tests {
         assert!(ack_for(&json!({"id": "k", "ack": "yes"}), false).is_none());
         assert!(ack_for(&json!({"ack": true}), false).is_none(), "no id");
         assert!(ack_for(&json!({"id": "", "ack": true}), false).is_none());
+        assert!(
+            ack_for(&json!({"id": "k", "ack": true, "isCancel": true}), false).is_none(),
+            "a cancel needs no answer"
+        );
     }
 
     struct Phone(std::sync::Mutex<Vec<NetworkPacket>>);

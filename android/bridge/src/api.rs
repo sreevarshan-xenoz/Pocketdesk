@@ -1320,12 +1320,15 @@ mod reply_tests {
         );
     }
 
-    /// C3 review: a computer from before C3 is never asked.
+    /// C3 review: a cancel never asks, and a computer from before C3 is
+    /// never asked.
     #[test]
     fn only_a_notification_to_a_computer_that_answers_asks() {
         let note = json!({"id": "k", "title": "Ann"});
+        let cancel = json!({"id": "k", "isCancel": true});
         assert!(super::asks_answer(&note, true));
         assert!(!super::asks_answer(&note, false));
+        assert!(!super::asks_answer(&cancel, true));
     }
 
     /// Several audio requests share one reply type: a reply naming another
@@ -1557,14 +1560,16 @@ const NOTIFICATION_ACK_WAIT: Duration = Duration::from_secs(5);
 /// it: `acked`, `refused` (the computer's Notifications permission is off),
 /// `unanswered` (sent on the live link, nothing back in time: the link has
 /// died unseen), `pushed` (no live link, sent on a connection of its own,
-/// which cannot carry the answer) or `sent` (not asked: a computer from
-/// before C3). A send that fails is an error.
+/// which cannot carry the answer) or `sent` (not asked: a cancel, or a
+/// computer from before C3). A send that fails is an error.
 pub async fn send_notification_acked(
     address: String,
     port: u16,
     body: String,
 ) -> Result<&'static str, String> {
     let body = notification_body(&body)?;
+    // A cancel asks nothing (C3 review): it needs no answer, and must not
+    // hold the phone's sends for one.
     if !asks_answer(&body, crate::peer_names::acks_notifications(&address)) {
         let packet = NetworkPacket::new("kdeconnect.notification").with_body(body);
         return push_packet(&address, port, &packet).await.map(|()| "sent");
@@ -1591,10 +1596,10 @@ pub async fn send_notification_acked(
     }
 }
 
-/// Whether to ask the computer to answer `body`: only a computer that says
-/// it answers (C3).
-fn asks_answer(_body: &serde_json::Value, computer_answers: bool) -> bool {
-    computer_answers
+/// Whether to ask the computer to answer `body`: not for a cancel, and only
+/// of a computer that says it answers (C3).
+fn asks_answer(body: &serde_json::Value, computer_answers: bool) -> bool {
+    computer_answers && body.get("isCancel").and_then(|v| v.as_bool()) != Some(true)
 }
 
 /// `body`, asking the computer to answer (C3).
