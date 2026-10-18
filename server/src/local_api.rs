@@ -124,6 +124,10 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
     let keys = device_keys::read(state_dir).unwrap_or_default();
     let batteries = pocketdesk_core::local::phone_status::read(state_dir);
     let quiet = pocketdesk_core::local::phone_quiet::read(state_dir);
+    // D2 review: only a phone linked now says its quiet; an old report is not now's.
+    let linked: std::collections::HashSet<String> = live_mirror(state_dir, now_unix, running)
+        .map(|m| m.linked.into_iter().map(|p| p.device_id).collect())
+        .unwrap_or_default();
     // Only a running server's: what played in an earlier run is not now.
     let media = if running {
         pocketdesk_core::local::phone_media::read(state_dir)
@@ -161,7 +165,7 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
                 // What it plays (T8d), or null.
                 "media": media.get(&id).map(|m| &m.media),
                 // Its Do Not Disturb as it last said (D2), or null.
-                "quiet": quiet.get(&id),
+                "quiet": quiet.get(&id).filter(|_| linked.contains(&id)),
             })
         })
         .collect();
@@ -1126,7 +1130,7 @@ mod tests {
         device_keys::register(&dir, "phone-a", device_keys::Slot::Tls, "k").unwrap();
         std::fs::write(
             dir.join(LIVE_FILE),
-            r#"{"updated_unix":100,"sessions":[{"device_id":"phone-a","peer":"192.0.2.7:1","transport":"lan","started_unix":90}]}"#,
+            r#"{"updated_unix":100,"sessions":[{"device_id":"phone-a","peer":"192.0.2.7:1","transport":"lan","started_unix":90}],"linked":[{"device_id":"phone-a","files":true}]}"#,
         )
         .unwrap();
         let mut batteries = std::collections::BTreeMap::new();
@@ -1201,6 +1205,14 @@ mod tests {
                 .iter()
                 .all(|d| d["media"] == Value::Null),
             "a stopped server's phones play nothing it knows of"
+        );
+        assert!(
+            stopped["devices"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|d| d["quiet"] == Value::Null),
+            "D2 review: a stopped server's phones are not linked, so their quiet is not now's"
         );
         assert_eq!(b["in_session"], false);
         assert!(b["grant_remaining_secs"].as_u64().is_some_and(|s| s <= 60));

@@ -94,22 +94,31 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         Ok(store) => store
             .trusted_devices()
             .into_iter()
-            .map(|id| Device {
-                name: store.name(&id).map(str::to_string),
-                // The owner's, even when it matches the phone's own (U3 review).
-                renamed: store.chosen_name(&id).is_some(),
-                grant_remaining: store.grant_remaining(&id),
-                connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
-                takes_files: takes_files(&id),
-                // A control link carries the ring (N1 review).
-                linked: mirror
+            .map(|id| {
+                let linked = mirror
                     .as_ref()
-                    .is_some_and(|m| m.linked.iter().any(|p| p.device_id == id)),
-                permissions: store.permissions(&id),
-                battery: batteries.get(&id).copied(),
-                quiet: quiet.get(&id).copied(),
-                computer: store.is_computer(&id),
-                id,
+                    .is_some_and(|m| m.linked.iter().any(|p| p.device_id == id));
+                Device {
+                    name: store.name(&id).map(str::to_string),
+                    // The owner's, even when it matches the phone's own (U3 review).
+                    renamed: store.chosen_name(&id).is_some(),
+                    grant_remaining: store.grant_remaining(&id),
+                    connected: sessions.iter().any(|s| s.device_id.as_deref() == Some(&id)),
+                    takes_files: takes_files(&id),
+                    // A control link carries the ring (N1 review).
+                    linked,
+                    permissions: store.permissions(&id),
+                    battery: batteries.get(&id).copied(),
+                    // Only a phone linked now (D2 review): it says when its quiet
+                    // changes, so an old report from a phone away is not now's.
+                    quiet: if linked {
+                        quiet.get(&id).copied()
+                    } else {
+                        None
+                    },
+                    computer: store.is_computer(&id),
+                    id,
+                }
             })
             .collect(),
         Err(_) => Vec::new(),
