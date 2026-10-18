@@ -33,6 +33,8 @@ pub struct Device {
     pub permissions: DevicePermissions,
     /// Its last battery report (T8b), if it ever sent one.
     pub battery: Option<pocketdesk_core::local::phone_status::PhoneBattery>,
+    /// Its Do Not Disturb as it last said (D2), if it ever did.
+    pub quiet: Option<pocketdesk_core::local::phone_quiet::PhoneQuiet>,
     /// Another of the owner's computers, paired as one (2f).
     pub computer: bool,
 }
@@ -87,6 +89,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
     let takes_files = |id: &str| mirror.as_ref().is_some_and(|m| m.files_reach(id));
     let sessions = mirror.clone().map(|m| m.sessions).unwrap_or_default();
     let batteries = pocketdesk_core::local::phone_status::read(state_dir);
+    let quiet = pocketdesk_core::local::phone_quiet::read(state_dir);
     let devices = match TrustStore::load_or_create(state_dir.join(TRUST_FILE)) {
         Ok(store) => store
             .trusted_devices()
@@ -104,6 +107,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                     .is_some_and(|m| m.linked.iter().any(|p| p.device_id == id)),
                 permissions: store.permissions(&id),
                 battery: batteries.get(&id).copied(),
+                quiet: quiet.get(&id).copied(),
                 computer: store.is_computer(&id),
                 id,
             })
@@ -239,6 +243,8 @@ pub struct PhoneRow<'a> {
     /// When its last session was recorded (unix seconds), if one is.
     pub last_session: Option<u64>,
     pub ring: Result<(), &'static str>,
+    /// D2: Mute for an hour, or Unmute.
+    pub mute: Result<(), &'static str>,
     pub file: Result<(), &'static str>,
     pub link: Result<(), &'static str>,
 }
@@ -273,6 +279,13 @@ pub fn phone_rows<'a>(
                 } else {
                     Ok(())
                 },
+                mute: if !allows(Capability::Mute) {
+                    Err("Mute is off for this phone, on the Devices page.")
+                } else if !device.linked {
+                    Err("Not linked now: it is muted while it keeps a link to this computer, which \"Let the computer mute this phone\" in its own Settings opens.")
+                } else {
+                    Ok(())
+                },
                 file: if !allows(Capability::Files) {
                     Err("Files are off for this phone, on the Devices page.")
                 } else if !device.takes_files {
@@ -291,6 +304,31 @@ pub fn phone_rows<'a>(
             }
         })
         .collect()
+}
+
+/// What a phone's Do Not Disturb is now, for the Overview (D2): `None` when
+/// it is not quiet, or never said. A mute from here says how long is left.
+pub fn quiet_text(
+    quiet: Option<&pocketdesk_core::local::phone_quiet::PhoneQuiet>,
+    now_unix: u64,
+) -> Option<String> {
+    let quiet = quiet.filter(|q| q.quiet)?;
+    Some(match quiet.until_unix {
+        Some(until) if quiet.by_computer && until > now_unix => {
+            let minutes = (until - now_unix).div_ceil(60);
+            format!("muted from here, {minutes} min left")
+        }
+        _ => "Do Not Disturb".to_string(),
+    })
+}
+
+/// Whether the Overview offers Unmute rather than Mute for an hour: a mute
+/// asked for from a computer, still running.
+pub fn muted_from_here(
+    quiet: Option<&pocketdesk_core::local::phone_quiet::PhoneQuiet>,
+    now_unix: u64,
+) -> bool {
+    quiet.is_some_and(|q| q.quiet && q.by_computer && q.until_unix.is_some_and(|u| u > now_unix))
 }
 
 /// How much of the session log's end is read for [`last_sessions`]: its
@@ -699,6 +737,7 @@ mod tests {
         off.permissions.set(Capability::Ring, false);
         off.permissions.set(Capability::Links, false);
         off.permissions.set(Capability::Files, false);
+        off.permissions.set(Capability::Mute, false);
         let mut away = phone("away");
         away.permissions = ready.permissions.clone();
         snapshot.devices = vec![ready, off, away];
@@ -710,6 +749,48 @@ mod tests {
         assert!(rows[2].ring.unwrap_err().contains("Not linked"));
         assert!(rows[2].file.unwrap_err().contains("in a session"));
         assert!(rows[2].link.unwrap_err().contains("Not linked"));
+        assert!(rows[0].mute.is_ok());
+        assert!(rows[1].mute.unwrap_err().contains("Devices"));
+        assert!(rows[2].mute.unwrap_err().contains("Not linked"));
+    }
+
+    /// D2: a phone's Do Not Disturb, and whether Unmute is offered.
+    #[test]
+    fn a_phone_s_quiet_is_said_and_a_mute_from_here_counts_down() {
+        use pocketdesk_core::local::phone_quiet::PhoneQuiet;
+        let own = PhoneQuiet {
+            quiet: true,
+            until_unix: Some(1_000 + 25 * 60 - 30),
+            by_computer: true,
+            updated_unix: 1_000,
+        };
+        assert_eq!(
+            quiet_text(Some(&own), 1_000).as_deref(),
+            Some("muted from here, 25 min left")
+        );
+        assert!(muted_from_here(Some(&own), 1_000));
+        // Its end passed (the phone not heard since): the phone's word stands.
+        assert_eq!(
+            quiet_text(Some(&own), 3_000).as_deref(),
+            Some("Do Not Disturb")
+        );
+        assert!(!muted_from_here(Some(&own), 3_000));
+        let owners = PhoneQuiet {
+            by_computer: false,
+            until_unix: None,
+            ..own
+        };
+        assert_eq!(
+            quiet_text(Some(&owners), 1_000).as_deref(),
+            Some("Do Not Disturb")
+        );
+        assert!(!muted_from_here(Some(&owners), 1_000));
+        let loud = PhoneQuiet {
+            quiet: false,
+            ..owners
+        };
+        assert_eq!(quiet_text(Some(&loud), 1_000), None);
+        assert_eq!(quiet_text(None, 1_000), None);
     }
 
     /// N6 review: the server pushes a link only over a control link.
