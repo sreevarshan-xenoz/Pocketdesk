@@ -72,6 +72,8 @@ struct State {
     watch_only: bool,
     /// The primary button is down on the phone.
     pressing: bool,
+    /// Where the last touch went, for a release the window did not see.
+    last_touch: (u16, u16),
 }
 
 /// The cast window and its worker.
@@ -306,9 +308,10 @@ fn coalesce_moves(events: Vec<ControlEvent>) -> Vec<ControlEvent> {
     out
 }
 
-/// Send `events` to the phone through the relay (C8), in batches; a write
-/// that fails ends nothing (the reader sees the relay go).
-fn send_control(writer: &mut TcpStream, events: Vec<ControlEvent>) {
+/// Send `events` to the phone through the relay (C8), in batches; whether
+/// all went. A write that fails mid-message leaves the framing broken, so
+/// the caller stops writing there (the reader sees the relay go).
+fn send_control(writer: &mut TcpStream, events: Vec<ControlEvent>) -> bool {
     let sent_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64);
@@ -317,10 +320,13 @@ fn send_control(writer: &mut TcpStream, events: Vec<ControlEvent>) {
             sent_ms,
             events: chunk.to_vec(),
         };
-        if let Some(bytes) = batch.encode() {
-            let _ = Message::Control(bytes).write(writer);
+        if let Some(bytes) = batch.encode()
+            && Message::Control(bytes).write(writer).is_err()
+        {
+            return false;
         }
     }
+    true
 }
 
 /// Where a `w`×`h` picture goes in `area`: as large as fits, centred.
@@ -375,18 +381,26 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                 ui.horizontal_wrapped(|ui| {
                     if phone_takes {
                         ui.add_enabled_ui(!watch_only, |ui| {
-                            if ui.button("Back").clicked() {
-                                buttons.push(ControlEvent::Global(Global::Back));
-                            }
-                            if ui.button("Home").clicked() {
-                                buttons.push(ControlEvent::Global(Global::Home));
-                            }
-                            if ui.button("Recents").clicked() {
-                                buttons.push(ControlEvent::Global(Global::Recents));
+                            for (label, global) in [
+                                ("Back", Global::Back),
+                                ("Home", Global::Home),
+                                ("Recents", Global::Recents),
+                            ] {
+                                let button = ui.button(label);
+                                if button.clicked() {
+                                    // Enter and Space go to the phone, not
+                                    // to this button again (C8 review).
+                                    button.surrender_focus();
+                                    buttons.push(ControlEvent::Global(global));
+                                }
                             }
                         });
-                        ui.checkbox(&mut watch_only, "Watch only")
+                        let switch = ui
+                            .checkbox(&mut watch_only, "Watch only")
                             .on_hover_text("Show the phone without touching it");
+                        if switch.clicked() {
+                            switch.surrender_focus();
+                        }
                     } else {
                         ui.colored_label(
                             egui::Color32::LIGHT_GRAY,
@@ -436,20 +450,63 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
             // C8: this pass's input, to the phone.
             let mut state = lock(shared);
             state.watch_only = watch_only;
+            // A picture of the old shape (the phone just turned) would put
+            // a tap in the wrong place: nothing goes until the new one shows.
+            let current = match (&texture, state.size) {
+                (Some(t), Some((w, h))) => t.size() == [usize::from(w), usize::from(h)],
+                _ => false,
+            };
             let mut events = Vec::new();
-            if controlling && !watch_only {
+            if controlling && !watch_only && current {
                 events = buttons;
                 if let Some(rect) = picture_rect {
-                    let (input, hover) = ctx.input(|i| (i.events.clone(), i.pointer.hover_pos()));
+                    let (input, hover, down) = ctx.input(|i| {
+                        (
+                            i.events.clone(),
+                            i.pointer.hover_pos(),
+                            i.pointer.primary_down(),
+                        )
+                    });
                     events.extend(control_events(&input, rect, hover, &mut state.pressing));
+                    // A release the window never saw (focus went mid-drag):
+                    // the finger lifts where it last was (C8 review).
+                    if state.pressing && !down {
+                        state.pressing = false;
+                        let (x, y) = state.last_touch;
+                        events.push(ControlEvent::Touch {
+                            action: TouchAction::Up,
+                            x,
+                            y,
+                        });
+                    }
                 }
             } else if state.pressing {
+                // Control went off mid-press: the finger lifts.
                 state.pressing = false;
+                let (x, y) = state.last_touch;
+                events.push(ControlEvent::Touch {
+                    action: TouchAction::Up,
+                    x,
+                    y,
+                });
             }
-            if !events.is_empty()
-                && let Some(writer) = state.writer.as_mut()
+            if let Some(ControlEvent::Touch { x, y, .. }) = events
+                .iter()
+                .rev()
+                .find(|e| matches!(e, ControlEvent::Touch { .. }))
             {
-                send_control(writer, events);
+                state.last_touch = (*x, *y);
+            }
+            // Written outside the window's lock, so a slow relay holds
+            // nothing else; the first broken write ends control here.
+            let writer = (!events.is_empty())
+                .then(|| state.writer.as_ref().and_then(|w| w.try_clone().ok()))
+                .flatten();
+            drop(state);
+            if let Some(mut writer) = writer
+                && !send_control(&mut writer, events)
+            {
+                lock(shared).writer = None;
             }
         });
 }
@@ -914,6 +971,37 @@ mod tests {
             got.extend(ControlBatch::decode(&bytes).expect("readable").events);
         }
         assert_eq!(got, many, "split at the batch limit, nothing lost");
+    }
+
+    #[test]
+    fn moves_in_a_pass_become_their_last_and_nothing_else_moves() {
+        let mv = |x| ControlEvent::Touch {
+            action: TouchAction::Move,
+            x,
+            y: 0,
+        };
+        let down = ControlEvent::Touch {
+            action: TouchAction::Down,
+            x: 0,
+            y: 0,
+        };
+        let up = ControlEvent::Touch {
+            action: TouchAction::Up,
+            x: 9,
+            y: 0,
+        };
+        assert_eq!(
+            coalesce_moves(vec![
+                down.clone(),
+                mv(1),
+                mv(2),
+                mv(3),
+                up.clone(),
+                mv(4),
+                mv(5)
+            ]),
+            vec![down, mv(3), up, mv(5)]
+        );
     }
 
     #[test]
