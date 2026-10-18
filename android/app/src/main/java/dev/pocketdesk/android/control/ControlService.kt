@@ -36,6 +36,8 @@ class ControlService : AccessibilityService() {
     private var stroke: GestureDescription.StrokeDescription? = null
     /** A segment is being performed. */
     private var busy = false
+    /** A finger is down, as the main thread last saw: read by the runner's thread. */
+    @Volatile private var fingerDown = false
 
     override fun onServiceConnected() {
         instance = this
@@ -85,7 +87,7 @@ class ControlService : AccessibilityService() {
     private fun locked(): Boolean = getSystemService(KeyguardManager::class.java).isDeviceLocked
 
     /** A touch at a fraction of the screen ([ControlPlan.place]). */
-    fun touch(action: String, x: Int, y: Int) = main.post {
+    fun touch(action: String, x: Int, y: Int): Boolean = main.post {
         if (locked()) {
             strokes.lift(SystemClock.uptimeMillis())
             pump()
@@ -121,10 +123,11 @@ class ControlService : AccessibilityService() {
         pump()
     }
 
-    /** Whether a press waits to start or more is pending. */
-    fun waiting(): Boolean = strokes.waiting(SystemClock.uptimeMillis())
+    /** Whether a finger is down, so the runner looks again soon (a press to start, a finger to lift). */
+    fun waiting(): Boolean = fingerDown
 
     private fun pump() {
+        fingerDown = strokes.active
         if (busy) return
         val segment = strokes.next(SystemClock.uptimeMillis()) ?: return
         perform(segment)
