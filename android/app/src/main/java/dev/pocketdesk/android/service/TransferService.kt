@@ -71,6 +71,8 @@ class TransferService : Service() {
     // last one finishes is never left running out of the foreground.
     private val lock = Any()
     private var queued = 0
+    /** The newest start, a Cancel's included: Android stops the service only for it (C1 review). */
+    private var lastStartId = 0
     private var current: Notification? = null
 
     // Only the worker thread touches these.
@@ -145,6 +147,7 @@ class TransferService : Service() {
         createChannel()
         if (intent?.action == ACTION_CANCEL) {
             synchronized(lock) {
+                lastStartId = startId
                 cancelThrough = enqueued
                 // Under the lock: a job queued after the press cannot have
                 // started its call yet, so only what was asked stops.
@@ -160,6 +163,7 @@ class TransferService : Service() {
             // A started foreground service must enter the foreground even
             // when it has nothing to do; keep what is showing if a job runs.
             enterForeground(current ?: progressNotification(getString(R.string.channel_transfers), "", 0))
+            lastStartId = startId
             if (job == null) {
                 if (queued == 0) stopSelf(startId)
                 return START_NOT_STICKY
@@ -483,8 +487,9 @@ class TransferService : Service() {
             current = null
             runCatching { stopForeground(STOP_FOREGROUND_DETACH) }
             runCatching { manager().notify(NOTIFICATION_ID, done) }
-            // Stops only if no job arrived after this one.
-            stopSelf(startId)
+            // The newest start (a Cancel's too): Android ignores an older
+            // one, and a job that arrived since keeps it running anyway.
+            stopSelf(lastStartId)
         }
     }
 
