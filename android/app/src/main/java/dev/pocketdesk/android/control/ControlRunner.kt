@@ -63,21 +63,34 @@ class ControlRunner(private val context: Context, private val onState: (Boolean)
         }
         val events = batch.optJSONArray("events") ?: return
         val now = SystemClock.uptimeMillis()
+        // Adjacent text is typed at once: one round to the field, not one a character.
+        var typed = StringBuilder()
+        val flush = {
+            if (typed.isNotEmpty()) {
+                service.type(typed.toString())
+                typed = StringBuilder()
+            }
+        }
         for (i in 0 until events.length()) {
             val event = events.optJSONObject(i) ?: continue
             // A press or release always goes: dropping one leaves a finger
             // down (C8 review); the rest is limited.
             val edge = event.optString("type") == "touch" && event.optString("action") != "move"
             if (!edge && !rate.take(now)) continue
+            if (event.optString("type") == "text") {
+                typed.append(event.optString("text"))
+                continue
+            }
+            flush()
             when (event.optString("type")) {
                 "touch" -> service.touch(event.optString("action"), event.optInt("x"), event.optInt("y"))
                 "scroll" -> service.scroll(event.optInt("x"), event.optInt("y"), event.optInt("dy"))
                 "global" -> service.global(event.optString("action"))
-                "text" -> service.type(event.optString("text"))
                 "backspace" -> service.backspace()
                 "enter" -> service.enter()
             }
         }
+        flush()
         // For measuring the delay against the computer's clock (C8).
         Log.d(TAG, "batch sent=${batch.optLong("sent")} taken=${System.currentTimeMillis()}")
     }

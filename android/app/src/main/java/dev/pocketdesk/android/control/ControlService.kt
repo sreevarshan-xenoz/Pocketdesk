@@ -7,6 +7,7 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.util.DisplayMetrics
@@ -24,6 +25,11 @@ import android.view.accessibility.AccessibilityNodeInfo
  */
 class ControlService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
+    /** Typing waits on the app that has the field: never on the main thread (C8 review). */
+    private val typing = HandlerThread("control-typing").apply { start() }
+    private val text = Handler(typing.looper)
+    /** A password field's text as typed here: Android hides it from this service. */
+    private var secret: Pair<AccessibilityNodeInfo, String>? = null
     private val strokes = ControlPlan.Strokes()
     /** The stroke the next segment continues, while a finger is down. */
     private var stroke: GestureDescription.StrokeDescription? = null
@@ -53,6 +59,7 @@ class ControlService : AccessibilityService() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        typing.quitSafely()
         super.onDestroy()
     }
 
@@ -185,11 +192,22 @@ class ControlService : AccessibilityService() {
             ?.also { it.refresh() }
             ?.takeIf { it.isEditable }
 
-    /** What the field holds: its hint is not its text. */
-    private fun textOf(node: AccessibilityNodeInfo): String =
-        if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+    /**
+     * What the field holds: its hint is not its text, and a password field's
+     * is what was typed into it here (from empty when it was not).
+     */
+    private fun textOf(node: AccessibilityNodeInfo): String = when {
+        node.isPassword -> secret?.takeIf { it.first == node }?.second.orEmpty()
+        node.isShowingHintText -> ""
+        else -> node.text?.toString().orEmpty()
+    }
+
+    /** Where a field's selection is; a password field's is at its end. */
+    private fun selectionOf(node: AccessibilityNodeInfo): Pair<Int, Int> =
+        if (node.isPassword) -1 to -1 else node.textSelectionStart to node.textSelectionEnd
 
     private fun setText(node: AccessibilityNodeInfo, edited: ControlPlan.Edited) {
+        secret = if (node.isPassword) node to edited.text else null
         node.performAction(
             AccessibilityNodeInfo.ACTION_SET_TEXT,
             Bundle().apply {
@@ -205,19 +223,21 @@ class ControlService : AccessibilityService() {
         )
     }
 
-    /** [text] typed at the focused field's selection. */
-    fun type(text: String) = main.post {
+    /** [typed] at the focused field's selection. */
+    fun type(typed: String) = text.post {
         val node = field() ?: return@post
-        setText(node, ControlPlan.type(textOf(node), node.textSelectionStart, node.textSelectionEnd, text))
+        val (start, end) = selectionOf(node)
+        setText(node, ControlPlan.type(textOf(node), start, end, typed))
     }
 
-    fun backspace() = main.post {
+    fun backspace() = text.post {
         val node = field() ?: return@post
-        setText(node, ControlPlan.backspace(textOf(node), node.textSelectionStart, node.textSelectionEnd))
+        val (start, end) = selectionOf(node)
+        setText(node, ControlPlan.backspace(textOf(node), start, end))
     }
 
     /** The field's action (send, search, next), on Android 11+; else a new line where one is allowed. */
-    fun enter() = main.post {
+    fun enter() = text.post {
         val node = field() ?: return@post
         if (Build.VERSION.SDK_INT >= 30 &&
             node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
@@ -225,7 +245,8 @@ class ControlService : AccessibilityService() {
             return@post
         }
         if (node.isMultiLine) {
-            setText(node, ControlPlan.type(textOf(node), node.textSelectionStart, node.textSelectionEnd, "\n"))
+            val (start, end) = selectionOf(node)
+            setText(node, ControlPlan.type(textOf(node), start, end, "\n"))
         }
     }
 
