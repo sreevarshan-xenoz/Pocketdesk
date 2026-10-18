@@ -16,8 +16,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 pub const SIZE: egui::Vec2 = egui::vec2(720.0, 480.0);
 
 /// The throwaway state and config folders, one pair for the test binary,
-/// named in the environment before any test reads a path, so nothing here
-/// reads or writes this computer's own.
+/// set as the process's own (the core's test seam) before any test reads a
+/// path, so no test reads or writes this computer's.
 struct Folders {
     state: PathBuf,
     config: PathBuf,
@@ -29,12 +29,10 @@ fn folders() -> &'static Folders {
         let root = std::env::temp_dir().join(format!("pd-ui-{}", std::process::id()));
         let state = root.join("state");
         let config = root.join("config");
-        // SAFETY: set once, under the OnceLock, before any test of this
-        // binary reads them; nothing here reads the environment meanwhile.
-        unsafe {
-            std::env::set_var("POCKETDESK_STATE_DIR", &state);
-            std::env::set_var("POCKETDESK_CONFIG_DIR", &config);
-        }
+        // In-process, not the environment (C4 review): no `unsafe` setenv
+        // while other tests run on other threads.
+        pocketdesk_core::local::paths::use_state_dir(state.clone());
+        pocketdesk_core::local::paths::use_config_dir(config.clone());
         Folders { state, config }
     })
 }

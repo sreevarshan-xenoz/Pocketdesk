@@ -10,7 +10,7 @@ About twenty of the checklist's owed desktop checks are done by eye, through the
 
 `egui_kittest` (0.36.2, matching egui 0.36) runs the app headless and finds widgets through AccessKit, which the app already turns on:
 - **The app as it runs:** the eframe builder drives `PocketdeskApp::new(state_dir, None, page)`, `logic` included, so each test sees what the app reads from its state and config folders.
-- **Hermetic folders:** every test runs over a throwaway state folder and config folder of its own (`POCKETDESK_STATE_DIR`, `POCKETDESK_CONFIG_DIR`), set once for the test binary, with the tests that write them run one at a time. The tests never read this computer's real folders.
+- **Throwaway folders:** every test runs over a throwaway state folder and config folder, set once for the test binary through the core's test seam (`paths::use_state_dir`, `use_config_dir`), with the tests run one at a time. They never read or write this computer's state or config; a page that looks elsewhere (the file manager's menu folder on Settings, the network on Pair) only reads.
 - **Fixtures as the server writes them:** a paired phone in `trusted_devices.json`, its battery in `phone_status.json`, a config file. They are written through `pocketdesk-core`'s own types where it has them, so a format change breaks the test, not the app.
 
 ## The tests

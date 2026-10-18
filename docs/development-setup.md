@@ -32,7 +32,7 @@ code paths the server build never compiles.
 
 ## 2b. Desktop app tests (C4)
 
-- `cargo test -p pocketdesk-desktop` drives the app headless through AccessKit (`desktop/src/ui_tests.rs`, `egui_kittest`), over throwaway state and config folders that the test binary names in `POCKETDESK_STATE_DIR` and `POCKETDESK_CONFIG_DIR`; it never touches this computer's own.
+- `cargo test -p pocketdesk-desktop` drives the app headless through AccessKit (`desktop/src/ui_tests.rs`, `egui_kittest`), over throwaway state and config folders that the test binary sets as its own (`paths::use_state_dir`, `use_config_dir`), never this computer's.
 - Snapshots of the Overview, Devices and Settings in both themes need a GPU renderer, so they sit behind a feature: `cargo test -p pocketdesk-desktop --features snapshots snapshots`. The committed pictures (`desktop/tests/snapshots/`) are drawn by CI's `snapshots` job with Mesa's software Vulkan; another GPU draws text a little differently, so compare against CI's.
 - After a change to how a page looks, take the new pictures from the failed job's `desktop-snapshots` artifact, look at them, and commit them (or draw them with `UPDATE_SNAPSHOTS=1` on a Linux box with `mesa-vulkan-drivers`).
 
