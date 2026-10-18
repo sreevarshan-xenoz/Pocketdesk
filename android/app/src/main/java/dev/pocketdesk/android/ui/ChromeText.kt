@@ -11,6 +11,9 @@ object ChromeText {
     /** The largest font scale the chrome draws at. */
     const val MAX_SCALE = 1.3f
 
+    /** Whether the owner's [fontScale] is over the cap, so the chrome draws at [MAX_SCALE]. */
+    fun capped(fontScale: Float): Boolean = fontScale > MAX_SCALE
+
     /** The chrome's font scale for the owner's [fontScale]. */
     fun scale(fontScale: Float): Float = fontScale.coerceAtMost(MAX_SCALE)
 }

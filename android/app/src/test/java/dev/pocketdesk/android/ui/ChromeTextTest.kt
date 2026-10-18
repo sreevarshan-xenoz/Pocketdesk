@@ -11,4 +11,11 @@ class ChromeTextTest {
         assertEquals(1.3f, ChromeText.scale(1.3f), 0f)
         assertEquals(1.3f, ChromeText.scale(2f), 0f)
     }
+
+    @Test
+    fun onlyAScaleOverTheCapIsReplaced() {
+        assertEquals(false, ChromeText.capped(1.15f))
+        assertEquals(false, ChromeText.capped(1.3f))
+        assertEquals(true, ChromeText.capped(1.5f))
+    }
 }

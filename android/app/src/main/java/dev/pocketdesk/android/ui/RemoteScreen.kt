@@ -1100,8 +1100,14 @@ fun RemoteScreen(
                 }
             }
             val baseDensity = LocalDensity.current
+            // Replaced only above the cap: the system's own density keeps
+            // Android 14's non-linear text scaling below it (C5 review).
             val chromeDensity = remember(baseDensity) {
-                androidx.compose.ui.unit.Density(baseDensity.density, ChromeText.scale(baseDensity.fontScale))
+                if (ChromeText.capped(baseDensity.fontScale)) {
+                    androidx.compose.ui.unit.Density(baseDensity.density, ChromeText.scale(baseDensity.fontScale))
+                } else {
+                    baseDensity
+                }
             }
             // Top chrome: HUDs + WAN badge + Exit, as one fading slide-down
             // group. AnimatedVisibility removes the subtree when hidden, so
