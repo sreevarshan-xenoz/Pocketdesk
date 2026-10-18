@@ -85,6 +85,9 @@ mod tests {
             ("phone_files (requests)", || {
                 Box::pin(crate::plugins::phone_files::run_watcher())
             }),
+            ("phone_photos (requests)", || {
+                Box::pin(crate::plugins::phone_photos::run_watcher())
+            }),
             ("virtual_screen (sweeper)", || {
                 Box::pin(crate::virtual_screen::run_sweeper())
             }),
