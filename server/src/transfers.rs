@@ -195,7 +195,14 @@ fn remember(table: &mut Table, key: String, now: Instant) {
 /// Mark the transfer `id` cancelled: the key it runs under, for the caller
 /// to stop it; `None` when it has ended already.
 fn cancel_at(table: &mut Table, id: &str, now: Instant) -> Option<String> {
-    let key = table.rows.get(id)?.shown.key.clone();
+    let row = table.rows.get(id)?;
+    // All of it is there: the other end may have kept it already, so it is
+    // left to finish (C1 review).
+    let size = row.shown.size;
+    if size > 0 && row.done.load(Ordering::Relaxed) >= size {
+        return None;
+    }
+    let key = row.shown.key.clone();
     remember(table, key.clone(), now);
     Some(key)
 }
@@ -223,7 +230,7 @@ pub(crate) fn cancelled_for_test(key: &str) {
 /// Stop the transfer `id` (the app's Cancel), and settle what it was.
 async fn cancel(id: &str) {
     let Some(key) = cancel_at(&mut lock(), id, Instant::now()) else {
-        tracing::info!("A cancel for a transfer that has ended");
+        tracing::info!("A cancel for a transfer that has ended or is ending");
         return;
     };
     tracing::info!("Cancelling the transfer {key} for the owner");
@@ -413,6 +420,11 @@ mod tests {
             },
         );
         assert_eq!(cancel_at(&mut table, "unknown", now), None);
+        // All of it there: left to finish, and nothing remembered.
+        table.rows.get("r1").unwrap().done.store(1_000, Ordering::Relaxed);
+        assert_eq!(cancel_at(&mut table, "r1", now), None);
+        assert!(!take_cancelled_at(&mut table, "offer:abc", now));
+        table.rows.get("r1").unwrap().done.store(10, Ordering::Relaxed);
         assert_eq!(
             cancel_at(&mut table, "r1", now).as_deref(),
             Some("offer:abc")
