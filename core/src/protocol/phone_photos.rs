@@ -59,7 +59,7 @@ pub struct Photos {
 /// [`MAX_THUMB_BYTES`] (empty means none).
 pub fn valid_thumb(thumb: &str) -> bool {
     thumb.len() <= MAX_THUMB_TEXT
-        && thumb.len() % 4 == 0
+        && thumb.len().is_multiple_of(4)
         && thumb
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
