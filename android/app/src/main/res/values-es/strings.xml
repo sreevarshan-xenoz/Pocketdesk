@@ -701,7 +701,7 @@
     <string name="health_texts_send">Las respuestas desde el ordenador no se pueden enviar: se retiró el permiso para enviar mensajes.</string>
     <string name="health_contacts">Los mensajes muestran números, no nombres: se retiró el acceso a los contactos.</string>
     <string name="health_photos">Las capturas y las fotos no pueden llegar al ordenador: se retiró el acceso a las fotos.</string>
-    <string name="health_app_notifications">Pocketdesk no puede mostrar notificaciones, así que los timbres, archivos y enlaces del ordenador pasan desapercibidos.</string>
+    <string name="health_app_notifications">Pocketdesk no puede mostrar notificaciones, así que los timbres y archivos del ordenador pasan desapercibidos.</string>
     <string name="health_control_service">El ordenador no puede controlar este teléfono: «Control de Pocketdesk» está desactivado en los ajustes de Accesibilidad de Android.</string>
     <string name="health_control_blocked">El ordenador no puede controlar este teléfono: la Protección avanzada solo permite servicios de accesibilidad a las herramientas de accesibilidad.</string>
     <string name="health_download_folder">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>

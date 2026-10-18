@@ -85,8 +85,10 @@ object HealthCheck {
             readContacts = granted(Manifest.permission.READ_CONTACTS),
             photoFeatures = ScreenshotPrefs.on(ctx) || RecentPhotoPrefs.on(ctx),
             photoAccess = ScreenshotPrefs.granted(ctx),
-            postingFeatures = Prefs.ringFromComputer(ctx) || Prefs.filesInBackground(ctx) ||
-                Prefs.linksFromComputer(ctx),
+            // Turned on by the owner, both off by default (D1 review): links
+            // from the computer are on by default and post only in a session,
+            // so they would flag every phone that said no to notifications.
+            postingFeatures = Prefs.ringFromComputer(ctx) || Prefs.filesInBackground(ctx),
             mayPost = NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
             control = control,
             controlService = !control || ControlRunner.serviceEnabled(ctx),

@@ -705,7 +705,7 @@
     <string name="health_texts_send">Replies from the computer can\'t be sent: the permission to send texts was taken away.</string>
     <string name="health_contacts">Texts show numbers, not names: contacts access was taken away.</string>
     <string name="health_photos">Screenshots and photos can\'t reach the computer: photo access was taken away.</string>
-    <string name="health_app_notifications">Pocketdesk can\'t show notifications, so rings, files and links from the computer go unseen.</string>
+    <string name="health_app_notifications">Pocketdesk can\'t show notifications, so rings and files from the computer go unseen.</string>
     <string name="health_control_service">The computer can\'t control this phone: \"Pocketdesk control\" is off in Android\'s Accessibility settings.</string>
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>
     <string name="health_download_folder">The folder picked for files from computers is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>

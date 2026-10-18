@@ -53,7 +53,7 @@ data class HealthSnapshot(
     /** Whether screenshots or recent photos to the computer are on. */
     val photoFeatures: Boolean,
     val photoAccess: Boolean,
-    /** Whether a feature that posts a notification on the phone is on (ring, files, links). */
+    /** Whether a feature that needs to post on the phone is on (ring, files in the background). */
     val postingFeatures: Boolean,
     val mayPost: Boolean,
     val control: Boolean,
