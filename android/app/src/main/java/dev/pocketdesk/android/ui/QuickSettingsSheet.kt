@@ -181,7 +181,7 @@ private fun GroupHeader(label: String) {
 
 /** Every option at once, the chosen one filled; a tap chooses, with no cycling. */
 @Composable
-private fun ChoiceRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+internal fun ChoiceRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
         Text(
             label,
