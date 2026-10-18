@@ -291,35 +291,50 @@ pub struct RemoteFlags {
 }
 
 /// Control batches waiting for the phone's control service (C8): bounded,
-/// the oldest dropped first, taken with a wait so nothing polls.
+/// the oldest dropped first, taken with a wait so nothing polls. A batch
+/// that waited longer than [`ControlInbox::MAX_AGE`] here (a link that
+/// stalled, then delivered a burst) is dropped rather than replayed late;
+/// its age is this phone's own clock, never the computer's.
 #[derive(Debug, Default)]
 pub struct ControlInbox {
-    batches: std::sync::Mutex<std::collections::VecDeque<Vec<u8>>>,
+    batches: std::sync::Mutex<std::collections::VecDeque<(std::time::Instant, Vec<u8>)>>,
     arrived: std::sync::Condvar,
 }
 
 impl ControlInbox {
     /// Most batches kept: a phone that falls behind keeps the newest.
     pub const MAX: usize = 64;
+    /// The longest a batch waits here before it is too late to perform.
+    pub const MAX_AGE: std::time::Duration = std::time::Duration::from_secs(2);
 
     /// A batch arrived.
     pub fn put(&self, batch: Vec<u8>) {
+        self.put_at(batch, std::time::Instant::now());
+    }
+
+    fn put_at(&self, batch: Vec<u8>, now: std::time::Instant) {
         let mut batches = self.batches.lock().unwrap_or_else(|e| e.into_inner());
         if batches.len() >= Self::MAX {
             batches.pop_front();
         }
-        batches.push_back(batch);
+        batches.push_back((now, batch));
         self.arrived.notify_one();
     }
 
-    /// The oldest waiting batch, waiting up to `timeout` for one.
+    /// The oldest waiting batch still fresh, waiting up to `timeout` for one.
     pub fn take(&self, timeout: std::time::Duration) -> Option<Vec<u8>> {
         let batches = self.batches.lock().unwrap_or_else(|e| e.into_inner());
         let (mut batches, _) = self
             .arrived
             .wait_timeout_while(batches, timeout, |b| b.is_empty())
             .unwrap_or_else(|e| e.into_inner());
-        batches.pop_front()
+        let now = std::time::Instant::now();
+        while let Some((at, batch)) = batches.pop_front() {
+            if now.saturating_duration_since(at) <= Self::MAX_AGE {
+                return Some(batch);
+            }
+        }
+        None
     }
 }
 
@@ -872,6 +887,24 @@ mod remote_tests {
             Some(vec![9]),
             "a waiting take wakes"
         );
+    }
+
+    #[test]
+    fn control_that_waited_too_long_is_not_performed() {
+        let inbox = ControlInbox::default();
+        let long_ago = std::time::Instant::now()
+            - ControlInbox::MAX_AGE
+            - std::time::Duration::from_millis(10);
+        inbox.put_at(vec![1], long_ago);
+        inbox.put_at(vec![2], long_ago);
+        inbox.put(vec![3]);
+        assert_eq!(
+            inbox.take(std::time::Duration::ZERO),
+            Some(vec![3]),
+            "the stale two were dropped, the fresh one kept"
+        );
+        inbox.put_at(vec![4], long_ago);
+        assert_eq!(inbox.take(std::time::Duration::ZERO), None);
     }
 
     #[test]
