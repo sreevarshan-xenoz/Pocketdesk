@@ -44,10 +44,11 @@ The detailed build journal lives in `git log` — one conventional commit per lo
 
 - 2026-10-18: **C5, the phone with large fonts, landscape and TalkBack (branch `fix/phone-accessibility`; spec `docs/superpowers/specs/2026-10-18-phone-accessibility-design.md`, with as-built and device-run sections).**
   - **Audited on the A71:** every clickable node on Home, the Add form, Settings, a session and its menu has a label and is at least 48 dp; 1.3 fits everywhere.
-  - **Fixed, found at font scale 2.0:** the session menu's choices broke words ("Balanc / ed"; now radio buttons when a word does not fit, `ChoiceFit`), and the chrome's chips ran into each other over a portrait stream (its text now stops at 1.3, `ChromeText`).
-  - **Fixed, found on its side:** a phone held sideways split side by side, the stream on half the screen; side by side now needs a tablet's or an unfolded phone's smallest width.
+  - **Fixed, found at font scale 2.0:** the session menu's choices broke words ("Balanc / ed"; now radio buttons when a word does not fit, `ChoiceFit`), and the chrome's chips ran into each other over a portrait stream (its text now stops at 1.3, `ChromeText`; no nodes overlap between its groups at 1.0, 1.3 or 2.0).
+  - **Fixed, found on its side:** a phone held sideways split side by side, the stream on half the screen; side by side now needs the window's smallest width to be 600 dp (a tablet's or an unfolded phone's).
   - **The first Compose instrumented test** (`ChoiceRowTest`, on the A71); Espresso pinned at 3.7.0 for Android 16.
-  - **Owed (checklist §108):** a TalkBack walk by hand, split screen, landscape with the keyboard.
+  - **Fresh review (0 Critical, 0 Important, 8 Minor), fixed:** the density replaced below the cap, a selected segment's check, no-break spaces, an untested row of three; and the docs.
+  - **Owed (checklist §108):** a TalkBack walk by hand, split screen, landscape with the keyboard, Spanish and Tamil at each scale.
 - 2026-10-18: **C4, a headless test harness for the desktop app (branch `test/desktop-harness`; spec `docs/superpowers/specs/2026-10-18-desktop-harness-design.md`, with as-built and review sections).**
   - **The harness:** `desktop/src/ui_tests.rs` drives the app, `logic` included, through AccessKit with `egui_kittest` 0.36.2, over throwaway state and config folders set through the core's test seam.
   - **Tests, with the workspace's:** every page opens; the empty pages' next steps; Unpair by name (Cancel keeps, Unpair removes); the Overview's phone with its battery and actions; the save bar (Undo, Save writing `config.toml`). Owed checks in §88 and §94 are now ticked by them.

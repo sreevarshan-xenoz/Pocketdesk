@@ -17,7 +17,8 @@ object PaneRule {
 
     /**
      * The split for [fold] (a hinge, or none) in a window [widthDp] by
-     * [heightDp] on a device whose smallest width is [smallestWidthDp]: the
+     * [heightDp] whose smallest width is [smallestWidthDp] (the window's
+     * `smallestScreenWidthDp`, the sw600dp rule): the
      * hinge's own axis; side by side when the window is wide on a tablet or
      * an unfolded phone; the stream on top and the controls below on a phone
      * held upright (T9b); else one pane, a phone on its side included (C5:

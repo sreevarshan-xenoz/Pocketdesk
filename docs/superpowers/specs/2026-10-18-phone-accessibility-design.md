@@ -17,7 +17,7 @@ On the A71 (Android 16, a 1080×2400 screen at 420 dpi):
 
 - **Choices that do not fit become a list.** A row of choices in the session menu measures the longest word of each option at the face it would use. If any is wider than its segment, the row is drawn as radio buttons, one per line, with the same TalkBack roles (`ChoiceFit`, JVM-tested).
 - **The chrome's text stops at 1.3×.** The session's chrome over the stream (its top and bottom groups) is drawn at the font scale capped at 1.3 (`ChromeText`). The session menu, sheets and every other screen keep the full scale. The chrome is a few words over moving video, in a pane that can be a quarter of the screen.
-- **A phone held sideways keeps one pane.** Pane "auto" splits side by side only when the device's smallest width is also 600 dp (a tablet, or an unfolded phone): `PaneRule.autoSplit` takes it. "Pane: Dual" still splits on request.
+- **A phone held sideways keeps one pane.** Pane "auto" splits side by side only when the window's smallest width is also 600 dp (the sw600dp rule: a tablet, or an unfolded phone): `PaneRule.autoSplit` takes it. "Pane: Dual" still splits on request.
 
 ## Testing
 
@@ -34,8 +34,8 @@ On the A71 (Android 16, a 1080×2400 screen at 420 dpi):
 ## As built
 
 - **Choices:** a row of four (which wraps between words) is measured word by word; a row of up to three (one line each) option by option, at the face it draws them in. Rows that do not fit become radio buttons with the same roles.
-- **The chrome's cap:** its top and bottom groups take a density whose font scale stops at 1.3; the menu sheet is composed outside them and keeps the full scale.
-- **Landscape:** `PaneRule.autoSplit` and `resolve` take the device's smallest width (Compose's `smallestScreenWidthDp`). Without it they assume a tablet, as before.
+- **The chrome's cap:** its top and bottom groups take a density whose font scale stops at 1.3, replaced only above the cap (the system's own keeps Android 14's non-linear scaling below it); the menu sheet is composed outside them and keeps the full scale.
+- **Landscape:** `PaneRule.autoSplit` and `resolve` take the window's smallest width (`smallestScreenWidthDp`). Without it they assume a tablet, as before. A tablet in a freeform window less than 600 dp across now gets one pane.
 - **The instrumented test:** segments and list rows are both radio buttons to TalkBack, so it tells them apart by their tops. Espresso is pinned at 3.7.0: the one Compose's test library brings calls `InputManager.getInstance`, which Android 16 removed.
 
 ## The device run
@@ -52,4 +52,20 @@ On the A71:
 - split screen;
 - landscape with the keyboard;
 - Spanish and Tamil at 2.0.
+
+## Review
+
+**Fresh review (0 Critical, 0 Important, 8 Minor), fixed one commit each:**
+- the chrome's density was replaced below the cap too;
+- a selected segment's check was allowed 2 dp too little;
+- words were split at no-break spaces;
+- the row of three was untested (now in `ChoiceRowTest`, in the app's theme);
+- why the instrumented tests take the BOM and `ui-test-manifest`;
+- the docs: "the window's smallest width", the chrome check as it was made, and Spanish and Tamil owed at each scale.
+
+**Left as is:**
+- **The shortcut bar's scale:** in one pane it sits in the capped chrome; beside a dock it is in the dock, at the full scale.
+- **Low vision:** the chrome's cap works against an owner who set 2.0 for its sake; the menu and every other screen keep it.
+- **`ui-test-manifest` in debug builds:** it adds the test rule's host activity to every debug APK, and the release workflow's unsigned fallback is a debug build.
+- **Not run in CI:** CI compiles the instrumented test but never runs it (no device); the A71 runs are its record.
 

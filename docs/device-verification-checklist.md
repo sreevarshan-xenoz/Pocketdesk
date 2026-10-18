@@ -1721,13 +1721,13 @@ On the A71 (1080×2400 at 420 dpi):
 
 - [x] Every clickable node on Home, the Add form, Settings, a session and its menu labelled and at least 48 dp each way (uiautomator's tree, which TalkBack reads; rows cut by a scroll edge aside).
 - [x] Font scale 1.3: Home, Settings, a session and its menu fit.
-- [x] Font scale 2.0: Home and Settings fit; the session menu's choices are radio buttons, one per line; the chrome's chips no longer run into each other.
+- [x] Font scale 2.0: Home and Settings fit; the session menu's choices are radio buttons, one per line; no nodes overlap between the chrome's groups (uiautomator's bounds, at 1.0, 1.3 and 2.0).
 - [x] On its side: Home fits, and a session's stream fills the screen with no trackpad dock.
-- [x] The choice row at 1.0 and 2.0 in a Compose instrumented test (`ChoiceRowTest`).
+- [x] The choice row at 1.0 and 2.0, with four options and with three, in a Compose instrumented test (`ChoiceRowTest`).
 - [ ] A TalkBack walk by hand: Home, the Add form, Settings, the session menu (TalkBack's tutorial takes the screen when it is turned on from adb, and adb cannot read which node it reads).
 - [ ] Split screen: Home and a session in half a screen.
 - [ ] Landscape with the keyboard open (§26).
-- [ ] Spanish and Tamil at 2.0.
+- [ ] Spanish and Tamil at 1.0, 1.3 and 2.0 (a long word such as "Individual" may already make a list at 1.0).
 
 ## Recording results
 
