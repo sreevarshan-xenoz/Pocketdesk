@@ -137,6 +137,8 @@ static FROM_PHONE: Mutex<Option<(String, String)>> = Mutex::new(None);
 
 /// Note that `device_id` just set the clipboard to `text`.
 pub(crate) fn note_from_phone(device_id: &str, text: &str) {
+    // It crossed: kept in the history (D3), with the device it came from.
+    crate::clip_history::note(text, Some(device_id));
     *FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()) =
         Some((device_id.to_string(), text.to_string()));
 }
@@ -342,6 +344,11 @@ async fn push_change(
         may_push(c.device_id())
     });
     let packet = packet(&text);
+    // This computer's own copy, gone to a phone: kept in the history (D3).
+    // A phone's own text was kept as it arrived.
+    if from_phone.as_ref().is_none_or(|(_, from)| from != &text) && !targets.is_empty() {
+        crate::clip_history::note(&text, None);
+    }
     for target in targets {
         if let Err(e) = target.send_packet(&packet).await {
             tracing::debug!("Clipboard not pushed to {}: {e}", target.device_id());

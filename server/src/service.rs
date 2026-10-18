@@ -190,6 +190,8 @@ pub async fn run(config: Config) -> Result<()> {
     if crate::clipboard_push::configure(config.clipboard_push, config.computer_clipboard) {
         tokio::spawn(crate::clipboard_push::run());
     }
+    // D3: a text from the clipboard's history put on a phone's clipboard.
+    tokio::spawn(crate::clip_history::run_sends());
     crate::plugins::phone_battery::configure(config.phone_battery_alerts);
     // N8 review: a kept screen-sharing grant goes as the server starts when
     // the setting is off, not only when a session next arrives.

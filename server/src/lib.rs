@@ -8,6 +8,7 @@ pub mod bench;
 pub mod browser_host;
 pub mod cast_relay;
 pub mod cli;
+pub(crate) mod clip_history;
 pub(crate) mod clipboard_push;
 pub mod config;
 pub mod conn_budget;
