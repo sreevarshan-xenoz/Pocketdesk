@@ -433,6 +433,8 @@ pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
         || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_REPLY
         || packet_type == pocketdesk_core::protocol::phone_files::LIST
         || packet_type == pocketdesk_core::protocol::phone_files::FETCH
+        || packet_type == pocketdesk_core::protocol::phone_photos::LIST
+        || packet_type == pocketdesk_core::protocol::phone_photos::FETCH
 }
 
 /// Drain the queued offers as a JSON array.
