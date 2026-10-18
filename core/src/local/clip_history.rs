@@ -100,6 +100,33 @@ pub fn record(state_dir: &Path, entry: ClipEntry, limit: u32) -> io::Result<()> 
     write(state_dir, &entries)
 }
 
+/// The history as `limit` allows (D3 review): none when it is 0, at most
+/// `limit` otherwise; what a reader shows, whatever the file still holds.
+pub fn read_limited(state_dir: &Path, limit: u32) -> Vec<ClipEntry> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let mut entries = read(state_dir);
+    entries.truncate(limit.min(MAX_ENTRIES) as usize);
+    entries
+}
+
+/// Hold the file to `limit` (D3 review): emptied when it is 0, trimmed when
+/// it holds more; the server does it at start and before each text, so a
+/// setting changed outside the app's Save, or lowered, applies at once.
+pub fn hold_to(state_dir: &Path, limit: u32) -> io::Result<()> {
+    if limit == 0 {
+        return clear(state_dir);
+    }
+    let entries = read(state_dir);
+    if entries.len() > limit.min(MAX_ENTRIES) as usize {
+        let mut entries = entries;
+        entries.truncate(limit.min(MAX_ENTRIES) as usize);
+        write(state_dir, &entries)?;
+    }
+    Ok(())
+}
+
 /// Empty the history: Clear, or the setting turned off.
 pub fn clear(state_dir: &Path) -> io::Result<()> {
     match std::fs::remove_file(state_dir.join(CLIP_HISTORY_FILE)) {
@@ -248,6 +275,22 @@ mod tests {
         clear(&dir).unwrap();
         std::fs::write(dir.join(CLIP_HISTORY_FILE), "nonsense").unwrap();
         assert!(read(&dir).is_empty(), "unreadable is empty");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_limit_holds_for_readers_and_the_file() {
+        let dir = temp_dir("limit");
+        for (i, t) in ["a", "b", "c"].iter().enumerate() {
+            record(&dir, ClipEntry::new(t, None, i as u64), 20).unwrap();
+        }
+        assert_eq!(read_limited(&dir, 2).len(), 2);
+        assert!(read_limited(&dir, 0).is_empty(), "off shows none");
+        hold_to(&dir, 1).unwrap();
+        assert_eq!(read(&dir).len(), 1, "trimmed on disk");
+        assert_eq!(read(&dir)[0].text, "c", "the newest kept");
+        hold_to(&dir, 0).unwrap();
+        assert!(!dir.join(CLIP_HISTORY_FILE).exists(), "off empties it");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

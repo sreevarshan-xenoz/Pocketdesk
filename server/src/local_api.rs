@@ -671,9 +671,15 @@ pub fn run_quiet(query: &str, minutes: u32, as_json: bool) -> i32 {
 /// The clipboard's history in `state_dir` (D3), or, with `send` (a place
 /// in it, 1 the newest, and a phone), that entry queued for the phone's
 /// clipboard. What to print, and the exit code.
-pub fn clipboard_in(state_dir: &Path, send: Option<(u32, &str)>, running: bool) -> (Value, i32) {
+pub fn clipboard_in(
+    state_dir: &Path,
+    send: Option<(u32, &str)>,
+    limit: u32,
+    running: bool,
+) -> (Value, i32) {
     use pocketdesk_core::local::clip_history;
-    let entries = clip_history::read(state_dir);
+    // As the setting allows (D3 review): none while it is off.
+    let entries = clip_history::read_limited(state_dir, limit);
     let Some((place, query)) = send else {
         return (versioned(json!({ "entries": entries })), exit::DONE);
     };
@@ -747,7 +753,9 @@ pub fn run_clipboard(send: Option<(u32, &str)>, as_json: bool) -> i32 {
         }
     };
     let running = pocketdesk_core::local::server::is_running(&dir);
-    let (out, code) = clipboard_in(&dir, send, running);
+    // A config that cannot be read shows none: the history may be off.
+    let limit = pocketdesk_core::local::config::Config::load().map_or(0, |c| c.clipboard_history);
+    let (out, code) = clipboard_in(&dir, send, limit, running);
     if as_json {
         print(&out);
     } else if let Some(reason) = out["error"].as_str() {
@@ -1924,21 +1932,23 @@ mod tests {
     fn the_clipboard_history_is_listed_and_an_entry_sent() {
         use pocketdesk_core::local::clip_history::{ClipEntry, record, take_sends};
         let (dir, _) = send_setup("cliphistory");
-        let (out, code) = clipboard_in(&dir, None, true);
+        let (out, code) = clipboard_in(&dir, None, 20, true);
         assert_eq!(code, exit::DONE);
         assert_eq!(out["entries"], json!([]));
         record(&dir, ClipEntry::new("older", None, 1), 20).unwrap();
         record(&dir, ClipEntry::new("newest", Some("5f1c9b3d-6e70"), 2), 20).unwrap();
-        let (out, _) = clipboard_in(&dir, None, false);
+        let (out, _) = clipboard_in(&dir, None, 20, false);
         assert_eq!(
             out["entries"][0]["text"], "newest",
             "listed with no server too"
         );
         assert_eq!(out["entries"][0]["from"], "5f1c9b3d-6e70");
+        let (out, _) = clipboard_in(&dir, None, 0, true);
+        assert_eq!(out["entries"], json!([]), "none while the history is off");
 
-        let (_, code) = clipboard_in(&dir, Some((3, "5f1c9b")), true);
+        let (_, code) = clipboard_in(&dir, Some((3, "5f1c9b")), 20, true);
         assert_eq!(code, exit::BAD_ARGUMENTS, "no third entry");
-        let (_, code) = clipboard_in(&dir, Some((2, "5f1c9b")), false);
+        let (_, code) = clipboard_in(&dir, Some((2, "5f1c9b")), 20, false);
         assert_eq!(code, exit::NO_SERVER);
         let now = pocketdesk_core::local::pin::now_unix();
         std::fs::write(
@@ -1951,7 +1961,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (out, code) = clipboard_in(&dir, Some((2, "5f1c9b")), true);
+        let (out, code) = clipboard_in(&dir, Some((2, "5f1c9b")), 20, true);
         assert_eq!(code, exit::DONE, "{out}");
         let sent = take_sends(&dir, now + 1);
         assert_eq!(sent.len(), 1);

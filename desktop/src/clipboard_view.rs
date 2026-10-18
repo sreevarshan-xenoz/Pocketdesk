@@ -90,7 +90,7 @@ impl ClipboardView {
                 .then_some(Action::OpenSettings);
         }
         if self.read_at.is_none_or(|at| at.elapsed() >= REFRESH) {
-            self.entries = clip_history::read(state_dir);
+            self.entries = clip_history::read_limited(state_dir, history);
             self.read_at = Some(Instant::now());
         }
         let mut action = None;

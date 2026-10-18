@@ -29,6 +29,10 @@ pub(crate) fn note(text: &str, from: Option<&str>) {
             Ok(config) => config.clipboard_history,
             Err(_) => return,
         };
+        // Held to the setting first (D3 review): off empties it, lowered trims it.
+        if let Err(e) = clip_history::hold_to(&dir, limit) {
+            tracing::warn!("Could not hold the clipboard's history to its setting: {e}");
+        }
         if limit == 0 {
             return;
         }
@@ -38,12 +42,18 @@ pub(crate) fn note(text: &str, from: Option<&str>) {
     });
 }
 
-/// Daemon task: put each queued text on its phone's clipboard.
+/// Daemon task: put each queued text on its phone's clipboard. At start the
+/// history is held to the setting, so one left from when it was on goes.
 pub async fn run_sends() {
     let Ok(dir) = crate::state::state_dir() else {
         tracing::warn!("No state directory: sending the clipboard's history is off");
         return;
     };
+    if let Ok(config) = pocketdesk_core::local::config::Config::load()
+        && let Err(e) = clip_history::hold_to(&dir, config.clipboard_history)
+    {
+        tracing::warn!("Could not hold the clipboard's history to its setting: {e}");
+    }
     loop {
         crate::inbox::wait(
             pocketdesk_core::local::paths::CLIPBOARD_OUT_DIR,
