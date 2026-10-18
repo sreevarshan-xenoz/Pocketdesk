@@ -126,16 +126,48 @@ fn open_file(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// The full image at `path` for the clipboard, decoded off the UI thread.
+/// The longest side a copied photo keeps: a phone's 50 or 108 MP photo
+/// would hold gigabytes on its way to the clipboard (C7 review).
+const MAX_COPY_SIDE: u32 = 4096;
+
+/// Whether a photo named `name` can be copied: a format the app decodes.
+pub fn copyable(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [".jpg", ".jpeg", ".png", ".webp"]
+        .iter()
+        .any(|ext| lower.ends_with(ext))
+}
+
+/// The full image at `path` for the clipboard, decoded off the UI thread,
+/// turned as the camera's orientation says (a portrait photo is stored on
+/// its side) and at most [`MAX_COPY_SIDE`] a side.
 fn decode(path: PathBuf) -> mpsc::Receiver<Result<egui::ColorImage, String>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result = image::open(&path)
-            .map(|img| {
-                let rgba = img.to_rgba8();
-                let size = [rgba.width() as usize, rgba.height() as usize];
-                egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw())
-            })
+        let read = || -> image::ImageResult<egui::ColorImage> {
+            use image::ImageDecoder;
+            let mut decoder = image::ImageReader::open(&path)?
+                .with_guessed_format()?
+                .into_decoder()?;
+            let orientation = decoder.orientation()?;
+            let mut img = image::DynamicImage::from_decoder(decoder)?;
+            img.apply_orientation(orientation);
+            if img.width().max(img.height()) > MAX_COPY_SIDE {
+                img = img.resize(
+                    MAX_COPY_SIDE,
+                    MAX_COPY_SIDE,
+                    image::imageops::FilterType::Triangle,
+                );
+            }
+            // The decoded image goes as its pixels are taken.
+            let rgba = img.into_rgba8();
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            Ok(egui::ColorImage::from_rgba_unmultiplied(
+                size,
+                rgba.as_raw(),
+            ))
+        };
+        let result = read()
             .map_err(|e| format!("This photo could not be read to copy ({e}): open it instead."));
         let _ = tx.send(result);
     });
@@ -253,7 +285,7 @@ impl PhotosView {
                         if openable(&photo.name) && ui.small_button("Open").clicked() {
                             action = Some((photo.id, photo.name.clone(), Then::Open));
                         }
-                        if ui.small_button("Copy").clicked() {
+                        if copyable(&photo.name) && ui.small_button("Copy").clicked() {
                             action = Some((photo.id, photo.name.clone(), Then::Copy));
                         }
                     });
@@ -491,9 +523,34 @@ mod tests {
         harness.run_steps(3);
         assert!(harness.query_by_label("Refresh").is_some());
         assert_eq!(harness.query_all_by_label("Save").count(), 2);
-        assert_eq!(harness.query_all_by_label("Copy").count(), 2);
-        // Only the picture may be opened.
+        assert_eq!(harness.query_all_by_label("Copy").count(), 1);
+        // Only the picture may be opened or copied.
         assert_eq!(harness.query_all_by_label("Open").count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_a_format_the_app_decodes_is_copied() {
+        for name in ["IMG_1.jpg", "a.JPEG", "b.png", "c.webp"] {
+            assert!(copyable(name), "{name}");
+        }
+        for name in ["c.heic", "d.gif", "e.bmp", "x.exe"] {
+            assert!(!copyable(name), "{name}");
+        }
+    }
+
+    /// A huge photo is copied at most MAX_COPY_SIDE a side. (Turning by
+    /// the camera's orientation is the image crate's, given the tag.)
+    #[test]
+    fn a_copied_photo_is_bounded() {
+        let dir = std::env::temp_dir().join(format!("pd-photos-copy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wide = dir.join("wide.png");
+        image::RgbImage::from_pixel(MAX_COPY_SIDE * 2, 10, image::Rgb([1, 2, 3]))
+            .save(&wide)
+            .unwrap();
+        let copied = decode(wide).recv().unwrap().unwrap();
+        assert_eq!(copied.size[0], MAX_COPY_SIDE as usize);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
