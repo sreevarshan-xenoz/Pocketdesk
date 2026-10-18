@@ -865,6 +865,29 @@ mod tests {
     }
 
     #[test]
+    fn control_goes_to_the_relay_as_batches_it_can_read() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let many: Vec<_> = (0..70)
+            .map(|n| ControlEvent::Touch {
+                action: TouchAction::Move,
+                x: n,
+                y: n,
+            })
+            .collect();
+        send_control(&mut writer, many.clone());
+        let mut got = Vec::new();
+        for _ in 0..2 {
+            let Message::Control(bytes) = Message::read(&mut relay).unwrap() else {
+                panic!("a control message");
+            };
+            got.extend(ControlBatch::decode(&bytes).expect("readable").events);
+        }
+        assert_eq!(got, many, "split at the batch limit, nothing lost");
+    }
+
+    #[test]
     fn the_wheel_counts_lines_and_points() {
         assert_eq!(
             notches(egui::vec2(0.0, 1.0), egui::MouseWheelUnit::Line),
