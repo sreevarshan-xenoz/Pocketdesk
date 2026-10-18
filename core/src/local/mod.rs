@@ -27,6 +27,7 @@ pub mod phone_notes;
 pub mod phone_photos;
 pub mod phone_status;
 pub mod pin;
+pub mod quiet;
 pub mod received;
 pub mod rings;
 pub mod send_menu;
