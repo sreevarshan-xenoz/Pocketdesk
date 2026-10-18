@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-549 open items.
+554 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 319 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 323 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
@@ -14,7 +14,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 9 |
 | A second computer | 4 |
 | A Linux desktop (the Azure VM serves for some) | 78 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 18 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 19 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 36 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
@@ -656,6 +656,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The rest of "here", in later batches.
 
+**110. Recent photos on the computer (C7)**
+
+- The Phone page by hand: Refresh, Save, Open and Copy.
+- The phone's switch off, and photo access denied: the page says why.
+- A phone with thousands of photos: the newest 24, quickly.
+- HEIC photos: thumbnails shown, Copy saying it cannot.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1270,6 +1277,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **105. Choose where received files land (C2)**
 
 - A picked folder on an SD card or a cloud provider.
+
+**110. Recent photos on the computer (C7)**
+
+- Android 8 or 9: the legacy thumbnail path.
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 

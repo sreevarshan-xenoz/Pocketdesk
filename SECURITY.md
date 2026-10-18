@@ -109,6 +109,8 @@ These are real gaps in the current design. Plan around them.
     - **What Android allows:** the service may read the screen. Pocketdesk reads only the field it types into and sends nothing it reads.
     - **Advanced Protection:** Android 17's Advanced Protection does not allow the service.
 
+26. **With the phone's "Recent photos on the computer" on, its computer can see its newest camera photos** (C7; off by default, and it needs photo access). The computer asks; the phone answers its own computer only, with thumbnails of at most 24 photos in DCIM, and sends a full photo only when asked, through the usual transfer. The thumbnails are kept owner-only in the computer's state folder, so anyone who can read that folder, or use the owner's account on the computer, can see them; turning the switch off on the phone stops further answers, and they are dropped when the server starts again.
+
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 
 ## Using it safely today

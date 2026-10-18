@@ -40,3 +40,23 @@ Windows' phone panel in the Start menu leads with the phone's recent photos. Poc
 - Albums other than DCIM.
 - Photos taken while the computer is away being pushed (the computer asks).
 - A wider permission than the computer's Files switch.
+
+## As built
+
+- **Packets** (`core::protocol::phone_photos`): thumbnails are checked as base64 text there (the phone's bridge builds core without base64), and decoded, with a JPEG's first bytes required, in the computer's store.
+- **The phone** answers from the notification listener's folders tick, and keeps the control link while the switch is on (the computer's requests come on it). The last answer's ids are held in memory: after the app restarts, the computer refreshes before fetching.
+- **The desktop:** Open is offered only for a picture's name (the name is the phone's; a renamed program is never opened). Open and Copy use a copy already received since the answer; otherwise they fetch it and act when it arrives (two minutes at most). Copy decodes off the UI thread and hands the image to egui's clipboard.
+
+## The device run
+
+On the A71 against a throwaway server, three camera-sized JPEGs pushed into `DCIM/Camera` and scanned:
+- the list answered with the three, newest first, each with a thumbnail of about 2.5 KB;
+- one fetched into the computer's received files, checksums matching.
+
+**Owed (checklist §110):**
+- the Phone page by hand, with Open and Copy (they act on the owner's screen and clipboard);
+- the switch off, and no photo access, on screen;
+- a phone with thousands of photos;
+- HEIC photos (the grid shows their thumbnails; Copy cannot decode them and says so);
+- Android before 10 (the legacy thumbnail path).
+
