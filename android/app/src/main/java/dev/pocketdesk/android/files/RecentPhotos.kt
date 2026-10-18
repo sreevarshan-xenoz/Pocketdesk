@@ -64,7 +64,7 @@ class RecentPhotos(private val ctx: Context) {
         if (!on && requests.isEmpty()) return
         val own = PhoneLink.target(ctx)
         // The computer's requests come on the control link: kept while on.
-        if (on && own != null && RustCore.controlPeer() == null) {
+        if (on && RecentPhotoPrefs.granted(ctx) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - lastConnectMs >= RECONNECT_MS) {
                 lastConnectMs = now
@@ -125,7 +125,10 @@ class RecentPhotos(private val ctx: Context) {
 
     private fun fetch(request: Request) {
         if (refusal() != null || !RecentPhotoRule.mayFetch(request.id, lastListed)) {
+            // Not sent: the computer gets a fresh list (or why not) to choose
+            // from again, rather than waiting for nothing (C7 review).
             Log.i(TAG, "a photo the last answer did not list was not sent")
+            list(request.copy(fetch = false))
             return
         }
         // Still a camera photo: it may have been moved or deleted since.
@@ -186,10 +189,18 @@ class RecentPhotos(private val ctx: Context) {
         return found
     }
 
-    /** A legacy absolute folder as a path below the storage's root (`…/DCIM/Camera` → `DCIM/Camera/`). */
+    /**
+     * A legacy absolute folder as a path below the storage's root
+     * (`/storage/emulated/0/DCIM/Camera` → `DCIM/Camera/`): only a `DCIM`
+     * right under a storage volume's root (`/storage/<volume>/` or
+     * `/storage/emulated/<user>/`), never one deeper (C7 review).
+     */
     private fun relativeOf(absolute: String): String? {
-        val at = absolute.indexOf("/DCIM")
-        return if (at < 0) null else absolute.substring(at + 1).trimEnd('/') + "/"
+        val parts = absolute.trim('/').split('/')
+        if (parts.firstOrNull() != "storage") return null
+        val root = if (parts.getOrNull(1) == "emulated") 3 else 2
+        val rest = parts.drop(root)
+        return if (rest.firstOrNull() == "DCIM") rest.joinToString("/") + "/" else null
     }
 
     /** [uri]'s thumbnail as base64 JPEG, at most [RecentPhotoRule.MAX_THUMB_BYTES], or null. */
@@ -202,6 +213,8 @@ class RecentPhotos(private val ctx: Context) {
                 } else {
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                    // Unread bounds would decode the whole photo.
+                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
                     val options = BitmapFactory.Options().apply { inSampleSize = RecentPhotoRule.sampleSize(bounds.outWidth, bounds.outHeight) }
                     ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
                 } ?: return@runCatching null
