@@ -52,7 +52,7 @@ Tailscale, when you use it, wraps all of these in WireGuard, which encrypts and 
 - **Files:**
   - Transfers run inside TLS, pinned both ways: no other device can read the bytes, send them, or take them.
   - A paired phone moves files only once its key is bound (pairing binds it).
-  - Received files are confined to Downloads, never overwrite anything, are size-limited, and are marked as downloaded on Windows.
+  - Received files are confined to one folder: Downloads, or the folder the owner chose (C2, desktop Settings "Received files land in"), never Pocketdesk's own state or config folders. They never overwrite anything, are size-limited, and are marked as downloaded on Windows. A phone with Files can fill whatever folder the owner chose, as it could Downloads.
   - Browsing and downloading are confined to the home folder. Hidden files, the server's own keys and settings, network paths and device names are refused, and links that lead out of home are refused too.
 
 ## Known limits

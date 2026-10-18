@@ -46,7 +46,7 @@ Without the address, the text goes to the last computer used. Naming a computer 
 | Type | the file's type, or `*/*` |
 | Extras | `android.intent.extra.STREAM` = the file's `content://` URI, with read permission granted; `dev.pocketdesk.android.extra.ADDRESS` = the computer (optional, as for text) |
 
-The files land in the computer's Downloads, each resumable, as a share from any app does. The automation app must grant read access to the URI (Tasker: tick "Grant read permission"). Only `content://` URIs are taken: a share naming a `file://` path is refused, since the app would open it with its own rights.
+The files land in the computer's Downloads (or the folder chosen in its Settings), each resumable, as a share from any app does. The automation app must grant read access to the URI (Tasker: tick "Grant read permission"). Only `content://` URIs are taken: a share naming a `file://` path is refused, since the app would open it with its own rights.
 
 ## What to expect
 
@@ -75,7 +75,7 @@ With **Settings → Tell other apps what happens** on (off by default), Pocketde
 |---|---|---|
 | `dev.pocketdesk.android.event.SESSION_STARTED` | A screen session's first picture arrived (after the owner allowed it, on a computer that asks), or a remote or sound session was admitted | `MODE`: `screen`, `remote` or `sound` (N5: the phone as the computer's speaker and mic) |
 | `dev.pocketdesk.android.event.SESSION_ENDED` | It ended | `REASON`: `left` (you left it) or `lost` (the link went down, or the computer ended it) |
-| `dev.pocketdesk.android.event.FILE_RECEIVED` | A file from the computer is in Downloads; one per file of a folder | `MIME`, `SIZE` (bytes, as the computer gave it) |
+| `dev.pocketdesk.android.event.FILE_RECEIVED` | A file from the computer is saved (Downloads/Pocketdesk, or the folder picked in Settings); one per file of a folder | `MIME`, `SIZE` (bytes, as the computer gave it) |
 | `dev.pocketdesk.android.event.FILES_SENT` | A share or folder to the computer finished | `COUNT` (sent), `FAILED` (meant to be sent and not) |
 | `dev.pocketdesk.android.event.LINK_RECEIVED` | A link from the computer was shown during a screen session, with "Links from the computer" on | none |
 | `dev.pocketdesk.android.event.TASK_FINISHED` | A task started from this phone ended, even after its sheet closed | `TASK` (its name), `STATE` (`done`, `refused`, `not_sent`, `no_answer`), and `CODE`, `TIMED_OUT` or `REASON` |

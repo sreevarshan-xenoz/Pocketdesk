@@ -1675,6 +1675,18 @@ On the A71 against a throwaway server, the cast over the internet road through a
 - [ ] Advanced Protection (Android 17): the service refused.
 - [ ] Linux.
 
+## 105. Choose where received files land (C2)
+
+On the A71 against a throwaway server, the phone in the background with files on:
+
+- [x] A folder picked in the phone's Settings; a file from the computer saved there (checksum matching), the same again as `name (1)`, and a folder with a sub-folder arriving whole.
+- [x] The picked folder deleted: the next file in Downloads/Pocketdesk, and the notification says why.
+- [ ] The computer's chosen folder with a phone's share, a KDE device's file and another computer's; a folder that is gone; Settings' Choose folder… and Use Downloads.
+- [ ] The phone's grant taken back in Android's settings, then a file.
+- [ ] A download broken and continued in a picked folder.
+- [ ] A picked folder on an SD card or a cloud provider.
+- [ ] Linux.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
