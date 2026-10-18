@@ -11,7 +11,7 @@ class ChoiceFitTest {
         assertEquals(listOf("Balanced"), ChoiceFit.words("Balanced"))
         assertEquals(listOf("Pantalla", "dividida"), ChoiceFit.words("Pantalla dividida"))
         assertEquals(listOf("Max"), ChoiceFit.words(" Max "))
-        assertEquals(listOf("Re", "Pág"), ChoiceFit.words("Re\u00A0Pág"))
+        assertEquals("no break at a no-break space", listOf("Re\u00A0Pág"), ChoiceFit.words("Re\u00A0Pág"))
     }
 
     @Test

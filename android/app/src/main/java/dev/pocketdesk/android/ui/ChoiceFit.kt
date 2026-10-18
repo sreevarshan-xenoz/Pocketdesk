@@ -9,8 +9,11 @@ package dev.pocketdesk.android.ui
  * is tested.
  */
 object ChoiceFit {
-    /** The words of [option], each of which must fit on a line. */
-    fun words(option: String): List<String> = option.split(' ', '\u00A0').filter { it.isNotEmpty() }.ifEmpty { listOf(option) }
+    /**
+     * The words of [option], each of which must fit on a line: split at
+     * spaces only, since a line never breaks at a no-break space (C5 review).
+     */
+    fun words(option: String): List<String> = option.split(' ').filter { it.isNotEmpty() }.ifEmpty { listOf(option) }
 
     /** Whether words [wordWidthsPx] wide all fit a segment [segmentWidthPx] wide inside its padding. */
     fun fits(segmentWidthPx: Float, wordWidthsPx: List<Float>): Boolean =
