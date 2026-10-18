@@ -1099,6 +1099,10 @@ fun RemoteScreen(
                     )
                 }
             }
+            val baseDensity = LocalDensity.current
+            val chromeDensity = remember(baseDensity) {
+                androidx.compose.ui.unit.Density(baseDensity.density, ChromeText.scale(baseDensity.fontScale))
+            }
             // Top chrome: HUDs + WAN badge + Exit, as one fading slide-down
             // group. AnimatedVisibility removes the subtree when hidden, so
             // invisible chrome never eats a desktop tap.
@@ -1110,108 +1114,111 @@ fun RemoteScreen(
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.systemBars),
             ) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    // Clear of Exit (48 dp at the top end): the details run
-                    // wider in some languages (U6, found in Tamil).
-                    Column(modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 72.dp)) {
-                        StatsHud(
-                            address = address,
-                            controlPort = controlPort,
-                            details = dev.pocketdesk.android.Prefs.connectionDetails(context),
-                            live = status is StreamStatus.Up,
-                        )
-                        // A live WAN link keeps a small badge reporting *how* it
-                        // is connected (R4 A1) — punched-direct vs relayed, since
-                        // relayed is a normal first-class state iroh keeps trying
-                        // to upgrade, not an error. It sits under the stats panel:
-                        // centred over the top edge it ran into the HUD caption
-                        // whenever the stream pane was narrow.
-                        if (status is StreamStatus.Up && status.kind == StreamTransportKind.Wan) {
-                            val label = when (linkState) {
-                                "wan_direct" -> stringResource(R.string.wan_link_direct)
-                                "wan_relayed" -> stringResource(R.string.wan_link_relayed)
-                                else -> stringResource(R.string.wan_link_punching)
-                            }
-                            Column(
-                                modifier = Modifier
-                                    .padding(top = 6.dp)
-                                    .background(
-                                        Color.Black.copy(alpha = 0.55f),
-                                        RoundedCornerShape(8.dp),
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                            ) {
-                                Text(
-                                    label,
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                                // One-tap escape hatch from the server's relay bitrate
-                                // floor (R4 A3): relaying is shared bandwidth, but the
-                                // user may still want every bit of it.
-                                if (linkState == "wan_relayed") {
-                                    TextButton(
-                                        onClick = {
-                                            val next = !fullQuality
-                                            fullQuality = next
-                                            scope.launch(Dispatchers.IO) {
-                                                RustCore.setFullQuality(next)
-                                                    .onFailure { fullQualityError = context.plainErrorText(it.message) }
-                                            }
-                                        },
-                                    ) {
-                                        val fqLabel = if (fullQuality) {
-                                            stringResource(R.string.full_quality_on)
-                                        } else {
-                                            stringResource(R.string.full_quality_off)
-                                        }
-                                        Text(
-                                            fqLabel,
-                                            color = if (fullQuality) Color(0xFFFFC080) else Color.White,
-                                            style = MaterialTheme.typography.labelSmall,
+                // C5: the chrome's text stops at 1.3x (ChromeText).
+                androidx.compose.runtime.CompositionLocalProvider(LocalDensity provides chromeDensity) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        // Clear of Exit (48 dp at the top end): the details run
+                        // wider in some languages (U6, found in Tamil).
+                        Column(modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 72.dp)) {
+                            StatsHud(
+                                address = address,
+                                controlPort = controlPort,
+                                details = dev.pocketdesk.android.Prefs.connectionDetails(context),
+                                live = status is StreamStatus.Up,
+                            )
+                            // A live WAN link keeps a small badge reporting *how* it
+                            // is connected (R4 A1) — punched-direct vs relayed, since
+                            // relayed is a normal first-class state iroh keeps trying
+                            // to upgrade, not an error. It sits under the stats panel:
+                            // centred over the top edge it ran into the HUD caption
+                            // whenever the stream pane was narrow.
+                            if (status is StreamStatus.Up && status.kind == StreamTransportKind.Wan) {
+                                val label = when (linkState) {
+                                    "wan_direct" -> stringResource(R.string.wan_link_direct)
+                                    "wan_relayed" -> stringResource(R.string.wan_link_relayed)
+                                    else -> stringResource(R.string.wan_link_punching)
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .padding(top = 6.dp)
+                                        .background(
+                                            Color.Black.copy(alpha = 0.55f),
+                                            RoundedCornerShape(8.dp),
                                         )
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                ) {
+                                    Text(
+                                        label,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                    // One-tap escape hatch from the server's relay bitrate
+                                    // floor (R4 A3): relaying is shared bandwidth, but the
+                                    // user may still want every bit of it.
+                                    if (linkState == "wan_relayed") {
+                                        TextButton(
+                                            onClick = {
+                                                val next = !fullQuality
+                                                fullQuality = next
+                                                scope.launch(Dispatchers.IO) {
+                                                    RustCore.setFullQuality(next)
+                                                        .onFailure { fullQualityError = context.plainErrorText(it.message) }
+                                                }
+                                            },
+                                        ) {
+                                            val fqLabel = if (fullQuality) {
+                                                stringResource(R.string.full_quality_on)
+                                            } else {
+                                                stringResource(R.string.full_quality_off)
+                                            }
+                                            Text(
+                                                fqLabel,
+                                                color = if (fullQuality) Color(0xFFFFC080) else Color.White,
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
                                     }
                                 }
                             }
+    
+                            WorkspaceHud(
+                                address = address,
+                                port = port,
+                                modifier = Modifier.padding(top = 6.dp),
+                                croppedAddress = cropWindow?.address,
+                                onPullWindow = pullWindow,
+                            )
                         }
-
-                        WorkspaceHud(
-                            address = address,
-                            port = port,
-                            modifier = Modifier.padding(top = 6.dp),
-                            croppedAddress = cropWindow?.address,
-                            onPullWindow = pullWindow,
-                        )
+    
+                        // Exit rides a scrim of its own: a bare white glyph
+                        // disappears over a bright desktop and reads as part of
+                        // the remote image rather than as the one control that
+                        // must be findable. The dark fill is deliberate here —
+                        // unlike the HUD readouts, this plate has to survive being
+                        // drawn on top of anything.
+                        Surface(
+                            onClick = {
+                                haptics.longPress()
+                                onExit()
+                            },
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.55f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp),
+                        ) {
+                            LlIcon(
+                                LlIcons.Close,
+                                stringResource(R.string.exit),
+                                tint = Color.White,
+                                size = 22.dp,
+                                // 48 dp across (U4).
+                                modifier = Modifier.padding(13.dp),
+                            )
+                        }
                     }
-
-                    // Exit rides a scrim of its own: a bare white glyph
-                    // disappears over a bright desktop and reads as part of
-                    // the remote image rather than as the one control that
-                    // must be findable. The dark fill is deliberate here —
-                    // unlike the HUD readouts, this plate has to survive being
-                    // drawn on top of anything.
-                    Surface(
-                        onClick = {
-                            haptics.longPress()
-                            onExit()
-                        },
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.55f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp),
-                    ) {
-                        LlIcon(
-                            LlIcons.Close,
-                            stringResource(R.string.exit),
-                            tint = Color.White,
-                            size = 22.dp,
-                            // 48 dp across (U4).
-                            modifier = Modifier.padding(13.dp),
-                        )
-                    }
-                }
+    }
             }
 
             // Bottom chrome group: mode toggle, the action disc opening
@@ -1225,109 +1232,112 @@ fun RemoteScreen(
                     .align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.navigationBars),
             ) {
-                Column(modifier = Modifier.padding(bottom = 8.dp)) {
-                    // The 16 flat TextButtons collapsed into one floating
-                    // action disc opening QuickSettingsSheet. Input mode stays
-                    // outside — it is the toggle used mid-gesture — and
-                    // doubles as the current-mode readout.
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // A scrimmed chip with the mode's own glyph, matching
-                        // the shortcut pill and the HUD: a bare text label
-                        // over video reads as a caption, not as the toggle it
-                        // is.
-                        val modeLabel = if (mode == InputMode.DirectTouch) {
-                            stringResource(R.string.mode_direct_touch)
-                        } else {
-                            stringResource(R.string.mode_trackpad)
-                        }
+                // C5: the chrome's text stops at 1.3x (ChromeText).
+                androidx.compose.runtime.CompositionLocalProvider(LocalDensity provides chromeDensity) {
+                    Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                        // The 16 flat TextButtons collapsed into one floating
+                        // action disc opening QuickSettingsSheet. Input mode stays
+                        // outside — it is the toggle used mid-gesture — and
+                        // doubles as the current-mode readout.
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                        // U4: 48 dp to the touch, however small it looks.
-                        Row(
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(Color.White.copy(alpha = 0.16f))
-                                .clickable(role = Role.Button) { haptics.toggle(); toggleMode() }
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            LlIcon(
-                                if (mode == InputMode.DirectTouch) LlIcons.Touch else LlIcons.Mouse,
-                                null,
-                                tint = Color.White,
-                                size = 16.dp,
-                            )
-                            Text(modeLabel, color = Color.White, fontSize = 13.sp)
-                        }
-                        // F1: always visible while the chrome is, because a
-                        // gesture alone is unreliable (phone skins steal
-                        // three-finger gestures).
-                        Box(
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(Color.White.copy(alpha = 0.16f))
-                                .clickable(role = Role.Button) {
-                                    haptics.tap()
-                                    keyboardOpen = true
-                                    keyboard.open()
-                                }
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
-                        ) {
-                            LlIcon(
-                                LlIcons.Keyboard,
-                                stringResource(R.string.keyboard_open),
-                                tint = Color.White,
-                                size = 16.dp,
-                            )
-                        }
-                        // One tap to another screen, when there is more than one.
-                        ScreenSwitcher(
-                            screens = screens,
-                            selected = monitorIndex,
-                            onPick = { index ->
-                                if (ScreenChoices.isSwitch(screens, monitorIndex, index)) {
-                                    haptics.tap()
-                                    switchMonitor(index)
-                                }
-                            },
-                        )
-                        }
-                        FloatingActionButton(
-                            onClick = { haptics.tap(); showQuick = true },
-                            shape = CircleShape,
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        ) {
-                            LlIcon(
-                                LlIcons.MoreVert,
-                                stringResource(R.string.session_menu),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                    }
-                    // In dual-pane the shortcut bar lives in the dock beside the
-                    // trackpad; here it stays under the stream.
-                    if (!dualPane) {
-                        ShortcutBar(
-                            address = address,
-                            port = port,
-                            onFailed = { sendTextNotice = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                        )
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // A scrimmed chip with the mode's own glyph, matching
+                            // the shortcut pill and the HUD: a bare text label
+                            // over video reads as a caption, not as the toggle it
+                            // is.
+                            val modeLabel = if (mode == InputMode.DirectTouch) {
+                                stringResource(R.string.mode_direct_touch)
+                            } else {
+                                stringResource(R.string.mode_trackpad)
+                            }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                            // U4: 48 dp to the touch, however small it looks.
+                            Row(
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(Color.White.copy(alpha = 0.16f))
+                                    .clickable(role = Role.Button) { haptics.toggle(); toggleMode() }
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                LlIcon(
+                                    if (mode == InputMode.DirectTouch) LlIcons.Touch else LlIcons.Mouse,
+                                    null,
+                                    tint = Color.White,
+                                    size = 16.dp,
+                                )
+                                Text(modeLabel, color = Color.White, fontSize = 13.sp)
+                            }
+                            // F1: always visible while the chrome is, because a
+                            // gesture alone is unreliable (phone skins steal
+                            // three-finger gestures).
+                            Box(
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(Color.White.copy(alpha = 0.16f))
+                                    .clickable(role = Role.Button) {
+                                        haptics.tap()
+                                        keyboardOpen = true
+                                        keyboard.open()
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                            ) {
+                                LlIcon(
+                                    LlIcons.Keyboard,
+                                    stringResource(R.string.keyboard_open),
+                                    tint = Color.White,
+                                    size = 16.dp,
+                                )
+                            }
+                            // One tap to another screen, when there is more than one.
+                            ScreenSwitcher(
+                                screens = screens,
+                                selected = monitorIndex,
+                                onPick = { index ->
+                                    if (ScreenChoices.isSwitch(screens, monitorIndex, index)) {
+                                        haptics.tap()
+                                        switchMonitor(index)
+                                    }
+                                },
+                            )
+                            }
+                            FloatingActionButton(
+                                onClick = { haptics.tap(); showQuick = true },
+                                shape = CircleShape,
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                LlIcon(
+                                    LlIcons.MoreVert,
+                                    stringResource(R.string.session_menu),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                        // In dual-pane the shortcut bar lives in the dock beside the
+                        // trackpad; here it stays under the stream.
+                        if (!dualPane) {
+                            ShortcutBar(
+                                address = address,
+                                port = port,
+                                onFailed = { sendTextNotice = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                            )
+                        }
                     }
-                }
+    }
             }
         }
         }
