@@ -91,6 +91,8 @@ object RustCore {
         seq: Long,
     ): Int
     private external fun nativeCastKeyframeWanted(): Boolean
+    private external fun nativeCastControlState(on: Boolean): Int
+    private external fun nativeCastControlTake(timeoutMs: Int): String?
     private external fun nativeCastState(): String
     private external fun nativeListTasks(address: String, port: Int): String
     private external fun nativeRunTask(address: String, port: Int, name: String, id: String): String
@@ -537,6 +539,12 @@ object RustCore {
 
     /** Whether the computer asked the cast for a keyframe since the last look. */
     fun castKeyframeWanted(): Boolean = nativeCastKeyframeWanted()
+
+    /** Tell the computer whether this phone takes control now (C8); QUEUED, FULL or NO_CAST. */
+    fun castControlState(on: Boolean): Int = nativeCastControlState(on)
+
+    /** The next control batch from the computer as JSON, waiting up to [timeoutMs], or null (C8). */
+    fun castControlTake(timeoutMs: Int): String? = nativeCastControlTake(timeoutMs)
 
     /** The cast session's state, as [remoteState]'s, but `none` while the phone's session is not a cast. */
     fun castState(): String = nativeCastState()

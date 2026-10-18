@@ -117,6 +117,39 @@ pub(crate) fn frame(keyframe: bool, seq: u64, access_unit: &[u8]) -> i32 {
     offer(queue_tx(), wire::frame_bytes(keyframe, seq, access_unit))
 }
 
+/// Tell the computer whether this phone takes control now (C8); waits for
+/// room, as a config does: a lost "off" would leave the computer sending.
+pub(crate) async fn control_state(on: bool) -> i32 {
+    let Some(tx) = queue_tx() else {
+        return NO_CAST;
+    };
+    match tokio::time::timeout(CONFIG_WAIT, tx.send(wire::control_state_bytes(on))).await {
+        Ok(Ok(())) => QUEUED,
+        Ok(Err(_)) => NO_CAST,
+        Err(_) => FULL,
+    }
+}
+
+/// The next control batch the computer sent the cast (C8), as JSON
+/// (`ControlBatch::to_json`), waiting up to `timeout`; `None` when none
+/// came, there is no cast, or the batch could not be read.
+pub(crate) fn take_control(timeout: Duration) -> Option<String> {
+    let inbox = crate::session::REMOTE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .filter(|r| r.cast)
+        .map(|r| r.control.clone());
+    let Some(inbox) = inbox else {
+        // No cast yet: the caller's loop waits rather than spins.
+        std::thread::sleep(timeout.min(Duration::from_millis(100)));
+        return None;
+    };
+    let batch = inbox.take(timeout)?;
+    pocketdesk_core::streaming::cast_control::ControlBatch::decode(&batch)
+        .map(|b| b.to_json().to_string())
+}
+
 /// Whether the computer asked for a keyframe since the last look.
 pub(crate) fn keyframe_wanted() -> bool {
     crate::session::REMOTE
