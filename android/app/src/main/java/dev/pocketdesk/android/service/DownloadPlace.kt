@@ -18,6 +18,14 @@ object DownloadPlace {
     fun lost(tree: String?, granted: Collection<String>): Boolean =
         !tree.isNullOrEmpty() && choose(tree, granted) == null
 
+    /** Whether [uri] names a document of a picked folder rather than a MediaStore row. */
+    fun isDocument(uri: String): Boolean {
+        val rest = uri.removePrefix("content://")
+        if (rest == uri) return false
+        val authority = rest.substringBefore('/')
+        return authority != "media" && "/document/" in rest
+    }
+
     /** The name of [name] while it arrives. */
     fun partName(name: String): String = name + PART_SUFFIX
 

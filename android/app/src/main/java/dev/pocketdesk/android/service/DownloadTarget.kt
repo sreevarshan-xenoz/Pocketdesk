@@ -133,7 +133,7 @@ object DownloadTarget {
     fun reopen(context: Context, location: String): Target? = runCatching {
         if (location.startsWith("content://")) {
             val uri = location.toUri()
-            val document = DocumentsContract.isDocumentUri(context, uri)
+            val document = DownloadPlace.isDocument(location)
             context.contentResolver.openFileDescriptor(uri, "rw")?.let {
                 if (document) Target(it, context, null, null, uri) else Target(it, context, uri, null)
             }
@@ -148,7 +148,7 @@ object DownloadTarget {
         runCatching {
             if (location.startsWith("content://")) {
                 val uri = location.toUri()
-                if (DocumentsContract.isDocumentUri(context, uri)) {
+                if (DownloadPlace.isDocument(location)) {
                     DocumentsContract.deleteDocument(context.contentResolver, uri)
                 } else {
                     context.contentResolver.delete(uri, null, null)

@@ -34,6 +34,13 @@ class DownloadPlaceTest {
     }
 
     @Test
+    fun aDocumentIsToldFromAMediaStoreRow() {
+        assertTrue(DownloadPlace.isDocument("content://com.android.externalstorage.documents/tree/primary%3AMovies/document/primary%3AMovies%2Fa.bin"))
+        assertFalse(DownloadPlace.isDocument("content://media/external/downloads/146"))
+        assertFalse(DownloadPlace.isDocument("/storage/emulated/0/Android/data/x/files/Download/a.bin"))
+    }
+
+    @Test
     fun aFileIsAPartUntilItIsWhole() {
         assertEquals("photo.jpg.part", DownloadPlace.partName("photo.jpg"))
         assertEquals("photo.jpg", DownloadPlace.finishedName("photo.jpg.part"))
