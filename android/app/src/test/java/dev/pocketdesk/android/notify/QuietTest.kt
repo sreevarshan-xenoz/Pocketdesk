@@ -54,7 +54,9 @@ class QuietTest {
         assertEquals(QuietPlan.State(quiet = true, untilUnix = 3_600, byComputer = true), QuietPlan.state(QuietPlan.PRIORITY, mute))
         // The owner's own Do Not Disturb of another kind, with a stale mute not yet forgotten.
         assertEquals(QuietPlan.State(quiet = true, untilUnix = null, byComputer = false), QuietPlan.state(QuietPlan.ALARMS, mute))
-        assertEquals(QuietPlan.State(quiet = false, untilUnix = null, byComputer = false), QuietPlan.state(QuietPlan.UNKNOWN, null))
+        // Not known yet: nothing to tell.
+        assertNull(QuietPlan.state(QuietPlan.UNKNOWN, null))
+        assertNull(QuietPlan.state(QuietPlan.UNKNOWN, mute))
     }
 
     @Test

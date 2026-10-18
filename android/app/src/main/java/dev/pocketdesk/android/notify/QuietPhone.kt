@@ -98,6 +98,12 @@ class BackgroundQuiet(
             return
         }
         val minutes = QuietPlan.minutes(asked.optInt("minutes", -1)) ?: return
+        if (filter() == QuietPlan.UNKNOWN) {
+            // Android has not connected the listener: a filter asked for now
+            // would do nothing, and a mute kept would end the owner's later.
+            Log.i(TAG, "a mute from the computer, not taken: the listener is not connected")
+            return
+        }
         if (minutes == 0) {
             val mute = QuietPrefs.mute(ctx)
             // Only the computer's own mute is ended, and only while it stands.
@@ -131,7 +137,7 @@ class BackgroundQuiet(
 
     private fun report() {
         val peer = RustCore.controlPeer() ?: return
-        val state = QuietPlan.state(filter(), QuietPrefs.mute(ctx))
+        val state = QuietPlan.state(filter(), QuietPrefs.mute(ctx)) ?: return
         if (told == state to peer) return
         val body = JSONObject().put("quiet", state.quiet).put("byComputer", state.byComputer)
         state.untilUnix?.let { body.put("until", it) }

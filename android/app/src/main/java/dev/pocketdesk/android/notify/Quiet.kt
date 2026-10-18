@@ -49,8 +49,13 @@ object QuietPlan {
     /** What the phone tells its computer. */
     data class State(val quiet: Boolean, val untilUnix: Long?, val byComputer: Boolean)
 
-    fun state(filter: Int, mute: Mute?): State {
-        val quiet = filter != ALL && filter != UNKNOWN
+    /**
+     * What the phone tells its computer, or null while the filter is not
+     * known (the listener not connected): "not quiet" then would be a guess.
+     */
+    fun state(filter: Int, mute: Mute?): State? {
+        if (filter == UNKNOWN) return null
+        val quiet = filter != ALL
         val mine = quiet && mute != null && mute.filter == filter
         return State(quiet, if (mine) mute!!.untilMs / 1_000 else null, mine)
     }
