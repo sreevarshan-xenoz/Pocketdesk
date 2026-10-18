@@ -44,6 +44,10 @@ pub fn spawn(state_dir: PathBuf) -> mpsc::Sender<CastEvent> {
 struct Cast {
     session_id: u64,
     want: mpsc::Sender<()>,
+    /// Control batches for the phone (C8).
+    control: mpsc::Sender<Vec<u8>>,
+    /// Whether the phone takes control now, as it last said (C8).
+    control_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
     token: [u8; TOKEN_LEN],
     config: Option<(u16, u16)>,
     /// Paces the keyframe asks a slow viewer makes.
@@ -76,7 +80,7 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
             event = events.recv() => {
                 let Some(event) = event else { break };
                 match event {
-                    CastEvent::Start { session_id, device_id, want_keyframe } => {
+                    CastEvent::Start { session_id, device_id, want_keyframe, control } => {
                         end(&mut cast, &mut viewer, &state_dir);
                         let mut token = [0u8; TOKEN_LEN];
                         rand::rngs::OsRng.fill_bytes(&mut token);
@@ -93,6 +97,8 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                         cast = Some(Cast {
                             session_id,
                             want: want_keyframe,
+                            control,
+                            control_on: Default::default(),
                             token,
                             config: None,
                             asks: CastChain::default(),
@@ -110,6 +116,12 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                             }
                             CastPayload::Frame { keyframe, seq, data } => {
                                 Message::Frame { keyframe, seq, data }
+                            }
+                            CastPayload::ControlState { on } => {
+                                current
+                                    .control_on
+                                    .store(on, std::sync::atomic::Ordering::Release);
+                                Message::ControlState { on }
                             }
                         };
                         if let Some(v) = viewer.as_ref().filter(|v| v.session_id == session_id)
@@ -151,10 +163,19 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                 let Some(c) = cast.as_ref().filter(|c| c.session_id == session_id) else {
                     continue;
                 };
-                let v = start_viewer(stream, session_id, c.want.clone());
+                let v = start_viewer(
+                    stream,
+                    session_id,
+                    c.want.clone(),
+                    c.control.clone(),
+                    c.control_on.clone(),
+                );
                 if let Some((width, height)) = c.config {
                     let _ = v.tx.try_send(Message::Config { width, height });
                 }
+                // It learns at once whether it may control the phone (C8).
+                let on = c.control_on.load(std::sync::atomic::Ordering::Acquire);
+                let _ = v.tx.try_send(Message::ControlState { on });
                 // A new viewer starts from a keyframe.
                 let _ = c.want.try_send(());
                 tracing::info!(session_id, "The phone's screen is being shown");
@@ -206,9 +227,16 @@ async fn authenticate(
     }
 }
 
-/// The viewer's two halves: messages go out in order, and the only one it
-/// may send, a keyframe ask, reaches the phone.
-fn start_viewer(stream: TcpStream, session_id: u64, want: mpsc::Sender<()>) -> Viewer {
+/// The viewer's two halves: messages go out in order, and what it may
+/// send, a keyframe ask and control while the phone takes it (C8), reaches
+/// the phone.
+fn start_viewer(
+    stream: TcpStream,
+    session_id: u64,
+    want: mpsc::Sender<()>,
+    control: mpsc::Sender<Vec<u8>>,
+    control_on: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Viewer {
     let _ = stream.set_nodelay(true);
     let (mut read, mut write) = stream.into_split();
     let (tx, mut rx) = mpsc::channel::<Message>(VIEWER_QUEUE);
@@ -224,10 +252,28 @@ fn start_viewer(stream: TcpStream, session_id: u64, want: mpsc::Sender<()>) -> V
     tokio::spawn(async move {
         let mut head = [0u8; 5];
         while read.read_exact(&mut head).await.is_ok() {
-            if head[0] != wire::WANT_KEYFRAME || head[1..] != [0, 0, 0, 0] {
-                break;
+            let len = u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as usize;
+            match head[0] {
+                wire::WANT_KEYFRAME if len == 0 => {
+                    let _ = want.try_send(());
+                }
+                wire::CONTROL if len > 0 && len <= wire::MAX_CONTROL => {
+                    let mut batch = vec![0u8; len];
+                    if read.read_exact(&mut batch).await.is_err() {
+                        break;
+                    }
+                    // Only what the phone can read, and only while it takes
+                    // control: a full queue drops (the newest input wins
+                    // next time).
+                    if control_on.load(std::sync::atomic::Ordering::Acquire)
+                        && pocketdesk_core::streaming::cast_control::ControlBatch::decode(&batch)
+                            .is_some()
+                    {
+                        let _ = control.try_send(batch);
+                    }
+                }
+                _ => break,
             }
-            let _ = want.try_send(());
         }
     });
     Viewer { session_id, tx }
@@ -277,6 +323,7 @@ mod tests {
                 session_id: 7,
                 device_id: Some("phone".into()),
                 want_keyframe: want_tx,
+                control: mpsc::channel(4).0,
             })
             .await
             .unwrap();
@@ -304,6 +351,11 @@ mod tests {
                 width: 864,
                 height: 1920
             }
+        );
+        assert_eq!(
+            read_message(&mut view).await,
+            Message::ControlState { on: false },
+            "it learns whether it may control the phone (C8)"
         );
         assert_eq!(
             want_rx.recv().await,
@@ -359,6 +411,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_viewers_control_reaches_the_phone_only_while_it_takes_it() {
+        let dir = temp_dir("control");
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let (events, rx) = mpsc::channel(64);
+        let relay = tokio::spawn(run(rx, listener, dir.clone()));
+        let (want_tx, _want_rx) = mpsc::channel(4);
+        let (control_tx, mut control_rx) = mpsc::channel(4);
+        events
+            .send(CastEvent::Start {
+                session_id: 3,
+                device_id: None,
+                want_keyframe: want_tx,
+                control: control_tx,
+            })
+            .await
+            .unwrap();
+        let file = cast_file(&dir).await;
+        let mut view = TcpStream::connect((Ipv4Addr::LOCALHOST, file.port))
+            .await
+            .unwrap();
+        view.write_all(&file.token_bytes().unwrap()).await.unwrap();
+        assert_eq!(
+            read_message(&mut view).await,
+            Message::ControlState { on: false }
+        );
+        let batch = pocketdesk_core::streaming::cast_control::ControlBatch {
+            sent_ms: 1,
+            events: vec![pocketdesk_core::streaming::cast_control::ControlEvent::Backspace],
+        }
+        .encode()
+        .unwrap();
+        view.write_all(&Message::Control(batch.clone()).encode())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            control_rx.try_recv().is_err(),
+            "the phone had not said it takes control"
+        );
+
+        events
+            .send(CastEvent::Payload {
+                session_id: 3,
+                payload: CastPayload::ControlState { on: true },
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            read_message(&mut view).await,
+            Message::ControlState { on: true }
+        );
+        // What the phone could not read is dropped; what it can goes.
+        view.write_all(&Message::Control(vec![1, 2, 3]).encode())
+            .await
+            .unwrap();
+        view.write_all(&Message::Control(batch.clone()).encode())
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), control_rx.recv())
+                .await
+                .unwrap(),
+            Some(batch)
+        );
+        assert!(
+            control_rx.try_recv().is_err(),
+            "the malformed batch went nowhere"
+        );
+        drop(events);
+        let _ = relay.await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn a_viewer_without_the_token_sees_nothing() {
         let dir = temp_dir("token");
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -370,6 +496,7 @@ mod tests {
                 session_id: 1,
                 device_id: None,
                 want_keyframe: want_tx,
+                control: mpsc::channel(4).0,
             })
             .await
             .unwrap();
@@ -413,6 +540,7 @@ mod tests {
                 session_id: 3,
                 device_id: None,
                 want_keyframe: want_tx,
+                control: mpsc::channel(4).0,
             })
             .await
             .unwrap();
