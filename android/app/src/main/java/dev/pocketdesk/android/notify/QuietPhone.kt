@@ -119,8 +119,13 @@ class BackgroundQuiet(
         }
         if (minutes == 0) {
             val mute = QuietPrefs.mute(ctx)
-            // Only the computer's own mute is ended, and only while it stands.
-            if (mute != null && filter() == mute.filter) setFilter(QuietPlan.ALL)
+            // Only the computer's own mute is ended. From Android 15 asking
+            // for "all" ends only its own mode, so it is always asked (found on
+            // the device: an end while the owner's own was on left the mode
+            // running); before, only while the mute's filter stands.
+            if (mute != null && (QuietPlan.ownMode(Build.VERSION.SDK_INT) || filter() == mute.filter)) {
+                setFilter(QuietPlan.ALL)
+            }
             QuietPrefs.setMute(ctx, null)
         } else if (QuietPlan.mayMute(filter())) {
             // Kept first: a process killed between the two still ends it.
