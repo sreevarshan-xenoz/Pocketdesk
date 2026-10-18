@@ -44,9 +44,12 @@ impl Plugin for PhonePhotosPlugin {
             return Ok(());
         };
         // Only a paired phone's photos are kept (an unpaired one passes the
-        // gate when pairing is not required).
-        if !crate::plugins::pair::is_paired_device(sender.device_id()) {
-            tracing::info!("Photos from a phone that is not paired were dropped");
+        // gate when pairing is not required), never a computer's, whose
+        // default permissions include Files (C7 review).
+        if !crate::plugins::pair::is_paired_device(sender.device_id())
+            || crate::plugins::pair::is_computer_device(sender.device_id())
+        {
+            tracing::info!("Photos from a device that is not a paired phone were dropped");
             return Ok(());
         }
         let device = sender.device_id().to_string();

@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::kdeconnect::is_invisible_format;
 use super::phone_files::valid_name;
 
 /// Computer → phone: `{}`, list the newest camera photos.
@@ -75,9 +76,14 @@ impl Photos {
             .photos
             .retain(|p| valid_name(&p.name) && valid_thumb(&p.thumb));
         photos.photos.truncate(MAX_PHOTOS);
-        photos.error = photos
-            .error
-            .map(|e| e.chars().filter(|c| !c.is_control()).take(200).collect());
+        // Shown to the owner: no control or invisible format characters
+        // (a right-to-left override could turn the words around).
+        photos.error = photos.error.map(|e| {
+            e.chars()
+                .filter(|c| !c.is_control() && !is_invisible_format(*c))
+                .take(200)
+                .collect()
+        });
         Some(photos)
     }
 }
@@ -123,6 +129,12 @@ mod tests {
         );
         assert!(Photos::from_body(&json!({"photos": "nope"})).is_none());
         let refused = Photos::from_body(&json!({"error": "Turned off\non the phone"})).unwrap();
+        let turned = Photos::from_body(&json!({"error": "abc\u{202E}def"})).unwrap();
+        assert_eq!(
+            turned.error.as_deref(),
+            Some("abcdef"),
+            "no right-to-left override"
+        );
         assert_eq!(refused.error.as_deref(), Some("Turned offon the phone"));
         assert!(refused.photos.is_empty());
     }
