@@ -1168,6 +1168,7 @@ mod tests {
                 until_unix: Some(3_700),
                 by_computer: true,
                 updated_unix: 100,
+                refused_unix: None,
             },
         );
         pocketdesk_core::local::phone_quiet::write(&dir, &quiet).unwrap();

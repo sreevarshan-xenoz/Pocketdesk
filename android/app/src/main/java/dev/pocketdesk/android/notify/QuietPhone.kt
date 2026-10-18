@@ -91,9 +91,11 @@ class BackgroundQuiet(
         val asked = runCatching { JSONObject(RustCore.takeQuiet()) }.getOrNull() ?: return
         val host = asked.optString("host")
         val port = asked.optInt("port")
-        if (!on || !PhoneFilesRule.fromOwnComputer(host, port, own?.address, own?.controlPort)) {
+        val fromOwn = PhoneFilesRule.fromOwnComputer(host, port, own?.address, own?.controlPort)
+        if (!on || !fromOwn) {
             Log.i(TAG, "a mute from the computer, not taken (switch off, or not its own computer)")
-            // The computer is told the phone's state, so it shows nothing changed.
+            // Its own computer is told why nothing happened (D2 review).
+            if (fromOwn) refuse()
             told = null
             return
         }
@@ -133,6 +135,16 @@ class BackgroundQuiet(
             }
             QuietPlan.Next.WAIT -> {}
         }
+    }
+
+    /** Tell the phone's own computer it may not mute it: the switch is off. */
+    private fun refuse() {
+        val state = QuietPlan.state(filter(), QuietPrefs.mute(ctx))
+        val body = JSONObject()
+            .put("quiet", state?.quiet ?: false)
+            .put("byComputer", state?.byComputer ?: false)
+            .put("refused", true)
+        PhoneLink.sendNow(ctx, STATE, body)
     }
 
     private fun report() {

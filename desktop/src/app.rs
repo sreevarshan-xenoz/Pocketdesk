@@ -867,6 +867,12 @@ impl PocketdeskApp {
                 if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now) {
                     facts.push(quiet);
                 }
+                if model::mute_refused(device.quiet.as_ref(), now) {
+                    facts.push(
+                        "it said no to the mute: turn on \"Let the computer mute this phone\" in its Settings"
+                            .to_string(),
+                    );
+                }
                 if row.place != model::Place::Session {
                     facts.push(match row.last_session {
                         Some(at) => format!("last session {}", crate::words::ago(now, at)),

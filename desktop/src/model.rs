@@ -331,6 +331,20 @@ pub fn quiet_text(
     })
 }
 
+/// How long the Overview says a phone said no to a mute.
+pub const REFUSAL_SHOWN_SECS: u64 = 120;
+
+/// Whether the phone said no to a mute in the last two minutes (D2 review):
+/// its "Let the computer mute this phone" is off.
+pub fn mute_refused(
+    quiet: Option<&pocketdesk_core::local::phone_quiet::PhoneQuiet>,
+    now_unix: u64,
+) -> bool {
+    quiet
+        .and_then(|q| q.refused_unix)
+        .is_some_and(|at| at <= now_unix && now_unix - at <= REFUSAL_SHOWN_SECS)
+}
+
 /// Whether the phone is in its owner's own Do Not Disturb (D2 review): the
 /// computer does not mute it then, so Mute for an hour is not offered.
 pub fn quiet_by_owner(quiet: Option<&pocketdesk_core::local::phone_quiet::PhoneQuiet>) -> bool {
@@ -778,6 +792,7 @@ mod tests {
             until_unix: Some(1_000 + 25 * 60 - 30),
             by_computer: true,
             updated_unix: 1_000,
+            refused_unix: None,
         };
         assert_eq!(
             quiet_text(Some(&own), 1_000).as_deref(),
@@ -801,6 +816,13 @@ mod tests {
         );
         assert!(!muted_from_here(Some(&owners), 1_000));
         assert!(quiet_by_owner(Some(&owners)));
+        let said_no = PhoneQuiet {
+            refused_unix: Some(1_000),
+            ..owners
+        };
+        assert!(mute_refused(Some(&said_no), 1_000 + REFUSAL_SHOWN_SECS));
+        assert!(!mute_refused(Some(&said_no), 1_001 + REFUSAL_SHOWN_SECS));
+        assert!(!mute_refused(Some(&owners), 1_000));
         assert!(!quiet_by_owner(Some(&own)));
         let loud = PhoneQuiet {
             quiet: false,

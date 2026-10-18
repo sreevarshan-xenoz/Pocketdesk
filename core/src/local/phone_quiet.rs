@@ -24,6 +24,9 @@ pub struct PhoneQuiet {
     /// The mute is one a computer asked for.
     pub by_computer: bool,
     pub updated_unix: u64,
+    /// When the phone last said no to a mute (D2 review): its switch is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused_unix: Option<u64>,
 }
 
 impl PhoneQuiet {
@@ -37,11 +40,13 @@ impl PhoneQuiet {
             .and_then(|v| v.as_u64())
             // At most a day and a little from now: a mute is a day at most.
             .filter(|until| by_computer && *until <= now_unix + 2 * 86_400);
+        let refused = body.get("refused").and_then(|v| v.as_bool()) == Some(true);
         Some(Self {
             quiet,
             until_unix,
             by_computer,
             updated_unix: now_unix,
+            refused_unix: refused.then_some(now_unix),
         })
     }
 }
@@ -92,8 +97,19 @@ mod tests {
                 quiet: true,
                 until_unix: Some(now + 3600),
                 by_computer: true,
-                updated_unix: now
+                updated_unix: now,
+                refused_unix: None,
             })
+        );
+        // A mute said no to.
+        assert_eq!(
+            PhoneQuiet::from_body(
+                &json!({"quiet": false, "byComputer": false, "refused": true}),
+                now
+            )
+            .unwrap()
+            .refused_unix,
+            Some(now)
         );
         // The owner's own Do Not Disturb: no end of ours.
         assert_eq!(
@@ -139,6 +155,7 @@ mod tests {
                 until_unix: None,
                 by_computer: false,
                 updated_unix: 5,
+                refused_unix: None,
             },
         );
         write(&dir, &phones).unwrap();
