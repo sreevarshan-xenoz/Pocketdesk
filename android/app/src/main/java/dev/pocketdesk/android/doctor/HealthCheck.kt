@@ -39,18 +39,27 @@ object HealthCheck {
     /** How long a rebind is given to connect the listener before it counts as stopped. */
     const val REBIND_WAIT_MS = 5_000L
 
-    /** Whether any feature that runs on the notification listener is on. */
+    /**
+     * Whether any feature that runs on the notification listener's ticks is
+     * on. Answering notifications needs forwarding on as well, so forwarding
+     * covers it; texts shown on the computer wait there to be sent again.
+     */
     fun listenerFeatures(ctx: Context): Boolean =
         PhoneNotificationPrefs.enabled(ctx) ||
+            TextPrefs.show(ctx) ||
             TextPrefs.reply(ctx) ||
             Prefs.clipboardInBackground(ctx) ||
-            Prefs.answerNotifications(ctx) ||
             Prefs.ringFromComputer(ctx) ||
             Prefs.filesInBackground(ctx) ||
-            Prefs.phoneMediaOnComputer(ctx) ||
             ScreenshotPrefs.on(ctx) ||
             RecentPhotoPrefs.on(ctx) ||
             PhoneFolders.all(ctx).isNotEmpty()
+
+    /**
+     * Whether a feature that needs notification access, but not the listener
+     * running, is on: the phone's media reads other apps' sessions by it.
+     */
+    fun accessFeatures(ctx: Context): Boolean = Prefs.phoneMediaOnComputer(ctx)
 
     /**
      * Ask Android to bind the listener again when it should run and does
@@ -75,6 +84,7 @@ object HealthCheck {
         val control = Prefs.controlFromComputer(ctx)
         return HealthSnapshot(
             listenerFeatures = listenerFeatures(ctx),
+            accessFeatures = accessFeatures(ctx),
             listenerAccess = PhoneNotificationPrefs.accessGranted(ctx),
             listenerConnected = if (ListenerState.connected) true else if (listenerKnown) false else null,
             textsShow = TextPrefs.show(ctx),

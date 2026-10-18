@@ -166,4 +166,15 @@ class HealthTest {
         assertTrue(Health.notifyAfterUpdate(both, seen = Health.key(photos), dismissed = null))
         assertFalse(Health.notifyAfterUpdate(emptyList(), seen = null, dismissed = null))
     }
+
+    @Test
+    fun `a feature that needs access but not the listener running`() {
+        val media = nothingOn.copy(accessFeatures = true, advancedProtection = false)
+        assertEquals(listOf(HealthProblem.NOTIFICATION_ACCESS), Health.problems(media))
+        // With access, a listener not running does not stop it.
+        assertEquals(
+            emptyList<HealthProblem>(),
+            Health.problems(media.copy(listenerAccess = true, listenerConnected = false)),
+        )
+    }
 }

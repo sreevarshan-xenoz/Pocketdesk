@@ -41,6 +41,8 @@ enum class HealthProblem {
 data class HealthSnapshot(
     /** Whether any feature that runs on the notification listener is on. */
     val listenerFeatures: Boolean,
+    /** Whether a feature that needs notification access but not the listener running is on (the phone's media). */
+    val accessFeatures: Boolean = false,
     val listenerAccess: Boolean,
     /** Whether the listener has connected; null while a rebind's answer is awaited. */
     val listenerConnected: Boolean?,
@@ -64,12 +66,10 @@ data class HealthSnapshot(
 
 object Health {
     fun problems(s: HealthSnapshot): List<HealthProblem> = buildList {
-        if (s.listenerFeatures) {
-            if (!s.listenerAccess) {
-                add(HealthProblem.NOTIFICATION_ACCESS)
-            } else if (s.listenerConnected == false) {
-                add(HealthProblem.LISTENER_STOPPED)
-            }
+        if ((s.listenerFeatures || s.accessFeatures) && !s.listenerAccess) {
+            add(HealthProblem.NOTIFICATION_ACCESS)
+        } else if (s.listenerFeatures && s.listenerAccess && s.listenerConnected == false) {
+            add(HealthProblem.LISTENER_STOPPED)
         }
         if (s.textsShow && !s.receiveSms) add(HealthProblem.TEXTS_RECEIVE)
         if (s.textsReply && !s.sendSms) add(HealthProblem.TEXTS_SEND)
