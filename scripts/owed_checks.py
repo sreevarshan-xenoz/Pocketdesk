@@ -19,19 +19,25 @@ OUT = ROOT / 'docs' / 'owed-checks.md'
 # wins, so the more particular come first.
 PLACES = [
     ('power', 'Power, lock or server stop on the owner\'s Windows box: never run here (the owner\'s rule)',
-     r'\b(sleep|shut ?down|hibernat\w*|reboot|log ?off|lock(ed|s)? (it|the (desktop|computer|screen|phone))|power (off|button|actions?)|server[- ]stop|stop(ping)? the (installed )?server|install(ed)? task|start/restart|restart (the )?(installed )?server)\b'),
+     r'\b(sleep|shut ?down|hibernat\w*|reboot|log ?off|lock(ed|s)? (it|the (desktop|computer|screen|phone|pc))'
+     r'|lock (pc|desktop)|screen locks|win\+l|uac|power (off|button|actions?)|server[- ]stop'
+     r'|stop(ping)? the (installed )?server|pocketdesk (stop|install|uninstall)|logon task|firewall rules?'
+     r'|install(ed)? task|start/restart|restart (the )?(installed )?server)\b'),
     ('owner', "Needs the owner's OK on this box: input reaching Windows, or its display settings",
-     r'\b(inject\w*|super\+|alt\+tab|ctrl\+|pointer|cursor|taps? (map|land|reach|still map)|tap-to-|typ(ed|ing) (into|in)|hotkeys?|keys? (arrive|reach|land)|keyboard (shortcut|input)|mouse moves?|click(s|ed)? (on|into) the desktop|desktop (moves|receives)|drives? the (desktop|computer)|scal(ed|ing) \(?1[25]\d ?%|1[25]\d ?% scal\w*|dpi)\b'),
+     r'\b(inject\w*|super\b|start menu|alt\+tab|ctrl\+|pointer|cursor|taps? (map|land|reach|still map)|tap-to-'
+     r'|typ(ed|ing) (into|in)|letters|hotkeys?|keys? (arrive|reach|land)|keyboard (shortcut|input)|mouse moves?'
+     r'|privacy|swipe typing|dictation|composing text|click(s|ed)? (on|into) the desktop|desktop (moves|receives)|drives? the (desktop|computer)|elevated'
+     r'|scal(ed|ing)\b[^.]{0,12}\d{3}|\d{3} ?% scal\w*|\d{3}/\d{3} ?%|dpi)'),
     ('sim', 'A phone with a SIM', r'\b(sim|sms|mms|text messages?|texts|cellular|mobile (data|service|network))\b'),
     ('second phone', 'A second phone', r'\b(two phones|second phone|another phone|both phones|second android|phone b)\b'),
     ('away', 'Away from home: another network, or through a router', r'\b(outside|away from home|from away|another network|router|port forward\w*|public (ip|network)|relayed path|from the internet|real distance|hotspot)\b'),
     ('second computer', 'A second computer', r'\b(two (real )?computers|second computer|another computer|computer b|other computer)\b'),
     ('linux', 'A Linux desktop (the Azure VM serves for some)',
-     r'\b(linux|sway|gnome|kde|plasma|wayland|x11|xwayland|hyprland|wlroots|d-bus|dbus|pipewire|vaapi|nvenc|orca|fc-list|systemd|wev|the vm|azure|waybar|swaybar|libnotify|notify-send|playerctl|ydotool|uinput)\b'),
+     r'\b(linux|sway|gnome|kde plasma|plasma|wayland|x11|xwayland|hyprland|wlroots|d-bus|dbus|pipewire|vaapi|nvenc|orca|fc-list|systemd|wev|the vm|azure|waybar|swaybar|libnotify|notify-send|playerctl|ydotool|uinput|mako|dunst)\b'),
     ('other hardware', 'Other hardware: a foldable, tablet, mouse, game pad, older or newer Android',
-     r'\b(foldable|tablet|gamepad|game ?pad|mouse|hardware keyboard|bluetooth|sd card|android (8|9|1[0-3]|17)|api 3[0-3]|tv|wear ?os|watch|projector|hdr|4k|third monitor)\b'),
+     r'\b(foldable|tablet|gamepad|game ?pad|(usb|bluetooth) mouse|connected mouse|mouse connected|hardware keyboard|bluetooth|sd card|android (8|9|1[0-3]|17)|api 3[0-3]|android tv|wear ?os|smart ?watch|projector|hdr|4k|third monitor)\b'),
     ('by hand', 'By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app',
-     r'\b(by ear|ears?|listen\w*|hear\w*|by eye|look(s|ing)?|tray|drag(ging)?|drop(ped|ping)?|narrator|talkback|screen reader|camera|scan(s|ning)?|real (app|chat app|player|panel)|tasker|browser extension|extension loaded|home assistant itself|stopwatch|feel|smooth\w*|on screen|clicks?|the window by hand)\b'),
+     r'\b(by ear|ears?|listen\w*|hear\w*|by eye|look(s|ing)?|tray|drag(ging)?|drag and drop|drag-and-drop|drop(ped)? (a|the) (file|folder)|dropped on the window|narrator|talkback|screen reader|camera|scan(s|ning)?|real (app|chat app|player|panel)|tasker|browser extension|extension loaded|home assistant itself|stopwatch|feel|smooth\w*|on screen|clicks?|the window by hand)\b'),
 ]
 HERE = ('here', 'Here: this Windows box and the A71, without touching the owner\'s power, lock or input')
 
@@ -68,10 +74,18 @@ def place(section, item):
     if own:
         return own.group(1).strip()
     for key, _, rx in PLACES:
+        # A Linux section's items need Linux before anything less
+        # particular (hardware, hands) (C6 review).
+        if key == 'other hardware' and re.search(r'\blinux\b', section, re.I):
+            return 'linux'
         if re.search(rx, item, re.I):
             return key
-    # A section about one place (Linux, a SIM) puts its items there.
-    for key in ('linux', 'sim', 'second phone'):
+    # A section about one place puts its items there: Linux by name only
+    # (a "KDE Connect devices" section runs on the phone), a SIM, a second
+    # phone (C6 review).
+    if re.search(r'\blinux\b', section, re.I):
+        return 'linux'
+    for key in ('sim', 'second phone'):
         rx = dict((k, r) for k, _, r in PLACES)[key]
         if re.search(rx, section, re.I):
             return key
@@ -118,7 +132,38 @@ def render(text):
     return '\n'.join(out).replace('\n\n\n', '\n\n') + '\n'
 
 
+# Lines whose place must not drift (C6 review): above all, nothing the
+# owner's rule forbids may be filed under "here".
+CASES = [
+    ('A UAC prompt or Win+L mid-session.', '', 'power'),
+    ('`pocketdesk stop` from a second terminal stops the server cleanly.', '', 'power'),
+    ('`install` adds the logon task and the firewall rules.', '', 'power'),
+    ('Lock PC / Lock desktop: the screen locks.', '', 'power'),
+    ('Typing letters, arrows and Super (the Start menu) on the phone.', '', 'owner'),
+    ('Video on a 100 % and on a scaled (125/150 %) display.', '', 'owner'),
+    ('An elevated window: input stops reaching it.', '', 'owner'),
+    ('A file transfer cut by a drop of the Wi-Fi continues.', '', 'here'),
+    ('Watch only: the window shows the phone.', '', 'here'),
+    ('Privacy on: the keyboard and mouse on the desktop stop responding.', '', 'owner'),
+    ('Pairing, codes matching both ways.', '101. KDE Connect next steps (N9)', 'here'),
+    ('The tray icon in a real panel.', '99. The phone panel and a Linux tray (N6)', 'linux'),
+    ('A text message forwarded and answered.', '', 'sim'),
+    ('"Privacy: on" → the desktop\'s keyboard stops responding.', '', 'owner'),
+    ('Swipe typing a word, and voice dictation.', '', 'owner'),
+    ('A file dropped on the window is offered.', '', 'by hand'),
+]
+
+
+def selftest():
+    bad = [(item, want, place(section, item)) for item, section, want in CASES if place(section, item) != want]
+    for item, want, got in bad:
+        print(f'{item!r}: want {want}, got {got}', file=sys.stderr)
+    return 1 if bad else 0
+
+
 def main():
+    if '--selftest' in sys.argv:
+        return selftest()
     text = CHECKLIST.read_text(encoding='utf-8')
     rendered = render(text)
     if '--check' in sys.argv:

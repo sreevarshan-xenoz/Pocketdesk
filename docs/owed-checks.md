@@ -6,16 +6,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 308 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 13 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 24 |
-| A phone with a SIM | 22 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 319 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
+| A phone with a SIM | 21 |
 | A second phone | 5 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 4 |
-| A Linux desktop (the Azure VM serves for some) | 88 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 51 |
+| A Linux desktop (the Azure VM serves for some) | 78 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 18 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 36 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -40,6 +40,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Video appears within ~1 s; with "Show connection details" on, the HUD shows fps/kbps/rtt/delay/lost, plus the caption naming what the rates and the link figure were measured over (§2d).
 - FGS notification is present ("Streaming to <ip>"), survives home/swipe-away attempts; its Disconnect action ends the session.
 - Screen-off for 1 min, wake → stream still live (wake lock + keepalive; plan #13).
+- Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5). "Drops" means **frames the phone never received** — the holes in the server's per-frame sequence numbers, counted where only the client can count them. So a saturated link must move it (the desktop's transport task trims its backlog before a stall clears), while a frame that arrives late and intact must not: the number can come back down when an out-of-order frame lands, and that is correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the desktop's `src` rate, not here.
 - Status chip: kill the server → "Down: <reason>" chip + Retry rebuilds after restarting the server.
 - R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing or upside-down frames (YInvert handling).
 - R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (x,y)" shows that monitor's wl_output origin and frames are its size.
@@ -49,6 +50,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - R4 C2 bottom rung exhausted: with software already live, keep killing encoders until the log shows "Encoder bottom rung exhausted; ending session" → stream goes Down cleanly (status chip + Retry works), never a silent infinite stall.
 - R4 C2 crop stability: during a software-fallback session, pick/clear a window crop → encoder rebuild must NOT re-log the hardware fallback (sticky `encoder_preferred` — a rebuild must not re-probe the dead hardware).
 
+**2c. In-process VAAPI encode (R4 C4) — desktop/box-observable, no device needed**
+
+- R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` → `test_vaapi_encode_roundtrip` encodes 40 real frames through `h264_vaapi` on this box's Intel iHD node and asserts Annex-B packets + ≥1 keyframe (self-skips green where no VA node exists).
+
 **2a. Desktop-side session visibility + kick (R4 D2)**
 
 - Consent notice: first phone connect → desktop shows a "Pocketdesk: a device is streaming this desktop" notification with device id + LAN/WAN + peer (headless: the same line appears in the server log instead).
@@ -56,6 +61,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - `pocketdesk kick <id-prefix>` (≥6 chars, or full id, or peer IP) → phone shows the Down status chip within ~2 s and the status line disappears; other sessions are untouched.
 - `pocketdesk kick all` ends every live session at once.
 - kick with no running server → "no running Pocketdesk server to kick through", nothing written; a bogus target logs "kick: no live session matched" and the live session survives.
+- Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/pocketdesk/kick` (`all\n<unix-secs older than 60s>`), start the daemon, connect a phone → the session must NOT be killed (the expired request is dropped with a warn on first tick).
 - Phone disconnect (normal Exit) → status line goes away within ~2 s; no leftover session in `live_sessions.json` (registry deregisters on pipeline exit).
 
 **2b. Compositor-true latency read (R4 E3)**
@@ -86,6 +92,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Moving the window mid-session: crop follows only after re-pick (known limitation — crop is static rect).
 - "Whole desktop" clears the crop.
+- R4 B2: close the streamed window mid-session → stream keeps running on full-output frames with software crop (warn log "did not stage"; no session drop).
 - Monitor picker lists monitors via xcap; selecting index N streams that monitor's region; reconnect persists the choice per host.
 - Mid-session monitor switch tears down + rebuilds cleanly (no zombie session — bridge "already active" path).
 
@@ -111,13 +118,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **8a. Control-channel versioning (R4 D4)**
 
 - Reply still works end-to-end after the `kdeconnect.notification-reply` → `kdeconnect.pocketdesk.notification_reply` rename (desktop-side check): reply from the phone shade → `replies.log` records it + confirmation popup (the server only matches the new type now, so an old client build's reply would silently no-op — both ends must be from this build).
-- `llVersion` tag is present on our extension packets only: capture the control-channel line (e.g. `journalctl`/strace the JSON, or a debug log of `to_wire` output) — a `kdeconnect.pocketdesk.privacy`/`.audio`/`.state` packet carries `"llVersion":1`; a native `kdeconnect.identity`/`kdeconnect.pair`/`kdeconnect.clipboard` packet does NOT.
 
 **9. Privacy mode + lock (Tier-3 #15, R4 E4)**
 
-- Leave session with privacy on → release happens (phone app exit); also verify 10-min TTL auto-release by force-killing the phone app mid-grab.
-- Shield tears down with the grab: "Privacy: off" → the red frame disappears immediately; force-killing the phone app mid-grab → frame gone after the TTL auto-release.
-- "Lock PC" / session-notification "Lock desktop" → screen locks (loginctl path).
 - Without `input` group: clean error, no crash.
 
 **10. Audio control (Tier-3 #16)**
@@ -141,6 +144,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Phone on LTE (Wi-Fi off): dial from cached identity succeeds → badge shows "WAN · punching…" then settles to "WAN · direct" or "WAN · relayed — trying direct…", video + input + keyframe-on-gap all work through relays (R4 A1).
 - Hole punching through a real NAT (relay-free if possible): check `directAddrs` paths get used.
 - After both a LAN and a WAN session: `pocketdesk sessions` shows one line per session with distinct `outcome=` (`lan_direct` vs `wan_punched`/`wan_relayed`), plausible `rtt_ms`/`kbps`, and `dev=` = the paired deviceId.
+- Tail latency (roadmap 2141-2146): the same lines carry `enc_n`/`enc_p50`/`enc_p90`/`enc_p95`/`enc_p99`/`enc_max` and the matching `rtt_*` set. `enc_n` counts frames the encoder actually produced a packet for, so it must be non-zero and of the same order as fps × session duration — a large shortfall is its own finding (frames dropped upstream, or a path that never samples). `enc_p50` must sit near the typical frame time for the encoder rung in use (the log line names the backend at session start), and a deliberate stall — crop to a window, or unplug/replug Wi-Fi mid-session — has to move `enc_max` or `rtt_max` above `enc_p50`/`rtt_p50`. **A line with no `enc_*` at all means the sampling was never wired to the live pipeline: that is a bug, not a healthy session.**
 - Relayed → direct upgrade while streaming: badge flips to "WAN · direct" on its own (iroh keeps punching) and the bridge logs "upgraded from relay to direct path" (logcat). Relayed session must stay usable the whole time, not stall on the transition.
 - Relayed session (R4 A3): within ~2 s of the badge reading "relayed", the desktop log shows "Encoder bitrate target changed" (relay_cap engaged) at effective ≤ 2 Mbit/s followed by "Encoder rebuilt for new bitrate", and picture is visibly softer than LAN/direct.
 - Full-quality override (R4 A3): while relaying, the badge area offers "Full quality: off" — tap → log shows "Relay quality override changed" then a fresh "Encoder bitrate target changed" back to configured (`pocketdesk sessions` kbps over the next session line). Tap again to re-clamp; toggle survives a stream retry (re-arms).
@@ -152,6 +156,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **11b. HUD link-profile presets (R4 E5)**
 
 - Session bar shows "Quality: auto" by default. Tap it once → "Quality: max" (blue), then "balanced", "economy", back to "auto" — the button cycles all four.
+- On LAN, pick "economy": desktop log shows "Link-profile preset changed" then "Encoder bitrate target changed" with effective ≤ 1.5 Mbit/s and "Encoder rebuilt for new bitrate"; the HUD bitrate/`pocketdesk sessions` kbps drop and the picture softens. Native resolution is NOT reduced (only bitrate) — verify the HUD reports the same width×height.
 - Pick "balanced": effective ≤ 5 Mbit/s. A configured rate below a band (low-res monitor) is never raised above it (the band is a ceiling, not a floor).
 - Preset survives a stream retry / monitor switch: choose "economy", trigger Retry — the new pipeline re-arms the preset (stays ≤ 1.5 Mbit/s without re-tapping). Server latches are per-session, so a full reconnect to a fresh `StreamingServer` resets to Auto (phone must re-pick) — expected.
 - A preset change mid-action is seamless: no freeze longer than one keyframe; the post-rebuild IDR reseeds the decoder cleanly (no green/garbled persist).
@@ -170,6 +175,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **14. Blackout / pocket mode (Tier-3 #15 remainder)**
 
+- "Blackout" → black screen, "double-tap to unlock" hint, screen dimmed; stream continues (watch desktop from another device or check fps in logcat).
 - Screenshot during blackout → blocked (FLAG_SECURE); Recents thumbnail blank/secure.
 - Double-tap or system back unlocks; back never exits the session while blacked out.
 - Entering PiP while blacked-out auto-clears the overlay.
@@ -183,12 +189,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **16. Long-run / hygiene**
 
 - 1 h continuous session: memory stable (no decoder leak across resolution changes), fps steady, no watchdog kills.
-- Force-stop app mid-stream: desktop auto-releases privacy within TTL, encoder sessions stop (no server-side zombie capture), siren/WoL relays unaffected.
 - Airplane-mode mid-session then back: clean Down chip + retry, no ANR.
 
 **17. Foldable / tablet dual-pane (R4 E6)**
 
 - Rotate to a horizontal hinge → split flips to top/bottom (stream top, dock bottom) and vice-versa.
+- Toggling panes mid-session does NOT drop the stream (the decode session survives the fold — check fps continuity / no re-Keyframe gap).
 - Direct-touch taps on the video pane still hit the right desktop point (letterbox/aspect-fit recompute for the half-width pane).
 - Shortcut bar appears once — in the dock while dual, under the stream while single.
 - Blackout still covers BOTH panes (whole window), not just the stream.
@@ -226,14 +232,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - `install` registers the "Pocketdesk" task (Task Scheduler → Task Scheduler Library), removes a "Pocketdesk" task an older version left, starts the server with no console window, and the log file appears under `%LOCALAPPDATA%\pocketdesk\logs`.
 - A toast "Pocketdesk pairing PIN: …" appears for `pair` (the `a_toast_is_shown` test only proves Windows accepted it).
-- Phone keyboard: letters, digits, shifted capitals, arrows, F11/F12, Esc, Super (Start menu), right Alt, the app key; pasted text with capitals, accents and an emoji arrives intact. *Run 1: not testable — the app has no in-session keyboard (only the shortcut bar); Android Share sends text to the PC clipboard, not as typing.*
 - Window crop: picking a window streams just that window; closing it returns to the monitor.
-- A UAC prompt or Win+L mid-session: the stream recovers after it is dismissed (WGC keeps running; on the DXGI fallback, access-lost rebuilds the duplication).
-- `uninstall` removes the task and the firewall rules (`wf.msc`), including the "Pocketdesk" ones an older version created.
 
 **24. Desktop app and QR pairing**
 
-- Pair over the LAN address in the code, not `adb reverse` (needs the firewall rules `install` adds).
 - Settings → Save on a real `config.toml` keeps comments; the server picks the change up after Restart.
 - Open a `pocketdesk://pair` link, finish or dismiss it, then switch dark mode or reopen the app from Recents: the pairing is not offered again. Switching theme while the confirmation is showing keeps it.
 
@@ -247,10 +249,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **26. In-session keyboard**
 
-- Swipe typing a word, and voice dictation.
-- Double-tap locks a modifier (ringed cap); typing with Shift locked; Super latched + a key on the desktop.
 - Landscape: the stream stays visible above the keyboard, and zoom survives opening and closing it.
-- Tamil and Spanish keyboards: composing text arrives whole and correct.
 
 **27. Trackpad gestures**
 
@@ -259,6 +258,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **28. Permissions and session approval**
 
 - No answer: the phone shows the refusal about 30 s after connecting.
+- Clipboard off: the phone's clipboard actions are dropped (`Denied … clipboard` in the log); turn it on again and they work at once.
 - Running commands: denied by default; allowed after the switch is turned on.
 - Control off: the session is view-only and the phone cannot lift it. Sound off: no desktop sound. Microphone off: the mic does not reach the desktop.
 - Turning control, sound or the microphone off during a session ends that session; Retry starts one with the change. Removing a connected phone ends its session.
@@ -345,18 +345,19 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **45. Phase R3 and R4: hostile connections, and idle cost**
 
-- Turning off a phone's Power permission while it holds privacy mode (limit 6 in SECURITY.md): the grab ends at its 10 minute expiry.
 - The phone's battery over an hour with the app in the background, and while a session is open.
 - Network traffic while idle (both ends).
 
 **46. Phase R2: long sessions and recovery**
 
 - An hour with one session from start to end, to confirm the memory levels off.
+- A file transfer cut by a drop (today it fails and is sent again whole).
 
 **47. Check connection (T1)**
 
 - A VPN that captures home traffic, and Tailscale off for a tailnet address.
 - Guest Wi-Fi with AP isolation, and another subnet.
+- A UDP-only block (the computer's firewall dropping the stream port).
 - Copy report on a device: no address or id in the text.
 
 **48. Staying connected in the background (T2)**
@@ -368,7 +369,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
 
 - Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing, and a device-to-device move (Smart Switch) leaves the app unpaired on the new phone.
-- Windows: after `pocketdesk install`, the firewall has TCP 1716 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
 - A Wi-Fi with Tailscale up: a phone browsing mDNS sees the LAN address and no 100.x or fd7a: address.
 - Transfers both ways still end "saved" over many runs (the clean close after the status byte), and a desktop share to a full disk fails at once instead of after 10 s.
 
@@ -386,6 +386,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The phone shows "Not all of … was sent" when it leaves names out, and "Stopped sending …" when the computer goes away mid-folder.
 - A folder broken by Wi-Fi mid-way, continued.
 - A folder over the limits (10 000 files, 32 levels) says what was left out.
+- The desktop app's "Choose folder…" and dropping a folder on the window.
 - Names Windows refuses on the phone (`a:b`) left out and counted.
 
 **52. Download a folder from the remote browser**
@@ -414,10 +415,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Chrome's and Firefox's share sheets ("Open on computer" listed, the title and link they share).
 - The desktop app's Send link, and its refusal for a phone with Links off.
+- The phone's "Links from the computer" off: a link dropped.
 
 **57. The phone's battery on the computer (T8b)**
 
 - The Devices tab's text, and its age after the session ends.
+- Catching up after a Wi-Fi drop.
 - Unpairing the phone: its report gone from the file within 5 s.
 - The phone's "Share battery with the computer" off: no report; the desktop's "Phones' batteries" off: no notification.
 - A real discharge to 15 %, and Android's own low flag.
@@ -442,6 +445,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **61. Portrait sessions (T9b)**
 
 - A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
+
+**62. A mouse on the phone (T9c)**
+
+- Motion, all five buttons and the wheel (both ways) reach the desktop, and a fast mouse keeps its travel.
+- Opening and closing the in-session keyboard: the mouse keeps working.
+- The mouse's Back button goes to the desktop and does not end the session.
 
 **64. The control channel over the internet (T10a)**
 
@@ -486,6 +495,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **74. The phone's battery without a session**
 
+- With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
 - Over the internet road.
 
 **76. Hotspot and tethering in Check connection**
@@ -536,10 +546,19 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A folder from B to A lands under one new folder; a folder from A to B is refused with its reason.
 - Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works.
 
+**87. KDE Connect devices (3a–3c)**
+
+- Cancel after the device's Accept unpairs it on the phone; a second request from the phone while one waits shows nothing new.
+- A device that broadcasts first (this computer dialing it): not built (the receive half waits).
+
 **88. The desktop app's shell (U1)**
 
 - A notice clearing after 6 s, "Copied.", and the two settings' switches while their change runs.
 - A line mixing Arabic or Hebrew with Latin (egui has no bidirectional layout), read by someone who reads it.
+
+**89. The phone's navigation and feedback (U2)**
+
+- Ring's snackbar (it rings the computer), and a shortcut key's failure message on a dropped link.
 
 **90. Names on both sides (U3)**
 
@@ -590,8 +609,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A ring that raised the volume on Android 16, cut short, then the phone on 17: the volume is put back when the app is opened.
 - A screen, remote and sound session with the screen off: the computer's sound keeps playing (the session's foreground service holds while-in-use).
 
+**100. GNOME and KDE hosts that work unattended (N8)**
+
+- "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog.
+- No RemoteDesktop portal (or refused): the screen alone.
+
+**101. KDE Connect, next steps (N9)**
+
+- A chat app's notification, an update to one (replacing the toast), and a flood held to the limit.
+
 **102. The phone's background cost (N7)**
 
+- The same hour on battery, without USB: the battery's drop, and the CPU while the phone really sleeps.
 - Over Wi-Fi rather than `adb reverse`: the radio's wakes and bytes for the link's keepalives.
 - A release build (R8): the CPU again.
 
@@ -641,6 +670,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Reboot phone → history + saved hosts survive.
 
+**9. Privacy mode + lock (Tier-3 #15, R4 E4)**
+
+- "Lock PC" / session-notification "Lock desktop" → screen locks (loginctl path).
+
 **11. WAN over iroh (R1)**
 
 - Desktop reconnects (restart server) → identity re-announced within 30 s, phone re-dials.
@@ -651,10 +684,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **23. Windows host (W1: core remote desktop)**
 
+- A UAC prompt or Win+L mid-session: the stream recovers after it is dismissed (WGC keeps running; on the DXGI fallback, access-lost rebuilds the duplication).
 - `pocketdesk stop` from a second terminal stops the server cleanly (the log ends with `Shutdown requested (pocketdesk stop)`) — run this yourself; it is deliberately not automated.
+- `uninstall` removes the task and the firewall rules (`wf.msc`), including the "Pocketdesk" ones an older version created.
 
 **24. Desktop app and QR pairing**
 
+- Pair over the LAN address in the code, not `adb reverse` (needs the firewall rules `install` adds).
 - Start / Restart server from the app, on Windows (logon task) and Linux (systemd user unit). This is not run on the developer box by rule.
 
 **42. Wake from the phone (N6)**
@@ -667,12 +703,17 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
 - The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
+- Windows: after `pocketdesk install`, the firewall has TCP 1716 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
 
 **89. The phone's navigation and feedback (U2)**
 
 - Lock confirmed, and refused with Power off (the server's answer is unit-tested): never against this box, so on the VM or a spare computer.
 
 ## Needs the owner's OK on this box: input reaching Windows, or its display settings
+
+**0. Prerequisites**
+
+- Desktop: user in `input` group (uinput + `/dev/input/event*` read for privacy mode) — `groups $USER` should show `input`.
 
 **3. Input paths (R2#4, Tier 1 #2)**
 
@@ -696,7 +737,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **8a. Control-channel versioning (R4 D4)**
 
+- `llVersion` tag is present on our extension packets only: capture the control-channel line (e.g. `journalctl`/strace the JSON, or a debug log of `to_wire` output) — a `kdeconnect.pocketdesk.privacy`/`.audio`/`.state` packet carries `"llVersion":1`; a native `kdeconnect.identity`/`kdeconnect.pair`/`kdeconnect.clipboard` packet does NOT.
 - Forward-compat: hand-inject a `kdeconnect.pocketdesk.privacy` line with an extra unknown top-level field and an unknown body key → server still parses and acts (unknown fields ignored).
+
+**9. Privacy mode + lock (Tier-3 #15, R4 E4)**
+
+- "Privacy: on" → physical keyboard/mouse on desktop stop responding (`evtest`: grabs held), while phone input still flows.
+- Compositor shield (R4 E4, Hyprland/wlroots): the same "Privacy: on" also paints a full-perimeter red frame on every monitor within ~1 s; the desktop centre stays visible and interactive from the phone (the ring is `KeyboardInteractivity::None`, click-through). Desktop log shows "privacy: layer-shell privacy shield engaged".
+- Leave session with privacy on → release happens (phone app exit); also verify 10-min TTL auto-release by force-killing the phone app mid-grab.
+- Shield tears down with the grab: "Privacy: off" → the red frame disappears immediately; force-killing the phone app mid-grab → frame gone after the TTL auto-release.
 
 **10a. Phone mic share (R4 E2)**
 
@@ -714,22 +763,40 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - DeX/docked or split-screen: session is resizeable, letterboxing recomputes, taps still map correctly.
 
+**16. Long-run / hygiene**
+
+- Force-stop app mid-stream: desktop auto-releases privacy within TTL, encoder sessions stop (no server-side zombie capture), siren/WoL relays unaffected.
+
 **17. Foldable / tablet dual-pane (R4 E6)**
 
 - On a foldable folded to half-open (vertical hinge): session auto-splits — desktop video on one pane, trackpad + shortcut dock on the other; tapping/dragging the dock moves the desktop cursor and the finger never covers the video.
 
 **23. Windows host (W1: core remote desktop)**
 
+- Video is live and correct-sized on a 100 % and on a scaled (125/150 %) display; a still desktop keeps the HUD alive (the 1 s heartbeat) instead of tripping the 10 s dead-link card. *Run 1: live, correct-sized and kept alive on a still desktop at 100 %; no scaled display tried.*
 - Taps land on the pixel tapped, on a single monitor and on a secondary monitor left of/above the primary (negative origin); drag selects text. *Run 1: taps on the primary land within 5 px with a second screen present, after the monitor → layout remap fix. Not tried: streaming the secondary, a monitor left of the primary, drag.*
+- Phone keyboard: letters, digits, shifted capitals, arrows, F11/F12, Esc, Super (Start menu), right Alt, the app key; pasted text with capitals, accents and an emoji arrives intact. *Run 1: not testable — the app has no in-session keyboard (only the shortcut bar); Android Share sends text to the PC clipboard, not as typing.*
 - Focusing an elevated window (e.g. an admin terminal) makes input stop with one `Windows refused injected input` log line, and input resumes on returning to a normal window.
+
+**24. Desktop app and QR pairing**
+
+- Leaving the scanner (after a scan, and with Back) turns the camera off: the privacy indicator goes out at once, not when the app closes.
 
 **26. In-session keyboard**
 
+- Swipe typing a word, and voice dictation.
+- Double-tap locks a modifier (ringed cap); typing with Shift locked; Super latched + a key on the desktop.
 - F-keys, Ins, PgUp/PgDn and Ctrl+Alt+Del from the bar.
+- A Bluetooth or USB keyboard on the phone: letters, Ctrl shortcuts, arrows, F-keys.
+- Tamil and Spanish keyboards: composing text arrives whole and correct.
 
 **27. Trackpad gestures**
 
 - Speed 0.5× and 3× feel right; slow movements still move the cursor.
+
+**45. Phase R3 and R4: hostile connections, and idle cost**
+
+- Turning off a phone's Power permission while it holds privacy mode (limit 6 in SECURITY.md): the grab ends at its 10 minute expiry.
 
 **60. Pinch-zoom in trackpad mode (T9a)**
 
@@ -740,9 +807,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The phone's pointer is hidden during the session and back over Home after Exit.
 - Settings off: the phone's own pointer, no capture.
 
+**63. Contact names in texts (T8e)**
+
+- A text from a contact shows "Ann (number)" in the notification and in Messages; a stranger shows the number only; a sender ID with letters gets no name.
+
 **71. Input on wlroots without uinput (T10f)**
 
 - Super+N, and the text fallback typed as keys.
+- Privacy mode where `/dev/input` is root-only too: the local keyboard is likely not blocked.
 
 **98. An Android 17 pass (N4)**
 
@@ -800,7 +872,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **63. Contact names in texts (T8e)**
 
-- A text from a contact shows "Ann (number)" in the notification and in Messages; a stranger shows the number only; a sender ID with letters gets no name.
 - A text queued while the computer is away, then names turned off: it goes without a name.
 - Desktop "keep the contact names" off: new texts carry none, and after a server restart the kept names are gone.
 
@@ -892,7 +963,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **0. Prerequisites**
 
 - Desktop: `cargo run -p pocketdesk-server` (or installed server) on the Hyprland machine; FFmpeg + PipeWire + xdg-desktop-portal present.
-- Desktop: user in `input` group (uinput + `/dev/input/event*` read for privacy mode) — `groups $USER` should show `input`.
 - Note which items are Hyprland-specific (window picker, workspace HUD, monitor geometry) — retest on a plain session if that's a target.
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -909,7 +979,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **2c. In-process VAAPI encode (R4 C4) — desktop/box-observable, no device needed**
 
-- R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` → `test_vaapi_encode_roundtrip` encodes 40 real frames through `h264_vaapi` on this box's Intel iHD node and asserts Annex-B packets + ≥1 keyframe (self-skips green where no VA node exists).
 - R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the VA-capable node, NOT the hardcoded NVIDIA `renderD128` — `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD129` starts a session → server log "Video encoder: in-process VAAPI (h264_vaapi) on /dev/dri/renderD129" and **no `ffmpeg` sidecar child** is spawned for the vaapi path (`pstree` of the server). Point the override at a VA-less node (e.g. `/dev/dri/renderD128`) → it degrades to sidecar-then-software (C2), never hangs.
 - R4 C4 quality (needs a phone): a VAAPI-encoded session decodes with correct color (no NV12 chroma shift) and the GOP (fps×2) keyframe lets first-frame render land within ~2 s.
 
@@ -930,7 +999,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **9. Privacy mode + lock (Tier-3 #15, R4 E4)**
 
-- Compositor shield (R4 E4, Hyprland/wlroots): the same "Privacy: on" also paints a full-perimeter red frame on every monitor within ~1 s; the desktop centre stays visible and interactive from the phone (the ring is `KeyboardInteractivity::None`, click-through). Desktop log shows "privacy: layer-shell privacy shield engaged".
 - Non-wlroots desktop (GNOME/KDE/X11, or `POCKETDESK_SCREENCOPY=0` headless): no shield is attempted — grab still works, no crash, no "shield engaged" log line.
 
 **18. Login autostart + tailnet access (server-side)**
@@ -1054,7 +1122,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **71. Input on wlroots without uinput (T10f)**
 
 - Hyprland, river, labwc and Wayfire.
-- Privacy mode where `/dev/input` is root-only too: the local keyboard is likely not blocked.
 
 **75. A second screen at the phone's shape (T10j)**
 
@@ -1088,9 +1155,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **87. KDE Connect devices (3a–3c)**
 
-- Cancel after the device's Accept unpairs it on the phone; a second request from the phone while one waits shows nothing new.
-- 3c, a text or link share refused with its notice, the low-battery warning from a KDE device, and the switches, battery and Ring on screen.
-- A device that broadcasts first (this computer dialing it): not built (the receive half waits).
 - Linux, with `kdeconnectd` holding UDP 1716.
 
 **88. The desktop app's shell (U1)**
@@ -1122,15 +1186,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **100. GNOME and KDE hosts that work unattended (N8)**
 
-- "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog.
 - Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there.
 - Revoking in GNOME's settings brings the dialog back; Forget the grant and turning the setting off make the next session ask.
-- No RemoteDesktop portal (or refused): the screen alone.
 - The server started as a systemd user service: does the portal keep its restore data with no desktop app id?
 
 **101. KDE Connect, next steps (N9)**
 
-- A chat app's notification, an update to one (replacing the toast), and a flood held to the limit.
 - Linux: the notification over D-Bus, and closed by its id.
 
 **104. Control the phone from the computer (C8)**
@@ -1147,14 +1208,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
-**9. Privacy mode + lock (Tier-3 #15, R4 E4)**
-
-- "Privacy: on" → physical keyboard/mouse on desktop stop responding (`evtest`: grabs held), while phone input still flows.
-
-**14. Blackout / pocket mode (Tier-3 #15 remainder)**
-
-- "Blackout" → black screen, "double-tap to unlock" hint, screen dimmed; stream continues (watch desktop from another device or check fps in logcat).
-
 **15. Language / i18n (Tier-3 #17 remainder)**
 
 - Connect screen shows "Language" button on Android 13+ (absent on 12).
@@ -1167,10 +1220,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **21. UI polish pass C1–C9 (design system, immersive session, error UX, settings)**
 
 - Material You: on Android 12+ the palette follows the wallpaper when "Dynamic color" is on; turning it off falls back to the brand palette.
-
-**26. In-session keyboard**
-
-- A Bluetooth or USB keyboard on the phone: letters, Ctrl shortcuts, arrows, F-keys.
 
 **27. Trackpad gestures**
 
@@ -1201,12 +1250,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A real player (Spotify, a podcast app): its title, and the app's name (Android 11+ package visibility may give the package name).
 
-**62. A mouse on the phone (T9c)**
-
-- Motion, all five buttons and the wheel (both ways) reach the desktop, and a fast mouse keeps its travel.
-- Opening and closing the in-session keyboard: the mouse keeps working.
-- The mouse's Back button goes to the desktop and does not end the session.
-
 **65. The clipboard outside a session (T10b)**
 
 - Android 10–12: the tile's window reads the clipboard.
@@ -1221,7 +1264,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **104. Control the phone from the computer (C8)**
 
-- The window by hand: a click, a drag, the wheel, the right and middle buttons, typing, the bar's buttons, Watch only, and a drag that leaves the window.
 - Android 13+ sideloaded: the restricted-settings step.
 - Advanced Protection (Android 17): the service refused.
 
@@ -1231,43 +1273,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
-**2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
-
-- Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5). "Drops" means **frames the phone never received** — the holes in the server's per-frame sequence numbers, counted where only the client can count them. So a saturated link must move it (the desktop's transport task trims its backlog before a stall clears), while a frame that arrives late and intact must not: the number can come back down when an out-of-order frame lands, and that is correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the desktop's `src` rate, not here.
-
-**2a. Desktop-side session visibility + kick (R4 D2)**
-
-- Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/pocketdesk/kick` (`all\n<unix-secs older than 60s>`), start the daemon, connect a phone → the session must NOT be killed (the expired request is dropped with a warn on first tick).
-
 **2b. Compositor-true latency read (R4 E3)**
 
 - Cross-check (eyes, optional): point the phone camera at the desktop with an on-screen clock/stopwatch — the phone's rendered image lags the physical panel by roughly the HUD `delay` figure (± the phone's own present latency, which the probe can't see).
-
-**5. Window + monitor streaming (R3#7, Tier-2 #10)**
-
-- R4 B2: close the streamed window mid-session → stream keeps running on full-output frames with software crop (warn log "did not stage"; no session drop).
-
-**11. WAN over iroh (R1)**
-
-- Tail latency (roadmap 2141-2146): the same lines carry `enc_n`/`enc_p50`/`enc_p90`/`enc_p95`/`enc_p99`/`enc_max` and the matching `rtt_*` set. `enc_n` counts frames the encoder actually produced a packet for, so it must be non-zero and of the same order as fps × session duration — a large shortfall is its own finding (frames dropped upstream, or a path that never samples). `enc_p50` must sit near the typical frame time for the encoder rung in use (the log line names the backend at session start), and a deliberate stall — crop to a window, or unplug/replug Wi-Fi mid-session — has to move `enc_max` or `rtt_max` above `enc_p50`/`rtt_p50`. **A line with no `enc_*` at all means the sampling was never wired to the live pipeline: that is a bug, not a healthy session.**
-
-**11b. HUD link-profile presets (R4 E5)**
-
-- On LAN, pick "economy": desktop log shows "Link-profile preset changed" then "Encoder bitrate target changed" with effective ≤ 1.5 Mbit/s and "Encoder rebuilt for new bitrate"; the HUD bitrate/`pocketdesk sessions` kbps drop and the picture softens. Native resolution is NOT reduced (only bitrate) — verify the HUD reports the same width×height.
-
-**17. Foldable / tablet dual-pane (R4 E6)**
-
-- Toggling panes mid-session does NOT drop the stream (the decode session survives the fold — check fps continuity / no re-Keyframe gap).
-
-**23. Windows host (W1: core remote desktop)**
-
-- Video is live and correct-sized on a 100 % and on a scaled (125/150 %) display; a still desktop keeps the HUD alive (the 1 s heartbeat) instead of tripping the 10 s dead-link card. *Run 1: live, correct-sized and kept alive on a still desktop at 100 %; no scaled display tried.*
 
 **24. Desktop app and QR pairing**
 
 - Scan the desktop app's code with the phone camera (the USB-tethered phone could not see the screen).
 - Tray: Open, Pair a phone… and Quit from the tray menu itself.
-- Leaving the scanner (after a scan, and with Back) turns the camera off: the privacy indicator goes out at once, not when the app closes.
 
 **25. Desktop sound on the phone**
 
@@ -1284,7 +1297,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **28. Permissions and session approval**
 
 - The desktop app's prompt: it comes to the front (also from the tray) and its three buttons work; Always allow turns the switch off.
-- Clipboard off: the phone's clipboard actions are dropped (`Denied … clipboard` in the log); turn it on again and they work at once.
 
 **34. Desktop diagnostics (F10)**
 
@@ -1294,30 +1306,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A real app's public notification (a chat message) shows its title and text.
 
-**46. Phase R2: long sessions and recovery**
-
-- A file transfer cut by a drop (today it fails and is sent again whole).
-
 **47. Check connection (T1)**
 
 - A changed security key (pin a wrong one), and "Scan code again" from the finding: the computer and its key removed, the scanner opened, and the new code trusted.
-- A UDP-only block (the computer's firewall dropping the stream port).
-
-**51. Folders (T6b)**
-
-- The desktop app's "Choose folder…" and dropping a folder on the window.
 
 **54. Automation apps on the phone (T7b)**
 
 - Tasker itself: the clipboard recipe, a file with "Grant read permission", Connect and Wake from a task.
-
-**56. Links both ways (T8a)**
-
-- The phone's "Links from the computer" off: a link dropped.
-
-**57. The phone's battery on the computer (T8b)**
-
-- Catching up after a Wi-Fi drop.
 
 **58. The computer's media from the phone (T8c)**
 
@@ -1339,10 +1334,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Direct touch (absolute moves), scrolling, right and middle clicks, and a two-output layout.
 
-**74. The phone's battery without a session**
-
-- With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
-
 **77. This phone's screen on the computer (T10k)**
 
 - The latency against a stopwatch, and over the internet road (WAN, relayed and direct).
@@ -1362,10 +1353,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **87. KDE Connect devices (3a–3c)**
 
 - The desktop app's Find button, list, Allow/Deny and Pair on screen.
+- 3c, a text or link share refused with its notice, the low-battery warning from a KDE device, and the switches, battery and Ring on screen.
 
 **89. The phone's navigation and feedback (U2)**
 
-- Ring's snackbar (it rings the computer), and a shortcut key's failure message on a dropped link.
 - TalkBack reading the snackbars and the checking card.
 
 **90. Names on both sides (U3)**
@@ -1389,9 +1380,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - By ear: the computer's sound on the phone (lag, quality, across the room).
 - Windows with VB-CABLE: the phone's mic heard in a recording or a call on the computer.
 
-**102. The phone's background cost (N7)**
+**104. Control the phone from the computer (C8)**
 
-- The same hour on battery, without USB: the battery's drop, and the CPU while the phone really sleeps.
+- The window by hand: a click, a drag, the wheel, the right and middle buttons, typing, the bar's buttons, Watch only, and a drag that leaves the window.
 
 **106. Notifications that wait and go later (C3)**
 

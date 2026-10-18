@@ -34,7 +34,7 @@ jobs:
 
       # C6: the owed checks by where they can run, generated from the checklist.
       - name: Owed checks index
-        run: python3 scripts/owed_checks.py --check
+        run: python3 scripts/owed_checks.py --selftest && python3 scripts/owed_checks.py --check
 
       - name: Clippy (workspace, all targets)
         run: cargo clippy --workspace --all-targets -- -D warnings
