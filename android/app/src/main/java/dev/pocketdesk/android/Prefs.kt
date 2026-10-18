@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
+    private const val KEY_CONTROL_FROM_COMPUTER = "control_from_computer"
     private const val KEY_INTERNET_FILES = "internet_files"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
@@ -214,6 +215,15 @@ object Prefs {
 
     fun setCaptureMouse(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CAPTURE_MOUSE, enabled) }
+        bump()
+    }
+
+    /** C8: the computer this phone casts to may control it (off by default). */
+    fun controlFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_CONTROL_FROM_COMPUTER, false)
+
+    fun setControlFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CONTROL_FROM_COMPUTER, enabled) }
         bump()
     }
 

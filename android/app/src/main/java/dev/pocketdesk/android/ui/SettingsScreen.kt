@@ -106,6 +106,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            ControlSetting()
 
             SettingsHeader(stringResource(R.string.settings_session))
             SettingSwitch(

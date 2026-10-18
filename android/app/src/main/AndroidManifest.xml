@@ -135,6 +135,20 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
+        <!-- C8: control from the computer during a cast; only Android binds it. -->
+        <service
+            android:name=".control.ControlService"
+            android:exported="true"
+            android:label="@string/control_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/control_service" />
+        </service>
+
         <service
             android:name=".service.SessionForegroundService"
             android:exported="false"
