@@ -160,8 +160,12 @@ fun HomeScreen(
     LaunchedEffect(healthProblems) {
         // What an update's check compares with: it tells only of new problems.
         Prefs.setHealthSeen(context, Health.key(healthProblems))
-        // Fixed: the notification posted after an update goes too.
-        if (healthProblems.isEmpty()) HealthReceiver.cancel(context)
+        if (healthProblems.isEmpty()) {
+            // Fixed: the notification posted after an update goes too, and
+            // "Not now" is forgotten, so the same problem coming back shows.
+            HealthReceiver.cancel(context)
+            if (Prefs.healthDismissed(context) != null) Prefs.setHealthDismissed(context, null)
+        }
     }
     val showHealth = Prefs.healthAlerts(context) && Health.shows(healthProblems, Prefs.healthDismissed(context))
     // Read once per resume (system services), not on every recomposition.
