@@ -216,6 +216,16 @@ class PhoneNotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         dev.pocketdesk.android.doctor.ListenerState.connected(true)
+        // Connected after an update's check called it stopped: take its notice
+        // back once nothing is wrong (D1 review).
+        val app = applicationContext
+        Thread {
+            runCatching {
+                if (dev.pocketdesk.android.doctor.HealthCheck.problems(app).isEmpty()) {
+                    dev.pocketdesk.android.doctor.HealthReceiver.cancel(app)
+                }
+            }
+        }.start()
     }
 
     override fun onListenerDisconnected() {

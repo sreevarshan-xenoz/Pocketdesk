@@ -36,6 +36,8 @@ class HealthReceiver : BroadcastReceiver() {
                 check(app)
             } catch (e: RuntimeException) {
                 Log.w(TAG, "health check after an update failed", e)
+            } catch (_: InterruptedException) {
+                // Given up with the process: nothing to tell.
             } finally {
                 pending.finish()
             }
@@ -45,7 +47,11 @@ class HealthReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "HealthReceiver"
         private const val CHANNEL = "health"
-        private const val NOTIFICATION_ID = 41_000
+        // Below BackgroundFiles' 40_000 + n.
+        private const val NOTIFICATION_ID = 39_000
+
+        /** How long a boot is given to bind the listener: dexopt after an update makes it slow. */
+        private const val LISTENER_WAIT_MS = 8_000L
 
         /** Whether this boot runs another system build than the last one seen, which it records. */
         fun systemUpdated(ctx: Context): Boolean {
@@ -64,9 +70,19 @@ class HealthReceiver : BroadcastReceiver() {
             if (Prefs.lastFingerprint(ctx) != now) Prefs.setLastFingerprint(ctx, now)
         }
 
-        /** Rebind, wait, check, and notify; on the receiver's own thread, within its time limit. */
+        /**
+         * Rebind, wait for the listener, check, and notify; on the receiver's
+         * own thread, within its time limit. Nothing without a saved computer:
+         * Home, which would show and clear it, has no card then.
+         */
         fun check(ctx: Context) {
-            if (HealthCheck.rebindIfStopped(ctx)) Thread.sleep(HealthCheck.REBIND_WAIT_MS)
+            if (dev.pocketdesk.android.HostStore.hosts(ctx).isEmpty()) return
+            // After a boot the listener may bind late (D1 review): wait for it,
+            // up to [LISTENER_WAIT_MS], rather than judge it from one sample.
+            if (HealthCheck.rebindIfStopped(ctx) || !ListenerState.connected) {
+                val until = android.os.SystemClock.elapsedRealtime() + LISTENER_WAIT_MS
+                while (!ListenerState.connected && android.os.SystemClock.elapsedRealtime() < until) Thread.sleep(250)
+            }
             val problems = HealthCheck.problems(ctx)
             if (problems.isEmpty()) {
                 cancel(ctx)
