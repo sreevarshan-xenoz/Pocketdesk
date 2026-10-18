@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -145,29 +146,32 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     // D1: what is on but cannot work, re-read on each resume and when
-    // Settings change. A listener that should run and does not is asked to
-    // bind again, and judged only once the rebind has had its time.
+    // Settings change, off the main thread (system services). A listener
+    // that should run and does not is asked to bind again, and judged only
+    // once the rebind has had its time. Null until the first read, so no
+    // card flashes and nothing is recorded before then (D1 review).
     val prefsVersion = Prefs.observedVersion()
-    var listenerKnown by remember { mutableStateOf(true) }
-    LaunchedEffect(resumes) {
-        if (HealthCheck.rebindIfStopped(context)) {
-            listenerKnown = false
+    val healthProblems by produceState<List<HealthProblem>?>(null, resumes, prefsVersion) {
+        val rebinding = withContext(Dispatchers.IO) { HealthCheck.rebindIfStopped(context) }
+        value = withContext(Dispatchers.IO) { HealthCheck.problems(context, listenerKnown = !rebinding) }
+        if (rebinding) {
             delay(HealthCheck.REBIND_WAIT_MS)
-            listenerKnown = true
+            value = withContext(Dispatchers.IO) { HealthCheck.problems(context) }
         }
     }
-    val healthProblems = remember(resumes, listenerKnown, prefsVersion) { HealthCheck.problems(context, listenerKnown) }
     LaunchedEffect(healthProblems) {
+        val problems = healthProblems ?: return@LaunchedEffect
         // What an update's check compares with: it tells only of new problems.
-        Prefs.setHealthSeen(context, Health.key(healthProblems))
-        if (healthProblems.isEmpty()) {
+        Prefs.setHealthSeen(context, Health.key(problems))
+        if (problems.isEmpty()) {
             // Fixed: the notification posted after an update goes too, and
             // "Not now" is forgotten, so the same problem coming back shows.
             HealthReceiver.cancel(context)
             if (Prefs.healthDismissed(context) != null) Prefs.setHealthDismissed(context, null)
         }
     }
-    val showHealth = Prefs.healthAlerts(context) && Health.shows(healthProblems, Prefs.healthDismissed(context))
+    val showHealth = Prefs.healthAlerts(context) &&
+        Health.shows(healthProblems.orEmpty(), Prefs.healthDismissed(context))
     // Read once per resume (system services), not on every recomposition.
     val backgroundLimit = remember(resumes) { BackgroundRunning.limit(context) }
     val backgroundFeatures = remember(resumes) { BackgroundRunning.featuresOn(context) }
@@ -304,11 +308,11 @@ fun HomeScreen(
                 if (showHealth) {
                     item(key = "#health") {
                         HealthCard(
-                            problems = healthProblems,
+                            problems = healthProblems.orEmpty(),
                             onFix = { HealthCheck.openFix(context, it) },
                             onTurnOffControl = { Prefs.setControlFromComputer(context, false) },
                             onChooseFolder = onOpenSettings,
-                            onNotNow = { Prefs.setHealthDismissed(context, Health.key(healthProblems)) },
+                            onNotNow = { Prefs.setHealthDismissed(context, Health.key(healthProblems.orEmpty())) },
                         )
                     }
                 }
