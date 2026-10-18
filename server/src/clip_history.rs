@@ -11,35 +11,70 @@ use std::time::Duration;
 use pocketdesk_core::local::clip_history::{self, ClipEntry, SendRequest};
 use pocketdesk_core::protocol::kdeconnect::DeviceSender;
 
+/// How many texts may wait for the writer; more are dropped (D3 review: a
+/// phone sending many could otherwise pile up threads and disk writes).
+const WAITING: usize = 64;
+
+/// The one writer: it keeps the texts in the order they came (D3 review).
+fn writer() -> Option<&'static std::sync::mpsc::SyncSender<ClipEntry>> {
+    static WRITER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<ClipEntry>>> =
+        std::sync::OnceLock::new();
+    WRITER
+        .get_or_init(|| {
+            let dir = crate::state::state_dir().ok()?;
+            let (tx, rx) = std::sync::mpsc::sync_channel::<ClipEntry>(WAITING);
+            std::thread::Builder::new()
+                .name("clip-history".to_string())
+                .spawn(move || {
+                    for entry in rx {
+                        write_one(&dir, entry);
+                    }
+                })
+                .ok()?;
+            Some(tx)
+        })
+        .as_ref()
+}
+
+/// Keep one text, as the setting allows, read at each text so a change
+/// applies at once.
+fn write_one(dir: &std::path::Path, entry: ClipEntry) {
+    let Ok(config) = pocketdesk_core::local::config::Config::load() else {
+        return;
+    };
+    let limit = config.clipboard_history;
+    // Held to the setting first (D3 review): off empties it, lowered trims it.
+    if let Err(e) = clip_history::hold_to(dir, limit) {
+        tracing::warn!("Could not hold the clipboard's history to its setting: {e}");
+    }
+    if limit == 0 {
+        return;
+    }
+    // The same text as the newest again (a phone asking for the computer's
+    // clipboard every few seconds): nothing to write.
+    if clip_history::read(dir)
+        .first()
+        .is_some_and(|newest| newest.text == entry.text)
+    {
+        return;
+    }
+    if let Err(e) = clip_history::record(dir, entry, limit) {
+        tracing::warn!("Could not keep the clipboard's history: {e}");
+    }
+}
+
 /// Keep `text`, which came from `from` (a phone or computer), or from this
 /// computer with `None`; off the caller's thread.
 pub(crate) fn note(text: &str, from: Option<&str>) {
     if cfg!(test) || crate::plugins::clipboard::is_pairing_link(text) {
         return;
     }
-    let Ok(dir) = crate::state::state_dir() else {
-        return;
-    };
     let entry = ClipEntry::new(text, from, pocketdesk_core::local::pin::now_unix());
-    std::thread::spawn(move || {
-        // One at a time: each reads the file, adds and writes it whole.
-        static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
-        let limit = match pocketdesk_core::local::config::Config::load() {
-            Ok(config) => config.clipboard_history,
-            Err(_) => return,
-        };
-        // Held to the setting first (D3 review): off empties it, lowered trims it.
-        if let Err(e) = clip_history::hold_to(&dir, limit) {
-            tracing::warn!("Could not hold the clipboard's history to its setting: {e}");
-        }
-        if limit == 0 {
-            return;
-        }
-        if let Err(e) = clip_history::record(&dir, entry, limit) {
-            tracing::warn!("Could not keep the clipboard's history: {e}");
-        }
-    });
+    if let Some(writer) = writer()
+        && writer.try_send(entry).is_err()
+    {
+        tracing::debug!("A text was not kept in the history: too many waiting");
+    }
 }
 
 /// Daemon task: put each queued text on its phone's clipboard. At start the
