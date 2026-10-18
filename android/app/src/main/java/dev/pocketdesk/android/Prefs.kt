@@ -37,6 +37,9 @@ object Prefs {
     private const val KEY_RING_FROM_COMPUTER = "ring_from_computer"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
+    private const val KEY_HEALTH_ALERTS = "health_alerts"
+    private const val KEY_HEALTH_DISMISSED = "health_dismissed"
+    private const val KEY_LAST_FINGERPRINT = "last_fingerprint"
     private const val KEY_REVEAL_PIN = "reveal_pin"
     private const val KEY_HAPTICS = "haptics"
     private const val KEY_CONNECTION_DETAILS = "connection_details"
@@ -102,6 +105,30 @@ object Prefs {
     fun setBackgroundReminder(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_BACKGROUND_REMINDER, enabled) }
         bump()
+    }
+
+    /** D1: Home and a notification after updates say what stopped working. On by default. */
+    fun healthAlerts(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_HEALTH_ALERTS, true)
+
+    fun setHealthAlerts(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_HEALTH_ALERTS, enabled) }
+        bump()
+    }
+
+    /** D1: the set of problems the owner put off with "Not now" ([dev.pocketdesk.android.doctor.Health.key]). */
+    fun healthDismissed(ctx: Context): String? = prefs(ctx).getString(KEY_HEALTH_DISMISSED, null)
+
+    fun setHealthDismissed(ctx: Context, key: String?) {
+        prefs(ctx).edit { putString(KEY_HEALTH_DISMISSED, key) }
+        bump()
+    }
+
+    /** D1: the system build seen at the last boot, to tell a system update from a restart. */
+    fun lastFingerprint(ctx: Context): String? = prefs(ctx).getString(KEY_LAST_FINGERPRINT, null)
+
+    fun setLastFingerprint(ctx: Context, fingerprint: String) {
+        prefs(ctx).edit { putString(KEY_LAST_FINGERPRINT, fingerprint) }
     }
 
     /** R2: a session whose link went away reconnects by itself. */

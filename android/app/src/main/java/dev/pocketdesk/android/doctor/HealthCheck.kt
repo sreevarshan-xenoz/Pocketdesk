@@ -1,0 +1,131 @@
+package dev.pocketdesk.android.doctor
+
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import android.service.notification.NotificationListenerService
+import androidx.core.app.NotificationManagerCompat
+import dev.pocketdesk.android.Prefs
+import dev.pocketdesk.android.control.ControlRunner
+import dev.pocketdesk.android.files.PhoneFolders
+import dev.pocketdesk.android.files.RecentPhotoPrefs
+import dev.pocketdesk.android.files.ScreenshotPrefs
+import dev.pocketdesk.android.notify.PhoneNotificationListener
+import dev.pocketdesk.android.notify.PhoneNotificationPrefs
+import dev.pocketdesk.android.notify.TextPrefs
+import dev.pocketdesk.android.service.DownloadTarget
+
+/**
+ * Whether the notification listener is connected in this process (D1): set
+ * by the listener itself. Pocketdesk's activity and the listener share one
+ * process, so this is the truth for it; false in a process that never saw it.
+ */
+object ListenerState {
+    @Volatile
+    var connected = false
+        private set
+
+    fun connected(on: Boolean) {
+        connected = on
+    }
+}
+
+/** Reads [HealthSnapshot] from Android, and opens each problem's fix (D1). */
+object HealthCheck {
+    /** How long a rebind is given to connect the listener before it counts as stopped. */
+    const val REBIND_WAIT_MS = 5_000L
+
+    /** Whether any feature that runs on the notification listener is on. */
+    fun listenerFeatures(ctx: Context): Boolean =
+        PhoneNotificationPrefs.enabled(ctx) ||
+            TextPrefs.reply(ctx) ||
+            Prefs.clipboardInBackground(ctx) ||
+            Prefs.answerNotifications(ctx) ||
+            Prefs.ringFromComputer(ctx) ||
+            Prefs.filesInBackground(ctx) ||
+            Prefs.phoneMediaOnComputer(ctx) ||
+            ScreenshotPrefs.on(ctx) ||
+            RecentPhotoPrefs.on(ctx) ||
+            PhoneFolders.all(ctx).isNotEmpty()
+
+    /**
+     * Ask Android to bind the listener again when it should run and does
+     * not: after an update it can stay unbound until access is toggled.
+     * True when a rebind was asked, so the caller waits [REBIND_WAIT_MS].
+     */
+    fun rebindIfStopped(ctx: Context): Boolean {
+        if (ListenerState.connected || !listenerFeatures(ctx) || !PhoneNotificationPrefs.accessGranted(ctx)) return false
+        return runCatching {
+            NotificationListenerService.requestRebind(ComponentName(ctx, PhoneNotificationListener::class.java))
+        }.isSuccess
+    }
+
+    /**
+     * What the check reads. [listenerKnown] is false while a rebind's answer
+     * is awaited, so a listener not connected yet is not called stopped.
+     */
+    fun snapshot(ctx: Context, listenerKnown: Boolean = true): HealthSnapshot {
+        val granted = { permission: String ->
+            ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+        }
+        val control = Prefs.controlFromComputer(ctx)
+        return HealthSnapshot(
+            listenerFeatures = listenerFeatures(ctx),
+            listenerAccess = PhoneNotificationPrefs.accessGranted(ctx),
+            listenerConnected = if (ListenerState.connected) true else if (listenerKnown) false else null,
+            textsShow = TextPrefs.show(ctx),
+            receiveSms = granted(Manifest.permission.RECEIVE_SMS),
+            textsReply = TextPrefs.reply(ctx),
+            sendSms = granted(Manifest.permission.SEND_SMS),
+            contactNames = TextPrefs.names(ctx),
+            readContacts = granted(Manifest.permission.READ_CONTACTS),
+            photoFeatures = ScreenshotPrefs.on(ctx) || RecentPhotoPrefs.on(ctx),
+            photoAccess = ScreenshotPrefs.granted(ctx),
+            postingFeatures = Prefs.ringFromComputer(ctx) || Prefs.filesInBackground(ctx) ||
+                Prefs.linksFromComputer(ctx),
+            mayPost = NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
+            control = control,
+            controlService = !control || ControlRunner.serviceEnabled(ctx),
+            advancedProtection = control && advancedProtection(ctx),
+            downloadFolderLost = runCatching { DownloadTarget.treeLost(ctx) }.getOrDefault(false),
+        )
+    }
+
+    fun problems(ctx: Context, listenerKnown: Boolean = true): List<HealthProblem> =
+        Health.problems(snapshot(ctx, listenerKnown))
+
+    /** Android 16's Advanced Protection, which keeps Accessibility services to accessibility tools on 17. */
+    fun advancedProtection(ctx: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 36) return false
+        return runCatching {
+            ctx.getSystemService(android.security.advancedprotection.AdvancedProtectionManager::class.java)
+                ?.isAdvancedProtectionEnabled == true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * The page that fixes [problem], or null where there is none: Advanced
+     * Protection's block is lifted only by turning the setting off, and the
+     * download folder is chosen in Pocketdesk's own Settings.
+     */
+    fun fixIntent(ctx: Context, problem: HealthProblem): Intent? = when (problem) {
+        HealthProblem.NOTIFICATION_ACCESS, HealthProblem.LISTENER_STOPPED -> PhoneNotificationPrefs.accessSettingsIntent()
+        HealthProblem.TEXTS_RECEIVE, HealthProblem.TEXTS_SEND, HealthProblem.CONTACTS, HealthProblem.PHOTOS ->
+            BackgroundRunning.appPage(ctx)
+        HealthProblem.APP_NOTIFICATIONS ->
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+        HealthProblem.CONTROL_SERVICE -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        HealthProblem.CONTROL_BLOCKED, HealthProblem.DOWNLOAD_FOLDER -> null
+    }?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+    /** Open [problem]'s fix; the app's page where that one is missing. */
+    fun openFix(ctx: Context, problem: HealthProblem) {
+        val intent = fixIntent(ctx, problem) ?: return
+        val opened = runCatching { ctx.startActivity(intent) }.isSuccess
+        if (!opened) runCatching { ctx.startActivity(BackgroundRunning.appPage(ctx).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+}

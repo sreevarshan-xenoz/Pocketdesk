@@ -687,4 +687,29 @@
     <string name="settings_download_folder_lost">La carpeta que elegiste ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk. Toca para elegir otra.</string>
     <string name="settings_download_folder_reset">Volver a usar Descargas/Pocketdesk</string>
     <string name="transfer_folder_gone">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que esto fue a Descargas/Pocketdesk.</string>
+    <!-- D1: health after updates. -->
+    <string name="health_channel">Algo dejó de funcionar</string>
+    <string name="health_title">Algo dejó de funcionar</string>
+    <string name="health_after_update">Algo dejó de funcionar tras una actualización</string>
+    <string name="health_not_now">Ahora no</string>
+    <string name="health_fix">Arreglar</string>
+    <string name="health_turn_off">Desactivar</string>
+    <string name="health_choose">Elegir</string>
+    <string name="health_notification_access">El acceso a las notificaciones está desactivado, así que lo que Pocketdesk hace en segundo plano se ha detenido.</string>
+    <string name="health_listener_stopped">Android detuvo la parte de Pocketdesk que funciona en segundo plano. Desactivar y volver a activar su acceso a las notificaciones la pone en marcha.</string>
+    <string name="health_texts_receive">Los mensajes no pueden llegar al ordenador: se retiró el permiso para recibirlos.</string>
+    <string name="health_texts_send">Las respuestas desde el ordenador no se pueden enviar: se retiró el permiso para enviar mensajes.</string>
+    <string name="health_contacts">Los mensajes muestran números, no nombres: se retiró el acceso a los contactos.</string>
+    <string name="health_photos">Las capturas y las fotos no pueden llegar al ordenador: se retiró el acceso a las fotos.</string>
+    <string name="health_app_notifications">Pocketdesk no puede mostrar notificaciones, así que los timbres, archivos y enlaces del ordenador pasan desapercibidos.</string>
+    <string name="health_control_service">El ordenador no puede controlar este teléfono: «Control de Pocketdesk» está desactivado en los ajustes de Accesibilidad de Android.</string>
+    <string name="health_control_blocked">El ordenador no puede controlar este teléfono: la Protección avanzada solo permite servicios de accesibilidad a las herramientas de accesibilidad.</string>
+    <string name="health_download_folder">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>
+    <string name="settings_health">Avisarme cuando algo deje de funcionar</string>
+    <string name="settings_health_summary">En Inicio, y en una notificación tras una actualización</string>
+    <plurals name="health_count">
+        <item quantity="one">%1$d cosa que arreglar en Pocketdesk</item>
+        <item quantity="many">%1$d cosas que arreglar en Pocketdesk</item>
+        <item quantity="other">%1$d cosas que arreglar en Pocketdesk</item>
+    </plurals>
 </resources>

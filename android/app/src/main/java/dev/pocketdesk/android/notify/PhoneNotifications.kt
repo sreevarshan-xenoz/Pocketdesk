@@ -212,6 +212,17 @@ class PhoneNotificationListener : NotificationListenerService() {
         )
     }
 
+    // D1: whether the listener runs, for the health check in this process.
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        dev.pocketdesk.android.doctor.ListenerState.connected(true)
+    }
+
+    override fun onListenerDisconnected() {
+        dev.pocketdesk.android.doctor.ListenerState.connected(false)
+        super.onListenerDisconnected()
+    }
+
     override fun onDestroy() {
         answerTicker.shutdownNow()
         phoneFilesTicker.shutdownNow()

@@ -63,6 +63,10 @@ import dev.pocketdesk.android.discovery.FoundComputer
 import dev.pocketdesk.android.discovery.FoundComputers
 import dev.pocketdesk.android.discovery.rememberFoundComputers
 import dev.pocketdesk.android.doctor.BackgroundLimit
+import dev.pocketdesk.android.doctor.Health
+import dev.pocketdesk.android.doctor.HealthCheck
+import dev.pocketdesk.android.doctor.HealthProblem
+import dev.pocketdesk.android.doctor.HealthReceiver
 import dev.pocketdesk.android.doctor.BackgroundRunning
 import dev.pocketdesk.android.wake.Waker
 import kotlinx.coroutines.Dispatchers
@@ -140,6 +144,24 @@ fun HomeScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    // D1: what is on but cannot work, re-read on each resume and when
+    // Settings change. A listener that should run and does not is asked to
+    // bind again, and judged only once the rebind has had its time.
+    val prefsVersion = Prefs.observedVersion()
+    var listenerKnown by remember { mutableStateOf(true) }
+    LaunchedEffect(resumes) {
+        if (HealthCheck.rebindIfStopped(context)) {
+            listenerKnown = false
+            delay(HealthCheck.REBIND_WAIT_MS)
+            listenerKnown = true
+        }
+    }
+    val healthProblems = remember(resumes, listenerKnown, prefsVersion) { HealthCheck.problems(context, listenerKnown) }
+    LaunchedEffect(healthProblems) {
+        // Fixed: the notification posted after an update goes too.
+        if (healthProblems.isEmpty()) HealthReceiver.cancel(context)
+    }
+    val showHealth = Prefs.healthAlerts(context) && Health.shows(healthProblems, Prefs.healthDismissed(context))
     // Read once per resume (system services), not on every recomposition.
     val backgroundLimit = remember(resumes) { BackgroundRunning.limit(context) }
     val backgroundFeatures = remember(resumes) { BackgroundRunning.featuresOn(context) }
@@ -273,6 +295,17 @@ fun HomeScreen(
             ) {
                 // Only here, not on the empty Home: the background features
                 // need a paired computer to send to.
+                if (showHealth) {
+                    item(key = "#health") {
+                        HealthCard(
+                            problems = healthProblems,
+                            onFix = { HealthCheck.openFix(context, it) },
+                            onTurnOffControl = { Prefs.setControlFromComputer(context, false) },
+                            onChooseFolder = onOpenSettings,
+                            onNotNow = { Prefs.setHealthDismissed(context, Health.key(healthProblems)) },
+                        )
+                    }
+                }
                 if (remindBackground) {
                     item(key = "#background") {
                         BackgroundCard(
@@ -717,6 +750,65 @@ private const val WAKE_WAIT_HOME_S = 90
 
 /** How long it waits before connecting from outside, where nothing can be seen, in seconds. */
 private const val WAKE_WAIT_AWAY_S = 30
+
+/** D1: what is on in Pocketdesk but cannot work, each with its fix. */
+@Composable
+private fun HealthCard(
+    problems: List<HealthProblem>,
+    onFix: (HealthProblem) -> Unit,
+    onTurnOffControl: () -> Unit,
+    onChooseFolder: () -> Unit,
+    onNotNow: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                stringResource(R.string.health_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            for (problem in problems) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(healthText(problem)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                    when (problem) {
+                        HealthProblem.CONTROL_BLOCKED ->
+                            TextButton(onClick = onTurnOffControl) { Text(stringResource(R.string.health_turn_off)) }
+                        HealthProblem.DOWNLOAD_FOLDER ->
+                            TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.health_choose)) }
+                        else -> TextButton(onClick = { onFix(problem) }) { Text(stringResource(R.string.health_fix)) }
+                    }
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onNotNow) { Text(stringResource(R.string.health_not_now)) }
+            }
+        }
+    }
+}
+
+private fun healthText(problem: HealthProblem): Int = when (problem) {
+    HealthProblem.NOTIFICATION_ACCESS -> R.string.health_notification_access
+    HealthProblem.LISTENER_STOPPED -> R.string.health_listener_stopped
+    HealthProblem.TEXTS_RECEIVE -> R.string.health_texts_receive
+    HealthProblem.TEXTS_SEND -> R.string.health_texts_send
+    HealthProblem.CONTACTS -> R.string.health_contacts
+    HealthProblem.PHOTOS -> R.string.health_photos
+    HealthProblem.APP_NOTIFICATIONS -> R.string.health_app_notifications
+    HealthProblem.CONTROL_SERVICE -> R.string.health_control_service
+    HealthProblem.CONTROL_BLOCKED -> R.string.health_control_blocked
+    HealthProblem.DOWNLOAD_FOLDER -> R.string.health_download_folder
+}
 
 /** T2: Android may stop the features that work in the background. */
 @Composable
