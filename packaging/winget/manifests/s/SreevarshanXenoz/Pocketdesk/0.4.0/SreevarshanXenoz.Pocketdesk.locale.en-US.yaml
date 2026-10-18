@@ -14,8 +14,9 @@ ShortDescription: Your Android phone and your computer, together - remote deskto
 Description: |-
   Pocketdesk links an Android phone with this computer: see and drive the computer from the phone, send files and links both
   ways, share the clipboard, show the phone's notifications and texts here, and reach the computer from outside the home
-  network without opening a port. Two programs: pocketdesk, the server (run `pocketdesk install` once to start it at logon
-  and open its firewall rules), and pocketdesk-app, the desktop app to pair phones and see what is going on.
+  network without opening a port. Two programs: pocketdesk, the server, and pocketdesk-app, the desktop app to pair phones
+  and see what is going on. After installing or upgrading, run `pocketdesk install` to start the server at logon and open its
+  firewall rules (stop it with `pocketdesk stop` before an upgrade). FFmpeg, which encodes the video, comes as a dependency.
 Tags:
 - android
 - clipboard

@@ -9,6 +9,10 @@ NestedInstallerFiles:
   PortableCommandAlias: pocketdesk
 - RelativeFilePath: pocketdesk-v0.4.0-windows-x86_64\pocketdesk-app.exe
   PortableCommandAlias: pocketdesk-app
+# The server encodes video with ffmpeg on PATH; the zip does not carry it.
+Dependencies:
+  PackageDependencies:
+  - PackageIdentifier: Gyan.FFmpeg
 Installers:
 - Architecture: x64
   InstallerUrl: https://github.com/sreevarshan-xenoz/Pocketdesk/releases/download/v0.4.0/pocketdesk-v0.4.0-windows-x86_64.zip

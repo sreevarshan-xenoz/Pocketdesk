@@ -2,6 +2,7 @@
 """Write the winget manifests for a Pocketdesk release (C10).
 
 Usage: python3 scripts/winget_manifest.py <version> <SHA256SUMS>
+(`python` or `py` on Windows)
 
 The release's SHA256SUMS (from its assets) gives the Windows zip's hash.
 The three files go to packaging/winget/manifests/s/SreevarshanXenoz/
@@ -38,6 +39,10 @@ NestedInstallerFiles:
   PortableCommandAlias: pocketdesk
 - RelativeFilePath: {folder}\\pocketdesk-app.exe
   PortableCommandAlias: pocketdesk-app
+# The server encodes video with ffmpeg on PATH; the zip does not carry it.
+Dependencies:
+  PackageDependencies:
+  - PackageIdentifier: Gyan.FFmpeg
 Installers:
 - Architecture: x64
   InstallerUrl: {REPO}/releases/download/v{version}/{zip_name}
@@ -59,8 +64,9 @@ ShortDescription: Your Android phone and your computer, together - remote deskto
 Description: |-
   Pocketdesk links an Android phone with this computer: see and drive the computer from the phone, send files and links both
   ways, share the clipboard, show the phone's notifications and texts here, and reach the computer from outside the home
-  network without opening a port. Two programs: pocketdesk, the server (run `pocketdesk install` once to start it at logon
-  and open its firewall rules), and pocketdesk-app, the desktop app to pair phones and see what is going on.
+  network without opening a port. Two programs: pocketdesk, the server, and pocketdesk-app, the desktop app to pair phones
+  and see what is going on. After installing or upgrading, run `pocketdesk install` to start the server at logon and open its
+  firewall rules (stop it with `pocketdesk stop` before an upgrade). FFmpeg, which encodes the video, comes as a dependency.
 Tags:
 - android
 - clipboard
@@ -84,7 +90,12 @@ def main() -> int:
         print(f'not a version: {version}', file=sys.stderr)
         return 2
     wanted = f'pocketdesk-v{version}-windows-x86_64.zip'
-    sha = next((line.split()[0] for line in sums.read_text().splitlines() if line.strip().endswith(wanted)), None)
+    # The file's name exactly (sha256sum may mark binary mode with a '*').
+    sha = next(
+        (parts[0] for parts in (line.split() for line in sums.read_text().splitlines())
+         if len(parts) == 2 and parts[1].lstrip('*') == wanted),
+        None,
+    )
     if sha is None or not re.fullmatch(r'[0-9a-fA-F]{64}', sha):
         print(f'{wanted} is not in {sums}', file=sys.stderr)
         return 1
