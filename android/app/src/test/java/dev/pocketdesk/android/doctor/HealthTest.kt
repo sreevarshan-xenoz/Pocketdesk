@@ -145,4 +145,25 @@ class HealthTest {
         assertFalse(Health.shows(emptyList(), dismissed = null))
         assertEquals(Health.key(two), Health.key(two.reversed()))
     }
+
+    @Test
+    fun `a system update is a build other than the last one seen`() {
+        assertTrue(Health.systemUpdated("a/1", "a/2"))
+        assertFalse(Health.systemUpdated("a/1", "a/1"))
+        assertFalse(Health.systemUpdated(null, "a/1"))
+        assertFalse(Health.systemUpdated("a/1", null))
+    }
+
+    @Test
+    fun `an update notifies only of what is new`() {
+        val photos = listOf(HealthProblem.PHOTOS)
+        val both = listOf(HealthProblem.PHOTOS, HealthProblem.NOTIFICATION_ACCESS)
+        assertTrue(Health.notifyAfterUpdate(photos, seen = null, dismissed = null))
+        // Seen on Home before the update, or put off: not news.
+        assertFalse(Health.notifyAfterUpdate(photos, seen = Health.key(photos), dismissed = null))
+        assertFalse(Health.notifyAfterUpdate(photos, seen = null, dismissed = Health.key(photos)))
+        // Something the update took away besides.
+        assertTrue(Health.notifyAfterUpdate(both, seen = Health.key(photos), dismissed = null))
+        assertFalse(Health.notifyAfterUpdate(emptyList(), seen = null, dismissed = null))
+    }
 }

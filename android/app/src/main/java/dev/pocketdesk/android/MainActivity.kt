@@ -238,6 +238,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         RustCore.start(this)
+        // D1: the system build, so a later boot can tell an update.
+        dev.pocketdesk.android.doctor.HealthReceiver.noteBuild(this)
         if (savedInstanceState == null) {
             maybeRequestLocalNetworkPermission()
             pairLink.value = takePairUri(intent)

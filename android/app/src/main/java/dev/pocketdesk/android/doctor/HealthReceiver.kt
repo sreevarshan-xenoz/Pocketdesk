@@ -25,7 +25,7 @@ class HealthReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext
         when (intent.action) {
-            Intent.ACTION_MY_PACKAGE_REPLACED -> Unit
+            Intent.ACTION_MY_PACKAGE_REPLACED -> noteBuild(app)
             Intent.ACTION_BOOT_COMPLETED -> if (!systemUpdated(app)) return
             else -> return
         }
@@ -49,12 +49,19 @@ class HealthReceiver : BroadcastReceiver() {
 
         /** Whether this boot runs another system build than the last one seen, which it records. */
         fun systemUpdated(ctx: Context): Boolean {
-            val now = Build.FINGERPRINT ?: return false
-            val last = Prefs.lastFingerprint(ctx)
-            if (last == now) return false
-            Prefs.setLastFingerprint(ctx, now)
-            // The first boot seen is not an update.
-            return last != null
+            val updated = Health.systemUpdated(Prefs.lastFingerprint(ctx), Build.FINGERPRINT)
+            noteBuild(ctx)
+            return updated
+        }
+
+        /**
+         * Record the system build now running: at boot, at every app start
+         * and update (D1 review), so the first system update after installing
+         * is told from a restart.
+         */
+        fun noteBuild(ctx: Context) {
+            val now = Build.FINGERPRINT ?: return
+            if (Prefs.lastFingerprint(ctx) != now) Prefs.setLastFingerprint(ctx, now)
         }
 
         /** Rebind, wait, check, and notify; on the receiver's own thread, within its time limit. */

@@ -85,6 +85,26 @@ object Health {
     /** A set of problems as one word, the same in any order: what "Not now" remembers. */
     fun key(problems: List<HealthProblem>): String = problems.map { it.name }.sorted().joinToString(",")
 
+    /**
+     * Whether this boot runs another system build than the last one seen.
+     * Nothing seen yet is not an update: the build is recorded at every app
+     * start and update too, so only a phone never opened since installing
+     * misses its first update.
+     */
+    fun systemUpdated(last: String?, now: String?): Boolean = now != null && last != null && last != now
+
+    /**
+     * Whether an update's check posts its notification: only for a problem
+     * the owner has not seen on Home nor put off, since one known before the
+     * update is not news it caused.
+     */
+    fun notifyAfterUpdate(problems: List<HealthProblem>, seen: String?, dismissed: String?): Boolean {
+        val known = names(seen) + names(dismissed)
+        return problems.any { it.name !in known }
+    }
+
+    private fun names(key: String?): Set<String> = key?.split(',')?.filter { it.isNotEmpty() }?.toSet().orEmpty()
+
     /** Whether Home shows the card: problems, and not the set the owner put off. */
     fun shows(problems: List<HealthProblem>, dismissed: String?): Boolean =
         problems.isNotEmpty() && key(problems) != dismissed
