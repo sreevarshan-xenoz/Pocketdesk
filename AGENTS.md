@@ -59,6 +59,7 @@ The detailed build journal lives in `git log` — one conventional commit per lo
     - one sample judged the listener;
     - the feature list was wrong three ways.
   - **Device-checked on the A71** (checklist §111), which found screenshots turning themselves off without a word. A real system update and Advanced Protection are owed.
+- 2026-10-18: **The next cycle (plan `docs/research/2026-10-18-next-cycle.md`).** From what users asked for in 2025–2026 (calls, quiet hours, clipboard history, RCS, a tray to act from, handoff), Android 17's Advanced Protection (it revokes C8's Accessibility grant) and Phone Link's silent breakage after updates. Order: D1 health after updates, D2 quiet hours kept in step, D3 clipboard history and Resend, D4 conversations, D5 the tray you act from, D6 continue there, D7 memory at rest, D8 the phone's folders as a drive, D9 lock when the phone leaves (by a seam only), D10 calls (the owner, with a SIM).
 - 2026-10-18: **C10, getting it to people (branch `chore/distribution`; `packaging/README.md`).** What can be done without the owner's sign-off:
   - Obtainium: the releases already carry one APK named so it is picked; README gives the repo and the signing certificate's SHA-256.
   - winget: 0.4.0's manifests (`packaging/winget/`, validated with `winget validate`) and `scripts/winget_manifest.py` for each release.
