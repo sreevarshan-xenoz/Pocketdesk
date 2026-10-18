@@ -274,6 +274,35 @@ fn control_events(
             _ => {}
         }
     }
+    coalesce_moves(out)
+}
+
+/// Moves one after another become their last: a 1000 Hz mouse sends one
+/// move a pass, not one a millisecond (C8 review). Presses, releases and
+/// all else keep their order.
+fn coalesce_moves(events: Vec<ControlEvent>) -> Vec<ControlEvent> {
+    let mut out: Vec<ControlEvent> = Vec::with_capacity(events.len());
+    for event in events {
+        let is_move = matches!(
+            event,
+            ControlEvent::Touch {
+                action: TouchAction::Move,
+                ..
+            }
+        );
+        if is_move
+            && matches!(
+                out.last(),
+                Some(ControlEvent::Touch {
+                    action: TouchAction::Move,
+                    ..
+                })
+            )
+        {
+            out.pop();
+        }
+        out.push(event);
+    }
     out
 }
 
@@ -772,13 +801,13 @@ mod tests {
             TouchAction::Down,
             "a move before the press is nothing"
         );
-        assert_eq!(actions[1].0, TouchAction::Move);
         assert_eq!(
-            actions[2],
+            actions[1],
             (TouchAction::Move, 65535),
-            "clamped to the edge"
+            "two moves in a pass are their last, clamped to the edge"
         );
-        assert_eq!(actions[3], (TouchAction::Up, 65535));
+        assert_eq!(actions[2], (TouchAction::Up, 65535));
+        assert_eq!(actions.len(), 3);
         assert!(!pressing);
 
         // A press on the bar is not a touch, nor its release.
