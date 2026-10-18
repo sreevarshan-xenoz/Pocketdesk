@@ -222,3 +222,40 @@ fn the_save_bar_comes_with_a_change_and_goes_with_undo_or_save() {
     let saved = std::fs::read_to_string(fixture.config().join("config.toml")).expect("written");
     assert!(saved.contains("lan_discovery = false"), "{saved}");
 }
+
+/// Sessions and Files with nothing to show say what to do next, and their
+/// button goes there (U5).
+#[test]
+fn empty_sessions_and_files_say_what_to_do_next() {
+    let fixture = Fixture::new();
+    // No server runs here, so Sessions sends the owner to start it.
+    let mut app = fixture.open(Some(Tab::Sessions));
+    assert!(
+        app.query_by_label(
+            "The server is not running, so no phone is connected. Start it from Overview."
+        )
+        .is_some()
+    );
+    app.get_all_by_label("Overview")
+        .last()
+        .expect("the page's own Overview button")
+        .click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Status.purpose()).is_some(),
+        "Overview opened"
+    );
+
+    go_to(&app, Tab::Files);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label_contains("No phone or computer can take a file right now.")
+            .is_some()
+    );
+    app.get_by_label("Pair a phone").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Pair.purpose()).is_some(),
+        "Pair opened"
+    );
+}
