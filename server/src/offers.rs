@@ -353,6 +353,20 @@ impl Drop for Reservation {
     }
 }
 
+/// The other files of the folder send offer `id` belongs to that have
+/// not ended yet (C1: a Cancel stops the whole folder).
+pub(crate) fn folder_siblings(id: &str) -> Vec<String> {
+    let g = groups().lock().unwrap_or_else(|e| e.into_inner());
+    let Some(group) = g.member_of.get(id) else {
+        return Vec::new();
+    };
+    g.member_of
+        .iter()
+        .filter(|(offer, of)| *of == group && offer.as_str() != id)
+        .map(|(offer, _)| offer.clone())
+        .collect()
+}
+
 /// Make `offer_ids` the files of the folder send `group`.
 fn start_group(group: &str, offer_ids: &[&str]) {
     let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());

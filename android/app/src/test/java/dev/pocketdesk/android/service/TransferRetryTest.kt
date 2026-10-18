@@ -3,6 +3,7 @@ package dev.pocketdesk.android.service
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -15,6 +16,27 @@ class TransferRetryTest {
         assertEquals(15L, TransferRetry.delayBefore(2, error, enabled = true))
         assertEquals(45L, TransferRetry.delayBefore(3, error, enabled = true))
         assertNull("then it stops", TransferRetry.delayBefore(4, error, enabled = true))
+    }
+
+    @Test
+    fun aCancelledTransferIsNeverRetried() {
+        assertNull(TransferRetry.delayBefore(1, "cancelled on the phone", enabled = true))
+        assertNull(
+            "the computer's Cancel arrives as its refusal",
+            TransferRetry.delayBefore(1, "The computer refused the download: cancelled on the computer", enabled = true),
+        )
+    }
+
+    @Test
+    fun aCancelOnEitherSideIsKnownAsOne() {
+        assertTrue(TransferRetry.isCancel("cancelled on the phone"))
+        assertTrue(TransferRetry.isCancel("The computer refused the file: cancelled on the computer"))
+        assertFalse(TransferRetry.isCancel("Operation cancelled by the system"))
+        assertFalse(TransferRetry.isCancel(null))
+        assertNotNull(
+            "another error naming a cancel is still retried",
+            TransferRetry.delayBefore(1, "Operation cancelled by the system", enabled = true),
+        )
     }
 
     @Test

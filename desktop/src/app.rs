@@ -1505,6 +1505,7 @@ impl PocketdeskApp {
         egui::ScrollArea::vertical().show(ui, |ui| {
             self.send_box(ui);
             ui.add_space(12.0);
+            self.under_way_list(ui);
             self.sent_list(ui);
             self.received_list(ui);
         });
@@ -1648,6 +1649,58 @@ impl PocketdeskApp {
             RichText::new("Or drop files or folders on this window.").color(crate::theme::muted(ui))
         };
         ui.label(hint);
+    }
+
+    /// Files moving now, each with its bar and Cancel (C1).
+    fn under_way_list(&mut self, ui: &mut egui::Ui) {
+        if self.snapshot.under_way.is_empty() {
+            return;
+        }
+        ui.strong("Under way");
+        let mut cancel = None;
+        egui::Grid::new("under_way")
+            .num_columns(4)
+            .striped(true)
+            .spacing([16.0, 8.0])
+            .show(ui, |ui| {
+                for transfer in &self.snapshot.under_way {
+                    ui.label(model::transfer_title(transfer));
+                    let other = model::target_label(&self.snapshot, &transfer.device_id);
+                    ui.label(match transfer.direction {
+                        pocketdesk_core::local::transfers::Direction::ToPhone => {
+                            format!("to {other}")
+                        }
+                        pocketdesk_core::local::transfers::Direction::FromPhone => {
+                            format!("from {other}")
+                        }
+                    });
+                    ui.add(
+                        egui::ProgressBar::new(model::transfer_fraction(transfer))
+                            .desired_width(220.0)
+                            .text(model::transfer_words(transfer)),
+                    );
+                    if ui
+                        .button("Cancel")
+                        .on_hover_text("Stop it on both ends; sending it again continues")
+                        .clicked()
+                    {
+                        cancel = Some((transfer.id.clone(), transfer.name.clone()));
+                    }
+                    ui.end_row();
+                }
+            });
+        if let Some((id, name)) = cancel {
+            self.notice = match pocketdesk_core::local::transfers::request_cancel(
+                &self.state_dir,
+                &id,
+                now_unix(),
+            ) {
+                // Short: the row goes once it stops (C1 review).
+                Ok(_) => crate::notice::Notice::done(format!("Cancel asked for {name}.")),
+                Err(e) => crate::notice::Notice::error(format!("Could not cancel {name}: {e}")),
+            };
+        }
+        ui.add_space(12.0);
     }
 
     fn sent_list(&mut self, ui: &mut egui::Ui) {

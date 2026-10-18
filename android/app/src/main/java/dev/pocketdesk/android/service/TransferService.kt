@@ -71,6 +71,8 @@ class TransferService : Service() {
     // last one finishes is never left running out of the foreground.
     private val lock = Any()
     private var queued = 0
+    /** The newest start, a Cancel's included: Android stops the service only for it (C1 review). */
+    private var lastStartId = 0
     private var current: Notification? = null
 
     // Only the worker thread touches these.
@@ -84,6 +86,38 @@ class TransferService : Service() {
     private var lastAddress = ""
     private var lastError: String? = null
     private var notice: String? = null
+
+    /** The speed the progress notification shows (C1); 0 for none yet. */
+    @Volatile private var speed = 0L
+
+    // Cancel (C1): every job queued up to the press stops. Jobs are
+    // numbered as they are queued, under [lock].
+    private var enqueued = 0L
+    @Volatile private var cancelThrough = 0L
+    /** The job the worker runs now, by its number. */
+    @Volatile private var runningJob = 0L
+    /** Whether a cancel stopped anything since the last summary. */
+    private var cancelledAny = false
+
+    private fun stopped() = runningJob <= cancelThrough
+
+    /** Woken by a Cancel, so a wait between attempts ends at once. */
+    private val pause = Object()
+
+    /** Wait [ms] between attempts, or until a Cancel (C1). */
+    private fun pauseFor(ms: Long) {
+        val until = SystemClock.elapsedRealtime() + ms
+        synchronized(pause) {
+            while (!stopped()) {
+                val left = until - SystemClock.elapsedRealtime()
+                if (left <= 0) return
+                pause.wait(left)
+            }
+        }
+    }
+
+    private fun cancelledHere(): Result<Nothing> =
+        Result.failure(java.io.IOException(TransferRetry.CANCELLED_ON_PHONE))
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -111,18 +145,33 @@ class TransferService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
+        if (intent?.action == ACTION_CANCEL) {
+            synchronized(lock) {
+                lastStartId = startId
+                cancelThrough = enqueued
+                // Under the lock: a job queued after the press cannot have
+                // started its call yet, so only what was asked stops.
+                RustCore.cancelTransfer()
+                if (queued == 0) stopSelf(startId)
+            }
+            synchronized(pause) { pause.notifyAll() }
+            return START_NOT_STICKY
+        }
         val job = intent?.let(::jobOf)
+        val number: Long
         synchronized(lock) {
             // A started foreground service must enter the foreground even
             // when it has nothing to do; keep what is showing if a job runs.
             enterForeground(current ?: progressNotification(getString(R.string.channel_transfers), "", 0))
+            lastStartId = startId
             if (job == null) {
                 if (queued == 0) stopSelf(startId)
                 return START_NOT_STICKY
             }
             queued++
+            number = ++enqueued
         }
-        worker.execute { run(job ?: return@execute, startId) }
+        worker.execute { run(job ?: return@execute, startId, number) }
         return START_NOT_STICKY
     }
 
@@ -157,7 +206,8 @@ class TransferService : Service() {
     private val offline = TransferRetry.OfflineBudget()
 
     /** Runs on [worker]; the last job queued reports everything done since. */
-    private fun run(job: Job, startId: Int) {
+    private fun run(job: Job, startId: Int, number: Long) {
+        runningJob = number
         lastAddress = job.address
         // A job that starts with a network ends any outage.
         if (NetworkWait.usable(this, job.address)) offline.reset()
@@ -201,6 +251,11 @@ class TransferService : Service() {
                 "shared.bin"
             }
             val title = getString(R.string.transfer_sending, index + 1, job.uris.size)
+            if (stopped()) {
+                cancelledAny = true
+                sendCount++
+                return@forEachIndexed
+            }
             sendCounted(job.address, job.port, uri, name, null, title)
         }
     }
@@ -227,7 +282,19 @@ class TransferService : Service() {
             val uri = DocumentsContract.buildDocumentUriUsingTree(job.tree, file.id)
             val part = RustCore.FolderPart(folderId, folder, file.path)
             val title = getString(R.string.transfer_sending_folder, folder, index + 1, plan.files.size)
+            if (stopped()) {
+                // Cancelled (C1): the rest of the folder is not sent.
+                cancelledAny = true
+                sendCount += plan.files.size - index
+                return
+            }
             val result = sendCounted(job.address, job.port, uri, file.path.last(), part, title)
+            if (TransferRetry.isCancel(result.exceptionOrNull()?.message)) {
+                // Cancelled on either side (C1 review): the whole folder stops.
+                cancelledAny = true
+                sendCount += plan.files.size - index - 1
+                return
+            }
             if (!streak.record(result.isSuccess, result.exceptionOrNull()?.message)) {
                 // The computer stopped answering: the rest are not sent.
                 val left = plan.files.size - index - 1
@@ -253,8 +320,12 @@ class TransferService : Service() {
         title: String,
     ): Result<Unit> {
         show(progressNotification(title, name, 0))
-        var result = sendOne(address, port, uri, name, part) { percent ->
-            show(progressNotification(title, name, percent))
+        var result = if (stopped()) {
+            cancelledHere()
+        } else {
+            sendOne(address, port, uri, name, part) { percent ->
+                show(progressNotification(title, name, percent))
+            }
         }
         // A failed file goes again a few times: the computer kept what
         // arrived, so each retry continues where the last one stopped. With
@@ -271,7 +342,7 @@ class TransferService : Service() {
                     Log.i(TAG, "sending $name failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_waiting_network), name, 0))
                     val started = SystemClock.elapsedRealtime()
-                    val back = NetworkWait.await(this, address, next.seconds)
+                    val back = NetworkWait.await(this, address, next.seconds, ::stopped)
                     val ended = SystemClock.elapsedRealtime()
                     offline.add((ended - started + 999) / 1000, ended)
                     if (!back) continue@retry
@@ -279,15 +350,21 @@ class TransferService : Service() {
                 is TransferRetry.Next.After -> {
                     Log.i(TAG, "sending $name failed (${error?.message}); trying again in ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_retrying, attempt), name, 0))
-                    Thread.sleep(next.seconds * 1000)
+                    pauseFor(next.seconds * 1000)
                     attempt++
                 }
             }
-            result = sendOne(address, port, uri, name, part) { percent ->
-                show(progressNotification(title, name, percent))
+            result = if (stopped()) {
+                cancelledHere()
+            } else {
+                sendOne(address, port, uri, name, part) { percent ->
+                    show(progressNotification(title, name, percent))
+                }
             }
         }
         sendCount++
+        // A file that went before the press is sent, not cancelled.
+        if (result.isFailure && stopped()) cancelledAny = true
         if (result.isSuccess) {
             sentTotal++
             offline.reset()
@@ -335,9 +412,14 @@ class TransferService : Service() {
 
     private fun receive(job: Job.Receive) {
         val title = getString(R.string.transfer_receiving)
-        show(progressNotification(title, job.name, 0))
         receiveCount++
-        var result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
+        if (stopped()) {
+            cancelledAny = true
+            if (job.isOffer) declineCancelled(job)
+            return
+        }
+        show(progressNotification(title, job.name, 0))
+        var result: Result<Uri?> = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
         // A broken download goes again a few times, continuing what it kept;
         // with no network it first waits for one (R6i).
         var attempt = 1
@@ -352,7 +434,7 @@ class TransferService : Service() {
                     Log.i(TAG, "receiving ${job.name} failed (${error?.message}) with no network; waiting up to ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_waiting_network), job.name, 0))
                     val started = SystemClock.elapsedRealtime()
-                    val back = NetworkWait.await(this, job.address, next.seconds)
+                    val back = NetworkWait.await(this, job.address, next.seconds, ::stopped)
                     val ended = SystemClock.elapsedRealtime()
                     offline.add((ended - started + 999) / 1000, ended)
                     if (!back) continue@retry
@@ -360,11 +442,11 @@ class TransferService : Service() {
                 is TransferRetry.Next.After -> {
                     Log.i(TAG, "receiving ${job.name} failed (${error?.message}); trying again in ${next.seconds} s")
                     show(progressNotification(getString(R.string.transfer_retrying, attempt), job.name, 0))
-                    Thread.sleep(next.seconds * 1000)
+                    pauseFor(next.seconds * 1000)
                     attempt++
                 }
             }
-            result = receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
+            result = if (stopped()) cancelledHere() else receiveOne(job) { percent -> show(progressNotification(title, job.name, percent)) }
         }
         result.onSuccess { uri ->
             savedTotal++
@@ -381,14 +463,26 @@ class TransferService : Service() {
         }.onFailure {
             lastError = it.message
             Log.w(TAG, "receiving ${job.name} failed: $lastError")
+            if (stopped()) {
+                cancelledAny = true
+                if (job.isOffer) declineCancelled(job)
+            }
         }
+    }
+
+    /** Tell the computer an offer was cancelled here, so its Sent list says so (C1). */
+    private fun declineCancelled(job: Job.Receive) {
+        RustCore.declineOffer(job.address, job.port, job.value, CANCELLED_HERE)
+            .onFailure { Log.w(TAG, "could not decline ${job.value}: ${it.message}") }
     }
 
     private fun finishJob(startId: Int) {
         synchronized(lock) {
             queued--
             if (queued > 0) return
+            if (cancelledAny) notice = getString(R.string.transfer_cancelled)
             val done = doneNotification()
+            cancelledAny = false
             sentTotal = 0
             sendCount = 0
             savedTotal = 0
@@ -399,18 +493,23 @@ class TransferService : Service() {
             current = null
             runCatching { stopForeground(STOP_FOREGROUND_DETACH) }
             runCatching { manager().notify(NOTIFICATION_ID, done) }
-            // Stops only if no job arrived after this one.
-            stopSelf(startId)
+            // The newest start (a Cancel's too): Android ignores an older
+            // one, and a job that arrived since keeps it running anyway.
+            stopSelf(lastStartId)
         }
     }
 
     /** Run [transfer] while a watcher reports its percentage about twice a second. */
     private fun <T> withProgress(size: () -> Long, onProgress: (Int) -> Unit, transfer: () -> T): T {
+        val meter = TransferProgress.Speed()
+        speed = 0L
         val watcher = Thread {
             try {
                 while (true) {
                     Thread.sleep(PROGRESS_MS)
                     val (done, total) = RustCore.transferProgress()
+                    // The bridge's counters are this file's only once they say so.
+                    speed = if (size() > 0 && total == size()) meter.add(SystemClock.elapsedRealtime(), done) else 0L
                     onProgress(TransferProgress.forFile(done, total, size()))
                 }
             } catch (_: InterruptedException) {
@@ -425,6 +524,7 @@ class TransferService : Service() {
             // result notification.
             watcher.interrupt()
             if (watcher.isAlive) watcher.join()
+            speed = 0L
         }
     }
 
@@ -615,15 +715,35 @@ class TransferService : Service() {
         manager().createNotificationChannel(channel)
     }
 
-    private fun progressNotification(title: String, name: String, percent: Int): Notification =
-        Notification.Builder(this, CHANNEL_ID)
+    private fun progressNotification(title: String, name: String, percent: Int): Notification {
+        val rate = speed
+        val text = if (percent > 0 && rate > 0) {
+            getString(R.string.transfer_name_speed, name, android.text.format.Formatter.formatShortFileSize(this, rate))
+        } else {
+            name
+        }
+        val cancel = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, TransferService::class.java).setAction(ACTION_CANCEL),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
             .setContentTitle(title)
-            .setContentText(name)
+            .setContentText(text)
             .setProgress(100, percent, percent == 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .addAction(
+                Notification.Action.Builder(
+                    android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_notif_disconnect),
+                    getString(R.string.cancel),
+                    cancel,
+                ).build(),
+            )
             .build()
+    }
 
     private fun doneNotification(): Notification {
         val outcome = TransferSummary.of(sentTotal, sendCount, savedTotal, receiveCount)
@@ -668,6 +788,9 @@ class TransferService : Service() {
         private const val CHANNEL_ID = "transfers"
         private const val NOTIFICATION_ID = 7
         private const val PROGRESS_MS = 500L
+        private const val ACTION_CANCEL = "dev.pocketdesk.android.action.CANCEL_TRANSFER"
+        /** What the computer's Sent list says of an offer cancelled here (C1). */
+        private const val CANCELLED_HERE = TransferRetry.CANCELLED_ON_PHONE
         private const val MAX_RECEIVE_BYTES = 8L * 1024 * 1024 * 1024
         private const val EXTRA_ADDRESS = "address"
         private const val EXTRA_PORT = "port"

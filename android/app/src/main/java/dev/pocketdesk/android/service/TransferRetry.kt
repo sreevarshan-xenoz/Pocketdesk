@@ -190,7 +190,20 @@ object TransferRetry {
         "larger than",
         "not accepted",
         "permission",
+        // Cancelled on the phone, or on the computer (C1).
+        CANCELLED_ON_PHONE,
+        CANCELLED_ON_COMPUTER,
     )
+
+    /** Whether [error] is a Cancel, on either side (C1). */
+    fun isCancel(error: String?): Boolean =
+        error != null && (error.contains(CANCELLED_ON_PHONE) || error.contains(CANCELLED_ON_COMPUTER))
+
+    /** What a transfer the phone's Cancel stopped fails with (the bridge's words too). */
+    const val CANCELLED_ON_PHONE = "cancelled on the phone"
+
+    /** The computer's refusal of a file its owner cancelled (C1). */
+    const val CANCELLED_ON_COMPUTER = "cancelled on the computer"
 
     /**
      * Refusals that pass: while other transfers run, or a request that went

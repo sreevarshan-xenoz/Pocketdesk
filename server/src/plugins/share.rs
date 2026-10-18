@@ -563,6 +563,11 @@ impl Plugin for SharePlugin {
                     .as_ref()
                     .map(|s| format!("share:{from}:{s}"))
                     .unwrap_or_else(|| format!("share:{}", uuid::Uuid::new_v4().simple()));
+                // The owner cancelled this file while it ran (C1): its retry
+                // is told so, and stops.
+                if crate::transfers::take_cancelled(&running_key) {
+                    return refused(crate::transfers::CANCELLED_HERE.to_string()).await;
+                }
                 running().supersede(&running_key).await;
                 let slot = match transfer_slots().take(sender.device_id()) {
                     Ok(slot) => slot,
@@ -571,6 +576,7 @@ impl Plugin for SharePlugin {
                 // A file of a folder send (T6b) goes to its place under the
                 // send's own new folder; its path was checked part by part.
                 // Made only now, so a share refused above leaves no folder.
+                let folder_name = folder_of(body).map(|(_, folder, _)| folder);
                 let (dir, name, top) = match folder_of(body) {
                     None => (dir, name.clone(), None),
                     Some((folder_id, folder, path)) => {
@@ -589,8 +595,18 @@ impl Plugin for SharePlugin {
                         }
                     }
                 };
+                let tracker = crate::transfers::track(crate::transfers::Shown {
+                    key: running_key.clone(),
+                    direction: pocketdesk_core::local::transfers::Direction::FromPhone,
+                    device_id: from.clone(),
+                    name: name.clone(),
+                    folder: folder_name,
+                    size,
+                });
                 running()
                     .spawn(running_key, async move {
+                        let progress = Box::new(tracker.progress());
+                        let _tracker = tracker;
                         match receive_file(
                             route,
                             &key,
@@ -602,6 +618,7 @@ impl Plugin for SharePlugin {
                                 source: source.as_deref(),
                                 store: &store,
                                 limits: partial_limits(),
+                                progress,
                                 on_saved: {
                                     let from = from.clone();
                                     Box::new(move |path: &Path| {
@@ -697,14 +714,34 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         (None, Some(path)) => format!("path:{}:{path}", sender.device_id()),
         (None, None) => format!("fetch:{}", uuid::Uuid::new_v4().simple()),
     };
+    // The owner cancelled this file while it ran (C1): its retry is told so.
+    if crate::transfers::take_cancelled(&running_key) {
+        tracing::info!("Download refused: the owner cancelled it");
+        refuse(sender, &key, crate::transfers::CANCELLED_HERE).await;
+        return;
+    }
     running().supersede(&running_key).await;
     match plan_fetch(&packet.body, sender) {
         Ok(fetch) => {
             tracing::info!("Sending {} to {}", fetch.path.display(), fetch.route);
+            let tracker = crate::transfers::track(crate::transfers::Shown {
+                key: running_key.clone(),
+                direction: pocketdesk_core::local::transfers::Direction::ToPhone,
+                device_id: phone_of(sender),
+                name: fetch
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                folder: None,
+                size: fetch.size,
+            });
             running()
                 .spawn(running_key, async move {
                     let _slot = fetch.slot;
-                    let sent = send_file_to(fetch.route, &key, &fetch.path).await;
+                    let sent =
+                        send_file_counted(fetch.route, &key, &fetch.path, tracker.progress()).await;
+                    drop(tracker);
                     match &sent {
                         Ok(size) => {
                             tracing::info!("File sent: {} ({size} bytes)", fetch.path.display())
@@ -729,6 +766,7 @@ struct Fetch {
     /// How the bytes reach the phone that asked.
     route: Route,
     path: PathBuf,
+    size: u64,
     /// The desktop app's send this download answers, if any.
     offer: Option<String>,
     slot: TransferSlot,
@@ -794,6 +832,7 @@ fn plan_fetch(
     Ok(Fetch {
         route,
         path,
+        size,
         offer,
         slot,
     })
@@ -1010,6 +1049,17 @@ pub(crate) async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {
 /// Send the file at `path` to the phone by `route`, and return its size
 /// once the phone says it saved it.
 pub(crate) async fn send_file_to(route: Route, key: &str, path: &Path) -> Result<u64> {
+    send_file_counted(route, key, path, |_| {}).await
+}
+
+/// [`send_file_to`], telling `progress` how much of the file the phone has
+/// (C1).
+pub(crate) async fn send_file_counted(
+    route: Route,
+    key: &str,
+    path: &Path,
+    progress: impl FnMut(u64),
+) -> Result<u64> {
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|e| io_error("open", e))?;
@@ -1021,7 +1071,7 @@ pub(crate) async fn send_file_to(route: Route, key: &str, path: &Path) -> Result
     if size > MAX_FILE_BYTES {
         return Err(io_error("send", "larger than 8 GB"));
     }
-    send_reader(route, key, &mut file, size).await
+    send_reader_counted(route, key, &mut file, size, progress).await
 }
 
 /// Open `route`, present `key`, and send `size` bytes of `reader` with the
@@ -1035,11 +1085,22 @@ pub(crate) async fn send_reader<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut R,
     size: u64,
 ) -> Result<u64> {
+    send_reader_counted(route, key, reader, size, |_| {}).await
+}
+
+/// [`send_reader`], telling `progress` how much the phone has.
+async fn send_reader_counted<R: tokio::io::AsyncRead + Unpin>(
+    route: Route,
+    key: &str,
+    reader: &mut R,
+    size: u64,
+    progress: impl FnMut(u64),
+) -> Result<u64> {
     let mut stream = route.open().await?;
     if route.presents_key() {
         present_key(&mut stream, key).await?;
     }
-    let from = transfer::send(reader, size, &mut stream, Pace::DEFAULT, |_| {})
+    let from = transfer::send(reader, size, &mut stream, Pace::DEFAULT, progress)
         .await
         .map_err(|e| io_error("send", e))?;
     if from > 0 {
@@ -1350,6 +1411,8 @@ struct Incoming<'a> {
     store: &'a Store,
     /// How much unfinished work is kept; an age of 0 keeps none.
     limits: pocketdesk_core::protocol::partials::Limits,
+    /// Told how much of the file this end has as it arrives (C1).
+    progress: Box<dyn FnMut(u64) + Send>,
     /// Told where the file went once it is in place (the notification and
     /// the received list), before the phone hears "saved".
     on_saved: Box<dyn FnOnce(&Path) + Send>,
@@ -1370,6 +1433,7 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
         source,
         store,
         limits,
+        progress,
         on_saved,
     } = incoming;
     if size == 0 || size > MAX_FILE_BYTES {
@@ -1426,7 +1490,7 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
         present_key(&mut stream, key).await?;
     }
     tracing::info!("Receiving {name} from {route} ({size} bytes)");
-    let outcome = transfer::receive(
+    let outcome = transfer::receive_counted(
         &mut stream,
         &mut file,
         have,
@@ -1449,6 +1513,7 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
                 }
             }
         },
+        progress,
     )
     .await;
     drop(file);
@@ -1536,6 +1601,7 @@ pub(crate) async fn receive_offered(
             source: source.as_deref(),
             store: &store,
             limits: partial_limits(),
+            progress: Box::new(|_| {}),
             on_saved: Box::new(move |path: &Path| {
                 on_received(path, size, &announced, top.as_deref())
             }),
@@ -2005,6 +2071,7 @@ mod tests {
             source,
             store,
             limits: LIMITS,
+            progress: Box::new(|_| {}),
             on_saved: Box::new(|_| {}),
         }
     }
@@ -2595,6 +2662,28 @@ mod tests {
                 "payloadTransferInfo": { "port": 40000, "key": KEY },
             }))
             .with_payload_size(size)
+    }
+
+    /// A file the owner cancelled while it ran (C1): the phone's retry is
+    /// refused with why, once, so it stops; a later attempt is not told it
+    /// again.
+    #[tokio::test]
+    async fn a_download_the_owner_cancelled_is_refused_with_why_once() {
+        crate::transfers::cancelled_for_test("offer:c1-cancelled-offer");
+        let asked = || {
+            fetch(serde_json::json!({
+                "offer": "c1-cancelled-offer", "port": 40000, "key": KEY,
+            }))
+        };
+        let phone = Phone::at("192.0.2.7:51000");
+        handle_fetch(&asked(), &phone).await;
+        let (key, reason) = refusal(&phone).expect("refused");
+        assert_eq!(key, KEY);
+        assert_eq!(reason, crate::transfers::CANCELLED_HERE);
+        let again = Phone::at("192.0.2.7:51001");
+        handle_fetch(&asked(), &again).await;
+        let (_, reason) = refusal(&again).expect("refused: the offer is gone");
+        assert_ne!(reason, crate::transfers::CANCELLED_HERE, "told once");
     }
 
     /// A refused share is answered, so the phone stops waiting for a

@@ -215,6 +215,8 @@
     <string name="transfer_done_mixed">முடிந்தது. அனுப்பியவை: %1$d, சேமித்தவை: %2$d</string>
     <string name="transfer_some_failed">தோல்வி: %2$d இல் %1$d</string>
     <string name="transfer_no_space">%1$s க்குப் போதுமான இடமில்லை</string>
+    <string name="transfer_name_speed">%1$s · %2$s/வி</string>
+    <string name="transfer_cancelled">ரத்து செய்யப்பட்டது. மீண்டும் அனுப்பினால் நின்ற இடத்திலிருந்து தொடரும்.</string>
     <plurals name="transfer_saved">
         <item quantity="one">%1$d கோப்பு Downloads-இல் சேமிக்கப்பட்டது</item>
         <item quantity="other">%1$d கோப்புகள் Downloads-இல் சேமிக்கப்பட்டன</item>

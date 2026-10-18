@@ -6,6 +6,7 @@
 //! polls; there is no callback channel yet.
 
 mod api;
+mod cancel;
 mod cast;
 mod clipboard_push;
 mod download;
@@ -1045,7 +1046,11 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let file_path = jstring_to_string(&mut env, &file_path);
-    let json = envelope_unit(RUNTIME.block_on(api::send_file(address, port as u16, file_path)));
+    let json = envelope_unit(RUNTIME.block_on(cancel::cancellable(api::send_file(
+        address,
+        port as u16,
+        file_path,
+    ))));
     to_jstring(&mut env, json)
 }
 
@@ -1081,7 +1086,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
         path,
     });
     let size = u64::try_from(size).unwrap_or(0);
-    let json = envelope_unit(RUNTIME.block_on(api::send_file_fd(
+    let json = envelope_unit(RUNTIME.block_on(cancel::cancellable(api::send_file_fd(
         address,
         port as u16,
         fd,
@@ -1089,8 +1094,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
         size,
         source,
         folder,
-    )));
+    ))));
     to_jstring(&mut env, json)
+}
+
+/// Stop the file transfer running now, if any (C1): its call returns
+/// "cancelled on the phone".
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCancelTransfer(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) {
+    cancel::cancel_current();
 }
 
 /// The running file transfer as `[sent, total]` bytes.
@@ -1151,13 +1166,15 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchFi
         name,
         location,
     });
-    let json = envelope(RUNTIME.block_on(download::fetch_file_fd(
-        address,
-        port as u16,
-        target,
-        fd,
-        resume,
-    )));
+    let json = envelope(
+        RUNTIME.block_on(cancel::cancellable(download::fetch_file_fd(
+            address,
+            port as u16,
+            target,
+            fd,
+            resume,
+        ))),
+    );
     to_jstring(&mut env, json)
 }
 

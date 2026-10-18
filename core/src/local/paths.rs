@@ -48,6 +48,10 @@ pub const COMPUTERS_FILE: &str = "computers.json";
 /// The desktop app's requests about them, one file each.
 pub const COMPUTERS_DIR: &str = "computers_out";
 pub const SENT_FILE: &str = "sent.json";
+/// The transfers under way (C1), written by the server for the desktop app.
+pub const TRANSFERS_FILE: &str = "transfers.json";
+/// The desktop app's requests to cancel one, one file each.
+pub const TRANSFER_CANCELS_DIR: &str = "transfer_cancels";
 /// How the bridge to Home Assistant's MQTT broker stands (ecosystem 1e).
 pub const HOME_ASSISTANT_FILE: &str = "home_assistant.json";
 /// Each phone's last battery report (T8b), written by the server.

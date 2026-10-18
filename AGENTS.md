@@ -42,6 +42,13 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-18: **C1, transfers you can watch and stop (branch `feat/transfer-progress`; spec `docs/superpowers/specs/2026-10-17-transfer-progress-design.md`, with as-built and review sections).**
+  - **The computer:** each download and share the server runs has a row while it runs (`server/src/transfers.rs`): direction, phone, file and folder, bytes from the transfer's own progress (`transfer::receive_counted` for the receiving side). Rows go to `transfers.json` every second while any runs. The Files page shows them under "Under way" with a bar, "42 % · 3.1 MB/s" and Cancel, which writes a request (`transfer_cancels/`).
+  - **A Cancel on the computer** stops the transfer as a retry's supersede does and remembers the file once, so the phone's retry is refused ("cancelled on the computer") and stops. A whole folder of offers goes with it.
+  - **The phone:** the transfer notification has the speed and Cancel (`nativeCancelTransfer`). Cancel stops the file under way, the waits between attempts and the jobs queued up to the press; it is never retried, and a cancelled offer is declined.
+  - **Fresh review (0 Critical, 4 Important), fixed one commit each:** a Cancel lost between attempts, a service that never stopped itself, one Cancel per file of a folder, and a resumed offset shown as speed. Plus nine minors.
+  - **Device-checked** on the A71 with a 1.5 GB file over the internet road (checklist §103): both Cancels, the refusal, and a resend continuing from 615 MB.
+  - **Owed:** folders each way, a share cancelled on the computer, Linux.
 - 2026-10-17: **N7, the phone's background cost (branch `perf/background-cost`; spec `docs/superpowers/specs/2026-10-17-background-cost-design.md`, with as-built and review sections).**
   - **Measured:** an hour each on the A71 against a throwaway server, with the clipboard, files and ringing on and the screen off.
   - **Profiled:** simpleperf put 94 % of the app's cycles in its six timer threads. Each worked out the phone's own computer on every tick, every 2 to 5 s, by reading and parsing the saved computers.

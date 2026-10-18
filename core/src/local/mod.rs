@@ -34,4 +34,5 @@ pub mod server;
 pub mod sessions;
 pub mod sms;
 pub mod tasks;
+pub mod transfers;
 pub mod wake;

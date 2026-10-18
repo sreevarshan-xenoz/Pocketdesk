@@ -417,6 +417,8 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/pending_approvals.json`, `approvals/` | Held sessions (device id, peer address) and the owner's answers | Default | `core/src/local/approval.rs` |
 | `<state>/received.json` | The last 50 received files: name, path, size, time, sending device | Default | `core/src/local/received.rs` |
 | `<state>/outbox/`, `sent.json` | Files the app sends to a phone, and their state | Default | `core/src/local/outbox.rs`, `sent.rs` |
+| `<state>/transfers.json` | The transfers under way (C1): direction, device id, file and folder name, size, bytes so far, rate. Rewritten every second while any runs | Default | `core/src/local/transfers.rs`, `server/src/transfers.rs` |
+| `<state>/transfer_cancels/` | The app's requests to cancel one, by its id; taken once, a minute at most | Default | `core/src/local/transfers.rs` |
 | `<state>/phone_media.json` | What each connected phone with Media on plays (title, artist, app). Listening history: written owner-only, at most every 2 s, emptied at start | Owner-only | `core/src/local/phone_media.rs`, `server/src/plugins/phone_media.rs` |
 | `<state>/phone_media_out/` | The desktop app's presses for a phone's player, one file each, taken within 10 s | Default | `core/src/local/phone_media.rs` |
 | `<state>/phone_status.json` | Each paired phone's last battery report: charge, charging, when it came. Written by the server at most every 5 s; a phone no longer paired is dropped | Default | `core/src/local/phone_status.rs`, `server/src/plugins/phone_battery.rs` |
