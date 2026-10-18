@@ -120,6 +120,11 @@ jobs:
       - name: Clippy (workspace, all targets)
         run: cargo clippy --workspace --all-targets --exclude pocketdesk-android-bridge --exclude iroh-spike -- -D warnings
 
+      # The desktop snapshots' renderer builds on Windows only while the lock
+      # gives gpu-allocator the windows crate wgpu-hal uses (C4 review).
+      - name: Clippy (desktop with snapshots)
+        run: cargo clippy -p pocketdesk-desktop --all-targets --features snapshots -- -D warnings
+
       - name: Test
         run: cargo test --workspace --exclude pocketdesk-android-bridge --exclude iroh-spike
 

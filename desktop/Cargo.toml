@@ -24,6 +24,8 @@ serde_json = "1"
 
 # C4: the snapshots need a GPU renderer; a feature, so the usual test run
 # does not build one (a feature cannot turn on a dev-dependency's features).
+# On Windows it builds only while Cargo.lock gives gpu-allocator windows
+# 0.62, the version wgpu-hal hands it (CI's Windows job checks).
 egui_kittest = { version = "=0.36.2", optional = true, features = ["eframe", "snapshot", "wgpu"] }
 
 [target.'cfg(windows)'.dependencies]
