@@ -1695,7 +1695,8 @@ impl PocketdeskApp {
                 &id,
                 now_unix(),
             ) {
-                Ok(_) => crate::notice::Notice::working(format!("Cancelling {name}…")),
+                // Short: the row goes once it stops (C1 review).
+                Ok(_) => crate::notice::Notice::done(format!("Cancel asked for {name}.")),
                 Err(e) => crate::notice::Notice::error(format!("Could not cancel {name}: {e}")),
             };
         }
