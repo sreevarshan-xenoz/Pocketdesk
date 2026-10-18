@@ -149,7 +149,7 @@
     <string name="files_empty">Esta carpeta está vacía.</string>
     <string name="files_truncated">Solo se muestran los primeros elementos de esta carpeta; es demasiado grande para mostrarla entera.</string>
     <string name="files_download_title">¿Descargar %1$s?</string>
-    <string name="files_download_text">%1$s, se guarda en Descargas/Pocketdesk.</string>
+    <string name="files_download_text">%1$s, se guarda donde van los archivos de ordenadores.</string>
     <string name="files_download">Descargar</string>
     <string name="files_download_started">Descargando %1$s…</string>
     <string name="files_failed">No se pudo abrir esta carpeta: %1$s</string>
@@ -210,7 +210,7 @@
     <string name="files_download_folder_text">Todos sus archivos y los de sus carpetas van a una carpeta nueva en Download/Pocketdesk. Los archivos ocultos se omiten.</string>
     <string name="files_download_folder_asked">Se pidió %1$s al equipo</string>
     <string name="files_send_folder">Enviar una carpeta a este equipo</string>
-    <string name="files_send_folder_summary">Va a una carpeta nueva en sus Descargas</string>
+    <string name="files_send_folder_summary">Va a una carpeta nueva donde el equipo guarda lo recibido</string>
     <string name="transfer_sending">Enviando %1$d de %2$d</string>
     <string name="transfer_failed">Sin enviar: %1$d de %2$d</string>
     <string name="transfer_receiving">Recibiendo de tu ordenador</string>
@@ -220,9 +220,9 @@
     <string name="transfer_name_speed">%1$s · %2$s/s</string>
     <string name="transfer_cancelled">Cancelado. Si lo vuelves a enviar, sigue donde se quedó.</string>
     <plurals name="transfer_saved">
-        <item quantity="one">%1$d archivo guardado en Descargas</item>
-        <item quantity="many">%1$d archivos guardados en Descargas</item>
-        <item quantity="other">%1$d archivos guardados en Descargas</item>
+        <item quantity="one">%1$d archivo guardado</item>
+        <item quantity="many">%1$d archivos guardados</item>
+        <item quantity="other">%1$d archivos guardados</item>
     </plurals>
     <plurals name="share_sending_files">
         <item quantity="one">Enviando %1$d archivo a %2$s…</item>
@@ -503,7 +503,7 @@
     <string name="offer_waiting_title">El equipo envía un archivo</string>
     <string name="offer_save">Guardar</string>
     <string name="settings_files_background">Archivos del equipo en segundo plano</string>
-    <string name="settings_files_background_summary">Lo que envía el equipo llega a Descargas sin una sesión, en casa o, con Archivos por internet, desde fuera. Necesita acceso a las notificaciones, que mantiene la conexión</string>
+    <string name="settings_files_background_summary">Lo que envía el equipo llega sin una sesión, donde van los archivos de ordenadores, en casa o, con Archivos por internet, desde fuera. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="settings_phone_folders">Carpetas que puede abrir el equipo</string>
     <string name="settings_phone_folders_summary">La pestaña Teléfono del equipo puede listar estas carpetas y copiar sus archivos. Nada más del teléfono es accesible. Mientras haya una carpeta compartida se mantiene conectado al equipo, usando el acceso a las notificaciones</string>
     <string name="phone_folders_empty">Ninguna aún: el equipo no puede abrir nada en este teléfono. Añade una carpeta para que su pestaña Teléfono la liste y copie archivos</string>
@@ -516,7 +516,7 @@
     <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano</string>
     <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
     <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>
-    <string name="screenshots_save">Guardarlas en Descargas del equipo</string>
+    <string name="screenshots_save">Guardarlas en el equipo, con lo que recibe</string>
     <string name="remote_button">Mando</string>
     <string name="remote_title">Mando · %1$s</string>
     <string name="remote_keyboard">Teclado</string>

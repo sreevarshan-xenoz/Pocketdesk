@@ -1553,7 +1553,7 @@ impl PocketdeskApp {
                     "No phone or computer can take a file right now. A phone can in a session, or \
                      with \"Files from the computer in the background\" on in its Settings; \
                      another of your computers, while its link is up. Files land in the \
-                     phone's Downloads/Pocketdesk.",
+                     phone's folder for files from computers (Downloads/Pocketdesk unless chosen).",
                 )
                 .color(crate::theme::muted(ui)),
             );
@@ -1744,7 +1744,7 @@ impl PocketdeskApp {
             ui.label("Nothing received yet.");
             ui.label(
                 RichText::new(
-                    "Share a file to Pocketdesk on your phone; it lands in Downloads and is \
+                    "Share a file to Pocketdesk on your phone; it lands where Settings says (Downloads unless chosen) and is \
                      listed here.",
                 )
                 .color(crate::theme::muted(ui)),
