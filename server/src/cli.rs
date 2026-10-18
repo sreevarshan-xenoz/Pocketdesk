@@ -85,6 +85,21 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// The clipboard's history (D3): the texts that crossed between this
+    /// computer and its phones, newest first; or, with --send, one of them
+    /// put on a phone's clipboard again. Exit codes: 0 done, 1 failed, 2 bad
+    /// arguments, 3 no server running (for --send)
+    Clipboard {
+        /// Send the entry at this place in the list (1 is the newest)
+        #[arg(long, requires = "to", value_parser = clap::value_parser!(u32).range(1..))]
+        send: Option<u32>,
+        /// The phone to send it to: its device id, or 6 or more of its first characters
+        #[arg(long, requires = "send")]
+        to: Option<String>,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Ring a paired phone that keeps a link now (a session, or "Ring from
     /// the computer" on in its Settings), at most once a minute. Exit
     /// codes: 0 asked, 1 failed, 2 bad arguments, 3 no server running

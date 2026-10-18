@@ -668,6 +668,106 @@ pub fn run_quiet(query: &str, minutes: u32, as_json: bool) -> i32 {
     code
 }
 
+/// The clipboard's history in `state_dir` (D3), or, with `send` (a place
+/// in it, 1 the newest, and a phone), that entry queued for the phone's
+/// clipboard. What to print, and the exit code.
+pub fn clipboard_in(state_dir: &Path, send: Option<(u32, &str)>, running: bool) -> (Value, i32) {
+    use pocketdesk_core::local::clip_history;
+    let entries = clip_history::read(state_dir);
+    let Some((place, query)) = send else {
+        return (versioned(json!({ "entries": entries })), exit::DONE);
+    };
+    let Some(entry) = entries.get(place.saturating_sub(1) as usize) else {
+        return (
+            error(format!(
+                "there is no entry {place}: the history holds {}",
+                entries.len()
+            )),
+            exit::BAD_ARGUMENTS,
+        );
+    };
+    if !running {
+        return (
+            error("no Pocketdesk server is running to send it"),
+            exit::NO_SERVER,
+        );
+    }
+    let store = match trust_store(state_dir) {
+        Ok(store) => store,
+        Err(reason) => return (error(reason), exit::FAILED),
+    };
+    let device_id = match resolve_phone(&store.trusted_devices(), query) {
+        Ok(id) => id,
+        Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
+    };
+    if !store.permissions(&device_id).allows(Capability::Clipboard) {
+        return (
+            error(format!(
+                "Clipboard is off for {device_id} (the Devices page)"
+            )),
+            exit::FAILED,
+        );
+    }
+    let now = pocketdesk_core::local::pin::now_unix();
+    let reachable = live_mirror(state_dir, now, running)
+        .is_some_and(|mirror| mirror.linked.iter().any(|p| p.device_id == device_id));
+    if !reachable {
+        return (
+            error(format!(
+                "{device_id} is not linked now: a copy reaches it in a session, or with a background feature on"
+            )),
+            exit::FAILED,
+        );
+    }
+    match clip_history::request_send(state_dir, &device_id, &entry.text, now) {
+        Ok(request) => (
+            versioned(json!({
+                "id": request.id,
+                "device_id": device_id,
+                "state": "queued",
+            })),
+            exit::DONE,
+        ),
+        Err(e) => (error(format!("could not queue it: {e}")), exit::FAILED),
+    }
+}
+
+/// `pocketdesk clipboard`: prints the history, or sends an entry, and
+/// returns the exit code.
+pub fn run_clipboard(send: Option<(u32, &str)>, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
+            return exit::FAILED;
+        }
+    };
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    let (out, code) = clipboard_in(&dir, send, running);
+    if as_json {
+        print(&out);
+    } else if let Some(reason) = out["error"].as_str() {
+        eprintln!("Error: {reason}");
+    } else if send.is_some() {
+        println!("asked the phone to take it on its clipboard");
+    } else if let Some(entries) = out["entries"].as_array() {
+        if entries.is_empty() {
+            println!("The history is empty (Settings: Clipboard history, 0 keeps none).");
+        }
+        for (i, entry) in entries.iter().enumerate() {
+            let text = entry["text"].as_str().unwrap_or("");
+            let first: String = text.lines().next().unwrap_or("").chars().take(70).collect();
+            let from = entry["from"].as_str().unwrap_or("this computer");
+            println!("{:>3}  {first}  ({from})", i + 1);
+        }
+    }
+    code
+}
+
 /// `pocketdesk ring`: prints the outcome and returns the exit code.
 pub fn run_ring(query: &str, as_json: bool) -> i32 {
     let dir = match crate::state::state_dir() {
@@ -1816,6 +1916,46 @@ mod tests {
             pocketdesk_core::local::quiet::take_all(&dir, now + 1).is_empty(),
             "none refused was queued"
         );
+    }
+
+    /// D3: the history listed, and one entry sent to a linked phone with
+    /// Clipboard on, by its place.
+    #[test]
+    fn the_clipboard_history_is_listed_and_an_entry_sent() {
+        use pocketdesk_core::local::clip_history::{ClipEntry, record, take_sends};
+        let (dir, _) = send_setup("cliphistory");
+        let (out, code) = clipboard_in(&dir, None, true);
+        assert_eq!(code, exit::DONE);
+        assert_eq!(out["entries"], json!([]));
+        record(&dir, ClipEntry::new("older", None, 1), 20).unwrap();
+        record(&dir, ClipEntry::new("newest", Some("5f1c9b3d-6e70"), 2), 20).unwrap();
+        let (out, _) = clipboard_in(&dir, None, false);
+        assert_eq!(
+            out["entries"][0]["text"], "newest",
+            "listed with no server too"
+        );
+        assert_eq!(out["entries"][0]["from"], "5f1c9b3d-6e70");
+
+        let (_, code) = clipboard_in(&dir, Some((3, "5f1c9b")), true);
+        assert_eq!(code, exit::BAD_ARGUMENTS, "no third entry");
+        let (_, code) = clipboard_in(&dir, Some((2, "5f1c9b")), false);
+        assert_eq!(code, exit::NO_SERVER);
+        let now = pocketdesk_core::local::pin::now_unix();
+        std::fs::write(
+            dir.join(LIVE_FILE),
+            json!({
+                "updated_unix": now,
+                "sessions": [],
+                "linked": [{ "device_id": "5f1c9b3d-6e70", "files": false }],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let (out, code) = clipboard_in(&dir, Some((2, "5f1c9b")), true);
+        assert_eq!(code, exit::DONE, "{out}");
+        let sent = take_sends(&dir, now + 1);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].text, "older");
     }
 
     #[test]

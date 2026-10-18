@@ -6,7 +6,7 @@ Design: `docs/superpowers/specs/2026-10-15-local-api-design.md`. Source: `server
 
 ## The rules
 
-These hold for `status`, `devices`, `sent`, `received`, `send`, `link`, `ring`, `quiet`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. `events` prints many objects, one per line, each following them. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
+These hold for `status`, `devices`, `sent`, `received`, `send`, `link`, `ring`, `quiet`, `clipboard`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. `events` prints many objects, one per line, each following them. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
 
 - **One JSON object per run** on stdout, on one line. Logs go to stderr.
 - **Every object carries `"api": 1`.** Within version 1, fields are only ever added, never renamed, removed or given another meaning. A field a script does not know should be ignored.
@@ -155,6 +155,10 @@ Asks the server to ring the phone (N1): `{"api": 1, "id": "…", "device_id": "�
 ### `pocketdesk quiet <phone> [--minutes N | --off] --json`
 
 Asks the server to turn on the phone's Do Not Disturb for `N` minutes (1 to 1440, 60 by default), or with `--off` to end the mute this computer asked for (D2): `{"api": 1, "id": "…", "device_id": "…", "minutes": 60, "state": "queued"}` (`minutes` 0 for `--off`). Refused at once (exit 1) when the phone's Mute permission is off or it keeps no link now: it is muted with "Let the computer mute this phone" on in its own Settings. The phone keeps the owner's own Do Not Disturb settings; it ends the mute only while it is still the one it set. `devices --json` shows what each phone last said in `quiet`. Exit 2 for an unknown phone or minutes outside 1 to 1440 (`--off` asks for the end; `--minutes 0` is a usage error), 3 when no server runs.
+
+### `pocketdesk clipboard [--send N --to <phone>] --json`
+
+The clipboard's history (D3), with Settings "Clipboard history" above 0: the texts that crossed between this computer and its phones, either way, newest first: `{"api": 1, "entries": [{"text": "…", "from": "0d7c3a52-…", "at_unix": 1792069000}]}`. `from` is the phone or computer it came from, or null for this computer; an entry that was longer than 64 KiB is kept cut and says `"cut": true`. With `--send N --to <phone>` the Nth entry (1 the newest) goes to that phone's clipboard: `{"api": 1, "id": "…", "device_id": "…", "state": "queued"}`, refused at once (exit 1) when its Clipboard permission is off or it keeps no link now. Exit 2 for an entry or phone that is not there, 3 when no server runs (for `--send`).
 
 ### `pocketdesk kick <target> --json`
 
