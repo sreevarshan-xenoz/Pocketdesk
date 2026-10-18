@@ -4,7 +4,7 @@ Ready-made entries for the places people install Pocketdesk from. Each one is pu
 
 ## Obtainium (the APK from the releases)
 
-Nothing to submit. Obtainium follows the GitHub releases: each has exactly one APK, `pocketdesk-vX.Y.Z-android-arm64.apk`, which Obtainium picks without a filter. Add the app with `https://github.com/sreevarshan-xenoz/Pocketdesk`.
+Nothing to submit. Obtainium follows the GitHub releases: each since 0.4.0 has exactly one APK, `pocketdesk-vX.Y.Z-android-arm64.apk`, which Obtainium picks without a filter. Add the app with `https://github.com/sreevarshan-xenoz/Pocketdesk`.
 
 The APK is signed with the release key. Its certificate's SHA-256, for AppVerifier or `apksigner verify --print-certs`:
 
@@ -12,10 +12,10 @@ The APK is signed with the release key. Its certificate's SHA-256, for AppVerifi
 
 ## winget (Windows)
 
-`packaging/winget/manifests/s/SreevarshanXenoz/Pocketdesk/<version>/` holds the three manifests for a release, in the layout of [winget-pkgs](https://github.com/microsoft/winget-pkgs). They install the release's Windows zip as two portable commands, `pocketdesk` and `pocketdesk-app`; the server then wants `pocketdesk install` once (logon start and firewall rules).
+`packaging/winget/manifests/s/SreevarshanXenoz/Pocketdesk/<version>/` holds the three manifests for a release, in the layout of [winget-pkgs](https://github.com/microsoft/winget-pkgs). They install the release's Windows zip as two portable commands, `pocketdesk` and `pocketdesk-app`, with FFmpeg (`Gyan.FFmpeg`) as a dependency, since the server encodes video with it. The server then wants `pocketdesk install` (logon start and firewall rules), and again after every upgrade, with `pocketdesk stop` first: the logon task and firewall rules name the version's folder, and a running server holds its file.
 
 For each release:
-1. `python3 scripts/winget_manifest.py <version> <the release's SHA256SUMS>` writes the manifests.
+1. `python3 scripts/winget_manifest.py <version> <the release's SHA256SUMS>` (`python` or `py` on Windows) writes the manifests.
 2. `winget validate --manifest <that folder>` checks them.
 3. To try them: `winget install --manifest <that folder>` (needs `winget settings --enable LocalManifestFiles` from an administrator).
 4. To publish: a pull request to microsoft/winget-pkgs adding the folder (the owner's call; `wingetcreate submit` does it too).

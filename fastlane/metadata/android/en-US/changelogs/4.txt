@@ -1,0 +1,4 @@
+* Use another of your computers: pair two computers, share the clipboard and send files between them.
+* Files reach the phone over the internet too, without opening a port.
+* Work with KDE Connect devices: pair, clipboard, battery, ring and files.
+* Events and hooks, named tasks the phone can start, Home Assistant, and a browser extension.
