@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-551 open items.
+549 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 320 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 318 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 12 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 22 |
 | A phone with a SIM | 22 |
@@ -254,7 +254,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Connecting to a silent desktop does not pause music already playing on the phone; the first desktop sound takes over. "Silent" means no app holds an audio stream open: Windows loopback sends packets of silence while any app has one (seen on the A71 with a browser open: focus was taken 1.3 s after connect), and focus follows packets, not loudness.
 - A phone call silences it, and it resumes after the call. Another app starting music takes over for good: switching "Desktop sound on this phone" off and on brings it back.
 - In PiP the sound continues; Exit stops it.
-- `adb logcat -s DesktopAudio`: "desktop sound started", and on exit "stopped (N underruns)" with N small.
 
 **26. In-session keyboard**
 
@@ -462,8 +461,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **65. The clipboard outside a session (T10b)**
 
-- Desktop "Clipboard to phones" off: nothing pushed; a session still gets the clipboard on request.
-- A phone with Clipboard off on the desktop gets no pushes.
+- With it off, a session still gets the clipboard on request.
 
 **66. Answering the phone's notifications from the computer (T10c)**
 
@@ -474,7 +472,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **67. Files from the computer without a session (T10d)**
 
 - A phone that refuses background starts: the "The computer sends a file" notification, and Save downloading it.
-- A folder sent this way.
 - The desktop app's Files tab listing a linked phone with no session.
 
 **69. "Send to phone" in the file manager (T10e)**
@@ -610,7 +607,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **103. Transfers you can watch and stop (C1)**
 
-- A folder: one Cancel stops the whole folder, each way.
+- A folder cancelled on the phone: the app's notifications sit folded under "Silent" in the shade, so its Cancel was not reached by script (a single 1.5 GB file's was, in C1).
 - A share from the phone cancelled on the computer, then shared again.
 
 **104. Control the phone from the computer (C8)**
@@ -635,6 +632,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Split screen: Home and a session in half a screen.
 - Landscape with the keyboard open (§26).
 - Spanish and Tamil at 1.0, 1.3 and 2.0 (a long word such as "Individual" may already make a list at 1.0).
+
+**109. The owed checks by where they run (C6)**
+
+- The rest of "here", in later batches.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
