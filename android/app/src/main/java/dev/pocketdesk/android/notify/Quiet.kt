@@ -15,6 +15,13 @@ object QuietPlan {
     /** The longest mute the computer may ask for: a day. */
     const val MAX_MINUTES = 1_440
 
+    /**
+     * Whether the computer's mute may start: only from "all" (D2 review). A
+     * phone already in Do Not Disturb is the owner's: a mute would take it
+     * over and, at its end, turn it off.
+     */
+    fun mayMute(filter: Int): Boolean = filter == ALL
+
     /** The computer's minutes, 0 to end a mute; null for a value out of range. */
     fun minutes(asked: Int): Int? = asked.takeIf { it in 0..MAX_MINUTES }
 

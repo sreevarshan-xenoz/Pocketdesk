@@ -894,9 +894,15 @@ impl PocketdeskApp {
                     } else {
                         "Turn on the phone's Do Not Disturb for an hour. Calls and messages its own settings let through still come."
                     });
+                    let owners = !muted && model::quiet_by_owner(device.quiet.as_ref());
+                    let mute_why = if owners && row.mute.is_ok() {
+                        "The phone is already in its own Do Not Disturb; the computer leaves it as it is."
+                    } else {
+                        mute_why
+                    };
                     if ui
                         .add_enabled(
-                            row.mute.is_ok(),
+                            row.mute.is_ok() && !owners,
                             egui::Button::new(if muted { "Unmute" } else { "Mute for an hour" }),
                         )
                         .on_hover_text(mute_why)

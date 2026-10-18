@@ -56,4 +56,13 @@ class QuietTest {
         assertEquals(QuietPlan.State(quiet = true, untilUnix = null, byComputer = false), QuietPlan.state(QuietPlan.ALARMS, mute))
         assertEquals(QuietPlan.State(quiet = false, untilUnix = null, byComputer = false), QuietPlan.state(QuietPlan.UNKNOWN, null))
     }
+
+    @Test
+    fun `a mute starts only from all, never over the owner's own Do Not Disturb`() {
+        assertTrue(QuietPlan.mayMute(QuietPlan.ALL))
+        assertFalse(QuietPlan.mayMute(QuietPlan.PRIORITY))
+        assertFalse(QuietPlan.mayMute(QuietPlan.ALARMS))
+        assertFalse(QuietPlan.mayMute(QuietPlan.NONE))
+        assertFalse(QuietPlan.mayMute(QuietPlan.UNKNOWN))
+    }
 }

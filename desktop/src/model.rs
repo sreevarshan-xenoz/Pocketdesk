@@ -322,6 +322,12 @@ pub fn quiet_text(
     })
 }
 
+/// Whether the phone is in its owner's own Do Not Disturb (D2 review): the
+/// computer does not mute it then, so Mute for an hour is not offered.
+pub fn quiet_by_owner(quiet: Option<&pocketdesk_core::local::phone_quiet::PhoneQuiet>) -> bool {
+    quiet.is_some_and(|q| q.quiet && !q.by_computer)
+}
+
 /// Whether the Overview offers Unmute rather than Mute for an hour: a mute
 /// asked for from a computer, still running.
 pub fn muted_from_here(
@@ -785,6 +791,8 @@ mod tests {
             Some("Do Not Disturb")
         );
         assert!(!muted_from_here(Some(&owners), 1_000));
+        assert!(quiet_by_owner(Some(&owners)));
+        assert!(!quiet_by_owner(Some(&own)));
         let loud = PhoneQuiet {
             quiet: false,
             ..owners

@@ -103,9 +103,12 @@ class BackgroundQuiet(
             // Only the computer's own mute is ended, and only while it stands.
             if (mute != null && filter() == mute.filter) setFilter(QuietPlan.ALL)
             QuietPrefs.setMute(ctx, null)
-        } else {
+        } else if (QuietPlan.mayMute(filter())) {
             setFilter(QuietPlan.PRIORITY)
             QuietPrefs.setMute(ctx, QuietPlan.Mute(System.currentTimeMillis() + minutes * 60_000L, QuietPlan.PRIORITY))
+        } else {
+            // The owner's own Do Not Disturb stands; the computer is told it.
+            Log.i(TAG, "a mute from the computer, not taken: already in Do Not Disturb")
         }
         told = null
     }
