@@ -406,8 +406,6 @@ pub(crate) fn running() -> &'static Running {
 
 #[derive(Debug)]
 pub struct SharePlugin {
-    /// Where received files go; `None` when this system has neither a
-    /// downloads nor a home folder, and files are then refused.
     /// A fixed folder for received files (tests); otherwise each file goes
     /// where [`download_dir`] says at that moment.
     fixed_dir: Option<PathBuf>,
@@ -430,10 +428,24 @@ pub(crate) fn download_dir() -> Option<PathBuf> {
     {
         return Some(seam);
     }
-    // The owner's folder (C2), read at each file so a change applies at once.
-    let chosen = pocketdesk_core::local::config::Config::load()
-        .map(|c| c.downloads_folder)
-        .unwrap_or_default();
+    // The owner's folder (C2), read at each file so a change applies at once;
+    // a config that cannot be read now keeps the last one read (C2 review).
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let chosen = match pocketdesk_core::local::config::Config::load() {
+        Ok(config) => {
+            *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some(config.downloads_folder.clone());
+            config.downloads_folder
+        }
+        Err(e) => {
+            warn_once(&format!(
+                "The settings could not be read ({e}); received files go where they went last"
+            ));
+            LAST.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+                .unwrap_or_default()
+        }
+    };
     chosen_folder(&chosen)
         .or_else(dirs::download_dir)
         .or_else(dirs::home_dir)
@@ -450,10 +462,21 @@ fn chosen_folder(chosen: &str) -> Option<PathBuf> {
     if path.is_absolute() && path.is_dir() {
         Some(path)
     } else {
-        tracing::warn!(
+        warn_once(&format!(
             "Received files go to Downloads: the folder chosen for them ({chosen}) is not there"
-        );
+        ));
         None
+    }
+}
+
+/// Log `message` unless it was the last one logged: a folder of a thousand
+/// files says why once.
+fn warn_once(message: &str) {
+    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last != message {
+        tracing::warn!("{message}");
+        *last = message.to_string();
     }
 }
 
