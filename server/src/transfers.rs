@@ -222,10 +222,27 @@ async fn cancel(id: &str) {
         return;
     };
     tracing::info!("Cancelling the transfer {key} for the owner");
+    let Some(offer) = key.strip_prefix("offer:") else {
+        crate::plugins::share::running().supersede(&key).await;
+        return;
+    };
+    // The rest of its folder send goes too (C1 review): each refused with
+    // why when the phone asks for it, and settled.
+    let siblings = crate::offers::folder_siblings(offer);
+    {
+        let mut table = lock();
+        for sibling in &siblings {
+            remember(&mut table, format!("offer:{sibling}"), Instant::now());
+        }
+    }
     crate::plugins::share::running().supersede(&key).await;
     // An offer's task ended before it could settle it: the Sent list says why.
-    if let Some(offer) = key.strip_prefix("offer:") {
-        crate::offers::fail(offer, OFFER_CANCELLED.to_string());
+    crate::offers::fail(offer, OFFER_CANCELLED.to_string());
+    for sibling in siblings {
+        crate::plugins::share::running()
+            .supersede(&format!("offer:{sibling}"))
+            .await;
+        crate::offers::fail(&sibling, OFFER_CANCELLED.to_string());
     }
 }
 
