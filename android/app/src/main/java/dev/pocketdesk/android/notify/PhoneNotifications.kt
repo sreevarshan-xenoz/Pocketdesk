@@ -28,6 +28,10 @@ object PhoneNotificationPrefs {
     private const val KEY_SHARED = "shared"
     private const val KEY_SEEN = "seen"
     private const val MAX_SEEN = 100
+    private const val KEY_WAIT = "wait_minutes"
+
+    /** How long a notification may wait for the computer, in minutes (C3): the choices, the default first. */
+    val WAIT_CHOICES = listOf(60, 10, 0)
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -35,6 +39,14 @@ object PhoneNotificationPrefs {
 
     fun setEnabled(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_ENABLED, on) }
+    }
+
+    /** How long a notification that could not be sent waits for the computer, in minutes (C3). */
+    fun waitMinutes(ctx: Context): Int =
+        prefs(ctx).getInt(KEY_WAIT, WAIT_CHOICES.first()).takeIf { it in WAIT_CHOICES } ?: WAIT_CHOICES.first()
+
+    fun setWaitMinutes(ctx: Context, minutes: Int) {
+        prefs(ctx).edit { putInt(KEY_WAIT, minutes) }
     }
 
     /** The apps whose notifications go to the computer. */
@@ -225,7 +237,15 @@ class PhoneNotificationListener : NotificationListenerService() {
     private fun sendable(id: String, pkg: String): Boolean =
         id !in closedKeys && PhoneNotificationPrefs.enabled(this) && pkg in PhoneNotificationPrefs.shared(this)
 
-    private fun sendBody(body: JSONObject): Boolean = PhoneLink.sendNow(this, "kdeconnect.notification", body)
+    /**
+     * Send [body]; one that waited says for how long, in whole seconds, so
+     * the computer can mark it late (C3). The phone's monotonic clock
+     * measures it, so the two clocks need not agree.
+     */
+    private fun sendBody(body: JSONObject, waitedMs: Long): Boolean {
+        val out = if (waitedMs >= 1_000) JSONObject(body.toString()).put("waited", waitedMs / 1_000) else body
+        return PhoneLink.sendNow(this, "kdeconnect.notification", out)
+    }
 
     private fun handle(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>) {
         if (!PhoneNotificationPrefs.enabled(this)) return
@@ -259,6 +279,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
+        outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
         outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
             .forEach { rule.removed(it) }
     }
@@ -365,6 +386,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     /** Send what waited, oldest first, until one fails. */
     private fun sendWaiting() {
         if (outbox.isEmpty()) return
+        outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
         outbox.flush(SystemClock.elapsedRealtime(), ::sendable, ::sendBody).forEach { rule.removed(it) }
     }
 

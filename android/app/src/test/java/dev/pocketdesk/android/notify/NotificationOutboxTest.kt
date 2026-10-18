@@ -10,7 +10,13 @@ class NotificationOutboxTest {
     private class Computer {
         var up = true
         val shown = mutableListOf<String>()
-        fun send(body: String): Boolean = up.also { if (it) shown += body }
+        val waited = mutableListOf<Long>()
+        fun send(body: String, waitedMs: Long): Boolean = up.also {
+            if (it) {
+                shown += body
+                waited += waitedMs
+            }
+        }
     }
 
     private val any = { _: String, _: String -> true }
@@ -21,6 +27,40 @@ class NotificationOutboxTest {
         val computer = Computer()
         outbox.post("k", "app", "A", nowMs = 0, sendable = any, send = computer::send)
         assertEquals(listOf("A"), computer.shown)
+    }
+
+    @Test
+    fun `one sent from the wait says how long it waited, one sent at once says none`() {
+        val outbox = NotificationOutbox<String>()
+        val computer = Computer().apply { up = false }
+        outbox.post("a", "app", "A", nowMs = 1_000, sendable = any, send = computer::send)
+        computer.up = true
+        outbox.flush(nowMs = 61_000, sendable = any, send = computer::send)
+        outbox.post("b", "app", "B", nowMs = 62_000, sendable = any, send = computer::send)
+        assertEquals(listOf("A", "B"), computer.shown)
+        assertEquals(listOf(60_000L, 0L), computer.waited)
+    }
+
+    @Test
+    fun `with no wait a notification is sent at once or given up on, never queued`() {
+        val outbox = NotificationOutbox<String>(PendingNotifications(maxAgeMs = 0))
+        val computer = Computer().apply { up = false }
+        assertEquals(listOf("a"), outbox.post("a", "app", "A", nowMs = 0, sendable = any, send = computer::send))
+        assertTrue(outbox.isEmpty())
+        computer.up = true
+        assertEquals(emptyList<String>(), outbox.post("b", "app", "B", nowMs = 1, sendable = any, send = computer::send))
+        assertEquals(listOf("B"), computer.shown)
+    }
+
+    @Test
+    fun `turning waiting off gives up on what waited`() {
+        val outbox = NotificationOutbox<String>(PendingNotifications(maxAgeMs = 60_000))
+        val computer = Computer().apply { up = false }
+        outbox.post("a", "app", "A", nowMs = 0, sendable = any, send = computer::send)
+        outbox.maxAgeMs = 0
+        computer.up = true
+        assertEquals(listOf("a"), outbox.post("b", "app", "B", nowMs = 1_000, sendable = any, send = computer::send))
+        assertEquals(listOf("B"), computer.shown)
     }
 
     @Test

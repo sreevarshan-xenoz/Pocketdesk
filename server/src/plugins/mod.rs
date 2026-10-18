@@ -30,6 +30,7 @@ pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     share::answer_denied(packet, sender).await;
     audio_control::answer_denied(packet, sender).await;
     privacy::answer_denied(packet, sender).await;
+    notification::answer_denied(packet, sender).await;
 }
 
 /// Packets the computer sends from outside its plugins: pushes and what a

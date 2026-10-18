@@ -58,7 +58,11 @@ object PhoneLink {
         val host = target(ctx) ?: return false
         val send = {
             if (packetType == "kdeconnect.notification") {
-                RustCore.sendNotification(host.address, host.controlPort, body.toString())
+                // Asked to be answered (C3): one written into a link that has
+                // died unseen is not counted as sent, so it waits.
+                RustCore.sendNotificationAcked(host.address, host.controlPort, body.toString()).mapCatching { outcome ->
+                    check(NotificationDelivery.sent(outcome)) { "the computer did not say it had it" }
+                }
             } else {
                 RustCore.sendPhonePacket(host.address, host.controlPort, packetType, body.toString())
             }

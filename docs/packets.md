@@ -17,6 +17,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.mousepad.echo` |  | yes |  | input |
 | `kdeconnect.mousepad.request` | yes |  | Input | input |
 | `kdeconnect.notification` | yes | yes | Notifications | notification |
+| `kdeconnect.notification.ack` |  | yes |  | notification |
 | `kdeconnect.notification.action` |  | yes |  | notification |
 | `kdeconnect.notification.reply` |  | yes |  | notification |
 | `kdeconnect.notification.request` | yes |  | none (any paired phone) | notification |

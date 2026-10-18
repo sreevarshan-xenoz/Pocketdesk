@@ -309,9 +309,10 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchCl
     to_jstring(&mut env, json)
 }
 
-/// Show one of this phone's notifications on the desktop (N5a).
+/// Show one of this phone's notifications on the desktop, asking it to say
+/// it read it (C3): `acked`, `refused`, `unanswered` or `pushed`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendNotification(
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendNotificationAcked(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     address: JString<'_>,
@@ -320,7 +321,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendNot
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let body = jstring_to_string(&mut env, &body);
-    let json = envelope_unit(RUNTIME.block_on(api::send_notification(address, port as u16, body)));
+    let json = envelope(RUNTIME.block_on(api::send_notification_acked(address, port as u16, body)));
     to_jstring(&mut env, json)
 }
 

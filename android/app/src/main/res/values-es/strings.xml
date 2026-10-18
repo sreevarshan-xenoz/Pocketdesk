@@ -499,6 +499,11 @@
     <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>
     <string name="phone_notifications_answer_summary">El equipo puede pulsar los botones de una notificación y responder chats, en tu nombre: desde su pestaña Notificaciones o desde la notificación que muestra. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
+    <string name="phone_notifications_wait">Cuando el equipo no está al alcance</string>
+    <string name="phone_notifications_wait_summary">Las notificaciones esperan en este teléfono, solo en memoria, y se envían cuando el equipo responde, marcadas como tardías con lo que esperaron. Esperan 20 como máximo</string>
+    <string name="phone_notifications_wait_10">Esperar hasta 10 minutos</string>
+    <string name="phone_notifications_wait_60">Esperar hasta una hora</string>
+    <string name="phone_notifications_wait_0">No esperar</string>
     <string name="channel_offers">Archivos del equipo</string>
     <string name="offer_waiting_title">El equipo envía un archivo</string>
     <string name="offer_save">Guardar</string>

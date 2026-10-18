@@ -42,6 +42,13 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-18: **C3, notifications that fail to send wait and go later (branch `feat/late-notifications`; spec `docs/superpowers/specs/2026-10-18-late-notifications-design.md`, with as-built, device-run and review sections).**
+  - **The phone:** notifications wait up to an hour (was 10 minutes), in memory only, at most 20. Settings "When the computer is out of reach": an hour, 10 minutes, or don't wait. Each is sent with how long it waited.
+  - **The computer:** one that waited a minute or more is shown "Sent N min late", dated from when it came on the phone, with `late_secs` in its event.
+  - **Found on the device:** a notification written into a link that had died unseen (some 35 s) was counted as sent and lost. The computer's identity now announces `kdeconnect.notification.ack`; such a computer answers each notification that asks, and the phone keeps one that goes unanswered for 5 s.
+  - **Fresh review (0 Critical, 3 Important), fixed one commit each.**
+  - **Device-checked** on the A71 (checklist §106): the dead link, a cancel, and an hour in forced deep idle (all 12 within a second; Pocketdesk's process stayed a bound foreground service).
+  - **Owed:** Doze on battery without USB, a computer from before C3, Linux.
 - 2026-10-18: **C2, choose where received files land (branch `feat/download-folder`; spec `docs/superpowers/specs/2026-10-18-download-folder-design.md`, with as-built, device-run and review sections).**
   - **The computer:** desktop Settings "Received files land in" (`downloads_folder`, empty for Downloads, read at each file) for phones', computers' and KDE devices' files. Pocketdesk's own folders are refused, and a folder that is gone means Downloads.
   - **The phone:** "Files from computers go to", Downloads/Pocketdesk or a folder picked with Android's picker. There files arrive through the Storage Access Framework as `<name>.part`, renamed once whole (the next free name when one is taken), and a folder that is gone falls back with the notification saying so.
