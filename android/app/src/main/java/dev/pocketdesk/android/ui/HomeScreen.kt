@@ -522,8 +522,9 @@ fun HomeScreen(
             onPick = { text ->
                 historyFor = null
                 scope.launch {
+                    // Over the internet road too, as the tile (D3 review).
                     val sent = withContext(Dispatchers.IO) {
-                        RustCore.sendClipboard(host.address, host.controlPort, text).isSuccess
+                        dev.pocketdesk.android.clip.ClipboardSend.toComputer(context, host, text)
                     }
                     wakeSaid = resources.getString(
                         if (sent) R.string.send_clipboard_sent else R.string.send_clipboard_failed,

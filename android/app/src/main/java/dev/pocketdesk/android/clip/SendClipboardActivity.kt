@@ -7,7 +7,6 @@ import android.os.Looper
 import android.widget.Toast
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
-import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.ui.ClipHistory
 import dev.pocketdesk.android.ui.localClipboardText
@@ -112,16 +111,7 @@ class SendClipboardActivity : Activity() {
 
     /** Send [text]; a [private] copy is not kept in the clipboard history (N2 review). */
     private fun send(app: Context, host: HostStore.Host, text: String, private: Boolean = false) {
-        val attempt = { RustCore.sendClipboard(host.address, host.controlPort, text) }
-        var sent = attempt()
-        if (sent.isFailure && RustCore.controlPeer() == null) {
-            HostStore.wanIdentity(app, host.address)?.let { wan ->
-                RustCore.connectToPeer(host.address, host.controlPort, wan)
-                if (RustCore.controlPeer() != null) sent = attempt()
-            }
-        }
-        if (sent.isSuccess) {
-            ClipboardShared.lastExchanged = text
+        if (ClipboardSend.toComputer(app, host, text)) {
             if (!private) ClipHistory.add(app, text)
             say(app, app.getString(R.string.send_clipboard_sent, HostStore.shownName(app, host.address)))
         } else {
