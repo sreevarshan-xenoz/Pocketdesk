@@ -70,6 +70,9 @@ class BackgroundQuiet(
     fun tick() {
         val on = QuietPrefs.letComputerMute(ctx)
         val own = PhoneLink.target(ctx)
+        // No link: what was told is forgotten, so a link that comes back (to
+        // the same computer, which may have lost it) is told again (D2 review).
+        if (RustCore.controlPeer() == null) told = null
         if (on && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - lastConnectMs >= RECONNECT_MS) {
