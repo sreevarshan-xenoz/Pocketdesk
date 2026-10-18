@@ -173,9 +173,13 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                 if let Some((width, height)) = c.config {
                     let _ = v.tx.try_send(Message::Config { width, height });
                 }
-                // It learns at once whether it may control the phone (C8).
-                let on = c.control_on.load(std::sync::atomic::Ordering::Acquire);
-                let _ = v.tx.try_send(Message::ControlState { on });
+                // It learns at once that it may control the phone (C8). Only a
+                // yes is said: a desktop app from before C8 cannot read the
+                // message and would leave, so a cast without control never
+                // sends it one.
+                if c.control_on.load(std::sync::atomic::Ordering::Acquire) {
+                    let _ = v.tx.try_send(Message::ControlState { on: true });
+                }
                 // A new viewer starts from a keyframe.
                 let _ = c.want.try_send(());
                 tracing::info!(session_id, "The phone's screen is being shown");
@@ -353,11 +357,6 @@ mod tests {
             }
         );
         assert_eq!(
-            read_message(&mut view).await,
-            Message::ControlState { on: false },
-            "it learns whether it may control the phone (C8)"
-        );
-        assert_eq!(
             want_rx.recv().await,
             Some(()),
             "a new viewer starts from a keyframe"
@@ -432,10 +431,6 @@ mod tests {
             .await
             .unwrap();
         view.write_all(&file.token_bytes().unwrap()).await.unwrap();
-        assert_eq!(
-            read_message(&mut view).await,
-            Message::ControlState { on: false }
-        );
         let batch = pocketdesk_core::streaming::cast_control::ControlBatch {
             sent_ms: 1,
             events: vec![pocketdesk_core::streaming::cast_control::ControlEvent::Backspace],
