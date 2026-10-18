@@ -123,6 +123,7 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
     let live = live_sessions(state_dir, now_unix, running);
     let keys = device_keys::read(state_dir).unwrap_or_default();
     let batteries = pocketdesk_core::local::phone_status::read(state_dir);
+    let quiet = pocketdesk_core::local::phone_quiet::read(state_dir);
     // Only a running server's: what played in an earlier run is not now.
     let media = if running {
         pocketdesk_core::local::phone_media::read(state_dir)
@@ -159,6 +160,8 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
                 "battery": batteries.get(&id),
                 // What it plays (T8d), or null.
                 "media": media.get(&id).map(|m| &m.media),
+                // Its Do Not Disturb as it last said (D2), or null.
+                "quiet": quiet.get(&id),
             })
         })
         .collect();
@@ -566,6 +569,99 @@ pub fn ring_in(state_dir: &Path, query: &str, running: bool) -> (Value, i32) {
         ),
         Err(e) => (error(format!("could not queue it: {e}")), exit::FAILED),
     }
+}
+
+/// Ask the running server in `state_dir` to mute the phone `query` names
+/// for `minutes`, or to end its mute with 0 (D2): one with Mute on that
+/// keeps a link now. What to print, and the exit code.
+pub fn quiet_in(state_dir: &Path, query: &str, minutes: u32, running: bool) -> (Value, i32) {
+    if minutes > pocketdesk_core::local::quiet::MAX_MINUTES {
+        return (
+            error(format!(
+                "at most {} minutes (a day)",
+                pocketdesk_core::local::quiet::MAX_MINUTES
+            )),
+            exit::BAD_ARGUMENTS,
+        );
+    }
+    if !running {
+        return (
+            error("no Pocketdesk server is running to mute it"),
+            exit::NO_SERVER,
+        );
+    }
+    let store = match trust_store(state_dir) {
+        Ok(store) => store,
+        Err(reason) => return (error(reason), exit::FAILED),
+    };
+    let device_id = match resolve_phone(&store.trusted_devices(), query) {
+        Ok(id) => id,
+        Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
+    };
+    if store.is_computer(&device_id) {
+        return (
+            error(format!(
+                "{device_id} is a computer, not a phone: only phones are muted"
+            )),
+            exit::FAILED,
+        );
+    }
+    if !store.permissions(&device_id).allows(Capability::Mute) {
+        return (
+            error(format!("Mute is off for {device_id} (the Devices page)")),
+            exit::FAILED,
+        );
+    }
+    let now = pocketdesk_core::local::pin::now_unix();
+    let reachable = live_mirror(state_dir, now, running)
+        .is_some_and(|mirror| mirror.linked.iter().any(|p| p.device_id == device_id));
+    if !reachable {
+        return (
+            error(format!(
+                "{device_id} is not linked now: it is muted in a session, or with \"Let the computer mute this phone\" on in its Settings"
+            )),
+            exit::FAILED,
+        );
+    }
+    match pocketdesk_core::local::quiet::request(state_dir, &device_id, minutes, now) {
+        Ok(request) => (
+            versioned(json!({
+                "id": request.id,
+                "device_id": device_id,
+                "minutes": minutes,
+                "state": "queued",
+            })),
+            exit::DONE,
+        ),
+        Err(e) => (error(format!("could not queue it: {e}")), exit::FAILED),
+    }
+}
+
+/// `pocketdesk quiet`: prints the outcome and returns the exit code.
+pub fn run_quiet(query: &str, minutes: u32, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
+            return exit::FAILED;
+        }
+    };
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    let (out, code) = quiet_in(&dir, query, minutes, running);
+    if as_json {
+        print(&out);
+    } else if let Some(reason) = out["error"].as_str() {
+        eprintln!("Error: {reason}");
+    } else if minutes == 0 {
+        println!("asked the phone to end its mute");
+    } else {
+        println!("asked the phone to be quiet for {minutes} minutes");
+    }
+    code
 }
 
 /// `pocketdesk ring`: prints the outcome and returns the exit code.
@@ -1060,6 +1156,17 @@ mod tests {
             },
         );
         pocketdesk_core::local::phone_media::write(&dir, &media).unwrap();
+        let mut quiet = std::collections::BTreeMap::new();
+        quiet.insert(
+            "phone-a".to_string(),
+            pocketdesk_core::local::phone_quiet::PhoneQuiet {
+                quiet: true,
+                until_unix: Some(3_700),
+                by_computer: true,
+                updated_unix: 100,
+            },
+        );
+        pocketdesk_core::local::phone_quiet::write(&dir, &quiet).unwrap();
         let listed = devices(&dir, 101, true).unwrap();
         assert_eq!(listed["api"], API);
         assert_eq!(listed["server_running"], true);
@@ -1081,6 +1188,11 @@ mod tests {
         assert_eq!(a["media"]["title"], "Song");
         assert_eq!(a["media"]["isPlaying"], true);
         assert_eq!(b["media"], Value::Null, "plays nothing");
+        assert_eq!(
+            a["quiet"],
+            json!({"quiet": true, "until_unix": 3_700, "by_computer": true, "updated_unix": 100})
+        );
+        assert_eq!(b["quiet"], Value::Null, "never said");
         let stopped = devices(&dir, 101, false).unwrap();
         assert!(
             stopped["devices"]
@@ -1626,6 +1738,59 @@ mod tests {
         let now = pocketdesk_core::local::pin::now_unix();
         assert!(
             pocketdesk_core::local::rings::take_all(&dir, now).is_empty(),
+            "none refused was queued"
+        );
+    }
+
+    /// D2: a mute is queued for a linked phone with Mute on, refused at once
+    /// otherwise, and a day at most.
+    #[test]
+    fn a_mute_is_queued_for_a_linked_phone_with_mute_on() {
+        let (dir, _) = send_setup("quiet");
+        let now = pocketdesk_core::local::pin::now_unix();
+        std::fs::write(
+            dir.join(LIVE_FILE),
+            json!({
+                "updated_unix": now,
+                "sessions": [],
+                "linked": [{ "device_id": "5f1c9b3d-6e70", "files": false }],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let (out, code) = quiet_in(&dir, "5f1c9b", 60, true);
+        assert_eq!(code, exit::DONE, "linked: {out}");
+        assert_eq!(out["minutes"], 60);
+        let (_, code) = quiet_in(&dir, "5f1c9b", 0, true);
+        assert_eq!(code, exit::DONE, "0 ends it");
+        let taken = pocketdesk_core::local::quiet::take_all(&dir, now + 1);
+        // Both in one second: in either order.
+        let mut minutes: Vec<u32> = taken.iter().map(|r| r.minutes).collect();
+        minutes.sort_unstable();
+        assert_eq!(minutes, [0, 60]);
+
+        let (out, code) = quiet_in(&dir, "5f1c9b", 1441, true);
+        assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
+        let (_, code) = quiet_in(&dir, "5f1c9b", 60, false);
+        assert_eq!(code, exit::NO_SERVER);
+
+        let mut store = TrustStore::read(dir.join(TRUST_FILE)).unwrap();
+        let mut permissions = store.permissions("5f1c9b3d-6e70");
+        permissions.mute = Some(false);
+        store.set_permissions("5f1c9b3d-6e70", permissions).unwrap();
+        let (out, code) = quiet_in(&dir, "5f1c9b", 60, true);
+        assert_eq!(code, exit::FAILED, "{out}");
+        assert!(out["error"].as_str().unwrap().contains("Mute is off"));
+
+        in_session(&dir, &[]);
+        let mut store = TrustStore::read(dir.join(TRUST_FILE)).unwrap();
+        let mut permissions = store.permissions("5f1c9b3d-6e70");
+        permissions.mute = None;
+        store.set_permissions("5f1c9b3d-6e70", permissions).unwrap();
+        let (out, code) = quiet_in(&dir, "5f1c9b", 60, true);
+        assert_eq!(code, exit::FAILED, "not linked: {out}");
+        assert!(
+            pocketdesk_core::local::quiet::take_all(&dir, now + 1).is_empty(),
             "none refused was queued"
         );
     }

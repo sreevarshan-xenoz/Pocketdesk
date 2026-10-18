@@ -95,6 +95,23 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Turn on a paired phone's Do Not Disturb for a while, or end it (D2):
+    /// one with Mute on that keeps a link now ("Let the computer mute this
+    /// phone" on in its Settings). Exit codes: 0 asked, 1 failed, 2 bad
+    /// arguments, 3 no server running
+    Quiet {
+        /// The phone: its device id, or 6 or more of its first characters
+        phone: String,
+        /// For how many minutes, 1 to 1440 (a day)
+        #[arg(long, default_value_t = 60, conflicts_with = "off")]
+        minutes: u32,
+        /// End the mute this computer asked for
+        #[arg(long)]
+        off: bool,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Send files or folders to your phone, the one connected on this
     /// network (in a session first): what the file manager's "Send to
     /// phone" runs. Says how it went in a desktop notification too.

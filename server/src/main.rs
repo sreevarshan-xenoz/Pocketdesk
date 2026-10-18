@@ -124,6 +124,16 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
         cli::Commands::Ring { phone, json } => {
             std::process::exit(local_api::run_ring(&phone, json))
         }
+        cli::Commands::Quiet {
+            phone,
+            minutes,
+            off,
+            json,
+        } => {
+            // 0 is the wire's "end"; --minutes 0 would read as a mistake.
+            let minutes = if off { 0 } else { minutes.max(1) };
+            std::process::exit(local_api::run_quiet(&phone, minutes, json))
+        }
         cli::Commands::Send {
             phone,
             path,

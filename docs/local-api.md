@@ -6,7 +6,7 @@ Design: `docs/superpowers/specs/2026-10-15-local-api-design.md`. Source: `server
 
 ## The rules
 
-These hold for `status`, `devices`, `sent`, `received`, `send`, `link`, `ring`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. `events` prints many objects, one per line, each following them. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
+These hold for `status`, `devices`, `sent`, `received`, `send`, `link`, `ring`, `quiet`, `kick`, `pair`, `unpair`, `list` and `relay-ids`. `events` prints many objects, one per line, each following them. Three older commands keep formats of their own: `sessions --json` prints one object per line (one per session), `capabilities --json` the generated report (`docs/capabilities.md`), and `bench --json` the benchmark's record; none of them carries `api`.
 
 - **One JSON object per run** on stdout, on one line. Logs go to stderr.
 - **Every object carries `"api": 1`.** Within version 1, fields are only ever added, never renamed, removed or given another meaning. A field a script does not know should be ignored.
@@ -53,13 +53,14 @@ The paired phones.
               "permissions": {"input": true, "clipboard": true, "files": true, "audio": true,
                               "mic": true, "power": true, "exec": false,
                               "notifications": true, "texts": true, "links": true, "media": true, "cast": true, "tasks": true,
-                              "ring": true},
+                              "ring": true, "mute": true},
               "battery": {"charge": 54, "charging": false, "updated_unix": 1792069000},
               "media": {"title": "Song", "artist": "Artist", "app": "Spotify", "isPlaying": true,
-                        "canPlayPause": true, "canNext": true, "canPrevious": true}}]}
+                        "canPlayPause": true, "canNext": true, "canPrevious": true},
+              "quiet": {"quiet": true, "until_unix": 1792072600, "by_computer": true, "updated_unix": 1792069000}}]}
 ```
 
-`name` is the owner's rename in the desktop app's Devices page, else the name the phone gives itself (cleaned: one short printable line), or null until it has connected since this version. `grant_remaining_secs` is null for a lasting pairing and counts down for one made with `pair --grant`. `key_bound` says the phone has proved its key on this network; `internet_key_bound`, from outside. Each permission is what the phone may do now, defaults included. `battery` is the phone's last report, sent during sessions (null if it never reported); `updated_unix` says how old it is. `media` is what the phone plays, as it says during a session with "My media on the computer" on (null when nothing plays, or the phone is not connected, has Media off, or the server is stopped).
+`name` is the owner's rename in the desktop app's Devices page, else the name the phone gives itself (cleaned: one short printable line), or null until it has connected since this version. `grant_remaining_secs` is null for a lasting pairing and counts down for one made with `pair --grant`. `key_bound` says the phone has proved its key on this network; `internet_key_bound`, from outside. Each permission is what the phone may do now, defaults included. `battery` is the phone's last report, sent during sessions (null if it never reported); `updated_unix` says how old it is. `media` is what the phone plays, as it says during a session with "My media on the computer" on (null when nothing plays, or the phone is not connected, has Media off, or the server is stopped). `quiet` is the phone's Do Not Disturb as it last said, with "Let the computer mute this phone" on (null if it never said); `until_unix` and `by_computer` are set only for a mute a computer asked for (D2).
 
 ### `pocketdesk sent --json` and `pocketdesk received --json`
 
@@ -100,6 +101,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `session_ended` | `session_id` | — |
 | `phone_linked`, `phone_unlinked` | — (any connection the phone holds to this computer, a brief one for a single send included) | — |
 | `phone_battery` | `charge`, `charging` | — |
+| `phone_quiet` | `quiet` | — |
 | `phone_battery_low` | `charge` | — |
 | `notification` | `app`, and `late_secs` (seconds) for one that waited on the phone a minute or more (C3) | `title`, `text` |
 | `text_received` | — | `from`, `body` |
@@ -149,6 +151,10 @@ Hands a web link to a phone in a session; it waits there as a notification that 
 ### `pocketdesk ring <phone> --json`
 
 Asks the server to ring the phone (N1): `{"api": 1, "id": "…", "device_id": "…", "state": "queued"}`. Refused at once (exit 1) when the phone's Ring permission is off or it keeps no link now: it rings in a session, or with "Ring from the computer" on in its own Settings. The server sends at most one ring a minute to a phone, and drops a ring not sent within a minute.
+
+### `pocketdesk quiet <phone> [--minutes N | --off] --json`
+
+Asks the server to turn on the phone's Do Not Disturb for `N` minutes (1 to 1440, 60 by default), or with `--off` to end the mute this computer asked for (D2): `{"api": 1, "id": "…", "device_id": "…", "minutes": 60, "state": "queued"}` (`minutes` 0 for `--off`). Refused at once (exit 1) when the phone's Mute permission is off or it keeps no link now: it is muted with "Let the computer mute this phone" on in its own Settings. The phone keeps the owner's own Do Not Disturb settings; it ends the mute only while it is still the one it set. `devices --json` shows what each phone last said in `quiet`.
 
 ### `pocketdesk kick <target> --json`
 
