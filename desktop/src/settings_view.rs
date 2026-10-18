@@ -123,6 +123,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ),
     ("mic_relay_device", "Phone mic plays into", Section::Phones),
     (
+        "cast_control",
+        "Control phones from their screen window",
+        Section::Phones,
+    ),
+    (
         "phone_notifications",
         "Phone notifications",
         Section::Notifications,
@@ -211,6 +216,7 @@ pub fn applies_live(key: &str) -> bool {
             | "mqtt_password"
             | "internet_files"
             | "toast_answers"
+            | "cast_control"
             | "remember_screen_grant"
     )
 }
@@ -582,6 +588,16 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.virtual_screens,
                         "a phone with Input can add a screen of its own shape (Sway)",
+                    );
+                });
+                row(ui, "cast_control", |ui| {
+                    ui.checkbox(
+                        &mut e.cast_control,
+                        "tap, drag, scroll and type on a phone in the window showing its screen",
+                    );
+                    note(
+                        ui,
+                        "Only once the phone allows it: \"Let the computer control this phone\" in its Pocketdesk Settings.",
                     );
                 });
                 if cfg!(windows) {

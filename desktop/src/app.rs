@@ -1868,7 +1868,11 @@ impl eframe::App for PocketdeskApp {
         }
         self.cast
             .get_or_insert_with(|| crate::cast_view::CastView::new(ctx, self.state_dir.clone()))
-            .show(ctx, &self.snapshot.devices);
+            .show(
+                ctx,
+                &self.snapshot.devices,
+                self.config.as_ref().is_none_or(|c| c.cast_control),
+            );
         ctx.request_repaint_after(REFRESH);
     }
 
