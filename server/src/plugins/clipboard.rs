@@ -306,7 +306,9 @@ pub(crate) fn stand_in() -> Option<std::path::PathBuf> {
 /// Pair tab copies for another computer (2f): it holds the PIN, so it goes
 /// to no phone or computer from the clipboard.
 pub(crate) fn is_pairing_link(text: &str) -> bool {
-    text.trim_start().starts_with("pocketdesk://pair?")
+    // Anywhere in the text, in any case (D3 review): a message that quotes
+    // the link carries its PIN just the same.
+    text.to_ascii_lowercase().contains("pocketdesk://pair?")
 }
 
 /// The clipboard's text, if it holds any (T10b's watcher): never an image,
@@ -528,7 +530,11 @@ mod tests {
     fn a_pairing_link_is_told_from_other_text() {
         assert!(is_pairing_link("pocketdesk://pair?v=1&id=b&pin=123456"));
         assert!(is_pairing_link("  pocketdesk://pair?v=1"));
-        assert!(!is_pairing_link("see pocketdesk://pair?v=1"));
+        assert!(
+            is_pairing_link("see pocketdesk://pair?v=1"),
+            "quoted, its PIN goes with it"
+        );
+        assert!(is_pairing_link("PocketDesk://PAIR?v=1&pin=123456"));
         assert!(!is_pairing_link("https://example.org/"));
     }
 
