@@ -36,6 +36,8 @@ enum Then {
 struct Pending {
     device: String,
     name: String,
+    /// Its size as the phone said, which tells two photos of one name apart.
+    size: u64,
     then: Then,
     asked_unix: u64,
 }
@@ -54,13 +56,15 @@ pub struct PhotosView {
     notice: Option<String>,
 }
 
-/// Where the photo `name` from `device`, asked for at `since_unix`, was
-/// saved, once it is among the received files (saved as `name`, or as
-/// `stem (n).ext` beside another of that name).
+/// Where the photo `name` of `size` bytes (0 unknown) from `device`, asked
+/// for at `since_unix`, was saved, once it is among the received files
+/// (saved as `name`, or as `stem (n).ext` beside another of that name; of
+/// that size, so two photos of one name are told apart).
 pub fn arrived(
     rows: &[ReceivedFile],
     device: &str,
     name: &str,
+    size: u64,
     since_unix: u64,
 ) -> Option<PathBuf> {
     let (stem, ext) = match name.rfind('.') {
@@ -69,7 +73,9 @@ pub fn arrived(
     };
     rows.iter()
         .rev()
-        .filter(|r| r.from == device && r.received_unix + 1 >= since_unix)
+        .filter(|r| {
+            r.from == device && r.received_unix + 1 >= since_unix && (size == 0 || r.size == size)
+        })
         .find(|r| {
             r.name == name
                 || r.name
@@ -280,20 +286,20 @@ impl PhotosView {
                     .on_hover_text(&photo.name);
                     ui.horizontal(|ui| {
                         if ui.small_button("Save").clicked() {
-                            action = Some((photo.id, photo.name.clone(), Then::Save));
+                            action = Some((photo.id, photo.name.clone(), photo.size, Then::Save));
                         }
                         if openable(&photo.name) && ui.small_button("Open").clicked() {
-                            action = Some((photo.id, photo.name.clone(), Then::Open));
+                            action = Some((photo.id, photo.name.clone(), photo.size, Then::Open));
                         }
                         if copyable(&photo.name) && ui.small_button("Copy").clicked() {
-                            action = Some((photo.id, photo.name.clone(), Then::Copy));
+                            action = Some((photo.id, photo.name.clone(), photo.size, Then::Copy));
                         }
                     });
                 });
             }
         });
-        if let Some((id, name, then)) = action {
-            self.act(state_dir, phone, id, name, then, now_unix);
+        if let Some((id, name, size, then)) = action {
+            self.act(state_dir, phone, id, name, size, then, now_unix);
         }
         // Thumbnails of older answers are not drawn again.
         let at = kept.at_unix;
@@ -302,12 +308,14 @@ impl PhotosView {
     }
 
     /// Ask for a photo, unless it is already here for Open or Copy.
+    #[allow(clippy::too_many_arguments)]
     fn act(
         &mut self,
         state_dir: &Path,
         phone: &str,
         id: u64,
         name: String,
+        size: u64,
         then: Then,
         now_unix: u64,
     ) {
@@ -315,7 +323,7 @@ impl PhotosView {
         // A photo saved earlier in this run (since the answer came) is used as it is.
         let since = self.kept.get(phone).map_or(now_unix, |k| k.at_unix);
         if then != Then::Save
-            && let Some(path) = arrived(&rows, phone, &name, since)
+            && let Some(path) = arrived(&rows, phone, &name, size, since)
         {
             self.then(path, &name, then);
             return;
@@ -325,6 +333,7 @@ impl PhotosView {
             self.pending.push(Pending {
                 device: phone.to_string(),
                 name,
+                size,
                 then,
                 asked_unix: now_unix,
             });
@@ -354,10 +363,14 @@ impl PhotosView {
             let rows = received::read(state_dir);
             let mut done = Vec::new();
             for (i, p) in self.pending.iter().enumerate() {
-                if let Some(path) = arrived(&rows, &p.device, &p.name, p.asked_unix) {
-                    done.push((i, Some(path)));
-                } else if now_unix.saturating_sub(p.asked_unix) > FETCH_SECS {
+                // Past its time it is dropped even if it came since: Open or
+                // Copy long after the click (the page left and come back to)
+                // would surprise the owner (C7 review).
+                if now_unix.saturating_sub(p.asked_unix) > FETCH_SECS {
                     done.push((i, None));
+                } else if let Some(path) = arrived(&rows, &p.device, &p.name, p.size, p.asked_unix)
+                {
+                    done.push((i, Some(path)));
                 }
             }
             for (i, path) in done.into_iter().rev() {
@@ -449,28 +462,37 @@ mod tests {
             row("IMG_1 (2).jpg", "phone-a", 120),
         ];
         assert_eq!(
-            arrived(&rows, "phone-a", "IMG_1.jpg", 100),
+            arrived(&rows, "phone-a", "IMG_1.jpg", 0, 100),
             Some(PathBuf::from("C:/Downloads/IMG_1 (2).jpg")),
             "the newest, saved beside an older of that name"
         );
         assert_eq!(
-            arrived(&rows, "phone-a", "IMG_1.jpg", 130),
+            arrived(&rows, "phone-a", "IMG_1.jpg", 0, 130),
             None,
             "none since"
         );
         assert_eq!(
-            arrived(&rows, "phone-c", "IMG_1.jpg", 0),
+            arrived(&rows, "phone-c", "IMG_1.jpg", 0, 0),
             None,
             "another phone's"
         );
         assert_eq!(
-            arrived(&[row("IMG_10.jpg", "p", 5)], "p", "IMG_1.jpg", 0),
+            arrived(&[row("IMG_10.jpg", "p", 5)], "p", "IMG_1.jpg", 0, 0),
             None
         );
         assert_eq!(
-            arrived(&[row("IMG_1 (x).jpg", "p", 5)], "p", "IMG_1.jpg", 0),
+            arrived(&[row("IMG_1 (x).jpg", "p", 5)], "p", "IMG_1.jpg", 0, 0),
             None
         );
+    }
+
+    #[test]
+    fn two_photos_of_one_name_are_told_apart_by_size() {
+        assert_eq!(
+            arrived(&[row("IMG_1.jpg", "p", 5)], "p", "IMG_1.jpg", 2, 0),
+            None
+        );
+        assert!(arrived(&[row("IMG_1.jpg", "p", 5)], "p", "IMG_1.jpg", 1, 0).is_some());
     }
 
     #[test]
