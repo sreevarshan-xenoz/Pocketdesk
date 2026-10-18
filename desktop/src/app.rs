@@ -113,6 +113,7 @@ pub enum Tab {
     Messages,
     Notifications,
     Phone,
+    Clipboard,
     Settings,
     Diagnostics,
     Logs,
@@ -169,6 +170,8 @@ pub struct PocketdeskApp {
     diagnostics: crate::diagnostics_view::DiagnosticsView,
     /// The Messages tab (N5b).
     messages: crate::messages_view::MessagesView,
+    /// D3: the texts that crossed, to copy or send again.
+    clipboard: crate::clipboard_view::ClipboardView,
     /// The Notifications tab (T10c).
     notes: crate::notes_view::NotesView,
     /// Settings → Other computers (2f).
@@ -228,6 +231,7 @@ impl PocketdeskApp {
             picking: None,
             diagnostics: Default::default(),
             messages: Default::default(),
+            clipboard: Default::default(),
             notes: Default::default(),
             computers: Default::default(),
             kdeconnect: Default::default(),
@@ -724,6 +728,31 @@ impl PocketdeskApp {
                 // C7: the chosen phone's recent photos below its folders.
                 if let Some(phone) = self.phone_files.phone().map(str::to_string) {
                     self.photos.show(ui, &self.state_dir, &phone, now_unix());
+                }
+            }
+            Tab::Clipboard => {
+                let history = self.config.as_ref().map_or(0, |c| c.clipboard_history);
+                match self.clipboard.show(
+                    ui,
+                    &self.state_dir,
+                    &self.snapshot.devices,
+                    history,
+                    now_unix(),
+                ) {
+                    Some(crate::clipboard_view::Action::Copy(text)) => {
+                        ui.ctx().copy_text(text);
+                        self.notice = crate::notice::Notice::done("Copied.");
+                    }
+                    Some(crate::clipboard_view::Action::Done(said)) => {
+                        self.notice = crate::notice::Notice::done(said);
+                    }
+                    Some(crate::clipboard_view::Action::Failed(said)) => {
+                        self.notice = crate::notice::Notice::error(said);
+                    }
+                    Some(crate::clipboard_view::Action::OpenSettings) => {
+                        self.switch_to(Tab::Settings)
+                    }
+                    None => {}
                 }
             }
             Tab::Settings => self.settings_tab(ui),
