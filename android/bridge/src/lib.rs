@@ -18,6 +18,7 @@ mod notification_answers;
 mod peer_names;
 mod phone_file_requests;
 mod photo_requests;
+mod quiet_requests;
 mod rates;
 mod session;
 mod tasks;
@@ -1378,6 +1379,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePho
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(photo_requests::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's newest mute for this phone since the last call (D2):
+/// `{"ok": "{host, port, minutes}"}`, or `{"ok": "null"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeQuiet(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(quiet_requests::take_json()));
     to_jstring(&mut env, json)
 }
 

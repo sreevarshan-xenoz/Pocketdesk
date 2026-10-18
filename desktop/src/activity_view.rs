@@ -236,6 +236,12 @@ pub fn describe(event: &Event) -> String {
             if flag("charging") { ", charging" } else { "" }
         ),
         "phone_battery_low" => format!("Battery low: {} %", number(event, "charge").unwrap_or(0)),
+        "phone_quiet" => if flag("quiet") {
+            "Do Not Disturb on"
+        } else {
+            "Do Not Disturb off"
+        }
+        .to_string(),
         "notification" => {
             let mut line = format!(
                 "Notification from {}",
@@ -352,6 +358,10 @@ mod tests {
                 json!({"charge": 54, "charging": true})
             )),
             "Battery 54 %, charging"
+        );
+        assert_eq!(
+            describe(&event("phone_quiet", json!({"quiet": true}))),
+            "Do Not Disturb on"
         );
         assert_eq!(
             describe(&event("file_received", json!({"size": 2_100_000}))),

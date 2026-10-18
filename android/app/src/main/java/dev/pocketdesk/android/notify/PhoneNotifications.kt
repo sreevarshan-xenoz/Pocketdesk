@@ -148,6 +148,18 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val ring by lazy { dev.pocketdesk.android.ring.BackgroundRing(applicationContext) }
     private val ringTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
+    /**
+     * The computer muting this phone (D2), on the ring's tick: both keep the
+     * link the same way, and a mute is as rare as a ring.
+     */
+    private val quiet by lazy {
+        BackgroundQuiet(
+            applicationContext,
+            { runCatching { currentInterruptionFilter }.getOrDefault(QuietPlan.UNKNOWN) },
+            { filter -> runCatching { requestInterruptionFilter(filter) } },
+        )
+    }
+
     /** New screenshots to the computer (T10h), on a 2 s tick of their own: a send takes seconds. */
     private val screenshots by lazy { dev.pocketdesk.android.files.Screenshots(applicationContext) }
     private val screenshotsTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
@@ -189,7 +201,10 @@ class PhoneNotificationListener : NotificationListenerService() {
             TimeUnit.SECONDS,
         )
         ringTicker.scheduleWithFixedDelay(
-            { runCatching { ring.tick() }.onFailure { Log.w("PhoneNotifications", "ring tick failed", it) } },
+            {
+                runCatching { ring.tick() }.onFailure { Log.w("PhoneNotifications", "ring tick failed", it) }
+                runCatching { quiet.tick() }.onFailure { Log.w("PhoneNotifications", "quiet tick failed", it) }
+            },
             2,
             2,
             TimeUnit.SECONDS,
@@ -249,7 +264,26 @@ class PhoneNotificationListener : NotificationListenerService() {
         closedKeys.remove(sbn.key)
         // Read the ranking now: it describes the state at this moment.
         val rankingVisibility = rankingVisibility(sbn)
+        // D2: whether Do Not Disturb hides it on the phone itself.
+        val heldBack = QuietRule.holdBack(
+            QuietPrefs.holdBack(this),
+            runCatching { currentInterruptionFilter }.getOrDefault(QuietPlan.UNKNOWN),
+            matchesInterruptionFilter(sbn),
+        )
+        if (heldBack) return
         worker.execute { handle(sbn, rankingVisibility) }
+    }
+
+    /** D2: the phone's Do Not Disturb changed; the computer is told on the ring's thread. */
+    override fun onInterruptionFilterChanged(interruptionFilter: Int) {
+        ringTicker.execute { runCatching { quiet.filterChanged() } }
+    }
+
+    /** Whether Android lets [sbn] through its Do Not Disturb; true when unknown. */
+    private fun matchesInterruptionFilter(sbn: StatusBarNotification): Boolean {
+        val ranking = Ranking()
+        if (!runCatching { currentRanking.getRanking(sbn.key, ranking) }.getOrDefault(false)) return true
+        return ranking.matchesInterruptionFilter()
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {

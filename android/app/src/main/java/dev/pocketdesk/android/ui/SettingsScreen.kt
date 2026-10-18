@@ -215,6 +215,19 @@ fun SettingsScreen(onBack: () -> Unit) {
                     askForListener(it)
                 },
             )
+            // D2: the computer may turn on Do Not Disturb for a while. Its
+            // own preferences, so the switch redraws from a local state.
+            var letMute by remember { mutableStateOf(dev.pocketdesk.android.notify.QuietPrefs.letComputerMute(context)) }
+            SettingSwitch(
+                stringResource(R.string.settings_let_computer_mute),
+                stringResource(R.string.settings_let_computer_mute_summary),
+                letMute,
+                {
+                    dev.pocketdesk.android.notify.QuietPrefs.setLetComputerMute(context, it)
+                    letMute = it
+                    askForListener(it)
+                },
+            )
             SettingSwitch(
                 stringResource(R.string.settings_share_battery),
                 stringResource(R.string.settings_share_battery_summary),

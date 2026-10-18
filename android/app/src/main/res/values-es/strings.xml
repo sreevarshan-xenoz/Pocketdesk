@@ -714,4 +714,9 @@
         <item quantity="many">%1$d cosas que arreglar en Pocketdesk</item>
         <item quantity="other">%1$d cosas que arreglar en Pocketdesk</item>
     </plurals>
+    <!-- D2: quiet hours kept in step. -->
+    <string name="settings_let_computer_mute">Dejar que el ordenador silencie este teléfono</string>
+    <string name="settings_let_computer_mute_summary">Tu ordenador puede activar No molestar durante un tiempo, hasta un día, y ve cuándo este teléfono está en silencio. Las llamadas y los mensajes que tus ajustes de No molestar dejan pasar siguen llegando. Mantiene un enlace con el ordenador, así que necesita acceso a las notificaciones.</string>
+    <string name="phone_notifications_hold_back">Retener con No molestar</string>
+    <string name="phone_notifications_hold_back_summary">Mientras No molestar silencia una notificación en este teléfono, tampoco se envía al ordenador</string>
 </resources>

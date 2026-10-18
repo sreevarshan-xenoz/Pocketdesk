@@ -68,6 +68,7 @@ pub fn register_all() -> PluginSet {
     registry.register(phone_media::PhoneMediaPlugin);
     registry.register(phone_files::PhoneFilesPlugin);
     registry.register(phone_photos::PhonePhotosPlugin);
+    registry.register(crate::quiet_phone::PhoneQuietPlugin);
     registry.register(crate::virtual_screen::VirtualScreenPlugin);
     registry.register(clipboard::ClipboardPlugin::new());
     registry.register(notification::NotificationPlugin::new());

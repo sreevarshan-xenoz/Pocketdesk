@@ -1,0 +1,204 @@
+package dev.pocketdesk.android.notify
+
+import android.content.Context
+import android.os.Build
+import android.os.SystemClock
+import android.util.Log
+import androidx.core.content.edit
+import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.files.PhoneFilesRule
+import org.json.JSONObject
+
+/** D2's switches and the computer's mute, kept across a process death. */
+object QuietPrefs {
+    private const val PREFS = "pocketdesk-quiet"
+    private const val KEY_HOLD_BACK = "hold_back"
+    private const val KEY_LET_MUTE = "let_computer_mute"
+    private const val KEY_UNTIL = "mute_until_ms"
+    private const val KEY_FILTER = "mute_filter"
+    private const val KEY_STARTED = "mute_started_ms"
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Hold back notifications Do Not Disturb hides from the phone itself. On by default. */
+    fun holdBack(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_HOLD_BACK, true)
+
+    fun setHoldBack(ctx: Context, on: Boolean) = prefs(ctx).edit { putBoolean(KEY_HOLD_BACK, on) }
+
+    /** Let the phone's own computer turn on Do Not Disturb for a while. Off by default. */
+    fun letComputerMute(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_LET_MUTE, false)
+
+    fun setLetComputerMute(ctx: Context, on: Boolean) = prefs(ctx).edit { putBoolean(KEY_LET_MUTE, on) }
+
+    /** The computer's mute running now, if any. */
+    fun mute(ctx: Context): QuietPlan.Mute? {
+        val until = prefs(ctx).getLong(KEY_UNTIL, -1)
+        if (until < 0) return null
+        return QuietPlan.Mute(
+            until,
+            prefs(ctx).getInt(KEY_FILTER, QuietPlan.PRIORITY),
+            prefs(ctx).getLong(KEY_STARTED, 0),
+        )
+    }
+
+    fun setMute(ctx: Context, mute: QuietPlan.Mute?) = prefs(ctx).edit {
+        if (mute == null) {
+            remove(KEY_UNTIL)
+            remove(KEY_FILTER)
+            remove(KEY_STARTED)
+        } else {
+            putLong(KEY_UNTIL, mute.untilMs)
+            putInt(KEY_FILTER, mute.filter)
+            putLong(KEY_STARTED, mute.startedMs)
+        }
+    }
+}
+
+/**
+ * The computer muting this phone (D2), on the notification listener's tick:
+ * keeps the link to its own computer while "Let the computer mute this
+ * phone" is on, carries out the newest mute from that computer, ends a mute
+ * at its time while the filter is still the one it set, and tells the
+ * computer when the phone's state changes or the link comes up.
+ *
+ * [filter] reads the listener's interruption filter; [setFilter] asks
+ * Android for one (`requestInterruptionFilter`), which a listener may.
+ */
+class BackgroundQuiet(
+    private val ctx: Context,
+    private val filter: () -> Int,
+    private val setFilter: (Int) -> Unit,
+) {
+    private var lastConnectMs = 0L
+
+    /** What the computer was last told, and on which link; null forces a report. */
+    private var told: Pair<QuietPlan.State, Pair<String, Int>?>? = null
+
+    fun tick() {
+        val on = QuietPrefs.letComputerMute(ctx)
+        val own = PhoneLink.target(ctx)
+        // No link: what was told is forgotten, so a link that comes back (to
+        // the same computer, which may have lost it) is told again (D2 review).
+        if (RustCore.controlPeer() == null) told = null
+        if (on && own != null && RustCore.controlPeer() == null) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastConnectMs >= RECONNECT_MS) {
+                lastConnectMs = now
+                RustCore.connectToPeer(own.address, own.controlPort, HostStore.wanIdentity(ctx, own.address))
+            }
+        }
+        take(on, own)
+        end()
+        if (on) report()
+    }
+
+    /** The interruption filter changed (the listener's callback): tell the computer. */
+    fun filterChanged() {
+        if (QuietPrefs.letComputerMute(ctx)) report()
+    }
+
+    private fun take(on: Boolean, own: HostStore.Host?) {
+        val asked = runCatching { JSONObject(RustCore.takeQuiet()) }.getOrNull() ?: return
+        val host = asked.optString("host")
+        val port = asked.optInt("port")
+        val fromOwn = PhoneFilesRule.fromOwnComputer(host, port, own?.address, own?.controlPort)
+        if (!on || !fromOwn) {
+            Log.i(TAG, "a mute from the computer, not taken (switch off, or not its own computer)")
+            // Its own computer is told why nothing happened (D2 review).
+            if (fromOwn) refuse()
+            told = null
+            return
+        }
+        val minutes = QuietPlan.minutes(asked.optInt("minutes", -1)) ?: return
+        if (filter() == QuietPlan.UNKNOWN) {
+            // Android has not connected the listener: a filter asked for now
+            // would do nothing, and a mute kept would end the owner's later.
+            Log.i(TAG, "a mute from the computer, not taken: the listener is not connected")
+            return
+        }
+        if (minutes == 0) {
+            val mute = QuietPrefs.mute(ctx)
+            // Only the computer's own mute is ended. From Android 15 asking
+            // for "all" ends only its own mode, so it is always asked (found on
+            // the device: an end while the owner's own was on left the mode
+            // running); before, only while the mute's filter stands.
+            if (mute != null && (QuietPlan.ownMode(Build.VERSION.SDK_INT) || filter() == mute.filter)) {
+                setFilter(QuietPlan.ALL)
+            }
+            QuietPrefs.setMute(ctx, null)
+        } else if (QuietPlan.mayMute(filter())) {
+            // Kept first: a process killed between the two still ends it.
+            val now = System.currentTimeMillis()
+            QuietPrefs.setMute(ctx, QuietPlan.Mute(now + minutes * 60_000L, QuietPlan.PRIORITY, startedMs = now))
+            setFilter(QuietPlan.PRIORITY)
+            Log.i(TAG, "muted for $minutes minutes by the computer")
+        } else {
+            // The owner's own Do Not Disturb stands; the computer is told it.
+            Log.i(TAG, "a mute from the computer, not taken: already in Do Not Disturb")
+        }
+        told = null
+    }
+
+    private fun end() {
+        val mute = QuietPrefs.mute(ctx) ?: return
+        when (QuietPlan.next(mute, System.currentTimeMillis(), filter())) {
+            QuietPlan.Next.END -> {
+                setFilter(QuietPlan.ALL)
+                QuietPrefs.setMute(ctx, null)
+                told = null
+                Log.i(TAG, "the computer's mute ended")
+            }
+            QuietPlan.Next.FORGET -> {
+                // Android 15 and newer keep an app's filter as its own mode,
+                // which the owner's change does not end: retire it, which
+                // leaves the owner's own Do Not Disturb as it is (found on
+                // the device). Before 15 "all" would end the owner's too.
+                if (QuietPlan.ownMode(Build.VERSION.SDK_INT)) setFilter(QuietPlan.ALL)
+                QuietPrefs.setMute(ctx, null)
+                told = null
+                Log.i(TAG, "the computer's mute forgotten: the owner changed Do Not Disturb")
+            }
+            QuietPlan.Next.WAIT -> {}
+        }
+    }
+
+    /** Tell the phone's own computer it may not mute it: the switch is off. */
+    private fun refuse() {
+        val state = QuietPlan.state(filter(), QuietPrefs.mute(ctx))
+        val body = JSONObject()
+            .put("quiet", state?.quiet ?: false)
+            .put("byComputer", state?.byComputer ?: false)
+            .put("refused", true)
+        send(body)
+    }
+
+    /**
+     * Over the link already up to the phone's own computer only, never a
+     * dial: a failure here must not pause the notifications' sends, as
+     * [PhoneLink.sendNow]'s does.
+     */
+    private fun send(body: JSONObject): Boolean {
+        val own = PhoneLink.target(ctx) ?: return false
+        return RustCore.sendPhonePacketOnLink(own.address, own.controlPort, STATE, body.toString())
+            .onFailure { Log.d(TAG, "quiet state not sent: ${it.message}") }
+            .isSuccess
+    }
+
+    private fun report() {
+        val peer = RustCore.controlPeer() ?: return
+        val state = QuietPlan.state(filter(), QuietPrefs.mute(ctx)) ?: return
+        if (told == state to peer) return
+        val body = JSONObject().put("quiet", state.quiet).put("byComputer", state.byComputer)
+        state.untilUnix?.let { body.put("until", it) }
+        if (send(body)) told = state to peer
+    }
+
+    private companion object {
+        const val TAG = "BackgroundQuiet"
+        const val STATE = "kdeconnect.pocketdesk.quiet_state"
+
+        // As the other background features retry: a computer away costs a dial a minute.
+        const val RECONNECT_MS = 60_000L
+    }
+}

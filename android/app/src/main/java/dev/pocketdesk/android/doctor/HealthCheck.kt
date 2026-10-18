@@ -50,6 +50,7 @@ object HealthCheck {
             TextPrefs.reply(ctx) ||
             Prefs.clipboardInBackground(ctx) ||
             Prefs.ringFromComputer(ctx) ||
+            dev.pocketdesk.android.notify.QuietPrefs.letComputerMute(ctx) ||
             Prefs.filesInBackground(ctx) ||
             ScreenshotPrefs.on(ctx) ||
             RecentPhotoPrefs.on(ctx) ||

@@ -33,6 +33,8 @@ pub const OUTBOX_DIR: &str = "outbox";
 pub const LINKS_DIR: &str = "links_out";
 /// Rings the desktop app or the local API asks the server to send to a phone (N1).
 pub const RINGS_DIR: &str = "rings_out";
+/// Mutes the desktop app or the local API asks the server to send to a phone (D2).
+pub const QUIET_DIR: &str = "quiet_out";
 /// KDE Connect devices this computer has seen (3a), for the desktop app.
 pub const KDECONNECT_SEEN_FILE: &str = "kdeconnect_seen.json";
 /// The desktop app's request to look for KDE Connect devices: until when.
@@ -56,6 +58,8 @@ pub const TRANSFER_CANCELS_DIR: &str = "transfer_cancels";
 pub const HOME_ASSISTANT_FILE: &str = "home_assistant.json";
 /// Each phone's last battery report (T8b), written by the server.
 pub const PHONE_STATUS_FILE: &str = "phone_status.json";
+/// Whether each phone is in Do Not Disturb, as it last said (D2).
+pub const PHONE_QUIET_FILE: &str = "phone_quiet.json";
 /// Each phone's last media report (T8d), written by the server.
 pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
 /// Each phone's last listing of its shared folders (T10g).

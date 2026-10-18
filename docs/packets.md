@@ -50,6 +50,8 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.phone_photos.list` |  | yes |  | phone_photos |
 | `kdeconnect.pocketdesk.power` | yes |  | Power | power |
 | `kdeconnect.pocketdesk.privacy` | yes | yes | Power | privacy |
+| `kdeconnect.pocketdesk.quiet` |  | yes |  | phone_quiet |
+| `kdeconnect.pocketdesk.quiet_state` | yes |  | Mute | phone_quiet |
 | `kdeconnect.pocketdesk.sms_sent` | yes |  | Texts | sms |
 | `kdeconnect.pocketdesk.task_result` |  | yes |  | tasks |
 | `kdeconnect.pocketdesk.task_run` | yes |  | Tasks | tasks |

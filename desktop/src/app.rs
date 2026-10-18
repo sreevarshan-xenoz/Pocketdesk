@@ -24,7 +24,7 @@ const REFRESH: Duration = Duration::from_secs(1);
 pub const PAGE_KEY: &str = "page";
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 14] = [
+const PERMISSIONS: [(Capability, &str, &str); 15] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -94,6 +94,11 @@ const PERMISSIONS: [(Capability, &str, &str); 14] = [
         Capability::Ring,
         "Ring this phone from here",
         "Ring it from here when it is lost, at most once a minute. The phone rings only with \"Ring from the computer\" on in its own Settings.",
+    ),
+    (
+        Capability::Mute,
+        "Mute this phone from here",
+        "Turn on the phone's Do Not Disturb from here for a while, and see when it is quiet. The phone allows it only with \"Let the computer mute this phone\" on in its own Settings.",
     ),
 ];
 
@@ -794,6 +799,22 @@ impl PocketdeskApp {
             );
     }
 
+    /// Ask the phone `id` to be quiet for `minutes`, or to end the mute with
+    /// 0 (D2), and say how that went.
+    fn quiet(&mut self, id: &str, minutes: u32) {
+        let who = self.label(id);
+        self.notice = crate::notice::Notice::outcome(match pocketdesk_core::local::quiet::request(
+            &self.state_dir,
+            id,
+            minutes,
+            now_unix(),
+        ) {
+            Ok(_) if minutes == 0 => Ok(format!("Asked {who} to end its mute.")),
+            Ok(_) => Ok(format!("Asked {who} to be quiet for an hour.")),
+            Err(e) => Err(format!("Could not mute {who}: {e}")),
+        });
+    }
+
     /// The Overview's phones (N6): where each is, its battery and last
     /// session, and Ring, Send file… and Send link… for it.
     fn phones_panel(&mut self, ui: &mut egui::Ui) {
@@ -809,6 +830,7 @@ impl PocketdeskApp {
             return;
         }
         let mut ring = None;
+        let mut mute = None;
         let mut send_file = None;
         let mut open_link = None;
         // One short block per phone, so it fits a narrow window (N6).
@@ -842,6 +864,15 @@ impl PocketdeskApp {
                 // Its battery, and its last session unless one runs now
                 // (a session is recorded when it ends).
                 let mut facts = vec![format!("Battery {}", battery_text(device.battery.as_ref(), now))];
+                if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now) {
+                    facts.push(quiet);
+                }
+                if model::mute_refused(device.quiet.as_ref(), now) {
+                    facts.push(
+                        "it said no to the mute: turn on \"Let the computer mute this phone\" in its Settings"
+                            .to_string(),
+                    );
+                }
                 if row.place != model::Place::Session {
                     facts.push(match row.last_session {
                         Some(at) => format!("last session {}", crate::words::ago(now, at)),
@@ -861,6 +892,30 @@ impl PocketdeskApp {
                         .clicked()
                     {
                         ring = Some(device.id.clone());
+                    }
+                    // D2: Mute for an hour, or Unmute a mute from here.
+                    let muted = model::muted_from_here(device.quiet.as_ref(), now);
+                    let mute_why = row.mute.err().unwrap_or(if muted {
+                        "End the mute asked for from here. The phone's own Do Not Disturb settings stay as they are."
+                    } else {
+                        "Turn on the phone's Do Not Disturb for an hour. Calls and messages its own settings let through still come."
+                    });
+                    let owners = !muted && model::quiet_by_owner(device.quiet.as_ref());
+                    let mute_why = if owners && row.mute.is_ok() {
+                        "The phone is already in its own Do Not Disturb; the computer leaves it as it is."
+                    } else {
+                        mute_why
+                    };
+                    if ui
+                        .add_enabled(
+                            row.mute.is_ok() && !owners,
+                            egui::Button::new(if muted { "Unmute" } else { "Mute for an hour" }),
+                        )
+                        .on_hover_text(mute_why)
+                        .on_disabled_hover_text(mute_why)
+                        .clicked()
+                    {
+                        mute = Some((device.id.clone(), if muted { 0 } else { 60 }));
                     }
                     let file_why = row.file.err().unwrap_or("Open Files with this phone chosen.");
                     if ui
@@ -892,6 +947,9 @@ impl PocketdeskApp {
         drop(rows);
         if let Some(id) = ring {
             self.ring(&id);
+        }
+        if let Some((id, minutes)) = mute {
+            self.quiet(&id, minutes);
         }
         if let Some(id) = send_file {
             self.send_to = Some(id);

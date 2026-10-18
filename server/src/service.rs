@@ -114,6 +114,9 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::links::run_watcher());
     // N1: rings the desktop app or `pocketdesk ring` queues for a phone.
     tokio::spawn(crate::ring_phone::run_watcher());
+    // D2: mutes for phones, and what the phones said before this run.
+    crate::quiet_phone::load();
+    tokio::spawn(crate::quiet_phone::run_watcher());
     tokio::spawn(crate::transfers::run());
     tokio::spawn(crate::plugins::phone_battery::run_writer());
     // Home Assistant over MQTT (ecosystem 1e), while config.toml turns it on.
