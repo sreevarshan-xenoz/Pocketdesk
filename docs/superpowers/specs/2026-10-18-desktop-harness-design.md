@@ -38,3 +38,17 @@ About twenty of the checklist's owed desktop checks are done by eye, through the
 - The cast window (`cast_view`), which needs `ffmpeg`.
 - The tray.
 - Fonts from the system: the tests use egui's own, so text looks the same on every runner.
+
+## As built
+
+- **Tests** (`desktop/src/ui_tests.rs`, six with the workspace's tests):
+  - every page opens from the left with its purpose;
+  - Devices, Sessions and Files empty, each with its next step;
+  - Unpair (Cancel keeps, Unpair removes from the trust store);
+  - the Overview's phone with its battery and actions;
+  - the save bar (Undo, and Save writing `config.toml`).
+- **The harness:** the app is built as `main.rs` builds it, with its theme installed, less the system's fonts. The left panel is drawn first, so a page is opened by the first node with its name (its heading says it too).
+- **Snapshots:** one test draws the Overview, Devices and Settings in both themes with a paired phone, and reports every page that changed, not only the first.
+- **A dependency mismatch fixed on the way:** `gpu-allocator` takes any `windows` from 0.53 to 0.62. Cargo had chosen the workspace's 0.61, while `wgpu-hal` 30 hands it 0.62's types, so the feature did not build on Windows. The lock now gives it 0.62.
+- **The first pictures:** drawn here on this box's GPU and looked at, then left to CI: the committed set comes from its software Vulkan.
+
