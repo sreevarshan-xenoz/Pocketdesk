@@ -16,6 +16,9 @@ use crate::model::Device;
 /// How often the history is read again while the page is open.
 const REFRESH: Duration = Duration::from_secs(2);
 
+/// How long a first press of Clear waits for the second.
+const CONFIRM: Duration = Duration::from_secs(5);
+
 /// The most characters of an entry shown.
 const PREVIEW_CHARS: usize = 280;
 
@@ -67,8 +70,9 @@ pub fn targets(devices: &[Device]) -> Vec<&Device> {
 pub struct ClipboardView {
     entries: Vec<ClipEntry>,
     read_at: Option<Instant>,
-    /// Clear pressed once: the next press empties the history.
-    confirm_clear: bool,
+    /// Clear pressed once, when: a press within [`CONFIRM`] empties the
+    /// history (D3 review: an armed Clear had stayed armed for good).
+    confirm_clear: Option<Instant>,
 }
 
 impl ClipboardView {
@@ -98,22 +102,28 @@ impl ClipboardView {
             ui.label(format!(
                 "The last {history} texts that crossed, newest first."
             ));
+            if self.confirm_clear.is_some_and(|at| at.elapsed() >= CONFIRM) {
+                self.confirm_clear = None;
+            }
             if !self.entries.is_empty() {
-                let label = if self.confirm_clear {
+                let label = if self.confirm_clear.is_some() {
                     "Clear: sure?"
                 } else {
                     "Clear history"
                 };
                 if ui.button(label).clicked() {
-                    if self.confirm_clear {
+                    if self.confirm_clear.is_some() {
                         action = Some(match clip_history::clear(state_dir) {
-                            Ok(()) => Action::Done("Cleared.".to_string()),
+                            Ok(()) => {
+                                self.entries.clear();
+                                Action::Done("Cleared.".to_string())
+                            }
+                            // Kept on screen: they are still kept (D3 review).
                             Err(e) => Action::Failed(format!("Not cleared: {e}")),
                         });
-                        self.entries.clear();
-                        self.confirm_clear = false;
+                        self.confirm_clear = None;
                     } else {
-                        self.confirm_clear = true;
+                        self.confirm_clear = Some(Instant::now());
                     }
                 }
             }
@@ -144,8 +154,13 @@ impl ClipboardView {
                         if ui.button("Copy").clicked() {
                             action = Some(Action::Copy(entry.text.clone()));
                         }
-                        let why = "No phone with Clipboard on is linked now.";
-                        ui.add_enabled_ui(!targets.is_empty(), |ui| {
+                        // A cut entry is not what was copied (D3 review).
+                        let why = if entry.cut {
+                            "Kept cut, not as it was copied: copy it instead."
+                        } else {
+                            "No phone with Clipboard on is linked now."
+                        };
+                        ui.add_enabled_ui(!targets.is_empty() && !entry.cut, |ui| {
                             ui.menu_button("Send to…", |ui| {
                                 for device in &targets {
                                     let name = crate::model::device_label(devices, &device.id);
@@ -157,7 +172,10 @@ impl ClipboardView {
                                                 &entry.text,
                                                 now_unix,
                                             ) {
-                                                Ok(_) => Action::Done(format!("Sent to {name}.")),
+                                                // Queued for the server (D3 review).
+                                                Ok(_) => Action::Done(format!(
+                                                    "Asked {name} to take it."
+                                                )),
                                                 Err(e) => Action::Failed(format!("Not sent: {e}")),
                                             },
                                         );

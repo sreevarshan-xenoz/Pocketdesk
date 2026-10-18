@@ -692,6 +692,14 @@ pub fn clipboard_in(
             exit::BAD_ARGUMENTS,
         );
     };
+    if entry.cut {
+        return (
+            error(format!(
+                "entry {place} is kept cut, not as it was copied: copy it whole instead"
+            )),
+            exit::FAILED,
+        );
+    }
     if !running {
         return (
             error("no Pocketdesk server is running to send it"),

@@ -95,7 +95,16 @@ pub fn write(state_dir: &Path, entries: &[ClipEntry]) -> io::Result<()> {
 
 /// Add `entry` to the history on disk, at most `limit` kept.
 pub fn record(state_dir: &Path, entry: ClipEntry, limit: u32) -> io::Result<()> {
-    let mut entries = read(state_dir);
+    // A file there that does not read now (another program holding it) is
+    // not overwritten, which would lose the whole history (D3 review).
+    let path = state_dir.join(CLIP_HISTORY_FILE);
+    let mut entries = match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<HistoryFile>(&raw)
+            .map(|file| file.entries)
+            .map_err(io::Error::other)?,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
     add(&mut entries, entry, limit);
     write(state_dir, &entries)
 }
@@ -275,6 +284,14 @@ mod tests {
         clear(&dir).unwrap();
         std::fs::write(dir.join(CLIP_HISTORY_FILE), "nonsense").unwrap();
         assert!(read(&dir).is_empty(), "unreadable is empty");
+        assert!(
+            record(&dir, ClipEntry::new("c", None, 3), 20).is_err(),
+            "an unreadable file is not overwritten"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join(CLIP_HISTORY_FILE)).unwrap(),
+            "nonsense"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -100,10 +100,9 @@ pub async fn run_sends() {
             let clients = crate::state::clone_clients().await;
             let allowed = crate::plugins::pair::permits(&request.device_id, "kdeconnect.clipboard");
             match send(&request, &clients, allowed).await {
-                Ok(()) => {
-                    tracing::info!("Put a copy on {}'s clipboard", request.device_id);
-                    note(&request.text, None);
-                }
+                // Not kept again (D3 review): it is in the history, from
+                // where it first came.
+                Ok(()) => tracing::info!("Put a copy on {}'s clipboard", request.device_id),
                 Err(reason) => tracing::info!("{} not sent the copy: {reason}", request.device_id),
             }
         }

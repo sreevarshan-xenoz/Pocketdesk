@@ -418,12 +418,12 @@ impl SettingsForm {
         self.home_assistant.as_ref().and_then(|(_, s)| s.clone())
     }
 
-    /// Save the edit to `path` if it is valid.
     /// Whether saving turns the clipboard's history off (D3): it is emptied then.
     pub fn turns_history_off(&self) -> bool {
         self.saved.clipboard_history > 0 && self.edited.clipboard_history == 0
     }
 
+    /// Save the edit to `path` if it is valid.
     pub fn save_to(&mut self, path: &Path) -> Result<(), String> {
         self.apply_text_fields();
         let problems = self.problems();
