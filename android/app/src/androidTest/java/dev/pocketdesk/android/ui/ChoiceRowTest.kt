@@ -2,6 +2,7 @@ package dev.pocketdesk.android.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -31,21 +32,24 @@ class ChoiceRowTest {
 
     private val radio = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
 
-    private fun show(fontScale: Float) {
+    private fun show(fontScale: Float, options: List<String> = listOf("Auto", "Max", "Balanced", "Economy")) {
         compose.setContent {
             val base = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale)) {
-                // The sheet's width on a phone held upright.
-                Box(Modifier.width(400.dp)) {
-                    ChoiceRow("Quality", listOf("Auto", "Max", "Balanced", "Economy"), selected = 0, onSelect = {})
+            // The app's theme: its text style is the one the row measures.
+            MaterialTheme {
+                CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale)) {
+                    // The sheet's width on a phone held upright.
+                    Box(Modifier.width(400.dp)) {
+                        ChoiceRow("Quality", options, selected = 0, onSelect = {})
+                    }
                 }
             }
         }
     }
 
     /** The tops of the four choices (segments and list rows are both radio buttons to TalkBack). */
-    private fun tops(): List<Float> {
-        compose.onAllNodes(radio).assertCountEquals(4)
+    private fun tops(count: Int = 4): List<Float> {
+        compose.onAllNodes(radio).assertCountEquals(count)
         return compose.onAllNodes(radio).fetchSemanticsNodes().map { it.boundsInRoot.top }
     }
 
@@ -53,6 +57,21 @@ class ChoiceRowTest {
     fun atTheUsualSizeTheChoicesAreSegmentsOnOneLine() {
         show(1f)
         assertEquals("one line", 1, tops().distinct().size)
+    }
+
+    private val pane = listOf("Auto", "Dual", "Single")
+
+    /** Up to three keep each whole on one line, beside a selected one's check (C5 review). */
+    @Test
+    fun threeChoicesAreSegmentsAtTheUsualSize() {
+        show(1f, pane)
+        assertEquals("one line", 1, tops(3).distinct().size)
+    }
+
+    @Test
+    fun threeChoicesAreAListAtTwiceTheSize() {
+        show(2f, pane)
+        assertEquals("a line each", 3, tops(3).distinct().size)
     }
 
     @Test
