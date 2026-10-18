@@ -7,13 +7,16 @@ import android.os.Build
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.core.net.toUri
 import java.io.File
 
 /**
- * Where a file from the computer is written (F7b): Downloads/Pocketdesk.
+ * Where a file from the computer is written (F7b): Downloads/Pocketdesk,
+ * or a folder the owner picked (C2), through the Storage Access Framework,
+ * as `<name>.part` until it is whole.
  *
  * On Android 10 and later it is a MediaStore download, kept pending (and so
  * invisible to other apps) until [Target.publish]. On 8 and 9 it is the
@@ -29,12 +32,14 @@ object DownloadTarget {
         private val context: Context,
         private val mediaUri: Uri?,
         private val legacyFile: File?,
+        /** A document in a picked folder (C2), named as a part until published. */
+        private var documentUri: Uri? = null,
     ) {
         /** What a viewer can open once published, if anything. */
-        val viewUri: Uri? get() = mediaUri
+        val viewUri: Uri? get() = mediaUri ?: documentUri
 
         /** Where the bytes are, to find this file again for a retry (T6a). */
-        val location: String get() = mediaUri?.toString() ?: legacyFile?.absolutePath ?: ""
+        val location: String get() = mediaUri?.toString() ?: documentUri?.toString() ?: legacyFile?.absolutePath ?: ""
 
         /** Let go of the descriptor and keep the file, unpublished, for a retry. */
         fun keepForRetry() {
@@ -42,6 +47,15 @@ object DownloadTarget {
         }
 
         fun publish() {
+            documentUri?.let { document ->
+                // The part takes its name; a provider that cannot rename
+                // leaves the file whole under the part's name.
+                val part = displayName(context, document) ?: return
+                runCatching {
+                    DocumentsContract.renameDocument(context.contentResolver, document, DownloadPlace.finishedName(part))
+                }.getOrNull()?.let { documentUri = it }
+                return
+            }
             val uri = mediaUri ?: return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
@@ -52,6 +66,7 @@ object DownloadTarget {
         fun discard() {
             runCatching { descriptor.close() }
             mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            documentUri?.let { runCatching { DocumentsContract.deleteDocument(context.contentResolver, it) } }
             legacyFile?.delete()
         }
     }
@@ -63,6 +78,9 @@ object DownloadTarget {
      */
     fun create(context: Context, name: String, folders: List<String> = emptyList()): Target? = runCatching {
         val safe = DownloadName.safe(name)
+        // The picked folder first (C2); one that can no longer be written
+        // means Downloads/Pocketdesk.
+        tree(context)?.let { tree -> createInTree(context, tree, safe, folders)?.let { return@runCatching it } }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             createMedia(context, safe, folders)
         } else {
@@ -76,7 +94,10 @@ object DownloadTarget {
      */
     fun freeFolder(context: Context, base: String): String =
         FolderWalk.freeName(base) { candidate ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val tree = tree(context)
+            if (tree != null) {
+                child(context, tree, DocumentsContract.getTreeDocumentId(tree), candidate) != null
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 folderInUse(context, candidate)
             } else {
                 val root = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
@@ -105,7 +126,10 @@ object DownloadTarget {
     fun reopen(context: Context, location: String): Target? = runCatching {
         if (location.startsWith("content://")) {
             val uri = location.toUri()
-            context.contentResolver.openFileDescriptor(uri, "rw")?.let { Target(it, context, uri, null) }
+            val document = DocumentsContract.isDocumentUri(context, uri)
+            context.contentResolver.openFileDescriptor(uri, "rw")?.let {
+                if (document) Target(it, context, null, null, uri) else Target(it, context, uri, null)
+            }
         } else {
             val file = File(location).takeIf { it.isFile } ?: return@runCatching null
             Target(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE), context, null, file)
@@ -116,7 +140,12 @@ object DownloadTarget {
     fun delete(context: Context, location: String) {
         runCatching {
             if (location.startsWith("content://")) {
-                context.contentResolver.delete(location.toUri(), null, null)
+                val uri = location.toUri()
+                if (DocumentsContract.isDocumentUri(context, uri)) {
+                    DocumentsContract.deleteDocument(context.contentResolver, uri)
+                } else {
+                    context.contentResolver.delete(uri, null, null)
+                }
             } else {
                 File(location).delete()
             }
@@ -139,6 +168,76 @@ object DownloadTarget {
     private fun mimeOf(name: String): String =
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(DownloadName.extension(name))
             ?: "application/octet-stream"
+
+    /** The writes this app still holds on picked folders. */
+    private fun granted(context: Context): List<String> =
+        context.contentResolver.persistedUriPermissions.filter { it.isWritePermission }.map { it.uri.toString() }
+
+    /** The picked folder files go to, while it can still be written (C2). */
+    fun tree(context: Context): Uri? =
+        DownloadPlace.choose(dev.pocketdesk.android.Prefs.downloadTree(context), granted(context))?.toUri()
+
+    /** A folder was picked but can no longer be written: files went to Downloads/Pocketdesk. */
+    fun treeLost(context: Context): Boolean =
+        DownloadPlace.lost(dev.pocketdesk.android.Prefs.downloadTree(context), granted(context))
+
+    /** What the picked folder is called, for Settings. */
+    fun treeName(context: Context, tree: Uri): String? = runCatching {
+        displayName(context, DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree)))
+    }.getOrNull()
+
+    private fun displayName(context: Context, document: Uri): String? = runCatching {
+        context.contentResolver.query(document, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)
+            ?.use { if (it.moveToFirst()) it.getString(0) else null }
+    }.getOrNull()
+
+    /** The child of [parent] in [tree] named [name], by its document id. */
+    private fun child(context: Context, tree: Uri, parent: String, name: String): String? {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent)
+        return context.contentResolver.query(
+            children,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            var found: String? = null
+            while (found == null && cursor.moveToNext()) {
+                if (cursor.getString(1) == name) found = cursor.getString(0)
+            }
+            found
+        }
+    }
+
+    /** A new part in [tree], under [folders] (found or made). */
+    private fun createInTree(context: Context, tree: Uri, name: String, folders: List<String>): Target? {
+        val resolver = context.contentResolver
+        var parent = DocumentsContract.getTreeDocumentId(tree)
+        for (folder in folders) {
+            parent = child(context, tree, parent, folder)
+                ?: DocumentsContract.createDocument(
+                    resolver,
+                    DocumentsContract.buildDocumentUriUsingTree(tree, parent),
+                    DocumentsContract.Document.MIME_TYPE_DIR,
+                    folder,
+                )?.let { DocumentsContract.getDocumentId(it) }
+                ?: return null
+        }
+        // A plain type for the part: a provider adds the extension a type
+        // implies, and the finished name brings its own.
+        val document = DocumentsContract.createDocument(
+            resolver,
+            DocumentsContract.buildDocumentUriUsingTree(tree, parent),
+            "application/octet-stream",
+            DownloadPlace.partName(name),
+        ) ?: return null
+        val descriptor = resolver.openFileDescriptor(document, "rw")
+        if (descriptor == null) {
+            runCatching { DocumentsContract.deleteDocument(resolver, document) }
+            return null
+        }
+        return Target(descriptor, context, null, null, document)
+    }
 
     private fun createMedia(context: Context, name: String, folders: List<String>): Target? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null

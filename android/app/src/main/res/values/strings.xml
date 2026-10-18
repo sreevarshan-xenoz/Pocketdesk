@@ -676,4 +676,10 @@
     <string name="settings_control_summary_on">On: while this phone shows its screen on a computer, that computer can tap, swipe, type and press Back and Home. Not while the phone is locked, apart from Back and Home.</string>
     <string name="cast_showing_controlled">This phone\'s screen is shown and controlled on %1$s</string>
     <string name="settings_control_open_accessibility">Open Accessibility settings</string>
+    <string name="settings_download_folder">Files from computers go to</string>
+    <string name="settings_download_folder_default">Downloads/Pocketdesk</string>
+    <string name="settings_download_folder_picked">The folder you picked</string>
+    <string name="settings_download_folder_lost">The folder you picked is gone or no longer allowed, so files go to Downloads/Pocketdesk. Tap to pick another.</string>
+    <string name="settings_download_folder_reset">Use Downloads/Pocketdesk again</string>
+    <string name="transfer_folder_gone">The folder picked for files from computers is gone or no longer allowed, so this went to Downloads/Pocketdesk.</string>
 </resources>

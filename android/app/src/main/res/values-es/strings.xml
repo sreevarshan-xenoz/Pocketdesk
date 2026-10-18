@@ -672,4 +672,10 @@
     <string name="settings_control_summary_on">Activado: mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar, escribir y pulsar Atrás e Inicio. No con el teléfono bloqueado, salvo Atrás e Inicio.</string>
     <string name="cast_showing_controlled">La pantalla de este teléfono se muestra y se controla en %1$s</string>
     <string name="settings_control_open_accessibility">Abrir los ajustes de Accesibilidad</string>
+    <string name="settings_download_folder">Los archivos de ordenadores van a</string>
+    <string name="settings_download_folder_default">Descargas/Pocketdesk</string>
+    <string name="settings_download_folder_picked">La carpeta que elegiste</string>
+    <string name="settings_download_folder_lost">La carpeta que elegiste ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk. Toca para elegir otra.</string>
+    <string name="settings_download_folder_reset">Volver a usar Descargas/Pocketdesk</string>
+    <string name="transfer_folder_gone">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que esto fue a Descargas/Pocketdesk.</string>
 </resources>

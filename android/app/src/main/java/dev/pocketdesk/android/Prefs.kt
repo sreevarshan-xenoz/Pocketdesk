@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
+    private const val KEY_DOWNLOAD_TREE = "download_tree"
     private const val KEY_CONTROL_FROM_COMPUTER = "control_from_computer"
     private const val KEY_INTERNET_FILES = "internet_files"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
@@ -224,6 +225,15 @@ object Prefs {
 
     fun setControlFromComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CONTROL_FROM_COMPUTER, enabled) }
+        bump()
+    }
+
+    /** C2: the folder files from computers go to (a tree uri), or null for Downloads/Pocketdesk. */
+    fun downloadTree(ctx: Context): String? =
+        prefs(ctx).getString(KEY_DOWNLOAD_TREE, null)?.takeIf { it.isNotEmpty() }
+
+    fun setDownloadTree(ctx: Context, tree: String?) {
+        prefs(ctx).edit { if (tree == null) remove(KEY_DOWNLOAD_TREE) else putString(KEY_DOWNLOAD_TREE, tree) }
         bump()
     }
 

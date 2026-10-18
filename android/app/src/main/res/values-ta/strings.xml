@@ -667,4 +667,10 @@
     <string name="settings_control_summary_on">இயக்கத்தில்: இந்தத் தொலைபேசி ஒரு கணினியில் தன் திரையைக் காட்டும்போது, அந்தக் கணினி தட்டலாம், இழுக்கலாம், தட்டச்சு செய்யலாம், பின், முகப்பு பொத்தான்களை அழுத்தலாம். தொலைபேசி பூட்டப்பட்டிருக்கும்போது பின், முகப்பு மட்டுமே.</string>
     <string name="cast_showing_controlled">இந்தத் தொலைபேசியின் திரை %1$s இல் காட்டப்பட்டுக் கட்டுப்படுத்தப்படுகிறது</string>
     <string name="settings_control_open_accessibility">அணுகல்தன்மை அமைப்புகளைத் திற</string>
+    <string name="settings_download_folder">கணினிகளிலிருந்து வரும் கோப்புகள் செல்லும் இடம்</string>
+    <string name="settings_download_folder_default">Downloads/Pocketdesk</string>
+    <string name="settings_download_folder_picked">நீங்கள் தேர்ந்தெடுத்த கோப்புறை</string>
+    <string name="settings_download_folder_lost">நீங்கள் தேர்ந்தெடுத்த கோப்புறை இல்லை அல்லது இனி அனுமதிக்கப்படவில்லை, எனவே கோப்புகள் Downloads/Pocketdesk-க்குச் செல்கின்றன. வேறொன்றைத் தேர்ந்தெடுக்கத் தட்டவும்.</string>
+    <string name="settings_download_folder_reset">மீண்டும் Downloads/Pocketdesk-ஐப் பயன்படுத்து</string>
+    <string name="transfer_folder_gone">கணினிகளிலிருந்து வரும் கோப்புகளுக்குத் தேர்ந்தெடுத்த கோப்புறை இல்லை அல்லது இனி அனுமதிக்கப்படவில்லை, எனவே இது Downloads/Pocketdesk-க்குச் சென்றது.</string>
 </resources>
