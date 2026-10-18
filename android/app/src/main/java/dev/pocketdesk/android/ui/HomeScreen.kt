@@ -102,6 +102,8 @@ fun HomeScreen(
     var removing by remember { mutableStateOf<HostStore.Host?>(null) }
     // U3: the card being renamed, and a count that redraws names.
     var renaming by remember { mutableStateOf<HostStore.Host?>(null) }
+    // D3: the computer whose card opened the clipboard history.
+    var historyFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var names by remember { mutableIntStateOf(0) }
     LaunchedEffect(hosts) {
         // The names the computers gave themselves on this run's connections.
@@ -373,6 +375,7 @@ fun HomeScreen(
                         onCheck = { checking = host },
                         onRemove = { removing = host },
                         onRename = { renaming = host },
+                        onHistory = { historyFor = host },
                     )
                 }
                 item {
@@ -510,6 +513,27 @@ fun HomeScreen(
         }
     }
 
+    // D3: the phone's clipboard history, outside a session: a picked copy
+    // goes to that computer's clipboard.
+    historyFor?.let { host ->
+        val shown = HostStore.shownName(context, host.address)
+        ClipboardHistorySheet(
+            onDismiss = { historyFor = null },
+            onPick = { text ->
+                historyFor = null
+                scope.launch {
+                    val sent = withContext(Dispatchers.IO) {
+                        RustCore.sendClipboard(host.address, host.controlPort, text).isSuccess
+                    }
+                    wakeSaid = resources.getString(
+                        if (sent) R.string.send_clipboard_sent else R.string.send_clipboard_failed,
+                        shown,
+                    )
+                }
+            },
+        )
+    }
+
     renaming?.let { host ->
         RenameDialog(
             shown = HostStore.shownName(context, host.address),
@@ -642,6 +666,7 @@ private fun HostCard(
     onCheck: () -> Unit,
     onRemove: () -> Unit,
     onRename: () -> Unit,
+    onHistory: () -> Unit,
 ) {
     val title = name ?: host.address
     val connectLabel = stringResource(R.string.connect)
@@ -674,6 +699,8 @@ private fun HostCard(
                             add(R.string.wake_settings to onWakeSettings)
                             add(R.string.doctor_title to onCheck)
                             add(R.string.card_rename to onRename)
+                            // D3: an earlier copy, sent to this computer again.
+                            add(R.string.clipboard_history to onHistory)
                         }
                         entries.forEach { (label, action) ->
                             DropdownMenuItem(
