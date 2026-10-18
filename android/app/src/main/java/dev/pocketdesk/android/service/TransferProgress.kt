@@ -26,7 +26,9 @@ object TransferProgress {
 
         /** Add the reading [done] bytes at [atMs]; the speed now, 0 until it can tell. */
         fun add(atMs: Long, done: Long): Long {
-            if (readings.lastOrNull()?.let { it.second > done } == true) readings.clear()
+            // A reading lower than the last, or the first above nothing (a
+            // resumed attempt counts what it already had at once): start over.
+            if (readings.lastOrNull()?.let { it.second > done || (it.second == 0L && done > 0L) } == true) readings.clear()
             readings.addLast(atMs to done)
             while (readings.size > 1 && atMs - readings.first().first > windowMs) readings.removeFirst()
             val (firstAt, firstDone) = readings.first()

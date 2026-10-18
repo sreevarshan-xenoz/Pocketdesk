@@ -34,6 +34,15 @@ class TransferProgressTest {
     }
 
     @Test
+    fun aResumedAttemptsFirstReadingIsNotSpeed() {
+        val speed = TransferProgress.Speed()
+        speed.add(0, 0)
+        speed.add(1_000, 0)
+        assertEquals("what the other end had is not speed", 0, speed.add(2_000, 800_000_000))
+        assertEquals(1_000, speed.add(3_000, 800_001_000))
+    }
+
+    @Test
     fun countersOfAnotherTransferDoNotCount() {
         assertEquals(40, TransferProgress.forFile(400, 1000, 1000))
         assertEquals("the last file's counters", 0, TransferProgress.forFile(400, 500, 1000))
