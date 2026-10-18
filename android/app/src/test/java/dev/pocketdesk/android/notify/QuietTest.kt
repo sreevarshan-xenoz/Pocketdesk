@@ -76,4 +76,11 @@ class QuietTest {
         val withinADay = mute.untilMs - QuietPlan.MAX_MINUTES * 60_000L
         assertEquals(QuietPlan.Next.WAIT, QuietPlan.next(mute, nowMs = withinADay, filter = QuietPlan.PRIORITY))
     }
+
+    @Test
+    fun `from Android 15 a requested filter is the app's own mode`() {
+        assertFalse(QuietPlan.ownMode(34))
+        assertTrue(QuietPlan.ownMode(35))
+        assertTrue(QuietPlan.ownMode(37))
+    }
 }

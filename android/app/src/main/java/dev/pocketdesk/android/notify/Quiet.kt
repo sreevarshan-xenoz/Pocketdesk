@@ -22,6 +22,12 @@ object QuietPlan {
      */
     fun mayMute(filter: Int): Boolean = filter == ALL
 
+    /**
+     * Whether an app's requested filter is a mode of its own (Android 15,
+     * API 35, and newer): asking for "all" then ends only that mode.
+     */
+    fun ownMode(sdk: Int): Boolean = sdk >= 35
+
     /** The computer's minutes, 0 to end a mute; null for a value out of range. */
     fun minutes(asked: Int): Int? = asked.takeIf { it in 0..MAX_MINUTES }
 

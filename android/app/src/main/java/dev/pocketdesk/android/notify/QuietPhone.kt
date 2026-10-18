@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.notify
 
 import android.content.Context
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.edit
@@ -136,6 +137,11 @@ class BackgroundQuiet(
                 Log.i(TAG, "the computer's mute ended")
             }
             QuietPlan.Next.FORGET -> {
+                // Android 15 and newer keep an app's filter as its own mode,
+                // which the owner's change does not end: retire it, which
+                // leaves the owner's own Do Not Disturb as it is (found on
+                // the device). Before 15 "all" would end the owner's too.
+                if (QuietPlan.ownMode(Build.VERSION.SDK_INT)) setFilter(QuietPlan.ALL)
                 QuietPrefs.setMute(ctx, null)
                 told = null
                 Log.i(TAG, "the computer's mute forgotten: the owner changed Do Not Disturb")
