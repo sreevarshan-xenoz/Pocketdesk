@@ -79,6 +79,17 @@ fun PhoneNotificationsSection() {
         enabled = enabled,
     )
     if (!enabled) return
+    // D2: what Do Not Disturb hides on the phone stays off the computer.
+    val holdBack = version.let { dev.pocketdesk.android.notify.QuietPrefs.holdBack(context) }
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_hold_back),
+        stringResource(R.string.phone_notifications_hold_back_summary),
+        holdBack,
+        {
+            dev.pocketdesk.android.notify.QuietPrefs.setHoldBack(context, it)
+            version++
+        },
+    )
     // C3: how long a notification waits for a computer out of reach.
     val wait = version.let { PhoneNotificationPrefs.waitMinutes(context) }
     SettingRow(stringResource(R.string.phone_notifications_wait), stringResource(R.string.phone_notifications_wait_summary))
