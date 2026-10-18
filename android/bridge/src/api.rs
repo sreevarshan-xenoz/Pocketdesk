@@ -752,6 +752,17 @@ pub async fn connect_to_peer(
                                         from_peer.1,
                                     );
                                 }
+                                // The computer's mutes for this phone (D2).
+                                if trimmed.contains("pocketdesk.quiet")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                {
+                                    crate::quiet_requests::receive(
+                                        &pkt.packet_type,
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    );
+                                }
                                 // The computer's answers to this phone's
                                 // notifications (T10c), kept for the app.
                                 if trimmed.contains("kdeconnect.notification.")
@@ -849,6 +860,7 @@ pub async fn connect_to_peer(
                         crate::notification_answers::forget();
                         crate::phone_file_requests::forget();
                         crate::photo_requests::forget();
+                        crate::quiet_requests::forget();
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );
