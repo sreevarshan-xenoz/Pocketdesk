@@ -5,6 +5,10 @@ The ordered battery to run against a real phone (arm64, Android 8.0+/API 26, deb
 `FAIL: <symptom>` next to the box; each item maps to the commit/feature noted so fixes land in the right
 place.
 
+The open items, by where they can run (here, Linux, a SIM, a second phone, away from home, or never on
+the owner's box), are in `docs/owed-checks.md`, generated from this file by `scripts/owed_checks.py`: run it
+after ticking items, or CI fails.
+
 Several sections are now ticked from real runs (OPPO CPH2359 over LAN and tailnet, 2026-09-22 onward).
 What is *not* ticked is not verified, however confident the code looks — and §22 is the standing register
 of exactly that, including the one fix that merged without its confirming observation.
