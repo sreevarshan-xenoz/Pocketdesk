@@ -58,6 +58,8 @@ pub const TRANSFER_CANCELS_DIR: &str = "transfer_cancels";
 pub const HOME_ASSISTANT_FILE: &str = "home_assistant.json";
 /// Each phone's last battery report (T8b), written by the server.
 pub const PHONE_STATUS_FILE: &str = "phone_status.json";
+/// Whether each phone is in Do Not Disturb, as it last said (D2).
+pub const PHONE_QUIET_FILE: &str = "phone_quiet.json";
 /// Each phone's last media report (T8d), written by the server.
 pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
 /// Each phone's last listing of its shared folders (T10g).
