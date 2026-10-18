@@ -289,6 +289,12 @@ class TransferService : Service() {
                 return
             }
             val result = sendCounted(job.address, job.port, uri, file.path.last(), part, title)
+            if (TransferRetry.isCancel(result.exceptionOrNull()?.message)) {
+                // Cancelled on either side (C1 review): the whole folder stops.
+                cancelledAny = true
+                sendCount += plan.files.size - index - 1
+                return
+            }
             if (!streak.record(result.isSuccess, result.exceptionOrNull()?.message)) {
                 // The computer stopped answering: the rest are not sent.
                 val left = plan.files.size - index - 1

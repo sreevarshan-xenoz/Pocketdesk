@@ -195,6 +195,10 @@ object TransferRetry {
         CANCELLED_ON_COMPUTER,
     )
 
+    /** Whether [error] is a Cancel, on either side (C1). */
+    fun isCancel(error: String?): Boolean =
+        error != null && (error.contains(CANCELLED_ON_PHONE) || error.contains(CANCELLED_ON_COMPUTER))
+
     /** What a transfer the phone's Cancel stopped fails with (the bridge's words too). */
     const val CANCELLED_ON_PHONE = "cancelled on the phone"
 
