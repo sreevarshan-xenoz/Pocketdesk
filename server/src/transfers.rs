@@ -443,10 +443,20 @@ mod tests {
         );
         assert_eq!(cancel_at(&mut table, "unknown", now), None);
         // All of it there: left to finish, and nothing remembered.
-        table.rows.get("r1").unwrap().done.store(1_000, Ordering::Relaxed);
+        table
+            .rows
+            .get("r1")
+            .unwrap()
+            .done
+            .store(1_000, Ordering::Relaxed);
         assert_eq!(cancel_at(&mut table, "r1", now), None);
         assert!(!take_cancelled_at(&mut table, "offer:abc", now));
-        table.rows.get("r1").unwrap().done.store(10, Ordering::Relaxed);
+        table
+            .rows
+            .get("r1")
+            .unwrap()
+            .done
+            .store(10, Ordering::Relaxed);
         assert_eq!(
             cancel_at(&mut table, "r1", now).as_deref(),
             Some("offer:abc")
