@@ -43,6 +43,16 @@ pub struct Fixture {
     _turn: MutexGuard<'static, ()>,
 }
 
+/// The folders go when each test ends (C4 review), so a run leaves no
+/// pairing or PIN behind; the next test makes them again.
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        if let Some(root) = folders().state.parent() {
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+}
+
 impl Fixture {
     pub fn new() -> Self {
         static TURN: Mutex<()> = Mutex::new(());
