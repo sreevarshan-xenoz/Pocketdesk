@@ -1046,7 +1046,11 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let file_path = jstring_to_string(&mut env, &file_path);
-    let json = envelope_unit(RUNTIME.block_on(api::send_file(address, port as u16, file_path)));
+    let json = envelope_unit(RUNTIME.block_on(cancel::cancellable(api::send_file(
+        address,
+        port as u16,
+        file_path,
+    ))));
     to_jstring(&mut env, json)
 }
 

@@ -29,7 +29,10 @@ pub(crate) async fn cancellable<T>(
     let number = NEXT.fetch_add(1, Ordering::Relaxed);
     let token = CancellationToken::new();
     *current() = Some((number, token.clone()));
+    // Biased: the work is polled first, so it takes over its file
+    // descriptor even when the cancel is already in (C1 review).
     let out = tokio::select! {
+        biased;
         out = work => out,
         () = token.cancelled() => Err(CANCELLED.to_string()),
     };
