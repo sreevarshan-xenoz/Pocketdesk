@@ -446,20 +446,33 @@ pub(crate) fn download_dir() -> Option<PathBuf> {
                 .unwrap_or_default()
         }
     };
-    chosen_folder(&chosen)
+    chosen_folder(&chosen, &protected_dirs())
         .or_else(dirs::download_dir)
         .or_else(dirs::home_dir)
 }
 
 /// The owner's folder for received files when it can take them: set,
 /// absolute and a folder. Anything else is Downloads, and the log says why.
-fn chosen_folder(chosen: &str) -> Option<PathBuf> {
+fn chosen_folder(chosen: &str, protected: &[PathBuf]) -> Option<PathBuf> {
     let chosen = chosen.trim();
     if chosen.is_empty() {
         return None;
     }
     let path = PathBuf::from(chosen);
     if path.is_absolute() && path.is_dir() {
+        // Never the server's own folders, nor inside them (C2 review): a
+        // paired phone could plant a PIN file or a cast token there.
+        let real = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let theirs = protected.iter().any(|dir| {
+            let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+            real.starts_with(&dir)
+        });
+        if theirs {
+            warn_once(&format!(
+                "Received files go to Downloads: the folder chosen for them ({chosen}) is Pocketdesk's own"
+            ));
+            return None;
+        }
         Some(path)
     } else {
         warn_once(&format!(
@@ -467,6 +480,17 @@ fn chosen_folder(chosen: &str) -> Option<PathBuf> {
         ));
         None
     }
+}
+
+/// The server's own folders, which received files never go into.
+fn protected_dirs() -> Vec<PathBuf> {
+    [
+        pocketdesk_core::local::paths::state_dir(),
+        pocketdesk_core::local::paths::config_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Log `message` unless it was the last one logged: a folder of a thousand
@@ -1741,19 +1765,33 @@ mod tests {
     fn received_files_go_to_the_chosen_folder_only_when_it_is_one() {
         let dir = std::env::temp_dir().join(format!("pd-c2-folder-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(chosen_folder(&dir.display().to_string()), Some(dir.clone()));
-        assert_eq!(chosen_folder(""), None, "unset: Downloads");
-        assert_eq!(chosen_folder("   "), None);
-        assert_eq!(chosen_folder("relative/folder"), None, "not absolute");
+        let none: &[PathBuf] = &[];
+        assert_eq!(
+            chosen_folder(&dir.display().to_string(), none),
+            Some(dir.clone())
+        );
+        assert_eq!(chosen_folder("", none), None, "unset: Downloads");
+        assert_eq!(chosen_folder("   ", none), None);
+        assert_eq!(chosen_folder("relative/folder", none), None, "not absolute");
         let gone = dir.join("gone");
-        assert_eq!(chosen_folder(&gone.display().to_string()), None, "gone");
+        assert_eq!(
+            chosen_folder(&gone.display().to_string(), none),
+            None,
+            "gone"
+        );
         let file = dir.join("a-file");
         std::fs::write(&file, b"x").unwrap();
         assert_eq!(
-            chosen_folder(&file.display().to_string()),
+            chosen_folder(&file.display().to_string(), none),
             None,
             "not a folder"
         );
+        // The server's own folders, and inside them, are never it.
+        let inside = dir.join("inside");
+        std::fs::create_dir_all(&inside).unwrap();
+        let ours = [dir.clone()];
+        assert_eq!(chosen_folder(&dir.display().to_string(), &ours), None);
+        assert_eq!(chosen_folder(&inside.display().to_string(), &ours), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
     use tokio::io::AsyncReadExt;
