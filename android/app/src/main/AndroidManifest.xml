@@ -13,6 +13,10 @@
     <!-- T10k: this phone's screen on the computer, only while the owner casts it. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- D1: after a system update, say what stopped working. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- D1: Advanced Protection keeps the control service to accessibility tools on Android 17. -->
+    <uses-permission android:name="android.permission.QUERY_ADVANCED_PROTECTION_MODE" />
     <!-- N1: the ring from the computer onto the lock screen, only while it rings. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- N5b: texts on the computer and replies from it; both asked for only
@@ -247,6 +251,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/clipboard_paths" />
         </provider>
+        <!-- D1: after the app or the system updated, what stopped working. -->
+        <receiver
+            android:name=".doctor.HealthReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
         <!-- N1: Stop on the ring from the computer. -->
         <receiver
             android:name=".ring.StopRingReceiver"

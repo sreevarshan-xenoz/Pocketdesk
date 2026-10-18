@@ -241,6 +241,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.backgroundReminder(context),
                 { Prefs.setBackgroundReminder(context, it) },
             )
+            // D1: what stopped working, on Home and after updates.
+            SettingSwitch(
+                stringResource(R.string.settings_health),
+                stringResource(R.string.settings_health_summary),
+                Prefs.healthAlerts(context),
+                { Prefs.setHealthAlerts(context, it) },
+            )
 
             SettingsHeader(stringResource(R.string.settings_notifications_texts))
             PhoneNotificationsSection()

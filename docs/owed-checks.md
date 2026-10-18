@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-554 open items.
+558 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 323 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 324 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
@@ -14,8 +14,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 9 |
 | A second computer | 4 |
 | A Linux desktop (the Azure VM serves for some) | 78 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 19 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 36 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 38 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -663,6 +663,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A phone with thousands of photos: the newest 24, quickly.
 - HEIC photos: thumbnails shown, Copy saying it cannot.
 
+**111. Health after updates (D1)**
+
+- Advanced Protection on, with control on (needs the owner's Google account).
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1282,6 +1286,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Android 8 or 9: the legacy thumbnail path.
 
+**111. Health after updates (D1)**
+
+- A low-RAM phone on Android 10 or older: no "stopped" card.
+
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
 **2b. Compositor-true latency read (R4 E3)**
@@ -1406,3 +1414,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **108. The phone with large fonts, landscape and TalkBack (C5)**
 
 - A TalkBack walk by hand: Home, the Add form, Settings, the session menu (TalkBack's tutorial takes the screen when it is turned on from adb, and adb cannot read which node it reads).
+
+**111. Health after updates (D1)**
+
+- A real system update (the fingerprint path), and a listener that stays unbound after one.
+- The card in Spanish and Tamil, and with TalkBack.

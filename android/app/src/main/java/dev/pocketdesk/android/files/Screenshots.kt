@@ -30,10 +30,20 @@ object ScreenshotPrefs {
     private const val KEY_SAVE = "save"
     private const val KEY_SINCE = "since"
     private const val KEY_LAST_ID = "last_id"
+    private const val KEY_STOPPED = "stopped"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun on(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_ON, false)
+
+    /** D1: the switch turned itself off when photo access went, and the owner has not chosen since. */
+    fun stopped(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_STOPPED, false)
+
+    /** Turned off because photo access went: Home says so until the owner chooses again. */
+    fun stopForAccess(ctx: Context) = prefs(ctx).edit {
+        putBoolean(KEY_ON, false)
+        putBoolean(KEY_STOPPED, true)
+    }
 
     fun clipboard(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_CLIPBOARD, true)
 
@@ -50,6 +60,8 @@ object ScreenshotPrefs {
     fun setOn(ctx: Context, value: Boolean) {
         prefs(ctx).edit {
             putBoolean(KEY_ON, value)
+            // The owner chose: no longer "turned itself off" (D1).
+            remove(KEY_STOPPED)
             if (value) {
                 putLong(KEY_SINCE, System.currentTimeMillis() / 1000)
                 putLong(KEY_LAST_ID, Screenshots.newestId(ctx))
@@ -89,7 +101,8 @@ class Screenshots(private val ctx: Context) {
         if (!ScreenshotPrefs.on(ctx) || !ScreenshotPrefs.granted(ctx)) {
             // Access taken back turns it off: given back, it does not start
             // again by itself with screenshots taken in between.
-            if (ScreenshotPrefs.on(ctx)) ScreenshotPrefs.setOn(ctx, false)
+            // Said on Home (D1): it would otherwise stop without a word.
+            if (ScreenshotPrefs.on(ctx)) ScreenshotPrefs.stopForAccess(ctx)
             stopWatching()
             return
         }

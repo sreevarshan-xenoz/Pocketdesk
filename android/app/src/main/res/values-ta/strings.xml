@@ -682,4 +682,30 @@
     <string name="settings_download_folder_lost">நீங்கள் தேர்ந்தெடுத்த கோப்புறை இல்லை அல்லது இனி அனுமதிக்கப்படவில்லை, எனவே கோப்புகள் Downloads/Pocketdesk-க்குச் செல்கின்றன. வேறொன்றைத் தேர்ந்தெடுக்கத் தட்டவும்.</string>
     <string name="settings_download_folder_reset">மீண்டும் Downloads/Pocketdesk-ஐப் பயன்படுத்து</string>
     <string name="transfer_folder_gone">கணினிகளிலிருந்து வரும் கோப்புகளுக்குத் தேர்ந்தெடுத்த கோப்புறை இல்லை அல்லது இனி அனுமதிக்கப்படவில்லை, எனவே இது Downloads/Pocketdesk-க்குச் சென்றது.</string>
+    <!-- D1: health after updates. -->
+    <string name="health_channel">ஏதோ வேலை செய்வது நின்றது</string>
+    <string name="health_title">ஏதோ வேலை செய்வது நின்றது</string>
+    <string name="health_after_update">புதுப்பிப்புக்குப் பிறகு ஏதோ வேலை செய்வது நின்றது</string>
+    <string name="health_not_now">இப்போது வேண்டாம்</string>
+    <string name="health_fix">சரிசெய்</string>
+    <string name="health_turn_off">அணை</string>
+    <string name="health_choose">தேர்ந்தெடு</string>
+    <string name="health_notification_access">அறிவிப்பு அணுகல் அணைக்கப்பட்டுள்ளது, அதனால் Pocketdesk பின்னணியில் செய்வது நின்றுவிட்டது.</string>
+    <string name="health_listener_stopped">பின்னணியில் இயங்கும் Pocketdesk பகுதியை Android நிறுத்தியது. அதன் அறிவிப்பு அணுகலை அணைத்து மீண்டும் இயக்கினால் அது தொடங்கும்.</string>
+    <string name="health_texts_receive">குறுஞ்செய்திகள் கணினியை அடைய முடியாது: அவற்றைப் பெற Pocketdesk-க்கு அனுமதி இல்லை.</string>
+    <string name="health_texts_send">கணினியிலிருந்து வரும் பதில்களை அனுப்ப முடியாது: குறுஞ்செய்தி அனுப்ப Pocketdesk-க்கு அனுமதி இல்லை.</string>
+    <string name="health_contacts">குறுஞ்செய்திகளில் பெயர்களுக்குப் பதிலாக எண்கள் தெரியும்: தொடர்புகளைப் படிக்க Pocketdesk-க்கு அனுமதி இல்லை.</string>
+    <string name="health_photos">திரைப்பிடிப்புகளும் படங்களும் கணினியை அடைய முடியாது: படங்களைப் பார்க்க Pocketdesk-க்கு அனுமதி இல்லை.</string>
+    <string name="health_app_notifications">Pocketdesk அறிவிப்புகளைக் காட்ட முடியாது, அதனால் கணினியிலிருந்து வரும் ஒலிப்புகளும் கோப்புகளும் கவனிக்கப்படாமல் போகும்.</string>
+    <string name="health_control_service">கணினியால் இந்தத் தொலைபேசியைக் கட்டுப்படுத்த முடியாது: Android-இன் அணுகல்தன்மை அமைப்புகளில் «Pocketdesk கட்டுப்பாடு» அணைக்கப்பட்டுள்ளது.</string>
+    <string name="health_control_blocked">கணினியால் இந்தத் தொலைபேசியைக் கட்டுப்படுத்த முடியாது: மேம்பட்ட பாதுகாப்பு அணுகல்தன்மைச் சேவைகளை அணுகல்தன்மைக் கருவிகளுக்கு மட்டுமே அனுமதிக்கிறது.</string>
+    <string name="health_download_folder">கணினிகளிலிருந்து வரும் கோப்புகளுக்குத் தேர்ந்தெடுத்த கோப்புறை இல்லை அல்லது இனி அனுமதிக்கப்படவில்லை, எனவே கோப்புகள் Downloads/Pocketdesk-க்குச் செல்கின்றன.</string>
+    <string name="health_screenshots_stopped">படங்கள் அணுகல் நீக்கப்பட்டபோது புதிய திரைப்பிடிப்புகள் கணினிக்குச் செல்வது நின்றது. அமைப்புகளில் மீண்டும் இயக்கவும்.</string>
+    <string name="health_settings">அமைப்புகள்</string>
+    <string name="settings_health">ஏதாவது வேலை செய்வது நின்றால் சொல்</string>
+    <string name="settings_health_summary">முகப்பில், மற்றும் புதுப்பிப்புக்குப் பிறகு ஒரு அறிவிப்பில்</string>
+    <plurals name="health_count">
+        <item quantity="one">Pocketdesk-இல் சரிசெய்ய %1$d விஷயம்</item>
+        <item quantity="other">Pocketdesk-இல் சரிசெய்ய %1$d விஷயங்கள்</item>
+    </plurals>
 </resources>
