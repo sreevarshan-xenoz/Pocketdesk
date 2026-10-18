@@ -1220,6 +1220,32 @@ async fn control_request(
     reply_type: &str,
     timeout: Duration,
 ) -> Result<Option<serde_json::Value>, NoReply> {
+    request_answer(address, port, request, reply_type, timeout, |reply| {
+        reply_answers(&request.body, reply)
+    })
+    .await
+    .map_err(|_| NoReply)
+}
+
+/// Why [`request_answer`] has no answer.
+#[derive(Debug, PartialEq, Eq)]
+enum Unanswered {
+    /// The request never went out.
+    NotSent,
+    /// It went out, and nothing answering it came back in time.
+    Silent,
+}
+
+/// [`control_request`], with the answer chosen by `matches`, and a request
+/// that never went out told from one that went unanswered.
+async fn request_answer(
+    address: &str,
+    port: u16,
+    request: &NetworkPacket,
+    reply_type: &str,
+    timeout: Duration,
+    matches: impl Fn(&serde_json::Value) -> bool,
+) -> Result<Option<serde_json::Value>, Unanswered> {
     // Only the live connection *to this desktop* may carry the request: with
     // another computer connected, reusing it would send this desktop's query -
     // or its pairing PIN - to the wrong machine, and record that machine's
@@ -1238,27 +1264,27 @@ async fn control_request(
     let sender = TcpDeviceSender::from_arc(writer, address.to_string());
     sender.send_packet(request).await.map_err(|e| {
         tracing::warn!("Control request failed to send: {e}");
-        NoReply
+        Unanswered::NotSent
     })?;
 
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
-            return Err(NoReply);
+            return Err(Unanswered::Silent);
         }
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Ok(line)) => {
                 if let Ok(packet) = NetworkPacket::from_wire(&line)
                     && packet.packet_type == reply_type
-                    && reply_answers(&request.body, &packet.body)
+                    && matches(&packet.body)
                 {
                     return Ok(Some(packet.body));
                 }
             }
             // The reader loop retires the shared writer when the socket dies,
             // so a lagging subscriber simply means "no answer on this one".
-            Ok(Err(_)) | Err(_) => return Err(NoReply),
+            Ok(Err(_)) | Err(_) => return Err(Unanswered::Silent),
         }
     }
 }
@@ -1276,6 +1302,23 @@ mod reply_tests {
     }
 
     use serde_json::json;
+
+    /// C3: a notification asks the computer to answer, and the answer says
+    /// whether it was refused.
+    #[test]
+    fn a_notification_asks_to_be_answered_and_reads_the_answer() {
+        let body = super::ack_body(json!({"id": "k", "title": "Ann"}));
+        assert_eq!(body, json!({"id": "k", "title": "Ann", "ack": true}));
+        assert_eq!(super::delivery_of(&json!({"id": "k"})), "acked");
+        assert_eq!(
+            super::delivery_of(&json!({"id": "k", "refused": true})),
+            "refused"
+        );
+        assert_eq!(
+            super::delivery_of(&json!({"id": "k", "refused": "no"})),
+            "acked"
+        );
+    }
 
     /// Several audio requests share one reply type: a reply naming another
     /// request's action is not this one's (T8c).
@@ -1498,18 +1541,55 @@ pub async fn get_clipboard(address: String, port: u16) -> Result<String, String>
         .to_string())
 }
 
-/// Show one of this phone's notifications on the desktop (N5a): `body` is
-/// the `kdeconnect.notification` body as JSON (`{id, app, title, text, time,
-/// isClearable}`). Rides the live control connection to that desktop, or a
-/// short one of its own.
-pub async fn send_notification(address: String, port: u16, body: String) -> Result<(), String> {
-    let body = notification_body(&body)?;
-    push_packet(
+/// How long a computer has to say it read a phone notification (C3).
+const NOTIFICATION_ACK_WAIT: Duration = Duration::from_secs(5);
+
+/// Send one of this phone's notifications asking the computer to say it
+/// read it (C3), and say what became of it: `acked`, `refused` (the
+/// computer's Notifications permission is off), `unanswered` (sent on the
+/// live link, nothing back: a computer from before C3, or a link that has
+/// died unseen), or `pushed` (no live link, sent on a connection of its own,
+/// which cannot carry the answer). A send that fails is an error.
+pub async fn send_notification_acked(
+    address: String,
+    port: u16,
+    body: String,
+) -> Result<&'static str, String> {
+    let body = ack_body(notification_body(&body)?);
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    let packet = NetworkPacket::new("kdeconnect.notification").with_body(body);
+    let answer = request_answer(
         &address,
         port,
-        &NetworkPacket::new("kdeconnect.notification").with_body(body),
+        &packet,
+        "kdeconnect.notification.ack",
+        NOTIFICATION_ACK_WAIT,
+        |reply| reply.get("id").and_then(|v| v.as_str()) == Some(id.as_str()),
     )
-    .await
+    .await;
+    match answer {
+        Ok(Some(reply)) => Ok(delivery_of(&reply)),
+        Ok(None) => push_packet(&address, port, &packet)
+            .await
+            .map(|()| "pushed"),
+        Err(Unanswered::Silent) => Ok("unanswered"),
+        Err(Unanswered::NotSent) => Err("The notification could not be sent".to_string()),
+    }
+}
+
+/// `body`, asking the computer to answer (C3).
+fn ack_body(mut body: serde_json::Value) -> serde_json::Value {
+    body["ack"] = true.into();
+    body
+}
+
+/// What the computer's answer says became of the notification.
+fn delivery_of(reply: &serde_json::Value) -> &'static str {
+    if reply.get("refused").and_then(|v| v.as_bool()) == Some(true) {
+        "refused"
+    } else {
+        "acked"
+    }
 }
 
 /// The notification body the phone sends: a JSON object with an `id`.

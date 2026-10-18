@@ -38,7 +38,7 @@ object RustCore {
     private external fun nativeSendClipboard(address: String, port: Int, content: String): String
     private external fun nativeGetClipboard(address: String, port: Int): String
     private external fun nativeGetClipboardState(address: String, port: Int): String
-    private external fun nativeSendNotification(address: String, port: Int, body: String): String
+    private external fun nativeSendNotificationAcked(address: String, port: Int, body: String): String
     private external fun nativeSendPhonePacket(address: String, port: Int, packetType: String, body: String): String
     private external fun nativeSendPhonePacketOnLink(address: String, port: Int, packetType: String, body: String): String
     private external fun nativeTakeSmsRequests(): String
@@ -345,9 +345,13 @@ object RustCore {
             }
         }
 
-    /** Show one of this phone's notifications on the desktop (N5a); [body] is JSON. */
-    fun sendNotification(address: String, port: Int, body: String): Result<Unit> =
-        envelope(nativeSendNotification(address, port, body)).map { }
+    /**
+     * Show one of this phone's notifications on the desktop, asking it to
+     * say it read it (C3): what became of it, as [dev.pocketdesk.android.notify.NotificationDelivery]
+     * reads it.
+     */
+    fun sendNotificationAcked(address: String, port: Int, body: String): Result<String> =
+        envelope(nativeSendNotificationAcked(address, port, body))
 
     /** Send the phone's texts or a reply's result to the desktop (N5b). */
     /** [sendPhonePacket] only over the control link already up to that computer: never a connection of its own. */
