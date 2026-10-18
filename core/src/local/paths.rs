@@ -62,6 +62,12 @@ pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
 pub const PHONE_FILES_FILE: &str = "phone_files.json";
 /// The desktop app's requests to browse them (T10g).
 pub const PHONE_FILES_DIR: &str = "phone_files_out";
+/// Each phone's last recent photos (C7).
+pub const PHONE_PHOTOS_FILE: &str = "phone_photos.json";
+/// Their thumbnails, a folder per phone (C7).
+pub const PHONE_PHOTOS_DIR: &str = "phone_photos";
+/// The desktop app's requests for them (C7).
+pub const PHONE_PHOTOS_OUT_DIR: &str = "phone_photos_out";
 /// Phone notifications the computer can answer (T10c).
 pub const PHONE_NOTES_FILE: &str = "phone_notifications.json";
 /// Answers to them the desktop app asks the server to send (T10c).
