@@ -344,9 +344,25 @@ async fn push_change(
         may_push(c.device_id())
     });
     let packet = packet(&text);
-    // This computer's own copy, gone to a phone: kept in the history (D3).
-    // A phone's own text was kept as it arrived.
-    if from_phone.as_ref().is_none_or(|(_, from)| from != &text) && !targets.is_empty() {
+    // Paired KDE Connect devices, as phones (3c): each link sends it only
+    // to a device allowed the clipboard.
+    let kde: Vec<String> = if TO_PHONES.load(Ordering::Relaxed) {
+        crate::kdeconnect_compat::link::live_paired()
+            .into_iter()
+            .filter(|id| !came_from(from_phone.as_ref(), id, &text))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // This computer's own copy, gone to anyone, a phone, a computer or a KDE
+    // device: kept in the history (D3 review). A phone's own text was kept
+    // as it arrived.
+    let goes = !targets.is_empty()
+        || !kde.is_empty()
+        || linked
+            .iter()
+            .any(|c| !came_from(from_phone.as_ref(), &c.device_id, &text));
+    if from_phone.as_ref().is_none_or(|(_, from)| from != &text) && goes {
         crate::clip_history::note(&text, None);
     }
     for target in targets {
@@ -359,17 +375,11 @@ async fn push_change(
             computer.send(packet.clone());
         }
     }
-    // Paired KDE Connect devices, as phones (3c): each link sends it only
-    // to a device allowed the clipboard.
-    if TO_PHONES.load(Ordering::Relaxed) {
-        for device_id in crate::kdeconnect_compat::link::live_paired() {
-            if !came_from(from_phone.as_ref(), &device_id, &text) {
-                crate::kdeconnect_compat::link::tell(
-                    &device_id,
-                    crate::kdeconnect_compat::link::Event::Clipboard(text.clone()),
-                );
-            }
-        }
+    for device_id in kde {
+        crate::kdeconnect_compat::link::tell(
+            &device_id,
+            crate::kdeconnect_compat::link::Event::Clipboard(text.clone()),
+        );
     }
 }
 

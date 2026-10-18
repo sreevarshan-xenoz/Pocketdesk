@@ -166,6 +166,13 @@ impl Plugin for ClipboardPlugin {
                 let response =
                     NetworkPacket::new("kdeconnect.clipboard").with_body(reply_body(&clip));
                 sender.send_packet(&response).await?;
+                // A text handed to the phone that asked crossed too (D3
+                // review); the same text again is not written twice.
+                if let Clip::Text(text) = &clip
+                    && !text.is_empty()
+                {
+                    crate::clip_history::note(text, None);
+                }
             }
             CLIPBOARD_IMAGE => receive_image(packet, sender).await,
             CLIPBOARD_IMAGE_FETCH => send_image(packet, sender).await,
