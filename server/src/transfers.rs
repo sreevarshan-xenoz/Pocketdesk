@@ -135,9 +135,14 @@ fn rows_at(table: &mut Table, now: Instant) -> Vec<Transfer> {
         .iter_mut()
         .map(|(id, row)| {
             let done = row.done.load(Ordering::Relaxed);
-            // A new attempt that resumed reads lower than the last: the
-            // rate starts over rather than going negative.
-            if row.samples.back().is_some_and(|&(_, d)| d > done) {
+            // A new attempt that resumed reads lower than the last, and the
+            // first reading above nothing counts what the other end already
+            // had: either way the rate starts over (C1 review).
+            if row
+                .samples
+                .back()
+                .is_some_and(|&(_, d)| d > done || (d == 0 && done > 0))
+            {
                 row.samples.clear();
             }
             row.samples.push_back((now, done));
@@ -368,6 +373,30 @@ mod tests {
         done.store(300, Ordering::Relaxed);
         let rows = rows_at(&mut table, start + Duration::from_secs(1));
         assert_eq!(rows[0].rate, 0, "not negative, not a stale figure");
+    }
+
+    #[test]
+    fn what_the_other_end_already_had_is_not_speed() {
+        let mut table = Table::default();
+        let done = Arc::new(AtomicU64::new(0));
+        table.rows.insert(
+            "r1".to_string(),
+            Row {
+                shown: shown("share:p:jump"),
+                done: done.clone(),
+                started_unix: 1,
+                samples: VecDeque::new(),
+            },
+        );
+        let start = Instant::now();
+        rows_at(&mut table, start);
+        rows_at(&mut table, start + Duration::from_secs(1));
+        done.store(800_000_000, Ordering::Relaxed);
+        let rows = rows_at(&mut table, start + Duration::from_secs(2));
+        assert_eq!(rows[0].rate, 0, "the resumed offset is not bytes moved");
+        done.store(800_002_000, Ordering::Relaxed);
+        let rows = rows_at(&mut table, start + Duration::from_secs(3));
+        assert_eq!(rows[0].rate, 2_000);
     }
 
     #[test]
