@@ -1116,7 +1116,7 @@ On the A71 against Windows, 2026-10-15, portrait, input off for the phone:
 
 Owed:
 - [x] The on-screen keyboard opening in portrait: the layout stayed split, the desktop kept its full top pane, and the key bar and keyboard sat over the dock (2026-10-15).
-- [ ] Turning the phone: on its side the A71 (860 dp wide) splits side by side, as before.
+- [x] Turning the phone: on its side the A71 keeps one pane, the stream full screen (C5 changed this: it had split side by side, the stream on half the screen).
 - [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
 
 ## 62. A mouse on the phone (T9c)
@@ -1712,8 +1712,22 @@ On the A71 against a throwaway server:
 - [x] The Overview shows a paired phone with its battery, Ring, Send file… and Send link….
 - [x] A change in Settings brings the save bar; Undo takes it away; Save writes `config.toml` and says "Saved.".
 - [x] A one-off look: the Overview, Devices and Settings in both themes drawn on this box's GPU with the `snapshots` feature, then deleted (CI's are the ones kept).
-- [ ] The committed pictures drawn by CI's software Vulkan, and the comparison passing there.
+- [x] The committed pictures drawn by CI's software Vulkan, and the comparison passing there (PR #131).
 - [ ] Clicks through the app's own window that a harness cannot stand in for: the tray, drag and drop, the cast window.
+
+## 108. The phone with large fonts, landscape and TalkBack (C5)
+
+On the A71 (1080×2400 at 420 dpi):
+
+- [x] Every clickable node on Home, the Add form, Settings, a session and its menu labelled and at least 48 dp each way (uiautomator's tree, which TalkBack reads; rows cut by a scroll edge aside).
+- [x] Font scale 1.3: Home, Settings, a session and its menu fit.
+- [x] Font scale 2.0: Home and Settings fit; the session menu's choices are radio buttons, one per line; the chrome's chips no longer run into each other.
+- [x] On its side: Home fits, and a session's stream fills the screen with no trackpad dock.
+- [x] The choice row at 1.0 and 2.0 in a Compose instrumented test (`ChoiceRowTest`).
+- [ ] A TalkBack walk by hand: Home, the Add form, Settings, the session menu (TalkBack's tutorial takes the screen when it is turned on from adb, and adb cannot read which node it reads).
+- [ ] Split screen: Home and a session in half a screen.
+- [ ] Landscape with the keyboard open (§26).
+- [ ] Spanish and Tamil at 2.0.
 
 ## Recording results
 

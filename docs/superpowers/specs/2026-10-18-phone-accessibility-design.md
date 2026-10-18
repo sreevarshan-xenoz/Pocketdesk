@@ -30,3 +30,26 @@ On the A71 (Android 16, a 1080×2400 screen at 420 dpi):
 
 - Split screen beyond a check that a session and Home draw in half a screen.
 - TalkBack in Spanish and Tamil.
+
+## As built
+
+- **Choices:** a row of four (which wraps between words) is measured word by word; a row of up to three (one line each) option by option, at the face it draws them in. Rows that do not fit become radio buttons with the same roles.
+- **The chrome's cap:** its top and bottom groups take a density whose font scale stops at 1.3; the menu sheet is composed outside them and keeps the full scale.
+- **Landscape:** `PaneRule.autoSplit` and `resolve` take the device's smallest width (Compose's `smallestScreenWidthDp`). Without it they assume a tablet, as before.
+- **The instrumented test:** segments and list rows are both radio buttons to TalkBack, so it tells them apart by their tops. Espresso is pinned at 3.7.0: the one Compose's test library brings calls `InputManager.getInstance`, which Android 16 removed.
+
+## The device run
+
+On the A71:
+- the audit of Home, the Add form, Settings, a session and its menu (labels, 48 dp);
+- 1.3 and 2.0 on each, with screenshots looked at and deleted (they showed the desktop);
+- a check of the chrome for overlapping nodes at 1.0, 1.3 and 2.0: none between its groups;
+- a session on its side, full screen;
+- `ChoiceRowTest` passing.
+
+**Owed (checklist §108):**
+- the TalkBack walk by hand: turned on from adb, TalkBack opened its tutorial, and adb cannot read where its focus is;
+- split screen;
+- landscape with the keyboard;
+- Spanish and Tamil at 2.0.
+
