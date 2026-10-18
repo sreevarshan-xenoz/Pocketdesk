@@ -159,8 +159,13 @@ object DownloadTarget {
         }
     }
 
-    /** Whether there is room for [size] bytes, with a margin for the system. */
+    /**
+     * Whether there is room for [size] bytes, with a margin for the system.
+     * A picked folder may be on another volume (an SD card, a drive, a
+     * cloud): there the write itself says (C2 review).
+     */
     fun hasRoomFor(context: Context, size: Long): Boolean {
+        if (tree(context) != null) return true
         val dir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Environment.getExternalStorageDirectory()
         } else {
