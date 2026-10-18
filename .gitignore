@@ -179,3 +179,8 @@ local_settings.py
 devconfig/
 # Stray directory a tool created when ~ was not expanded: a full Android SDK
 /~/
+
+# The desktop snapshots' comparison output (C4): only the pictures are kept.
+desktop/tests/snapshots/*.new.png
+desktop/tests/snapshots/*.diff.png
+desktop/tests/snapshots/*.old.png

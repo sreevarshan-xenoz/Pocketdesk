@@ -27,6 +27,8 @@ mod single_instance;
 mod theme;
 #[cfg(not(target_os = "linux"))]
 mod tray;
+#[cfg(test)]
+mod ui_tests;
 // N6: a StatusNotifierItem over D-Bus, no GTK.
 #[cfg(target_os = "linux")]
 #[path = "tray_linux.rs"]

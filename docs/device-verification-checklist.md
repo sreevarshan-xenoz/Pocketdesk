@@ -1482,7 +1482,8 @@ On this box, the app's own window captured (no input into it):
 - [x] File names in Hindi, Korean, Thai, Arabic, Chinese and Tamil drawn (they were boxes).
 - [x] Windows UI Automation reads the navigation, the group titles, the page's heading and its text.
 - [x] A second run opened on the page the first had shown.
-- [ ] Settings' Save bar after an edit, a notice clearing after 6 s, "Copied.", and the two settings' switches while their change runs (they need clicks).
+- [x] Settings' Save bar after an edit, Undo taking it away and Save writing the file and saying "Saved." (C4's harness).
+- [ ] A notice clearing after 6 s, "Copied.", and the two settings' switches while their change runs.
 - [ ] Narrator reading the app; the Linux build (Orca, the Noto fonts through fc-list).
 - [ ] A line mixing Arabic or Hebrew with Latin (egui has no bidirectional layout), read by someone who reads it.
 
@@ -1556,8 +1557,9 @@ On this box through the app's own window (screenshots only), with a throwaway co
 - [x] Devices: "Unpair…" and a battery's age as "9 min ago"; Files with nothing to send to says which phones and computers can take a file.
 - [ ] Opening and closing sections; a change shown as applying now or after a restart in the save bar, and the restart notice naming it.
 - [ ] A narrow window wrapping every row; a section with a problem held open.
-- [ ] Unpair's question for a phone and for a computer, and Cancel.
-- [ ] Pair a phone and Overview buttons on the empty pages.
+- [x] Unpair's question for a phone, Cancel keeping it and Unpair removing it (C4's harness, `desktop/src/ui_tests.rs`).
+- [ ] Unpair's question for a computer.
+- [x] Pair a phone and Overview buttons on the empty pages (C4's harness: Devices, Sessions and Files).
 
 ## 95. The phone app in Spanish and Tamil (U6)
 
@@ -1699,6 +1701,19 @@ On the A71 against a throwaway server:
 - [ ] A computer from before C3: notifications arrive once each, as before.
 - [ ] The computer's Notifications permission off: nothing waits on the phone.
 - [ ] Linux: the late line in a D-Bus notification.
+
+## 107. The desktop app's headless harness (C4)
+
+`desktop/src/ui_tests.rs` drives the app through AccessKit with `egui_kittest`, over throwaway state and config folders (`cargo test -p pocketdesk-desktop`):
+
+- [x] Every page opens from the left, with its purpose (Pair in a test of its own).
+- [x] Devices with nothing paired says how, and its button opens Pair; Sessions without a server sends the owner to Overview; Files with nothing to send to offers to pair.
+- [x] Unpair… asks by name; Cancel keeps the phone, Unpair removes it from the trust store.
+- [x] The Overview shows a paired phone with its battery, Ring, Send file… and Send link….
+- [x] A change in Settings brings the save bar; Undo takes it away; Save writes `config.toml` and says "Saved.".
+- [x] A one-off look: the Overview, Devices and Settings in both themes drawn on this box's GPU with the `snapshots` feature, then deleted (CI's are the ones kept).
+- [ ] The committed pictures drawn by CI's software Vulkan, and the comparison passing there.
+- [ ] Clicks through the app's own window that a harness cannot stand in for: the tray, drag and drop, the cast window.
 
 ## Recording results
 

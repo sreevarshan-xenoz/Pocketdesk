@@ -120,6 +120,11 @@ jobs:
       - name: Clippy (workspace, all targets)
         run: cargo clippy --workspace --all-targets --exclude pocketdesk-android-bridge --exclude iroh-spike -- -D warnings
 
+      # The desktop snapshots' renderer builds on Windows only while the lock
+      # gives gpu-allocator the windows crate wgpu-hal uses (C4 review).
+      - name: Clippy (desktop with snapshots)
+        run: cargo clippy -p pocketdesk-desktop --all-targets --features snapshots -- -D warnings
+
       - name: Test
         run: cargo test --workspace --exclude pocketdesk-android-bridge --exclude iroh-spike
 
@@ -242,6 +247,47 @@ jobs:
         with:
           name: encoder-baseline-software
           path: '${{ runner.temp }}/bench/*.json'
+          if-no-files-found: ignore
+
+  # C4: the desktop app's pages in both themes, drawn by Mesa's software
+  # Vulkan (lavapipe), where the committed pictures were made, and compared
+  # with them. With none committed it draws them, uploads them and fails, so
+  # a missing set never passes; a changed picture uploads the new image and
+  # its difference.
+  # Pinned: a new image's Mesa draws text a little differently.
+  snapshots:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev mesa-vulkan-drivers
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy (with snapshots)
+        run: cargo clippy -p pocketdesk-desktop --all-targets --features snapshots -- -D warnings
+
+      - name: Snapshots
+        run: |
+          if ls desktop/tests/snapshots/*_light.png >/dev/null 2>&1; then
+            cargo test -p pocketdesk-desktop --features snapshots snapshots
+          else
+            UPDATE_SNAPSHOTS=1 cargo test -p pocketdesk-desktop --features snapshots snapshots
+            echo "::error::No snapshots were committed: drew them (see the artifact); commit them to desktop/tests/snapshots/."
+            exit 1
+          fi
+
+      - name: Upload the pictures drawn
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-snapshots
+          path: desktop/tests/snapshots/
           if-no-files-found: ignore
 
   audit:
