@@ -39,10 +39,13 @@ pub enum Capability {
     /// what the computer sends, not what the phone may do: no packet from a
     /// phone needs it.
     Ring,
+    /// Be muted from this computer, and tell it whether the phone is in Do
+    /// Not Disturb (D2).
+    Mute,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 14] = [
+    pub const ALL: [Capability; 15] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -57,6 +60,7 @@ impl Capability {
         Capability::Cast,
         Capability::Tasks,
         Capability::Ring,
+        Capability::Mute,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -118,6 +122,7 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         "kdeconnect.sms.messages" | "kdeconnect.pocketdesk.sms_sent" => Capability::Texts,
         crate::protocol::link::LINK => Capability::Links,
         crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,
+        crate::protocol::quiet::QUIET_STATE => Capability::Mute,
         _ => return None,
     })
 }
@@ -153,6 +158,8 @@ pub struct DevicePermissions {
     pub tasks: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ring: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mute: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -175,6 +182,7 @@ impl DevicePermissions {
             Capability::Cast => &mut self.cast,
             Capability::Tasks => &mut self.tasks,
             Capability::Ring => &mut self.ring,
+            Capability::Mute => &mut self.mute,
         }
     }
 
@@ -194,6 +202,7 @@ impl DevicePermissions {
             Capability::Cast => self.cast,
             Capability::Tasks => self.tasks,
             Capability::Ring => self.ring,
+            Capability::Mute => self.mute,
         };
         value.unwrap_or(capability.default_allowed())
     }

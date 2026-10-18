@@ -9,6 +9,7 @@ pub mod permissions;
 pub mod phone_files;
 pub mod phone_media;
 pub mod phone_photos;
+pub mod quiet;
 pub mod relpath;
 pub mod transfer;
 pub mod v2;
