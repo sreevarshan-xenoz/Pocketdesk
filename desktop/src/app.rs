@@ -172,6 +172,7 @@ pub struct PocketdeskApp {
     kdeconnect: crate::kdeconnect_view::KdeConnectView,
     /// The Phone tab (T10g).
     phone_files: crate::phone_files_view::PhoneFilesView,
+    photos: crate::photos_view::PhotosView,
     /// Whether "Send to phone" is in the file manager, as last read (T10e).
     send_menu_installed: Option<bool>,
     /// The browsers the extension's host is registered with, as last read
@@ -226,6 +227,7 @@ impl PocketdeskApp {
             computers: Default::default(),
             kdeconnect: Default::default(),
             phone_files: Default::default(),
+            photos: Default::default(),
             send_menu_installed: None,
             browser_registered: None,
             cast: None,
@@ -713,7 +715,11 @@ impl PocketdeskApp {
             }
             Tab::Phone => {
                 self.phone_files
-                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
+                    .show(ui, &self.state_dir, &self.snapshot.devices, now_unix());
+                // C7: the chosen phone's recent photos below its folders.
+                if let Some(phone) = self.phone_files.phone().map(str::to_string) {
+                    self.photos.show(ui, &self.state_dir, &phone, now_unix());
+                }
             }
             Tab::Settings => self.settings_tab(ui),
             Tab::Diagnostics => self

@@ -35,7 +35,7 @@ pub fn show_in_folder(path: &Path) -> std::io::Result<()> {
 /// The Windows folder (explorer.exe lives there, not in System32), asked of
 /// the system rather than found on PATH.
 #[cfg(windows)]
-fn windows_dir() -> std::path::PathBuf {
+pub(crate) fn windows_dir() -> std::path::PathBuf {
     use windows::Win32::System::SystemInformation::GetWindowsDirectoryW;
     let mut buf = [0u16; 260];
     let len = unsafe { GetWindowsDirectoryW(Some(&mut buf)) } as usize;
