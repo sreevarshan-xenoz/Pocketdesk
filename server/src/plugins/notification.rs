@@ -295,7 +295,9 @@ fn to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
 /// again, so one written into a link that had died is not lost.
 pub const ACK: &str = "kdeconnect.notification.ack";
 
-/// The answer to `body`, if it asked (`ack: true`) and names itself. A
+/// The answer to `body`, if it asked (`ack: true`) and names itself. Any
+/// id it gave is echoed, even one this computer would not keep to answer
+/// (C3 review): unanswered, the phone would send it again for an hour. A
 /// cancel needs no answer.
 fn ack_for(body: &serde_json::Value, refused: bool) -> Option<NetworkPacket> {
     if body.get("ack").and_then(|v| v.as_bool()) != Some(true)
@@ -306,7 +308,7 @@ fn ack_for(body: &serde_json::Value, refused: bool) -> Option<NetworkPacket> {
     let id = body
         .get("id")
         .and_then(|v| v.as_str())
-        .filter(|id| notification_action::valid_key(id))?;
+        .filter(|id| !id.is_empty())?;
     let mut answer = serde_json::json!({ "id": id });
     if refused {
         answer["refused"] = true.into();
@@ -1074,6 +1076,10 @@ mod tests {
             ack_for(&json!({"id": "k", "ack": true, "isCancel": true}), false).is_none(),
             "a cancel needs no answer"
         );
+        // An id this computer would not keep to answer is still answered.
+        let odd = "0|com.chat|1|tag\u{1}".to_string() + &"x".repeat(600);
+        let ack = ack_for(&json!({"id": odd, "ack": true}), false).unwrap();
+        assert_eq!(ack.body["id"], odd.as_str());
     }
 
     struct Phone(std::sync::Mutex<Vec<NetworkPacket>>);
