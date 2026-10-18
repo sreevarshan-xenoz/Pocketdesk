@@ -665,10 +665,10 @@
     <string name="texts_show_summary_17">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste. Android retiene tres horas un SMS con un código</string>
     <string name="settings_capture_mouse_summary_17">Durante una sesión, un ratón o un panel táctil conectado a este teléfono (USB o Bluetooth) mueve el cursor del ordenador y hace clic allí</string>
     <string name="control_service_label">Control de Pocketdesk</string>
-    <string name="control_service_description">Mientras este teléfono muestra su pantalla en tu ordenador con Pocketdesk, y lo permites en los Ajustes de Pocketdesk, ese ordenador puede tocar, deslizar, desplazar, escribir en el campo en el que estás y pulsar Atrás, Inicio y Recientes. Pocketdesk no lee nada de la pantalla salvo el campo en el que escribe.</string>
+    <string name="control_service_description">Mientras este teléfono muestra su pantalla en tu ordenador con Pocketdesk, y lo permites en los Ajustes de Pocketdesk, ese ordenador puede tocar, deslizar, desplazar, escribir en el campo en el que estás y pulsar Atrás, Inicio y Recientes. Android permite al servicio leer lo que hay en la pantalla; Pocketdesk solo lee el campo en el que escribe y no envía nada de lo que lee.</string>
     <string name="settings_control_from_computer">Dejar que el ordenador controle este teléfono</string>
     <string name="settings_control_summary_off">Mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar y escribir en él. Usa un servicio de accesibilidad, que la Protección avanzada de Android no permite.</string>
-    <string name="settings_control_summary_needs_service">Casi: activa «Control de Pocketdesk» en los ajustes de Accesibilidad de Android.</string>
+    <string name="settings_control_summary_needs_service">Casi: activa «Control de Pocketdesk» en los ajustes de Accesibilidad de Android. Si Android lo muestra en gris, abre la información de la app de Pocketdesk, luego ⋮, Permitir ajustes restringidos.</string>
     <string name="settings_control_summary_on">Activado: mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar, escribir y pulsar Atrás e Inicio. No con el teléfono bloqueado, salvo Atrás e Inicio.</string>
     <string name="cast_showing_controlled">La pantalla de este teléfono se muestra y se controla en %1$s</string>
     <string name="settings_control_open_accessibility">Abrir los ajustes de Accesibilidad</string>
