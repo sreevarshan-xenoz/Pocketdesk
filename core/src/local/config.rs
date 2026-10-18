@@ -89,6 +89,10 @@ pub struct Config {
     /// still answers.
     #[serde(default = "default_true")]
     pub toast_answers: bool,
+    /// Where received files land (C2): an absolute folder, or empty for
+    /// Downloads. A folder that is gone falls back to Downloads.
+    #[serde(default)]
+    pub downloads_folder: String,
     /// The window showing a phone's screen controls the phone, when the
     /// phone allows it (C8); off, the window only shows.
     #[serde(default = "default_true")]
@@ -267,6 +271,7 @@ impl Default for Config {
             dht_publish: DhtPublish::Relay,
             phone_notifications: true,
             toast_answers: true,
+            downloads_folder: String::new(),
             cast_control: true,
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
@@ -459,6 +464,7 @@ impl Config {
         "dht_publish",
         "phone_notifications",
         "toast_answers",
+        "downloads_folder",
         "cast_control",
         "notifications_per_minute",
         "sms_notify",

@@ -406,9 +406,9 @@ pub(crate) fn running() -> &'static Running {
 
 #[derive(Debug)]
 pub struct SharePlugin {
-    /// Where received files go; `None` when this system has neither a
-    /// downloads nor a home folder, and files are then refused.
-    download_dir: Option<PathBuf>,
+    /// A fixed folder for received files (tests); otherwise each file goes
+    /// where [`download_dir`] says at that moment.
+    fixed_dir: Option<PathBuf>,
 }
 
 impl Default for SharePlugin {
@@ -422,24 +422,97 @@ impl Default for SharePlugin {
 /// servers on one machine (2h), which would share its real Downloads. The
 /// server warns at start when it is set.
 pub(crate) fn download_dir() -> Option<PathBuf> {
-    std::env::var_os("POCKETDESK_DOWNLOAD_DIR")
+    if let Some(seam) = std::env::var_os("POCKETDESK_DOWNLOAD_DIR")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
+    {
+        return Some(seam);
+    }
+    // The owner's folder (C2), read at each file so a change applies at once;
+    // a config that cannot be read now keeps the last one read (C2 review).
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let chosen = match pocketdesk_core::local::config::Config::load() {
+        Ok(config) => {
+            *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some(config.downloads_folder.clone());
+            config.downloads_folder
+        }
+        Err(e) => {
+            warn_once(&format!(
+                "The settings could not be read ({e}); received files go where they went last"
+            ));
+            LAST.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+                .unwrap_or_default()
+        }
+    };
+    chosen_folder(&chosen, &protected_dirs())
         .or_else(dirs::download_dir)
         .or_else(dirs::home_dir)
 }
 
+/// The owner's folder for received files when it can take them: set,
+/// absolute and a folder. Anything else is Downloads, and the log says why.
+fn chosen_folder(chosen: &str, protected: &[PathBuf]) -> Option<PathBuf> {
+    let chosen = chosen.trim();
+    if chosen.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(chosen);
+    if path.is_absolute() && path.is_dir() {
+        // Never the server's own folders, nor inside them (C2 review): a
+        // paired phone could plant a PIN file or a cast token there.
+        let real = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let theirs = protected.iter().any(|dir| {
+            let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+            real.starts_with(&dir)
+        });
+        if theirs {
+            warn_once(&format!(
+                "Received files go to Downloads: the folder chosen for them ({chosen}) is Pocketdesk's own"
+            ));
+            return None;
+        }
+        Some(path)
+    } else {
+        warn_once(&format!(
+            "Received files go to Downloads: the folder chosen for them ({chosen}) is not there"
+        ));
+        None
+    }
+}
+
+/// The server's own folders, which received files never go into.
+fn protected_dirs() -> Vec<PathBuf> {
+    [
+        pocketdesk_core::local::paths::state_dir(),
+        pocketdesk_core::local::paths::config_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// Log `message` unless it was the last one logged: a folder of a thousand
+/// files says why once.
+fn warn_once(message: &str) {
+    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last != message {
+        tracing::warn!("{message}");
+        *last = message.to_string();
+    }
+}
+
 impl SharePlugin {
     pub fn new() -> Self {
-        Self {
-            download_dir: download_dir(),
-        }
+        Self { fixed_dir: None }
     }
 
     #[allow(dead_code)]
     pub fn with_download_dir(dir: PathBuf) -> Self {
         Self {
-            download_dir: Some(dir),
+            fixed_dir: Some(dir),
         }
     }
 }
@@ -537,7 +610,7 @@ impl Plugin for SharePlugin {
                     ))
                     .await;
                 }
-                let Some(dir) = self.download_dir.clone() else {
+                let Some(dir) = self.fixed_dir.clone().or_else(download_dir) else {
                     return refused("no downloads or home folder".into()).await;
                 };
                 // At home the bytes travel inside TLS with the phone that
@@ -1153,7 +1226,19 @@ fn received_in(
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    let parent_name = |p: &Path| p.parent().map(name_of).unwrap_or_default();
+    // A folder at a drive's root has no name of its own: its path then.
+    let parent_name = |p: &Path| {
+        p.parent()
+            .map(|parent| {
+                let name = name_of(parent);
+                if name.is_empty() {
+                    parent.display().to_string()
+                } else {
+                    name
+                }
+            })
+            .unwrap_or_default()
+    };
     // Transfers run concurrently; the list is read, changed and replaced.
     static LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LIST.lock().unwrap_or_else(|e| e.into_inner());
@@ -1687,6 +1772,40 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn received_files_go_to_the_chosen_folder_only_when_it_is_one() {
+        let dir = std::env::temp_dir().join(format!("pd-c2-folder-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let none: &[PathBuf] = &[];
+        assert_eq!(
+            chosen_folder(&dir.display().to_string(), none),
+            Some(dir.clone())
+        );
+        assert_eq!(chosen_folder("", none), None, "unset: Downloads");
+        assert_eq!(chosen_folder("   ", none), None);
+        assert_eq!(chosen_folder("relative/folder", none), None, "not absolute");
+        let gone = dir.join("gone");
+        assert_eq!(
+            chosen_folder(&gone.display().to_string(), none),
+            None,
+            "gone"
+        );
+        let file = dir.join("a-file");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(
+            chosen_folder(&file.display().to_string(), none),
+            None,
+            "not a folder"
+        );
+        // The server's own folders, and inside them, are never it.
+        let inside = dir.join("inside");
+        std::fs::create_dir_all(&inside).unwrap();
+        let ours = [dir.clone()];
+        assert_eq!(chosen_folder(&dir.display().to_string(), &ours), None);
+        assert_eq!(chosen_folder(&inside.display().to_string(), &ours), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
 

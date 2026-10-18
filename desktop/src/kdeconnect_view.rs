@@ -366,7 +366,7 @@ fn permission_boxes(
             KdePermission::Files,
             &mut permissions.files,
             "Send files here",
-            "Files it sends go to Downloads",
+            "Files it sends go where received files land (Settings, Phones)",
         ),
         (
             KdePermission::Notifications,

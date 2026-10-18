@@ -66,6 +66,11 @@ video_quality = "balanced"
 # inline reply). Off: plain, and the desktop app's Notifications page answers.
 # toast_answers = true
 
+# Where files from phones, computers and KDE Connect devices land: an
+# absolute folder. Empty (the default) is Downloads; a folder that is gone
+# falls back to Downloads.
+# downloads_folder = ""
+
 # The desktop app's window showing a phone's screen controls the phone, once
 # the phone allows it ("Let the computer control this phone" in its Settings).
 # Off: the window only shows.

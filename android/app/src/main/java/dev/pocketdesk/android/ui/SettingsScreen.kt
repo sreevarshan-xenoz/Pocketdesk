@@ -176,6 +176,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.linksFromComputer(context),
                 { Prefs.setLinksFromComputer(context, it) },
             )
+            DownloadFolderSetting()
             PhoneFoldersSection()
 
             SettingsHeader(stringResource(R.string.settings_background))

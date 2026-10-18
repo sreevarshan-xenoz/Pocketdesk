@@ -147,7 +147,7 @@
     <string name="files_empty">இந்தக் கோப்புறை காலியாக உள்ளது.</string>
     <string name="files_truncated">இந்தக் கோப்புறையின் முதல் உருப்படிகள் மட்டுமே காட்டப்படுகின்றன; முழுவதும் பட்டியலிட இது மிகப் பெரியது.</string>
     <string name="files_download_title">%1$s ஐப் பதிவிறக்கவா?</string>
-    <string name="files_download_text">%1$s, Downloads/Pocketdesk இல் சேமிக்கப்படும்.</string>
+    <string name="files_download_text">%1$s, கணினிகளிலிருந்து வரும் கோப்புகள் செல்லும் இடத்தில் சேமிக்கப்படும்.</string>
     <string name="files_download">பதிவிறக்கு</string>
     <string name="files_download_started">%1$s பதிவிறக்கப்படுகிறது…</string>
     <string name="files_failed">இந்தக் கோப்புறையைத் திறக்க முடியவில்லை: %1$s</string>
@@ -208,7 +208,7 @@
     <string name="files_download_folder_text">இதிலும் இதன் கோப்புறைகளிலும் உள்ள ஒவ்வொரு கோப்பும் Download/Pocketdesk இல் ஒரு புதிய கோப்புறைக்குச் செல்லும். மறைக்கப்பட்ட கோப்புகள் விடப்படும்.</string>
     <string name="files_download_folder_asked">கணினியிடம் %1$s கேட்கப்பட்டது</string>
     <string name="files_send_folder">இந்தக் கணினிக்கு ஒரு கோப்புறையை அனுப்பு</string>
-    <string name="files_send_folder_summary">அதன் பதிவிறக்கங்களில் புதிய கோப்புறைக்குச் செல்லும்</string>
+    <string name="files_send_folder_summary">கணினி பெறும் கோப்புகளை வைக்கும் இடத்தில் புதிய கோப்புறைக்குச் செல்லும்</string>
     <string name="transfer_sending">%2$d இல் %1$d அனுப்பப்படுகிறது</string>
     <string name="transfer_failed">அனுப்பப்படாதவை: %2$d இல் %1$d</string>
     <string name="transfer_receiving">உங்கள் கணினியிலிருந்து பெறப்படுகிறது</string>
@@ -218,8 +218,8 @@
     <string name="transfer_name_speed">%1$s · %2$s/வி</string>
     <string name="transfer_cancelled">ரத்து செய்யப்பட்டது. மீண்டும் அனுப்பினால் நின்ற இடத்திலிருந்து தொடரும்.</string>
     <plurals name="transfer_saved">
-        <item quantity="one">%1$d கோப்பு Downloads-இல் சேமிக்கப்பட்டது</item>
-        <item quantity="other">%1$d கோப்புகள் Downloads-இல் சேமிக்கப்பட்டன</item>
+        <item quantity="one">%1$d கோப்பு சேமிக்கப்பட்டது</item>
+        <item quantity="other">%1$d கோப்புகள் சேமிக்கப்பட்டன</item>
     </plurals>
     <plurals name="share_sending_files">
         <item quantity="one">%2$s க்கு %1$d கோப்பு அனுப்பப்படுகிறது…</item>
@@ -498,7 +498,7 @@
     <string name="offer_waiting_title">கணினி ஒரு கோப்பை அனுப்புகிறது</string>
     <string name="offer_save">சேமி</string>
     <string name="settings_files_background">பின்னணியில் கணினியிலிருந்து கோப்புகள்</string>
-    <string name="settings_files_background_summary">கணினி அனுப்புவது அமர்வு இல்லாமலும் வீட்டிலோ, இணையம் வழியே கோப்புகள் இயக்கத்தில் இருந்தால் வெளியிலிருந்தோ பதிவிறக்கங்களில் வந்து சேரும். இதற்கு அறிவிப்பு அணுகல் தேவை, அது இணைப்பை வைத்திருக்கும்</string>
+    <string name="settings_files_background_summary">கணினி அனுப்புவது அமர்வு இல்லாமலும் வீட்டிலோ, இணையம் வழியே கோப்புகள் இயக்கத்தில் இருந்தால் வெளியிலிருந்தோ கணினிகளிலிருந்து வரும் கோப்புகள் செல்லும் இடத்தில் வந்து சேரும். இதற்கு அறிவிப்பு அணுகல் தேவை, அது இணைப்பை வைத்திருக்கும்</string>
     <string name="settings_phone_folders">கணினி திறக்கக்கூடிய கோப்புறைகள்</string>
     <string name="settings_phone_folders_summary">கணினியின் ஃபோன் தாவல் இந்தக் கோப்புறைகளைப் பட்டியலிட்டு அவற்றின் கோப்புகளை நகலெடுக்கலாம். ஃபோனில் வேறு எதையும் அணுக முடியாது. ஏதேனும் கோப்புறை பகிரப்பட்டிருக்கும் வரை, அறிவிப்பு அணுகலைப் பயன்படுத்தி கணினியுடன் இணைப்பில் இருக்கும்</string>
     <string name="phone_folders_empty">இன்னும் இல்லை: கணினி இந்த ஃபோனில் எதையும் திறக்க முடியாது. அதன் ஃபோன் தாவல் பட்டியலிட ஒரு கோப்புறையைச் சேர்க்கவும்</string>
@@ -511,7 +511,7 @@
     <string name="screenshots_needs_access">பின்னணியில் இயங்க அறிவிப்பு அணுகல் தேவை</string>
     <string name="screenshots_needs_photos">எல்லாப் படங்களுக்குமான அணுகல் தேவை: Android அமைப்புகளில் Pocketdesk-க்கு அனுமதிக்கவும்</string>
     <string name="screenshots_clipboard">கணினியின் கிளிப்போர்டில் வை</string>
-    <string name="screenshots_save">கணினியின் Downloads-இல் சேமி</string>
+    <string name="screenshots_save">கணினியில், அது பெறும் கோப்புகளுடன் சேமி</string>
     <string name="remote_button">ரிமோட்</string>
     <string name="remote_title">ரிமோட் · %1$s</string>
     <string name="remote_keyboard">விசைப்பலகை</string>
@@ -667,4 +667,10 @@
     <string name="settings_control_summary_on">இயக்கத்தில்: இந்தத் தொலைபேசி ஒரு கணினியில் தன் திரையைக் காட்டும்போது, அந்தக் கணினி தட்டலாம், இழுக்கலாம், தட்டச்சு செய்யலாம், பின், முகப்பு பொத்தான்களை அழுத்தலாம். தொலைபேசி பூட்டப்பட்டிருக்கும்போது பின், முகப்பு மட்டுமே.</string>
     <string name="cast_showing_controlled">இந்தத் தொலைபேசியின் திரை %1$s இல் காட்டப்பட்டுக் கட்டுப்படுத்தப்படுகிறது</string>
     <string name="settings_control_open_accessibility">அணுகல்தன்மை அமைப்புகளைத் திற</string>
+    <string name="settings_download_folder">கணினிகளிலிருந்து வரும் கோப்புகள் செல்லும் இடம்</string>
+    <string name="settings_download_folder_default">Downloads/Pocketdesk</string>
+    <string name="settings_download_folder_picked">நீங்கள் தேர்ந்தெடுத்த கோப்புறை</string>
+    <string name="settings_download_folder_lost">நீங்கள் தேர்ந்தெடுத்த கோப்புறை இல்லை அல்லது இனி அனுமதிக்கப்படவில்லை, எனவே கோப்புகள் Downloads/Pocketdesk-க்குச் செல்கின்றன. வேறொன்றைத் தேர்ந்தெடுக்கத் தட்டவும்.</string>
+    <string name="settings_download_folder_reset">மீண்டும் Downloads/Pocketdesk-ஐப் பயன்படுத்து</string>
+    <string name="transfer_folder_gone">கணினிகளிலிருந்து வரும் கோப்புகளுக்குத் தேர்ந்தெடுத்த கோப்புறை இல்லை அல்லது இனி அனுமதிக்கப்படவில்லை, எனவே இது Downloads/Pocketdesk-க்குச் சென்றது.</string>
 </resources>

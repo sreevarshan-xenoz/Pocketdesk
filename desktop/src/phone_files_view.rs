@@ -84,7 +84,7 @@ impl PhoneFilesView {
                 self.notice = Some(match kind {
                     Kind::List => "Asked the phone…".to_string(),
                     Kind::Fetch => format!(
-                        "Asked the phone to send {}; it arrives in Downloads.",
+                        "Asked the phone to send {}; it arrives where received files land.",
                         path.last().map(String::as_str).unwrap_or("it")
                     ),
                 });

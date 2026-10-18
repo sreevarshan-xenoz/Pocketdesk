@@ -42,6 +42,12 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-18: **C2, choose where received files land (branch `feat/download-folder`; spec `docs/superpowers/specs/2026-10-18-download-folder-design.md`, with as-built, device-run and review sections).**
+  - **The computer:** desktop Settings "Received files land in" (`downloads_folder`, empty for Downloads, read at each file) for phones', computers' and KDE devices' files. Pocketdesk's own folders are refused, and a folder that is gone means Downloads.
+  - **The phone:** "Files from computers go to", Downloads/Pocketdesk or a folder picked with Android's picker. There files arrive through the Storage Access Framework as `<name>.part`, renamed once whole (the next free name when one is taken), and a folder that is gone falls back with the notification saying so.
+  - **Fresh review (0 Critical, 8 Important), fixed one commit each.**
+  - **Device-checked** on the A71 (checklist §105): a picked folder, a second file of one name, a folder with a sub-folder, and the fallback.
+  - **Owed:** the computer's chosen folder end to end, a revoked grant, a resume in a picked folder.
 - 2026-10-18: **C8, control the phone from the computer (branch `feat/phone-control`; spec `docs/superpowers/specs/2026-10-18-phone-control-design.md`, with as-built, device-run and review sections).** The owner's priority for this cycle.
   - **The phone:** with "Let the computer control this phone" on (off by default) and the "Pocketdesk control" Accessibility service on, a cast tells its computer it takes control (`[FA 02]`). The computer then sends batches (`core::streaming::cast_control`, stream kind 4, relay `CONTROL`), which the phone performs: touches as gestures (a drag one continued stroke joining the moves that arrive meanwhile, a long press held), the wheel as a swipe, Back/Home/Recents/the shade, and text at the focused field. `ControlPlan` is JVM-tested.
   - **The window:** it takes the mouse and keyboard, with a bar holding Back, Home, Recents and Watch only. Desktop Settings "Control phones from their screen window".

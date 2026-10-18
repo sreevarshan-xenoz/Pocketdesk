@@ -446,7 +446,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/server.pid` | Server pid | Default | `server/src/state.rs` |
 | `<state>/logs/pocketdesk.*.log` | Daily logs, 7 kept, only with `start --background`. They can contain peer addresses and device ids, and a pairing PIN only when no desktop notification could show it | Default | `server/src/main.rs`, `server/src/plugins/pair.rs` |
 | `<state>/relay-acme/` | Let's Encrypt account and certificate keys (relay HTTPS mode) | Owner-only folder | `server/src/relay.rs` |
-| `Downloads/` (else home) | Files received from phones; Mark of the Web on Windows | — | `server/src/plugins/share.rs`, `SECURITY.md` |
+| `Downloads/` (else home), or `downloads_folder` (C2) | Files received from phones, computers and KDE devices; Mark of the Web on Windows | — | `server/src/plugins/share.rs`, `SECURITY.md` |
 
 ### 5.2 Phone
 
@@ -463,7 +463,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 | SharedPreferences `pocketdesk-phone-notifications` | On/off, the opted-in app list, seen ids | `notify/PhoneNotifications.kt` |
 | SharedPreferences `pocketdesk-texts` | On/off (show, reply, names), and up to 200 texts queued while the computer is away (without names: a name is looked up as a text leaves), with send tracking | `notify/Texts.kt` |
 | `cache/share`, `cache/clipboard`, `cache/clipboard-out` | Files being shared, clipboard images | `service/TransferService.kt`, `ui/ClipboardImages.kt` |
-| MediaStore `Downloads/Pocketdesk` (shared storage) | Files received from the desktop | `service/DownloadTarget.kt` |
+| MediaStore `Downloads/Pocketdesk` (shared storage), or a folder the owner picked (C2, Storage Access Framework, `<name>.part` until whole) | Files received from the desktop | `service/DownloadTarget.kt` |
 
 ---
 

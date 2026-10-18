@@ -156,7 +156,7 @@
     <string name="files_empty">This folder is empty.</string>
     <string name="files_truncated">Only the first items of this folder are shown; it is too big to list in full.</string>
     <string name="files_download_title">Download %1$s?</string>
-    <string name="files_download_text">%1$s, saved to Downloads/Pocketdesk.</string>
+    <string name="files_download_text">%1$s, saved where files from computers go.</string>
     <string name="files_download">Download</string>
     <string name="files_download_started">Downloading %1$s…</string>
     <string name="files_failed">This folder could not be opened: %1$s</string>
@@ -217,7 +217,7 @@
     <string name="files_download_folder_text">Every file in it and in its folders goes to a new folder in Download/Pocketdesk. Hidden files are left out.</string>
     <string name="files_download_folder_asked">Asked the computer for %1$s</string>
     <string name="files_send_folder">Send a folder to this computer</string>
-    <string name="files_send_folder_summary">Goes into a new folder in its Downloads</string>
+    <string name="files_send_folder_summary">Goes into a new folder where the computer keeps received files</string>
     <string name="transfer_sending">Sending %1$d of %2$d</string>
     <string name="transfer_failed">Not sent: %1$d of %2$d</string>
     <string name="transfer_receiving">Receiving from your computer</string>
@@ -227,8 +227,8 @@
     <string name="transfer_name_speed">%1$s · %2$s/s</string>
     <string name="transfer_cancelled">Cancelled. Sending it again continues where it stopped.</string>
     <plurals name="transfer_saved">
-        <item quantity="one">Saved %1$d file to Downloads</item>
-        <item quantity="other">Saved %1$d files to Downloads</item>
+        <item quantity="one">Saved %1$d file</item>
+        <item quantity="other">Saved %1$d files</item>
     </plurals>
     <plurals name="share_sending_files">
         <item quantity="one">Sending %1$d file to %2$s…</item>
@@ -507,7 +507,7 @@
     <string name="offer_waiting_title">The computer sends a file</string>
     <string name="offer_save">Save</string>
     <string name="settings_files_background">Files from the computer in the background</string>
-    <string name="settings_files_background_summary">What the computer sends arrives in Downloads without a session, at home or, with Files over the internet, from away. It needs notification access, which keeps the connection</string>
+    <string name="settings_files_background_summary">What the computer sends arrives without a session, where files from computers go, at home or, with Files over the internet, from away. It needs notification access, which keeps the connection</string>
     <string name="settings_phone_folders">Folders the computer may open</string>
     <string name="settings_phone_folders_summary">The computer\'s Phone tab can list these folders and copy their files to itself. Nothing else on the phone is reachable. While any folder is shared it stays connected to the computer, using notification access</string>
     <string name="phone_folders_empty">None yet: the computer cannot open anything on this phone. Add a folder to let its Phone tab list it and copy files from it</string>
@@ -520,7 +520,7 @@
     <string name="screenshots_needs_access">Needs notification access to run in the background</string>
     <string name="screenshots_needs_photos">Needs access to all photos: allow it in Android\'s settings for Pocketdesk</string>
     <string name="screenshots_clipboard">Put on the computer\'s clipboard</string>
-    <string name="screenshots_save">Save in the computer\'s Downloads</string>
+    <string name="screenshots_save">Save on the computer, with its received files</string>
     <string name="remote_button">Remote</string>
     <string name="remote_title">Remote · %1$s</string>
     <string name="remote_keyboard">Keyboard</string>
@@ -676,4 +676,10 @@
     <string name="settings_control_summary_on">On: while this phone shows its screen on a computer, that computer can tap, swipe, type and press Back and Home. Not while the phone is locked, apart from Back and Home.</string>
     <string name="cast_showing_controlled">This phone\'s screen is shown and controlled on %1$s</string>
     <string name="settings_control_open_accessibility">Open Accessibility settings</string>
+    <string name="settings_download_folder">Files from computers go to</string>
+    <string name="settings_download_folder_default">Downloads/Pocketdesk</string>
+    <string name="settings_download_folder_picked">The folder you picked</string>
+    <string name="settings_download_folder_lost">The folder you picked is gone or no longer allowed, so files go to Downloads/Pocketdesk. Tap to pick another.</string>
+    <string name="settings_download_folder_reset">Use Downloads/Pocketdesk again</string>
+    <string name="transfer_folder_gone">The folder picked for files from computers is gone or no longer allowed, so this went to Downloads/Pocketdesk.</string>
 </resources>
