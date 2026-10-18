@@ -274,6 +274,10 @@ mod snapshots {
     fn the_pages_look_as_they_did() {
         let fixture = Fixture::new();
         pair_phone(fixture.state(), PHONE, "Test Phone");
+        // egui's own colour threshold, and a few pixels of slack for a
+        // Mesa update's anti-aliasing (C4 review); more could hide a moved
+        // border.
+        let options = egui_kittest::SnapshotOptions::new().max_failed_pixels(8);
         let mut failed = Vec::new();
         for (page, name) in [
             (None, "overview"),
@@ -291,7 +295,7 @@ mod snapshots {
                         PocketdeskApp::new(state, None, page)
                     });
                 app.run_steps(3);
-                if let Err(e) = app.try_snapshot(format!("{name}_{shade}")) {
+                if let Err(e) = app.try_snapshot_options(format!("{name}_{shade}"), &options) {
                     failed.push(e.to_string());
                 }
             }

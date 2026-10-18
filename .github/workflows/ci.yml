@@ -249,8 +249,9 @@ jobs:
   # with them. With none committed it draws them, uploads them and fails, so
   # a missing set never passes; a changed picture uploads the new image and
   # its difference.
+  # Pinned: a new image's Mesa draws text a little differently.
   snapshots:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -268,7 +269,7 @@ jobs:
 
       - name: Snapshots
         run: |
-          if ls desktop/tests/snapshots/*.png >/dev/null 2>&1; then
+          if ls desktop/tests/snapshots/*_light.png >/dev/null 2>&1; then
             cargo test -p pocketdesk-desktop --features snapshots snapshots
           else
             UPDATE_SNAPSHOTS=1 cargo test -p pocketdesk-desktop --features snapshots snapshots
