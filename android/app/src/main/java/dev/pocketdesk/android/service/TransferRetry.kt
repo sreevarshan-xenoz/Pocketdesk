@@ -195,6 +195,14 @@ object TransferRetry {
         CANCELLED_ON_COMPUTER,
     )
 
+    /**
+     * Whether a download that failed with [error] keeps its part for a
+     * retry: only one the bridge recorded ([resumable]), and never a Cancel,
+     * which is not sent again (C6, found on the device: a folder cancelled on
+     * the computer left its first file's part behind).
+     */
+    fun keepsPart(resumable: Boolean, error: String?): Boolean = resumable && !isCancel(error)
+
     /** Whether [error] is a Cancel, on either side (C1). */
     fun isCancel(error: String?): Boolean =
         error != null && (error.contains(CANCELLED_ON_PHONE) || error.contains(CANCELLED_ON_COMPUTER))

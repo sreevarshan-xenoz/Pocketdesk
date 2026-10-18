@@ -625,7 +625,7 @@ class TransferService : Service() {
                 // Kept for a retry only when the bridge recorded this place.
                 val resumable = source.isNotEmpty() &&
                     RustCore.partialLocation(job.address, source) == target.location
-                if (resumable) target.keepForRetry() else target.discard()
+                if (TransferRetry.keepsPart(resumable, saved.exceptionOrNull()?.message)) target.keepForRetry() else target.discard()
                 Result.failure(saved.exceptionOrNull() ?: IllegalStateException("not saved"))
             }
         } catch (t: Throwable) {
