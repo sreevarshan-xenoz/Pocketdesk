@@ -1185,20 +1185,6 @@ impl From<NoReply> for String {
     }
 }
 
-/// Send `request` on the shared control connection and resolve with the body
-/// of the first packet whose type is `reply_type`.
-///
-/// Every query used to open its own throwaway TCP connection carrying the same
-/// device_id. The server keys its client registry by device_id, so each of
-/// those evicted the real control session (which is how the phone silently
-/// stopped receiving desktop notifications), and dropping the socket the moment
-/// the answer arrived left the server writing into a dead pipe — the source of
-/// the `Broken pipe` plugin errors and the "reconnect storm" kicks. One shared
-/// connection for everything instead.
-///
-/// `Ok(None)` means there is no live control connection: the caller should use
-/// [`oneshot_request`]. `Err(NoReply)` means the connection is live but the
-/// server never answered.
 /// Whether `reply` answers `request`: a reply that names an action (the
 /// audio replies do, T8c) answers only a request that named the same one,
 /// since every audio action replies with the same packet type. A reply
@@ -1213,6 +1199,20 @@ fn reply_answers(request: &serde_json::Value, reply: &serde_json::Value) -> bool
     }
 }
 
+/// Send `request` on the shared control connection and resolve with the body
+/// of the first packet whose type is `reply_type`.
+///
+/// Every query used to open its own throwaway TCP connection carrying the same
+/// device_id. The server keys its client registry by device_id, so each of
+/// those evicted the real control session (which is how the phone silently
+/// stopped receiving desktop notifications), and dropping the socket the moment
+/// the answer arrived left the server writing into a dead pipe — the source of
+/// the `Broken pipe` plugin errors and the "reconnect storm" kicks. One shared
+/// connection for everything instead.
+///
+/// `Ok(None)` means there is no live control connection: the caller should use
+/// [`oneshot_request`]. `Err(NoReply)` means the connection is live but the
+/// server never answered.
 async fn control_request(
     address: &str,
     port: u16,

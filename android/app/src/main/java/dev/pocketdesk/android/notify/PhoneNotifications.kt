@@ -41,7 +41,6 @@ object PhoneNotificationPrefs {
         prefs(ctx).edit { putBoolean(KEY_ENABLED, on) }
     }
 
-    /** The apps whose notifications go to the computer. */
     /** How long a notification that could not be sent waits for the computer, in minutes (C3). */
     fun waitMinutes(ctx: Context): Int =
         prefs(ctx).getInt(KEY_WAIT, WAIT_CHOICES.first()).takeIf { it in WAIT_CHOICES } ?: WAIT_CHOICES.first()
@@ -50,6 +49,7 @@ object PhoneNotificationPrefs {
         prefs(ctx).edit { putInt(KEY_WAIT, minutes) }
     }
 
+    /** The apps whose notifications go to the computer. */
     fun shared(ctx: Context): Set<String> = prefs(ctx).getStringSet(KEY_SHARED, emptySet()).orEmpty().toSet()
 
     fun setShared(ctx: Context, pkg: String, shared: Boolean) {
