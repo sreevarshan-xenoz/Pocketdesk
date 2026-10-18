@@ -57,6 +57,16 @@ struct Cast {
 struct Viewer {
     session_id: u64,
     tx: mpsc::Sender<Message>,
+    /// What it sends, read for as long as it is the viewer and no longer:
+    /// a viewer replaced (another joined, or the cast changed) can no
+    /// longer reach the phone (C8 review).
+    reader: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Viewer {
+    fn drop(&mut self) {
+        self.reader.abort();
+    }
 }
 
 /// The relay's loop, over `listener` (bound to loopback).
@@ -253,7 +263,7 @@ fn start_viewer(
         }
         let _ = write.shutdown().await;
     });
-    tokio::spawn(async move {
+    let reader = tokio::spawn(async move {
         let mut head = [0u8; 5];
         while read.read_exact(&mut head).await.is_ok() {
             let len = u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as usize;
@@ -280,7 +290,11 @@ fn start_viewer(
             }
         }
     });
-    Viewer { session_id, tx }
+    Viewer {
+        session_id,
+        tx,
+        reader,
+    }
 }
 
 #[cfg(test)]
@@ -468,11 +482,41 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(5), control_rx.recv())
                 .await
                 .unwrap(),
-            Some(batch)
+            Some(batch.clone())
         );
         assert!(
             control_rx.try_recv().is_err(),
             "the malformed batch went nowhere"
+        );
+        // Another viewer joins: the first can no longer reach the phone.
+        let mut second = TcpStream::connect((Ipv4Addr::LOCALHOST, file.port))
+            .await
+            .unwrap();
+        second
+            .write_all(&file.token_bytes().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            read_message(&mut second).await,
+            Message::ControlState { on: true }
+        );
+        let _ = view
+            .write_all(&Message::Control(batch.clone()).encode())
+            .await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            control_rx.try_recv().is_err(),
+            "the replaced viewer's control went nowhere"
+        );
+        second
+            .write_all(&Message::Control(batch.clone()).encode())
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), control_rx.recv())
+                .await
+                .unwrap(),
+            Some(batch)
         );
         drop(events);
         let _ = relay.await;
