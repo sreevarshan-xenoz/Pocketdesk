@@ -675,6 +675,32 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeStopCas
     RUNTIME.block_on(api::stop_cast());
 }
 
+/// Tell the computer whether this phone takes control now (C8): 0 sent, 1
+/// the link is behind, 2 no cast session.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastControlState(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    on: jboolean,
+) -> jint {
+    RUNTIME.block_on(cast::control_state(on != 0))
+}
+
+/// The next control batch from the computer as JSON, waiting up to
+/// `timeout_ms`, or null (C8).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastControlTake(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    timeout_ms: jint,
+) -> jstring {
+    let timeout = std::time::Duration::from_millis(u64::try_from(timeout_ms).unwrap_or(0));
+    match cast::take_control(timeout) {
+        Some(json) => to_jstring(&mut env, json),
+        None => std::ptr::null_mut(),
+    }
+}
+
 /// Whether the computer asked the cast for a keyframe since the last look.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastKeyframeWanted(

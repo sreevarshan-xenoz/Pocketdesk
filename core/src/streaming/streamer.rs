@@ -602,12 +602,17 @@ impl StreamingServer {
         // The relay learns of the cast, with a way to ask the phone for a
         // keyframe (a viewer joined, or its decoder lost its way).
         let (cast_want_tx, cast_want_rx) = mpsc::channel::<()>(4);
+        // Control for the phone (C8): batches from the relay, sent only
+        // while the phone's last word was that it takes them.
+        let (cast_control_tx, cast_control_rx) = mpsc::channel::<Vec<u8>>(CAST_CONTROL_QUEUE);
+        let cast_control_on = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let _cast_ended = match &cast_tx {
             Some(tx) => {
                 let start = super::cast::CastEvent::Start {
                     session_id: _live_session.id(),
                     device_id: device_id.clone(),
                     want_keyframe: cast_want_tx.clone(),
+                    control: cast_control_tx.clone(),
                 };
                 if tx.send(start).await.is_err() {
                     warn!("The cast relay is gone");
@@ -648,6 +653,35 @@ impl StreamingServer {
         let window_mode = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let mut tasks = JoinSet::new();
+
+        // A cast's control (C8) goes to the phone a batch per stream, only
+        // while it said it takes control.
+        if cast {
+            let control_conn = connection.clone();
+            let mut control_rx = cast_control_rx;
+            let control_on = cast_control_on.clone();
+            let control_cancel = cancel.clone();
+            tasks.spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = control_cancel.cancelled() => break,
+                        batch = control_rx.recv() => match batch {
+                            Some(batch) => {
+                                if control_on.load(std::sync::atomic::Ordering::Acquire) {
+                                    send_cast_control(&control_conn, &batch).await;
+                                } else {
+                                    debug!("Control for a phone that does not take it, dropped");
+                                }
+                            }
+                            None => {
+                                control_cancel.cancelled().await;
+                                break;
+                            }
+                        },
+                    }
+                }
+            });
+        }
 
         // A cast's keyframe asks go to the phone as a header-only stream.
         if cast {
@@ -1292,6 +1326,7 @@ impl StreamingServer {
         let monitor_mic_tx = self.mic_tx.clone();
         let monitor_cast_tx = cast_tx.clone();
         let monitor_cast_want = cast_want_tx;
+        let monitor_cast_control_on = cast_control_on;
         let mut cast_chain = super::cast::CastChain::default();
         // A cast's frames are far larger than input packets.
         let client_stream_max = if cast {
@@ -1371,6 +1406,12 @@ impl StreamingServer {
                                                 }
                                                 super::cast::CastPayload::Frame { keyframe, seq, .. } => {
                                                     cast_chain.on_frame(*keyframe, *seq, now)
+                                                }
+                                                super::cast::CastPayload::ControlState { on } => {
+                                                    info!(on, "The phone says whether it takes control");
+                                                    monitor_cast_control_on
+                                                        .store(*on, std::sync::atomic::Ordering::Release);
+                                                    false
                                                 }
                                             };
                                             let delivered = monitor_cast_tx.as_ref().is_some_and(|tx| {
@@ -1885,6 +1926,33 @@ fn negotiate_codec(caps: u8, hevc_allowed: bool, current: VideoCodec) -> Option<
 }
 
 /// Ask a cast's phone for a keyframe (T10k): a header-only stream.
+/// Control batches waiting for the phone (C8); more are dropped.
+const CAST_CONTROL_QUEUE: usize = 64;
+
+/// One control batch to the phone (C8): its header, then the batch.
+async fn send_cast_control(connection: &SharedConnection, batch: &[u8]) {
+    let header = super::transport::PacketHeader {
+        sequence: 0,
+        stream_kind: super::transport::STREAM_KIND_CAST_CONTROL,
+        is_keyframe: false,
+        timestamp_us: 0,
+    };
+    match connection.open_uni().await {
+        Ok(mut stream) => {
+            let sent = async {
+                stream.write_all(&header.as_bytes()).await?;
+                stream.write_all(batch).await
+            }
+            .await;
+            if let Err(e) = sent {
+                debug!(error = %e, "Could not send control to the phone");
+            }
+            let _ = stream.finish();
+        }
+        Err(e) => debug!(error = %e, "Could not send control to the phone"),
+    }
+}
+
 async fn send_cast_keyframe_ask(connection: &SharedConnection) {
     let header = super::transport::PacketHeader {
         sequence: 0,

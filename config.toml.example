@@ -66,6 +66,11 @@ video_quality = "balanced"
 # inline reply). Off: plain, and the desktop app's Notifications page answers.
 # toast_answers = true
 
+# The desktop app's window showing a phone's screen controls the phone, once
+# the phone allows it ("Let the computer control this phone" in its Settings).
+# Off: the window only shows.
+# cast_control = true
+
 # Texts a phone forwards (Messages in the desktop app): a notification for
 # each, and how many the history keeps.
 # sms_notify = true

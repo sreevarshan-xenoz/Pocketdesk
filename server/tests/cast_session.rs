@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
 use pocketdesk_core::streaming::cast::{self, CastEvent, CastPayload};
+use pocketdesk_core::streaming::cast_control::{ControlBatch, ControlEvent, Global};
 use pocketdesk_core::streaming::transport::{CertManager, StreamServer, StreamTransportConfig};
 use pocketdesk_core::streaming::{
     InputPacket, QuinnConnection, SessionMode, SharedConnection, StreamingClient, StreamingConfig,
@@ -104,6 +105,21 @@ async fn connect_cast(addr: SocketAddr, cert: std::sync::Arc<CertManager>) -> St
     client
 }
 
+/// The next control batch the phone took, waiting up to 5 s without
+/// blocking the runtime the client receives on.
+async fn take_control(remote: &pocketdesk_core::streaming::client::RemoteFlags) -> Option<Vec<u8>> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(batch) = remote.control.take(Duration::ZERO) {
+            return Some(batch);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
 async fn a_cast_reaches_the_relay_and_its_keyframe_asks_reach_the_phone() {
     let (cast_tx, mut events) = mpsc::channel(64);
@@ -117,6 +133,7 @@ async fn a_cast_reaches_the_relay_and_its_keyframe_asks_reach_the_phone() {
         session_id,
         device_id,
         want_keyframe,
+        control,
     } = next(&mut events).await
     else {
         panic!("the cast starts first");
@@ -171,6 +188,52 @@ async fn a_cast_reaches_the_relay_and_its_keyframe_asks_reach_the_phone() {
         assert!(tokio::time::Instant::now() < deadline, "the ask never came");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+
+    // Control (C8): nothing reaches a phone that has not said it takes it.
+    let batch = ControlBatch {
+        sent_ms: 1,
+        events: vec![ControlEvent::Global(Global::Home)],
+    }
+    .encode()
+    .unwrap();
+    control
+        .send(batch.clone())
+        .await
+        .expect("the control channel");
+    assert_eq!(
+        {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            remote.control.take(Duration::ZERO)
+        },
+        None,
+        "the phone had not said it takes control"
+    );
+    // It says so; the relay hears it, and control reaches it.
+    send(&conn, &cast::control_state_bytes(true)).await;
+    let CastEvent::Payload { payload, .. } = next(&mut events).await else {
+        panic!("the control state");
+    };
+    assert_eq!(payload, CastPayload::ControlState { on: true });
+    control
+        .send(batch.clone())
+        .await
+        .expect("the control channel");
+    assert_eq!(
+        take_control(&remote).await,
+        Some(batch.clone()),
+        "control reached the phone"
+    );
+    // It says it no longer does: nothing more reaches it.
+    send(&conn, &cast::control_state_bytes(false)).await;
+    let _ = next(&mut events).await;
+    control.send(batch).await.expect("the control channel");
+    assert_eq!(
+        {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            remote.control.take(Duration::ZERO)
+        },
+        None
+    );
 
     // A cast does not drive the computer.
     send(&conn, &InputPacket::MouseMove { dx: 5, dy: -3 }.encode()).await;

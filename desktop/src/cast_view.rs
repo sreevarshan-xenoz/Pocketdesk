@@ -6,6 +6,12 @@
 //! texture in a window of its own, at the phone's shape. Closing the window
 //! stops showing that cast (the phone keeps casting until it stops);
 //! the Sessions tab can show it again.
+//!
+//! Once the phone says it takes control (C8), the window controls it: the
+//! primary button presses, drags and releases on the phone, the wheel
+//! scrolls, the right button is Back and the middle Home, typing goes to
+//! the phone's focused field, and a bar holds Back, Home, Recents and a
+//! switch to watch without touching.
 
 use std::io::{self, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -16,6 +22,7 @@ use std::time::Duration;
 
 use eframe::egui;
 use pocketdesk_core::local::cast::{self as wire, CastFile, Message};
+use pocketdesk_core::streaming::cast_control::{ControlBatch, ControlEvent, Global, TouchAction};
 
 /// The window's id among the app's viewports.
 fn viewport_id() -> egui::ViewportId {
@@ -57,6 +64,16 @@ struct State {
     dismissed: Option<u64>,
     /// The relay connection, to cut when the window closes.
     stream: Option<TcpStream>,
+    /// Where control goes: the relay connection's writing half (C8).
+    writer: Option<TcpStream>,
+    /// The phone takes control now, as it last said (C8).
+    control_on: bool,
+    /// The owner switched control off in this window, to watch only.
+    watch_only: bool,
+    /// The primary button is down on the phone.
+    pressing: bool,
+    /// Where the last touch went, for a release the window did not see.
+    last_touch: (u16, u16),
 }
 
 /// The cast window and its worker.
@@ -89,7 +106,9 @@ impl CastView {
     }
 
     /// Call each pass: keeps the window open while there is a cast to show.
-    pub fn show(&self, ctx: &egui::Context, devices: &[crate::model::Device]) {
+    /// `control` is the owner's Settings ("Control phones from their screen
+    /// window", C8).
+    pub fn show(&self, ctx: &egui::Context, devices: &[crate::model::Device], control: bool) {
         let (title, size) = {
             let state = lock(&self.shared);
             let Some(id) = state.session_id else { return };
@@ -116,7 +135,7 @@ impl CastView {
             .with_min_inner_size([160.0, 160.0]);
         let shared = self.shared.clone();
         ctx.show_viewport_deferred(viewport_id(), builder, move |ui, _class| {
-            draw(&shared, ui);
+            draw(&shared, ui, control);
         });
     }
 }
@@ -149,6 +168,167 @@ fn window_size(size: Option<(u16, u16)>) -> (f32, f32) {
     }
 }
 
+/// The point `pos` as fractions of `picture` (C8), 0 to 65535 on each
+/// axis; `None` outside it, unless `clamp` (a drag that left the picture
+/// keeps to its edge).
+fn fraction(picture: egui::Rect, pos: egui::Pos2, clamp: bool) -> Option<(u16, u16)> {
+    if picture.width() <= 0.0 || picture.height() <= 0.0 {
+        return None;
+    }
+    if !clamp && !picture.contains(pos) {
+        return None;
+    }
+    let fx = ((pos.x - picture.left()) / picture.width()).clamp(0.0, 1.0);
+    let fy = ((pos.y - picture.top()) / picture.height()).clamp(0.0, 1.0);
+    Some(((fx * 65535.0).round() as u16, (fy * 65535.0).round() as u16))
+}
+
+/// The wheel's `delta` as notches (C8): positive scrolls the phone's
+/// content down. Lines count one each; points, one per 50.
+fn notches(delta: egui::Vec2, unit: egui::MouseWheelUnit) -> i8 {
+    let lines = match unit {
+        egui::MouseWheelUnit::Line => delta.y,
+        egui::MouseWheelUnit::Page => delta.y * 3.0,
+        egui::MouseWheelUnit::Point => delta.y / 50.0,
+    };
+    (-lines).round().clamp(-5.0, 5.0) as i8
+}
+
+/// This pass's input in the window as control for the phone (C8), with the
+/// picture at `picture`; `pressing` follows the primary button.
+fn control_events(
+    events: &[egui::Event],
+    picture: egui::Rect,
+    hover: Option<egui::Pos2>,
+    pressing: &mut bool,
+) -> Vec<ControlEvent> {
+    let mut out = Vec::new();
+    for event in events {
+        match event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                ..
+            } => {
+                if *pressed {
+                    if let Some((x, y)) = fraction(picture, *pos, false) {
+                        *pressing = true;
+                        out.push(ControlEvent::Touch {
+                            action: TouchAction::Down,
+                            x,
+                            y,
+                        });
+                    }
+                } else if *pressing {
+                    *pressing = false;
+                    if let Some((x, y)) = fraction(picture, *pos, true) {
+                        out.push(ControlEvent::Touch {
+                            action: TouchAction::Up,
+                            x,
+                            y,
+                        });
+                    }
+                }
+            }
+            egui::Event::PointerMoved(pos) if *pressing => {
+                if let Some((x, y)) = fraction(picture, *pos, true) {
+                    out.push(ControlEvent::Touch {
+                        action: TouchAction::Move,
+                        x,
+                        y,
+                    });
+                }
+            }
+            egui::Event::PointerButton {
+                pos,
+                button,
+                pressed: true,
+                ..
+            } if fraction(picture, *pos, false).is_some() => match button {
+                egui::PointerButton::Secondary => out.push(ControlEvent::Global(Global::Back)),
+                egui::PointerButton::Middle => out.push(ControlEvent::Global(Global::Home)),
+                _ => {}
+            },
+            egui::Event::MouseWheel { unit, delta, .. } => {
+                let dy = notches(*delta, *unit);
+                if dy != 0 && !*pressing {
+                    // At the pointer; the picture's centre when it is not over it.
+                    let at = hover
+                        .filter(|p| picture.contains(*p))
+                        .unwrap_or(picture.center());
+                    if let Some((x, y)) = fraction(picture, at, false) {
+                        out.push(ControlEvent::Scroll { x, y, dx: 0, dy });
+                    }
+                }
+            }
+            egui::Event::Text(text) if !text.is_empty() => {
+                out.push(ControlEvent::Text(text.clone()));
+            }
+            egui::Event::Key {
+                key, pressed: true, ..
+            } => match key {
+                egui::Key::Backspace => out.push(ControlEvent::Backspace),
+                egui::Key::Enter => out.push(ControlEvent::Enter),
+                egui::Key::Escape => out.push(ControlEvent::Global(Global::Back)),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    coalesce_moves(out)
+}
+
+/// Moves one after another become their last: a 1000 Hz mouse sends one
+/// move a pass, not one a millisecond (C8 review). Presses, releases and
+/// all else keep their order.
+fn coalesce_moves(events: Vec<ControlEvent>) -> Vec<ControlEvent> {
+    let mut out: Vec<ControlEvent> = Vec::with_capacity(events.len());
+    for event in events {
+        let is_move = matches!(
+            event,
+            ControlEvent::Touch {
+                action: TouchAction::Move,
+                ..
+            }
+        );
+        if is_move
+            && matches!(
+                out.last(),
+                Some(ControlEvent::Touch {
+                    action: TouchAction::Move,
+                    ..
+                })
+            )
+        {
+            out.pop();
+        }
+        out.push(event);
+    }
+    out
+}
+
+/// Send `events` to the phone through the relay (C8), in batches; whether
+/// all went. A write that fails mid-message leaves the framing broken, so
+/// the caller stops writing there (the reader sees the relay go).
+fn send_control(writer: &mut TcpStream, events: Vec<ControlEvent>) -> bool {
+    let sent_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    for chunk in events.chunks(pocketdesk_core::streaming::cast_control::MAX_EVENTS) {
+        let batch = ControlBatch {
+            sent_ms,
+            events: chunk.to_vec(),
+        };
+        if let Some(bytes) = batch.encode()
+            && Message::Control(bytes).write(writer).is_err()
+        {
+            return false;
+        }
+    }
+    true
+}
+
 /// Where a `w`×`h` picture goes in `area`: as large as fits, centred.
 fn letterbox(area: egui::Rect, w: usize, h: usize) -> egui::Rect {
     let (w, h) = (w.max(1) as f32, h.max(1) as f32);
@@ -156,11 +336,12 @@ fn letterbox(area: egui::Rect, w: usize, h: usize) -> egui::Rect {
     egui::Rect::from_center_size(area.center(), egui::vec2(w * scale, h * scale))
 }
 
-fn draw(shared: &Mutex<State>, ui: &mut egui::Ui) {
+fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
     let ctx = ui.ctx().clone();
     let mut state = lock(shared);
     if ctx.input(|i| i.viewport().close_requested()) {
         state.dismissed = state.session_id;
+        state.writer = None;
         if let Some(stream) = state.stream.take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
@@ -188,11 +369,52 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui) {
     }
     let texture = state.texture.clone();
     let note = state.note.clone();
+    let phone_takes = state.control_on && state.writer.is_some();
+    let controlling = control && phone_takes && !state.watch_only;
+    let mut watch_only = state.watch_only;
     drop(state);
+    let mut buttons = Vec::new();
+    if control {
+        egui::Panel::top("cast-control")
+            .frame(egui::Frame::NONE.fill(egui::Color32::from_gray(24)).inner_margin(4.0))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if phone_takes {
+                        ui.add_enabled_ui(!watch_only, |ui| {
+                            for (label, global) in [
+                                ("Back", Global::Back),
+                                ("Home", Global::Home),
+                                ("Recents", Global::Recents),
+                            ] {
+                                let button = ui.button(label);
+                                if button.clicked() {
+                                    // Enter and Space go to the phone, not
+                                    // to this button again (C8 review).
+                                    button.surrender_focus();
+                                    buttons.push(ControlEvent::Global(global));
+                                }
+                            }
+                        });
+                        let switch = ui
+                            .checkbox(&mut watch_only, "Watch only")
+                            .on_hover_text("Show the phone without touching it");
+                        if switch.clicked() {
+                            switch.surrender_focus();
+                        }
+                    } else {
+                        ui.colored_label(
+                            egui::Color32::LIGHT_GRAY,
+                            "To control the phone from here, turn on \u{201c}Let the computer control this phone\u{201d} in its Pocketdesk Settings.",
+                        );
+                    }
+                });
+            });
+    }
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
         .show(ui, |ui| {
             let area = ui.max_rect();
+            let mut picture_rect = None;
             match (&texture, note) {
                 (_, Some(note)) => {
                     ui.centered_and_justified(|ui| {
@@ -201,9 +423,17 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui) {
                 }
                 (Some(texture), None) => {
                     let [w, h] = texture.size();
+                    let rect = letterbox(area, w, h);
+                    picture_rect = Some(rect);
+                    // The picture takes the pointer, so egui does not.
+                    ui.interact(
+                        rect,
+                        ui.id().with("cast-picture"),
+                        egui::Sense::click_and_drag(),
+                    );
                     ui.painter().image(
                         texture.id(),
-                        letterbox(area, w, h),
+                        rect,
                         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                         egui::Color32::WHITE,
                     );
@@ -216,6 +446,67 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui) {
                         )
                     });
                 }
+            }
+            // C8: this pass's input, to the phone.
+            let mut state = lock(shared);
+            state.watch_only = watch_only;
+            // A picture of the old shape (the phone just turned) would put
+            // a tap in the wrong place: nothing goes until the new one shows.
+            let current = match (&texture, state.size) {
+                (Some(t), Some((w, h))) => t.size() == [usize::from(w), usize::from(h)],
+                _ => false,
+            };
+            let mut events = Vec::new();
+            if controlling && !watch_only && current {
+                events = buttons;
+                if let Some(rect) = picture_rect {
+                    let (input, hover, down) = ctx.input(|i| {
+                        (
+                            i.events.clone(),
+                            i.pointer.hover_pos(),
+                            i.pointer.primary_down(),
+                        )
+                    });
+                    events.extend(control_events(&input, rect, hover, &mut state.pressing));
+                    // A release the window never saw (focus went mid-drag):
+                    // the finger lifts where it last was (C8 review).
+                    if state.pressing && !down {
+                        state.pressing = false;
+                        let (x, y) = state.last_touch;
+                        events.push(ControlEvent::Touch {
+                            action: TouchAction::Up,
+                            x,
+                            y,
+                        });
+                    }
+                }
+            } else if state.pressing {
+                // Control went off mid-press: the finger lifts.
+                state.pressing = false;
+                let (x, y) = state.last_touch;
+                events.push(ControlEvent::Touch {
+                    action: TouchAction::Up,
+                    x,
+                    y,
+                });
+            }
+            if let Some(ControlEvent::Touch { x, y, .. }) = events
+                .iter()
+                .rev()
+                .find(|e| matches!(e, ControlEvent::Touch { .. }))
+            {
+                state.last_touch = (*x, *y);
+            }
+            // Written outside the window's lock, so a slow relay holds
+            // nothing else; the first broken write ends control here.
+            let writer = (!events.is_empty())
+                .then(|| state.writer.as_ref().and_then(|w| w.try_clone().ok()))
+                .flatten();
+            drop(state);
+            if let Some(mut writer) = writer
+                && !send_control(&mut writer, events)
+            {
+                lock(shared).writer = None;
             }
         });
 }
@@ -249,6 +540,9 @@ fn watch(state_dir: &std::path::Path, shared: &Arc<Mutex<State>>, ctx: &egui::Co
         let _ = view(&file, shared, ctx);
         let mut state = lock(shared);
         state.stream = None;
+        state.writer = None;
+        state.control_on = false;
+        state.pressing = false;
         state.size = None;
         state.texture = None;
         state.picture = None;
@@ -278,7 +572,13 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
     stream.write_all(&token)?;
-    lock(shared).stream = Some(stream.try_clone()?);
+    // A stuck write must not hold the window (C8): control is best effort.
+    stream.set_write_timeout(Some(Duration::from_millis(200)))?;
+    {
+        let mut state = lock(shared);
+        state.stream = Some(stream.try_clone()?);
+        state.writer = Some(stream.try_clone()?);
+    }
     let mut asks = stream.try_clone()?;
     let mut reader = BufReader::with_capacity(256 * 1024, stream);
 
@@ -325,7 +625,11 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     ctx.request_repaint_of(viewport_id());
                 }
             }
-            Message::Heartbeat | Message::WantKeyframe => {}
+            Message::ControlState { on } => {
+                lock(shared).control_on = on;
+                ctx.request_repaint_of(viewport_id());
+            }
+            Message::Heartbeat | Message::WantKeyframe | Message::Control(_) => {}
             Message::End => return Ok(()),
         }
     }
@@ -490,6 +794,236 @@ impl Drop for Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn picture() -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(100.0, 0.0), egui::vec2(200.0, 400.0))
+    }
+
+    #[test]
+    fn a_point_is_a_fraction_of_the_picture_and_outside_it_is_nothing() {
+        assert_eq!(
+            fraction(picture(), egui::pos2(100.0, 0.0), false),
+            Some((0, 0))
+        );
+        assert_eq!(
+            fraction(picture(), egui::pos2(300.0, 400.0), false),
+            Some((65535, 65535))
+        );
+        assert_eq!(
+            fraction(picture(), egui::pos2(200.0, 200.0), false),
+            Some((32768, 32768))
+        );
+        assert_eq!(
+            fraction(picture(), egui::pos2(50.0, 200.0), false),
+            None,
+            "the letterbox's bar"
+        );
+        assert_eq!(
+            fraction(picture(), egui::pos2(50.0, 500.0), true),
+            Some((0, 65535)),
+            "a drag that left keeps to the edge"
+        );
+    }
+
+    #[test]
+    fn a_press_drag_and_release_on_the_picture_are_one_touch() {
+        let press = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut pressing = false;
+        let events = control_events(
+            &[
+                egui::Event::PointerMoved(egui::pos2(150.0, 100.0)),
+                press(egui::pos2(150.0, 100.0), true),
+                egui::Event::PointerMoved(egui::pos2(160.0, 120.0)),
+                egui::Event::PointerMoved(egui::pos2(500.0, 120.0)),
+                press(egui::pos2(500.0, 120.0), false),
+            ],
+            picture(),
+            None,
+            &mut pressing,
+        );
+        let actions: Vec<_> = events
+            .iter()
+            .map(|e| match e {
+                ControlEvent::Touch { action, x, .. } => (*action, *x),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            actions[0].0,
+            TouchAction::Down,
+            "a move before the press is nothing"
+        );
+        assert_eq!(
+            actions[1],
+            (TouchAction::Move, 65535),
+            "two moves in a pass are their last, clamped to the edge"
+        );
+        assert_eq!(actions[2], (TouchAction::Up, 65535));
+        assert_eq!(actions.len(), 3);
+        assert!(!pressing);
+
+        // A press on the bar is not a touch, nor its release.
+        let events = control_events(
+            &[
+                press(egui::pos2(10.0, 10.0), true),
+                press(egui::pos2(150.0, 10.0), false),
+            ],
+            picture(),
+            None,
+            &mut pressing,
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn buttons_wheel_and_keys_are_what_the_phone_does_with_them() {
+        let mut pressing = false;
+        let at = egui::pos2(200.0, 100.0);
+        let events = control_events(
+            &[
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Middle,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, -2.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Text("hé".into()),
+                egui::Event::Key {
+                    key: egui::Key::Backspace,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            picture(),
+            Some(at),
+            &mut pressing,
+        );
+        assert_eq!(
+            events,
+            vec![
+                ControlEvent::Global(Global::Back),
+                ControlEvent::Global(Global::Home),
+                ControlEvent::Scroll {
+                    x: 32768,
+                    y: 16384,
+                    dx: 0,
+                    dy: 2
+                },
+                ControlEvent::Text("hé".into()),
+                ControlEvent::Backspace,
+                ControlEvent::Enter,
+                ControlEvent::Global(Global::Back),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_goes_to_the_relay_as_batches_it_can_read() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let many: Vec<_> = (0..70)
+            .map(|n| ControlEvent::Touch {
+                action: TouchAction::Move,
+                x: n,
+                y: n,
+            })
+            .collect();
+        send_control(&mut writer, many.clone());
+        let mut got = Vec::new();
+        for _ in 0..2 {
+            let Message::Control(bytes) = Message::read(&mut relay).unwrap() else {
+                panic!("a control message");
+            };
+            got.extend(ControlBatch::decode(&bytes).expect("readable").events);
+        }
+        assert_eq!(got, many, "split at the batch limit, nothing lost");
+    }
+
+    #[test]
+    fn moves_in_a_pass_become_their_last_and_nothing_else_moves() {
+        let mv = |x| ControlEvent::Touch {
+            action: TouchAction::Move,
+            x,
+            y: 0,
+        };
+        let down = ControlEvent::Touch {
+            action: TouchAction::Down,
+            x: 0,
+            y: 0,
+        };
+        let up = ControlEvent::Touch {
+            action: TouchAction::Up,
+            x: 9,
+            y: 0,
+        };
+        assert_eq!(
+            coalesce_moves(vec![
+                down.clone(),
+                mv(1),
+                mv(2),
+                mv(3),
+                up.clone(),
+                mv(4),
+                mv(5)
+            ]),
+            vec![down, mv(3), up, mv(5)]
+        );
+    }
+
+    #[test]
+    fn the_wheel_counts_lines_and_points() {
+        assert_eq!(
+            notches(egui::vec2(0.0, 1.0), egui::MouseWheelUnit::Line),
+            -1
+        );
+        assert_eq!(
+            notches(egui::vec2(0.0, -100.0), egui::MouseWheelUnit::Point),
+            2
+        );
+        assert_eq!(
+            notches(egui::vec2(0.0, -99.0), egui::MouseWheelUnit::Line),
+            5,
+            "bounded"
+        );
+        assert_eq!(
+            notches(egui::vec2(0.0, 10.0), egui::MouseWheelUnit::Point),
+            0
+        );
+    }
 
     #[test]
     fn the_window_takes_the_phones_shape() {

@@ -89,6 +89,10 @@ pub struct Config {
     /// still answers.
     #[serde(default = "default_true")]
     pub toast_answers: bool,
+    /// The window showing a phone's screen controls the phone, when the
+    /// phone allows it (C8); off, the window only shows.
+    #[serde(default = "default_true")]
+    pub cast_control: bool,
     /// A notification for each text a phone forwards (roadmap N5b).
     #[serde(default = "default_true")]
     pub sms_notify: bool,
@@ -263,6 +267,7 @@ impl Default for Config {
             dht_publish: DhtPublish::Relay,
             phone_notifications: true,
             toast_answers: true,
+            cast_control: true,
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
             sms_keep: default_sms_keep(),
@@ -454,6 +459,7 @@ impl Config {
         "dht_publish",
         "phone_notifications",
         "toast_answers",
+        "cast_control",
         "notifications_per_minute",
         "sms_notify",
         "open_links",

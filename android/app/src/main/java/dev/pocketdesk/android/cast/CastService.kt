@@ -137,6 +137,10 @@ class CastService : Service() {
         return START_NOT_STICKY
     }
 
+    /** Control from the computer while the screen is shown (C8). */
+    @Volatile
+    private var control: dev.pocketdesk.android.control.ControlRunner? = null
+
     /** The session: connect, wait to be admitted, show, and watch it. */
     private fun run(port: Int) {
         val connected =
@@ -179,6 +183,12 @@ class CastService : Service() {
                         showing = true
                         main.post(::startPicture)
                         update(getString(R.string.cast_showing, address))
+                        // C8: the computer may control the phone while it is shown.
+                        control = dev.pocketdesk.android.control.ControlRunner(this) { on ->
+                            if (!finished) {
+                                update(getString(if (on) R.string.cast_showing_controlled else R.string.cast_showing, address))
+                            }
+                        }.also { it.start() }
                     }
                 else -> {}
             }
@@ -285,6 +295,7 @@ class CastService : Service() {
     }
 
     override fun onDestroy() {
+        control?.stop()
         finish()
         super.onDestroy()
     }
