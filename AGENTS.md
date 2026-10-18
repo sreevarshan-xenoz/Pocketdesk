@@ -42,6 +42,11 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-18: **C4, a headless test harness for the desktop app (branch `test/desktop-harness`; spec `docs/superpowers/specs/2026-10-18-desktop-harness-design.md`, with as-built and review sections).**
+  - **The harness:** `desktop/src/ui_tests.rs` drives the app, `logic` included, through AccessKit with `egui_kittest` 0.36.2, over throwaway state and config folders set through the core's test seam.
+  - **Tests, with the workspace's:** every page opens; the empty pages' next steps; Unpair by name (Cancel keeps, Unpair removes); the Overview's phone with its battery and actions; the save bar (Undo, Save writing `config.toml`). Owed checks in §88 and §94 are now ticked by them.
+  - **Snapshots:** the Overview, Devices and Settings in both themes behind the `snapshots` feature (a GPU renderer), drawn and compared by a CI job with Mesa's software Vulkan on `ubuntu-24.04`. Found on the way: the feature did not build on Windows (gpu-allocator resolved against windows 0.61), fixed in the lock and guarded in CI.
+  - **Fresh review (0 Critical, 3 Important), fixed one commit each** (checklist §107).
 - 2026-10-18: **C3, notifications that fail to send wait and go later (branch `feat/late-notifications`; spec `docs/superpowers/specs/2026-10-18-late-notifications-design.md`, with as-built, device-run and review sections).**
   - **The phone:** notifications wait up to an hour (was 10 minutes), in memory only, at most 20. Settings "When the computer is out of reach": an hour, 10 minutes, or don't wait. Each is sent with how long it waited.
   - **The computer:** one that waited a minute or more is shown "Sent N min late", dated from when it came on the phone, with `late_secs` in its event.

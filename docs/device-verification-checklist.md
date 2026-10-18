@@ -1701,16 +1701,17 @@ On the A71 against a throwaway server:
 - [ ] A computer from before C3: notifications arrive once each, as before.
 - [ ] The computer's Notifications permission off: nothing waits on the phone.
 - [ ] Linux: the late line in a D-Bus notification.
+
 ## 107. The desktop app's headless harness (C4)
 
 `desktop/src/ui_tests.rs` drives the app through AccessKit with `egui_kittest`, over throwaway state and config folders (`cargo test -p pocketdesk-desktop`):
 
-- [x] Every page opens from the left, with its purpose.
+- [x] Every page opens from the left, with its purpose (Pair in a test of its own).
 - [x] Devices with nothing paired says how, and its button opens Pair; Sessions without a server sends the owner to Overview; Files with nothing to send to offers to pair.
 - [x] Unpair… asks by name; Cancel keeps the phone, Unpair removes it from the trust store.
 - [x] The Overview shows a paired phone with its battery, Ring, Send file… and Send link….
 - [x] A change in Settings brings the save bar; Undo takes it away; Save writes `config.toml` and says "Saved.".
-- [x] The Overview, Devices and Settings in both themes, drawn on this box's GPU with the `snapshots` feature (6 pictures, looked at).
+- [x] A one-off look: the Overview, Devices and Settings in both themes drawn on this box's GPU with the `snapshots` feature, then deleted (CI's are the ones kept).
 - [ ] The committed pictures drawn by CI's software Vulkan, and the comparison passing there.
 - [ ] Clicks through the app's own window that a harness cannot stand in for: the tray, drag and drop, the cast window.
 

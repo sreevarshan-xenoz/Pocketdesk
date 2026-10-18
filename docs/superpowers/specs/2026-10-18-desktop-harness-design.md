@@ -16,7 +16,7 @@ About twenty of the checklist's owed desktop checks are done by eye, through the
 ## The tests
 
 - **Navigation:** every page down the left opens, with its heading and its purpose line.
-- **The save bar:** a change in Settings shows the bar with Save and Undo; Undo takes the change back and hides the bar; Save writes the config file and says which changes apply now.
+- **The save bar:** a change in Settings shows the bar with Save and Undo; Undo takes the change back and hides the bar; Save writes the config file and says "Saved.".
 - **Unpair:** a paired phone's Unpair… asks by name; Cancel leaves it paired; the confirmation removes it from the trust store.
 - **Empty states:** Devices, Files and Sessions with nothing in them each say what to do next and offer the button that does it.
 - **The phone panel:** the Overview shows a paired phone's block with its battery and its Ring, Send file… and Send link….
@@ -41,8 +41,8 @@ About twenty of the checklist's owed desktop checks are done by eye, through the
 
 ## As built
 
-- **Tests** (`desktop/src/ui_tests.rs`, six with the workspace's tests):
-  - every page opens from the left with its purpose;
+- **Tests** (`desktop/src/ui_tests.rs`, seven with the workspace's tests):
+  - every page opens from the left with its purpose (Pair in its own test, since it mints a code);
   - Devices, Sessions and Files empty, each with its next step;
   - Unpair (Cancel keeps, Unpair removes from the trust store);
   - the Overview's phone with its battery and actions;
@@ -50,5 +50,23 @@ About twenty of the checklist's owed desktop checks are done by eye, through the
 - **The harness:** the app is built as `main.rs` builds it, with its theme installed, less the system's fonts. The left panel is drawn first, so a page is opened by the first node with its name (its heading says it too).
 - **Snapshots:** one test draws the Overview, Devices and Settings in both themes with a paired phone, and reports every page that changed, not only the first.
 - **A dependency mismatch fixed on the way:** `gpu-allocator` takes any `windows` from 0.53 to 0.62. Adding it, Cargo chose 0.61, already in the lock (for `enigo`), while `wgpu-hal` 30 hands it 0.62's types, so the feature did not build on Windows. The lock now gives it 0.62; Cargo cannot pin a dependency's choice in a manifest, so CI's Windows job builds the feature to catch a re-resolve.
-- **The first pictures:** drawn here on this box's GPU and looked at, then left to CI: the committed set comes from its software Vulkan.
+- **The first pictures:** drawn here on this box's GPU and looked at, then deleted: the committed set comes from CI's software Vulkan.
+
+## Review
+
+**Fresh review (0 Critical, 3 Important), fixed one commit each:**
+- the folders were set with an `unsafe` `set_var` while other tests ran on other threads (now the core's in-process seam);
+- the snapshots job is red until its pictures are committed (they are, from its own artifact, before merge);
+- exact pixels on an unpinned runner (now `ubuntu-24.04` and 8 pixels of slack, with the comparison's output ignored).
+
+**Minors fixed:**
+- each test removes its folders;
+- Pair opens in a test of its own;
+- CI's Windows job builds the feature, to catch the lock's edge coming undone;
+- the docs' claims.
+
+**Left as is:**
+- **Queries by order:** a page is opened by the first node with its name, and the Sessions page's Overview button by the last; a new duplicate fails loudly, not vacuously.
+- **Leftover threads:** each harness leaves the cast window's watcher polling for a `cast.json` no test writes.
+- **Real reads:** Settings and Pair read the file manager's menu folder and the network, which only makes a locally drawn picture differ from CI's.
 
