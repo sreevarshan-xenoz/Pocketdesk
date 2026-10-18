@@ -150,9 +150,16 @@ class ControlService : AccessibilityService() {
         performGlobalAction(code)
     }
 
-    /** The field that takes typing now, if any. */
+    /**
+     * The field that takes typing now, if any, read fresh: this service
+     * listens for no text events, so Android's cached copy can still hold
+     * the text before the last edit (a Backspace right after typing undid
+     * the typing).
+     */
     private fun field(): AccessibilityNodeInfo? =
-        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?.also { it.refresh() }
+            ?.takeIf { it.isEditable }
 
     /** What the field holds: its hint is not its text. */
     private fun textOf(node: AccessibilityNodeInfo): String =
