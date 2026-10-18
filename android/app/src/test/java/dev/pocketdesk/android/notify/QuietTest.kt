@@ -67,4 +67,13 @@ class QuietTest {
         assertFalse(QuietPlan.mayMute(QuietPlan.NONE))
         assertFalse(QuietPlan.mayMute(QuietPlan.UNKNOWN))
     }
+
+    @Test
+    fun `a clock set back ends the mute rather than stretching it`() {
+        val mute = QuietPlan.Mute(untilMs = 10_000_000_000, filter = QuietPlan.PRIORITY)
+        val dayBack = mute.untilMs - (QuietPlan.MAX_MINUTES + 2) * 60_000L
+        assertEquals(QuietPlan.Next.END, QuietPlan.next(mute, nowMs = dayBack, filter = QuietPlan.PRIORITY))
+        val withinADay = mute.untilMs - QuietPlan.MAX_MINUTES * 60_000L
+        assertEquals(QuietPlan.Next.WAIT, QuietPlan.next(mute, nowMs = withinADay, filter = QuietPlan.PRIORITY))
+    }
 }

@@ -43,6 +43,9 @@ object QuietPlan {
         mute == null || filter == UNKNOWN -> Next.WAIT
         filter != mute.filter -> Next.FORGET
         nowMs >= mute.untilMs -> Next.END
+        // Further off than any mute: the clock was set back. Ended, not
+        // stretched by however far it went (D2 review).
+        mute.untilMs - nowMs > MAX_MINUTES * 60_000L + 60_000L -> Next.END
         else -> Next.WAIT
     }
 

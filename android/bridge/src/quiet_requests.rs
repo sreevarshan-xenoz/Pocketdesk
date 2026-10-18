@@ -4,10 +4,15 @@
 //! mute and then its end, read together, end it.
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use pocketdesk_core::protocol::quiet::{MAX_MINUTES, QUIET};
 
-static WAITING: Mutex<Option<serde_json::Value>> = Mutex::new(None);
+/// How long a mute waits for the app: the listener not running, a mute an
+/// hour old must not start when it does (D2 review).
+const WAIT: Duration = Duration::from_secs(60);
+
+static WAITING: Mutex<Option<(Instant, serde_json::Value)>> = Mutex::new(None);
 
 /// Keep a mute of `packet_type` from the computer at `host:port`, if it is
 /// one with minutes in range.
@@ -22,8 +27,10 @@ pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, host: &str, p
     else {
         return;
     };
-    *WAITING.lock().unwrap_or_else(|e| e.into_inner()) =
-        Some(serde_json::json!({ "host": host, "port": port, "minutes": minutes }));
+    *WAITING.lock().unwrap_or_else(|e| e.into_inner()) = Some((
+        Instant::now(),
+        serde_json::json!({ "host": host, "port": port, "minutes": minutes }),
+    ));
 }
 
 /// Drop what waits: it came from a computer the phone left.
@@ -33,10 +40,16 @@ pub(crate) fn forget() {
 
 /// The newest mute waiting, as JSON, or `null`; taken.
 pub(crate) fn take_json() -> String {
+    take_within(WAIT)
+}
+
+fn take_within(wait: Duration) -> String {
     WAITING
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take()
+        .filter(|(at, _)| at.elapsed() <= wait)
+        .map(|(_, mute)| mute)
         .unwrap_or(serde_json::Value::Null)
         .to_string()
 }
@@ -66,5 +79,8 @@ mod tests {
             1716,
         );
         assert_eq!(take_json(), "null", "none of those");
+        receive(QUIET, &serde_json::json!({ "minutes": 5 }), host, 1716);
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(take_within(Duration::from_millis(1)), "null", "too old");
     }
 }
