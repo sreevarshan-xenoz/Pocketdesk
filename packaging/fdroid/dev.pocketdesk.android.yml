@@ -1,6 +1,7 @@
 # Pocketdesk's metadata for F-Droid (fdroiddata's metadata/dev.pocketdesk.android.yml),
-# modelled on Ruffle and Fatto (Rust through cargo-ndk, developer-signed). A draft:
-# opening the merge request is the owner's call (packaging/README.md).
+# modelled on Ruffle and Fatto (Rust through cargo-ndk, developer-signed). A draft, not yet
+# run through fdroid lint or fdroid build on F-Droid's build server: opening the merge
+# request, and running those there, is the owner's call (packaging/README.md).
 Categories:
   - Connectivity
   - System
@@ -24,9 +25,12 @@ Builds:
     versionCode: 4
     commit: v0.4.0
     subdir: android/app
+    # The environment CI builds the release in: JDK 21 (the APK's bytes depend on the
+    # compiler), and cmake for the TLS crate iroh brings (aws-lc-sys).
     sudo:
       - apt-get update
-      - apt-get install -y cmake
+      - apt-get install -y openjdk-21-jdk-headless cmake
+      - update-alternatives --auto java
     gradle:
       - yes
     srclibs:

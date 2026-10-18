@@ -22,9 +22,9 @@ For each release:
 
 ## F-Droid
 
-`packaging/fdroid/dev.pocketdesk.android.yml` is the draft of fdroiddata's metadata file: the build as CI does it (the pinned Rust, cargo-ndk, `android/bridge/build-android.sh`) and the release key's certificate, so F-Droid ships the developer's signature on bytes it built itself (the Reproducible APK workflow checks two machines agree). The store listing and screenshots are in `fastlane/metadata/android/en-US/`.
+`packaging/fdroid/dev.pocketdesk.android.yml` is the draft of fdroiddata's metadata file: the bridge built as CI builds it (the pinned Rust, cargo-ndk, `android/bridge/build-android.sh`, JDK 21) and the release key's certificate, so F-Droid would ship the developer's signature on bytes it built itself. The Reproducible APK workflow shows two of CI's machines agree; F-Droid's build server (another JDK distribution, its own SDK) is not tried yet, and any difference fails its comparison. The store listing and screenshots are in `fastlane/metadata/android/en-US/`.
 
-To publish: a merge request to fdroiddata adding the file as `metadata/dev.pocketdesk.android.yml` (the owner's call), with `fdroid lint` and `fdroid build` run on it there.
+To publish: a merge request to fdroiddata adding the file as `metadata/dev.pocketdesk.android.yml` (the owner's call), with `fdroid lint` and `fdroid build` run on it there. Submit it with the first release that holds the screenshots: F-Droid reads the listing from the tag it builds, and the screenshots show settings newer than 0.4.0 (move the `Builds` entry to that release).
 
 ## Android developer verification
 
