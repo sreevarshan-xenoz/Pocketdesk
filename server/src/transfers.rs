@@ -27,7 +27,7 @@ const MAX_CANCELLED: usize = 256;
 /// The rate is the bytes over about this long.
 const RATE_WINDOW: Duration = Duration::from_secs(4);
 /// How often the list is rewritten while anything moves.
-const TICK: Duration = Duration::from_secs(1);
+const TICK: Duration = Duration::from_secs(mirror::HEARTBEAT_SECS);
 
 /// What a transfer shows of itself.
 #[derive(Debug, Clone)]

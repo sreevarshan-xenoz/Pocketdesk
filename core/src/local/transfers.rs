@@ -16,7 +16,7 @@ use super::approval::is_valid_id;
 use super::paths::{TRANSFER_CANCELS_DIR, TRANSFERS_FILE};
 
 /// How often the server rewrites a list with transfers in it.
-pub const HEARTBEAT_SECS: u64 = 2;
+pub const HEARTBEAT_SECS: u64 = 1;
 /// How old a list may be and still describe a running server.
 const FRESH_SECS: u64 = 5;
 /// How long a cancel request waits for the server before it is dropped.
