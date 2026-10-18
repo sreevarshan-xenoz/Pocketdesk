@@ -31,9 +31,18 @@ object RecentPhotoRule {
         val timeMs: Long get() = if (takenMs > 0) takenMs else addedSecs * 1000
     }
 
-    /** Whether [row] is a camera photo: in `DCIM/`, whole, with a name. */
-    fun camera(row: Row): Boolean =
-        !row.pending && row.name.isNotBlank() && row.folder?.trimStart('/')?.startsWith("DCIM/", ignoreCase = true) == true
+    /**
+     * Whether [row] is a camera photo: in `DCIM/`, whole, with a name; not in
+     * `DCIM/Screenshots` (some makers keep screenshots there) or a hidden
+     * folder such as `DCIM/.thumbnails` (C7 review).
+     */
+    fun camera(row: Row): Boolean {
+        if (row.pending || row.name.isBlank() || row.name.startsWith(".")) return false
+        val parts = row.folder?.trim('/')?.split('/') ?: return false
+        return parts.firstOrNull().equals("DCIM", ignoreCase = true) &&
+            parts.none { it.startsWith(".") } &&
+            parts.getOrNull(1)?.equals("Screenshots", ignoreCase = true) != true
+    }
 
     /** The photos to list from [rows]: camera photos, newest first, at most [MAX_PHOTOS]. */
     fun listed(rows: List<Row>): List<Row> =

@@ -26,6 +26,16 @@ class RecentPhotoRuleTest {
     }
 
     @Test
+    fun screenshotsAndHiddenFoldersInDcimAreNotCameraPhotos() {
+        assertFalse(RecentPhotoRule.camera(row(1, "DCIM/Screenshots/")))
+        assertFalse(RecentPhotoRule.camera(row(2, "DCIM/.thumbnails/")))
+        assertFalse(RecentPhotoRule.camera(row(3, "DCIM/Camera/", name = ".hidden.jpg")))
+        assertFalse(RecentPhotoRule.camera(row(4, "Private/DCIM/")))
+        assertTrue(RecentPhotoRule.camera(row(5, "DCIM/Camera/")))
+        assertTrue(RecentPhotoRule.camera(row(6, "DCIM/")))
+    }
+
+    @Test
     fun atMostTwentyFourAreListed() {
         val rows = (1L..40L).map { row(it, "DCIM/Camera/", taken = it) }
         val listed = RecentPhotoRule.listed(rows)
