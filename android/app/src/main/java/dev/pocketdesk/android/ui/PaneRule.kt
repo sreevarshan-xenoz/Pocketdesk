@@ -17,13 +17,16 @@ object PaneRule {
 
     /**
      * The split for [fold] (a hinge, or none) in a window [widthDp] by
-     * [heightDp]: the hinge's own axis; side by side when wide; the stream
-     * on top and the controls below on a phone held upright (T9b); else one
-     * pane.
+     * [heightDp] whose smallest width is [smallestWidthDp] (the window's
+     * `smallestScreenWidthDp`, the sw600dp rule): the
+     * hinge's own axis; side by side when the window is wide on a tablet or
+     * an unfolded phone; the stream on top and the controls below on a phone
+     * held upright (T9b); else one pane, a phone on its side included (C5:
+     * it is wide, and the split gave its stream half the screen).
      */
-    fun autoSplit(fold: PaneSplit, widthDp: Float, heightDp: Float): PaneSplit = when {
+    fun autoSplit(fold: PaneSplit, widthDp: Float, heightDp: Float, smallestWidthDp: Float = WIDE_DP): PaneSplit = when {
         fold != PaneSplit.None -> fold
-        widthDp >= WIDE_DP -> PaneSplit.Vertical
+        widthDp >= WIDE_DP && smallestWidthDp >= WIDE_DP -> PaneSplit.Vertical
         heightDp >= widthDp * PORTRAIT_RATIO -> PaneSplit.Horizontal
         else -> PaneSplit.None
     }
@@ -35,9 +38,16 @@ object PaneRule {
      * there) and side by side otherwise; Single one. Picture-in-picture shows
      * the stream alone.
      */
-    fun resolve(mode: PaneMode, fold: PaneSplit, widthDp: Float, heightDp: Float, pip: Boolean): PaneSplit {
+    fun resolve(
+        mode: PaneMode,
+        fold: PaneSplit,
+        widthDp: Float,
+        heightDp: Float,
+        pip: Boolean,
+        smallestWidthDp: Float = WIDE_DP,
+    ): PaneSplit {
         if (pip) return PaneSplit.None
-        val auto = autoSplit(fold, widthDp, heightDp)
+        val auto = autoSplit(fold, widthDp, heightDp, smallestWidthDp)
         return when (mode) {
             PaneMode.Auto -> auto
             PaneMode.Dual -> if (auto != PaneSplit.None) auto else PaneSplit.Vertical

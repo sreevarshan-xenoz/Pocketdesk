@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -16,19 +19,23 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -174,35 +181,82 @@ private fun GroupHeader(label: String) {
 
 /** Every option at once, the chosen one filled; a tap chooses, with no cycling. */
 @Composable
-private fun ChoiceRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+internal fun ChoiceRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
         Text(
             label,
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.padding(start = 8.dp, bottom = 6.dp),
         )
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            options.forEachIndexed { i, option ->
-                // Four options leave little room ("Equilibrada", "அதிகபட்சம்"):
-                // no check (the fill says which), narrower sides, a smaller
-                // face, and two lines before an ellipsis (U4 review).
-                val crowded = options.size > 3
-                SegmentedButton(
-                    selected = i == selected,
-                    onClick = { onSelect(i) },
-                    shape = SegmentedButtonDefaults.itemShape(index = i, count = options.size),
-                    icon = if (crowded) ({}) else ({ SegmentedButtonDefaults.Icon(i == selected) }),
-                    contentPadding = if (crowded) PaddingValues(horizontal = 4.dp) else SegmentedButtonDefaults.ContentPadding,
-                ) {
-                    Text(
-                        option,
-                        style = if (crowded) MaterialTheme.typography.labelMedium else LocalTextStyle.current,
-                        maxLines = if (crowded) 2 else 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                    )
-                }
+        // Four options leave little room ("Equilibrada", "அதிகபட்சம்"):
+        // no check (the fill says which), narrower sides, a smaller face,
+        // and two lines before an ellipsis (U4 review).
+        val crowded = options.size > 3
+        val face = if (crowded) MaterialTheme.typography.labelMedium else LocalTextStyle.current
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            // C5: a segment narrower than one of its words (font scale 2.0)
+            // broke it mid-word; such a row is a list instead.
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            // Crowded: 4 dp each side. Else 12 dp each side, and a selected
+            // segment's 18 dp check with 8 dp after it (C5 review: 50, not 48).
+            val sides = if (crowded) 8.dp else 50.dp
+            val segment = with(density) { (maxWidth / options.size - sides).toPx() }
+            val widths = remember(options, face, density, segment) {
+                // Four wrap between words; up to three keep each on one line.
+                options.flatMap { if (crowded) ChoiceFit.words(it) else listOf(it) }
+                    .map { measurer.measure(it, face).size.width.toFloat() }
             }
+            if (ChoiceFit.fits(segment, widths)) {
+                Segments(options, selected, crowded, face, onSelect)
+            } else {
+                ChoiceList(options, selected, onSelect)
+            }
+        }
+    }
+}
+
+/** [options] as one row of segments, the [selected] one filled. */
+@Composable
+private fun Segments(
+    options: List<String>,
+    selected: Int,
+    crowded: Boolean,
+    face: androidx.compose.ui.text.TextStyle,
+    onSelect: (Int) -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        options.forEachIndexed { i, option ->
+            SegmentedButton(
+                selected = i == selected,
+                onClick = { onSelect(i) },
+                shape = SegmentedButtonDefaults.itemShape(index = i, count = options.size),
+                icon = if (crowded) ({}) else ({ SegmentedButtonDefaults.Icon(i == selected) }),
+                contentPadding = if (crowded) PaddingValues(horizontal = 4.dp) else SegmentedButtonDefaults.ContentPadding,
+            ) {
+                Text(
+                    option,
+                    style = face,
+                    maxLines = if (crowded) 2 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+/** [options] as radio buttons, one per line, when they do not fit as segments (C5). */
+@Composable
+private fun ChoiceList(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    Column(modifier = Modifier.selectableGroup()) {
+        options.forEachIndexed { i, option ->
+            ListItem(
+                headlineContent = { Text(option, style = MaterialTheme.typography.bodyLarge) },
+                leadingContent = { RadioButton(selected = i == selected, onClick = null) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.selectable(selected = i == selected, role = Role.RadioButton) { onSelect(i) },
+            )
         }
     }
 }

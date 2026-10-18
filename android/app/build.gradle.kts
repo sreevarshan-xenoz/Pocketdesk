@@ -95,6 +95,14 @@ dependencies {
     // On-device check that the scanner reads the desktop app's code.
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    // C5: Compose instrumented tests (the choice row at a large font).
+    // The BOM's versions do not reach the instrumented tests' runtime classpath by themselves.
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // The Espresso it brings calls InputManager.getInstance, which Android 16 removed.
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    // The test rule's host activity: in debug builds only (not release).
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }

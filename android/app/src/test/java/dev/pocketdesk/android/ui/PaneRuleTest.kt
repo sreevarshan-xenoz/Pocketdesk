@@ -53,6 +53,23 @@ class PaneRuleTest {
     }
 
     @Test
+    fun aPhoneOnItsSideKeepsOnePaneAndATabletSplits() {
+        // A phone held sideways is wide, but its smallest width is a phone's
+        // (C5): the stream keeps the whole screen.
+        assertEquals(PaneSplit.None, PaneRule.autoSplit(PaneSplit.None, 914f, 411f, smallestWidthDp = 411f))
+        assertEquals(PaneSplit.None, PaneRule.resolve(PaneMode.Auto, PaneSplit.None, 914f, 411f, pip = false, smallestWidthDp = 411f))
+        // Dual still splits it on request.
+        assertEquals(PaneSplit.Vertical, PaneRule.resolve(PaneMode.Dual, PaneSplit.None, 914f, 411f, pip = false, smallestWidthDp = 411f))
+        // Upright, it splits top and bottom as before.
+        assertEquals(PaneSplit.Horizontal, PaneRule.autoSplit(PaneSplit.None, 411f, 914f, smallestWidthDp = 411f))
+        // A tablet or an unfolded phone, either way up: side by side.
+        assertEquals(PaneSplit.Vertical, PaneRule.autoSplit(PaneSplit.None, 1280f, 800f, smallestWidthDp = 800f))
+        assertEquals(PaneSplit.Vertical, PaneRule.autoSplit(PaneSplit.None, 673f, 841f, smallestWidthDp = 673f))
+        // A hinge still decides.
+        assertEquals(PaneSplit.Vertical, PaneRule.autoSplit(PaneSplit.Vertical, 914f, 411f, smallestWidthDp = 411f))
+    }
+
+    @Test
     fun theBoundariesFavourTheOldLayouts() {
         // Exactly 600 dp wide is wide, even upright: side by side, as before.
         assertEquals(PaneSplit.Vertical, PaneRule.autoSplit(PaneSplit.None, 600f, 1000f))
