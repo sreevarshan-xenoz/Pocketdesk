@@ -21,8 +21,11 @@ class ControlRunner(private val context: Context, private val onState: (Boolean)
     @Volatile
     private var running = true
     private val rate = ControlPlan.Rate()
-    /** What the computer was last told; null before the first word. */
-    private var said: Boolean? = null
+    /**
+     * What the computer was last told. Off to begin with, so a cast without
+     * control says nothing (a desktop app from before C8 cannot read it).
+     */
+    private var said = false
 
     fun start() {
         Thread(::loop, "cast-control").start()
@@ -61,11 +64,11 @@ class ControlRunner(private val context: Context, private val onState: (Boolean)
         val events = batch.optJSONArray("events") ?: return
         val now = SystemClock.uptimeMillis()
         for (i in 0 until events.length()) {
-            if (!rate.take(now)) {
-                Log.w(TAG, "too much control at once; the rest of this batch is dropped")
-                break
-            }
             val event = events.optJSONObject(i) ?: continue
+            // A press or release always goes: dropping one leaves a finger
+            // down (C8 review); the rest is limited.
+            val edge = event.optString("type") == "touch" && event.optString("action") != "move"
+            if (!edge && !rate.take(now)) continue
             when (event.optString("type")) {
                 "touch" -> service.touch(event.optString("action"), event.optInt("x"), event.optInt("y"))
                 "scroll" -> service.scroll(event.optInt("x"), event.optInt("y"), event.optInt("dy"))
