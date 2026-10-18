@@ -289,6 +289,42 @@ fn to_show(body: &serde_json::Value) -> Option<(String, String, String)> {
     ))
 }
 
+/// The longest wait a phone's notification may claim, in seconds (a day).
+const MAX_WAITED_SECS: u64 = 86_400;
+
+/// How long a phone's notification waited on the phone before it could be
+/// sent, in seconds (C3): `waited`, measured on the phone's own clock; 0 when
+/// it went at once, or when the value makes no sense.
+fn waited_secs(body: &serde_json::Value) -> u64 {
+    body.get("waited")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
+        .min(MAX_WAITED_SECS)
+}
+
+/// The line that marks a notification late (C3): one that waited a minute
+/// or more, with how long; a few seconds of retries are not late.
+fn late_line(waited: u64) -> Option<String> {
+    if waited < 60 {
+        return None;
+    }
+    let (hours, minutes) = (waited / 3600, waited % 3600 / 60);
+    Some(match (hours, minutes) {
+        (0, m) => format!("Sent {m} min late"),
+        (h, 0) => format!("Sent {h} h late"),
+        (h, m) => format!("Sent {h} h {m} min late"),
+    })
+}
+
+/// `text` as shown, with the late line last when it waited.
+fn with_late(text: &str, waited: u64) -> String {
+    match late_line(waited) {
+        Some(line) if text.is_empty() => line,
+        Some(line) => format!("{text}\n{line}"),
+        None => text.to_string(),
+    }
+}
+
 /// A KDE Connect device's notification to show (N9): its app is
 /// `appName`, a ticker stands in for missing text, and one marked `silent`
 /// (already there when the device connected) is not shown.
@@ -421,6 +457,8 @@ impl Plugin for NotificationPlugin {
                 let Some((app, title, text)) = to_show(&packet.body) else {
                     return Ok(());
                 };
+                // One that waited on the phone says so (C3).
+                let waited = waited_secs(&packet.body);
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 let admitted = flood_guard()
                     .lock()
@@ -432,10 +470,15 @@ impl Plugin for NotificationPlugin {
                 // An event whether or not it is shown here (a script may want
                 // the phone's notifications without the toasts), as it would
                 // be shown: one the phone hides stays hidden in the log too.
+                let meta = if waited > 0 {
+                    serde_json::json!({ "app": app, "late_secs": waited })
+                } else {
+                    serde_json::json!({ "app": app })
+                };
                 crate::events::emit(
                     "notification",
                     Some(sender.device_id()),
-                    serde_json::json!({ "app": app }),
+                    meta,
                     serde_json::json!({ "title": title, "text": text }),
                 );
                 if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
@@ -454,6 +497,7 @@ impl Plugin for NotificationPlugin {
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }
+                let text = with_late(&text, waited);
                 if let Err(e) =
                     show_desktop_notification(tag.as_deref(), &app, &title, &text, answers).await
                 {
@@ -502,7 +546,8 @@ pub(crate) fn answerable(
         app,
         title,
         text,
-        at_unix: now_unix,
+        // When it came on the phone, not when it got here (C3).
+        at_unix: now_unix.saturating_sub(waited_secs(body)),
         actions,
         reply,
     })
@@ -941,6 +986,50 @@ mod tests {
         assert_eq!(
             to_show(&json!({"text": "body only"})),
             Some(("Phone".into(), "Notification".into(), "body only".into()))
+        );
+    }
+
+    #[test]
+    fn how_long_a_notification_waited_is_read_capped_and_ignored_when_bad() {
+        assert_eq!(waited_secs(&json!({"waited": 125})), 125);
+        assert_eq!(waited_secs(&json!({})), 0, "sent at once");
+        assert_eq!(waited_secs(&json!({"waited": "125"})), 0, "not a number");
+        assert_eq!(waited_secs(&json!({"waited": -5})), 0);
+        assert_eq!(waited_secs(&json!({"waited": 1.5})), 0);
+        assert_eq!(
+            waited_secs(&json!({"waited": 10_000_000u64})),
+            86_400,
+            "a day at most"
+        );
+    }
+
+    #[test]
+    fn a_notification_that_waited_a_minute_or_more_says_it_is_late() {
+        assert_eq!(late_line(0), None);
+        assert_eq!(late_line(59), None, "a few retries are not late");
+        assert_eq!(late_line(60).as_deref(), Some("Sent 1 min late"));
+        assert_eq!(late_line(43 * 60 + 20).as_deref(), Some("Sent 43 min late"));
+        assert_eq!(late_line(3600).as_deref(), Some("Sent 1 h late"));
+        assert_eq!(
+            late_line(2 * 3600 + 5 * 60).as_deref(),
+            Some("Sent 2 h 5 min late")
+        );
+        assert_eq!(with_late("Lunch?", 120), "Lunch?\nSent 2 min late");
+        assert_eq!(with_late("", 120), "Sent 2 min late");
+        assert_eq!(with_late("Lunch?", 10), "Lunch?");
+    }
+
+    #[test]
+    fn a_late_notification_is_kept_from_when_it_came_on_the_phone() {
+        let body = json!({
+            "id": "0|com.chat|1", "app": "Chat", "title": "Ann", "text": "Lunch?",
+            "actions": ["Mark read"], "waited": 600,
+        });
+        let note = answerable("phone", &body, 10_000).unwrap();
+        assert_eq!(note.at_unix, 9_400);
+        assert_eq!(
+            note.text, "Lunch?",
+            "the text kept to answer is the phone's own"
         );
     }
 }
