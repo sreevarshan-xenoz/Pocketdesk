@@ -1226,7 +1226,19 @@ fn received_in(
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    let parent_name = |p: &Path| p.parent().map(name_of).unwrap_or_default();
+    // A folder at a drive's root has no name of its own: its path then.
+    let parent_name = |p: &Path| {
+        p.parent()
+            .map(|parent| {
+                let name = name_of(parent);
+                if name.is_empty() {
+                    parent.display().to_string()
+                } else {
+                    name
+                }
+            })
+            .unwrap_or_default()
+    };
     // Transfers run concurrently; the list is read, changed and replaced.
     static LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LIST.lock().unwrap_or_else(|e| e.into_inner());
