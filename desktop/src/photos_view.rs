@@ -375,7 +375,16 @@ fn thumbnail(
     }
     let path = store::thumb_path(state_dir, phone, id)?;
     let bytes = std::fs::read(path).ok()?;
-    let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg).ok()?;
+    // Held to a thumbnail's size before decoding: a few kilobytes can
+    // declare a picture the GPU refuses, or gigabytes (C7 review).
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Jpeg);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(store::MAX_THUMB_SIDE);
+    limits.max_image_height = Some(store::MAX_THUMB_SIDE);
+    limits.max_alloc = Some(8 << 20);
+    reader.limits(limits);
+    let img = reader.decode().ok()?;
     let rgba = img.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());

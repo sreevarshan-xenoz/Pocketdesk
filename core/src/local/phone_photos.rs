@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use super::approval::is_valid_id;
 use super::paths::{PHONE_PHOTOS_DIR, PHONE_PHOTOS_FILE, PHONE_PHOTOS_OUT_DIR};
-use crate::protocol::phone_photos::{MAX_THUMB_BYTES, Photos};
+use crate::protocol::phone_photos::{MAX_THUMB_BYTES, Photos, THUMB_SIDE};
 
 /// How long a request waits for the server before it is dropped.
 pub const REQUEST_TTL_SECS: u64 = 60;
@@ -73,12 +73,58 @@ fn plain(device_id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// A thumbnail's bytes from its base64, if they are a JPEG within bounds.
+/// The largest side a kept thumbnail may declare: twice what a phone makes.
+/// A few kilobytes of JPEG can declare 65535 by 65535, which the desktop
+/// would decode to gigabytes, or a texture its GPU refuses (C7 review).
+pub const MAX_THUMB_SIDE: u32 = 2 * THUMB_SIDE;
+
+/// A thumbnail's bytes from its base64, if they are a JPEG within bounds,
+/// its declared size included.
 fn thumb_bytes(thumb: &str) -> Option<Vec<u8>> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(thumb)
         .ok()?;
-    (bytes.len() <= MAX_THUMB_BYTES && bytes.starts_with(&[0xFF, 0xD8, 0xFF])).then_some(bytes)
+    if bytes.len() > MAX_THUMB_BYTES || !bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return None;
+    }
+    let (width, height) = jpeg_size(&bytes)?;
+    (width > 0 && height > 0 && width <= MAX_THUMB_SIDE && height <= MAX_THUMB_SIDE)
+        .then_some(bytes)
+}
+
+/// A JPEG's width and height, from its first frame header (SOF0–SOF15,
+/// less DHT, JPG and DAC), walking its markers; `None` when it has none.
+pub fn jpeg_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let mut at = 2;
+    while at + 4 <= bytes.len() {
+        if bytes[at] != 0xFF {
+            return None;
+        }
+        let marker = bytes[at + 1];
+        // Fill bytes before a marker.
+        if marker == 0xFF {
+            at += 1;
+            continue;
+        }
+        // Markers that stand alone.
+        if marker == 0x01 || (0xD0..=0xD8).contains(&marker) {
+            at += 2;
+            continue;
+        }
+        let length = u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]) as usize;
+        let frame = (0xC0..=0xCF).contains(&marker) && ![0xC4, 0xC8, 0xCC].contains(&marker);
+        if frame {
+            let header = bytes.get(at + 4..at + 9)?;
+            let height = u16::from_be_bytes([header[1], header[2]]) as u32;
+            let width = u16::from_be_bytes([header[3], header[4]]) as u32;
+            return Some((width, height));
+        }
+        if marker == 0xDA || length < 2 {
+            return None;
+        }
+        at += 2 + length;
+    }
+    None
 }
 
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -244,9 +290,35 @@ mod tests {
         dir
     }
 
-    /// A tiny "JPEG": its start is all the store looks at.
+    /// A JPEG's markers as far as the store reads them: an APP0, then a
+    /// baseline frame header of `width` by `height`.
+    fn jpeg_of(width: u16, height: u16) -> Vec<u8> {
+        let mut b = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46];
+        b.extend([0xFF, 0xC0, 0x00, 0x11, 0x08]);
+        b.extend(height.to_be_bytes());
+        b.extend(width.to_be_bytes());
+        b.extend([0x03; 12]);
+        b
+    }
+
     fn jpeg() -> String {
-        base64::engine::general_purpose::STANDARD.encode([0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3])
+        base64::engine::general_purpose::STANDARD.encode(jpeg_of(256, 192))
+    }
+
+    #[test]
+    fn a_thumbnail_declaring_a_huge_picture_is_not_kept() {
+        assert_eq!(jpeg_size(&jpeg_of(256, 192)), Some((256, 192)));
+        assert!(thumb_bytes(&jpeg()).is_some());
+        let huge = base64::engine::general_purpose::STANDARD.encode(jpeg_of(65535, 8));
+        assert!(
+            thumb_bytes(&huge).is_none(),
+            "a tiny file declaring 65535 px"
+        );
+        let zero = base64::engine::general_purpose::STANDARD.encode(jpeg_of(0, 0));
+        assert!(thumb_bytes(&zero).is_none());
+        let no_frame =
+            base64::engine::general_purpose::STANDARD.encode([0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3]);
+        assert!(thumb_bytes(&no_frame).is_none(), "no frame header to read");
     }
 
     fn photo(id: u64, thumb: String) -> Photo {
