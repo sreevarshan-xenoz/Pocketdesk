@@ -362,9 +362,14 @@ enum GamepadAction {
 
 /// Gamepad button bits to desktop action, in the order the old hand-written
 /// `if` chain applied them.
-const GAMEPAD_BUTTONS: [(u16, GamepadAction); 7] = [
+const GAMEPAD_BUTTONS: [(u16, GamepadAction); 12] = [
     (0x0001, GamepadAction::Key(Key::Return)),     // A
     (0x0002, GamepadAction::Key(Key::Escape)),     // B
+    (0x0004, GamepadAction::Key(Key::Space)),      // X (E4)
+    (0x0008, GamepadAction::Key(Key::Tab)),        // Y (E4)
+    (0x0010, GamepadAction::Key(Key::PageUp)),     // LB (E4)
+    (0x0020, GamepadAction::Key(Key::PageDown)),   // RB (E4)
+    (0x0040, GamepadAction::Key(Key::Backspace)),  // Select (E4)
     (0x0080, GamepadAction::LeftClick),            // Start
     (0x0800, GamepadAction::Key(Key::UpArrow)),    // DPad up
     (0x1000, GamepadAction::Key(Key::DownArrow)),  // DPad down
@@ -382,6 +387,13 @@ impl InputInjector {
     pub fn swap_gamepad_buttons(&mut self, buttons: u16) -> u16 {
         std::mem::replace(&mut self.gamepad_buttons, buttons)
     }
+}
+
+/// The wheel notches one gamepad packet's right stick gives (E4): none
+/// within half its travel, one from there, two at its edge; up scrolls up.
+fn gamepad_scroll(x: i16, y: i16) -> (i32, i32) {
+    let notches = |v: i16| i32::from(v) / 16_384;
+    (notches(x), -notches(y))
 }
 
 fn gamepad_edges(previous: u16, current: u16) -> Vec<(GamepadAction, bool)> {
@@ -995,6 +1007,12 @@ impl InputInjector {
                 let my = axes[1] as i32 / 256;
                 if mx != 0 || my != 0 {
                     self.move_mouse_relative(mx, my)?;
+                }
+                // Right stick -> the wheel (E4): a notch per packet from half
+                // way, two at the edge; pushed up (negative) scrolls up.
+                let (sx, sy) = gamepad_scroll(axes[2], axes[3]);
+                if sx != 0 || sy != 0 {
+                    self.scroll(sx, sy)?;
                 }
 
                 // Gamepad buttons arrive as a state snapshot, so each mapped bit
@@ -1868,11 +1886,24 @@ mod tests {
     }
 
     #[test]
+    fn the_right_stick_scrolls_from_half_its_travel() {
+        assert_eq!(gamepad_scroll(0, 0), (0, 0));
+        assert_eq!(
+            gamepad_scroll(10_000, -10_000),
+            (0, 0),
+            "under half: nothing"
+        );
+        assert_eq!(gamepad_scroll(0, -16_384), (0, 1), "pushed up scrolls up");
+        assert_eq!(gamepad_scroll(0, i16::MAX), (0, -1));
+        assert_eq!(gamepad_scroll(i16::MIN, 0), (-2, 0));
+    }
+
+    #[test]
     fn every_mapped_gamepad_button_that_goes_down_comes_up() {
         let mapped = GAMEPAD_BUTTONS
             .iter()
             .fold(0u16, |acc, &(bit, _)| acc | bit);
-        assert_eq!(mapped, 0x7883, "the mapped bits changed shape");
+        assert_eq!(mapped, 0x78FF, "the mapped bits changed shape");
 
         let down = gamepad_edges(0, mapped);
         let up = gamepad_edges(mapped, 0);
