@@ -18,8 +18,9 @@ Phone Link's 2026 complaint: replies from notifications that never reach the pho
     - its answer is not offered any more;
     - answering is off on the phone;
     - too many answers at once;
-    - another computer's;
     - the app refused it (`PendingIntent.CanceledException`).
+
+    An answer from a computer other than the phone's own is told nothing.
 - **The computer keeps each answer's state** in `notification_answers.json` (owner-only, the newest 30):
   - waiting for the phone;
   - sent to the phone;
@@ -31,8 +32,27 @@ Phone Link's 2026 complaint: replies from notifications that never reach the pho
   - "Waiting for the phone…";
   - "Handed to the app";
   - "Not sent: …";
-  - "No word from the phone": sent a minute ago, and no outcome since. A phone from before E1 never says.
+  - "Sent, but no word back from the phone": sent a minute ago, and no outcome since. A phone from before E1 never says; nor does one whose link dropped as it answered.
 - **A failed answer gets a desktop notification,** which matters for one sent from a toast (N3), whose window may be hidden.
+
+## Review
+
+**Fresh review: 0 Critical, 2 Important, 7 Minor.**
+
+- **Fixed, one commit each:**
+  - An answer's states were written by detached threads: a late "waiting" could stick, and the phone's word could come before "sent" was kept and be dropped. Now:
+    - states are written in order and only move forward;
+    - "sent" is kept before the answer goes;
+    - a word not kept is logged.
+  - The phone's word on an answer was untested in the server; now tested.
+- **Minors fixed:**
+  - another computer's answer decided first, so it is told nothing with answering off too;
+  - an answer's id of any request id's form;
+  - the silent phone's line naming both causes;
+  - one desktop notification for a burst of failures.
+- **Left as they are:**
+  - an answer's line stays under its notification after the app updates it;
+  - the phone's word is sent once, not again after a drop.
 
 ## Not done
 
