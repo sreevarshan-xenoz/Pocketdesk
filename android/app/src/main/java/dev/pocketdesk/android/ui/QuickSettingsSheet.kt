@@ -191,13 +191,22 @@ private fun GroupHeader(label: String) {
 
 /** Every option at once, the chosen one filled; a tap chooses, with no cycling. */
 @Composable
-internal fun ChoiceRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
-    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(start = 8.dp, bottom = 6.dp),
-        )
+internal fun ChoiceRow(
+    label: String?,
+    options: List<String>,
+    selected: Int,
+    horizontal: androidx.compose.ui.unit.Dp = 8.dp,
+    onSelect: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = horizontal, vertical = 6.dp)) {
+        // None under a Settings row, which names it (E6).
+        if (label != null) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(start = 8.dp, bottom = 6.dp),
+            )
+        }
         // A crowded row ("Equilibrada", "அதிகபட்சம்"): no check (the fill
         // says which), narrower sides, a smaller face, and two lines before
         // an ellipsis (U4 review). Measured in the face the segment draws,

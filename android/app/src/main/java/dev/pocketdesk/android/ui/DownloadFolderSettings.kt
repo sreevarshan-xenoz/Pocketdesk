@@ -5,6 +5,9 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -36,21 +39,23 @@ fun DownloadFolderSetting() {
     SettingLink(
         stringResource(R.string.settings_download_folder),
         if (lost) stringResource(R.string.settings_download_folder_lost) else where,
+        // A lost folder in the warning colour, as other needs are (E6).
+        warning = lost,
     ) { pick() }
     if (picked != null) {
-        SettingLink(stringResource(R.string.settings_download_folder_reset), null) {
-            release(context, picked)
-            Prefs.setDownloadTree(context, null)
-            version++
-        }
+        // Acts at once: no chevron (E6).
+        SettingRow(
+            stringResource(R.string.settings_download_folder_reset),
+            null,
+            modifier = Modifier.clickable(role = Role.Button) {
+                release(context, picked)
+                Prefs.setDownloadTree(context, null)
+                version++
+            },
+        )
     }
 }
 
-/**
- * Let go of this setting's grant on [tree]: the write, and the read too
- * unless "Folders the computer may open" shares the folder (grants are per
- * folder, not per feature).
- */
 /**
  * Android's folder picker for where files from computers land, kept with
  * its grant; [onPicked] after a choice. Settings and Home's Health card
@@ -77,6 +82,11 @@ fun rememberDownloadFolderPicker(onPicked: () -> Unit = {}): () -> Unit {
     return { launcher.launch(null) }
 }
 
+/**
+ * Let go of this setting's grant on [tree]: the write, and the read too
+ * unless "Folders the computer may open" shares the folder (grants are per
+ * folder, not per feature).
+ */
 private fun release(context: android.content.Context, tree: String?) {
     tree ?: return
     val shared = dev.pocketdesk.android.files.PhoneFolders.all(context).any { it.uri == tree }

@@ -33,6 +33,7 @@
     <string name="settings_dynamic">Material You colors</string>
     <string name="settings_dynamic_summary">Match the palette to your wallpaper (Android 12+)</string>
     <string name="settings_session">Session</string>
+    <string name="settings_input">Input</string>
     <string name="settings_keep_screen_on">Keep screen on</string>
     <string name="settings_keep_screen_on_summary">During a streaming session</string>
     <string name="settings_auto_reconnect">Reconnect by itself</string>
@@ -67,8 +68,8 @@
     <string name="pen_pressure_soft">Soft</string>
     <string name="pen_pressure_even">Even</string>
     <string name="pen_pressure_firm">Firm</string>
-    <string name="settings_gamepad_controller">Game controller to the computer</string>
-    <string name="settings_gamepad_controller_summary">A controller connected to this phone plays on the computer during a session: A is Enter, B Esc, X Space, Y Tab, the bumpers Page Up and Down, Select Backspace, Start a click, the left stick the mouse and the right the wheel</string>
+    <string name="settings_gamepad_controller">Use a connected game controller on the computer</string>
+    <string name="settings_gamepad_controller_summary">During a session, a controller connected to this phone (USB or Bluetooth) plays on the computer: A is Enter, B Esc, X Space, Y Tab, the bumpers Page Up and Down, Select Backspace, Start a click, the left stick the mouse and the right the wheel</string>
     <string name="settings_system">System</string>
     <string name="settings_about">About</string>
     <string name="app_version">Version %1$s</string>
@@ -549,6 +550,7 @@
     <string name="phone_folders_empty">None yet: the computer cannot open anything on this phone. Add a folder to let its Phone tab list it and copy files from it</string>
     <string name="phone_folders_add">Add folder</string>
     <string name="phone_folders_remove">Remove</string>
+    <string name="phone_folders_remove_named">Remove %1$s</string>
     <string name="phone_folders_storage">Storage</string>
     <string name="phone_folders_not_kept">Android did not let Pocketdesk keep access to that folder</string>
     <string name="screenshots_on">Send new screenshots</string>

@@ -24,6 +24,7 @@
     <string name="settings_dynamic">Colores de Material You</string>
     <string name="settings_dynamic_summary">Adaptar la paleta al fondo de pantalla (Android 12+)</string>
     <string name="settings_session">Sesión</string>
+    <string name="settings_input">Entrada</string>
     <string name="settings_keep_screen_on">Mantener pantalla encendida</string>
     <string name="settings_keep_screen_on_summary">Durante una sesión de transmisión</string>
     <string name="settings_auto_reconnect">Reconectar automáticamente</string>
@@ -58,8 +59,8 @@
     <string name="pen_pressure_soft">Suave</string>
     <string name="pen_pressure_even">Normal</string>
     <string name="pen_pressure_firm">Firme</string>
-    <string name="settings_gamepad_controller">Mando conectado al ordenador</string>
-    <string name="settings_gamepad_controller_summary">Un mando conectado a este teléfono juega en el ordenador durante una sesión: A es Intro, B Esc, X Espacio, Y Tab, los gatillos superiores Re Pág y Av Pág, Select Retroceso, Start un clic, la palanca izquierda el ratón y la derecha la rueda</string>
+    <string name="settings_gamepad_controller">Usar un mando conectado en el ordenador</string>
+    <string name="settings_gamepad_controller_summary">Durante una sesión, un mando conectado a este teléfono (USB o Bluetooth) juega en el ordenador: A es Intro, B Esc, X Espacio, Y Tab, los gatillos superiores Re Pág y Av Pág, Select Retroceso, Start un clic, la palanca izquierda el ratón y la derecha la rueda</string>
     <string name="settings_system">Sistema</string>
     <string name="settings_about">Acerca de</string>
     <string name="app_version">Versión %1$s</string>
@@ -545,6 +546,7 @@
     <string name="phone_folders_empty">Ninguna aún: el equipo no puede abrir nada en este teléfono. Añade una carpeta para que su pestaña Teléfono la liste y copie archivos</string>
     <string name="phone_folders_add">Añadir carpeta</string>
     <string name="phone_folders_remove">Quitar</string>
+    <string name="phone_folders_remove_named">Quitar %1$s</string>
     <string name="phone_folders_storage">Almacenamiento</string>
     <string name="phone_folders_not_kept">Android no dejó que Pocketdesk conservara el acceso a esa carpeta</string>
     <string name="screenshots_on">Enviar capturas nuevas</string>

@@ -24,6 +24,7 @@
     <string name="settings_dynamic">Material You நிறங்கள்</string>
     <string name="settings_dynamic_summary">திசைப்படத்துடன் நிறத்தொகுதியை ஒத்துப்போ (Android 12+)</string>
     <string name="settings_session">அமர்வு</string>
+    <string name="settings_input">உள்ளீடு</string>
     <string name="settings_keep_screen_on">திரையை ஒளிரவிடு</string>
     <string name="settings_keep_screen_on_summary">ஒளிப்பரப்பு அமர்வின்போது</string>
     <string name="settings_auto_reconnect">தானாக மீண்டும் இணை</string>
@@ -58,8 +59,8 @@
     <string name="pen_pressure_soft">மென்மை</string>
     <string name="pen_pressure_even">சமம்</string>
     <string name="pen_pressure_firm">உறுதி</string>
-    <string name="settings_gamepad_controller">கணினிக்கு கேம் கன்ட்ரோலர்</string>
-    <string name="settings_gamepad_controller_summary">இந்தத் தொலைபேசியுடன் இணைத்த கன்ட்ரோலர் அமர்வின்போது கணினியில் விளையாடும்: A என்பது Enter, B Esc, X Space, Y Tab, மேல் பொத்தான்கள் Page Up, Page Down, Select Backspace, Start ஒரு கிளிக், இடது குச்சி சுட்டி, வலது சக்கரம்</string>
+    <string name="settings_gamepad_controller">இணைத்த கேம் கன்ட்ரோலரைக் கணினியில் பயன்படுத்து</string>
+    <string name="settings_gamepad_controller_summary">அமர்வின்போது, இந்தக் கைபேசியுடன் இணைத்த கன்ட்ரோலர் (USB அல்லது Bluetooth) கணினியில் விளையாடும்: A என்பது Enter, B Esc, X Space, Y Tab, மேல் பொத்தான்கள் Page Up, Page Down, Select Backspace, Start ஒரு கிளிக், இடது குச்சி சுட்டி, வலது சக்கரம்</string>
     <string name="settings_system">சிஸ்டம்</string>
     <string name="settings_about">பற்றி</string>
     <string name="app_version">பதிப்பு %1$s</string>
@@ -540,6 +541,7 @@
     <string name="phone_folders_empty">இன்னும் இல்லை: கணினி இந்த ஃபோனில் எதையும் திறக்க முடியாது. அதன் ஃபோன் தாவல் பட்டியலிட ஒரு கோப்புறையைச் சேர்க்கவும்</string>
     <string name="phone_folders_add">கோப்புறையைச் சேர்</string>
     <string name="phone_folders_remove">நீக்கு</string>
+    <string name="phone_folders_remove_named">%1$s-ஐ நீக்கு</string>
     <string name="phone_folders_storage">சேமிப்பகம்</string>
     <string name="phone_folders_not_kept">அந்தக் கோப்புறைக்கான அணுகலை Pocketdesk வைத்திருக்க Android அனுமதிக்கவில்லை</string>
     <string name="screenshots_on">புதிய திரைப்பிடிப்புகளை அனுப்பு</string>
