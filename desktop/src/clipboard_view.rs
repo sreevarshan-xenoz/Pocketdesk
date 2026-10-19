@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 use pocketdesk_core::local::clip_history::{self, ClipEntry};
-use pocketdesk_core::protocol::permissions::Capability;
 
 use crate::model::Device;
 
@@ -62,7 +61,7 @@ pub fn origin(entry: &ClipEntry, devices: &[Device]) -> String {
 pub fn targets(devices: &[Device]) -> Vec<&Device> {
     devices
         .iter()
-        .filter(|d| d.linked && d.permissions.allows(Capability::Clipboard))
+        .filter(|d| crate::model::clipboard_reach(d).is_ok())
         .collect()
 }
 
@@ -197,6 +196,7 @@ impl ClipboardView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pocketdesk_core::protocol::permissions::Capability;
 
     fn entry(text: &str) -> ClipEntry {
         ClipEntry::new(text, None, 1)

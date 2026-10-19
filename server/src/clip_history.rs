@@ -99,22 +99,50 @@ pub async fn run_sends() {
         for request in clip_history::take_sends(&dir, now) {
             let clients = crate::state::clone_clients().await;
             let allowed = crate::plugins::pair::permits(&request.device_id, "kdeconnect.clipboard");
-            match send(&request, &clients, allowed).await {
-                // Not kept again (D3 review): it is in the history, from
-                // where it first came.
-                Ok(()) => tracing::info!("Put a copy on {}'s clipboard", request.device_id),
-                Err(reason) => tracing::info!("{} not sent the copy: {reason}", request.device_id),
+            // D5: the clipboard now, read as a push reads it (never a
+            // private copy or a pairing link).
+            let now_text = async { crate::plugins::clipboard::read_text().await.ok().flatten() };
+            match send(&request, &clients, allowed, now_text).await {
+                Ok(text) => {
+                    // A text from the history is not kept again (D3
+                    // review); the clipboard now crossed for the first
+                    // time, perhaps (D5 review), and the writer skips it
+                    // when it is the newest kept.
+                    if request.current {
+                        note(&text, None);
+                    }
+                    tracing::info!("Put a copy on {}'s clipboard", request.device_id)
+                }
+                Err(reason) => {
+                    tracing::info!("{} not sent the copy: {reason}", request.device_id);
+                    // Asked from the tray, its window hidden: the refusal
+                    // is shown, or the pick seems to do nothing (D5 review).
+                    if request.current && !cfg!(test) {
+                        let short: String = request.device_id.chars().take(8).collect();
+                        let body = format!("Phone {short}: {reason}");
+                        std::thread::spawn(move || {
+                            crate::platform::notify(
+                                "The clipboard was not sent",
+                                &body,
+                                Duration::from_secs(10),
+                            );
+                        });
+                    }
+                }
             }
         }
     }
 }
 
-/// Send one text to its phone: allowed and connected.
+/// Send one text to its phone: allowed and connected, and say what went. A
+/// request for the clipboard now (D5) sends what `now_text` reads, only
+/// once it may go.
 async fn send(
     request: &SendRequest,
     clients: &[Arc<dyn DeviceSender>],
     allowed: bool,
-) -> Result<(), String> {
+    now_text: impl std::future::Future<Output = Option<String>>,
+) -> Result<String, String> {
     if !allowed {
         return Err("Clipboard is off for this phone".to_string());
     }
@@ -122,10 +150,27 @@ async fn send(
         .iter()
         .find(|c| c.device_id() == request.device_id)
         .ok_or("the phone is not connected")?;
+    let text = if request.current {
+        // Held as a push is (D5 review): never blank, never past a push's
+        // size, which the phone's control line takes.
+        let text = now_text.await.filter(|t| !t.trim().is_empty()).ok_or(
+            "nothing to send: the clipboard holds no text, or a private copy or a pairing link",
+        )?;
+        if text.len() > crate::clipboard_push::MAX_PUSH {
+            return Err(format!(
+                "the clipboard holds more than {} KiB of text, too much to send",
+                crate::clipboard_push::MAX_PUSH / 1024
+            ));
+        }
+        text
+    } else {
+        request.text.clone()
+    };
     phone
-        .send_packet(&crate::clipboard_push::packet(&request.text))
+        .send_packet(&crate::clipboard_push::packet(&text))
         .await
-        .map_err(|e| format!("could not send: {e}"))
+        .map_err(|e| format!("could not send: {e}"))?;
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -166,18 +211,74 @@ mod tests {
             device_id: "phone-a".to_string(),
             text: "hello".to_string(),
             created_unix: 1,
+            current: false,
         };
-        send(&request, &clients, true).await.unwrap();
+        let none = || async { None };
+        assert_eq!(
+            send(&request, &clients, true, none()).await.unwrap(),
+            "hello"
+        );
         let sent = a.sent.lock().unwrap().clone();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].packet_type, "kdeconnect.clipboard");
         assert_eq!(sent[0].body["content"], "hello");
-        assert!(send(&request, &clients, false).await.is_err());
+        assert!(send(&request, &clients, false, none()).await.is_err());
         let other = SendRequest {
             device_id: "phone-b".to_string(),
             ..request
         };
-        assert!(send(&other, &clients, true).await.is_err());
+        assert!(send(&other, &clients, true, none()).await.is_err());
         assert_eq!(a.sent.lock().unwrap().len(), 1);
+    }
+
+    /// D5: the clipboard now goes as read, and nothing when there is none
+    /// to send (empty, private, a pairing link).
+    #[tokio::test]
+    async fn the_clipboard_now_goes_as_read() {
+        let a = Arc::new(Phone {
+            id: "phone-a",
+            sent: Mutex::default(),
+        });
+        let clients: Vec<Arc<dyn DeviceSender>> = vec![a.clone()];
+        let request = SendRequest {
+            id: "x".to_string(),
+            device_id: "phone-a".to_string(),
+            text: String::new(),
+            created_unix: 1,
+            current: true,
+        };
+        let sent = send(&request, &clients, true, async { Some("now".to_string()) }).await;
+        assert_eq!(sent.unwrap(), "now", "what went, for the history");
+        assert_eq!(a.sent.lock().unwrap()[0].body["content"], "now");
+        let refused = send(&request, &clients, true, async { None }).await;
+        assert!(refused.unwrap_err().starts_with("nothing to send"));
+        // Blank, or more than a push carries (D5 review).
+        let blank = send(&request, &clients, true, async { Some(" \t ".to_string()) }).await;
+        assert!(blank.unwrap_err().starts_with("nothing to send"));
+        let long = "x".repeat(crate::clipboard_push::MAX_PUSH + 1);
+        let refused = send(&request, &clients, true, async move { Some(long) }).await;
+        assert!(refused.unwrap_err().contains("too much"));
+        assert_eq!(a.sent.lock().unwrap().len(), 1);
+    }
+
+    /// D5 review: the clipboard is read only once the send may go.
+    #[tokio::test]
+    async fn the_clipboard_is_not_read_for_a_send_that_cannot_go() {
+        let a = Arc::new(Phone {
+            id: "phone-a",
+            sent: Mutex::default(),
+        });
+        let clients: Vec<Arc<dyn DeviceSender>> = vec![a.clone()];
+        let mut request = SendRequest {
+            id: "x".to_string(),
+            device_id: "phone-a".to_string(),
+            text: String::new(),
+            created_unix: 1,
+            current: true,
+        };
+        let never = || async { panic!("the clipboard was read") };
+        assert!(send(&request, &clients, false, never()).await.is_err());
+        request.device_id = "phone-b".to_string();
+        assert!(send(&request, &clients, true, never()).await.is_err());
     }
 }

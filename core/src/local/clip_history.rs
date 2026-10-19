@@ -25,6 +25,11 @@ pub const MAX_TEXT: usize = 64 * 1024;
 /// How long a send request waits for the server.
 pub const REQUEST_TTL_SECS: u64 = 60;
 
+/// How long a request for the clipboard now waits (D5 review): the
+/// clipboard is read when the server takes it, so a server that starts
+/// later must not send what was copied since.
+pub const CURRENT_TTL_SECS: u64 = 10;
+
 /// One text that crossed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClipEntry {
@@ -151,6 +156,10 @@ pub struct SendRequest {
     pub device_id: String,
     pub text: String,
     pub created_unix: u64,
+    /// D5: send this computer's clipboard as the server reads it when it
+    /// takes the request (`text` empty); the app never reads it itself.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub current: bool,
 }
 
 /// Ask the server to put `text` on `device_id`'s clipboard.
@@ -171,14 +180,38 @@ pub fn request_send(
         device_id: device_id.to_string(),
         text: text.to_string(),
         created_unix: now_unix,
+        current: false,
     };
+    write_send(state_dir, &request)?;
+    Ok(request)
+}
+
+/// Ask the server to put this computer's clipboard, as it is when the
+/// server reads it, on `device_id`'s clipboard (D5, the tray's Send
+/// clipboard).
+pub fn request_current(
+    state_dir: &Path,
+    device_id: &str,
+    now_unix: u64,
+) -> io::Result<SendRequest> {
+    let request = SendRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        device_id: device_id.to_string(),
+        text: String::new(),
+        created_unix: now_unix,
+        current: true,
+    };
+    write_send(state_dir, &request)?;
+    Ok(request)
+}
+
+fn write_send(state_dir: &Path, request: &SendRequest) -> io::Result<()> {
     let file = request_path(state_dir, &request.id)?;
     crate::secure_fs::create_private_dir(&state_dir.join(CLIPBOARD_OUT_DIR))?;
-    let json = serde_json::to_string(&request).map_err(io::Error::other)?;
+    let json = serde_json::to_string(request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)?;
-    Ok(request)
+    std::fs::rename(&tmp, &file)
 }
 
 /// Take every waiting send (the server's side): read and removed; one that
@@ -206,10 +239,19 @@ pub fn take_sends(state_dir: &Path, now_unix: u64) -> Vec<SendRequest> {
         else {
             continue;
         };
-        let fresh =
-            request.created_unix <= now_unix && now_unix - request.created_unix <= REQUEST_TTL_SECS;
-        if fresh && request.id == stem && is_valid_id(&request.id) && request.text.len() <= MAX_TEXT
-        {
+        let ttl = if request.current {
+            CURRENT_TTL_SECS
+        } else {
+            REQUEST_TTL_SECS
+        };
+        let fresh = request.created_unix <= now_unix && now_unix - request.created_unix <= ttl;
+        // Text to send, or the clipboard now (D5), never both or neither.
+        let what = if request.current {
+            request.text.is_empty()
+        } else {
+            !request.text.trim().is_empty() && request.text.len() <= MAX_TEXT
+        };
+        if fresh && request.id == stem && is_valid_id(&request.id) && what {
             taken.push(request);
         }
     }
@@ -323,6 +365,47 @@ mod tests {
             take_sends(&dir, 100 + REQUEST_TTL_SECS + 1).is_empty(),
             "stale"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D5: "the computer's clipboard now", read by the server, carries no
+    /// text; one that does, or an empty one that is not, is refused.
+    #[test]
+    fn a_current_send_carries_no_text() {
+        let dir = temp_dir("current");
+        let asked = request_current(&dir, "p", 100).unwrap();
+        assert!(asked.current && asked.text.is_empty());
+        assert_eq!(take_sends(&dir, 101), [asked]);
+        let out = dir.join(CLIPBOARD_OUT_DIR);
+        let write = |id: &str, text: &str, current: &str| {
+            std::fs::write(
+                out.join(format!("{id}.json")),
+                format!(
+                    r#"{{"id":"{id}","device_id":"p","text":"{text}","created_unix":100{current}}}"#
+                ),
+            )
+            .unwrap()
+        };
+        write(
+            "6c1f2a0e-0000-4000-8000-000000000001",
+            "x",
+            r#","current":true"#,
+        );
+        write("6c1f2a0e-0000-4000-8000-000000000002", "", "");
+        assert!(
+            take_sends(&dir, 101).is_empty(),
+            "text with current, or neither"
+        );
+        request_current(&dir, "p", 100).unwrap();
+        assert!(
+            take_sends(&dir, 100 + CURRENT_TTL_SECS + 1).is_empty(),
+            "the clipboard now, asked too long ago"
+        );
+        // A request from before D5 reads as a text to send.
+        write("6c1f2a0e-0000-4000-8000-000000000003", "hi", "");
+        let taken = take_sends(&dir, 101);
+        assert_eq!(taken.len(), 1);
+        assert!(!taken[0].current && taken[0].text == "hi");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
