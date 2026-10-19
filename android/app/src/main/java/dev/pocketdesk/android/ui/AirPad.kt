@@ -129,6 +129,7 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier, laser: Boo
                     val down = awaitFirstDown(requireUnconsumed = false)
                     down.consume()
                     press[0] = AirPress(down.uptimeMillis)
+                    moves.cancelEnd()
                     held = true
                     var up = down
                     while (true) {
@@ -189,6 +190,12 @@ internal class MoveCoalescer(
 
     /** Send [sendEnd] once the moves asked so far are sent. */
     fun end() = start { ending = true }
+
+    /**
+     * A new press: an end not yet sent is dropped, so it never hides the
+     * dot in the middle of the next gesture (G4 review).
+     */
+    fun cancelEnd() = synchronized(this) { ending = false }
 
     private fun start(change: () -> Unit) {
         val start = synchronized(this) {

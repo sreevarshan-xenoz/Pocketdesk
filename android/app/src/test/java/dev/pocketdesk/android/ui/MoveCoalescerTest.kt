@@ -41,4 +41,18 @@ class MoveCoalescerTest {
         later.runAll()
         assertEquals("move 1 1", sent.last())
     }
+
+    /** G4 review: a press before the last release's end went out drops that end. */
+    @Test
+    fun aNewPressDropsAnEndNotYetSent() {
+        val later = Later()
+        val sent = mutableListOf<String>()
+        val moves = MoveCoalescer(later::launch, { x, y -> sent += "move $x $y" }, { sent += "end" })
+        moves.add(5, 0)
+        moves.end()
+        moves.cancelEnd()
+        moves.add(2, 0)
+        later.runAll()
+        assertEquals(listOf("move 7 0"), sent)
+    }
 }
