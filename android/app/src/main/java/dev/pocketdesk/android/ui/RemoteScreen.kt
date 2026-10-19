@@ -1369,7 +1369,11 @@ fun RemoteScreen(
                                     .minimumInteractiveComponentSize()
                                     .clip(RoundedCornerShape(18.dp))
                                     .background(Color.White.copy(alpha = 0.16f))
-                                    .clickable(role = Role.Button) { haptics.toggle(); toggleMode() }
+                                    .clickable(
+                                        role = Role.Button,
+                                        // What a tap does, for TalkBack (E6).
+                                        onClickLabel = stringResource(R.string.mode_change),
+                                    ) { haptics.toggle(); toggleMode() }
                                     .padding(horizontal = 12.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),

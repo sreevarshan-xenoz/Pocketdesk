@@ -24,6 +24,7 @@
     <string name="settings_dynamic">Colores de Material You</string>
     <string name="settings_dynamic_summary">Adaptar la paleta al fondo de pantalla (Android 12+)</string>
     <string name="settings_session">Sesión</string>
+    <string name="settings_input">Entrada</string>
     <string name="settings_keep_screen_on">Mantener pantalla encendida</string>
     <string name="settings_keep_screen_on_summary">Durante una sesión de transmisión</string>
     <string name="settings_auto_reconnect">Reconectar automáticamente</string>
@@ -54,12 +55,12 @@
     <string name="settings_trackpad_speed">Velocidad del panel táctil</string>
     <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo panel táctil</string>
     <string name="settings_pen_pressure">Presión del lápiz</string>
-    <string name="settings_pen_pressure_summary">En modo lápiz, cuánto hay que presionar para el trazo completo. Un lápiz óptico dibuja mejor: la mayoría de los teléfonos solo estiman la presión de un dedo.</string>
+    <string name="settings_pen_pressure_summary">En modo lápiz, cuánto hay que presionar para el trazo completo. Un lápiz óptico dibuja mejor: la mayoría de los teléfonos solo estiman la presión de un dedo</string>
     <string name="pen_pressure_soft">Suave</string>
     <string name="pen_pressure_even">Normal</string>
     <string name="pen_pressure_firm">Firme</string>
-    <string name="settings_gamepad_controller">Mando conectado al ordenador</string>
-    <string name="settings_gamepad_controller_summary">Un mando conectado a este teléfono juega en el ordenador durante una sesión: A es Intro, B Esc, X Espacio, Y Tab, los gatillos superiores Re Pág y Av Pág, Select Retroceso, Start un clic, la palanca izquierda el ratón y la derecha la rueda</string>
+    <string name="settings_gamepad_controller">Usar un mando conectado en el ordenador</string>
+    <string name="settings_gamepad_controller_summary">Durante una sesión, un mando conectado a este teléfono (USB o Bluetooth) juega en el ordenador: A es Intro, B Esc, X Espacio, Y Tab, los gatillos superiores Re Pág y Av Pág, Select Retroceso, Start un clic, la palanca izquierda el ratón y la derecha la rueda</string>
     <string name="settings_system">Sistema</string>
     <string name="settings_about">Acerca de</string>
     <string name="app_version">Versión %1$s</string>
@@ -92,7 +93,8 @@
     <string name="mode_direct_touch">Toque directo</string>
     <string name="mode_trackpad">Panel táctil</string>
     <string name="mode_pen">Lápiz</string>
-    <string name="ring_pc">Hacer sonar PC</string>
+    <string name="mode_change">Cambiar el modo de entrada</string>
+    <string name="ring_pc">Hacer sonar el ordenador</string>
     <string name="paired">Emparejado ✓</string>
     <string name="privacy_error">Privacidad: %1$s</string>
     <string name="view_only_error">Solo lectura: %1$s</string>
@@ -103,10 +105,10 @@
     <string name="mic_error">Micrófono: %1$s</string>
     <string name="mic_unavailable">Este dispositivo no tiene codificador Opus (Android 9+)</string>
     <string name="mic_permission_denied">Permiso de micrófono denegado</string>
-    <string name="codec_switched">El escritorio cambió de codificador: ahora %1$s</string>
-    <string name="lock_pc">Bloquear PC</string>
+    <string name="codec_switched">El ordenador cambió de codificador: ahora %1$s</string>
+    <string name="lock_pc">Bloquear el ordenador</string>
     <string name="blackout">Pantalla negra</string>
-    <string name="pip">PiP</string>
+    <string name="pip">Imagen en imagen</string>
     <string name="blackout_unlock">Pantalla negra — doble toque para desbloquear</string>
 
     <!-- R4 E6: pane plegable / tableta -->
@@ -122,17 +124,29 @@
     <string name="row_quality">Calidad</string>
     <string name="row_window">Ventana</string>
     <string name="row_monitor">Monitor</string>
-    <string name="row_gamepad">Mando</string>
+    <string name="row_gamepad">Mostrar el mando</string>
     <string name="gamepad_close">Cerrar el mando</string>
     <string name="gamepad_click">Clic</string>
     <string name="gamepad_mouse">Ratón</string>
     <string name="gamepad_scroll">Desplazar</string>
+    <string name="gamepad_lb">LB</string>
+    <string name="gamepad_rb">RB</string>
+    <string name="gamepad_select">Select</string>
+    <string name="gamepad_start">Start</string>
+    <string name="gamepad_a">A</string>
+    <string name="gamepad_b">B</string>
+    <string name="gamepad_x">X</string>
+    <string name="gamepad_y">Y</string>
+    <string name="gamepad_up">Tecla de flecha arriba</string>
+    <string name="gamepad_down">Tecla de flecha abajo</string>
+    <string name="gamepad_left">Tecla de flecha izquierda</string>
+    <string name="gamepad_right">Tecla de flecha derecha</string>
     <string name="row_pane">Distribución</string>
     <string name="row_clipboard">Sincronizar portapapeles</string>
     <string name="row_history">Historial del portapapeles</string>
     <string name="row_audio">Control de audio</string>
     <string name="row_mic">Micrófono del teléfono</string>
-    <string name="row_desktop_sound">Sonido del escritorio en el teléfono</string>
+    <string name="row_desktop_sound">El sonido del ordenador en este teléfono</string>
     <string name="keyboard_open">Teclado</string>
     <string name="keyboard_hide">Ocultar teclado</string>
     <string name="keyboard_mod_off">desactivado</string>
@@ -185,17 +199,17 @@
     <string name="value_unpaired">Sin emparejar</string>
 
     <!-- Foreground-service + notification relay -->
-    <string name="channel_session">Sesión de escritorio remoto</string>
-    <string name="channel_session_desc">Se muestra mientras una sesión de escritorio remoto mantiene la app en primer plano.</string>
+    <string name="channel_session">Sesión con un ordenador</string>
+    <string name="channel_session_desc">Se muestra mientras una sesión con un ordenador mantiene la app en primer plano.</string>
     <string name="notif_streaming">Transmitiendo a %1$s</string>
     <string name="disconnect">Desconectar</string>
-    <string name="lock_desktop">Bloquear escritorio</string>
-    <string name="channel_desktop_notifications">Notificaciones del escritorio</string>
+    <string name="lock_desktop">Bloquear el ordenador</string>
+    <string name="channel_desktop_notifications">Notificaciones del ordenador</string>
     <string name="reply">Responder</string>
     <string name="reply_to">Responder a %1$s</string>
 
     <!-- ShareActivity -->
-    <string name="share_no_host">Pocketdesk: no hay host guardado. Conéctate una vez desde la app.</string>
+    <string name="share_no_host">Pocketdesk: no hay ningún ordenador guardado. Conéctate a uno desde la app primero.</string>
     <string name="share_nothing">No hay nada compartible en esta intent.</string>
     <string name="share_sent_clipboard_to">Enviado al portapapeles de %1$s.</string>
     <string name="share_failed">Error: %1$s</string>
@@ -285,6 +299,10 @@
     <string name="clipboard_history">Historial del portapapeles</string>
     <string name="clear">Borrar</string>
     <string name="clipboard_empty">Aún no se ha capturado nada: copia algo o activa la sincronización del portapapeles.</string>
+    <string name="clipboard_tap_sends">Toca uno para enviarlo a %1$s</string>
+    <string name="clipboard_empty_home">Aún no se ha copiado nada. El texto que pasa durante una sesión, o con el portapapeles del ordenador en segundo plano, aparece aquí.</string>
+    <string name="clipboard_send">Enviar</string>
+    <string name="clipboard_copy">Copiar</string>
     <string name="clipboard_clear_message">Esto elimina todas las entradas guardadas del portapapeles en este teléfono.</string>
 
     <!-- Shortcut bar group captions (C9); key caps stay literal -->
@@ -297,21 +315,21 @@
     <string name="siren_dismiss">Silenciar</string>
 
     <!-- Audio sheet -->
-    <string name="desktop_audio">Audio del escritorio</string>
+    <string name="desktop_audio">El sonido del ordenador</string>
     <string name="audio_volume">Volumen · %1$d%%</string>
     <string name="audio_muted">(silenciado)</string>
     <string name="mute">Silenciar</string>
     <string name="output_device">Dispositivo de salida</string>
-    <string name="audio_rejected">El escritorio rechazó la solicitud</string>
+    <string name="audio_rejected">El ordenador rechazó la solicitud</string>
         <string name="audio_failed">Error de control de audio</string>
-    <string name="err_host_unreachable">Nadie respondió en esa dirección. ¿Está Pocketdesk activo en el escritorio?</string>
-    <string name="err_timeout">El escritorio tardó demasiado en responder. Asegúrate de que esté despierto y accesible.</string>
-    <string name="err_lan_only">No es alcanzable por LAN y este escritorio aún no tiene identidad de internet (WAN) guardada. Conéctate primero desde la misma red.</string>
-    <string name="err_trust_mismatch">Las credenciales de seguridad ya no coinciden con este escritorio. Vuelve a emparejar para continuar.</string>
-    <string name="err_pairing_declined">El escritorio rechazó el emparejamiento: el PIN era incorrecto o expiró.</string>
+    <string name="err_host_unreachable">Nadie respondió en esa dirección. ¿Está Pocketdesk activo en el ordenador?</string>
+    <string name="err_timeout">El ordenador tardó demasiado en responder. Asegúrate de que esté despierto y accesible.</string>
+    <string name="err_lan_only">No es alcanzable en esta red y este ordenador aún no tiene identidad de internet guardada. Conéctate primero desde la misma red.</string>
+    <string name="err_trust_mismatch">Las credenciales de seguridad ya no coinciden con este ordenador. Vuelve a emparejar para continuar.</string>
+    <string name="err_pairing_declined">El ordenador rechazó el emparejamiento: el PIN era incorrecto o expiró.</string>
     <string name="err_link_dropped">Se cortó la conexión con el ordenador. Puede haberse dormido o salido de la red.</string>
     <string name="err_generic">Algo salió mal al contactar el ordenador.</string>
-    <string name="connecting_still">Siguiendo intentándolo… verifica que el escritorio esté despierto con Pocketdesk activo.</string>
+    <string name="connecting_still">Siguiendo intentándolo… verifica que el ordenador esté despierto con Pocketdesk activo.</string>
     <string name="waiting_for_picture">Conectado: esperando la imagen…</string>
     <string name="waiting_for_approval">Si este ordenador pide permiso antes de cada sesión, acéptalo allí.</string>
     <string name="err_session_refused">Este ordenador rechazó la sesión. Si pide permiso antes de cada sesión, acéptalo allí; si no, vuelve a emparejar.</string>
@@ -319,8 +337,8 @@
     <string name="session_menu">Menú de sesión</string>
     <string name="pair_link_title">Emparejando con %1$s…</string>
     <string name="pair_link_trying">Probando %1$s</string>
-    <string name="pair_link_expired">Este código caducó: muestra uno nuevo en el escritorio y vuelve a escanear.</string>
-    <string name="pair_link_unreachable">No se pudo llegar al escritorio en ninguna de sus direcciones. ¿Está este teléfono en la misma red o tailnet? (%1$s)</string>
+    <string name="pair_link_expired">Este código caducó: muestra uno nuevo en el ordenador y vuelve a escanear.</string>
+    <string name="pair_link_unreachable">No se pudo llegar al ordenador en ninguna de sus direcciones. ¿Está este teléfono en la misma red o tailnet? (%1$s)</string>
     <string name="pair_link_invalid">Eso no es un código de emparejamiento de Pocketdesk.</string>
     <string name="scan_pairing_code">Escanear código de emparejamiento</string>
     <string name="scan_hint">Apunta la cámara al código de la página Pair de la app Pocketdesk en tu ordenador.</string>
@@ -334,13 +352,13 @@
     <string name="phone_notifications_service">Pocketdesk: mostrar en el ordenador</string>
     <string name="phone_notifications_share">Notificaciones de este teléfono en mi ordenador</string>
     <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste</string>
-    <string name="phone_notifications_no_access">Necesita acceso a las notificaciones</string>
+    <string name="phone_notifications_no_access">Necesita acceso a las notificaciones: permítelo abajo</string>
     <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Ninguna se comparte hasta que la actives.</string>
     <string name="texts_show">Mostrar mensajes en mi ordenador</string>
     <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste</string>
     <string name="texts_reply">Responder desde mi ordenador</string>
     <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono</string>
-    <string name="texts_reply_needs_access">Necesita acceso a las notificaciones: las respuestas llegan por ahí</string>
+    <string name="texts_reply_needs_access">Necesita acceso a las notificaciones: permítelo abajo</string>
     <!-- N6: waking a computer from the phone -->
     <string name="save">Guardar</string>
     <string name="wake_settings">Ajustes de encendido</string>
@@ -512,7 +530,7 @@
     <string name="settings_clipboard_background">Portapapeles del equipo en segundo plano</string>
     <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>
-    <string name="phone_notifications_answer_summary">El equipo puede pulsar los botones de una notificación y responder chats, en tu nombre: desde su pestaña Notificaciones o desde la notificación que muestra. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
+    <string name="phone_notifications_answer_summary">El equipo puede pulsar los botones de una notificación y responder chats, en tu nombre: desde su página Notificaciones o desde la notificación que muestra. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
     <string name="phone_notifications_wait">Cuando el equipo no está al alcance</string>
     <string name="phone_notifications_wait_summary">Las notificaciones esperan en este teléfono, solo en memoria, y se envían cuando el equipo responde, marcadas como tardías con lo que esperaron. Esperan 20 como máximo</string>
     <string name="phone_notifications_wait_10">Esperar hasta 10 minutos</string>
@@ -524,19 +542,20 @@
     <string name="settings_files_background">Archivos del equipo en segundo plano</string>
     <string name="settings_files_background_summary">Lo que envía el equipo llega sin una sesión, donde van los archivos de ordenadores, en casa o, con Archivos por internet, desde fuera. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="settings_phone_folders">Carpetas que puede abrir el equipo</string>
-    <string name="settings_phone_folders_summary">La pestaña Teléfono del equipo puede listar estas carpetas y copiar sus archivos. Nada más del teléfono es accesible. Mientras haya una carpeta compartida se mantiene conectado al equipo, usando el acceso a las notificaciones</string>
-    <string name="phone_folders_empty">Ninguna aún: el equipo no puede abrir nada en este teléfono. Añade una carpeta para que su pestaña Teléfono la liste y copie archivos</string>
+    <string name="settings_phone_folders_summary">La página Teléfono del equipo puede listar estas carpetas y copiar sus archivos. Nada más del teléfono es accesible. Mientras haya una carpeta compartida se mantiene conectado al equipo, usando el acceso a las notificaciones</string>
+    <string name="phone_folders_empty">Ninguna aún: el equipo no puede abrir nada en este teléfono. Añade una carpeta para que su página Teléfono la liste y copie archivos</string>
     <string name="phone_folders_add">Añadir carpeta</string>
     <string name="phone_folders_remove">Quitar</string>
+    <string name="phone_folders_remove_named">Quitar %1$s</string>
     <string name="phone_folders_storage">Almacenamiento</string>
     <string name="phone_folders_not_kept">Android no dejó que Pocketdesk conservara el acceso a esa carpeta</string>
     <string name="screenshots_on">Enviar capturas nuevas</string>
     <string name="screenshots_on_summary">Una captura de pantalla hecha en este teléfono llega a su equipo un momento después. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
     <string name="recent_photos_on">Fotos recientes en el equipo</string>
-    <string name="recent_photos_on_summary">La página Teléfono del equipo muestra tus fotos de cámara más nuevas (DCIM) en pequeño, y trae una cuando la pides. Desactivado hasta que lo actives</string>
+    <string name="recent_photos_on_summary">La página Teléfono del equipo muestra tus fotos de cámara más nuevas (DCIM) en pequeño, y trae una cuando la pides</string>
     <string name="recent_photos_needs_photos">Pocketdesk necesita acceso a las fotos para esto: actívalo de nuevo para permitirlo</string>
-    <string name="recent_photos_needs_access">El equipo pregunta a través del acceso a notificaciones del teléfono, que está desactivado: permítelo abajo</string>
-    <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano</string>
+    <string name="recent_photos_needs_access">Necesita acceso a las notificaciones: permítelo abajo</string>
+    <string name="screenshots_needs_access">Necesita acceso a las notificaciones: permítelo abajo</string>
     <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
     <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>
     <string name="screenshots_save">Guardarlas en el equipo, con lo que recibe</string>
@@ -693,15 +712,15 @@
     <string name="control_service_label">Control de Pocketdesk</string>
     <string name="control_service_description">Mientras este teléfono muestra su pantalla en tu ordenador con Pocketdesk, y lo permites en los Ajustes de Pocketdesk, ese ordenador puede tocar, deslizar, desplazar, escribir en el campo en el que estás y pulsar Atrás, Inicio y Recientes. Android permite al servicio leer lo que hay en la pantalla; Pocketdesk solo lee el campo en el que escribe y no envía nada de lo que lee.</string>
     <string name="settings_control_from_computer">Dejar que el ordenador controle este teléfono</string>
-    <string name="settings_control_summary_off">Mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar y escribir en él. Usa un servicio de accesibilidad, que la Protección avanzada de Android no permite.</string>
-    <string name="settings_control_summary_needs_service">Casi: activa «Control de Pocketdesk» en los ajustes de Accesibilidad de Android. Si Android lo muestra en gris, abre la información de la app de Pocketdesk, luego ⋮, Permitir ajustes restringidos.</string>
-    <string name="settings_control_summary_on">Activado: mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar, escribir y pulsar Atrás e Inicio. No con el teléfono bloqueado, salvo Atrás e Inicio.</string>
+    <string name="settings_control_summary_off">Mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar y escribir en él. Usa un servicio de accesibilidad, que la Protección avanzada de Android no permite</string>
+    <string name="settings_control_summary_needs_service">Casi: activa «Control de Pocketdesk» en los ajustes de Accesibilidad de Android. Si Android lo muestra en gris, abre la información de la app de Pocketdesk, luego ⋮, Permitir ajustes restringidos</string>
+    <string name="settings_control_summary_on">Activado: mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar, escribir y pulsar Atrás e Inicio. No con el teléfono bloqueado, salvo Atrás e Inicio</string>
     <string name="cast_showing_controlled">La pantalla de este teléfono se muestra y se controla en %1$s</string>
     <string name="settings_control_open_accessibility">Abrir los ajustes de Accesibilidad</string>
     <string name="settings_download_folder">Los archivos de ordenadores van a</string>
     <string name="settings_download_folder_default">Descargas/Pocketdesk</string>
     <string name="settings_download_folder_picked">La carpeta que elegiste</string>
-    <string name="settings_download_folder_lost">La carpeta que elegiste ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk. Toca para elegir otra.</string>
+    <string name="settings_download_folder_lost">La carpeta que elegiste ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>
     <string name="settings_download_folder_reset">Volver a usar Descargas/Pocketdesk</string>
     <string name="transfer_folder_gone">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que esto fue a Descargas/Pocketdesk.</string>
     <!-- D1: health after updates. -->
@@ -723,7 +742,7 @@
     <string name="health_control_blocked">El ordenador no puede controlar este teléfono: la Protección avanzada solo permite servicios de accesibilidad a las herramientas de accesibilidad.</string>
     <string name="health_download_folder">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>
     <string name="health_screenshots_stopped">Las capturas nuevas dejaron de ir al ordenador cuando se retiró el acceso a las fotos. Vuelve a activarlo en Ajustes.</string>
-    <string name="health_settings">Ajustes</string>
+    <string name="health_settings">Abrir Ajustes</string>
     <string name="settings_health">Avisarme cuando algo deje de funcionar</string>
     <string name="settings_health_summary">En Inicio, y en una notificación tras una actualización</string>
     <plurals name="health_count">
@@ -733,9 +752,9 @@
     </plurals>
     <!-- D2: quiet hours kept in step. -->
     <string name="settings_let_computer_mute">Dejar que el ordenador silencie este teléfono</string>
-    <string name="settings_let_computer_mute_summary">Tu ordenador puede activar No molestar durante un tiempo, hasta un día, y ve cuándo este teléfono está en silencio. Las llamadas y los mensajes que tus ajustes de No molestar dejan pasar siguen llegando. Mantiene un enlace con el ordenador, así que necesita acceso a las notificaciones.</string>
+    <string name="settings_let_computer_mute_summary">Tu ordenador puede activar No molestar durante un tiempo, hasta un día, y ve cuándo este teléfono está en silencio. Las llamadas y los mensajes que tus ajustes de No molestar dejan pasar siguen llegando. Mantiene un enlace con el ordenador, así que necesita acceso a las notificaciones</string>
     <string name="phone_notifications_hold_back">Retener con No molestar</string>
     <string name="phone_notifications_hold_back_summary">Mientras No molestar silencia una notificación en este teléfono, tampoco se envía al ordenador</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
-    <string name="card_send_earlier_copy">Enviar una copia anterior</string>
+    <string name="card_send_earlier_copy">Enviar desde el historial del portapapeles</string>
 </resources>

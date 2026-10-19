@@ -122,6 +122,27 @@ fun SettingsScreen(onBack: () -> Unit) {
                 { Prefs.setAutoReconnect(context, it) },
             )
             SettingSwitch(
+                stringResource(R.string.settings_show_driving),
+                stringResource(R.string.settings_show_driving_summary),
+                Prefs.showDriving(context),
+                { Prefs.setShowDriving(context, it) },
+            )
+            SettingSwitch(
+                stringResource(R.string.settings_haptics),
+                stringResource(R.string.settings_haptics_summary),
+                Prefs.haptics(context),
+                { Prefs.setHaptics(context, it) },
+            )
+            SettingSwitch(
+                stringResource(R.string.settings_connection_details),
+                stringResource(R.string.settings_connection_details_summary),
+                Prefs.connectionDetails(context),
+                { Prefs.setConnectionDetails(context, it) },
+            )
+
+            // E6: what drives the computer, under a heading of its own.
+            SettingsHeader(stringResource(R.string.settings_input))
+            SettingSwitch(
                 stringResource(R.string.settings_capture_mouse),
                 // A touchpad too on Android 17 (N4).
                 stringResource(
@@ -141,24 +162,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 stringResource(R.string.settings_gamepad_controller_summary),
                 Prefs.gamepadController(context),
                 { Prefs.setGamepadController(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_show_driving),
-                stringResource(R.string.settings_show_driving_summary),
-                Prefs.showDriving(context),
-                { Prefs.setShowDriving(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_haptics),
-                stringResource(R.string.settings_haptics_summary),
-                Prefs.haptics(context),
-                { Prefs.setHaptics(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_connection_details),
-                stringResource(R.string.settings_connection_details_summary),
-                Prefs.connectionDetails(context),
-                { Prefs.setConnectionDetails(context, it) },
             )
 
             SettingsHeader(stringResource(R.string.settings_files_links))
@@ -222,19 +225,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                     askForListener(it)
                 },
             )
-            // D2: the computer may turn on Do Not Disturb for a while. Its
-            // own preferences, so the switch redraws from a local state.
-            var letMute by remember { mutableStateOf(dev.pocketdesk.android.notify.QuietPrefs.letComputerMute(context)) }
-            SettingSwitch(
-                stringResource(R.string.settings_let_computer_mute),
-                stringResource(R.string.settings_let_computer_mute_summary),
-                letMute,
-                {
-                    dev.pocketdesk.android.notify.QuietPrefs.setLetComputerMute(context, it)
-                    letMute = it
-                    askForListener(it)
-                },
-            )
             SettingSwitch(
                 stringResource(R.string.settings_share_battery),
                 stringResource(R.string.settings_share_battery_summary),
@@ -261,15 +251,22 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.backgroundReminder(context),
                 { Prefs.setBackgroundReminder(context, it) },
             )
-            // D1: what stopped working, on Home and after updates.
-            SettingSwitch(
-                stringResource(R.string.settings_health),
-                stringResource(R.string.settings_health_summary),
-                Prefs.healthAlerts(context),
-                { Prefs.setHealthAlerts(context, it) },
-            )
 
             SettingsHeader(stringResource(R.string.settings_notifications_texts))
+            // E6: both Do Not Disturb settings in one place.
+            // D2: the computer may turn on Do Not Disturb for a while. Its
+            // own preferences, so the switch redraws from a local state.
+            var letMute by remember { mutableStateOf(dev.pocketdesk.android.notify.QuietPrefs.letComputerMute(context)) }
+            SettingSwitch(
+                stringResource(R.string.settings_let_computer_mute),
+                stringResource(R.string.settings_let_computer_mute_summary),
+                letMute,
+                {
+                    dev.pocketdesk.android.notify.QuietPrefs.setLetComputerMute(context, it)
+                    letMute = it
+                    askForListener(it)
+                },
+            )
             PhoneNotificationsSection()
             TextsSection()
 
@@ -337,8 +334,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
             }
 
+            SettingsHeader(stringResource(R.string.settings_system))
+            // D1: what stopped working, on Home and after updates.
+            SettingSwitch(
+                stringResource(R.string.settings_health),
+                stringResource(R.string.settings_health_summary),
+                Prefs.healthAlerts(context),
+                { Prefs.setHealthAlerts(context, it) },
+            )
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                SettingsHeader(stringResource(R.string.settings_system))
                 SettingLink(stringResource(R.string.language), null) {
                     runCatching {
                         context.startActivity(
@@ -403,24 +407,21 @@ private fun TrackpadSpeed() {
 private fun PenPressure() {
     val context = LocalContext.current
     val curves = dev.pocketdesk.android.stream.PenCurve.entries
+    // Read again when a choice is saved, so the chosen one redraws (E6 review).
+    Prefs.observedVersion()
     val chosen = Prefs.penCurve(context)
-    Column {
-        ChoiceRow(
-            stringResource(R.string.settings_pen_pressure),
-            listOf(
-                stringResource(R.string.pen_pressure_soft),
-                stringResource(R.string.pen_pressure_even),
-                stringResource(R.string.pen_pressure_firm),
-            ),
-            curves.indexOf(chosen),
-        ) { Prefs.setPenCurve(context, curves[it]) }
-        Text(
-            stringResource(R.string.settings_pen_pressure_summary),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-        )
-    }
+    // A row like its neighbours (E6): title and summary, the choice under.
+    SettingRow(stringResource(R.string.settings_pen_pressure), stringResource(R.string.settings_pen_pressure_summary))
+    ChoiceRow(
+        null,
+        listOf(
+            stringResource(R.string.pen_pressure_soft),
+            stringResource(R.string.pen_pressure_even),
+            stringResource(R.string.pen_pressure_firm),
+        ),
+        curves.indexOf(chosen),
+        horizontal = 16.dp,
+    ) { Prefs.setPenCurve(context, curves[it]) }
 }
 
 private fun appVersionName(context: android.content.Context): String =

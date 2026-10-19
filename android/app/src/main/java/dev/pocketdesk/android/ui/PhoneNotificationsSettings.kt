@@ -67,6 +67,8 @@ fun PhoneNotificationsSection() {
         warning = enabled && !granted,
     )
     if (enabled && !granted) AllowNotificationAccess()
+    // Its neighbours go while sharing is off, and so does it (E6).
+    if (!enabled) return
     // T10c: the computer may press buttons and reply, as this phone's owner.
     SettingSwitch(
         stringResource(R.string.phone_notifications_answer),
@@ -76,9 +78,7 @@ fun PhoneNotificationsSection() {
             Prefs.setAnswerNotifications(context, it)
             version++
         },
-        enabled = enabled,
     )
-    if (!enabled) return
     // D2: what Do Not Disturb hides on the phone stays off the computer.
     val holdBack = version.let { dev.pocketdesk.android.notify.QuietPrefs.holdBack(context) }
     SettingSwitch(

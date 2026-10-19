@@ -33,6 +33,7 @@
     <string name="settings_dynamic">Material You colors</string>
     <string name="settings_dynamic_summary">Match the palette to your wallpaper (Android 12+)</string>
     <string name="settings_session">Session</string>
+    <string name="settings_input">Input</string>
     <string name="settings_keep_screen_on">Keep screen on</string>
     <string name="settings_keep_screen_on_summary">During a streaming session</string>
     <string name="settings_auto_reconnect">Reconnect by itself</string>
@@ -63,12 +64,12 @@
     <string name="settings_trackpad_speed">Trackpad speed</string>
     <string name="settings_trackpad_speed_summary">How far the cursor moves for each finger movement in trackpad mode</string>
     <string name="settings_pen_pressure">Pen pressure</string>
-    <string name="settings_pen_pressure_summary">In pen mode, how hard you press for full ink. A stylus draws best: most phones only guess the pressure of a finger.</string>
+    <string name="settings_pen_pressure_summary">In pen mode, how hard you press for full ink. A stylus draws best: most phones only guess the pressure of a finger</string>
     <string name="pen_pressure_soft">Soft</string>
     <string name="pen_pressure_even">Even</string>
     <string name="pen_pressure_firm">Firm</string>
-    <string name="settings_gamepad_controller">Game controller to the computer</string>
-    <string name="settings_gamepad_controller_summary">A controller connected to this phone plays on the computer during a session: A is Enter, B Esc, X Space, Y Tab, the bumpers Page Up and Down, Select Backspace, Start a click, the left stick the mouse and the right the wheel</string>
+    <string name="settings_gamepad_controller">Use a connected game controller on the computer</string>
+    <string name="settings_gamepad_controller_summary">During a session, a controller connected to this phone (USB or Bluetooth) plays on the computer: A is Enter, B Esc, X Space, Y Tab, the bumpers Page Up and Down, Select Backspace, Start a click, the left stick the mouse and the right the wheel</string>
     <string name="settings_system">System</string>
     <string name="settings_about">About</string>
     <string name="app_version">Version %1$s</string>
@@ -101,7 +102,8 @@
     <string name="mode_direct_touch">Direct touch</string>
     <string name="mode_trackpad">Trackpad</string>
     <string name="mode_pen">Pen</string>
-    <string name="ring_pc">Ring PC</string>
+    <string name="mode_change">Change input mode</string>
+    <string name="ring_pc">Ring the computer</string>
     <string name="paired">Paired ✓</string>
     <string name="privacy_error">Privacy: %1$s</string>
     <string name="view_only_error">View-only: %1$s</string>
@@ -112,10 +114,10 @@
     <string name="mic_error">Mic share: %1$s</string>
     <string name="mic_unavailable">No Opus encoder on this device (Android 9+)</string>
     <string name="mic_permission_denied">Microphone permission denied</string>
-    <string name="codec_switched">Desktop switched encoder — now %1$s</string>
-    <string name="lock_pc">Lock PC</string>
+    <string name="codec_switched">The computer switched encoder: now %1$s</string>
+    <string name="lock_pc">Lock the computer</string>
     <string name="blackout">Blackout</string>
-    <string name="pip">PiP</string>
+    <string name="pip">Picture-in-picture</string>
     <string name="blackout_unlock">Blackout — double-tap to unlock</string>
 
     <!-- R4 E6: foldable / tablet dual-pane -->
@@ -131,17 +133,29 @@
     <string name="row_quality">Quality</string>
     <string name="row_window">Window</string>
     <string name="row_monitor">Monitor</string>
-    <string name="row_gamepad">Gamepad</string>
+    <string name="row_gamepad">Show the gamepad</string>
     <string name="gamepad_close">Close the gamepad</string>
     <string name="gamepad_click">Click</string>
     <string name="gamepad_mouse">Mouse</string>
     <string name="gamepad_scroll">Scroll</string>
+    <string name="gamepad_lb">LB</string>
+    <string name="gamepad_rb">RB</string>
+    <string name="gamepad_select">Select</string>
+    <string name="gamepad_start">Start</string>
+    <string name="gamepad_a">A</string>
+    <string name="gamepad_b">B</string>
+    <string name="gamepad_x">X</string>
+    <string name="gamepad_y">Y</string>
+    <string name="gamepad_up">Up arrow key</string>
+    <string name="gamepad_down">Down arrow key</string>
+    <string name="gamepad_left">Left arrow key</string>
+    <string name="gamepad_right">Right arrow key</string>
     <string name="row_pane">Pane layout</string>
     <string name="row_clipboard">Clipboard sync</string>
     <string name="row_history">Clipboard history</string>
     <string name="row_audio">Audio control</string>
     <string name="row_mic">Phone mic share</string>
-    <string name="row_desktop_sound">Desktop sound on this phone</string>
+    <string name="row_desktop_sound">The computer\'s sound on this phone</string>
     <string name="keyboard_open">Keyboard</string>
     <string name="keyboard_hide">Hide keyboard</string>
     <string name="keyboard_mod_off">off</string>
@@ -192,17 +206,17 @@
     <string name="value_unpaired">Not paired</string>
 
     <!-- Foreground-service + notification relay -->
-    <string name="channel_session">Remote desktop session</string>
-    <string name="channel_session_desc">Shown while a remote desktop session keeps this app in the foreground.</string>
+    <string name="channel_session">Session with a computer</string>
+    <string name="channel_session_desc">Shown while a session with a computer keeps this app in the foreground.</string>
     <string name="notif_streaming">Streaming to %1$s</string>
     <string name="disconnect">Disconnect</string>
-    <string name="lock_desktop">Lock desktop</string>
-    <string name="channel_desktop_notifications">Desktop notifications</string>
+    <string name="lock_desktop">Lock the computer</string>
+    <string name="channel_desktop_notifications">Notifications from the computer</string>
     <string name="reply">Reply</string>
     <string name="reply_to">Reply to %1$s</string>
 
     <!-- ShareActivity -->
-    <string name="share_no_host">Pocketdesk: no saved host. Connect once from the app first.</string>
+    <string name="share_no_host">Pocketdesk: no saved computer. Connect to one from the app first.</string>
     <string name="share_nothing">Nothing shareable in this intent.</string>
     <string name="share_sent_clipboard_to">Sent to the clipboard of %1$s.</string>
     <string name="share_failed">Failed: %1$s</string>
@@ -289,6 +303,10 @@
     <string name="clipboard_history">Clipboard history</string>
     <string name="clear">Clear</string>
     <string name="clipboard_empty">Nothing captured yet — copy something or turn on clipboard sync.</string>
+    <string name="clipboard_tap_sends">Tap one to send it to %1$s</string>
+    <string name="clipboard_empty_home">Nothing copied yet. Text that crosses during a session, or with the computer\'s clipboard in the background, appears here.</string>
+    <string name="clipboard_send">Send</string>
+    <string name="clipboard_copy">Copy</string>
     <string name="clipboard_clear_message">This deletes every saved clipboard entry from this phone.</string>
 
     <!-- Shortcut bar group captions (C9); the key captions are the key_* strings (U6) -->
@@ -301,21 +319,21 @@
     <string name="siren_dismiss">Silence</string>
 
     <!-- Audio sheet -->
-    <string name="desktop_audio">Desktop audio</string>
+    <string name="desktop_audio">The computer\'s sound</string>
     <string name="audio_volume">Volume · %1$d%%</string>
     <string name="audio_muted">(muted)</string>
     <string name="mute">Mute</string>
     <string name="output_device">Output device</string>
-    <string name="audio_rejected">Desktop rejected the request</string>
+    <string name="audio_rejected">The computer refused the request</string>
     <string name="audio_failed">Audio control failed</string>
-    <string name="err_host_unreachable">Nothing answered on that address. Is Pocketdesk running on the desktop?</string>
-    <string name="err_timeout">The desktop took too long to answer. Make sure it is awake and reachable.</string>
-    <string name="err_lan_only">Not reachable over LAN, and this desktop has no saved internet (WAN) identity yet. Connect once from the same network first.</string>
-    <string name="err_trust_mismatch">Security credentials no longer match this desktop. Pair again to continue.</string>
-    <string name="err_pairing_declined">The desktop declined pairing — the PIN was wrong or expired.</string>
+    <string name="err_host_unreachable">Nothing answered on that address. Is Pocketdesk running on the computer?</string>
+    <string name="err_timeout">The computer took too long to answer. Make sure it is awake and reachable.</string>
+    <string name="err_lan_only">Not reachable on this network, and this computer has no saved internet identity yet. Connect once from the same network first.</string>
+    <string name="err_trust_mismatch">Security credentials no longer match this computer. Pair again to continue.</string>
+    <string name="err_pairing_declined">The computer declined pairing: the PIN was wrong or expired.</string>
     <string name="err_link_dropped">The connection to the computer dropped. It may have slept or left the network.</string>
     <string name="err_generic">Something went wrong reaching the computer.</string>
-    <string name="connecting_still">Still trying… check that the desktop is awake and running Pocketdesk.</string>
+    <string name="connecting_still">Still trying… check that the computer is awake and running Pocketdesk.</string>
     <string name="waiting_for_picture">Connected — waiting for the picture…</string>
     <string name="waiting_for_approval">If this computer asks before each session, allow it there.</string>
     <string name="err_session_refused">This computer turned the session down. If it asks before each session, allow it there; otherwise pair again.</string>
@@ -323,8 +341,8 @@
     <string name="session_menu">Session menu</string>
     <string name="pair_link_title">Pairing with %1$s…</string>
     <string name="pair_link_trying">Trying %1$s</string>
-    <string name="pair_link_expired">This code has expired — show a new one on the desktop and scan again.</string>
-    <string name="pair_link_unreachable">Could not reach the desktop at any of its addresses. Is this phone on the same network or tailnet? (%1$s)</string>
+    <string name="pair_link_expired">This code has expired: show a new one on the computer and scan again.</string>
+    <string name="pair_link_unreachable">Could not reach the computer at any of its addresses. Is this phone on the same network or tailnet? (%1$s)</string>
     <string name="pair_link_invalid">That is not a Pocketdesk pairing code.</string>
     <string name="scan_pairing_code">Scan pairing code</string>
     <string name="scan_hint">Point the camera at the code on the Pair page of the Pocketdesk app on your computer.</string>
@@ -338,13 +356,13 @@
     <string name="phone_notifications_service">Pocketdesk: show on computer</string>
     <string name="phone_notifications_share">This phone\'s notifications on my computer</string>
     <string name="phone_notifications_share_summary">Notifications from this phone appear on the computer you used last</string>
-    <string name="phone_notifications_no_access">Needs notification access</string>
+    <string name="phone_notifications_no_access">Needs notification access: allow it below</string>
     <string name="phone_notifications_apps_empty">Apps appear here once they notify. None is shared until you switch it on.</string>
     <string name="texts_show">Show texts on my computer</string>
     <string name="texts_show_summary">Texts this phone receives appear in Messages on the computer you used last</string>
     <string name="texts_reply">Reply from my computer</string>
     <string name="texts_reply_summary">The computer can send texts through this phone</string>
-    <string name="texts_reply_needs_access">Needs notification access: replies arrive through it</string>
+    <string name="texts_reply_needs_access">Needs notification access: allow it below</string>
     <!-- N6: waking a computer from the phone -->
     <string name="save">Save</string>
     <string name="wake_settings">Wake settings</string>
@@ -516,7 +534,7 @@
     <string name="settings_clipboard_background">Computer\'s clipboard in the background</string>
     <string name="settings_clipboard_background_summary">What you copy on the computer reaches this phone without a session, also away from home. It needs notification access, which keeps the connection</string>
     <string name="phone_notifications_answer">Let the computer answer notifications</string>
-    <string name="phone_notifications_answer_summary">The computer can press a notification\'s buttons and reply to chats, as you: from its Notifications tab, or from the notification it shows. Only notifications sent in full, and only from your own computer</string>
+    <string name="phone_notifications_answer_summary">The computer can press a notification\'s buttons and reply to chats, as you: from its Notifications page, or from the notification it shows. Only notifications sent in full, and only from your own computer</string>
     <string name="phone_notifications_wait">When the computer is out of reach</string>
     <string name="phone_notifications_wait_summary">Notifications wait on this phone, in memory only, and go when the computer answers, marked late with how long they waited. At most 20 wait</string>
     <string name="phone_notifications_wait_10">Wait up to 10 minutes</string>
@@ -528,19 +546,20 @@
     <string name="settings_files_background">Files from the computer in the background</string>
     <string name="settings_files_background_summary">What the computer sends arrives without a session, where files from computers go, at home or, with Files over the internet, from away. It needs notification access, which keeps the connection</string>
     <string name="settings_phone_folders">Folders the computer may open</string>
-    <string name="settings_phone_folders_summary">The computer\'s Phone tab can list these folders and copy their files to itself. Nothing else on the phone is reachable. While any folder is shared it stays connected to the computer, using notification access</string>
-    <string name="phone_folders_empty">None yet: the computer cannot open anything on this phone. Add a folder to let its Phone tab list it and copy files from it</string>
+    <string name="settings_phone_folders_summary">The computer\'s Phone page can list these folders and copy their files to itself. Nothing else on the phone is reachable. While any folder is shared it stays connected to the computer, using notification access</string>
+    <string name="phone_folders_empty">None yet: the computer cannot open anything on this phone. Add a folder to let its Phone page list it and copy files from it</string>
     <string name="phone_folders_add">Add folder</string>
     <string name="phone_folders_remove">Remove</string>
+    <string name="phone_folders_remove_named">Remove %1$s</string>
     <string name="phone_folders_storage">Storage</string>
     <string name="phone_folders_not_kept">Android did not let Pocketdesk keep access to that folder</string>
     <string name="screenshots_on">Send new screenshots</string>
     <string name="screenshots_on_summary">A screenshot taken on this phone goes to its computer a moment later. Asks for access to photos, and uses notification access to run in the background</string>
     <string name="recent_photos_on">Recent photos on the computer</string>
-    <string name="recent_photos_on_summary">Your computer\'s Phone page shows your newest camera photos (DCIM) as small pictures, and fetches one when you ask. Off until you turn it on</string>
+    <string name="recent_photos_on_summary">Your computer\'s Phone page shows your newest camera photos (DCIM) as small pictures, and fetches one when you ask</string>
     <string name="recent_photos_needs_photos">Pocketdesk needs access to photos for this: turn it on again to allow it</string>
-    <string name="recent_photos_needs_access">The computer asks through the phone\'s notification access, which is off: allow it below</string>
-    <string name="screenshots_needs_access">Needs notification access to run in the background</string>
+    <string name="recent_photos_needs_access">Needs notification access: allow it below</string>
+    <string name="screenshots_needs_access">Needs notification access: allow it below</string>
     <string name="screenshots_needs_photos">Needs access to all photos: allow it in Android\'s settings for Pocketdesk</string>
     <string name="screenshots_clipboard">Put on the computer\'s clipboard</string>
     <string name="screenshots_save">Save on the computer, with its received files</string>
@@ -697,15 +716,15 @@
     <string name="control_service_label">Pocketdesk control</string>
     <string name="control_service_description">While this phone shows its screen on your computer with Pocketdesk, and you allow it in Pocketdesk\'s Settings, that computer can tap, swipe, scroll, type into the field you are in, and press Back, Home and Recents. Android lets the service read what is on the screen; Pocketdesk reads only the field it types into, and sends nothing it reads anywhere.</string>
     <string name="settings_control_from_computer">Let the computer control this phone</string>
-    <string name="settings_control_summary_off">While this phone shows its screen on a computer, that computer can tap, swipe and type on it. Uses an Accessibility service, which Android\'s Advanced Protection does not allow.</string>
-    <string name="settings_control_summary_needs_service">Almost: turn on \"Pocketdesk control\" in Android\'s Accessibility settings. If Android greys it out, open Pocketdesk\'s App info, then ⋮, Allow restricted settings.</string>
-    <string name="settings_control_summary_on">On: while this phone shows its screen on a computer, that computer can tap, swipe, type and press Back and Home. Not while the phone is locked, apart from Back and Home.</string>
+    <string name="settings_control_summary_off">While this phone shows its screen on a computer, that computer can tap, swipe and type on it. Uses an Accessibility service, which Android\'s Advanced Protection does not allow</string>
+    <string name="settings_control_summary_needs_service">Almost: turn on \"Pocketdesk control\" in Android\'s Accessibility settings. If Android greys it out, open Pocketdesk\'s App info, then ⋮, Allow restricted settings</string>
+    <string name="settings_control_summary_on">On: while this phone shows its screen on a computer, that computer can tap, swipe, type and press Back and Home. Not while the phone is locked, apart from Back and Home</string>
     <string name="cast_showing_controlled">This phone\'s screen is shown and controlled on %1$s</string>
     <string name="settings_control_open_accessibility">Open Accessibility settings</string>
     <string name="settings_download_folder">Files from computers go to</string>
     <string name="settings_download_folder_default">Downloads/Pocketdesk</string>
     <string name="settings_download_folder_picked">The folder you picked</string>
-    <string name="settings_download_folder_lost">The folder you picked is gone or no longer allowed, so files go to Downloads/Pocketdesk. Tap to pick another.</string>
+    <string name="settings_download_folder_lost">The folder you picked is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
     <string name="settings_download_folder_reset">Use Downloads/Pocketdesk again</string>
     <string name="transfer_folder_gone">The folder picked for files from computers is gone or no longer allowed, so this went to Downloads/Pocketdesk.</string>
     <!-- D1: health after updates. -->
@@ -727,7 +746,7 @@
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>
     <string name="health_download_folder">The folder picked for files from computers is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
     <string name="health_screenshots_stopped">New screenshots stopped going to the computer when photo access was taken away. Turn it on again in Settings.</string>
-    <string name="health_settings">Settings</string>
+    <string name="health_settings">Open Settings</string>
     <string name="settings_health">Tell me when something stops working</string>
     <string name="settings_health_summary">On Home, and in a notification after an update</string>
     <plurals name="health_count">
@@ -736,9 +755,9 @@
     </plurals>
     <!-- D2: quiet hours kept in step. -->
     <string name="settings_let_computer_mute">Let the computer mute this phone</string>
-    <string name="settings_let_computer_mute_summary">Your computer can turn on Do Not Disturb for a while, up to a day, and sees when this phone is quiet. Calls and messages your Do Not Disturb settings let through still come. Keeps a link to the computer, so it needs notification access.</string>
+    <string name="settings_let_computer_mute_summary">Your computer can turn on Do Not Disturb for a while, up to a day, and sees when this phone is quiet. Calls and messages your Do Not Disturb settings let through still come. Keeps a link to the computer, so it needs notification access</string>
     <string name="phone_notifications_hold_back">Hold back in Do Not Disturb</string>
     <string name="phone_notifications_hold_back_summary">While Do Not Disturb silences a notification on this phone, it is not sent to the computer either</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
-    <string name="card_send_earlier_copy">Send an earlier copy</string>
+    <string name="card_send_earlier_copy">Send from clipboard history</string>
 </resources>

@@ -81,11 +81,12 @@ fun SettingSwitch(
 
 /** A row that opens something: a page of Android's, a guide. */
 @Composable
-fun SettingLink(title: String, summary: String?, onClick: () -> Unit) {
+fun SettingLink(title: String, summary: String?, warning: Boolean = false, onClick: () -> Unit) {
     SettingRow(
         title = title,
         summary = summary,
         modifier = Modifier.clickable(role = Role.Button, onClick = onClick),
+        warning = warning,
     ) {
         LlIcon(LlIcons.ChevronRight, null)
     }

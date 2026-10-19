@@ -111,7 +111,7 @@ class MainActivity : ComponentActivity() {
         if (!dev.pocketdesk.android.wake.Waker.canWake(dev.pocketdesk.android.wake.Waker.planFor(this, host.address))) {
             android.widget.Toast.makeText(
                 this,
-                getString(R.string.shortcut_no_wake, host.address),
+                getString(R.string.shortcut_no_wake, HostStore.shownName(this, host.address)),
                 android.widget.Toast.LENGTH_LONG,
             ).show()
             return
@@ -122,7 +122,7 @@ class MainActivity : ComponentActivity() {
         Thread {
             val result = dev.pocketdesk.android.wake.Waker.wake(app, host.address)
             val message = if (result.isSuccess) {
-                app.getString(R.string.wake_sent, host.address)
+                app.getString(R.string.wake_sent, HostStore.shownName(app, host.address))
             } else {
                 val error = result.exceptionOrNull()
                 app.getString(R.string.wake_failed, app.plainErrorText(error?.message))

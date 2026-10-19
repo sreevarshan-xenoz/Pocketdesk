@@ -6,6 +6,14 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -60,52 +68,96 @@ fun GamepadOverlay(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier
-            .fillMaxSize()
-            // What the controls leave is the overlay's: a palm between them
-            // must not reach the computer through the stream below (E4
-            // review). Children see each event first, in the Main pass.
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
+    // Its text stops growing where the session chrome's does (C5; E6:
+    // captions were cut off in their keys at font scale 2.0).
+    val base = LocalDensity.current
+    val capped = remember(base) {
+        if (ChromeText.capped(base.fontScale)) Density(base.density, ChromeText.scale(base.fontScale)) else base
+    }
+    CompositionLocalProvider(LocalDensity provides capped) {
+        BoxWithConstraints(
+            modifier
+                .fillMaxSize()
+                // What the controls leave is the overlay's: a palm between them
+                // must not reach the computer through the stream below (E4
+                // review). Children see each event first, in the Main pass.
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                    }
                 }
-            },
-    ) {
-        IconButton(
-            onClick = onClose,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp)
-                .clip(CircleShape)
-                .background(Scrim),
+                // Clear of the status and gesture bars and a cut-out (E6).
+                .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
-            LlIcon(LlIcons.Close, stringResource(R.string.gamepad_close), tint = Color.White)
-        }
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PadKey("LB", stringResource(R.string.key_page_up), PadButton.LB, pad, onChange, Bumper, 92.dp, KEY)
-                Stick(left = true, caption = stringResource(R.string.gamepad_mouse), pad = pad, onChange = onChange)
-                Dpad(pad, onChange)
+            val fit = GamepadFit.of(maxWidth.value, maxHeight.value)
+            // At the top's middle, clear of the bumpers below either side (E6).
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(8.dp)
+                    .clip(CircleShape)
+                    .background(Scrim),
+            ) {
+                LlIcon(LlIcons.Close, stringResource(R.string.gamepad_close), tint = Color.White)
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PadKey("Select", stringResource(R.string.key_backspace), PadButton.SELECT, pad, onChange, Bumper, 84.dp, KEY)
-                PadKey("Start", stringResource(R.string.gamepad_click), PadButton.START, pad, onChange, Bumper, 84.dp, KEY)
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PadKey("RB", stringResource(R.string.key_page_down), PadButton.RB, pad, onChange, Bumper, 92.dp, KEY)
-                FaceButtons(pad, onChange)
-                Stick(left = false, caption = stringResource(R.string.gamepad_scroll), pad = pad, onChange = onChange)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // A narrow phone has no room for a middle column: Select and
+                // Start go above the two sides (E6).
+                if (fit.narrow) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { SelectStart(pad, onChange) }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        PadKey(stringResource(R.string.gamepad_lb), stringResource(R.string.key_page_up), PadButton.LB, pad, onChange, Bumper, 92.dp, KEY)
+                        Stick(left = true, caption = stringResource(R.string.gamepad_mouse), diameter = fit.stick.dp, pad = pad, onChange = onChange)
+                        Dpad(pad, onChange)
+                    }
+                    if (!fit.narrow) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SelectStart(pad, onChange)
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        PadKey(stringResource(R.string.gamepad_rb), stringResource(R.string.key_page_down), PadButton.RB, pad, onChange, Bumper, 92.dp, KEY)
+                        FaceButtons(pad, onChange)
+                        Stick(left = false, caption = stringResource(R.string.gamepad_scroll), diameter = fit.stick.dp, pad = pad, onChange = onChange)
+                    }
+                }
             }
         }
     }
+}
+
+/**
+ * How the gamepad fits its window (E6): a phone under 400 dp across has no
+ * room for a middle column, and a window under 400 dp tall (a phone on its
+ * side) gets smaller sticks.
+ */
+object GamepadFit {
+    data class Fit(val narrow: Boolean, val stick: Int)
+
+    fun of(widthDp: Float, heightDp: Float): Fit {
+        val narrow = widthDp < 400f
+        return Fit(narrow = narrow, stick = if (narrow || heightDp < 400f) 96 else 116)
+    }
+}
+
+@Composable
+private fun SelectStart(pad: GamepadState, onChange: () -> Unit) {
+    PadKey(stringResource(R.string.gamepad_select), stringResource(R.string.key_backspace), PadButton.SELECT, pad, onChange, Bumper, 84.dp, KEY)
+    PadKey(stringResource(R.string.gamepad_start), stringResource(R.string.gamepad_click), PadButton.START, pad, onChange, Bumper, 84.dp, KEY)
 }
 
 private val Scrim = Color.Black.copy(alpha = 0.45f)
@@ -119,27 +171,27 @@ private val KEY = 48.dp
 private fun Dpad(pad: GamepadState, onChange: () -> Unit) {
     val key = KEY
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        PadKey("↑", null, PadButton.UP, pad, onChange, CircleShape, key, key)
+        PadKey("↑", null, PadButton.UP, pad, onChange, CircleShape, key, key, stringResource(R.string.gamepad_up))
         Row {
-            PadKey("←", null, PadButton.LEFT, pad, onChange, CircleShape, key, key)
+            PadKey("←", null, PadButton.LEFT, pad, onChange, CircleShape, key, key, stringResource(R.string.gamepad_left))
             Spacer(Modifier.width(key))
-            PadKey("→", null, PadButton.RIGHT, pad, onChange, CircleShape, key, key)
+            PadKey("→", null, PadButton.RIGHT, pad, onChange, CircleShape, key, key, stringResource(R.string.gamepad_right))
         }
-        PadKey("↓", null, PadButton.DOWN, pad, onChange, CircleShape, key, key)
+        PadKey("↓", null, PadButton.DOWN, pad, onChange, CircleShape, key, key, stringResource(R.string.gamepad_down))
     }
 }
 
 @Composable
 private fun FaceButtons(pad: GamepadState, onChange: () -> Unit) {
-    val key = 50.dp
+    val key = KEY
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        PadKey("Y", stringResource(R.string.key_tab), PadButton.Y, pad, onChange, CircleShape, key, key)
+        PadKey(stringResource(R.string.gamepad_y), stringResource(R.string.key_tab), PadButton.Y, pad, onChange, CircleShape, key, key)
         Row {
-            PadKey("X", stringResource(R.string.key_space), PadButton.X, pad, onChange, CircleShape, key, key)
+            PadKey(stringResource(R.string.gamepad_x), stringResource(R.string.key_space), PadButton.X, pad, onChange, CircleShape, key, key)
             Spacer(Modifier.width(key))
-            PadKey("B", stringResource(R.string.key_escape), PadButton.B, pad, onChange, CircleShape, key, key)
+            PadKey(stringResource(R.string.gamepad_b), stringResource(R.string.key_escape), PadButton.B, pad, onChange, CircleShape, key, key)
         }
-        PadKey("A", stringResource(R.string.key_enter), PadButton.A, pad, onChange, CircleShape, key, key)
+        PadKey(stringResource(R.string.gamepad_a), stringResource(R.string.key_enter), PadButton.A, pad, onChange, CircleShape, key, key)
     }
 }
 
@@ -157,13 +209,14 @@ private fun PadKey(
     shape: Shape,
     width: Dp,
     height: Dp,
+    spoken: String? = null,
 ) {
     var held by remember { mutableStateOf(false) }
     fun set(down: Boolean) {
         held = down
         if (pad.press(bit, down)) onChange()
     }
-    val description = if (caption != null) "$label, $caption" else label
+    val description = spoken ?: if (caption != null) "$label, $caption" else label
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -194,16 +247,23 @@ private fun PadKey(
             },
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, color = Color.White, fontSize = 14.sp)
-            if (caption != null) Text(caption, color = Color.White.copy(alpha = 0.8f), fontSize = 9.sp, maxLines = 1)
+            Text(label, color = Color.White, fontSize = 14.sp, maxLines = 1)
+            if (caption != null) {
+                Text(
+                    caption,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
 
 /** A stick: dragged from its centre, back to it when let go. */
 @Composable
-private fun Stick(left: Boolean, caption: String, pad: GamepadState, onChange: () -> Unit) {
-    val diameter = 116.dp
+private fun Stick(left: Boolean, caption: String, diameter: Dp, pad: GamepadState, onChange: () -> Unit) {
     val knob = 44.dp
     var at by remember { mutableStateOf(Offset.Zero) }
     Box(

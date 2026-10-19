@@ -5,6 +5,9 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -25,12 +28,46 @@ fun DownloadFolderSetting() {
     val context = LocalContext.current
     val resumes = rememberResumes()
     var version by remember { mutableIntStateOf(0) }
-    val picked = Prefs.downloadTree(context)
     val tree = remember(resumes, version) { DownloadTarget.tree(context) }
     val lost = remember(resumes, version) { DownloadTarget.treeLost(context) }
-    val pick =
+    val picked = remember(resumes, version) { Prefs.downloadTree(context) }
+    val pick = rememberDownloadFolderPicker { version++ }
+    val where = when {
+        tree != null -> DownloadTarget.treeName(context, tree) ?: stringResource(R.string.settings_download_folder_picked)
+        else -> stringResource(R.string.settings_download_folder_default)
+    }
+    SettingLink(
+        stringResource(R.string.settings_download_folder),
+        if (lost) stringResource(R.string.settings_download_folder_lost) else where,
+        // A lost folder in the warning colour, as other needs are (E6).
+        warning = lost,
+    ) { pick() }
+    if (picked != null) {
+        // Acts at once: no chevron (E6).
+        SettingRow(
+            stringResource(R.string.settings_download_folder_reset),
+            null,
+            modifier = Modifier.clickable(role = Role.Button) {
+                release(context, picked)
+                Prefs.setDownloadTree(context, null)
+                version++
+            },
+        )
+    }
+}
+
+/**
+ * Android's folder picker for where files from computers land, kept with
+ * its grant; [onPicked] after a choice. Settings and Home's Health card
+ * (E6: its Choose had only opened Settings) share it.
+ */
+@Composable
+fun rememberDownloadFolderPicker(onPicked: () -> Unit = {}): () -> Unit {
+    val context = LocalContext.current
+    val launcher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { chosen: Uri? ->
             if (chosen != null) {
+                val picked = Prefs.downloadTree(context)
                 val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 val kept = runCatching { context.contentResolver.takePersistableUriPermission(chosen, flags) }.isSuccess
                 if (kept) {
@@ -39,24 +76,10 @@ fun DownloadFolderSetting() {
                     if (picked != chosen.toString()) release(context, picked)
                     Prefs.setDownloadTree(context, chosen.toString())
                 }
-                version++
+                onPicked()
             }
         }
-    val where = when {
-        tree != null -> DownloadTarget.treeName(context, tree) ?: stringResource(R.string.settings_download_folder_picked)
-        else -> stringResource(R.string.settings_download_folder_default)
-    }
-    SettingLink(
-        stringResource(R.string.settings_download_folder),
-        if (lost) stringResource(R.string.settings_download_folder_lost) else where,
-    ) { pick.launch(null) }
-    if (picked != null) {
-        SettingLink(stringResource(R.string.settings_download_folder_reset), null) {
-            release(context, picked)
-            Prefs.setDownloadTree(context, null)
-            version++
-        }
-    }
+    return { launcher.launch(null) }
 }
 
 /**

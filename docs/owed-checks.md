@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-625 open items.
+631 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 367 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 371 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
 | A phone with a SIM | 21 |
@@ -14,7 +14,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 9 |
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 87 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 49 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
@@ -746,6 +746,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Devices: a paired computer has no Ring, Mute, cast or lock switches; the lock's note shows while it is on.
 - Notices: "Asked the phone…" on the Phone page goes in seconds; an error shows in red.
 
+**125. The phone app's design pass (E6)**
+
+- The session menu with Pen offered: three segments at 1.0; at 2.0 crowded.
+- The history sheet from Home: says a tap sends, entries 48 dp, no Clear when empty.
+- The Health card's Choose opens the folder picker.
+- Spanish and Tamil on the changed screens.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1417,6 +1424,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **111. Health after updates (D1)**
 
 - A low-RAM phone on Android 10 or older: no "stopped" card.
+
+**125. The phone app's design pass (E6)**
+
+- The gamepad in portrait and landscape on the A71 and a 360 dp phone; at font scale 2.0.
+- TalkBack on the new rows (the mode chip's action, the gamepad's keys, the folders' Remove).
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 

@@ -771,7 +771,12 @@ class TransferService : Service() {
         val outcome = TransferSummary.of(sentTotal, sendCount, savedTotal, receiveCount)
         val title = when (outcome) {
             is TransferSummary.Outcome.Sent ->
-                resources.getQuantityString(R.plurals.transfer_sent, outcome.count, outcome.count, lastAddress)
+                resources.getQuantityString(
+                    R.plurals.transfer_sent,
+                    outcome.count,
+                    outcome.count,
+                    dev.pocketdesk.android.HostStore.shownName(this, lastAddress),
+                )
             is TransferSummary.Outcome.Saved ->
                 resources.getQuantityString(R.plurals.transfer_saved, outcome.count, outcome.count)
             is TransferSummary.Outcome.Mixed ->

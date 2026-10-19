@@ -16,7 +16,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
@@ -118,6 +117,8 @@ fun QuickSettingsSheet(
                 },
                 modes.indexOf(mode).coerceAtLeast(0),
             ) { onSetMode(modes[it]) }
+            // Input, with the input mode (E6).
+            ActionRow(LlIcons.Gamepad, stringResource(R.string.row_gamepad), onGamepad)
             ToggleRow(LlIcons.Eye, stringResource(R.string.row_view_only), viewOnly, onSetViewOnly)
             val presets = listOf(
                 RustCore.PRESET_AUTO,
@@ -146,7 +147,6 @@ fun QuickSettingsSheet(
             ) { onSetPane(PaneMode.entries[it]) }
             OpenRow(LlIcons.Desktop, stringResource(R.string.row_window), windowValue, onPickWindow)
             OpenRow(LlIcons.Monitor, stringResource(R.string.row_monitor), monitorValue, onPickMonitor)
-            ActionRow(LlIcons.Gamepad, stringResource(R.string.row_gamepad), onGamepad)
 
             GroupHeader(stringResource(R.string.group_share))
             ToggleRow(LlIcons.Clipboard, stringResource(R.string.row_clipboard), clipboardSync, onSetClipboardSync)
@@ -191,18 +191,28 @@ private fun GroupHeader(label: String) {
 
 /** Every option at once, the chosen one filled; a tap chooses, with no cycling. */
 @Composable
-internal fun ChoiceRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
-    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(start = 8.dp, bottom = 6.dp),
-        )
-        // Four options leave little room ("Equilibrada", "அதிகபட்சம்"):
-        // no check (the fill says which), narrower sides, a smaller face,
-        // and two lines before an ellipsis (U4 review).
-        val crowded = options.size > 3
-        val face = if (crowded) MaterialTheme.typography.labelMedium else LocalTextStyle.current
+internal fun ChoiceRow(
+    label: String?,
+    options: List<String>,
+    selected: Int,
+    horizontal: androidx.compose.ui.unit.Dp = 8.dp,
+    onSelect: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = horizontal, vertical = 6.dp)) {
+        // None under a Settings row, which names it (E6).
+        if (label != null) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(start = 8.dp, bottom = 6.dp),
+            )
+        }
+        // A crowded row ("Equilibrada", "அதிகபட்சம்"): no check (the fill
+        // says which), narrower sides, a smaller face, and two lines before
+        // an ellipsis (U4 review). Measured in the face the segment draws,
+        // labelLarge, not the row's (E6).
+        val face = MaterialTheme.typography.labelLarge
+        val crowdedFace = MaterialTheme.typography.labelMedium
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             // C5: a segment narrower than one of its words (font scale 2.0)
             // broke it mid-word; such a row is a list instead.
@@ -210,17 +220,22 @@ internal fun ChoiceRow(label: String, options: List<String>, selected: Int, onSe
             val density = LocalDensity.current
             // Crowded: 4 dp each side. Else 12 dp each side, and a selected
             // segment's 18 dp check with 8 dp after it (C5 review: 50, not 48).
-            val sides = if (crowded) 8.dp else 50.dp
-            val segment = with(density) { (maxWidth / options.size - sides).toPx() }
-            val widths = remember(options, face, density, segment) {
-                // Four wrap between words; up to three keep each on one line.
-                options.flatMap { if (crowded) ChoiceFit.words(it) else listOf(it) }
-                    .map { measurer.measure(it, face).size.width.toFloat() }
+            fun segment(sides: androidx.compose.ui.unit.Dp) =
+                with(density) { (maxWidth / options.size - sides).toPx() }
+            val layout = remember(options, face, crowdedFace, density, maxWidth) {
+                val whole = options.map { measurer.measure(it, face).size.width.toFloat() }
+                val words = options.flatMap { ChoiceFit.words(it) }
+                    .map { measurer.measure(it, crowdedFace).size.width.toFloat() }
+                ChoiceFit.layout(
+                    options.size,
+                    segmentsFit = ChoiceFit.fits(segment(50.dp), whole),
+                    crowdedFit = ChoiceFit.fits(segment(8.dp), words),
+                )
             }
-            if (ChoiceFit.fits(segment, widths)) {
-                Segments(options, selected, crowded, face, onSelect)
-            } else {
-                ChoiceList(options, selected, onSelect)
+            when (layout) {
+                ChoiceFit.Layout.Segments -> Segments(options, selected, false, face, onSelect)
+                ChoiceFit.Layout.Crowded -> Segments(options, selected, true, crowdedFace, onSelect)
+                ChoiceFit.Layout.List -> ChoiceList(options, selected, onSelect)
             }
         }
     }

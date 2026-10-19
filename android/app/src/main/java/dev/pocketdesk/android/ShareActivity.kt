@@ -99,7 +99,12 @@ class ShareActivity : ComponentActivity() {
                     done(getString(R.string.share_unreadable))
                     return
                 }
-                done(resources.getQuantityString(R.plurals.share_sending_files, uris.size, uris.size, host.address))
+                done(resources.getQuantityString(
+                        R.plurals.share_sending_files,
+                        uris.size,
+                        uris.size,
+                        HostStore.shownName(this, host.address),
+                    ))
             }
             !text.isNullOrBlank() -> sendText(host, text)
             else -> done(getString(R.string.share_nothing))

@@ -10,6 +10,8 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -57,14 +59,18 @@ fun PhoneFoldersSection() {
             headlineContent = { Text(folder.name) },
             modifier = Modifier.padding(start = 24.dp),
             trailingContent = {
-                TextButton(onClick = {
-                    PhoneFolders.remove(context, folder)
-                    version++
-                }) { Text(stringResource(R.string.phone_folders_remove)) }
+                // Named for TalkBack: which folder it removes (E6).
+                val removeLabel = stringResource(R.string.phone_folders_remove_named, folder.name)
+                TextButton(
+                    onClick = {
+                        PhoneFolders.remove(context, folder)
+                        version++
+                    },
+                    modifier = Modifier.semantics { contentDescription = removeLabel },
+                ) { Text(stringResource(R.string.phone_folders_remove)) }
             },
         )
     }
-    TextButton(onClick = { runCatching { pick.launch(null) } }, modifier = Modifier.padding(horizontal = 8.dp)) {
-        Text(stringResource(R.string.phone_folders_add))
-    }
+    // A row like its neighbours, as it opens the picker (E6).
+    SettingLink(stringResource(R.string.phone_folders_add), null) { runCatching { pick.launch(null) } }
 }
