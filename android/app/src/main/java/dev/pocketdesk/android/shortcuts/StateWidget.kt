@@ -6,7 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.text.format.DateFormat
+import android.text.format.DateUtils
 import android.util.Log
 import android.widget.RemoteViews
 import androidx.core.content.edit
@@ -15,7 +15,6 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.ComputerState
-import java.util.Date
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
@@ -88,7 +87,12 @@ class StateWidget : AppWidgetProvider() {
 
             fun read(ctx: Context, lastComputer: String?): Kept {
                 val p = prefs(ctx)
-                if (!StateWidgetPlan.keeps(p.getString(KEY_FOR, null), lastComputer)) return Kept(null, null, false)
+                val readFor = p.getString(KEY_FOR, null)
+                if (!StateWidgetPlan.keeps(readFor, lastComputer)) {
+                    // Another computer's reading goes, so it never comes back stale (G1 review).
+                    if (readFor != null && lastComputer != null) p.edit { clear() }
+                    return Kept(null, null, false)
+                }
                 val at = p.getLong(KEY_AT, 0L)
                 return Kept(p.getString(KEY_JSON, null), at.takeIf { it > 0 }, p.getBoolean(KEY_FAILED, false))
             }
@@ -179,7 +183,11 @@ class StateWidget : AppWidgetProvider() {
         }
 
         private fun timeLine(context: Context, readAt: Long?, failed: Boolean, asking: Boolean): String {
-            val time = readAt?.let { DateFormat.getTimeFormat(context).format(Date(it)) }
+            // The time today, the date before (G1 review): a day-old reading never reads as now.
+            val time = readAt?.let {
+                DateUtils.formatSameDayTime(it, System.currentTimeMillis(), java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                    .toString()
+            }
             return when (StateWidgetPlan.timeLine(readAt, failed, asking)) {
                 StateWidgetPlan.When.Updated -> context.getString(R.string.state_widget_updated, time)
                 StateWidgetPlan.When.StaleSince -> context.getString(R.string.state_widget_stale, time)
