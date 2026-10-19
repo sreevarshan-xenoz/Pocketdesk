@@ -431,7 +431,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **61. Portrait sessions (T9b)**
 
 - A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
-- Switching between Direct touch and Trackpad mid-session: the pane changes without a new decoder (no keyframe gap).
+- Pinch-zoomed upright: the zoomed picture stays inside its area, not under the chrome (adb cannot pinch).
 
 **62. A mouse on the phone (T9c)**
 
