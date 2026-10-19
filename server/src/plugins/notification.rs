@@ -694,6 +694,16 @@ fn tell_not_sent(reason: &str) {
     if cfg!(test) {
         return;
     }
+    // A burst (many presses on a stale answer) shows one, not one each
+    // (E1 review); the log has them all.
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|at| at.elapsed() < Duration::from_secs(5)) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
     let body = format!("Not sent: {reason}");
     std::thread::spawn(move || {
         crate::platform::notify(
