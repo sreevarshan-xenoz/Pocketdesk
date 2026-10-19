@@ -32,14 +32,18 @@ class ChoiceRowTest {
 
     private val radio = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
 
-    private fun show(fontScale: Float, options: List<String> = listOf("Auto", "Max", "Balanced", "Economy")) {
+    private fun show(
+        fontScale: Float,
+        options: List<String> = listOf("Auto", "Max", "Balanced", "Economy"),
+        width: androidx.compose.ui.unit.Dp = 400.dp,
+    ) {
         compose.setContent {
             val base = LocalDensity.current
             // The app's theme: its text style is the one the row measures.
             MaterialTheme {
                 CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale)) {
                     // The sheet's width on a phone held upright.
-                    Box(Modifier.width(400.dp)) {
+                    Box(Modifier.width(width)) {
                         ChoiceRow("Quality", options, selected = 0, onSelect = {})
                     }
                 }
@@ -68,9 +72,16 @@ class ChoiceRowTest {
         assertEquals("one line", 1, tops(3).distinct().size)
     }
 
+    /** Crowded before a list (E6): three choices stay one line while their words fit. */
     @Test
-    fun threeChoicesAreAListAtTwiceTheSize() {
+    fun threeChoicesAreCrowdedOnOneLineAtTwiceTheSize() {
         show(2f, pane)
+        assertEquals("one line", 1, tops(3).distinct().size)
+    }
+
+    @Test
+    fun threeChoicesAreAListWhenEvenCrowdedTheyDoNotFit() {
+        show(2f, pane, width = 240.dp)
         assertEquals("a line each", 3, tops(3).distinct().size)
     }
 
