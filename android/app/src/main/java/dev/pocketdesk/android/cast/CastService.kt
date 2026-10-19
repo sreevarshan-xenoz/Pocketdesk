@@ -65,8 +65,13 @@ class CastService : Service() {
         var castingTo: String? = null
             private set
 
-        /** Show the phone's back camera on [address] (F6), the camera permission granted. */
+        /**
+         * Show the phone's back camera on [address] (F6). Only with the
+         * camera permission: a camera service started without it is
+         * refused by Android 14 before it can say why (F6 review).
+         */
         fun startCamera(context: Context, address: String, port: Int) {
+            if (context.checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
             context.startForegroundService(
                 Intent(context, CastService::class.java)
                     .setAction(ACTION_START)
@@ -126,12 +131,18 @@ class CastService : Service() {
             started = true
             createChannel()
             val notification = notification(getString(R.string.cast_connecting, shown))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
+            // The permission taken back since it was asked: Android refuses
+            // the camera service, so it ends here, saying why (F6 review).
+            val foreground = runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
             }
-            if (address.isEmpty() || checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (foreground.isFailure || address.isEmpty() ||
+                checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
                 fail(getString(R.string.cast_camera_denied))
                 return START_NOT_STICKY
             }
