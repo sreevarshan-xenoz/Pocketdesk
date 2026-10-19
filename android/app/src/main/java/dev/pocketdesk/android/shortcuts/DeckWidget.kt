@@ -36,6 +36,7 @@ class DeckWidget : AppWidgetProvider() {
             ACTION_FOLLOW -> list(context, DeckWidgetPlan.Why.Follow)
             ACTION_PRESS -> press(
                 context,
+                intent.getStringExtra(EXTRA_COMPUTER),
                 intent.getIntExtra(EXTRA_INDEX, -1),
                 intent.getStringExtra(EXTRA_LABEL).orEmpty(),
             )
@@ -73,9 +74,12 @@ class DeckWidget : AppWidgetProvider() {
         }
     }
 
-    private fun press(context: Context, index: Int, label: String) {
+    private fun press(context: Context, drawnFor: String?, index: Int, label: String) {
         val app = context.applicationContext
         val host = HostStore.lastHost(app) ?: return redrawAll(app)
+        // A button drawn for one computer never presses another's (G3 review):
+        // the last computer changed since, so it is drawn anew instead.
+        if (!DeckWidgetPlan.keeps(drawnFor, host.address)) return redrawAll(app)
         // A press still running is not sent again.
         if (index < 0 || label.isBlank() || !pressing.add(index)) return
         showAsking(app, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_loading)))
@@ -164,15 +168,23 @@ class DeckWidget : AppWidgetProvider() {
             }
 
             @Synchronized
-            fun save(ctx: Context, computer: String, json: String) = prefs(ctx).edit {
+            fun save(ctx: Context, computer: String, json: String) {
+                if (last(ctx, computer)) store(ctx, computer, json)
+            }
+
+            private fun store(ctx: Context, computer: String, json: String) = prefs(ctx).edit {
                 putString(KEY_FOR, computer)
                 putString(KEY_JSON, json)
                 putBoolean(KEY_FAILED, false)
                 remove(KEY_LINE)
             }
 
+            /** Whether [computer] is still the last one: a late answer for another never writes. */
+            private fun last(ctx: Context, computer: String) = HostStore.lastHost(ctx)?.address == computer
+
             @Synchronized
             fun failed(ctx: Context, computer: String, line: String) {
+                if (!last(ctx, computer)) return
                 val p = prefs(ctx)
                 p.edit {
                     if (p.getString(KEY_FOR, null) != computer) {
@@ -186,6 +198,7 @@ class DeckWidget : AppWidgetProvider() {
 
             @Synchronized
             fun line(ctx: Context, computer: String, line: String) {
+                if (!last(ctx, computer)) return
                 val p = prefs(ctx)
                 p.edit {
                     if (p.getString(KEY_FOR, null) != computer) {
@@ -203,6 +216,7 @@ class DeckWidget : AppWidgetProvider() {
         private const val ACTION_REFRESH = "dev.pocketdesk.android.action.DECK_WIDGET_REFRESH"
         private const val ACTION_FOLLOW = "dev.pocketdesk.android.action.DECK_WIDGET_FOLLOW"
         private const val ACTION_PRESS = "dev.pocketdesk.android.action.DECK_WIDGET_PRESS"
+        private const val EXTRA_COMPUTER = "computer"
         private const val EXTRA_INDEX = "index"
         private const val EXTRA_LABEL = "label"
         private const val ASK_SECONDS = 8L
@@ -295,7 +309,10 @@ class DeckWidget : AppWidgetProvider() {
                         broadcast(
                             context,
                             1 + slot,
-                            Intent(ACTION_PRESS).putExtra(EXTRA_INDEX, button.index).putExtra(EXTRA_LABEL, button.label),
+                            Intent(ACTION_PRESS)
+                                .putExtra(EXTRA_COMPUTER, host.address)
+                                .putExtra(EXTRA_INDEX, button.index)
+                                .putExtra(EXTRA_LABEL, button.label),
                         ),
                     )
                 }
