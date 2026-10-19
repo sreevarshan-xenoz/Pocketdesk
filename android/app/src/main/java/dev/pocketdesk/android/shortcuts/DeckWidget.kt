@@ -49,8 +49,15 @@ class DeckWidget : AppWidgetProvider() {
         val kept = Kept.read(app, host.address)
         if (!DeckWidgetPlan.askList(why, kept.json != null || kept.failed)) return redrawAll(app)
         val ask = generation.incrementAndGet()
-        line(app, host.address, app.getString(R.string.deck_loading))
-        bounded("deck-widget-list") {
+        showAsking(app, app.getString(R.string.deck_loading))
+        val noAnswer = {
+            if (generation.get() == ask) {
+                Kept.failed(app, host.address, app.getString(R.string.deck_failed, app.getString(R.string.deck_widget_no_answer)))
+                asking = null
+                redrawAll(app)
+            }
+        }
+        bounded("deck-widget-list", onTimeout = noAnswer) {
             val answer = ask(app) { RustCore.listDeck(host.address, host.controlPort) }
             // Only the newest ask keeps what it heard.
             if (generation.get() != ask) return@bounded
@@ -61,6 +68,7 @@ class DeckWidget : AppWidgetProvider() {
                 val why = app.plainErrorText(answer.exceptionOrNull()?.message)
                 Kept.failed(app, host.address, app.getString(R.string.deck_failed, why))
             }
+            asking = null
             redrawAll(app)
         }
     }
@@ -70,8 +78,14 @@ class DeckWidget : AppWidgetProvider() {
         val host = HostStore.lastHost(app) ?: return redrawAll(app)
         // A press still running is not sent again.
         if (index < 0 || label.isBlank() || !pressing.add(index)) return
-        line(app, host.address, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_loading)))
-        bounded("deck-widget-press", onEnd = { pressing.remove(index) }) {
+        showAsking(app, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_loading)))
+        val noAnswer = {
+            if (index in pressing) {
+                asking = null
+                line(app, host.address, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_widget_no_answer)))
+            }
+        }
+        bounded("deck-widget-press", onEnd = { pressing.remove(index) }, onTimeout = noAnswer) {
             val answer = ask(app) { RustCore.pressDeck(host.address, host.controlPort, index, label) }
             val outcome = answer.mapCatching { Deck.outcome(it) }.getOrNull()
             val words = when (DeckWidgetPlan.said(outcome)) {
@@ -80,6 +94,7 @@ class DeckWidget : AppWidgetProvider() {
                 DeckWidgetPlan.Said.Refused -> app.plainErrorText(outcome?.reason)
                 DeckWidgetPlan.Said.Failed -> app.plainErrorText(answer.exceptionOrNull()?.message)
             }
+            asking = null
             line(app, host.address, app.getString(R.string.deck_widget_said, label, words))
         }
     }
@@ -98,10 +113,11 @@ class DeckWidget : AppWidgetProvider() {
 
     /**
      * Run [work] on a thread under the broadcast's goAsync, waiting at most
-     * [ASK_SECONDS]; an Error from the library is caught, never the app's
-     * crash. [work] draws what it heard itself, so a late answer is drawn too.
+     * [ASK_SECONDS], then [onTimeout] if it still runs; an Error is caught,
+     * never the app's crash. [work] draws what it heard itself, so a late
+     * answer is drawn too.
      */
-    private fun bounded(name: String, onEnd: () -> Unit = {}, work: () -> Unit) {
+    private fun bounded(name: String, onEnd: () -> Unit = {}, onTimeout: () -> Unit, work: () -> Unit) {
         val pending = goAsync()
         thread(name = name) {
             try {
@@ -115,6 +131,10 @@ class DeckWidget : AppWidgetProvider() {
                     }
                 }
                 worker.join(TimeUnit.SECONDS.toMillis(ASK_SECONDS))
+                // Said, not kept as "Asking…" for good (G3 review).
+                if (worker.isAlive) onTimeout()
+            } catch (e: Exception) {
+                Log.w(TAG, "deck widget: $name failed", e)
             } finally {
                 pending.finish()
             }
@@ -190,6 +210,14 @@ class DeckWidget : AppWidgetProvider() {
         /** The newest list ask in this process: only it keeps what it heard. */
         private val generation = AtomicLong()
 
+        /**
+         * What an ask under way says on the line ("Asking the computer…"),
+         * in memory only: a process that dies mid-ask leaves nothing stuck
+         * (G3 review).
+         */
+        @Volatile
+        private var asking: String? = null
+
         /** The buttons whose press is running. */
         private val pressing: MutableSet<Int> = ConcurrentHashMap.newKeySet()
 
@@ -210,6 +238,11 @@ class DeckWidget : AppWidgetProvider() {
         /** The last computer may have changed: ask once when it was never asked. */
         fun follow(context: Context) {
             context.sendBroadcast(Intent(context, DeckWidget::class.java).setAction(ACTION_FOLLOW))
+        }
+
+        private fun showAsking(app: Context, text: String) {
+            asking = text
+            redrawAll(app)
         }
 
         private fun line(app: Context, computer: String, text: String) {
@@ -241,7 +274,7 @@ class DeckWidget : AppWidgetProvider() {
                 R.id.widget_deck_host,
                 host?.let { HostStore.shownName(context, it.address) } ?: context.getString(R.string.tile_no_computer),
             )
-            val line = kept.line ?: when {
+            val line = asking?.takeIf { host != null } ?: kept.line ?: when {
                 host == null -> null
                 buttons == null -> context.getString(R.string.deck_loading)
                 buttons.isEmpty() -> context.getString(R.string.deck_none)

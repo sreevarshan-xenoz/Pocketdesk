@@ -822,4 +822,5 @@
     <string name="deck_widget_description">கடைசி கணினியின் பொத்தான்கள், முகப்புத் திரையிலிருந்தே அழுத்த.</string>
     <string name="deck_widget_refresh">பொத்தான்களை மீண்டும் கேள்</string>
     <string name="deck_widget_said">%1$s: %2$s</string>
+    <string name="deck_widget_no_answer">கணினியிடமிருந்து இன்னும் பதில் இல்லை</string>
 </resources>

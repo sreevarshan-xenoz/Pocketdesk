@@ -832,4 +832,5 @@
     <string name="deck_widget_refresh">Ask for the buttons again</string>
     <string name="deck_widget_refresh_glyph" translatable="false">↻</string>
     <string name="deck_widget_said">%1$s: %2$s</string>
+    <string name="deck_widget_no_answer">No answer from the computer yet</string>
 </resources>
