@@ -315,7 +315,9 @@ mod tests {
         for capability in Capability::ALL {
             assert_eq!(
                 none.allows(capability),
-                capability != Capability::Exec,
+                // Nor lock this computer when it leaves, which only the
+                // owner turns on (D9).
+                !matches!(capability, Capability::Exec | Capability::AwayLock),
                 "{capability:?}"
             );
         }
