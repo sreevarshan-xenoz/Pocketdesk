@@ -556,6 +556,8 @@ pub async fn serve(
             accepted = listener.accept() => accepted,
         };
         let Ok((stream, peer)) = accepted else {
+            // Out of descriptors, say: a pause, not a spin (D8 review).
+            tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         };
         // Bound to loopback; held to it anyway.

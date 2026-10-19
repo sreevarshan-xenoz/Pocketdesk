@@ -219,10 +219,15 @@ pub async fn run() {
     let _ = store::clear(&dir);
     let _ = std::fs::remove_dir_all(dir.join(DRIVE_CACHE_DIR));
     let mut serving: Option<tokio_util::sync::CancellationToken> = None;
+    let mut said = false;
     loop {
-        let on = pocketdesk_core::local::config::Config::load()
-            .map(|c| c.phone_drive)
-            .unwrap_or(false);
+        // A config that does not read now (written meanwhile) keeps what
+        // was: a new address would break a drive the owner mapped (D8
+        // review).
+        let on = match pocketdesk_core::local::config::Config::load() {
+            Ok(config) => config.phone_drive,
+            Err(_) => serving.is_some(),
+        };
         match (on, serving.is_some()) {
             (true, false) => match tokio::net::TcpListener::bind("127.0.0.1:0").await {
                 Ok(listener) => {
@@ -235,6 +240,7 @@ pub async fn run() {
                         Ok(()) => {
                             tracing::info!("Serving the phones' folders as a drive on port {port}");
                             serving = Some(stop);
+                            said = false;
                         }
                         Err(e) => {
                             tracing::warn!("The drive's address was not kept: {e}");
@@ -242,7 +248,12 @@ pub async fn run() {
                         }
                     }
                 }
-                Err(e) => tracing::warn!("The drive could not listen: {e}"),
+                // Said once, not every tick (D8 review).
+                Err(e) => {
+                    if !std::mem::replace(&mut said, true) {
+                        tracing::warn!("The drive could not listen: {e}");
+                    }
+                }
             },
             (false, true) => {
                 if let Some(stop) = serving.take() {
