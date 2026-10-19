@@ -254,15 +254,20 @@ fun RemoteScreen(
     var showGamepad by remember { mutableStateOf(false) }
     val gamepad = remember { GamepadState() }
     var gamepadRepeat by remember { mutableStateOf<Job?>(null) }
+    var gamepadSending by remember { mutableStateOf<Job?>(null) }
     fun sendGamepad() {
-        sendGamepadOrdered(gamepad.axes.copyOf(), gamepad.buttons)
+        gamepadSending = sendGamepadOrdered(gamepad.axes.copyOf(), gamepad.buttons)
         // The computer moves the mouse and scrolls once per packet: a stick
-        // held off centre is sent again until it is back.
+        // held off centre is sent again until it is back. A repeat waits
+        // while the last send is still going, so a stalled link does not
+        // pile up moves to play at once when it comes back (E4 review).
         if (gamepad.moving && gamepadRepeat?.isActive != true) {
             gamepadRepeat = scope.launch {
                 while (gamepad.moving) {
                     delay(GamepadState.REPEAT_MS)
-                    if (gamepad.moving) sendGamepadOrdered(gamepad.axes.copyOf(), gamepad.buttons)
+                    if (gamepad.moving && gamepadSending?.isActive != true) {
+                        gamepadSending = sendGamepadOrdered(gamepad.axes.copyOf(), gamepad.buttons)
+                    }
                 }
             }
         }

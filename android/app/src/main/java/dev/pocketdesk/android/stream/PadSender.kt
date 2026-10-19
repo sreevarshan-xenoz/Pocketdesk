@@ -64,10 +64,9 @@ fun kotlinx.coroutines.CoroutineScope.scheduleHeldClick(pad: TrackpadGesture, se
 const val SCROLL_DP_PER_NOTCH = 24f
 
 /** Release the left button from a view that is going away (see [cancelPad]). */
-/** Send the gamepad's state in order with the other input (E4). */
-fun sendGamepadOrdered(axes: IntArray, buttons: Int) {
+/** Send the gamepad's state in order with the other input (E4); the send, to know when it is done. */
+fun sendGamepadOrdered(axes: IntArray, buttons: Int): kotlinx.coroutines.Job =
     padScope.launch { RustCore.sendGamepadEvent(axes, buttons) }
-}
 
 fun releaseLeftButton() {
     padScope.launch { RustCore.sendMouseClick(0, false) }
