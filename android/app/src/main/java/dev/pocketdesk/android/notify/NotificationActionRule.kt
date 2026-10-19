@@ -67,6 +67,37 @@ object NotificationActionRule {
             else -> Decision.Run
         }
 
+    /** What the phone tells its computer of an answer (E1): handed to the app, or why not. */
+    data class Outcome(val ok: Boolean, val reason: String?)
+
+    /** The packet that says it (core's `NOTIFICATION_ANSWERED`). */
+    const val ANSWERED = "kdeconnect.pocketdesk.notification_answered"
+
+    /**
+     * The outcome of an answer not run, in the words the computer shows;
+     * none for one from another computer, which is not told (it is not the
+     * phone's own), or for one that runs.
+     */
+    fun notRun(decision: Decision): Outcome? =
+        when (decision) {
+            Decision.Run, Decision.NotOwnComputer -> null
+            Decision.Off -> Outcome(false, "answering is off on the phone")
+            Decision.Gone -> Outcome(false, "the notification is gone from the phone")
+            Decision.NotOffered -> Outcome(false, "the notification no longer offers that answer")
+            Decision.TooMany -> Outcome(false, "too many answers at once")
+        }
+
+    /**
+     * The outcome of an answer run: handed to the app, or [failed]; the app
+     * [refused] it when its `PendingIntent` was cancelled.
+     */
+    fun ran(failed: Boolean, refused: Boolean): Outcome =
+        when {
+            !failed -> Outcome(true, null)
+            refused -> Outcome(false, "the app refused it")
+            else -> Outcome(false, "the phone could not run it")
+        }
+
     /** [PER_MINUTE] answers in any minute. */
     class Budget {
         private val times = ArrayDeque<Long>()

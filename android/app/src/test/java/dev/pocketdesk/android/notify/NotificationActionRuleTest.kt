@@ -79,4 +79,17 @@ class NotificationActionRuleTest {
         assertEquals(false, budget.take(2_000L))
         assertEquals("a minute after the first", true, budget.take(61_001L))
     }
+
+    @Test
+    fun `each answer says how it went, never to another computer`() {
+
+        assertNull(NotificationActionRule.notRun(NotificationActionRule.Decision.Run))
+        assertNull("another computer is not told", NotificationActionRule.notRun(NotificationActionRule.Decision.NotOwnComputer))
+        assertEquals(false, NotificationActionRule.notRun(NotificationActionRule.Decision.Gone)!!.ok)
+        assertEquals("answering is off on the phone", NotificationActionRule.notRun(NotificationActionRule.Decision.Off)!!.reason)
+        assertEquals("too many answers at once", NotificationActionRule.notRun(NotificationActionRule.Decision.TooMany)!!.reason)
+        assertEquals(NotificationActionRule.Outcome(true, null), NotificationActionRule.ran(failed = false, refused = false))
+        assertEquals("the app refused it", NotificationActionRule.ran(failed = true, refused = true).reason)
+        assertEquals("the phone could not run it", NotificationActionRule.ran(failed = true, refused = false).reason)
+    }
 }

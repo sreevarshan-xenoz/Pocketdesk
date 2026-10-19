@@ -875,12 +875,21 @@ object RustCore {
                     a.getString("key"),
                     a.optString("action").takeIf { a.has("action") },
                     a.optString("message").takeIf { a.has("message") },
+                    a.optString("answerId").takeIf { a.has("answerId") },
                 )
             }
         }.getOrDefault(emptyList())
 
     /** One answer from the computer at [host]:[port] to notification [key]: a button, or a reply. */
-    data class NotificationAnswer(val host: String, val port: Int, val key: String, val action: String?, val message: String?)
+    data class NotificationAnswer(
+        val host: String,
+        val port: Int,
+        val key: String,
+        val action: String?,
+        val message: String?,
+        /** The computer's id for it, to say how it went (E1); null from a computer before E1. */
+        val answerId: String? = null,
+    )
 
     /** One `kdeconnect.clipboard` text from the computer at [host]:[port]. */
     data class ClipboardPushed(val host: String, val port: Int, val content: String)

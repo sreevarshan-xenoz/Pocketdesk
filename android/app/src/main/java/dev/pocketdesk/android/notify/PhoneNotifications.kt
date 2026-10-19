@@ -441,6 +441,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             }
             if (decision != NotificationActionRule.Decision.Run || entry == null) {
                 Log.i("PhoneNotifications", "an answer from the computer was not run: $decision")
+                NotificationActionRule.notRun(decision)?.let { tell(answer, it) }
                 continue
             }
             val ran =
@@ -460,7 +461,22 @@ class PhoneNotificationListener : NotificationListenerService() {
                 }
             ran.onSuccess { Log.i("PhoneNotifications", "ran the computer's answer") }
                 .onFailure { Log.w("PhoneNotifications", "the computer's answer could not run", it) }
+            val error = ran.exceptionOrNull()
+            tell(answer, NotificationActionRule.ran(error != null, error is android.app.PendingIntent.CanceledException))
         }
+    }
+
+    /**
+     * Tell the phone's own computer how [answer] went (E1), on its link, when
+     * the answer named itself; a computer before E1 names none.
+     */
+    private fun tell(answer: RustCore.NotificationAnswer, outcome: NotificationActionRule.Outcome) {
+        val id = answer.answerId ?: return
+        val own = PhoneLink.target(this) ?: return
+        val body = org.json.JSONObject().put("answerId", id).put("ok", outcome.ok)
+        outcome.reason?.let { body.put("reason", it) }
+        RustCore.sendPhonePacketOnLink(own.address, own.controlPort, NotificationActionRule.ANSWERED, body.toString())
+            .onFailure { Log.w("PhoneNotifications", "how an answer went was not told", it) }
     }
 
     /** Send what waited, oldest first, until one fails. */
