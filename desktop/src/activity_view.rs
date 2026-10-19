@@ -205,15 +205,10 @@ fn number(event: &Event, key: &str) -> Option<i64> {
     event.fields.get(key).and_then(Value::as_i64)
 }
 
-/// `2_100_000` -> "2.1 MB".
+/// A size as every page says it (E5: Files and Activity had told one
+/// file's size two ways).
 fn size(bytes: i64) -> String {
-    let b = bytes.max(0) as f64;
-    match bytes {
-        ..1_000 => format!("{bytes} B"),
-        1_000..1_000_000 => format!("{:.0} KB", b / 1e3),
-        1_000_000..1_000_000_000 => format!("{:.1} MB", b / 1e6),
-        _ => format!("{:.1} GB", b / 1e9),
-    }
+    crate::words::human_size(bytes.max(0) as u64)
 }
 
 /// What happened, in words.
@@ -387,7 +382,7 @@ mod tests {
         );
         assert_eq!(
             describe(&event("file_received", json!({"size": 2_100_000}))),
-            "File received (2.1 MB)"
+            "File received (2.0 MB)"
         );
         assert_eq!(
             describe(&event("file_received", json!({"folder": true}))),

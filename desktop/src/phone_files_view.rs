@@ -69,22 +69,6 @@ fn answered(asked_unix: u64, kept_unix: Option<u64>, now_unix: u64) -> Option<bo
     }
 }
 
-/// A size in words.
-pub fn size_text(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
-}
-
 impl PhoneFilesView {
     /// The page its empty state's button asked for, since the last call (E5).
     pub fn take_go_to(&mut self) -> Option<crate::app::Tab> {
@@ -304,7 +288,10 @@ impl PhoneFilesView {
                     }
                 } else {
                     ui.label(&entry.name);
-                    ui.label(RichText::new(size_text(entry.size)).color(crate::theme::muted(ui)));
+                    ui.label(
+                        RichText::new(crate::words::human_size(entry.size))
+                            .color(crate::theme::muted(ui)),
+                    );
                     if ui.small_button("Download").clicked() {
                         self.ask(state_dir, &phone, Kind::Fetch, root, path, now_unix);
                     }
@@ -316,7 +303,7 @@ impl PhoneFilesView {
 
 #[cfg(test)]
 mod tests {
-    use super::{ANSWER_SECS, answered, size_text};
+    use super::{ANSWER_SECS, answered};
 
     #[test]
     fn a_list_request_is_answered_by_a_newer_listing_or_given_up() {
@@ -332,6 +319,8 @@ mod tests {
 
     #[test]
     fn sizes_read_as_people_say_them() {
+        // The one way every page says a size (E5).
+        let size_text = crate::words::human_size;
         assert_eq!(size_text(512), "512 B");
         assert_eq!(size_text(1536), "1.5 KB");
         assert_eq!(size_text(5 * 1024 * 1024), "5.0 MB");
