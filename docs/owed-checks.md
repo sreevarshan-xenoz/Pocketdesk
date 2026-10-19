@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-629 open items.
+628 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 367 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 365 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
 | A phone with a SIM | 21 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 87 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 51 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 52 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -659,8 +659,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **110. Recent photos on the computer (C7)**
 
 - The Phone page by hand: Refresh, Save, Open and Copy.
-- The phone's switch off, and photo access denied: the page says why.
-- A phone with thousands of photos: the newest 24, quickly.
 - HEIC photos: thumbnails shown, Copy saying it cannot.
 
 **111. Health after updates (D1)**
@@ -1550,6 +1548,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **108. The phone with large fonts, landscape and TalkBack (C5)**
 
 - A TalkBack walk by hand: Home, the Add form, Settings, the session menu (TalkBack's tutorial takes the screen when it is turned on from adb, and adb cannot read which node it reads).
+
+**110. Recent photos on the computer (C7)**
+
+- Photo access denied: the same with its reason; and the page showing either (by eye).
 
 **111. Health after updates (D1)**
 

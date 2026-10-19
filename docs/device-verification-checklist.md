@@ -1750,8 +1750,9 @@ On the A71 against a throwaway server:
 - [x] Three JPEGs pushed into DCIM/Camera: listed newest first with thumbnails; one fetched into the received files, checksums matching.
 - [x] The grid with each photo's Save, Copy and Open (a picture only), in the desktop's headless harness.
 - [ ] The Phone page by hand: Refresh, Save, Open and Copy.
-- [ ] The phone's switch off, and photo access denied: the page says why.
-- [ ] A phone with thousands of photos: the newest 24, quickly.
+- [x] The phone's switch off: the computer keeps its reason, "Recent photos are turned off in Pocketdesk's Settings on the phone", with no photos (2026-10-19, A71, by script).
+- [ ] Photo access denied: the same with its reason; and the page showing either (by eye).
+- [x] A phone with a thousand camera photos: the newest 24 answered in 3 to 4 s (2026-10-19, A71, twice; the photos made for the test and removed after).
 - [ ] HEIC photos: thumbnails shown, Copy saying it cannot.
 - [ ] Android 8 or 9: the legacy thumbnail path.
 
