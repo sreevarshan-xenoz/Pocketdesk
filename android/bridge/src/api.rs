@@ -1009,7 +1009,7 @@ pub async fn request_pair_pin(address: String, port: u16) -> Result<String, Stri
         Duration::from_secs(5),
     )
     .await
-    .map_err(|_| "Desktop did not respond to the PIN request".to_string())?;
+    .map_err(|_| "The computer did not answer the request for a PIN".to_string())?;
     Ok(body
         .get("pairStatus")
         .and_then(|v| v.as_str())
@@ -1039,7 +1039,7 @@ pub async fn pair_with_pin(
         Duration::from_secs(8),
     )
     .await
-    .map_err(|_| "Desktop did not answer the PIN in time".to_string())?;
+    .map_err(|_| "The computer did not answer the PIN in time".to_string())?;
     if body.get("pair").and_then(|v| v.as_bool()).unwrap_or(false) {
         let id = body
             .get("serverId")
@@ -1206,7 +1206,7 @@ pub struct NoReply;
 
 impl std::fmt::Display for NoReply {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("The desktop did not answer over the control connection")
+        f.write_str("The computer did not answer")
     }
 }
 
