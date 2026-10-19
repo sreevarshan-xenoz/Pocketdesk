@@ -12,7 +12,6 @@
 
 use std::sync::Mutex;
 
-use eframe::egui;
 use ksni::blocking::TrayMethods;
 
 use crate::tray_menu::{Entry, TrayAction};
@@ -71,8 +70,8 @@ impl Tray {
     }
 
     /// Wake the app on every pick, even while its window is hidden.
-    pub fn wake_on_click(ctx: egui::Context) {
-        *WAKE.lock().unwrap_or_else(|e| e.into_inner()) = Some(ctx);
+    pub fn wake_on_click(wake: impl Fn() + Send + 'static) {
+        *WAKE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Box::new(wake));
     }
 
     /// The picks since the last call, oldest first.
@@ -89,15 +88,15 @@ const REGISTER_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 static PENDING: Mutex<Vec<TrayAction>> = Mutex::new(Vec::new());
 
 /// The app's context, to wake it from ksni's thread.
-static WAKE: Mutex<Option<egui::Context>> = Mutex::new(None);
+static WAKE: Mutex<Option<Box<dyn Fn() + Send>>> = Mutex::new(None);
 
 fn picked(action: TrayAction) {
     PENDING
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .push(action);
-    if let Some(ctx) = WAKE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        ctx.request_repaint();
+    if let Some(wake) = WAKE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        wake();
     }
 }
 

@@ -11,10 +11,8 @@ mod clipboard_view;
 mod computers_view;
 mod diagnostics_view;
 mod fonts;
-mod icon;
 mod kdeconnect_view;
 mod messages_view;
-mod model;
 mod nav;
 mod notes_view;
 mod notice;
@@ -27,18 +25,12 @@ mod reveal;
 mod settings_view;
 mod single_instance;
 mod theme;
-#[cfg(not(target_os = "linux"))]
-mod tray;
 #[cfg(test)]
 mod ui_tests;
-// N6: a StatusNotifierItem over D-Bus, no GTK.
-#[cfg(target_os = "linux")]
-#[path = "tray_linux.rs"]
-mod tray;
-mod tray_menu;
-mod words;
 
 use eframe::egui;
+// What the window shares with the tray program (E2).
+use pocketdesk_desktop::{icon, model, tray, tray_menu, words};
 
 const TITLE: &str = "Pocketdesk";
 
@@ -100,7 +92,8 @@ fn main() -> eframe::Result {
             // Lesser text readable in both themes (U1 review).
             theme::install(&cc.egui_ctx);
             if tray.is_some() {
-                tray::Tray::wake_on_click(cc.egui_ctx.clone());
+                let ctx = cc.egui_ctx.clone();
+                tray::Tray::wake_on_click(move || ctx.request_repaint());
             }
             single_instance::wake_with(cc.egui_ctx.clone());
             // `--page`, else the page shown when the app last closed.

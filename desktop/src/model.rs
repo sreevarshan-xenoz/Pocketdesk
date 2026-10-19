@@ -193,12 +193,12 @@ pub fn transfer_fraction(transfer: &pocketdesk_core::local::transfers::Transfer)
 /// until there is one, and the bytes when the size is not known.
 pub fn transfer_words(transfer: &pocketdesk_core::local::transfers::Transfer) -> String {
     let rate = if transfer.rate > 0 {
-        format!(" · {}/s", crate::app::human_size(transfer.rate))
+        format!(" · {}/s", crate::words::human_size(transfer.rate))
     } else {
         String::new()
     };
     if transfer.size == 0 {
-        return format!("{}{rate}", crate::app::human_size(transfer.done));
+        return format!("{}{rate}", crate::words::human_size(transfer.done));
     }
     let percent = transfer.done.min(transfer.size) * 100 / transfer.size;
     format!("{percent} %{rate}")
@@ -466,7 +466,7 @@ pub fn device_label(devices: &[Device], id: &str) -> String {
         .find(|d| d.id == id)
         .and_then(|d| d.name.as_deref())
     else {
-        return crate::app::short(id);
+        return crate::words::short(id);
     };
     let shared = devices
         .iter()
@@ -474,7 +474,7 @@ pub fn device_label(devices: &[Device], id: &str) -> String {
         .count()
         > 1;
     if shared {
-        format!("{name} · {}", crate::app::short(id))
+        format!("{name} · {}", crate::words::short(id))
     } else {
         name.to_string()
     }

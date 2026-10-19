@@ -8,7 +8,6 @@
 
 use std::collections::HashMap;
 
-use eframe::egui;
 use tray_icon::menu::{IsMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
@@ -58,14 +57,15 @@ impl Tray {
         }
     }
 
-    /// Wake the app on every menu click, even while its window is hidden.
-    pub fn wake_on_click(ctx: egui::Context) {
+    /// Call `wake` on every menu click: the window's repaint, even while it
+    /// is hidden, or the tray program's own loop (E2).
+    pub fn wake_on_click(wake: impl Fn() + Send + Sync + 'static) {
         MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
             PENDING
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .push(event.id);
-            ctx.request_repaint();
+            wake();
         }));
     }
 
