@@ -772,4 +772,19 @@
     <string name="deck_waiting">Waiting for the computer\'s owner</string>
     <string name="settings_deck_columns">Deck buttons per row</string>
     <string name="settings_deck_columns_summary">How many of the computer\'s deck buttons a row holds on this phone</string>
+    <string name="card_state">How it is doing</string>
+    <string name="state_title">How %1$s is doing</string>
+    <string name="state_loading">Asking the computer…</string>
+    <string name="state_failed">Could not ask the computer: %1$s</string>
+    <string name="state_not_shared">This computer does not share how it is doing. Its Pocketdesk app, Settings, This computer\'s state, turns it on.</string>
+    <string name="state_cpu">CPU</string>
+    <string name="state_memory">Memory</string>
+    <string name="state_disk">Disk %1$s</string>
+    <string name="state_battery">Battery</string>
+    <string name="state_battery_charging">%1$d %% · charging</string>
+    <string name="state_uptime">Up for</string>
+    <string name="state_of">of</string>
+    <string name="state_unit_day">d</string>
+    <string name="state_unit_hour">h</string>
+    <string name="state_unit_minute">min</string>
 </resources>

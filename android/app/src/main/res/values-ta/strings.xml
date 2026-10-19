@@ -763,4 +763,19 @@
     <string name="deck_waiting">கணினியின் உரிமையாளருக்காகக் காத்திருக்கிறது</string>
     <string name="settings_deck_columns">ஒரு வரிசையில் பொத்தான்கள்</string>
     <string name="settings_deck_columns_summary">கணினியின் பொத்தான் பலகையில் ஒரு வரிசையில் எத்தனை பொத்தான்கள் இந்தக் கைபேசியில் தெரியும்</string>
+    <string name="card_state">அதன் நிலை</string>
+    <string name="state_title">%1$s இன் நிலை</string>
+    <string name="state_loading">கணினியைக் கேட்கிறது…</string>
+    <string name="state_failed">கணினியைக் கேட்க முடியவில்லை: %1$s</string>
+    <string name="state_not_shared">இந்தக் கணினி தன் நிலையைப் பகிர்வதில்லை. அதன் Pocketdesk செயலியில் Settings, This computer\'s state இல் இயக்கலாம்.</string>
+    <string name="state_cpu">CPU</string>
+    <string name="state_memory">நினைவகம்</string>
+    <string name="state_disk">வட்டு %1$s</string>
+    <string name="state_battery">மின்கலம்</string>
+    <string name="state_battery_charging">%1$d %% · மின்னேற்றுகிறது</string>
+    <string name="state_uptime">இயங்கும் நேரம்</string>
+    <string name="state_of">/</string>
+    <string name="state_unit_day">நா</string>
+    <string name="state_unit_hour">ம</string>
+    <string name="state_unit_minute">நி</string>
 </resources>
