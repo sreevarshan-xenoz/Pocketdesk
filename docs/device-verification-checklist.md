@@ -1009,7 +1009,8 @@ On the A71 against Windows, 2026-10-15 (`2026-10-15-download-folder-design.md`):
 - [x] An 8-file folder in three levels, with a dot-file and a file Windows marks hidden: all 8 at their places in Download/Pocketdesk, MD5s matching, the hidden two left out; the desktop's Files tab row "sent".
 
 Owed:
-- [ ] The toast: "Asked the computer for …", and a refusal's reason (Files off, a third folder while two are on the way).
+- [x] A refusal's reason: with Files turned off after browsing, "The computer refused the folder: Files is turned off for this phone on t…", cut at the toast's two lines (2026-10-19, A71, throwaway server, by script).
+- [ ] The toast "Asked the computer for …" (the folder arrived, the toast was not caught on screen), and a third folder while two are on the way.
 - [ ] Closing the sheet before the answer, and the toast still showing.
 - [ ] A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
 - [ ] The Linux host.
@@ -1079,7 +1080,7 @@ Owed:
 - [ ] The Devices tab's text, and its age after the session ends.
 - [x] After the review fixes: the report written at the session's start, and no control connection in the next 70 s beyond the two the session opened (the old loop dialed one per 15 s without a link).
 - [ ] Catching up after a Wi-Fi drop.
-- [ ] Unpairing the phone: its report gone from the file within 5 s.
+- [x] Unpairing the phone: its report gone from the file within 5 s (2026-10-19, A71, throwaway server, by script).
 - [x] The phone's "Share battery with the computer" off: no report in 30 s of a background link; on again, the report within a minute (2026-10-19, A71, throwaway server, by script).
 - [ ] The desktop's "Phones' batteries" off: no notification.
 - [x] Linux: a faked 11 % was recorded and warned about in the log, but **no notification was shown**: every Linux notification failed (`notify-send --expire` is not an option). Fixed (`--expire-time`); owed: see it shown on Linux.
@@ -1173,7 +1174,7 @@ On the A71 against this box, 2026-10-16: the saved computer's control port was p
 Owed:
 - [ ] From outside the home network (mobile data, or another Wi-Fi), with Tailscale off: notifications, texts, battery and the phone's media reach the computer with the app in the background, and Send link reaches the phone.
 - [ ] A phone with no iroh key registered (paired, never streamed on the LAN) is refused, with one log line, and works again after one session at home.
-- [ ] Unpairing on the desktop ends the internet link's packets at once.
+- [x] Unpairing on the desktop ends the internet link's packets at once: the phone's background link over the internet road gone within 5 s of `pocketdesk unpair` (2026-10-19, A71, throwaway server, by script).
 - [ ] A file offer to a phone on the internet link fails as "not reachable", not stuck.
 - [ ] The phone's battery over an hour with the link up in the background (iroh's 5 s heartbeat).
 - [ ] A session riding a relay (no direct path) with the control link up at the same time. Founded: two endpoints with one key cannot share a relay (`server/tests/one_key_two_endpoints.rs`); since 2b both ride one endpoint. Owed on the VM, relayed (checklist §85).
