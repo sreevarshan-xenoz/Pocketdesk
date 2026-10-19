@@ -761,4 +761,14 @@
     <string name="phone_notifications_hold_back_summary">While Do Not Disturb silences a notification on this phone, it is not sent to the computer either</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
     <string name="card_send_earlier_copy">Send from clipboard history</string>
+    <string name="card_deck">Deck</string>
+    <string name="row_deck">Deck</string>
+    <string name="deck_title">Deck on %1$s</string>
+    <string name="deck_hint">Buttons set up in Pocketdesk\'s Settings on the computer. Each runs there.</string>
+    <string name="deck_loading">Asking the computer…</string>
+    <string name="deck_none">The computer has no deck buttons yet. Set some up in its Pocketdesk app, Settings, Deck buttons.</string>
+    <string name="deck_failed">Could not ask the computer: %1$s</string>
+    <string name="deck_done">Done</string>
+    <string name="settings_deck_columns">Deck buttons per row</string>
+    <string name="settings_deck_columns_summary">How many of the computer\'s deck buttons a row holds on this phone</string>
 </resources>
