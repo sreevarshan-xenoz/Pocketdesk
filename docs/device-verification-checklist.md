@@ -1986,7 +1986,7 @@ Built 2026-10-20 on the owner's night of features; the computer's half read this
 Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] "Take a photo with the phone" on the Phone page: the A71's notification "<computer> asks for a photo" with the app in the background.
 - [ ] Its tap: the camera permission prompt the first time, then the camera; the photo in the received files and on the computer's clipboard.
-- [ ] "Also onto its clipboard" off: the file only; "Photos the computer asks for" off: no notification.
+- [ ] "Also onto its clipboard" off: the file only; "Photos the computer asks for" off (the default): no notification, and the Phone page's button disabled while the phone is not linked.
 - [ ] The camera left with Back: nothing sent; the activity killed while the camera runs (Don't keep activities): the photo still sent.
 - [ ] Spanish and Tamil.
 

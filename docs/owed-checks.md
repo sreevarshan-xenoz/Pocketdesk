@@ -742,7 +742,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **128. Take a photo with the phone (F3)**
 
 - "Take a photo with the phone" on the Phone page: the A71's notification "<computer> asks for a photo" with the app in the background.
-- "Also onto its clipboard" off: the file only; "Photos the computer asks for" off: no notification.
+- "Also onto its clipboard" off: the file only; "Photos the computer asks for" off (the default): no notification, and the Phone page's button disabled while the phone is not linked.
 - Spanish and Tamil.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
