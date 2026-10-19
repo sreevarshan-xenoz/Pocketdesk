@@ -66,6 +66,12 @@ pub(crate) fn arrived(id: &str, path: &std::path::Path) {
     }
 }
 
+/// The share for fetch `id` was refused (D8 review): its request ends now,
+/// not at its wait's end.
+pub(crate) fn failed(id: &str) {
+    WAITING.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+}
+
 /// A waiting fetch, forgotten when its request ends however it ends.
 struct Waiting(String);
 
@@ -177,9 +183,11 @@ impl Phones for LivePhones {
             loop {
                 if let Ok((from, listing)) = listings.recv().await
                     && from == device
-                    && listing.root == Some(root)
-                    && listing.path == parent
                     && listing.error.is_some()
+                    // Its folder's listing with why; or, for a folder shared
+                    // no more, the first one's (D8 review).
+                    && ((listing.root == Some(root) && listing.path == parent)
+                        || !listing.roots.iter().any(|r| r.id == root))
                 {
                     return;
                 }
@@ -188,7 +196,10 @@ impl Phones for LivePhones {
         tokio::select! {
             arrived = tokio::time::timeout(FETCH_WAIT, arrives) => match arrived {
                 Ok(Ok(file)) => Ok(file),
-                _ => Err(Fail::Timeout),
+                // Refused here (its waiter dropped): the phone could not
+                // give it.
+                Ok(Err(_)) => Err(Fail::Phone),
+                Err(_) => Err(Fail::Timeout),
             },
             _ = refused => Err(Fail::Phone),
         }
@@ -274,5 +285,22 @@ mod tests {
         arrived(id, &file);
         assert!(!file.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// D8 review: a refused share ends its fetch's wait at once.
+    #[test]
+    fn a_refused_share_ends_its_fetch() {
+        let id = "0badc0de0badc0de0badc0de0badc0de";
+        let (tell, mut arrives) = oneshot::channel();
+        WAITING
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), ("phone-a".to_string(), tell));
+        failed(id);
+        assert!(matches!(
+            arrives.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        assert!(waiting_dir("phone-a", id).is_none());
     }
 }

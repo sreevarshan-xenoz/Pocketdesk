@@ -581,12 +581,22 @@ impl Plugin for SharePlugin {
                     tracing::warn!("File share of {name} refused: no transfer key");
                     return Ok(());
                 };
+                // A file the drive asked for (D8) names its fetch.
+                let drive = body
+                    .get("drive")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
                 // Every refusal is answered, so the phone stops waiting for a
-                // connection that will not come, and can say why.
+                // connection that will not come, and can say why; a drive
+                // fetch's request is told at once too (D8 review).
                 let refused = |reason: String| {
                     let name = name.clone();
                     let key = key.clone();
+                    let drive = drive.clone();
                     async move {
+                        if let Some(id) = &drive {
+                            crate::drive::live::failed(id);
+                        }
                         tracing::warn!("File share of {name} refused: {reason}");
                         refuse(sender, &key, &reason).await;
                         Ok(())
@@ -615,10 +625,6 @@ impl Plugin for SharePlugin {
                 };
                 // A file the drive asked for (D8) goes to its cache, for the
                 // request waiting for it; one no request waits for, refused.
-                let drive = body
-                    .get("drive")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string);
                 let dir = match &drive {
                     None => dir,
                     Some(id) => match crate::drive::live::waiting_dir(sender.device_id(), id) {
