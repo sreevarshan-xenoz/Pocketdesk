@@ -1812,6 +1812,16 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] A one-time code arriving in a chat: no thread sent.
 - [ ] "Let the computer answer notifications" off: no messages sent.
 
+## 116. The tray you act from (D5)
+
+- [ ] Windows, the A71 linked: its submenu titled with its battery, which changes in the menu when the battery does.
+- [ ] Ring, Mute for an hour and then Unmute, from the tray with the window hidden: the phone answers, the window stays hidden.
+- [ ] Send clipboard: the computer's copy on the phone; a password manager's private copy not sent.
+- [ ] Send file…: the window opens on Files with the phone chosen.
+- [ ] The A71 away: its items greyed out.
+- [ ] A phone named with `&` (Windows) or `_` (Linux): the name as written.
+- [ ] Linux: the same menu in a real panel.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
