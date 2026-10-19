@@ -1223,6 +1223,57 @@ mod tests {
         }
     }
 
+    /// E1 review: a phone's word is kept only for an answer sent to that
+    /// phone and waiting, and a word out of bounds is dropped.
+    #[tokio::test]
+    async fn a_phone_s_word_is_kept_only_for_its_own_answer() {
+        let dir = pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        std::fs::create_dir_all(dir).unwrap();
+        let sent = |id: &str, device: &str| answers::Outcome {
+            id: id.to_string(),
+            device_id: device.to_string(),
+            key: "k".to_string(),
+            state: answers::State::Sent,
+            at_unix: 1,
+        };
+        let theirs = "e1e1e1e1-0000-4000-8000-00000000a001";
+        let mine = "e1e1e1e1-0000-4000-8000-00000000a002";
+        let refused = "e1e1e1e1-0000-4000-8000-00000000a003";
+        for (id, device) in [(theirs, "phone-b"), (mine, "phone-a"), (refused, "phone-a")] {
+            answers::record(dir, sent(id, device)).unwrap();
+        }
+        let plugin = NotificationPlugin;
+        let phone = Phone(Default::default());
+        let word = |body: serde_json::Value| {
+            NetworkPacket::new(notification_action::NOTIFICATION_ANSWERED).with_body(body)
+        };
+        for body in [
+            json!({"answerId": theirs, "ok": true}),
+            json!({"answerId": mine, "ok": true}),
+            json!({"answerId": refused, "ok": false, "reason": "the app refused it"}),
+            json!({"answerId": "../x", "ok": false}),
+        ] {
+            plugin.handle_packet(&word(body), &phone).await.unwrap();
+        }
+        let kept = answers::read(dir);
+        let state = |id: &str| kept.iter().find(|a| a.id == id).unwrap().state.clone();
+        assert_eq!(
+            state(theirs),
+            answers::State::Sent,
+            "another phone's answer"
+        );
+        assert_eq!(state(mine), answers::State::Handed);
+        assert_eq!(
+            state(refused),
+            answers::State::NotSent {
+                reason: "the app refused it".to_string()
+            }
+        );
+        assert!(phone.0.lock().unwrap().is_empty(), "nothing answered");
+    }
+
     /// A phone with Notifications off is told its notification was refused
     /// (C3), so it does not keep it waiting to send again.
     #[tokio::test]
