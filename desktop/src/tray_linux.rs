@@ -74,6 +74,12 @@ impl Tray {
         *WAKE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Box::new(wake));
     }
 
+    /// Whether the tray's service has ended (its D-Bus connection gone): the
+    /// icon is not shown any more, so a tray program exits (E2 review).
+    pub fn closed(&self) -> bool {
+        self.handle.is_closed()
+    }
+
     /// The picks since the last call, oldest first.
     pub fn take_actions(&self) -> Vec<TrayAction> {
         std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()))

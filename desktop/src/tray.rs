@@ -69,6 +69,12 @@ impl Tray {
         }));
     }
 
+    /// Whether the tray has gone: never on Windows, where the icon lives as
+    /// long as its process (Linux's can end with its D-Bus service).
+    pub fn closed(&self) -> bool {
+        false
+    }
+
     /// The clicks since the last call, oldest first.
     pub fn take_actions(&self) -> Vec<TrayAction> {
         let ids: Vec<MenuId> =

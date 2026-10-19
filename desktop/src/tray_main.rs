@@ -46,6 +46,10 @@ fn main() {
     let mut seen = tray_watch::Seen::default();
     loop {
         wait(&woken, REFRESH);
+        if tray.closed() {
+            // No icon any more: free the claim, so a tray can start again.
+            return;
+        }
         for action in tray.take_actions() {
             if !act(&state_dir, action) {
                 return;
