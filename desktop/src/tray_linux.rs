@@ -1,6 +1,7 @@
 //! The tray on Linux (N6): a StatusNotifierItem over D-Bus (`ksni`), with
-//! the same icon, tooltip and menu as on Windows: Open Pocketdesk, Pair a
-//! phone…, Quit; a click on the icon opens the window.
+//! the same icon, tooltip and menu as on Windows ([`crate::tray_menu`]:
+//! Open Pocketdesk, Pair a phone…, each paired phone's actions (D5), Quit);
+//! a click on the icon opens the window.
 //!
 //! tray-icon's Linux menu needs a GTK main loop the app does not run; this
 //! needs none. ksni serves the item from a thread of its own with its own
@@ -14,23 +15,12 @@ use std::sync::Mutex;
 use eframe::egui;
 use ksni::blocking::TrayMethods;
 
-/// What the user picked from the tray menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrayAction {
-    Open,
-    Pair,
-    Quit,
-}
-
-/// The menu's entries, in order; a separator goes before Quit.
-const MENU: [(&str, TrayAction); 3] = [
-    ("Open Pocketdesk", TrayAction::Open),
-    ("Pair a phone…", TrayAction::Pair),
-    ("Quit", TrayAction::Quit),
-];
+use crate::tray_menu::{Entry, TrayAction};
 
 pub struct Tray {
-    _handle: ksni::blocking::Handle<Item>,
+    handle: ksni::blocking::Handle<Item>,
+    /// The menu shown, so it is replaced only when it changes.
+    shown: Vec<Entry>,
 }
 
 impl Tray {
@@ -46,16 +36,37 @@ impl Tray {
             .collect();
         // A tray host that never answers must not hold up the window (N6
         // review): registration gets a few seconds, on a thread of its own.
+        let shown = crate::tray_menu::menu(&[], &[], 0);
+        let entries = shown.clone();
         let (sent, got) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = sent.send(Item { icon }.spawn().map_err(|e| e.to_string()));
+            let _ = sent.send(Item { icon, entries }.spawn().map_err(|e| e.to_string()));
         });
         match got.recv_timeout(REGISTER_WAIT) {
-            Ok(handle) => Ok(Self { _handle: handle? }),
+            Ok(handle) => Ok(Self {
+                handle: handle?,
+                shown,
+            }),
             Err(_) => Err(format!(
                 "the tray host did not answer within {} s",
                 REGISTER_WAIT.as_secs()
             )),
+        }
+    }
+
+    /// Show `entries`, if they differ from the menu shown.
+    pub fn show(&mut self, entries: Vec<Entry>) {
+        if entries == self.shown {
+            return;
+        }
+        let next = entries.clone();
+        // `None`: the tray's service has ended; nothing to update.
+        if self
+            .handle
+            .update(move |item| item.entries = next)
+            .is_some()
+        {
+            self.shown = entries;
         }
     }
 
@@ -93,6 +104,7 @@ fn picked(action: TrayAction) {
 /// The item ksni serves.
 pub struct Item {
     icon: Vec<ksni::Icon>,
+    entries: Vec<Entry>,
 }
 
 impl ksni::Tray for Item {
@@ -125,22 +137,36 @@ impl ksni::Tray for Item {
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        let mut items = Vec::new();
-        for (label, action) in MENU {
-            if action == TrayAction::Quit {
-                items.push(ksni::MenuItem::Separator);
-            }
-            items.push(
-                ksni::menu::StandardItem {
-                    label: label.into(),
-                    activate: Box::new(move |_: &mut Self| picked(action)),
-                    ..Default::default()
-                }
-                .into(),
-            );
-        }
-        items
+        self.entries.iter().map(item).collect()
     }
+}
+
+fn item(entry: &Entry) -> ksni::MenuItem<Item> {
+    match entry {
+        Entry::Item { label, action } => ksni::menu::StandardItem {
+            label: text(label),
+            enabled: action.is_some(),
+            activate: match action.clone() {
+                Some(action) => Box::new(move |_: &mut Item| picked(action.clone())),
+                None => Box::new(|_: &mut Item| {}),
+            },
+            ..Default::default()
+        }
+        .into(),
+        Entry::Phone { label, items } => ksni::menu::SubMenu {
+            label: text(label),
+            submenu: items.iter().map(item).collect(),
+            ..Default::default()
+        }
+        .into(),
+        Entry::Separator => ksni::MenuItem::Separator,
+    }
+}
+
+/// A label as a tray host shows it: `_` marks the next letter as the
+/// item's key, so a name's own is doubled.
+fn text(label: &str) -> String {
+    label.replace('_', "__")
 }
 
 #[cfg(test)]
@@ -148,9 +174,16 @@ mod tests {
     use super::*;
     use ksni::Tray as _;
 
+    /// The tests share the queue of picks.
+    static QUEUE: Mutex<()> = Mutex::new(());
+
     #[test]
     fn the_menu_is_the_windows_one_and_each_entry_is_queued() {
-        let item = Item { icon: Vec::new() };
+        let _queue = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        let item = Item {
+            icon: Vec::new(),
+            entries: crate::tray_menu::menu(&[], &[], 0),
+        };
         let menu = item.menu();
         let labels: Vec<String> = menu
             .iter()
@@ -177,6 +210,48 @@ mod tests {
                 TrayAction::Quit,
                 TrayAction::Open
             ]
+        );
+    }
+
+    /// D5: a phone is a submenu, its disabled items picking nothing, and
+    /// a name's underscore is shown as itself.
+    #[test]
+    fn a_phone_is_a_submenu() {
+        let _queue = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        let item = Item {
+            icon: Vec::new(),
+            entries: vec![Entry::Phone {
+                label: "my_phone".to_string(),
+                items: vec![
+                    Entry::Item {
+                        label: "Ring".to_string(),
+                        action: Some(TrayAction::Ring("p".to_string())),
+                    },
+                    Entry::Item {
+                        label: "Send file…".to_string(),
+                        action: None,
+                    },
+                ],
+            }],
+        };
+        let menu = item.menu();
+        let ksni::MenuItem::SubMenu(sub) = &menu[0] else {
+            panic!("not a submenu");
+        };
+        assert_eq!(sub.label, "my__phone");
+        let ksni::MenuItem::Standard(off) = &sub.submenu[1] else {
+            panic!("not an item");
+        };
+        assert!(!off.enabled);
+        let mut item = item;
+        for entry in &sub.submenu {
+            if let ksni::MenuItem::Standard(s) = entry {
+                (s.activate)(&mut item);
+            }
+        }
+        assert_eq!(
+            std::mem::take(&mut *PENDING.lock().unwrap()),
+            [TrayAction::Ring("p".to_string())]
         );
     }
 }

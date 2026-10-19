@@ -35,6 +35,7 @@ mod ui_tests;
 #[cfg(target_os = "linux")]
 #[path = "tray_linux.rs"]
 mod tray;
+mod tray_menu;
 mod words;
 
 use eframe::egui;

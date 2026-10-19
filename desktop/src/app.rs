@@ -16,7 +16,8 @@ use pocketdesk_core::protocol::permissions::Capability;
 use crate::model::{self, Snapshot};
 use crate::pair_view::PairView;
 use crate::settings_view::SettingsForm;
-use crate::tray::{Tray, TrayAction};
+use crate::tray::Tray;
+use crate::tray_menu::TrayAction;
 
 const REFRESH: Duration = Duration::from_secs(1);
 
@@ -411,20 +412,55 @@ impl PocketdeskApp {
     fn handle_tray(&mut self, ctx: &egui::Context) {
         let Some(tray) = &self.tray else { return };
         for action in tray.take_actions() {
-            match action {
-                TrayAction::Open | TrayAction::Pair => {
-                    if action == TrayAction::Pair {
-                        self.switch_to(Tab::Pair);
-                    }
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            let show = match action {
+                TrayAction::Open => true,
+                TrayAction::Pair => {
+                    self.switch_to(Tab::Pair);
+                    true
+                }
+                TrayAction::SendFile(id) => {
+                    self.send_to = Some(id);
+                    self.switch_to(Tab::Files);
+                    true
+                }
+                // D5: asked from the tray, the window stays as it is.
+                TrayAction::Ring(id) => {
+                    self.ring(&id);
+                    false
+                }
+                TrayAction::Mute(id, minutes) => {
+                    self.quiet(&id, minutes);
+                    false
+                }
+                TrayAction::SendClipboard(id) => {
+                    self.send_clipboard(&id);
+                    false
                 }
                 TrayAction::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    false
                 }
+            };
+            if show {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
         }
+    }
+
+    /// The tray's menu for the phones as last read (D5); rebuilt by the
+    /// tray only when it changes.
+    fn update_tray(&mut self) {
+        let Some(tray) = self.tray.as_mut() else {
+            return;
+        };
+        let rows = model::phone_rows(&self.snapshot, &self.last_sessions);
+        tray.show(crate::tray_menu::menu(
+            &rows,
+            &self.snapshot.devices,
+            now_unix(),
+        ));
     }
 
     /// A phone the owner has not seen yet is waiting: show the window, even
@@ -842,6 +878,22 @@ impl PocketdeskApp {
             Ok(_) => Ok(format!("Asked {who} to be quiet for an hour.")),
             Err(e) => Err(format!("Could not mute {who}: {e}")),
         });
+    }
+
+    /// Ask the server to put this computer's clipboard on the phone `id`
+    /// (D5, the tray), and say how that went.
+    fn send_clipboard(&mut self, id: &str) {
+        let who = self.label(id);
+        self.notice = crate::notice::Notice::outcome(
+            match pocketdesk_core::local::clip_history::request_current(
+                &self.state_dir,
+                id,
+                now_unix(),
+            ) {
+                Ok(_) => Ok(format!("Asked {who} to take the clipboard.")),
+                Err(e) => Err(format!("Could not send the clipboard to {who}: {e}")),
+            },
+        );
     }
 
     /// The Overview's phones (N6): where each is, its battery and last
@@ -1965,6 +2017,7 @@ impl eframe::App for PocketdeskApp {
             self.refresh();
             self.raise_for_approvals(ctx);
             self.raise_for_tasks(ctx);
+            self.update_tray();
         }
         self.cast
             .get_or_insert_with(|| crate::cast_view::CastView::new(ctx, self.state_dir.clone()))
