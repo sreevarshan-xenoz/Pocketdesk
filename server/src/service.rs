@@ -791,10 +791,19 @@ pub async fn stop() -> Result<()> {
     bail!("failed to stop process {}", pid)
 }
 
+/// The first line of `pocketdesk status`: Tailscale's own when it runs,
+/// else a note. Tailscale is optional, so its absence must not hide the
+/// sessions below it.
+fn tailscale_status_line(status: Result<String>) -> String {
+    status.unwrap_or_else(|_| "Tailscale: not running (it is optional)".to_string())
+}
+
 pub async fn print_status() -> Result<()> {
-    let tailscale = TailscaleClient::new().context("failed to initialize Tailscale client")?;
-    let status = tailscale.status_text().await?;
-    println!("{}", status);
+    let status = match TailscaleClient::new() {
+        Ok(tailscale) => tailscale.status_text().await,
+        Err(e) => Err(e),
+    };
+    println!("{}", tailscale_status_line(status));
 
     // R4 D2: what is watching this desktop right now (mirrored by the
     // daemon's live-session watcher; absent when no daemon is running).
@@ -2674,5 +2683,20 @@ mod vector_tests {
         for case in cases {
             replay(addr, case).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn status_without_tailscale_says_so_and_goes_on() {
+        let line = tailscale_status_line(Err(anyhow::anyhow!("tailscale status failed")));
+        assert_eq!(line, "Tailscale: not running (it is optional)");
+        assert_eq!(
+            tailscale_status_line(Ok("100.64.0.1 desk".to_string())),
+            "100.64.0.1 desk"
+        );
     }
 }
