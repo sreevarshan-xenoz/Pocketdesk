@@ -628,10 +628,26 @@ fun RemoteScreen(
                 }
             }
         }
+        // A controller that goes, or this window losing the keyboard (the
+        // shade, another app, a call), sends no centred sticks: let go of
+        // everything then, or a held stick would keep moving the computer's
+        // pointer (E4 review).
+        val inputs = context.getSystemService(android.hardware.input.InputManager::class.java)
+        val devices = object : android.hardware.input.InputManager.InputDeviceListener {
+            override fun onInputDeviceAdded(deviceId: Int) = Unit
+            override fun onInputDeviceChanged(deviceId: Int) = Unit
+            override fun onInputDeviceRemoved(deviceId: Int) = releaseGamepad()
+        }
+        inputs?.registerInputDeviceListener(devices, android.os.Handler(android.os.Looper.getMainLooper()))
         onDispose {
+            inputs?.unregisterInputDeviceListener(devices)
             ConnectedGamepad.sink = null
             releaseGamepad()
         }
+    }
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(windowFocused) {
+        if (!windowFocused) releaseGamepad()
     }
 
     LaunchedEffect(address) {
