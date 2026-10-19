@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-614 open items.
+620 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 349 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 351 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 44 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 46 |
 | A phone with a SIM | 21 |
-| A second phone | 6 |
+| A second phone | 7 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 87 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 53 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 54 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -728,6 +728,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The Health card's Choose opens the folder picker.
 - Spanish and Tamil on the changed screens.
 
+**126. The deck (F1)**
+
+- A button of each kind set up in the desktop app's Settings, listed on the A71's Deck from Home and from the session menu, with its icon.
+- A button edited after the phone listed it: "the computer's deck has changed".
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -908,6 +913,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The on-screen gamepad from the A71 into a scratch window that logs keys: each button's key down and up once, the D-pad's arrows, the left stick moving the pointer, the right stick scrolling.
 
+**126. The deck (F1)**
+
+- Keys (`ctrl+shift+m`, `alt+tab`) into a scratch window here: pressed in order, all let go (input reaches this box: with the owner).
+- Text typed into a scratch window; a task that asks first, the owner's Allow here; media Play/Pause and Next; a link opening in the browser.
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -992,6 +1002,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **122. The phone as a pen (E3)**
 
 - Control moving to another phone mid-stroke lifts the pen.
+
+**126. The deck (F1)**
+
+- Each refusal on the button: Input, Tasks, Audio or Links off for the phone; "Deck" off; another phone driving.
 
 ## Away from home: another network, or through a router
 
@@ -1580,3 +1594,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A screen reader (Narrator) names each photo's Save, Open and Copy, the pairing code and the phone's screen.
 - The tray: a phone's title says Do Not Disturb or the mute's minutes left; Send the clipboard and Pair a phone.
+
+**126. The deck (F1)**
+
+- 2, 3 and 4 a row; a long label; Spanish and Tamil; TalkBack reads each button's label.
