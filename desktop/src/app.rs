@@ -968,7 +968,7 @@ impl PocketdeskApp {
                 now_unix(),
             ) {
                 Ok(_) => Ok(format!(
-                    "Asked {who}: tap its notification to take the photo; it lands with the received files."
+                    "Asked {who}: tap its notification to take the photo (\"Photos the computer asks for\" on in its Settings); it lands with the received files."
                 )),
                 Err(e) => Err(format!("Could not ask {who} for a photo: {e}")),
             },
@@ -1117,7 +1117,7 @@ impl PocketdeskApp {
                     }
                     // G2: as the tray offers it, where files reach the phone.
                     let photo_why = row.file.err().unwrap_or(
-                        "The phone shows a notification that opens its camera; the photo comes here as a received file.",
+                        "With \"Photos the computer asks for\" on in Pocketdesk's Settings on the phone, it shows a notification that opens its camera; the photo comes here as a received file.",
                     );
                     if ui
                         .add_enabled(row.file.is_ok(), egui::Button::new("Take a photo"))
