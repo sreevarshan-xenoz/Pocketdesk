@@ -768,6 +768,7 @@
     <string name="state_loading">கணினியைக் கேட்கிறது…</string>
     <string name="state_failed">கணினியைக் கேட்க முடியவில்லை: %1$s</string>
     <string name="state_not_shared">இந்தக் கணினி தன் நிலையைப் பகிர்வதில்லை. அதன் Pocketdesk செயலியில் Settings, This computer\'s state இல் இயக்கலாம்.</string>
+    <string name="state_stale">இப்போது பதில் இல்லை: இது முன்பு இருந்த நிலை.</string>
     <string name="state_cpu">CPU</string>
     <string name="state_memory">நினைவகம்</string>
     <string name="state_disk">வட்டு %1$s</string>

@@ -774,6 +774,7 @@
     <string name="state_loading">Preguntando al ordenador…</string>
     <string name="state_failed">No se pudo preguntar al ordenador: %1$s</string>
     <string name="state_not_shared">Este ordenador no comparte cómo está. Su app Pocketdesk lo activa en Settings, This computer\'s state.</string>
+    <string name="state_stale">No responde ahora: así estaba.</string>
     <string name="state_cpu">CPU</string>
     <string name="state_memory">Memoria</string>
     <string name="state_disk">Disco %1$s</string>

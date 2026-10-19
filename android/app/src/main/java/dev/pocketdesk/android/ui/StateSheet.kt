@@ -46,6 +46,9 @@ fun StateSheet(address: String, controlPort: Int, computer: String, onDismiss: (
     val context = LocalContext.current
     var state by remember { mutableStateOf<ComputerState.State?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
+    // The last answer is kept on screen when the computer stops answering,
+    // marked as old (F2 review).
+    var stale by remember { mutableStateOf(false) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     // Only while the app is in front: asking every few seconds in the
@@ -58,8 +61,11 @@ fun StateSheet(address: String, controlPort: Int, computer: String, onDismiss: (
                 .onSuccess {
                     state = it
                     failure = null
+                    stale = false
                 }
-                .onFailure { if (state == null) failure = context.plainErrorText(it.message) }
+                .onFailure {
+                    if (state == null) failure = context.plainErrorText(it.message) else stale = true
+                }
             delay(REFRESH_MS)
         }
         }
@@ -82,6 +88,13 @@ fun StateSheet(address: String, controlPort: Int, computer: String, onDismiss: (
                 shown == null -> Text(stringResource(R.string.state_loading))
                 shown.off -> Text(stringResource(R.string.state_not_shared))
                 else -> {
+                    if (stale) {
+                        Text(
+                            stringResource(R.string.state_stale),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     shown.cpu?.let { cpu ->
                         Bar(stringResource(R.string.state_cpu), "%.0f %%".format(cpu), cpu / 100f)
                     }

@@ -777,6 +777,7 @@
     <string name="state_loading">Asking the computer…</string>
     <string name="state_failed">Could not ask the computer: %1$s</string>
     <string name="state_not_shared">This computer does not share how it is doing. Its Pocketdesk app, Settings, This computer\'s state, turns it on.</string>
+    <string name="state_stale">Not answering now: this is how it was.</string>
     <string name="state_cpu">CPU</string>
     <string name="state_memory">Memory</string>
     <string name="state_disk">Disk %1$s</string>
