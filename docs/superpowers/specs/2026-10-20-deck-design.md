@@ -94,3 +94,31 @@ text = "Thanks, talk soon!"
 - **Bridge:** the listing and press calls.
 - **JVM:** the grid's layout rule and the result's words.
 - **Owed (device, with the owner):** a button of each kind from the A71; keys into a scratch window (input on this box); a task asking first.
+
+## As built
+
+As specified. Details the spec did not fix:
+- **Keys:** pressed through one injector for the server (`deck::INJECTOR`), used on blocking threads only and made at start when the deck has buttons (`deck::warm_up`).
+- **Links:** opened or shown as a phone's own link, following "Links from phones".
+- **Tasks:**
+  - a task button starts its task as Home Assistant's do;
+  - the owner's prompt says "a phone's deck";
+  - one that asks first is answered `waiting`, which the button shows as "Waiting for the computer's owner".
+- **The phone:** presses go one at a time.
+- **Not checked on a device** (the owner's night of features, 2026-10-20): checklist §126.
+
+## Review
+
+A fresh review found 0 Critical and 5 Important issues, fixed one commit each:
+- a press that failed midway left a modifier held (now every key down is let go, past failed releases);
+- the first combination on Linux could lose its first key (the injector is now made at start);
+- typing ran on the phone's control loop (now on blocking threads);
+- two presses in flight could take each other's answers (now one at a time);
+- a hand-edited 49th button could be pressed though never listed.
+
+Minors fixed: a task that asks first said "Done", and a deck link ignored "Links from phones".
+
+Minors left:
+- a refused press goes to the log, not the Activity page;
+- a task button naming no task shows no problem in Settings (the phone says "unknown");
+- with pairing off, an unpaired device may list the labels (its presses are refused).
