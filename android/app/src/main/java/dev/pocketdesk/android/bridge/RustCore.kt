@@ -141,6 +141,7 @@ object RustCore {
         folderId: String,
         folder: String,
         pathJson: String,
+        drive: String,
     ): String
     private external fun nativeTransferProgress(): LongArray?
     private external fun nativeCancelTransfer()
@@ -745,7 +746,8 @@ object RustCore {
     /**
      * Send [size] bytes from [fd] as [name]; [source] names the file so a
      * retry continues it (T6a). With a [part], it is one file of a folder
-     * send and lands at its path under that folder (T6b).
+     * send and lands at its path under that folder (T6b). With a [drive],
+     * the computer's drive asked for it (D8).
      */
     fun sendFileFd(
         address: String,
@@ -755,6 +757,7 @@ object RustCore {
         size: Long,
         source: String,
         part: FolderPart? = null,
+        drive: String? = null,
     ): Result<Unit> =
         envelope(
             nativeSendFileFd(
@@ -767,6 +770,7 @@ object RustCore {
                 part?.folderId.orEmpty(),
                 part?.folder.orEmpty(),
                 org.json.JSONArray(part?.path.orEmpty()).toString(),
+                drive.orEmpty(),
             ),
         ).map { }
 

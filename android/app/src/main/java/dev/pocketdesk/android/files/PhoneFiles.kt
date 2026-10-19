@@ -23,7 +23,15 @@ class PhoneFiles(private val ctx: Context) {
     private var lastConnectMs = 0L
 
     /** A request as the bridge kept it. */
-    private data class Request(val host: String, val port: Int, val fetch: Boolean, val root: Int, val path: List<String>)
+    private data class Request(
+        val host: String,
+        val port: Int,
+        val fetch: Boolean,
+        val root: Int,
+        val path: List<String>,
+        /** The computer's drive asked for this file (D8): its share says so. */
+        val drive: String? = null,
+    )
 
     fun tick() {
         val folders = PhoneFolders.all(ctx)
@@ -58,6 +66,7 @@ class PhoneFiles(private val ctx: Context) {
                     o.getBoolean("fetch"),
                     o.getInt("root"),
                     (0 until path.length()).map { path.getString(it) },
+                    o.optString("drive").takeIf { PhoneFilesRule.validDrive(it) },
                 )
             }
         }.getOrDefault(emptyList())
@@ -176,7 +185,13 @@ class PhoneFiles(private val ctx: Context) {
                 val tree = folder.uri.toUri()
                 val (docId, dir) = resolve(tree, request.path) ?: return@runCatching "$name is not on the phone any more"
                 if (dir) return@runCatching "$name is a folder"
-                TransferService.start(ctx, request.host, request.port, listOf(DocumentsContract.buildDocumentUriUsingTree(tree, docId)))
+                TransferService.start(
+                    ctx,
+                    request.host,
+                    request.port,
+                    listOf(DocumentsContract.buildDocumentUriUsingTree(tree, docId)),
+                    request.drive,
+                )
                 null
             }.getOrElse {
                 Log.w(TAG, "could not send a shared file", it)
