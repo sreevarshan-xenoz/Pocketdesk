@@ -118,6 +118,8 @@ impl MessagesView {
             Ok(_) => {
                 self.draft.clear();
                 self.read_at = None;
+                // In place of an earlier failure's (E5 review).
+                self.notice = crate::notice::Notice::done("Queued: the phone sends it.");
                 true
             }
             Err(e) => {

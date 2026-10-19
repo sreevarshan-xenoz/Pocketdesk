@@ -2171,6 +2171,8 @@ impl eframe::App for PocketdeskApp {
         ];
         if let Some(notice) = said.into_iter().flatten().last() {
             self.notice = Some(notice);
+            // Shown now, not at the next refresh (E5 review).
+            ui.ctx().request_repaint();
         }
         // An empty page's button asked for another page (E5).
         if let Some(tab) = self.notes.take_go_to().or(self.phone_files.take_go_to()) {

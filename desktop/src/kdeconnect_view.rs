@@ -176,7 +176,7 @@ impl KdeConnectView {
                 match kdeconnect::ask_to_find(state_dir, now_unix, FIND_SECS) {
                     Ok(()) => {
                         self.finding = true;
-                        self.notice = crate::notice::Notice::working(
+                        self.notice = crate::notice::Notice::done(
                             "Looking for a minute: open KDE Connect on the device.",
                         );
                     }

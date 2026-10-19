@@ -101,7 +101,7 @@ impl PhoneFilesView {
             Ok(_) => {
                 self.waiting = (kind == Kind::List).then(|| (phone.to_string(), now_unix));
                 self.notice = match kind {
-                    Kind::List => crate::notice::Notice::working("Asked the phone…"),
+                    Kind::List => crate::notice::Notice::done("Asked the phone…"),
                     Kind::Fetch => crate::notice::Notice::done(format!(
                         "Asked the phone to send {}; it arrives where received files land.",
                         path.last().map(String::as_str).unwrap_or("it")
@@ -180,8 +180,8 @@ impl PhoneFilesView {
             let kept_unix = self.listings.get(&asking).map(|k| k.at_unix);
             match answered(asked_unix, kept_unix, now_unix) {
                 Some(true) => {
+                    // The listing shows: nothing to say (E5 review).
                     self.waiting = None;
-                    self.notice = crate::notice::Notice::done("The phone answered.");
                 }
                 Some(false) => {
                     self.waiting = None;

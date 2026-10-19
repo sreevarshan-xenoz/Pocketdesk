@@ -232,8 +232,7 @@ impl PhotosView {
             };
             if ui.button(label).clicked() && self.ask(state_dir, phone, Ask::List, now_unix) {
                 self.waiting = Some((phone.to_string(), now_unix));
-                self.notice =
-                    crate::notice::Notice::working("Asked the phone for its recent photos…");
+                self.notice = crate::notice::Notice::done("Asked the phone for its recent photos…");
             }
             if self.waiting.as_ref().is_some_and(|(p, _)| p == phone) {
                 ui.spinner();
@@ -345,7 +344,7 @@ impl PhotosView {
             return;
         }
         if self.ask(state_dir, phone, Ask::Fetch(id), now_unix) {
-            self.notice = crate::notice::Notice::working(format!("Asked the phone for {name}…"));
+            self.notice = crate::notice::Notice::done(format!("Asked the phone for {name}…"));
             self.pending.push(Pending {
                 device: phone.to_string(),
                 name,
@@ -370,7 +369,7 @@ impl PhotosView {
                 };
             }
             Then::Copy => {
-                self.notice = crate::notice::Notice::working(format!("Copying {name}…"));
+                self.notice = crate::notice::Notice::done(format!("Copying {name}…"));
                 self.copying = Some(decode(path));
             }
         }
