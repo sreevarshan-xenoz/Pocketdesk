@@ -1866,6 +1866,12 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] A real lock, on a computer where locking is allowed (not this box), Windows; on Linux, that it never locks.
 - [ ] A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
 
+## 119. Memory at rest (D7)
+
+- [x] Windows: `scripts/memory_at_rest.ps1`, server and app at rest (2026-10-19: server 9.7 MB private, app 77–85 MB; the reliability spec's D7 section).
+- [ ] Linux: the same by hand (`/proc/<pid>/status` VmRSS and RssAnon), the app in a Wayland session.
+- [ ] The app with a phone linked and a session running, then at rest again: back to its number.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
