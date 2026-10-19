@@ -121,6 +121,11 @@ pub struct Config {
     /// ways (2g). Off by default: the content crosses machines.
     #[serde(default)]
     pub computer_clipboard: bool,
+    /// Keep the last this many texts that crossed between this computer and
+    /// its phones, either way (D3); 0 keeps none. Off by default: the texts
+    /// stay on disk, owner-only.
+    #[serde(default)]
+    pub clipboard_history: u32,
     /// Work with KDE Connect devices (3a–3c): on by default (the owner's
     /// decision); off, a connection opening with `{` is refused as before.
     #[serde(default = "default_true")]
@@ -281,6 +286,7 @@ impl Default for Config {
             virtual_screens: true,
             clipboard_push: true,
             computer_clipboard: false,
+            clipboard_history: 0,
             kdeconnect_compat: true,
             phone_battery_alerts: true,
             wake_announce: true,
@@ -472,6 +478,7 @@ impl Config {
         "virtual_screens",
         "clipboard_push",
         "computer_clipboard",
+        "clipboard_history",
         "kdeconnect_compat",
         "phone_battery_alerts",
         "sms_keep",

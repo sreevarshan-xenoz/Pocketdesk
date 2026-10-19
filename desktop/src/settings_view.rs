@@ -114,6 +114,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     ("clipboard_push", "Clipboard to phones", Section::Phones),
+    ("clipboard_history", "Clipboard history", Section::Phones),
     ("open_links", "Links from phones", Section::Phones),
     ("phone_battery_alerts", "Phones' batteries", Section::Phones),
     (
@@ -224,6 +225,7 @@ pub fn applies_live(key: &str) -> bool {
             | "cast_control"
             | "downloads_folder"
             | "remember_screen_grant"
+            | "clipboard_history"
     )
 }
 
@@ -416,6 +418,11 @@ impl SettingsForm {
         self.home_assistant.as_ref().and_then(|(_, s)| s.clone())
     }
 
+    /// Whether saving turns the clipboard's history off (D3): it is emptied then.
+    pub fn turns_history_off(&self) -> bool {
+        self.saved.clipboard_history > 0 && self.edited.clipboard_history == 0
+    }
+
     /// Save the edit to `path` if it is valid.
     pub fn save_to(&mut self, path: &Path) -> Result<(), String> {
         self.apply_text_fields();
@@ -579,6 +586,17 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.clipboard_push,
                         "send what I copy to connected phones (those with Clipboard on)",
+                    );
+                });
+                row(ui, "clipboard_history", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut e.clipboard_history)
+                            .range(0..=pocketdesk_core::local::clip_history::MAX_ENTRIES)
+                            .suffix(" texts"),
+                    );
+                    note(
+                        ui,
+                        "The last texts that crossed between this computer and its phones, either way, kept on this computer for the Clipboard page; 0 keeps none, and emptying it there or here forgets them.",
                     );
                 });
                 row(ui, "open_links", |ui| {

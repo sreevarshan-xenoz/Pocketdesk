@@ -76,6 +76,9 @@ mod tests {
             ("quiet_phone (quiet_out)", || {
                 Box::pin(crate::quiet_phone::run_watcher())
             }),
+            ("clip_history (clipboard_out)", || {
+                Box::pin(crate::clip_history::run_sends())
+            }),
             ("phone_battery (writer)", || {
                 Box::pin(crate::plugins::phone_battery::run_writer())
             }),

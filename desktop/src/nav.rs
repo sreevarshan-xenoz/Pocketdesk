@@ -22,7 +22,13 @@ pub const GROUPS: &[Group] = &[
     },
     Group {
         title: Some("Sharing"),
-        pages: &[Tab::Files, Tab::Messages, Tab::Notifications, Tab::Phone],
+        pages: &[
+            Tab::Files,
+            Tab::Messages,
+            Tab::Notifications,
+            Tab::Phone,
+            Tab::Clipboard,
+        ],
     },
     Group {
         title: None,
@@ -36,7 +42,7 @@ pub const GROUPS: &[Group] = &[
 
 impl Tab {
     /// Every page.
-    pub const ALL: [Tab; 12] = [
+    pub const ALL: [Tab; 13] = [
         Tab::Status,
         Tab::Pair,
         Tab::Devices,
@@ -45,6 +51,7 @@ impl Tab {
         Tab::Messages,
         Tab::Notifications,
         Tab::Phone,
+        Tab::Clipboard,
         Tab::Activity,
         Tab::Settings,
         Tab::Diagnostics,
@@ -62,6 +69,7 @@ impl Tab {
             Tab::Messages => "Messages",
             Tab::Notifications => "Notifications",
             Tab::Phone => "Phone files",
+            Tab::Clipboard => "Clipboard",
             Tab::Activity => "Activity",
             Tab::Settings => "Settings",
             Tab::Diagnostics => "Diagnostics",
@@ -80,6 +88,9 @@ impl Tab {
             Tab::Messages => "Texts from the phone, and replies to them.",
             Tab::Notifications => "The phone's notifications, and answers to them.",
             Tab::Phone => "Folders the phone shares with this computer.",
+            Tab::Clipboard => {
+                "Texts that crossed between this computer and its phones, to copy or send again."
+            }
             Tab::Activity => "What has happened, newest first.",
             Tab::Settings => "How this computer works with phones and other computers.",
             Tab::Diagnostics => "Checks for when a phone cannot connect.",
@@ -97,6 +108,7 @@ impl Tab {
                 | Tab::Messages
                 | Tab::Notifications
                 | Tab::Phone
+                | Tab::Clipboard
                 | Tab::Activity
                 | Tab::Logs
         )
@@ -113,6 +125,7 @@ impl Tab {
             Tab::Messages => "messages",
             Tab::Notifications => "notifications",
             Tab::Phone => "phone-files",
+            Tab::Clipboard => "clipboard",
             Tab::Activity => "activity",
             Tab::Settings => "settings",
             Tab::Diagnostics => "diagnostics",

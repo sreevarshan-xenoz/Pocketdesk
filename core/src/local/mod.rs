@@ -7,6 +7,7 @@
 
 pub mod approval;
 pub mod cast;
+pub mod clip_history;
 pub mod computers;
 pub mod config;
 pub mod device_keys;

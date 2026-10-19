@@ -713,4 +713,6 @@
     <string name="settings_let_computer_mute_summary">உங்கள் கணினி சிறிது நேரம், ஒரு நாள் வரை, தொந்தரவு செய்ய வேண்டாம் நிலையை இயக்கலாம், மேலும் இந்தத் தொலைபேசி அமைதியாக இருக்கும்போது அதைப் பார்க்கும். உங்கள் தொந்தரவு செய்ய வேண்டாம் அமைப்புகள் அனுமதிக்கும் அழைப்புகளும் செய்திகளும் வந்துகொண்டே இருக்கும். கணினியுடன் இணைப்பை வைத்திருக்கும், அதனால் அறிவிப்பு அணுகல் தேவை.</string>
     <string name="phone_notifications_hold_back">தொந்தரவு செய்ய வேண்டாம் நிலையில் நிறுத்திவை</string>
     <string name="phone_notifications_hold_back_summary">தொந்தரவு செய்ய வேண்டாம் நிலை இந்தத் தொலைபேசியில் ஓர் அறிவிப்பை அமைதியாக்கும்போது, அது கணினிக்கும் அனுப்பப்படாது</string>
+    <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
+    <string name="card_send_earlier_copy">முந்தைய நகலை அனுப்பு</string>
 </resources>

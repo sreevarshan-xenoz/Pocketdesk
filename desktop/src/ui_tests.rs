@@ -325,3 +325,38 @@ mod snapshots {
         assert!(failed.is_empty(), "{failed:#?}");
     }
 }
+
+/// D3: the Clipboard page says the history is off, and with it on lists
+/// the texts that crossed, each with Copy and Send to….
+#[test]
+fn the_clipboard_page_lists_what_crossed() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let app = fixture.open(Some(Tab::Clipboard));
+    assert!(
+        app.query_by_label("Turn it on in Settings").is_some(),
+        "off by default"
+    );
+    drop(app);
+
+    std::fs::write(
+        fixture.config().join("config.toml"),
+        "clipboard_history = 20\n",
+    )
+    .expect("config");
+    use pocketdesk_core::local::clip_history::{ClipEntry, record};
+    record(
+        fixture.state(),
+        ClipEntry::new("from the phone", Some(PHONE), 100),
+        20,
+    )
+    .expect("kept");
+    record(fixture.state(), ClipEntry::new("from here", None, 200), 20).expect("kept");
+    let app = fixture.open(Some(Tab::Clipboard));
+    assert!(app.query_by_label("from here").is_some());
+    assert!(app.query_by_label("from the phone").is_some());
+    assert!(app.query_by_label_contains("From Test Phone").is_some());
+    assert!(app.query_by_label_contains("From this computer").is_some());
+    assert_eq!(app.query_all_by_label("Copy").count(), 2, "one each");
+    assert!(app.query_by_label("Clear history").is_some());
+}

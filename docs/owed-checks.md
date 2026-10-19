@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-562 open items.
+569 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 328 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 333 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
 | A second phone | 5 |
 | Away from home: another network, or through a router | 9 |
-| A second computer | 4 |
-| A Linux desktop (the Azure VM serves for some) | 78 |
+| A second computer | 5 |
+| A Linux desktop (the Azure VM serves for some) | 79 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 38 |
 
@@ -674,6 +674,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A Do Not Disturb that silences but still lists notifications.
 - A phone with a bedtime mode switching on during a mute.
 
+**113. Clipboard history and Resend (D3)**
+
+- An earlier copy sent from Home's card menu reaches the computer's clipboard, and the history keeps it as the phone's.
+- The computer's copy pushed to the phone is kept as this computer's.
+- `pocketdesk clipboard` lists both, newest first; `--send 2 --to` puts the older on the phone.
+- The history turned off in `config.toml` by hand is emptied at the next text and listed as none.
+- The Clipboard page by hand: Copy, Send to…, Clear and its confirm, a cut entry's Send greyed.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -976,6 +984,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The computer's chosen folder with a phone's share, a KDE device's file and another computer's; a folder that is gone; Settings' Choose folder… and Use Downloads.
 
+**113. Clipboard history and Resend (D3)**
+
+- A KDE Connect device's text, and another computer's, in the history.
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **0. Prerequisites**
@@ -1223,6 +1235,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **106. Notifications that wait and go later (C3)**
 
 - Linux: the late line in a D-Bus notification.
+
+**113. Clipboard history and Resend (D3)**
+
+- Linux (`wl-paste`).
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
