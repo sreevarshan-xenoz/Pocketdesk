@@ -95,13 +95,16 @@ fn item(
     actions: &mut HashMap<MenuId, TrayAction>,
 ) -> Result<Box<dyn IsMenuItem>, String> {
     Ok(match entry {
-        Entry::Item { label, action } => {
-            let item = MenuItem::new(text(label), action.is_some(), None);
-            if let Some(action) = action {
+        Entry::Item { label, action } => match action {
+            // Each action's id is the same in every menu built (D5 review):
+            // a click queued just before a rebuild still finds it.
+            Some(action) => {
+                let item = MenuItem::with_id(action_id(action), text(label), true, None);
                 actions.insert(item.id().clone(), action.clone());
+                Box::new(item)
             }
-            Box::new(item)
-        }
+            None => Box::new(MenuItem::new(text(label), false, None)),
+        },
         Entry::Phone { label, items } => {
             let sub = Submenu::new(text(label), true);
             for entry in items {
@@ -114,6 +117,19 @@ fn item(
     })
 }
 
+/// The menu id an action's item has.
+fn action_id(action: &TrayAction) -> String {
+    match action {
+        TrayAction::Open => "open".to_string(),
+        TrayAction::Pair => "pair".to_string(),
+        TrayAction::Quit => "quit".to_string(),
+        TrayAction::Ring(id) => format!("ring:{id}"),
+        TrayAction::Mute(id, minutes) => format!("mute:{minutes}:{id}"),
+        TrayAction::SendClipboard(id) => format!("clipboard:{id}"),
+        TrayAction::SendFile(id) => format!("file:{id}"),
+    }
+}
+
 /// A label as Windows shows it: `&` marks the next letter as the item's
 /// key, so a name's own is doubled.
 fn text(label: &str) -> String {
@@ -123,3 +139,26 @@ fn text(label: &str) -> String {
 /// Clicks waiting for the app. The handler runs on the event-loop thread
 /// while the app is borrowed elsewhere, so they are queued here.
 static PENDING: std::sync::Mutex<Vec<MenuId>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_action_has_its_own_id_and_names_keep_their_ampersands() {
+        let actions = [
+            TrayAction::Open,
+            TrayAction::Pair,
+            TrayAction::Quit,
+            TrayAction::Ring("p".into()),
+            TrayAction::Mute("p".into(), 60),
+            TrayAction::Mute("p".into(), 0),
+            TrayAction::SendClipboard("p".into()),
+            TrayAction::SendFile("p".into()),
+            TrayAction::Ring("q".into()),
+        ];
+        let ids: std::collections::HashSet<String> = actions.iter().map(action_id).collect();
+        assert_eq!(ids.len(), actions.len());
+        assert_eq!(text("Tom & Jerry"), "Tom && Jerry");
+    }
+}
