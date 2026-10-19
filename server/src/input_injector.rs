@@ -390,9 +390,10 @@ impl InputInjector {
 }
 
 /// The wheel notches one gamepad packet's right stick gives (E4): none
-/// within half its travel, one from there, two at its edge; up scrolls up.
+/// within a third of its travel, one from there, two from two thirds (the
+/// phone's edge is 32767); up scrolls up.
 fn gamepad_scroll(x: i16, y: i16) -> (i32, i32) {
-    let notches = |v: i16| i32::from(v) / 16_384;
+    let notches = |v: i16| i32::from(v) / 10_923;
     (notches(x), -notches(y))
 }
 
@@ -1008,8 +1009,9 @@ impl InputInjector {
                 if mx != 0 || my != 0 {
                     self.move_mouse_relative(mx, my)?;
                 }
-                // Right stick -> the wheel (E4): a notch per packet from half
-                // way, two at the edge; pushed up (negative) scrolls up.
+                // Right stick -> the wheel (E4): a notch per packet from a
+                // third of the way, two from two thirds; pushed up (negative)
+                // scrolls up.
                 let (sx, sy) = gamepad_scroll(axes[2], axes[3]);
                 if sx != 0 || sy != 0 {
                     self.scroll(sx, sy)?;
@@ -1886,16 +1888,16 @@ mod tests {
     }
 
     #[test]
-    fn the_right_stick_scrolls_from_half_its_travel() {
+    fn the_right_stick_scrolls_from_a_third_of_its_travel() {
         assert_eq!(gamepad_scroll(0, 0), (0, 0));
         assert_eq!(
             gamepad_scroll(10_000, -10_000),
             (0, 0),
-            "under half: nothing"
+            "under a third: nothing"
         );
         assert_eq!(gamepad_scroll(0, -16_384), (0, 1), "pushed up scrolls up");
-        assert_eq!(gamepad_scroll(0, i16::MAX), (0, -1));
-        assert_eq!(gamepad_scroll(i16::MIN, 0), (-2, 0));
+        assert_eq!(gamepad_scroll(0, i16::MAX), (0, -2), "the phone's edge");
+        assert_eq!(gamepad_scroll(-32_767, 0), (-2, 0));
     }
 
     #[test]
