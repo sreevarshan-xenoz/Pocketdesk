@@ -2,8 +2,11 @@ package dev.pocketdesk.android.shortcuts
 
 import android.app.PendingIntent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import java.lang.ref.WeakReference
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
 
@@ -16,6 +19,17 @@ import dev.pocketdesk.android.R
 class MediaTileService : TileService() {
     override fun onStartListening() {
         super.onStartListening()
+        open = WeakReference(this)
+        draw()
+    }
+
+    override fun onStopListening() {
+        if (open?.get() === this) open = null
+        super.onStopListening()
+    }
+
+    /** Draw the tile from the media widget's kept answer. */
+    private fun draw() {
         val tile = qsTile ?: return
         val host = HostStore.lastHost(this)
         val latest = MediaWidget.latest(this)
@@ -42,6 +56,21 @@ class MediaTileService : TileService() {
         }
         // Behind the phone's lock, as the deck's buttons are on the home screen.
         if (isLocked) unlockAndRun { MediaWidget.playPause(this) } else MediaWidget.playPause(this)
+    }
+
+    companion object {
+        /**
+         * The tile while the panel shows it. Only an active tile may ask to
+         * be drawn again (`requestListeningState`), so the open one is drawn
+         * directly when the answer changes (G6 review).
+         */
+        @Volatile
+        private var open: WeakReference<MediaTileService>? = null
+
+        /** Draw the open tile again, on the main thread; nothing when the panel is closed. */
+        fun redrawOpen() {
+            Handler(Looper.getMainLooper()).post { open?.get()?.draw() }
+        }
     }
 
     private fun openApp() {

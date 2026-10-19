@@ -7,7 +7,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
-import android.service.quicksettings.TileService
 import android.text.format.DateUtils
 import android.view.View
 import android.widget.RemoteViews
@@ -236,8 +235,8 @@ class MediaWidget : AppWidgetProvider() {
         }
 
         private fun redrawAll(app: Context) {
-            // The music tile reads the same answer; it is asked to look again (G6).
-            runCatching { TileService.requestListeningState(app, ComponentName(app, MediaTileService::class.java)) }
+            // The music tile reads the same answer: an open one draws it again (G6).
+            MediaTileService.redrawOpen()
             val manager = AppWidgetManager.getInstance(app) ?: return
             val ids = manager.getAppWidgetIds(ComponentName(app, MediaWidget::class.java))
             if (ids.isNotEmpty()) redraw(app, manager, ids)
