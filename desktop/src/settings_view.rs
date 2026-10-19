@@ -120,6 +120,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "The phone's folders as a drive",
         Section::Phones,
     ),
+    (
+        "away_lock_minutes",
+        "Lock after the phone leaves",
+        Section::Phones,
+    ),
     ("open_links", "Links from phones", Section::Phones),
     ("phone_battery_alerts", "Phones' batteries", Section::Phones),
     (
@@ -232,6 +237,7 @@ pub fn applies_live(key: &str) -> bool {
             | "remember_screen_grant"
             | "clipboard_history"
             | "phone_drive"
+            | "away_lock_minutes"
     )
 }
 
@@ -613,6 +619,17 @@ impl SettingsForm {
                     note(
                         ui,
                         "Served on this computer only, at an address with a secret in it that the Phone page shows. Any program you run can read those folders while this is on.",
+                    );
+                });
+                row(ui, "away_lock_minutes", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut e.away_lock_minutes)
+                            .range(1..=60)
+                            .suffix(" min"),
+                    );
+                    note(
+                        ui,
+                        "For a phone with \"Lock this computer when it leaves\" on (Devices): once it has been gone this long, and on Windows nobody has used the keyboard or mouse meanwhile, the computer locks.",
                     );
                 });
                 row(ui, "open_links", |ui| {
