@@ -67,6 +67,7 @@ class NotificationActionRuleTest {
         assertEquals(NotificationActionRule.Decision.Run, decide())
         assertEquals(NotificationActionRule.Decision.Off, decide(on = false))
         assertEquals(NotificationActionRule.Decision.NotOwnComputer, decide(own = false))
+        assertEquals("another computer's, the setting off too", NotificationActionRule.Decision.NotOwnComputer, decide(on = false, own = false))
         assertEquals(NotificationActionRule.Decision.Gone, decide(known = false))
         assertEquals(NotificationActionRule.Decision.NotOffered, decide(offered = false))
         assertEquals(NotificationActionRule.Decision.TooMany, decide(budget = false))

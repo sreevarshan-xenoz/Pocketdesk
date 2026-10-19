@@ -59,8 +59,10 @@ object NotificationActionRule {
      */
     fun decide(settingOn: Boolean, ownComputer: Boolean, known: Boolean, offered: Boolean, withinBudget: Boolean): Decision =
         when {
-            !settingOn -> Decision.Off
+            // Another computer's first (E1 review): it is never told how
+            // its answer went, setting or not.
             !ownComputer -> Decision.NotOwnComputer
+            !settingOn -> Decision.Off
             !known -> Decision.Gone
             !offered -> Decision.NotOffered
             !withinBudget -> Decision.TooMany
