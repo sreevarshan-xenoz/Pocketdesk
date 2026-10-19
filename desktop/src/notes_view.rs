@@ -7,6 +7,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
+use pocketdesk_core::local::answers::{self, Outcome, State};
 use pocketdesk_core::local::phone_notes::{self, Answer, PhoneNote};
 
 /// How often the list is read again while the tab is open.
@@ -15,6 +16,8 @@ const REFRESH: Duration = Duration::from_secs(2);
 #[derive(Default)]
 pub struct NotesView {
     notes: Vec<PhoneNote>,
+    /// Where each answer stands (E1).
+    answers: Vec<Outcome>,
     /// Each notification's reply being typed, by phone and key.
     drafts: HashMap<(String, String), String>,
     read_at: Option<Instant>,
@@ -33,6 +36,7 @@ impl NotesView {
             return;
         }
         self.notes = newest_first(phone_notes::read(state_dir));
+        self.answers = answers::read(state_dir);
         // Drafts for notifications that went are dropped.
         let live: Vec<(String, String)> = self
             .notes
@@ -113,6 +117,18 @@ impl NotesView {
                         .small()
                         .color(crate::theme::muted(ui)),
                     );
+                    // E1: how the last answer to it went.
+                    if let Some(outcome) =
+                        answers::latest(&self.answers, &note.device_id, &note.key)
+                    {
+                        let (line, tone) = answer_line(outcome, now_unix);
+                        let colour = match tone {
+                            Tone::Done => crate::theme::good(ui),
+                            Tone::Failed => crate::theme::bad(ui),
+                            Tone::Waiting => crate::theme::muted(ui),
+                        };
+                        ui.label(RichText::new(line).small().color(colour));
+                    }
                     ui.horizontal(|ui| {
                         for action in &note.actions {
                             if ui.button(action).clicked() {
@@ -142,6 +158,36 @@ impl NotesView {
                 ui.add_space(4.0);
             }
         });
+    }
+}
+
+/// How an answer's line reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Waiting,
+    Done,
+    Failed,
+}
+
+/// How long an answer sent to the phone may go unanswered before the page
+/// says so: a phone from before E1 never answers.
+pub const NO_WORD_SECS: u64 = 60;
+
+/// Where an answer stands, as the page says it (E1).
+pub fn answer_line(outcome: &Outcome, now_unix: u64) -> (String, Tone) {
+    match &outcome.state {
+        State::Waiting => (
+            "Your answer: waiting for the phone…".to_string(),
+            Tone::Waiting,
+        ),
+        State::Sent if now_unix.saturating_sub(outcome.at_unix) >= NO_WORD_SECS => (
+            "Your answer: sent, but no word back from the phone (an older app on it, or the link dropped)"
+                .to_string(),
+            Tone::Waiting,
+        ),
+        State::Sent => ("Your answer: sent to the phone…".to_string(), Tone::Waiting),
+        State::Handed => ("Your answer: handed to the app".to_string(), Tone::Done),
+        State::NotSent { reason } => (format!("Your answer was not sent: {reason}"), Tone::Failed),
     }
 }
 
@@ -181,6 +227,42 @@ pub fn thread_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// E1: each state in words, and a silent phone said after a minute.
+    #[test]
+    fn an_answer_s_line_says_where_it_stands() {
+        let at = |state: State| Outcome {
+            id: "a".into(),
+            device_id: "p".into(),
+            key: "k".into(),
+            state,
+            at_unix: 1_000,
+        };
+        assert_eq!(answer_line(&at(State::Waiting), 1_000).1, Tone::Waiting);
+        assert_eq!(
+            answer_line(&at(State::Sent), 1_010).0,
+            "Your answer: sent to the phone…"
+        );
+        assert!(
+            answer_line(&at(State::Sent), 1_000 + NO_WORD_SECS)
+                .0
+                .contains("no word")
+        );
+        assert_eq!(answer_line(&at(State::Handed), 1_000).1, Tone::Done);
+        let refused = answer_line(
+            &at(State::NotSent {
+                reason: "the app refused it".into(),
+            }),
+            1_000,
+        );
+        assert_eq!(
+            refused,
+            (
+                "Your answer was not sent: the app refused it".to_string(),
+                Tone::Failed
+            )
+        );
+    }
 
     #[test]
     fn the_newest_notification_is_listed_first() {

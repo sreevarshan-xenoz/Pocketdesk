@@ -1125,7 +1125,9 @@ pub fn take_sms_requests() -> String {
 /// and the results of the replies it sent (N5b), its battery (T8b), and
 /// what it plays (T8d), its folders' listings (T10g) and its recent photos
 /// (C7).
-const PHONE_PACKETS: [&str; 7] = [
+const PHONE_PACKETS: [&str; 8] = [
+    // E1: how an answer from the computer went.
+    pocketdesk_core::protocol::notification_action::NOTIFICATION_ANSWERED,
     // D2: the phone's Do Not Disturb, told to its computer.
     pocketdesk_core::protocol::quiet::QUIET_STATE,
     "kdeconnect.sms.messages",

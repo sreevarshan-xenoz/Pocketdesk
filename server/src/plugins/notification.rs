@@ -6,6 +6,7 @@
 //! one phone are shown, the rest dropped. `phone_notifications = false` shows
 //! none (a phone's cancels still close what is shown).
 
+use pocketdesk_core::local::answers;
 use pocketdesk_core::local::phone_notes::{self, Answer, AnswerRequest, PhoneNote};
 use pocketdesk_core::protocol::notification_action;
 use std::collections::HashMap;
@@ -450,7 +451,11 @@ impl Plugin for NotificationPlugin {
     }
 
     fn incoming_capabilities(&self) -> &'static [&'static str] {
-        &["kdeconnect.notification", "kdeconnect.notification.request"]
+        &[
+            "kdeconnect.notification",
+            "kdeconnect.notification.request",
+            notification_action::NOTIFICATION_ANSWERED,
+        ]
     }
 
     // The phone's notifications answered from here (T10c) go out too.
@@ -547,6 +552,37 @@ impl Plugin for NotificationPlugin {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
             }
+            // How an answer from here went (E1).
+            notification_action::NOTIFICATION_ANSWERED => {
+                let Some(answered) = notification_action::Answered::from_body(&packet.body) else {
+                    tracing::info!("A phone's word on an answer was dropped: out of bounds");
+                    return Ok(());
+                };
+                let Ok(dir) = crate::state::state_dir() else {
+                    return Ok(());
+                };
+                let device = sender.device_id().to_string();
+                let said = answered.clone();
+                let kept = tokio::task::spawn_blocking(move || {
+                    answers::phone_said(&dir, &device, &said, unix_now())
+                })
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(false);
+                if !kept {
+                    // Seen, so a word that came too early or for the wrong
+                    // phone is not lost without a trace (E1 review).
+                    tracing::info!(
+                        "A phone's word on an answer was not kept: no answer sent to it waits"
+                    );
+                } else if !answered.ok {
+                    let reason = answered.reason.unwrap_or_default();
+                    tracing::info!("An answer to a phone notification was not sent: {reason}");
+                    tell_not_sent(&reason);
+                }
+                return Ok(());
+            }
             "kdeconnect.notification.request" => {
                 // Acknowledge the request - we support notifications
                 let response = NetworkPacket::new("kdeconnect.notification");
@@ -599,12 +635,13 @@ pub(crate) fn answerable(
 }
 
 /// The packet that sends `request` to its phone, if the notification is
-/// still kept for that phone and offered that answer.
+/// still kept for that phone and offered that answer; it carries the
+/// request's id, for the phone to say how it went (E1).
 pub(crate) fn answer_packet(notes: &[PhoneNote], request: &AnswerRequest) -> Option<NetworkPacket> {
     let note = notes
         .iter()
         .find(|n| n.device_id == request.device_id && n.key == request.key)?;
-    match &request.answer {
+    let packet = match &request.answer {
         Answer::Action(title) if note.actions.contains(title) => {
             notification_action::action_packet(&note.key, title)
         }
@@ -612,7 +649,69 @@ pub(crate) fn answer_packet(notes: &[PhoneNote], request: &AnswerRequest) -> Opt
             notification_action::reply_packet(&note.key, message)
         }
         _ => None,
+    }?;
+    Some(notification_action::with_answer_id(packet, &request.id))
+}
+
+/// Keep where an answer stands (E1), off the runtime but in order (E1
+/// review): each write is waited for, so states land as they happened.
+async fn note_answer(request: &AnswerRequest, state: answers::State) {
+    if cfg!(test) {
+        return;
     }
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let outcome = answers::Outcome {
+        id: request.id.clone(),
+        device_id: request.device_id.clone(),
+        key: request.key.clone(),
+        state,
+        at_unix: unix_now(),
+    };
+    let kept = tokio::task::spawn_blocking(move || answers::record(&dir, outcome)).await;
+    if let Ok(Err(e)) = kept {
+        tracing::warn!("Where an answer stands was not kept: {e}");
+    }
+}
+
+/// An answer this computer drops, kept with why (E1), not only logged.
+async fn dropped(request: &AnswerRequest, reason: &str) {
+    tracing::info!("An answer to a phone notification was dropped: {reason}");
+    note_answer(
+        request,
+        answers::State::NotSent {
+            reason: reason.to_string(),
+        },
+    )
+    .await;
+    tell_not_sent(reason);
+}
+
+/// An answer that will not reach the app, said on the desktop too (E1): one
+/// sent from a toast has no window to show it.
+fn tell_not_sent(reason: &str) {
+    if cfg!(test) {
+        return;
+    }
+    // A burst (many presses on a stale answer) shows one, not one each
+    // (E1 review); the log has them all.
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|at| at.elapsed() < Duration::from_secs(5)) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    let body = format!("Not sent: {reason}");
+    std::thread::spawn(move || {
+        crate::platform::notify(
+            "The answer was not sent",
+            &body,
+            std::time::Duration::from_secs(10),
+        );
+    });
 }
 
 /// Send the desktop app's answers to the phones' notifications (T10c),
@@ -624,6 +723,7 @@ pub async fn run_answers() {
         return;
     };
     let _ = phone_notes::clear(&dir);
+    let _ = answers::clear(&dir);
     // Answers for a phone not connected yet wait here, within their time.
     let mut waiting: Vec<AnswerRequest> = Vec::new();
     loop {
@@ -639,7 +739,11 @@ pub async fn run_answers() {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
         let now = unix_now();
-        waiting.extend(phone_notes::take_all(&dir, now));
+        let new = phone_notes::take_all(&dir, now);
+        for request in &new {
+            note_answer(request, answers::State::Waiting).await;
+        }
+        waiting.extend(new);
         if waiting.is_empty() {
             continue;
         }
@@ -648,27 +752,31 @@ pub async fn run_answers() {
         let mut still = Vec::new();
         for request in waiting.drain(..) {
             let Some(packet) = answer_packet(&notes, &request) else {
-                tracing::info!("An answer to a phone notification was dropped: not offered");
+                dropped(&request, "the notification no longer offers that answer").await;
                 continue;
             };
             if !crate::plugins::pair::permits(&request.device_id, &packet.packet_type) {
-                tracing::info!(
-                    "An answer to a phone notification was dropped: Notifications is off"
-                );
+                dropped(
+                    &request,
+                    "Notifications is off for this phone, on the Devices page",
+                )
+                .await;
                 continue;
             }
             let Some(phone) = clients.iter().find(|c| c.device_id() == request.device_id) else {
                 if now.saturating_sub(request.created_unix) < phone_notes::ANSWER_TTL_SECS {
                     still.push(request);
                 } else {
-                    tracing::info!(
-                        "An answer to a phone notification was dropped: the phone did not connect in time"
-                    );
+                    dropped(&request, "the phone did not connect within a minute").await;
                 }
                 continue;
             };
+            // Kept as sent before it goes (E1 review): the phone's word can
+            // come back before a write after the send would land.
+            note_answer(&request, answers::State::Sent).await;
             if let Err(e) = phone.send_packet(&packet).await {
                 tracing::warn!("An answer to a phone notification was not sent: {e}");
+                dropped(&request, "the link to the phone failed").await;
             }
         }
         waiting = still;
@@ -922,6 +1030,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(press.packet_type, notification_action::NOTIFICATION_ACTION);
+        // E1: it carries the request's id, for the phone to say how it went.
+        assert_eq!(
+            press.body["answerId"],
+            "00000000-0000-0000-0000-000000000000"
+        );
         assert!(
             answer_packet(&notes, &ask("phone", "k", Answer::Action("Delete".into()))).is_none(),
             "not offered"
@@ -1118,6 +1231,57 @@ mod tests {
             self.0.lock().unwrap().push(packet.clone());
             Ok(())
         }
+    }
+
+    /// E1 review: a phone's word is kept only for an answer sent to that
+    /// phone and waiting, and a word out of bounds is dropped.
+    #[tokio::test]
+    async fn a_phone_s_word_is_kept_only_for_its_own_answer() {
+        let dir = pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        std::fs::create_dir_all(dir).unwrap();
+        let sent = |id: &str, device: &str| answers::Outcome {
+            id: id.to_string(),
+            device_id: device.to_string(),
+            key: "k".to_string(),
+            state: answers::State::Sent,
+            at_unix: 1,
+        };
+        let theirs = "e1e1e1e1-0000-4000-8000-00000000a001";
+        let mine = "e1e1e1e1-0000-4000-8000-00000000a002";
+        let refused = "e1e1e1e1-0000-4000-8000-00000000a003";
+        for (id, device) in [(theirs, "phone-b"), (mine, "phone-a"), (refused, "phone-a")] {
+            answers::record(dir, sent(id, device)).unwrap();
+        }
+        let plugin = NotificationPlugin;
+        let phone = Phone(Default::default());
+        let word = |body: serde_json::Value| {
+            NetworkPacket::new(notification_action::NOTIFICATION_ANSWERED).with_body(body)
+        };
+        for body in [
+            json!({"answerId": theirs, "ok": true}),
+            json!({"answerId": mine, "ok": true}),
+            json!({"answerId": refused, "ok": false, "reason": "the app refused it"}),
+            json!({"answerId": "../x", "ok": false}),
+        ] {
+            plugin.handle_packet(&word(body), &phone).await.unwrap();
+        }
+        let kept = answers::read(dir);
+        let state = |id: &str| kept.iter().find(|a| a.id == id).unwrap().state.clone();
+        assert_eq!(
+            state(theirs),
+            answers::State::Sent,
+            "another phone's answer"
+        );
+        assert_eq!(state(mine), answers::State::Handed);
+        assert_eq!(
+            state(refused),
+            answers::State::NotSent {
+                reason: "the app refused it".to_string()
+            }
+        );
+        assert!(phone.0.lock().unwrap().is_empty(), "nothing answered");
     }
 
     /// A phone with Notifications off is told its notification was refused
