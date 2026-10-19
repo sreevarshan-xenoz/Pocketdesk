@@ -13,12 +13,15 @@ object StateWidgetPlan {
     enum class Why { Tap, Period }
 
     /**
-     * Whether to ask the computer: always for a tap or with nothing read
-     * yet (a widget just placed); for the system's period only when the
-     * owner lets it refresh by itself.
+     * Whether to ask the computer: always for a tap or when it was never
+     * [tried] (a widget just placed, a new last computer); for the system's
+     * period only when the owner lets it refresh by itself.
      */
-    fun ask(why: Why, hasReading: Boolean, auto: Boolean): Boolean =
-        why == Why.Tap || !hasReading || auto
+    fun ask(why: Why, tried: Boolean, auto: Boolean): Boolean =
+        why == Why.Tap || !tried || auto
+
+    /** Whether the computer was asked already: it answered, or it failed. */
+    fun tried(json: String?, failed: Boolean): Boolean = json != null || failed
 
     /** The widget's numbers, whole percents; a part not read is null. */
     data class Numbers(val cpu: Int?, val memory: Int?, val disk: Int?, val battery: Int?)

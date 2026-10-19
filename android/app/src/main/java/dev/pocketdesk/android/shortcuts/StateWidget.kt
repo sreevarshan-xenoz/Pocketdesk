@@ -45,7 +45,7 @@ class StateWidget : AppWidgetProvider() {
         if (ids.isEmpty()) return
         val host = HostStore.lastHost(app)
         val kept = Kept.read(app, host?.address)
-        if (host == null || !StateWidgetPlan.ask(why, kept.json != null, auto)) {
+        if (host == null || !StateWidgetPlan.ask(why, StateWidgetPlan.tried(kept.json, kept.failed), auto)) {
             redraw(app, manager, ids)
             return
         }
