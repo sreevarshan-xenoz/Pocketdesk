@@ -65,6 +65,12 @@ impl Dot {
         Some(at)
     }
 
+    /// The dot was still too long, its release likely lost (G4 review): it
+    /// is hidden, but keeps its place, so the next move goes on from there.
+    pub fn rest(&mut self) {
+        self.moved = None;
+    }
+
     /// Hide the dot; the next move starts it again from the pointer's screen.
     pub fn hide(&mut self) {
         self.at = None;
@@ -182,6 +188,19 @@ mod tests {
             None,
             "no screen"
         );
+    }
+
+    #[test]
+    fn a_rested_dot_goes_on_from_its_place_and_a_hidden_one_starts_again() {
+        let now = Instant::now();
+        let mut dot = Dot::default();
+        dot.moved(0, 0, &[LEFT], (0, 0), now);
+        dot.moved(100, 0, &[LEFT], (0, 0), now);
+        dot.rest();
+        assert!(!dot.idle(now + IDLE), "rested: not idle again");
+        assert_eq!(dot.moved(10, 0, &[LEFT], (0, 0), now), Some((1070, 540)));
+        dot.hide();
+        assert_eq!(dot.moved(10, 0, &[LEFT], (0, 0), now), Some((970, 540)));
     }
 
     #[test]

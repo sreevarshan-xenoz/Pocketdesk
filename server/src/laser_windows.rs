@@ -163,8 +163,10 @@ fn run(moves: Receiver<Move>) {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
+                // Still too long: the phone's release was likely lost. The
+                // window goes, the place is kept (G4 review).
                 if dot.idle(now) {
-                    dot.hide();
+                    dot.rest();
                     unsafe {
                         let _ = ShowWindow(hwnd, SW_HIDE);
                     }

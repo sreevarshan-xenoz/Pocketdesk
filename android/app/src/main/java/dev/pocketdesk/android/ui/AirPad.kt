@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +35,7 @@ import dev.pocketdesk.android.stream.AirMouse
 import dev.pocketdesk.android.stream.AirPress
 import dev.pocketdesk.android.stream.PadOutput
 import dev.pocketdesk.android.stream.launchPadSend
+import kotlinx.coroutines.delay
 import dev.pocketdesk.android.stream.sendPadOutputs
 
 /** Whether this phone has a gyroscope for the air mouse (F4). */
@@ -99,6 +101,17 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier, laser: Boo
             }
         }
     }
+    // G4 review: held with the laser on, the dot shows at once and is said
+    // again each second, so it never hides while the presenter holds still
+    // to aim (the computer hides a dot still for 2 s, for a lost release).
+    LaunchedEffect(held, laser) {
+        if (held && laser) {
+            while (true) {
+                launchPadSend { RustCore.sendLaser(0, 0, true) }
+                delay(LASER_KEEP_MS)
+            }
+        }
+    }
     DisposableEffect(held, listener) {
         if (held && gyroscope != null) {
             air.reset()
@@ -153,6 +166,9 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier, laser: Boo
         }
     }
 }
+
+/** How often a held laser says it is still there, under the computer's 2 s. */
+private const val LASER_KEEP_MS = 1_000L
 
 /**
  * Adds moves up while one is being sent, and sends the sum when it is done;
