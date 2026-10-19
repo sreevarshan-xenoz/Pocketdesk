@@ -6,7 +6,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 368 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 367 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
 | A phone with a SIM | 21 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 87 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 50 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 51 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -695,9 +695,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **117. The phone's folders as a drive (D8)**
 
 - File Explorer at the Windows address: browse, open a photo, copy one out.
-- A file over 50 MB in Explorer (refused by Windows' limit), and with curl.
+- A file over 50 MB in Explorer (refused by Windows' limit).
 - A phone from before D8: the file lands in Downloads, the drive answers 504 after the wait.
-- The setting off: the address gone from the Phone page, and the port closed.
 
 **118. Lock when the phone leaves (D9)**
 
@@ -1542,7 +1541,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **106. Notifications that wait and go later (C3)**
 
-- Settings "When the computer is out of reach": each choice on screen, and Don't wait dropping a notification posted while the computer is away.
+- "Wait up to 10 minutes" on screen, and one posted more than 10 minutes before the computer comes back.
 
 **107. The desktop app's headless harness (C4)**
 
@@ -1573,6 +1572,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **117. The phone's folders as a drive (D8)**
 
 - Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).
+- The setting off: the address gone from the Phone page (by eye).
 
 **120. Answers that say how they went (E1)**
 
