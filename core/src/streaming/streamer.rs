@@ -93,6 +93,17 @@ impl Drop for CastEnded {
     }
 }
 
+/// What a screen session's ready stream says this computer takes (E3): a
+/// pen only for a phone whose input is taken (E3 review: one in view-only
+/// was offered a pen whose every stroke was dropped).
+fn screen_feature_byte(input: bool) -> u8 {
+    let mut byte = super::client::SCREEN_FEATURES_SAID;
+    if input {
+        byte |= super::client::SCREEN_FEATURE_PEN;
+    }
+    byte
+}
+
 /// Whether a session without a picture drops `packet`: it is about a
 /// picture, or a sound the session does not have. A remote (T10i) has no
 /// sound; a sound session (N5) is the computer's mic, so it keeps the mic.
@@ -102,6 +113,7 @@ fn about_the_stream(packet: &InputPacket, sound: bool) -> bool {
         _ => matches!(
             packet,
             InputPacket::MouseMoveAbs { .. }
+                | InputPacket::Pen(_)
                 | InputPacket::RequestKeyframe
                 | InputPacket::WindowCrop { .. }
                 | InputPacket::FullQuality { .. }
@@ -597,6 +609,26 @@ impl StreamingServer {
                 info!("Sound session: no capture or encode, sound both ways");
             } else {
                 info!("Input-only session: no capture, encode or sound");
+            }
+        } else {
+            // A screen session hears what this computer takes (E3); an older
+            // phone reads the ready stream and ignores its bytes.
+            match connection.open_uni().await {
+                Ok(mut ready) => {
+                    let header = super::transport::PacketHeader {
+                        sequence: 0,
+                        stream_kind: super::transport::STREAM_KIND_READY,
+                        is_keyframe: false,
+                        timestamp_us: 0,
+                    };
+                    let mut said = header.as_bytes().to_vec();
+                    said.push(screen_feature_byte(!force_view_only));
+                    if let Err(e) = ready.write_all(&said).await {
+                        debug!(error = %e, "Could not say what this computer takes");
+                    }
+                    let _ = ready.finish();
+                }
+                Err(e) => debug!(error = %e, "Could not say what this computer takes"),
             }
         }
         // The relay learns of the cast, with a way to ask the phone for a
@@ -1528,6 +1560,14 @@ impl StreamingServer {
                                                     ) if !cropped => {
                                                         let (x_norm, y_norm) = space.remap(x_norm, y_norm);
                                                         InputPacket::MouseMoveAbs { x_norm, y_norm }
+                                                    }
+                                                    // A pen lands where a tap would (E3).
+                                                    (InputPacket::Pen(mut pen), Some(space))
+                                                        if !cropped =>
+                                                    {
+                                                        (pen.x_norm, pen.y_norm) =
+                                                            space.remap(pen.x_norm, pen.y_norm);
+                                                        InputPacket::Pen(pen)
                                                     }
                                                     (packet, _) => packet,
                                                 };
@@ -2476,6 +2516,20 @@ mod tests {
     }
 
     #[test]
+    fn a_pen_is_offered_only_to_a_phone_whose_input_is_taken() {
+        use super::super::client::{SCREEN_FEATURE_PEN, screen_features};
+        assert_eq!(
+            screen_features(&[screen_feature_byte(true)]) & SCREEN_FEATURE_PEN,
+            SCREEN_FEATURE_PEN
+        );
+        assert_eq!(
+            screen_features(&[screen_feature_byte(false)]) & SCREEN_FEATURE_PEN,
+            0,
+            "said, and no pen"
+        );
+    }
+
+    #[test]
     fn an_input_only_session_drops_what_is_about_the_picture() {
         assert!(about_the_stream(
             &InputPacket::MouseMoveAbs {
@@ -2487,6 +2541,11 @@ mod tests {
         assert!(about_the_stream(&InputPacket::RequestKeyframe, false));
         assert!(!about_the_stream(
             &InputPacket::MouseMove { dx: 1, dy: 1 },
+            false
+        ));
+        // A pen draws on the picture there is not (E3).
+        assert!(about_the_stream(
+            &InputPacket::Pen(crate::streaming::input_packet::PenSample::default()),
             false
         ));
     }

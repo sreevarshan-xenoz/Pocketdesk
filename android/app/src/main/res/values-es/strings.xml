@@ -53,6 +53,11 @@
     <string name="link_poor">Mala conexión</string>
     <string name="settings_trackpad_speed">Velocidad del panel táctil</string>
     <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo panel táctil</string>
+    <string name="settings_pen_pressure">Presión del lápiz</string>
+    <string name="settings_pen_pressure_summary">En modo lápiz, cuánto hay que presionar para el trazo completo. Un lápiz óptico dibuja mejor: la mayoría de los teléfonos solo estiman la presión de un dedo.</string>
+    <string name="pen_pressure_soft">Suave</string>
+    <string name="pen_pressure_even">Normal</string>
+    <string name="pen_pressure_firm">Firme</string>
     <string name="settings_system">Sistema</string>
     <string name="settings_about">Acerca de</string>
     <string name="app_version">Versión %1$s</string>
@@ -84,6 +89,7 @@
     <string name="exit">Salir</string>
     <string name="mode_direct_touch">Toque directo</string>
     <string name="mode_trackpad">Panel táctil</string>
+    <string name="mode_pen">Lápiz</string>
     <string name="ring_pc">Hacer sonar PC</string>
     <string name="paired">Emparejado ✓</string>
     <string name="privacy_error">Privacidad: %1$s</string>
@@ -157,6 +163,7 @@
     <string name="row_pairing">Emparejamiento</string>
     <string name="value_direct_touch">Toque directo</string>
     <string name="value_trackpad">Panel táctil</string>
+    <string name="value_pen">Lápiz</string>
     <string name="value_quality_auto">Auto</string>
     <string name="value_quality_max">Máxima</string>
     <string name="value_quality_balanced">Equilibrada</string>

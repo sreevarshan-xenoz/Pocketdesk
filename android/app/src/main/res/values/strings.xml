@@ -62,6 +62,11 @@
     <string name="link_poor">Poor connection</string>
     <string name="settings_trackpad_speed">Trackpad speed</string>
     <string name="settings_trackpad_speed_summary">How far the cursor moves for each finger movement in trackpad mode</string>
+    <string name="settings_pen_pressure">Pen pressure</string>
+    <string name="settings_pen_pressure_summary">In pen mode, how hard you press for full ink. A stylus draws best: most phones only guess the pressure of a finger.</string>
+    <string name="pen_pressure_soft">Soft</string>
+    <string name="pen_pressure_even">Even</string>
+    <string name="pen_pressure_firm">Firm</string>
     <string name="settings_system">System</string>
     <string name="settings_about">About</string>
     <string name="app_version">Version %1$s</string>
@@ -93,6 +98,7 @@
     <string name="exit">Exit</string>
     <string name="mode_direct_touch">Direct touch</string>
     <string name="mode_trackpad">Trackpad</string>
+    <string name="mode_pen">Pen</string>
     <string name="ring_pc">Ring PC</string>
     <string name="paired">Paired ✓</string>
     <string name="privacy_error">Privacy: %1$s</string>
@@ -164,6 +170,7 @@
     <string name="row_pairing">Pairing</string>
     <string name="value_direct_touch">Direct touch</string>
     <string name="value_trackpad">Trackpad</string>
+    <string name="value_pen">Pen</string>
     <string name="value_quality_auto">Auto</string>
     <string name="value_quality_max">Max</string>
     <string name="value_quality_balanced">Balanced</string>

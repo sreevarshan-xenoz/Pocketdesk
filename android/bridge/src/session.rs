@@ -456,6 +456,12 @@ pub(crate) fn take_file_offers_json() -> String {
 pub(crate) static REMOTE: std::sync::Mutex<Option<pocketdesk_core::streaming::RemoteFlags>> =
     std::sync::Mutex::new(None);
 
+/// What the live screen session's computer says it takes (E3), as its ready
+/// stream said; `None` with no screen session.
+pub(crate) static SCREEN_FEATURES: std::sync::Mutex<
+    Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
+> = std::sync::Mutex::new(None);
+
 pub(crate) struct StreamingHandle {
     pub(crate) address: String,
     pub(crate) port: u16,

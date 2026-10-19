@@ -15,7 +15,8 @@ use enigo::{Coordinate, Enigo, Key, Keyboard, Mouse};
 use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
 #[cfg(target_os = "linux")]
 use evdev::{
-    AbsInfo, AbsoluteAxisCode, AttributeSet, InputEvent, KeyCode, RelativeAxisCode, UinputAbsSetup,
+    AbsInfo, AbsoluteAxisCode, AttributeSet, InputEvent, KeyCode, PropType, RelativeAxisCode,
+    UinputAbsSetup,
 };
 #[cfg(target_os = "linux")]
 use pocketdesk_core::streaming::portal_input::PortalEvent;
@@ -23,6 +24,7 @@ use pocketdesk_core::streaming::portal_input::PortalEvent;
 // same `KeyCode::KEY_*.0` shape as the evdev crate.
 #[cfg(not(target_os = "linux"))]
 use pocketdesk_core::input::evdev_codes::KeyCode;
+use pocketdesk_core::streaming::PenSample;
 use pocketdesk_core::streaming::input_packet::InputPacket;
 #[cfg(target_os = "linux")]
 use std::path::Path;
@@ -252,6 +254,8 @@ struct UinputState {
     /// touchscreens on this box, but an ABS pointer maps 1:1 onto the layout
     /// and moves the real cursor (verified with `hyprctl cursorpos`).
     abs: Option<VirtualDevice>,
+    /// The phone's pen (E3): a tablet with pressure and tilt.
+    pen: Option<VirtualDevice>,
 }
 
 #[cfg(target_os = "linux")]
@@ -268,10 +272,32 @@ pub struct InputInjector {
     /// Button mask of the previous `Gamepad` packet. That packet is a state
     /// snapshot, so every bit must be treated as an edge (see 2063).
     gamepad_buttons: u16,
+    /// The phone's pen (E3).
+    pen: PenState,
     /// The compositor's virtual keyboard for text (roadmap F4): not tried
     /// yet (`None`), not offered (`Some(None)`), or ready.
     #[cfg(target_os = "linux")]
     vkeyboard: VkState,
+}
+
+/// The phone's pen (E3): where it was, for the mouse it becomes where
+/// there is no pen device, and Windows' synthetic pen, made at its first
+/// sample.
+#[derive(Debug, Default)]
+struct PenState {
+    phase: crate::pen::PenPhase,
+    #[cfg(windows)]
+    windows: WindowsPenState,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Default)]
+enum WindowsPenState {
+    #[default]
+    Untried,
+    Ready(crate::input_pen_windows::WindowsPen),
+    /// This Windows makes none (before 10 1809): the pen is the mouse.
+    Unavailable,
 }
 
 /// The compositor's virtual keyboard for text (roadmap F4).
@@ -401,6 +427,7 @@ impl InputInjector {
             Ok(Self {
                 backend: InputBackend::SendInput(crate::input_sendinput::SendInputBackend::new()),
                 gamepad_buttons: 0,
+                pen: PenState::default(),
             })
         }
         #[cfg(not(windows))]
@@ -425,6 +452,7 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Wlr(wlr),
                                 gamepad_buttons: 0,
+                                pen: PenState::default(),
                                 vkeyboard: VkState::Untried,
                             });
                         }
@@ -438,6 +466,7 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Portal,
                                 gamepad_buttons: 0,
+                                pen: PenState::default(),
                                 vkeyboard: VkState::Untried,
                             });
                         }
@@ -456,6 +485,7 @@ impl InputInjector {
                 return Ok(Self {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
+                    pen: PenState::default(),
                     #[cfg(target_os = "linux")]
                     vkeyboard: VkState::Untried,
                 });
@@ -500,8 +530,14 @@ impl InputInjector {
             backend: InputBackend::Uinput(Mutex::new(UinputState {
                 main: device,
                 abs: Some(build_abs_device()?),
+                // Built now for the same reason; a computer that cannot
+                // make one has the pen as the mouse.
+                pen: build_pen_device()
+                    .inspect_err(|e| warn!(error = %e, "No uinput pen: the pen is the mouse"))
+                    .ok(),
             })),
             gamepad_buttons: 0,
+            pen: PenState::default(),
             vkeyboard: VkState::Untried,
         })
     }
@@ -573,6 +609,63 @@ impl InputInjector {
                 emit_uinput(guard, UinputDevice::Abs, &events, "absolute move")
             }
         }
+    }
+
+    /// A pen sample (E3): Windows' synthetic pen, or the uinput tablet;
+    /// elsewhere, or where neither can be made, the mouse, which moves with
+    /// the pen and holds the left button while it touches.
+    pub fn pen(&mut self, sample: &PenSample) -> Result<()> {
+        #[cfg(windows)]
+        {
+            if matches!(self.pen.windows, WindowsPenState::Untried) {
+                self.pen.windows = match crate::input_pen_windows::WindowsPen::new() {
+                    Ok(pen) => {
+                        info!("Pen input: Windows' synthetic pen");
+                        WindowsPenState::Ready(pen)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "No synthetic pen on this Windows: the pen is the mouse");
+                        WindowsPenState::Unavailable
+                    }
+                };
+            }
+            if let WindowsPenState::Ready(pen) = &mut self.pen.windows {
+                match pen.inject(sample) {
+                    Ok(()) => return Ok(()),
+                    // A pen Windows makes but never takes (E3 review): the
+                    // mouse stands in from now on.
+                    Err(e) => {
+                        tracing::warn!(error = %e, "The synthetic pen does not work here: the pen is the mouse");
+                        self.pen.windows = WindowsPenState::Unavailable;
+                    }
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if let InputBackend::Uinput(state) = &mut self.backend {
+            let guard = state.get_mut().unwrap();
+            if guard.pen.is_some() {
+                return emit_uinput(guard, UinputDevice::Pen, &pen_events(sample), "pen");
+            }
+        }
+        self.pen_as_mouse(sample)
+    }
+
+    /// The pen as the mouse: it moves while in range, and the left button
+    /// is down while it touches.
+    fn pen_as_mouse(&mut self, sample: &PenSample) -> Result<()> {
+        let before = std::mem::replace(&mut self.pen.phase, crate::pen::PenPhase::of(sample));
+        if sample.in_range() {
+            self.move_mouse_normalized_abs(sample.x_norm, sample.y_norm)?;
+        }
+        for step in crate::pen::steps(before, sample) {
+            match step {
+                crate::pen::PenStep::Down => self.mouse_button(MouseKey::Left, true)?,
+                crate::pen::PenStep::Up => self.mouse_button(MouseKey::Left, false)?,
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// Press or release a mouse button
@@ -870,6 +963,7 @@ impl InputInjector {
                 self.mouse_button(mouse_key, *pressed)
             }
             InputPacket::MouseScroll { dx, dy } => self.scroll(*dx as i32, *dy as i32),
+            InputPacket::Pen(sample) => self.pen(sample),
             InputPacket::KeyEvent { key, pressed } => self.inject_keycode(*key, *pressed),
             InputPacket::Text(text) => self.text(text),
             // Control-plane request, intercepted by the streaming server before
@@ -1053,17 +1147,12 @@ fn emit_uinput(
     events: &[InputEvent],
     what: &str,
 ) -> Result<()> {
-    if which == UinputDevice::Abs && state.abs.is_none() {
-        state.abs = Some(build_abs_device()?);
+    if device_mut(state, which).is_none() {
+        set_device(state, which, build_uinput(which)?);
     }
-    let first = match which {
-        UinputDevice::Main => state.main.emit(events),
-        UinputDevice::Abs => state
-            .abs
-            .as_mut()
-            .expect("absent abs device was just built")
-            .emit(events),
-    };
+    let first = device_mut(state, which)
+        .expect("an absent device was just built")
+        .emit(events);
     match first {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -1073,24 +1162,35 @@ fn emit_uinput(
                 action = what,
                 "uinput emit failed, rebuilding the device and retrying"
             );
-            let fresh = build_uinput(which)?;
-            let dev = match which {
-                UinputDevice::Main => {
-                    state.main = fresh;
-                    &mut state.main
-                }
-                UinputDevice::Abs => {
-                    state.abs = Some(fresh);
-                    state.abs.as_mut().unwrap()
-                }
-            };
-            dev.emit(events)
+            set_device(state, which, build_uinput(which)?);
+            device_mut(state, which)
+                .expect("the device was just rebuilt")
+                .emit(events)
                 .with_context(|| format!("uinput {what} failed again after its device was rebuilt"))
         }
     }
 }
 
-/// Which of the two uinput devices an emit is aimed at.
+/// The device `which` names, if built.
+#[cfg(target_os = "linux")]
+fn device_mut(state: &mut UinputState, which: UinputDevice) -> Option<&mut VirtualDevice> {
+    match which {
+        UinputDevice::Main => Some(&mut state.main),
+        UinputDevice::Abs => state.abs.as_mut(),
+        UinputDevice::Pen => state.pen.as_mut(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn set_device(state: &mut UinputState, which: UinputDevice, device: VirtualDevice) {
+    match which {
+        UinputDevice::Main => state.main = device,
+        UinputDevice::Abs => state.abs = Some(device),
+        UinputDevice::Pen => state.pen = Some(device),
+    }
+}
+
+/// Which of the uinput devices an emit is aimed at.
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UinputDevice {
@@ -1098,6 +1198,8 @@ enum UinputDevice {
     Main,
     /// The `ABS_X`/`ABS_Y` pointer direct-touch motion rides.
     Abs,
+    /// The phone's pen (E3).
+    Pen,
 }
 
 #[cfg(target_os = "linux")]
@@ -1106,6 +1208,7 @@ impl UinputDevice {
         match self {
             UinputDevice::Main => "Pocketdesk Virtual Input",
             UinputDevice::Abs => "Pocketdesk Virtual Abs Pointer",
+            UinputDevice::Pen => "Pocketdesk Virtual Pen",
         }
     }
 }
@@ -1115,7 +1218,81 @@ fn build_uinput(which: UinputDevice) -> Result<VirtualDevice> {
     match which {
         UinputDevice::Main => build_main_device(),
         UinputDevice::Abs => build_abs_device(),
+        UinputDevice::Pen => build_pen_device(),
     }
+}
+
+/// The phone's pen (E3) as a screen tablet: position over the layout as the
+/// abs pointer's, pressure 0..=65535, tilt in degrees, and the tool, touch
+/// and side button.
+#[cfg(target_os = "linux")]
+fn build_pen_device() -> Result<VirtualDevice> {
+    let mut keys = AttributeSet::<KeyCode>::new();
+    for key in [
+        KeyCode::BTN_TOOL_PEN,
+        KeyCode::BTN_TOUCH,
+        KeyCode::BTN_STYLUS,
+    ] {
+        keys.insert(key);
+    }
+    // A screen tablet: its positions are the screen's, as a phone's are.
+    let mut props = AttributeSet::<PropType>::new();
+    props.insert(PropType::DIRECT);
+    // libinput wants a resolution on a tablet's axes: units per mm for the
+    // position (any, as it maps onto the screen), per radian for the tilt.
+    let axis = |code: AbsoluteAxisCode, min: i32, max: i32, resolution: i32| {
+        UinputAbsSetup::new(code, AbsInfo::new(0, min, max, 0, 0, resolution))
+    };
+    let tilt = i32::from(pocketdesk_core::streaming::input_packet::PEN_MAX_TILT);
+    #[allow(deprecated)]
+    let device = VirtualDeviceBuilder::new()
+        .context("Failed to create pen builder")?
+        .with_keys(&keys)
+        .context("Failed to set up the pen's buttons")?
+        .with_properties(&props)
+        .context("Failed to mark the pen a screen tablet")?
+        .with_absolute_axis(&axis(AbsoluteAxisCode::ABS_X, 0, ABS_MAX_COORD, 100))
+        .context("Failed to set up the pen's ABS_X")?
+        .with_absolute_axis(&axis(AbsoluteAxisCode::ABS_Y, 0, ABS_MAX_COORD, 100))
+        .context("Failed to set up the pen's ABS_Y")?
+        .with_absolute_axis(&axis(AbsoluteAxisCode::ABS_PRESSURE, 0, 65_535, 0))
+        .context("Failed to set up the pen's pressure")?
+        .with_absolute_axis(&axis(AbsoluteAxisCode::ABS_TILT_X, -tilt, tilt, 57))
+        .context("Failed to set up the pen's ABS_TILT_X")?
+        .with_absolute_axis(&axis(AbsoluteAxisCode::ABS_TILT_Y, -tilt, tilt, 57))
+        .context("Failed to set up the pen's ABS_TILT_Y")?
+        .name(b"Pocketdesk Virtual Pen")
+        .build()
+        .context("Failed to build the uinput pen")?;
+    Ok(device)
+}
+
+/// One pen sample as the tablet's events: out of range lifts the tool, so
+/// the cursor is the mouse's again.
+#[cfg(target_os = "linux")]
+fn pen_events(sample: &PenSample) -> Vec<InputEvent> {
+    let abs = |code: AbsoluteAxisCode, value: i32| InputEvent::new(EV_ABS, code.0, value);
+    let key = |code: KeyCode, down: bool| InputEvent::new(EV_KEY, code.0, i32::from(down));
+    let range = sample.in_range();
+    let contact = sample.in_contact();
+    vec![
+        abs(AbsoluteAxisCode::ABS_X, i32::from(sample.x_norm)),
+        abs(AbsoluteAxisCode::ABS_Y, i32::from(sample.y_norm)),
+        abs(
+            AbsoluteAxisCode::ABS_PRESSURE,
+            if contact {
+                i32::from(sample.pressure)
+            } else {
+                0
+            },
+        ),
+        abs(AbsoluteAxisCode::ABS_TILT_X, i32::from(sample.tilt_x)),
+        abs(AbsoluteAxisCode::ABS_TILT_Y, i32::from(sample.tilt_y)),
+        key(KeyCode::BTN_TOOL_PEN, range),
+        key(KeyCode::BTN_TOUCH, contact),
+        key(KeyCode::BTN_STYLUS, range && sample.barrel()),
+        InputEvent::new(EV_SYN, SYN_REPORT, 0),
+    ]
 }
 
 /// Build the keyboard + relative-pointer + button device.
@@ -1763,6 +1940,59 @@ mod tests {
         );
     }
 
+    /// E3: a pen sample is the tablet's events: pressure only in contact,
+    /// the tool while in range, the side button with it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_pen_sample_is_the_tablet_s_events() {
+        use pocketdesk_core::streaming::{PEN_BARREL, PEN_CONTACT, PEN_IN_RANGE};
+        fn value(events: &[InputEvent], kind: u16, code: u16) -> Option<i32> {
+            events
+                .iter()
+                .find(|e| e.event_type().0 == kind && e.code() == code)
+                .map(|e| e.value())
+        }
+        let touching = pen_events(&PenSample {
+            x_norm: 10,
+            y_norm: 20,
+            pressure: 300,
+            tilt_x: 5,
+            tilt_y: -5,
+            flags: PEN_CONTACT | PEN_IN_RANGE | PEN_BARREL,
+        });
+        assert_eq!(
+            value(&touching, EV_ABS, AbsoluteAxisCode::ABS_X.0),
+            Some(10)
+        );
+        assert_eq!(
+            value(&touching, EV_ABS, AbsoluteAxisCode::ABS_PRESSURE.0),
+            Some(300)
+        );
+        assert_eq!(
+            value(&touching, EV_ABS, AbsoluteAxisCode::ABS_TILT_Y.0),
+            Some(-5)
+        );
+        assert_eq!(value(&touching, EV_KEY, KeyCode::BTN_TOOL_PEN.0), Some(1));
+        assert_eq!(value(&touching, EV_KEY, KeyCode::BTN_TOUCH.0), Some(1));
+        assert_eq!(value(&touching, EV_KEY, KeyCode::BTN_STYLUS.0), Some(1));
+        assert_eq!(touching.last().map(|e| e.event_type().0), Some(EV_SYN));
+
+        let hovering = pen_events(&PenSample {
+            pressure: 300,
+            flags: PEN_IN_RANGE,
+            ..PenSample::default()
+        });
+        assert_eq!(
+            value(&hovering, EV_ABS, AbsoluteAxisCode::ABS_PRESSURE.0),
+            Some(0)
+        );
+        assert_eq!(value(&hovering, EV_KEY, KeyCode::BTN_TOUCH.0), Some(0));
+        assert_eq!(value(&hovering, EV_KEY, KeyCode::BTN_TOOL_PEN.0), Some(1));
+
+        let gone = pen_events(&PenSample::default());
+        assert_eq!(value(&gone, EV_KEY, KeyCode::BTN_TOOL_PEN.0), Some(0));
+    }
+
     /// Roadmap 2064: a uinput device that faults at write time is rebuilt and
     /// the packet retried, instead of ending the session's input path for good.
     ///
@@ -1780,6 +2010,7 @@ mod tests {
         let mut state = UinputState {
             main: build_main_device().expect("uinput is present but its device could not be built"),
             abs: None,
+            pen: None,
         };
 
         // A bare SYN_REPORT: the kernel accepts it on any device, and the test
@@ -1794,7 +2025,9 @@ mod tests {
             "the abs device stays absent after an emit aimed at it"
         );
 
-        for which in [UinputDevice::Main, UinputDevice::Abs] {
+        emit_uinput(&mut state, UinputDevice::Pen, &syn, "pen")
+            .expect("the pen should be built on first use");
+        for which in [UinputDevice::Main, UinputDevice::Abs, UinputDevice::Pen] {
             fault_device(&mut state, which, &syn);
             emit_uinput(&mut state, which, &syn, "test emit").unwrap_or_else(|error| {
                 panic!(
@@ -1816,10 +2049,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn fault_device(state: &mut UinputState, which: UinputDevice, events: &[InputEvent]) {
         use std::os::fd::AsRawFd;
-        let device = match which {
-            UinputDevice::Main => &mut state.main,
-            UinputDevice::Abs => state.abs.as_mut().expect("abs device already built"),
-        };
+        let device = device_mut(state, which).expect("device already built");
         let null = std::fs::File::open("/dev/null").expect("no readable /dev/null");
         let redirected = unsafe { libc::dup2(null.as_raw_fd(), device.as_raw_fd()) };
         assert_eq!(

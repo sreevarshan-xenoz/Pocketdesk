@@ -26,6 +26,49 @@ const TAG_MIC: u8 = 11;
 const TAG_QUALITY_PRESET: u8 = 12;
 const TAG_LINK_FEEDBACK: u8 = 13;
 const TAG_CLIENT_SAMPLES: u8 = 14;
+const TAG_PEN: u8 = 15;
+
+/// A [`PenSample`]'s flags (E3). Bits not named here are ignored.
+pub const PEN_CONTACT: u8 = 1;
+/// The pen is within reach of the screen: hovering, or in contact. A sample
+/// without it says the pen left.
+pub const PEN_IN_RANGE: u8 = 1 << 1;
+/// The stylus's side button is held.
+pub const PEN_BARREL: u8 = 1 << 2;
+/// The stylus's eraser end (sent; not yet acted on).
+pub const PEN_ERASER: u8 = 1 << 3;
+
+/// The steepest tilt a [`PenSample`] says, in degrees either way.
+pub const PEN_MAX_TILT: i8 = 90;
+
+/// One sample of a pen on the phone's screen (E3): where it is, as
+/// [`InputPacket::MouseMoveAbs`] says it (0..=65535 over the picture), how
+/// hard it presses (0..=65535), its tilt in degrees each way (a finger's
+/// is 0), and [`PEN_CONTACT`] and the other flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PenSample {
+    pub x_norm: u16,
+    pub y_norm: u16,
+    pub pressure: u16,
+    pub tilt_x: i8,
+    pub tilt_y: i8,
+    pub flags: u8,
+}
+
+impl PenSample {
+    pub fn in_contact(&self) -> bool {
+        self.flags & PEN_CONTACT != 0
+    }
+
+    /// In range: in contact counts, whatever the flags say.
+    pub fn in_range(&self) -> bool {
+        self.flags & (PEN_IN_RANGE | PEN_CONTACT) != 0
+    }
+
+    pub fn barrel(&self) -> bool {
+        self.flags & PEN_BARREL != 0
+    }
+}
 
 /// Which client-side distribution a [`InputPacket::ClientSamples`] batch
 /// belongs to. Shared client↔server like the preset ids, so these must never
@@ -240,6 +283,9 @@ pub enum InputPacket {
     /// Values are clamped to [`MAX_SAMPLE_MICROS`] on the way in; use
     /// [`clamp_sample_micros`] so the rule has one definition.
     ClientSamples { kind: u8, values: Vec<u32> },
+    /// A pen on the phone's screen (E3): injected as a pen where the
+    /// computer has one, else as the mouse.
+    Pen(PenSample),
     /// Gamepad state: 6 analog axes + 16-bit button bitmask.
     Gamepad {
         /// Left stick X, Left stick Y, Right stick X, Right stick Y, L2, R2.
@@ -283,6 +329,17 @@ impl InputPacket {
                 let mut buf = vec![TAG_KEY_EVENT];
                 buf.extend_from_slice(&key.to_le_bytes());
                 buf.push(if *pressed { 1 } else { 0 });
+                buf
+            }
+            InputPacket::Pen(pen) => {
+                let mut buf = Vec::with_capacity(10);
+                buf.push(TAG_PEN);
+                buf.extend_from_slice(&pen.x_norm.to_le_bytes());
+                buf.extend_from_slice(&pen.y_norm.to_le_bytes());
+                buf.extend_from_slice(&pen.pressure.to_le_bytes());
+                buf.extend_from_slice(&pen.tilt_x.to_le_bytes());
+                buf.extend_from_slice(&pen.tilt_y.to_le_bytes());
+                buf.push(pen.flags);
                 buf
             }
             InputPacket::Gamepad { axes, buttons } => {
@@ -426,6 +483,18 @@ impl InputPacket {
                 let pressed = data[3] != 0;
                 Ok(InputPacket::KeyEvent { key, pressed })
             }
+            TAG_PEN => {
+                anyhow::ensure!(data.len() == 10, "Pen packet is not 10 bytes");
+                let tilt = |b: u8| (b as i8).clamp(-PEN_MAX_TILT, PEN_MAX_TILT);
+                Ok(InputPacket::Pen(PenSample {
+                    x_norm: u16::from_le_bytes(data[1..3].try_into().unwrap()),
+                    y_norm: u16::from_le_bytes(data[3..5].try_into().unwrap()),
+                    pressure: u16::from_le_bytes(data[5..7].try_into().unwrap()),
+                    tilt_x: tilt(data[7]),
+                    tilt_y: tilt(data[8]),
+                    flags: data[9],
+                }))
+            }
             TAG_GAMEPAD => {
                 anyhow::ensure!(data.len() >= 15, "Gamepad packet too short");
                 let mut axes = [0i16; 6];
@@ -550,6 +619,48 @@ impl From<InputPacket> for Vec<u8> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn a_pen_sample_goes_both_ways_in_ten_bytes() {
+        let pen = PenSample {
+            x_norm: 12_345,
+            y_norm: 65_535,
+            pressure: 40_000,
+            tilt_x: -30,
+            tilt_y: 45,
+            flags: PEN_CONTACT | PEN_IN_RANGE | PEN_BARREL,
+        };
+        let data = InputPacket::Pen(pen).encode();
+        assert_eq!(data.len(), 10);
+        assert_eq!(data[0], 15, "tags are never renumbered");
+        match InputPacket::decode(&data).unwrap() {
+            InputPacket::Pen(got) => {
+                assert_eq!(got, pen);
+                assert!(got.in_contact() && got.in_range() && got.barrel());
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+        assert!(InputPacket::decode(&data[..9]).is_err(), "short");
+        let mut long = data.clone();
+        long.push(0);
+        assert!(InputPacket::decode(&long).is_err(), "exactly ten bytes");
+    }
+
+    #[test]
+    fn a_pen_sample_s_tilt_is_held_to_ninety_degrees_and_contact_means_in_range() {
+        let mut data = InputPacket::Pen(PenSample::default()).encode();
+        data[7] = (-128i8) as u8;
+        data[8] = 127;
+        data[9] = PEN_CONTACT | 0xF0;
+        let InputPacket::Pen(got) = InputPacket::decode(&data).unwrap() else {
+            panic!("not a pen");
+        };
+        assert_eq!((got.tilt_x, got.tilt_y), (-90, 90));
+        assert!(got.in_range(), "a pen in contact is in range");
+        assert!(!got.barrel());
+        let left = PenSample::default();
+        assert!(!left.in_range() && !left.in_contact());
+    }
 
     #[test]
     fn test_mouse_move_roundtrip() {

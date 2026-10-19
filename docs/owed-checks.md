@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-603 open items.
+611 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 352 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 357 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 42 |
 | A phone with a SIM | 21 |
-| A second phone | 5 |
+| A second phone | 6 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 5 |
-| A Linux desktop (the Azure VM serves for some) | 85 |
+| A Linux desktop (the Azure VM serves for some) | 86 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 47 |
 
@@ -722,6 +722,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With the window closed: a phone that must ask, an ask-first task, and a phone's "Show screen" each start the window (once each), with the prompt or the screen.
 
+**122. The phone as a pen (E3)**
+
+- Windows: a pen session from the A71 into that window: pressure following the touch, Down and Up once per stroke.
+- A drawing app with pressure (Krita or Paint) on Windows: strokes thin and thick with the touch.
+- Pen pressure Soft, Even and Firm change the ink for one touch.
+- A pinch while in Pen lifts the pen and zooms the view, and the stroke does not go on after it.
+- Pen is not offered on a computer from before E3, and a session that meets one again goes back to Direct touch.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -890,6 +898,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Rotation: taps land right after the phone turns.
 
+**122. The phone as a pen (E3)**
+
+- A stylus (the A71 has none): hover moves the cursor without drawing, tilt and the side button reach the app.
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -970,6 +982,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **100. GNOME and KDE hosts that work unattended (N8)**
 
 - Two phones at once, then one leaving: the other's picture and input go on.
+
+**122. The phone as a pen (E3)**
+
+- Control moving to another phone mid-stroke lifts the pen.
 
 ## Away from home: another network, or through a router
 
@@ -1300,6 +1316,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **121. The tray on its own (E2)**
 
 - Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close).
+
+**122. The phone as a pen (E3)**
+
+- Linux: the uinput tablet (Krita, or `libinput debug-events` showing a tablet tool), and the mouse fallback without uinput.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
