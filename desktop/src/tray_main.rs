@@ -155,5 +155,5 @@ fn open_window(state_dir: &Path, page: &str, phone: Option<&str>) -> std::io::Re
     } else {
         "pocketdesk-app"
     });
-    std::process::Command::new(window).spawn().map(|_| ())
+    tray_instance::start(&window)
 }

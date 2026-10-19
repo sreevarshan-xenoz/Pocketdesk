@@ -68,7 +68,7 @@ fn main() -> eframe::Result {
     let tray = match tray_program {
         Some(program) => {
             if !tray_instance::running()
-                && let Err(e) = std::process::Command::new(&program).spawn()
+                && let Err(e) = tray_instance::start(&program)
             {
                 eprintln!("Pocketdesk: the tray program did not start ({e})");
             }

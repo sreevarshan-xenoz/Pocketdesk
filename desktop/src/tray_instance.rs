@@ -98,6 +98,16 @@ pub fn running() -> bool {
     std::os::unix::net::UnixStream::connect(socket_path()).is_ok()
 }
 
+/// Start `program`, waited for on a thread of its own so that on Linux it
+/// leaves no zombie when it ends before the one that started it (E2 review).
+pub fn start(program: &std::path::Path) -> std::io::Result<()> {
+    let mut child = std::process::Command::new(program).spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// The tray program beside `exe` (the window's own path), if installed.
 pub fn program_beside(exe: &std::path::Path) -> Option<std::path::PathBuf> {
     let name = if cfg!(windows) {
