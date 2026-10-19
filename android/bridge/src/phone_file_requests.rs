@@ -41,13 +41,27 @@ pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, host: &str, p
     let Some(path) = path.filter(|p| valid_path(p)) else {
         return;
     };
-    let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
-    waiting.push_back(serde_json::json!({
+    let mut request = serde_json::json!({
         "host": host, "port": port, "fetch": fetch, "root": root, "path": path,
-    }));
+    });
+    // A fetch for the computer's drive (D8) names it, for its share to say.
+    if let Some(drive) = body
+        .get("drive")
+        .and_then(|v| v.as_str())
+        .filter(|d| fetch && valid_drive(d))
+    {
+        request["drive"] = serde_json::json!(drive);
+    }
+    let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
+    waiting.push_back(request);
     while waiting.len() > MAX_WAITING {
         waiting.pop_front();
     }
+}
+
+/// A drive fetch's id (D8): 32 lowercase hex digits, as the computer makes it.
+pub(crate) fn valid_drive(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// Drop what waits: it came from a computer the phone left.
@@ -99,9 +113,31 @@ mod tests {
             host,
             1716,
         );
+        // A drive's fetch keeps its id; a list, or a bad id, keeps none (D8).
+        let drive = "0123456789abcdef0123456789abcdef";
+        receive(
+            FETCH,
+            &serde_json::json!({ "root": 1, "path": ["a.pdf"], "drive": drive }),
+            host,
+            1716,
+        );
+        receive(
+            FETCH,
+            &serde_json::json!({ "root": 1, "path": ["b.pdf"], "drive": "../x" }),
+            host,
+            1716,
+        );
+        receive(
+            LIST,
+            &serde_json::json!({ "root": 1, "path": [], "drive": drive }),
+            host,
+            1716,
+        );
         let taken: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
         let taken = taken.as_array().unwrap();
-        assert_eq!(taken.len(), 2);
+        assert_eq!(taken.len(), 5);
+        assert_eq!(taken[2]["drive"], drive);
+        assert!(taken[3].get("drive").is_none() && taken[4].get("drive").is_none());
         assert_eq!(taken[0]["fetch"], false);
         assert_eq!(taken[1]["path"][1], "a.pdf");
         assert_eq!(taken[1]["host"], host);

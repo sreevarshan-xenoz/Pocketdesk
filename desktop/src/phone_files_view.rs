@@ -8,6 +8,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
+use pocketdesk_core::local::drive::DriveInfo;
 use pocketdesk_core::local::phone_files::{self as store, Kept, Kind};
 
 use crate::model::Device;
@@ -29,6 +30,27 @@ pub struct PhoneFilesView {
     notice: Option<String>,
     /// The phone and the time of the list request still waiting for an answer.
     waiting: Option<(String, u64)>,
+    /// Where the server serves the phones' folders as a drive (D8), while
+    /// it does.
+    drive: Option<DriveInfo>,
+    /// When the drive's address was copied, for "Copied.".
+    drive_copied: Option<Instant>,
+}
+
+/// The drive's address for this computer's file manager (D8), and how to
+/// open it there.
+pub fn drive_address(info: &DriveInfo) -> (String, &'static str) {
+    if cfg!(windows) {
+        (
+            info.windows_path(),
+            "Paste it in File Explorer's address bar, or map it as a network drive. Windows' WebDAV client opens files of up to 50 MB unless its limit is raised.",
+        )
+    } else {
+        (
+            info.dav_url(),
+            "Open it in Files, Dolphin or another file manager that speaks WebDAV.",
+        )
+    }
 }
 
 /// What a list request waiting since `asked_unix` has come to, given the
@@ -66,6 +88,7 @@ impl PhoneFilesView {
             return;
         }
         self.listings = store::read(state_dir);
+        self.drive = pocketdesk_core::local::drive::read(state_dir);
         self.read_at = Some(Instant::now());
     }
 
@@ -102,6 +125,20 @@ impl PhoneFilesView {
     pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path, devices: &[Device], now_unix: u64) {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(REFRESH);
+        if let Some(info) = &self.drive {
+            let (address, how) = drive_address(info);
+            ui.label(RichText::new("As a drive, read-only").strong());
+            ui.horizontal_wrapped(|ui| {
+                ui.monospace(&address);
+                if ui.button("Copy").clicked() {
+                    ui.ctx().copy_text(address.clone());
+                    self.drive_copied = Some(Instant::now());
+                }
+                crate::notice::copied(ui, &mut self.drive_copied);
+            });
+            ui.label(RichText::new(how).small().color(crate::theme::muted(ui)));
+            ui.add_space(8.0);
+        }
         let phones: Vec<&Device> = devices.iter().filter(|d| d.takes_files).collect();
         if phones.is_empty() {
             ui.label(

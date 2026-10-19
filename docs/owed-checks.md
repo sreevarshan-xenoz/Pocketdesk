@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-587 open items.
+594 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 345 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 350 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
 | A second phone | 5 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 5 |
-| A Linux desktop (the Azure VM serves for some) | 81 |
+| A Linux desktop (the Azure VM serves for some) | 82 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 42 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 43 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -703,6 +703,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The A71 away: its items greyed out.
 - Send clipboard with an empty clipboard, and with over 256 KiB of text: a notification says it was not sent.
 
+**117. The phone's folders as a drive (D8)**
+
+- With the A71 sharing a folder: `curl -X PROPFIND -H "Depth: 1"` on the address lists the phone, its folders and their files.
+- File Explorer at the Windows address: browse, open a photo, copy one out.
+- A file over 50 MB in Explorer (refused by Windows' limit), and with curl.
+- A phone from before D8: the file lands in Downloads, the drive answers 504 after the wait.
+- The setting off: the address gone from the Phone page, and the port closed.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1266,6 +1274,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A phone named with `&` (Windows) or `_` (Linux): the name as written.
 - Linux: the same menu in a real panel.
 
+**117. The phone's folders as a drive (D8)**
+
+- Linux: Files or Dolphin at the `dav://` address.
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -1481,3 +1493,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Ring, Mute for an hour and then Unmute, from the tray with the window hidden: the phone answers, the window stays hidden.
 - A tray pick with the server stopped, and with a server from before D5: nothing sent, and the notice says only that it asked.
+
+**117. The phone's folders as a drive (D8)**
+
+- Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).

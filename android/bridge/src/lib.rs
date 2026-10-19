@@ -1100,10 +1100,14 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
     folder_id: JString<'_>,
     folder: JString<'_>,
     path_json: JString<'_>,
+    drive: JString<'_>,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let name = jstring_to_string(&mut env, &name);
     let source = jstring_to_string(&mut env, &source);
+    // The computer's drive asked for it (D8): its share says so.
+    let drive =
+        Some(jstring_to_string(&mut env, &drive)).filter(|d| phone_file_requests::valid_drive(d));
     let folder_id = jstring_to_string(&mut env, &folder_id);
     let folder = jstring_to_string(&mut env, &folder);
     let path: Vec<String> =
@@ -1122,7 +1126,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
         name,
         size,
         source,
-        folder,
+        api::ShareTags { folder, drive },
     ))));
     to_jstring(&mut env, json)
 }

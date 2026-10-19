@@ -124,6 +124,7 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::phone_media::run_watcher());
     // The desktop app's requests to browse the phones' storage (T10g).
     tokio::spawn(crate::plugins::phone_files::run_watcher());
+    tokio::spawn(crate::drive::live::run());
     tokio::spawn(crate::plugins::phone_photos::run_watcher());
     // A phone's own screen (T10j): those a stopped server left go, and
     // each goes once its phone has no session.

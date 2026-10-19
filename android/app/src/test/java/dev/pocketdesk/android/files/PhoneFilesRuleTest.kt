@@ -53,4 +53,12 @@ class PhoneFilesRuleTest {
         // The last folder removed: its id is not handed out again.
         assertEquals(4, PhoneFilesRule.nextId(listOf(folders[0]), 4))
     }
+
+    @Test
+    fun `a drive fetch's id is 32 lowercase hex digits`() {
+        assertEquals(true, PhoneFilesRule.validDrive("0123456789abcdef0123456789abcdef"))
+        for (bad in listOf("", "0123456789ABCDEF0123456789ABCDEF", "0123456789abcdef", "../../0123456789abcdef0123456789", "g".repeat(32))) {
+            assertEquals(bad, false, PhoneFilesRule.validDrive(bad))
+        }
+    }
 }

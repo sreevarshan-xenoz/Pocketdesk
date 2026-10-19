@@ -4,6 +4,7 @@ import dev.pocketdesk.android.ui.plainErrorText
 
 import dev.pocketdesk.android.automation.PhoneEventBroadcast
 import dev.pocketdesk.android.automation.PhoneEvents
+import dev.pocketdesk.android.files.PhoneFilesRule
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -44,7 +45,13 @@ class TransferService : Service() {
         val address: String
         val port: Int
 
-        class Send(override val address: String, override val port: Int, val uris: List<Uri>) : Job
+        class Send(
+            override val address: String,
+            override val port: Int,
+            val uris: List<Uri>,
+            /** The computer's drive asked for it (D8): its share says so. */
+            val drive: String? = null,
+        ) : Job
 
         /** Every file under a folder the person picked (T6b). */
         class SendFolder(override val address: String, override val port: Int, val tree: Uri) : Job
@@ -195,7 +202,8 @@ class TransferService : Service() {
         val uris = intent.clipData
             ?.let { clip -> (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } }
             .orEmpty()
-        return if (uris.isEmpty()) null else Job.Send(address, port, uris)
+        val drive = intent.getStringExtra(EXTRA_DRIVE)?.takeIf { PhoneFilesRule.validDrive(it) }
+        return if (uris.isEmpty()) null else Job.Send(address, port, uris, drive)
     }
 
     /**
@@ -256,7 +264,7 @@ class TransferService : Service() {
                 sendCount++
                 return@forEachIndexed
             }
-            sendCounted(job.address, job.port, uri, name, null, title)
+            sendCounted(job.address, job.port, uri, name, null, title, job.drive)
         }
     }
 
@@ -318,12 +326,13 @@ class TransferService : Service() {
         name: String,
         part: RustCore.FolderPart?,
         title: String,
+        drive: String? = null,
     ): Result<Unit> {
         show(progressNotification(title, name, 0))
         var result = if (stopped()) {
             cancelledHere()
         } else {
-            sendOne(address, port, uri, name, part) { percent ->
+            sendOne(address, port, uri, name, part, drive) { percent ->
                 show(progressNotification(title, name, percent))
             }
         }
@@ -357,7 +366,7 @@ class TransferService : Service() {
             result = if (stopped()) {
                 cancelledHere()
             } else {
-                sendOne(address, port, uri, name, part) { percent ->
+                sendOne(address, port, uri, name, part, drive) { percent ->
                     show(progressNotification(title, name, percent))
                 }
             }
@@ -535,6 +544,7 @@ class TransferService : Service() {
         uri: Uri,
         name: String,
         part: RustCore.FolderPart?,
+        drive: String?,
         onProgress: (Int) -> Unit,
     ): Result<Unit> = try {
         ensureLink(address, port)
@@ -549,14 +559,14 @@ class TransferService : Service() {
             size > 0L -> {
                 val source = SourceId.of(uri.toString(), size, lastModified(uri))
                 withProgress({ size }, onProgress) {
-                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source, part)
+                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source, part, drive)
                 }
             }
             else -> {
                 // A provider that cannot say how big the file is (a
                 // stream): copy it so the desktop is told an exact size.
                 descriptor.close()
-                sendCopy(address, port, uri, name)
+                sendCopy(address, port, uri, name, drive)
             }
         }
     } catch (t: Throwable) {
@@ -646,7 +656,7 @@ class TransferService : Service() {
         return Result.failure(TransferRetry.Refusal(reason))
     }
 
-    private fun sendCopy(address: String, port: Int, uri: Uri, name: String): Result<Unit> {
+    private fun sendCopy(address: String, port: Int, uri: Uri, name: String, drive: String?): Result<Unit> {
         val dir = File(cacheDir, "share").apply { mkdirs() }
         // The bridge names the file after its path: copy straight to a name
         // that is a plain file name here (the desktop makes it safe there).
@@ -658,10 +668,17 @@ class TransferService : Service() {
                 requireNotNull(input) { "content stream unavailable" }
                 copy.outputStream().use { output -> input.copyTo(output) }
             }
-            if (copy.length() == 0L) {
-                Result.failure(IllegalStateException("$name is empty"))
-            } else {
-                RustCore.sendFile(address, port, copy.absolutePath)
+            val size = copy.length()
+            when {
+                size == 0L -> Result.failure(IllegalStateException("$name is empty"))
+                // A file the computer's drive asked for says so (D8 review):
+                // sent as any other, it would land in its Downloads.
+                drive != null -> {
+                    val descriptor = android.os.ParcelFileDescriptor.open(copy, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                    val source = SourceId.of(uri.toString(), size, lastModified(uri))
+                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source, null, drive)
+                }
+                else -> RustCore.sendFile(address, port, copy.absolutePath)
             }
         } finally {
             copy.delete()
@@ -809,6 +826,7 @@ class TransferService : Service() {
         private const val EXTRA_FOLDER_ID = "folder_id"
         private const val EXTRA_FOLDER = "folder"
         private const val EXTRA_PATH = "path"
+        private const val EXTRA_DRIVE = "drive"
 
         /**
          * The top folder each folder send from the computer was saved in
@@ -830,12 +848,13 @@ class TransferService : Service() {
         private const val KEEP_PARTIAL_HOURS = 24
 
         /** Send [uris] to the desktop at [address]; the caller's read grant passes on. */
-        fun start(context: Context, address: String, port: Int, uris: List<Uri>) {
+        fun start(context: Context, address: String, port: Int, uris: List<Uri>, drive: String? = null) {
             val clip = android.content.ClipData.newRawUri("", uris.first())
             uris.drop(1).forEach { clip.addItem(android.content.ClipData.Item(it)) }
             val intent = Intent(context, TransferService::class.java)
                 .putExtra(EXTRA_ADDRESS, address)
                 .putExtra(EXTRA_PORT, port)
+                .putExtra(EXTRA_DRIVE, drive)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             intent.clipData = clip
             context.startForegroundService(intent)

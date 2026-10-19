@@ -6,6 +6,9 @@ package dev.pocketdesk.android.files
  * (`core::protocol::phone_files`). Pure, for JVM tests.
  */
 object PhoneFilesRule {
+    /** A drive fetch's id (D8): 32 lowercase hex digits, as the computer makes it. */
+    fun validDrive(id: String): Boolean = id.length == 32 && id.all { it in '0'..'9' || it in 'a'..'f' }
+
     /** Names a path holds below its root, at most. */
     const val MAX_DEPTH = 32
 

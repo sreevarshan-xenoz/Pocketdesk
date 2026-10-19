@@ -12,6 +12,7 @@ pub mod computers;
 pub mod config;
 pub mod device_keys;
 pub mod diagnostics;
+pub mod drive;
 pub mod events;
 pub mod home_assistant;
 pub mod identity;

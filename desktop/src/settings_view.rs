@@ -115,6 +115,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ),
     ("clipboard_push", "Clipboard to phones", Section::Phones),
     ("clipboard_history", "Clipboard history", Section::Phones),
+    (
+        "phone_drive",
+        "The phone's folders as a drive",
+        Section::Phones,
+    ),
     ("open_links", "Links from phones", Section::Phones),
     ("phone_battery_alerts", "Phones' batteries", Section::Phones),
     (
@@ -226,6 +231,7 @@ pub fn applies_live(key: &str) -> bool {
             | "downloads_folder"
             | "remember_screen_grant"
             | "clipboard_history"
+            | "phone_drive"
     )
 }
 
@@ -597,6 +603,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "The last texts that crossed between this computer and its phones, either way, kept on this computer for the Clipboard page; 0 keeps none, and emptying it there or here forgets them.",
+                    );
+                });
+                row(ui, "phone_drive", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_drive,
+                        "open the folders a phone shares in the file manager, read-only",
+                    );
+                    note(
+                        ui,
+                        "Served on this computer only, at an address with a secret in it that the Phone page shows. Any program you run can read those folders while this is on.",
                     );
                 });
                 row(ui, "open_links", |ui| {

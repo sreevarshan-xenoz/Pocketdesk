@@ -581,12 +581,22 @@ impl Plugin for SharePlugin {
                     tracing::warn!("File share of {name} refused: no transfer key");
                     return Ok(());
                 };
+                // A file the drive asked for (D8) names its fetch.
+                let drive = body
+                    .get("drive")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
                 // Every refusal is answered, so the phone stops waiting for a
-                // connection that will not come, and can say why.
+                // connection that will not come, and can say why; a drive
+                // fetch's request is told at once too (D8 review).
                 let refused = |reason: String| {
                     let name = name.clone();
                     let key = key.clone();
+                    let drive = drive.clone();
                     async move {
+                        if let Some(id) = &drive {
+                            crate::drive::live::failed(id);
+                        }
                         tracing::warn!("File share of {name} refused: {reason}");
                         refuse(sender, &key, &reason).await;
                         Ok(())
@@ -612,6 +622,18 @@ impl Plugin for SharePlugin {
                 }
                 let Some(dir) = self.fixed_dir.clone().or_else(download_dir) else {
                     return refused("no downloads or home folder".into()).await;
+                };
+                // A file the drive asked for (D8) goes to its cache, for the
+                // request waiting for it; one no request waits for, refused.
+                let dir = match &drive {
+                    None => dir,
+                    Some(id) => match crate::drive::live::waiting_dir(sender.device_id(), id) {
+                        Some(cache) => cache,
+                        None => {
+                            return refused("not a file this computer's drive asked for".into())
+                                .await;
+                        }
+                    },
                 };
                 // At home the bytes travel inside TLS with the phone that
                 // asked (phase C); on the link, iroh proved both keys.
@@ -650,7 +672,8 @@ impl Plugin for SharePlugin {
                 // send's own new folder; its path was checked part by part.
                 // Made only now, so a share refused above leaves no folder.
                 let folder_name = folder_of(body).map(|(_, folder, _)| folder);
-                let (dir, name, top) = match folder_of(body) {
+                let folder = folder_of(body).filter(|_| drive.is_none());
+                let (dir, name, top) = match folder {
                     None => (dir, name.clone(), None),
                     Some((folder_id, folder, path)) => {
                         match folder_tops().place(
@@ -694,8 +717,11 @@ impl Plugin for SharePlugin {
                                 progress,
                                 on_saved: {
                                     let from = from.clone();
-                                    Box::new(move |path: &Path| {
-                                        on_received(path, size, &from, top.as_deref())
+                                    Box::new(move |path: &Path| match &drive {
+                                        // Not received as a share is: no
+                                        // notification, list or event.
+                                        Some(id) => crate::drive::live::arrived(id, path),
+                                        None => on_received(path, size, &from, top.as_deref()),
                                     })
                                 },
                             },
