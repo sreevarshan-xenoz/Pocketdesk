@@ -796,4 +796,9 @@
     <string name="air_none">இந்தக் கைபேசியில் சுழல்காட்டி இல்லை, எனவே காற்றுச் சுட்டியாக இருக்க முடியாது.</string>
     <string name="settings_air_speed">காற்றுச் சுட்டியின் வேகம்</string>
     <string name="settings_air_speed_summary">ரிமோட்டின் காற்றுச் சுட்டியில் கைபேசியைத் திருப்பும்போது சுட்டி எவ்வளவு நகரும்</string>
+    <string name="settings_calls">ஒலிக்கும் அழைப்புகள் கணினியில்</string>
+    <string name="settings_calls_summary">இந்தக் கைபேசியில் ஒலிக்கும் அழைப்பு அமைதிப்படுத்து பொத்தானுடன் கணினியில் தெரியும்; கைபேசியின் நிலையையும் அழைப்புப் பதிவையும் (எண்ணுக்காக) படிக்க அனுமதி கேட்கும்</string>
+    <string name="settings_calls_needs_access">அறிவிப்பு அணுகல் தேவை: அழைப்பு அதிலிருந்து கவனிக்கப்படுகிறது, கணினியின் பதில்களும் அதில் வருகின்றன</string>
+    <string name="settings_calls_decline">அழைப்புகளை நிராகரிக்க கணினியை அனுமதி</string>
+    <string name="settings_calls_decline_summary">அமைதிப்படுத்து அருகே நிராகரி சேர்க்கும்; அழைப்புகளை முடிக்க அனுமதி கேட்கும்</string>
 </resources>

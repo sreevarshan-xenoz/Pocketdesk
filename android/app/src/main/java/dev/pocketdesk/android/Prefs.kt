@@ -50,6 +50,8 @@ object Prefs {
     private const val KEY_SHOW_DRIVING = "show_driving"
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
     private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
+    private const val KEY_CALLS_ON = "calls_on"
+    private const val KEY_CALLS_DECLINE = "calls_decline"
     private const val KEY_AIR_MOUSE_SPEED = "air_mouse_speed"
     private const val KEY_AIR_MOUSE = "air_mouse"
     private const val KEY_PEN_CURVE = "pen_curve"
@@ -411,6 +413,22 @@ object Prefs {
 
     fun setAirMouse(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_AIR_MOUSE, on) }
+        bump()
+    }
+
+    /** Ringing calls are told to the computer (F5). */
+    fun callsOn(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_CALLS_ON, false)
+
+    fun setCallsOn(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CALLS_ON, on) }
+        bump()
+    }
+
+    /** The computer may decline a ringing call (F5). */
+    fun callsDecline(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_CALLS_DECLINE, false)
+
+    fun setCallsDecline(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CALLS_DECLINE, on) }
         bump()
     }
 

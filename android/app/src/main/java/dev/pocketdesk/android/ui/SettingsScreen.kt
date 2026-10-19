@@ -292,6 +292,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             PhoneNotificationsSection()
             TextsSection()
+            CallsSection()
 
             SettingsHeader(stringResource(R.string.settings_automation))
             SettingSwitch(

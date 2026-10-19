@@ -802,4 +802,9 @@
     <string name="air_none">Este teléfono no tiene giroscopio, así que no puede ser un ratón aéreo.</string>
     <string name="settings_air_speed">Velocidad del ratón aéreo</string>
     <string name="settings_air_speed_summary">Cuánto se mueve el puntero al girar el teléfono en el ratón aéreo del mando</string>
+    <string name="settings_calls">Llamadas entrantes en el ordenador</string>
+    <string name="settings_calls_summary">Una llamada que suena en este teléfono aparece en el ordenador con Silenciar; pide leer el estado del teléfono y el registro de llamadas (para el número)</string>
+    <string name="settings_calls_needs_access">Necesita acceso a las notificaciones: la llamada se vigila, y llegan las respuestas del ordenador, desde él</string>
+    <string name="settings_calls_decline">Dejar que el ordenador rechace llamadas</string>
+    <string name="settings_calls_decline_summary">Añade Rechazar junto a Silenciar; pide finalizar llamadas</string>
 </resources>
