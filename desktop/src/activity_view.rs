@@ -217,7 +217,7 @@ pub fn describe(event: &Event) -> String {
     match event.event.as_str() {
         "session_started" => {
             let what = match text(event, "mode") {
-                Some("cast") => "Showing its screen here",
+                Some("cast") => "Showing its screen or camera here",
                 Some("remote") => "Using this computer as a remote",
                 Some("sound") => "Being this computer's speaker and mic",
                 _ => "Viewing this computer",
@@ -367,7 +367,7 @@ mod tests {
                 "session_started",
                 json!({"mode": "cast", "transport": "wan"})
             )),
-            "Showing its screen here (over the internet)"
+            "Showing its screen or camera here (over the internet)"
         );
         assert_eq!(
             describe(&event(
