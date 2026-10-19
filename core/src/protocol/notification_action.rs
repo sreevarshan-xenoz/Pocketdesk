@@ -77,10 +77,11 @@ pub const NOTIFICATION_ANSWERED: &str = "kdeconnect.pocketdesk.notification_answ
 /// An outcome's reason, at most, in characters.
 pub const MAX_REASON_CHARS: usize = 200;
 
-/// Whether `id` names an answer: the computer's request id, 1 to 64 hex
-/// digits and hyphens.
+/// Whether `id` names an answer: the computer's request id, 1 to 64
+/// letters, digits and hyphens (as a request file's name is held to, E1
+/// review: an id of another form was left off unsaid).
 pub fn valid_answer_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// `packet` with the answer's id (E1), which the phone sends back with how
