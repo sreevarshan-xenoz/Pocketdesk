@@ -57,7 +57,7 @@ impl Section {
     pub fn summary(self) -> &'static str {
         match self {
             Section::Connection => "ports, pairing, this network, files",
-            Section::Phones => "video, control, clipboard, links, batteries",
+            Section::Phones => "video, control, clipboard, drive, locking, links, batteries",
             Section::Notifications => "phones' notifications and texts here",
             Section::Wake => "waking this computer from a phone",
             Section::Automation => "event log, hooks, tasks, Home Assistant",
@@ -621,17 +621,21 @@ impl SettingsForm {
                         "Served on this computer only, at an address with a secret in it that the Phone page shows. Any program you run can read those folders while this is on.",
                     );
                 });
-                row(ui, "away_lock_minutes", |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut e.away_lock_minutes)
-                            .range(2..=60)
-                            .suffix(" min"),
-                    );
-                    note(
-                        ui,
-                        "For a phone with \"Lock this computer when it leaves\" on (Devices): once its link has been gone this long and nobody has used the keyboard or mouse meanwhile, the computer locks. A phone lying still may lose its link while asleep, so someone reading or watching without touching anything can be locked too. Windows only for now: Linux cannot yet tell whether someone is at the keyboard, so it never locks.",
-                    );
-                });
+                // Only where it locks (E5): Linux cannot tell yet whether
+                // someone is at the keyboard, so it never does.
+                if cfg!(windows) {
+                    row(ui, "away_lock_minutes", |ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut e.away_lock_minutes)
+                                .range(2..=60)
+                                .suffix(" min"),
+                        );
+                        note(
+                            ui,
+                            "How long a phone with \"Lock this computer when this phone leaves\" on (Devices) must be gone, with nobody at the keyboard or mouse, before this computer locks. A sleeping phone can drop its link, so it can lock while you read.",
+                        );
+                    });
+                }
                 row(ui, "open_links", |ui| {
                     ui.checkbox(
                         &mut e.open_links,
