@@ -16,6 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,6 +35,7 @@ import dev.pocketdesk.android.stream.AirMouse
 import dev.pocketdesk.android.stream.AirPress
 import dev.pocketdesk.android.stream.PadOutput
 import dev.pocketdesk.android.stream.launchPadSend
+import kotlinx.coroutines.delay
 import dev.pocketdesk.android.stream.sendPadOutputs
 
 /** Whether this phone has a gyroscope for the air mouse (F4). */
@@ -45,7 +48,7 @@ fun hasGyroscope(context: android.content.Context): Boolean =
  * The gyroscope is listened to only while the pad is held.
  */
 @Composable
-fun AirPad(address: String, port: Int, modifier: Modifier = Modifier) {
+fun AirPad(address: String, port: Int, modifier: Modifier = Modifier, laser: Boolean = false) {
     val context = LocalContext.current
     Prefs.observedVersion()
     val speed = Prefs.airMouseSpeed(context)
@@ -57,7 +60,22 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier) {
 
     // Moves add up while one is on its way, so a slow link sends their sum
     // rather than a queue that replays (F4 review).
-    val moves = remember(address, port) { MoveCoalescer { dx, dy -> RustCore.sendMouseEvent(address, port, dx.toFloat(), dy.toFloat(), 0, false) } }
+    // G4: with the laser on, the turn moves the computer's dot instead, and
+    // letting go hides it, sent after the moves still on their way.
+    val laserNow by rememberUpdatedState(laser)
+    val moves = remember(address, port) {
+        MoveCoalescer(
+            launch = { launchPadSend(it) },
+            sendMove = { dx, dy ->
+                if (laserNow) {
+                    RustCore.sendLaser(dx, dy, true)
+                } else {
+                    RustCore.sendMouseEvent(address, port, dx.toFloat(), dy.toFloat(), 0, false)
+                }
+            },
+            sendEnd = { RustCore.sendLaser(0, 0, false) },
+        )
+    }
     // This press, read by the sensor at once: a release stops moves before
     // the next recomposition (F4 review).
     val press = remember { arrayOfNulls<AirPress>(1) }
@@ -83,6 +101,17 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier) {
             }
         }
     }
+    // G4 review: held with the laser on, the dot shows at once and is said
+    // again each second, so it never hides while the presenter holds still
+    // to aim (the computer hides a dot still for 2 s, for a lost release).
+    LaunchedEffect(held, laser) {
+        if (held && laser) {
+            while (true) {
+                launchPadSend { RustCore.sendLaser(0, 0, true) }
+                delay(LASER_KEEP_MS)
+            }
+        }
+    }
     DisposableEffect(held, listener) {
         if (held && gyroscope != null) {
             air.reset()
@@ -100,6 +129,7 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier) {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     down.consume()
                     press[0] = AirPress(down.uptimeMillis)
+                    moves.cancelEnd()
                     held = true
                     var up = down
                     while (true) {
@@ -112,6 +142,7 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier) {
                     val tap = press[0]?.release(up.uptimeMillis) == true
                     press[0] = null
                     held = false
+                    if (laserNow) moves.end()
                     if (tap) send(listOf(PadOutput.Click(0)))
                 }
             },
@@ -121,7 +152,13 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier) {
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                stringResource(if (gyroscope == null) R.string.air_none else R.string.air_hint),
+                stringResource(
+                    when {
+                        gyroscope == null -> R.string.air_none
+                        laser -> R.string.air_hint_laser
+                        else -> R.string.air_hint
+                    },
+                ),
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -131,32 +168,60 @@ fun AirPad(address: String, port: Int, modifier: Modifier = Modifier) {
     }
 }
 
-/** Adds moves up while one is being sent, and sends the sum when it is done. */
-private class MoveCoalescer(private val sendMove: (Int, Int) -> Unit) {
+/** How often a held laser says it is still there, under the computer's 2 s. */
+private const val LASER_KEEP_MS = 1_000L
+
+/**
+ * Adds moves up while one is being sent, and sends the sum when it is done;
+ * an [end] (the laser let go, G4) goes after every move asked before it.
+ * [launch] runs the sending off the main thread.
+ */
+internal class MoveCoalescer(
+    private val launch: (() -> Unit) -> Unit,
+    private val sendMove: (Int, Int) -> Unit,
+    private val sendEnd: () -> Unit = {},
+) {
     private var dx = 0
     private var dy = 0
+    private var ending = false
     private var busy = false
 
-    fun add(x: Int, y: Int) {
+    fun add(x: Int, y: Int) = start { dx += x; dy += y }
+
+    /** Send [sendEnd] once the moves asked so far are sent. */
+    fun end() = start { ending = true }
+
+    /**
+     * A new press: an end not yet sent is dropped, so it never hides the
+     * dot in the middle of the next gesture (G4 review).
+     */
+    fun cancelEnd() = synchronized(this) { ending = false }
+
+    private fun start(change: () -> Unit) {
         val start = synchronized(this) {
-            dx += x
-            dy += y
+            change()
             if (busy) false else { busy = true; true }
         }
-        if (start) launchPadSend { drain() }
+        if (start) launch { drain() }
     }
 
     private fun drain() {
         while (true) {
-            val (x, y) = synchronized(this) {
-                val out = dx to dy
+            val next = synchronized(this) {
+                val move = dx to dy
+                val end = ending && move.first == 0 && move.second == 0
                 dx = 0
                 dy = 0
-                if (out.first == 0 && out.second == 0) busy = false
-                out
+                if (end) ending = false
+                if (move.first == 0 && move.second == 0 && !end) busy = false
+                move to end
             }
-            if (x == 0 && y == 0) return
-            sendMove(x, y)
+            val (move, end) = next
+            when {
+                end -> sendEnd()
+                move.first != 0 || move.second != 0 -> sendMove(move.first, move.second)
+                else -> return
+            }
         }
     }
 }

@@ -2038,6 +2038,15 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet. Pres
 - [ ] The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
 - [ ] Connect to another computer, then press a button still drawn for the first: nothing is sent, the widget redrawn for the new one.
 
+## 135. A laser pointer for the air mouse (G4)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet. The dot is drawn on this box's screen: with the owner there.
+- [ ] Remote on the A71 with the air mouse on: "Laser pointer" under the pad; on, a press shows a red dot in the middle of the pointer's screen, turning moves it, the pointer stays put.
+- [ ] Held still for 5 s: the dot stays; let go: it hides. Pressed again quickly: the dot is not hidden mid-gesture.
+- [ ] Two screens: the dot crosses where they meet and stops at an edge, never between them; larger on a 4K screen.
+- [ ] Desktop Settings "Laser pointer from phones" off, after a restart: the switch is not offered.
+- [ ] A slide show (PowerPoint or a browser's): a tap with the laser on still advances or clicks at the pointer.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

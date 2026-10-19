@@ -87,6 +87,23 @@ pub const SCREEN_FEATURES_SAID: u8 = 0x80;
 /// The computer takes pen samples ([`super::InputPacket::Pen`]).
 pub const SCREEN_FEATURE_PEN: u8 = 1;
 
+/// A remote's ready stream carries one byte of what the computer offers
+/// it (G4): this bit marks the byte as said. Computers before G4 send a
+/// remote's ready stream with no payload, and read as offering none of it.
+pub const REMOTE_FEATURES_SAID: u8 = 0x80;
+/// The computer draws a laser dot ([`super::InputPacket::Laser`]).
+pub const REMOTE_FEATURE_LASER: u8 = 1;
+
+/// What a remote's ready stream says the computer offers, from its
+/// payload: 0 when it says nothing.
+pub fn remote_features(payload: &[u8]) -> u8 {
+    payload
+        .first()
+        .copied()
+        .filter(|b| b & REMOTE_FEATURES_SAID != 0)
+        .unwrap_or(0)
+}
+
 /// What a screen session's ready stream says the computer takes, from its
 /// payload: 0 when it says nothing.
 pub fn screen_features(payload: &[u8]) -> u8 {
@@ -953,6 +970,13 @@ mod remote_tests {
         // Nothing said: no pen offered.
         assert_eq!(screen_features(&[]), 0);
         assert_eq!(screen_features(&[SCREEN_FEATURE_PEN]), 0);
+        // G4: a remote's byte, said or not.
+        assert_eq!(
+            remote_features(&[REMOTE_FEATURES_SAID | REMOTE_FEATURE_LASER]) & REMOTE_FEATURE_LASER,
+            REMOTE_FEATURE_LASER
+        );
+        assert_eq!(remote_features(&[]), 0);
+        assert_eq!(remote_features(&[REMOTE_FEATURE_LASER]), 0);
         // A screen session's ready stream is read, never fed to the decoder.
         assert_eq!(
             remote_stream(transport::STREAM_KIND_READY, false, false),
@@ -1111,6 +1135,15 @@ async fn recv_with_cancel(
                                 {
                                     remote.sound_granted.store(
                                         sound_grant(&payload),
+                                        std::sync::atomic::Ordering::Release,
+                                    );
+                                } else if !remote.sound
+                                    && let Ok(payload) = recv_stream.read_to_end(16).await
+                                {
+                                    // A remote hears what it is offered (G4),
+                                    // kept where a screen session keeps its own.
+                                    remote.screen_features.store(
+                                        remote_features(&payload),
                                         std::sync::atomic::Ordering::Release,
                                     );
                                 }

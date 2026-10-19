@@ -27,6 +27,7 @@ const TAG_QUALITY_PRESET: u8 = 12;
 const TAG_LINK_FEEDBACK: u8 = 13;
 const TAG_CLIENT_SAMPLES: u8 = 14;
 const TAG_PEN: u8 = 15;
+const TAG_LASER: u8 = 16;
 
 /// A [`PenSample`]'s flags (E3). Bits not named here are ignored.
 pub const PEN_CONTACT: u8 = 1;
@@ -286,6 +287,10 @@ pub enum InputPacket {
     /// A pen on the phone's screen (E3): injected as a pen where the
     /// computer has one, else as the mouse.
     Pen(PenSample),
+    /// The laser dot (G4): moved by `dx`/`dy` pointer pixels, hidden with
+    /// `show: false`. Input, as a mouse move is (dropped in view-only), but
+    /// the computer's pointer stays where it is.
+    Laser { dx: i16, dy: i16, show: bool },
     /// Gamepad state: 6 analog axes + 16-bit button bitmask.
     Gamepad {
         /// Left stick X, Left stick Y, Right stick X, Right stick Y, L2, R2.
@@ -340,6 +345,14 @@ impl InputPacket {
                 buf.extend_from_slice(&pen.tilt_x.to_le_bytes());
                 buf.extend_from_slice(&pen.tilt_y.to_le_bytes());
                 buf.push(pen.flags);
+                buf
+            }
+            InputPacket::Laser { dx, dy, show } => {
+                let mut buf = Vec::with_capacity(6);
+                buf.push(TAG_LASER);
+                buf.extend_from_slice(&dx.to_le_bytes());
+                buf.extend_from_slice(&dy.to_le_bytes());
+                buf.push(u8::from(*show));
                 buf
             }
             InputPacket::Gamepad { axes, buttons } => {
@@ -495,6 +508,14 @@ impl InputPacket {
                     flags: data[9],
                 }))
             }
+            TAG_LASER => {
+                anyhow::ensure!(data.len() == 6, "Laser packet is not 6 bytes");
+                Ok(InputPacket::Laser {
+                    dx: i16::from_le_bytes(data[1..3].try_into().unwrap()),
+                    dy: i16::from_le_bytes(data[3..5].try_into().unwrap()),
+                    show: data[5] != 0,
+                })
+            }
             TAG_GAMEPAD => {
                 anyhow::ensure!(data.len() >= 15, "Gamepad packet too short");
                 let mut axes = [0i16; 6];
@@ -644,6 +665,36 @@ mod tests {
         let mut long = data.clone();
         long.push(0);
         assert!(InputPacket::decode(&long).is_err(), "exactly ten bytes");
+    }
+
+    #[test]
+    fn a_laser_move_goes_both_ways_in_six_bytes() {
+        let data = InputPacket::Laser {
+            dx: -300,
+            dy: 42,
+            show: true,
+        }
+        .encode();
+        assert_eq!(data.len(), 6);
+        assert_eq!(data[0], 16, "tags are never renumbered");
+        match InputPacket::decode(&data).unwrap() {
+            InputPacket::Laser { dx, dy, show } => assert_eq!((dx, dy, show), (-300, 42, true)),
+            other => panic!("wrong variant: {other:?}"),
+        }
+        let hide = InputPacket::Laser {
+            dx: 0,
+            dy: 0,
+            show: false,
+        }
+        .encode();
+        assert!(matches!(
+            InputPacket::decode(&hide).unwrap(),
+            InputPacket::Laser { show: false, .. }
+        ));
+        assert!(InputPacket::decode(&data[..5]).is_err(), "short");
+        let mut long = data.clone();
+        long.push(0);
+        assert!(InputPacket::decode(&long).is_err(), "exactly six bytes");
     }
 
     #[test]

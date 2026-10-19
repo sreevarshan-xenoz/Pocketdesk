@@ -104,6 +104,16 @@ fn screen_feature_byte(input: bool) -> u8 {
     byte
 }
 
+/// What a remote's ready stream says this computer offers it (G4): a laser
+/// only for a phone whose input is taken, where the dot can be drawn.
+fn remote_feature_byte(input: bool, laser: bool) -> u8 {
+    let mut byte = super::client::REMOTE_FEATURES_SAID;
+    if input && laser {
+        byte |= super::client::REMOTE_FEATURE_LASER;
+    }
+    byte
+}
+
 /// Whether a session without a picture drops `packet`: it is about a
 /// picture, or a sound the session does not have. A remote (T10i) has no
 /// sound; a sound session (N5) is the computer's mic, so it keeps the mic.
@@ -190,6 +200,8 @@ pub struct StreamingServer {
     /// Whether a slow link may lower the frame rate (R6f,
     /// `Config::slow_link_frame_rate`). On by default.
     slow_link_frame_rate: bool,
+    /// Whether a remote is offered the laser dot (G4).
+    laser: bool,
     /// Channel for routing input events received from client over this QUIC connection
     input_tx: Option<tokio::sync::broadcast::Sender<SessionInput>>,
     /// R4 E2: routing for client→server mic audio. `InputPacket::Mic` frames
@@ -253,6 +265,7 @@ impl StreamingServer {
             bitrate_tx,
             fps_tx,
             slow_link_frame_rate: true,
+            laser: false,
             input_tx: None,
             mic_tx: None,
             cast_tx: None,
@@ -284,6 +297,12 @@ impl StreamingServer {
     /// "Full quality" turns it off for its session, as it does the relay floor.
     pub fn set_slow_link_frame_rate(&mut self, enabled: bool) {
         self.slow_link_frame_rate = enabled;
+    }
+
+    /// Whether this computer draws a phone's laser dot (G4): the owner's
+    /// setting, where the server can draw one. Off by default here.
+    pub fn set_laser(&mut self, enabled: bool) {
+        self.laser = enabled;
     }
 
     /// Choose the capture backend (R4 B3). `Auto` (default) detects the
@@ -493,6 +512,7 @@ impl StreamingServer {
         // the phone's own view-only switch can tighten this, never lift it.
         // A sound session gives no input at all (N5).
         let force_view_only = !permissions.allows(Capability::Input) || sound;
+        let laser = self.laser;
         let allow_mic = permissions.allows(Capability::Mic) && !input_only;
         let allow_audio = permissions.allows(Capability::Audio) && !input_only;
         // A cast needs its own permission, and somewhere to show it.
@@ -597,6 +617,9 @@ impl StreamingServer {
                             grant |= super::client::SOUND_GRANT_MIC;
                         }
                         said.push(grant);
+                    } else {
+                        // A remote hears what it is offered (G4).
+                        said.push(remote_feature_byte(!force_view_only, laser));
                     }
                     if let Err(e) = ready.write_all(&said).await {
                         warn!(error = %e, "Could not say the input-only session is ready");
@@ -2526,6 +2549,39 @@ mod tests {
             screen_features(&[screen_feature_byte(false)]) & SCREEN_FEATURE_PEN,
             0,
             "said, and no pen"
+        );
+    }
+
+    #[test]
+    fn a_remote_is_offered_the_laser_only_with_input_where_it_is_drawn() {
+        use super::super::client::{REMOTE_FEATURE_LASER, remote_features};
+        let laser = |input, drawn| {
+            remote_features(&[remote_feature_byte(input, drawn)]) & REMOTE_FEATURE_LASER
+        };
+        assert_eq!(laser(true, true), REMOTE_FEATURE_LASER);
+        assert_eq!(
+            laser(false, true),
+            0,
+            "view-only: its every move would be dropped"
+        );
+        assert_eq!(laser(true, false), 0, "no dot here");
+        assert_ne!(
+            remote_features(&[remote_feature_byte(false, false)]),
+            u8::MAX,
+            "said either way"
+        );
+    }
+
+    #[test]
+    fn a_remote_keeps_the_laser() {
+        let laser = InputPacket::Laser {
+            dx: 1,
+            dy: 1,
+            show: true,
+        };
+        assert!(
+            !about_the_stream(&laser, false),
+            "a remote's laser is not about a picture"
         );
     }
 

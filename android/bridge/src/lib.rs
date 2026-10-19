@@ -895,6 +895,29 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendPen
     to_jstring(&mut env, json)
 }
 
+/// Move the laser dot by `dx`/`dy` pointer pixels, or hide it (G4).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendLaser(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    dx: jint,
+    dy: jint,
+    show: jboolean,
+) -> jstring {
+    let held = |v: jint| v.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let json = envelope_unit(RUNTIME.block_on(api::send_laser(held(dx), held(dy), show != 0)));
+    to_jstring(&mut env, json)
+}
+
+/// Whether the remote's computer draws a laser dot (G4).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeLaserSupported(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jboolean {
+    api::laser_supported() as jboolean
+}
+
 /// Whether the screen session's computer takes a pen (E3).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePenSupported(

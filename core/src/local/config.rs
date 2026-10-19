@@ -41,6 +41,11 @@ pub struct Config {
     /// phone's "Full quality" turns it off for its session.
     #[serde(default = "default_true")]
     pub slow_link_frame_rate: bool,
+    /// Draw a phone's laser dot (G4): the air mouse in Remote moves a red
+    /// dot on the screen instead of the pointer. On by default; drawn on
+    /// Windows only for now.
+    #[serde(default = "default_true")]
+    pub laser_pointer: bool,
     /// Move files with a phone linked by the internet road (2c), on a
     /// stream of its own control connection. On by default: it shows relays
     /// nothing a session there does not (sizes and timing, never content).
@@ -289,6 +294,7 @@ impl Default for Config {
             pairing_required: true,
             allow_hevc: false,
             slow_link_frame_rate: true,
+            laser_pointer: true,
             internet_files: true,
             capture_backend: CaptureBackend::Auto,
             mic_relay_device: None,
@@ -488,6 +494,7 @@ impl Config {
         "pairing_required",
         "allow_hevc",
         "slow_link_frame_rate",
+        "laser_pointer",
         "internet_files",
         "capture_backend",
         "mic_relay_device",
@@ -860,6 +867,7 @@ phone_battery = \"x\"
         config.slow_link_frame_rate = false;
         config.save_to(&path).unwrap();
         assert!(!Config::load_from(&path).unwrap().slow_link_frame_rate);
+        assert!(Config::default().laser_pointer, "G4: on by default");
     }
 
     #[test]

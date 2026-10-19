@@ -81,8 +81,9 @@ pub use client::StreamingClient;
 /// [`client::report_samples`].
 pub use client::report_samples;
 pub use client::{
-    SCREEN_FEATURE_PEN, SCREEN_FEATURES_SAID, SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID,
-    screen_features, sound_grant,
+    REMOTE_FEATURE_LASER, REMOTE_FEATURES_SAID, SCREEN_FEATURE_PEN, SCREEN_FEATURES_SAID,
+    SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID, remote_features, screen_features,
+    sound_grant,
 };
 pub use connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, QuinnConnection,

@@ -833,4 +833,6 @@
     <string name="deck_widget_refresh_glyph" translatable="false">↻</string>
     <string name="deck_widget_said">%1$s: %2$s</string>
     <string name="deck_widget_no_answer">No answer from the computer yet</string>
+    <string name="remote_laser">Laser pointer</string>
+    <string name="air_hint_laser">Hold here and turn the phone to move a red dot on the computer\'s screen; let go to hide it. A tap clicks at the pointer.</string>
 </resources>

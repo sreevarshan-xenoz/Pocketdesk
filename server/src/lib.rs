@@ -32,6 +32,9 @@ pub mod install_windows;
 pub mod iroh_endpoint;
 pub mod kde;
 pub mod kdeconnect_compat;
+pub mod laser;
+#[cfg(windows)]
+mod laser_windows;
 pub mod live_sessions;
 pub mod local_api;
 pub mod media;

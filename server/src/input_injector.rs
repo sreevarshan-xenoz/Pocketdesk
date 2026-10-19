@@ -977,6 +977,11 @@ impl InputInjector {
             }
             InputPacket::MouseScroll { dx, dy } => self.scroll(*dx as i32, *dy as i32),
             InputPacket::Pen(sample) => self.pen(sample),
+            // G4: a dot drawn on the screen; the pointer stays where it is.
+            InputPacket::Laser { dx, dy, show } => {
+                crate::laser::handle(*dx, *dy, *show);
+                Ok(())
+            }
             InputPacket::KeyEvent { key, pressed } => self.inject_keycode(*key, *pressed),
             InputPacket::Text(text) => self.text(text),
             // Control-plane request, intercepted by the streaming server before
