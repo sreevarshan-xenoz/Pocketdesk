@@ -6,6 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+# `cargo run -p pocketdesk-desktop` runs the window, as before E2.
+default-run = "pocketdesk-app"
 
 [[bin]]
 name = "pocketdesk-app"
