@@ -1872,6 +1872,15 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] Linux: the same by hand (`/proc/<pid>/status` VmRSS and RssAnon), the app in a Wayland session.
 - [ ] The app with a phone linked and a session running, then at rest again: back to its number.
 
+## 120. Answers that say how they went (E1)
+
+- [ ] With the throwaway chat app: a reply from the Notifications page reads "handed to the app".
+- [ ] The notification swiped away on the phone before the answer arrives: "not sent: the notification is gone from the phone", and a desktop notification.
+- [ ] Answering off on the phone: "answering is off on the phone".
+- [ ] The phone away for more than a minute: "the phone did not connect within a minute".
+- [ ] A phone from before E1: "sent, but no word from the phone" after a minute.
+- [ ] From a toast (N3), the window hidden: a failure's desktop notification.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

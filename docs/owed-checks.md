@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-591 open items.
+597 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 345 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 351 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
@@ -708,6 +708,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **119. Memory at rest (D7)**
 
 - The app with a phone linked and a session running, then at rest again: back to its number.
+
+**120. Answers that say how they went (E1)**
+
+- With the throwaway chat app: a reply from the Notifications page reads "handed to the app".
+- The notification swiped away on the phone before the answer arrives: "not sent: the notification is gone from the phone", and a desktop notification.
+- Answering off on the phone: "answering is off on the phone".
+- The phone away for more than a minute: "the phone did not connect within a minute".
+- A phone from before E1: "sent, but no word from the phone" after a minute.
+- From a toast (N3), the window hidden: a failure's desktop notification.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
