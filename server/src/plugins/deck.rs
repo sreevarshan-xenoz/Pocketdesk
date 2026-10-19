@@ -226,7 +226,7 @@ impl DeckPlugin {
                 if let Some(problem) = pocketdesk_core::protocol::link::link_problem(url) {
                     return Err(format!("the link cannot be opened: {problem}"));
                 }
-                super::links::open_detached(url)
+                super::links::open_or_show(url)
             }
         }
     }
