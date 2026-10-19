@@ -6,9 +6,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 355 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 354 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 44 |
 | A phone with a SIM | 21 |
 | A second phone | 6 |
 | Away from home: another network, or through a router | 9 |
@@ -251,10 +251,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **28. Permissions and session approval**
 
 - No answer: the phone shows the refusal about 30 s after connecting.
-- Clipboard off: the phone's clipboard actions are dropped (`Denied … clipboard` in the log); turn it on again and they work at once.
 - Running commands: denied by default; allowed after the switch is turned on.
 - Control off: the session is view-only and the phone cannot lift it. Sound off: no desktop sound. Microphone off: the mic does not reach the desktop.
-- Turning control, sound or the microphone off during a session ends that session; Retry starts one with the change. Removing a connected phone ends its session.
+- Turning control or the microphone off during a session ends that session. Removing a connected phone ends its session.
 - LAN session: the prompt shows the phone's address.
 
 **29. Computers on this network**
@@ -432,6 +431,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **61. Portrait sessions (T9b)**
 
 - A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
+- Switching between Direct touch and Trackpad mid-session: the pane changes without a new decoder (no keyframe gap).
 
 **62. A mouse on the phone (T9c)**
 
@@ -561,7 +561,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **93. The phone's Home card, Add form, Settings and session menu (U4)**
 
-- "Show connection details" on, during a session: the numbers and the computer's battery.
 - A row's "Allow notification access" with a feature on and access off.
 - Landscape: the bottom chrome with 48 dp chips.
 
@@ -730,7 +729,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **125. The phone app's design pass (E6)**
 
 - The session menu with Pen offered: three segments at 1.0; at 2.0 crowded.
-- The history sheet from Home: says a tap sends, entries 48 dp, no Clear when empty.
+- The history sheet's entries 48 dp, and no Clear when empty.
 - The Health card's Choose opens the folder picker.
 - Spanish and Tamil on the changed screens.
 
@@ -879,6 +878,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **60. Pinch-zoom in trackpad mode (T9a)**
 
 - Zoomed in, the cursor's travel matches the finger's on-screen distance, and scrolling is not slowed by the zoom.
+
+**61. Portrait sessions (T9b)**
+
+- Pane: two panes with Direct touch: taps land on the point under the finger in the smaller picture.
 
 **62. A mouse on the phone (T9c)**
 
