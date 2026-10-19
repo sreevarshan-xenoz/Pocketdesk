@@ -805,4 +805,9 @@
     <string name="air_none">This phone has no gyroscope, so it cannot be an air mouse.</string>
     <string name="settings_air_speed">Air mouse speed</string>
     <string name="settings_air_speed_summary">How far the pointer moves as you turn the phone in Remote\'s air mouse</string>
+    <string name="settings_calls">Ringing calls on the computer</string>
+    <string name="settings_calls_summary">A call ringing on this phone shows on the computer with Silence; asks to read the phone\'s state and call log (for the number)</string>
+    <string name="settings_calls_needs_access">Needs notification access: the call is watched, and the computer\'s answers arrive, from it</string>
+    <string name="settings_calls_decline">Let the computer decline calls</string>
+    <string name="settings_calls_decline_summary">Adds Decline beside Silence; asks to end calls</string>
 </resources>

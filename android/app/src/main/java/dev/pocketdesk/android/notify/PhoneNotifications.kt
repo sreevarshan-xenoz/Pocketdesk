@@ -162,6 +162,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         )
     }
 
+    /** Ringing calls on the computer (F5). */
+    private val calls by lazy { CallWatch(applicationContext) }
+
     /** New screenshots to the computer (T10h), on a 2 s tick of their own: a send takes seconds. */
     private val screenshots by lazy { dev.pocketdesk.android.files.Screenshots(applicationContext) }
     private val screenshotsTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
@@ -170,6 +173,8 @@ class PhoneNotificationListener : NotificationListenerService() {
         super.onCreate()
         rule = NotificationForwardRule(packageName)
         RustCore.start(this)
+        // F5: ringing calls, watched on the main thread's looper.
+        calls.start()
         // On a thread of its own: connecting can take seconds while the
         // computer is away, and must not hold up notifications.
         replyTicker.scheduleWithFixedDelay(
@@ -251,6 +256,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        calls.stop()
         answerTicker.shutdownNow()
         phoneFilesTicker.shutdownNow()
         recentPhotosTicker.shutdownNow()
@@ -411,7 +417,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         val own = PhoneLink.target(this)
         // Answers come on the control link: keep one while answering is on.
         val answering = Prefs.answerNotifications(this) && PhoneNotificationPrefs.enabled(this)
-        if (answering && own != null && RustCore.controlPeer() == null) {
+        // F5: a call's answers come on the same link.
+        val callsOn = Prefs.callsOn(this)
+        if ((answering || callsOn) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
                 answerConnectMs = now
@@ -421,6 +429,21 @@ class PhoneNotificationListener : NotificationListenerService() {
         val answers = RustCore.takeNotificationAnswers()
         if (answers.isEmpty()) return
         for (answer in answers) {
+            // F5: an answer to a ringing call's note is the call's, not a notification's.
+            if (CallRule.isCall(answer.key)) {
+                val act = CallRule.decide(
+                    key = answer.key,
+                    action = answer.action,
+                    ringing = calls.ringing,
+                    ownComputer = NotificationActionRule.fromOwnComputer(answer.host, answer.port, own?.address, own?.controlPort),
+                    on = callsOn,
+                    mayDecline = CallWatch.mayDecline(this),
+                )
+                if (act == CallRule.Act.NotOwnComputer) continue
+                val why = calls.act(act)
+                tell(answer, NotificationActionRule.Outcome(why == null, why))
+                continue
+            }
             val entry = synchronized(answerable) { answerable[answer.key] }
             val offered =
                 when {

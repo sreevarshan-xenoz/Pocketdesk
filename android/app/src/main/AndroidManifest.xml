@@ -24,6 +24,11 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <!-- T8e: a forwarded text's sender name, only with "Names from my contacts" on. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- F5: ringing calls on the computer (the phone's state, the number from
+         the call log), and declining them from the computer. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <!-- T10h: new screenshots to the computer, only while that switch is on. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <!-- Android 14+: "selected photos only" is handled; Settings asks for all photos, as new screenshots need. -->
