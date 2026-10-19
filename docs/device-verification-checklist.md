@@ -1890,6 +1890,18 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] An install without `pocketdesk-tray`: the app's own tray, as before.
 - [ ] Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close).
 
+## 122. The phone as a pen (E3)
+
+- [x] Windows: the server's synthetic pen (its ignored test, `a_synthetic_pen_draws_a_stroke`) into a scratch window over every monitor that reads pointer messages (2026-10-19: type pen, enter, down at the expected pixel with pressure 313 rising to 938 of 1024, up, leave).
+- [ ] Windows: a pen session from the A71 into that window: pressure following the touch, Down and Up once per stroke.
+- [ ] A drawing app with pressure (Krita or Paint) on Windows: strokes thin and thick with the touch.
+- [ ] A stylus (the A71 has none): hover moves the cursor without drawing, tilt and the side button reach the app.
+- [ ] Pen pressure Soft, Even and Firm change the ink for one touch.
+- [ ] A pinch while in Pen lifts the pen and zooms the view, and the stroke does not go on after it.
+- [ ] Pen is not offered on a computer from before E3, and a session that meets one again goes back to Direct touch.
+- [ ] Control moving to another phone mid-stroke lifts the pen.
+- [ ] Linux: the uinput tablet (Krita, or `libinput debug-events` showing a tablet tool), and the mouse fallback without uinput.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

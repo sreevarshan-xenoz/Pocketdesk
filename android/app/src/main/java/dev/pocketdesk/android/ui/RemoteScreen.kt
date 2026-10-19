@@ -769,8 +769,8 @@ fun RemoteScreen(
             RustCore.sendQualityPreset(next).onFailure { qualityPresetError = context.plainErrorText(it.message) }
         }
     }
-    // E3: the pen, where the computer says it takes one, on its ready stream
-    // just after the picture starts.
+    // E3: the pen, where the computer says it takes one, on the ready stream
+    // it sends as the session is admitted.
     var penOffered by remember(address) { mutableStateOf(false) }
     fun toggleMode() {
         mode = nextMode(mode, inputModes(penOffered))
