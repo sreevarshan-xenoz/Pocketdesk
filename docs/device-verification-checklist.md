@@ -638,10 +638,11 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host, over WAN. Th
 
 - [ ] The desktop app's prompt: it comes to the front (also from the tray) and its three buttons work; Always allow turns the switch off.
 - [ ] No answer: the phone shows the refusal about 30 s after connecting.
-- [ ] Clipboard off: the phone's clipboard actions are dropped (`Denied … clipboard` in the log); turn it on again and they work at once.
+- [x] Clipboard off: the phone's clipboard actions are dropped (`Denied … clipboard` in the log); turn it on again and they work at once. Four denied in a session's first 15 s, none in the 15 s after it was turned on (2026-10-19, A71, throwaway server, by script).
 - [ ] Running commands: denied by default; allowed after the switch is turned on.
 - [ ] Control off: the session is view-only and the phone cannot lift it. Sound off: no desktop sound. Microphone off: the mic does not reach the desktop.
-- [ ] Turning control, sound or the microphone off during a session ends that session; Retry starts one with the change. Removing a connected phone ends its session.
+- [x] Turning sound off during a session ends it (within 1 s: "This computer's owner changed what this phone may do…"); Retry starts one with the change (2026-10-19, A71, throwaway server, by script). Found there: on a phone held upright the card was squeezed into the stream's quarter of the screen, its text over the chrome and Retry under the mode chip; fixed, the card now has the whole screen while the session is not up.
+- [ ] Turning control or the microphone off during a session ends that session. Removing a connected phone ends its session.
 - [ ] LAN session: the prompt shows the phone's address.
 
 ## 29. Computers on this network
@@ -1558,7 +1559,7 @@ On the A71, against a throwaway server (`adb reverse`, input off for the phone):
 - [x] A session: no dot while connecting, "Good connection" once streaming over the internet road; a refused session shows none.
 - [x] The session menu: the groups, segmented choices (Trackpad chosen, the chip followed), no chevron on Ring, Lock, Blackout and picture-in-picture.
 - [ ] TalkBack on a card ("Connect"), a Settings row (one stop) and a heading.
-- [ ] "Show connection details" on, during a session: the numbers and the computer's battery.
+- [x] "Show connection details" on, during a session: the numbers and the computer's battery (fps, kbps, rtt, delay, lost, "computer 55%⚡" and the caption) (2026-10-19, A71, throwaway server, by script).
 - [ ] A row's "Allow notification access" with a feature on and access off.
 - [x] Spanish and Tamil (the app's own language set by `cmd locale`): the card's buttons fit (Tamil wraps Show screen to a second row), and the four quality choices fit after the review.
 - [ ] Landscape: the bottom chrome with 48 dp chips.
@@ -1944,7 +1945,8 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [x] Settings' Input group, Pen pressure as a row saving its choice, at font scale 1.0 and 2.0 (2026-10-19).
 - [ ] The session menu with Pen offered: three segments at 1.0; at 2.0 crowded.
 - [ ] The gamepad in portrait and landscape on the A71 and a 360 dp phone; at font scale 2.0.
-- [ ] The history sheet from Home: says a tap sends, entries 48 dp, no Clear when empty.
+- [x] The history sheet from Home says a tap sends ("Tap one to send it to Test Desk") (2026-10-19, A71, throwaway server, by script).
+- [ ] The history sheet's entries 48 dp, and no Clear when empty.
 - [ ] The Health card's Choose opens the folder picker.
 - [ ] TalkBack on the new rows (the mode chip's action, the gamepad's keys, the folders' Remove).
 - [ ] Spanish and Tamil on the changed screens.
