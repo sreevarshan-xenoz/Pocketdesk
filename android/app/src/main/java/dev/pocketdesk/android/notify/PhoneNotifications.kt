@@ -326,7 +326,17 @@ class PhoneNotificationListener : NotificationListenerService() {
         val infos = actionInfos(actions)
         val offered = NotificationActionRule.offered(infos)
         val reply = NotificationActionRule.replyIndex(infos)?.let { actions[it] }
-        val offer = NotificationActionRule.signature(offered, reply != null)
+        // D4: a chat's recent messages, only for a notification the computer
+        // may answer, which keeps them only then (D4 review: the toast alone
+        // had sent the whole history). Read before deciding whether anything
+        // is new: a new message can leave the title and text as they were.
+        val thread =
+            if (Prefs.answerNotifications(this) && (offered.isNotEmpty() || reply != null)) {
+                conversation(sbn.notification)
+            } else {
+                null
+            }
+        val offer = NotificationActionRule.signature(offered, reply != null) + ConversationRule.digest(thread?.toString())
         val out = rule.decide(note, enabled = true, shared = PhoneNotificationPrefs.shared(this), offer = offer)
         if (out == null) {
             // Nothing new to send; an app that posts again often replaces
@@ -345,12 +355,8 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
-        // D4: a chat's recent messages, only with the notification in full
-        // and answerable from the computer, which keeps them only then (D4
-        // review: the toast alone had sent the whole history).
-        if (out.full && Prefs.answerNotifications(this) && (offered.isNotEmpty() || reply != null)) {
-            conversation(sbn.notification)?.let { body.put("messages", it) }
-        }
+        // Only with the notification in full.
+        if (out.full) thread?.let { body.put("messages", it) }
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L

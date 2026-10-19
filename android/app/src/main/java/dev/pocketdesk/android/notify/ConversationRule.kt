@@ -16,6 +16,13 @@ object ConversationRule {
     /** One message as it is sent. */
     data class Out(val from: String, val text: String, val timeMs: Long, val mine: Boolean)
 
+    /**
+     * What tells one thread from another in what was last sent (D4 review):
+     * a new message under the same title and text is something new to send.
+     * Empty for no thread.
+     */
+    fun digest(thread: String?): String = if (thread == null) "" else "|m" + thread.hashCode()
+
     fun messages(raw: List<Raw>, hidden: String): List<Out> =
         raw.mapNotNull { m ->
             val text = m.text?.trim().orEmpty()

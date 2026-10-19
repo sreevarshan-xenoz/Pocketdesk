@@ -30,4 +30,11 @@ class ConversationRuleTest {
         assertEquals("Bank", out[1].from)
         assertEquals(hidden, out[1].text)
     }
+
+    @Test
+    fun `a new message changes the digest, the same thread does not`() {
+        assertEquals("", ConversationRule.digest(null))
+        assertEquals(ConversationRule.digest("[a]"), ConversationRule.digest("[a]"))
+        org.junit.Assert.assertNotEquals(ConversationRule.digest("[a]"), ConversationRule.digest("[a,b]"))
+    }
 }
