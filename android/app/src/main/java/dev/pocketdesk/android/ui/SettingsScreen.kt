@@ -166,6 +166,21 @@ fun SettingsScreen(onBack: () -> Unit) {
             DeckColumns()
 
             SettingsHeader(stringResource(R.string.settings_files_links))
+            // F3: a photo the computer asks for.
+            SettingSwitch(
+                stringResource(R.string.settings_camera_asks),
+                stringResource(R.string.settings_camera_asks_summary),
+                Prefs.cameraAsks(context),
+                { Prefs.setCameraAsks(context, it) },
+            )
+            if (Prefs.cameraAsks(context)) {
+                SettingSwitch(
+                    stringResource(R.string.settings_camera_clipboard),
+                    stringResource(R.string.settings_camera_clipboard_summary),
+                    Prefs.cameraClipboard(context),
+                    { Prefs.setCameraClipboard(context, it) },
+                )
+            }
             SettingSwitch(
                 stringResource(R.string.settings_retry_transfers),
                 stringResource(R.string.settings_retry_transfers_summary),

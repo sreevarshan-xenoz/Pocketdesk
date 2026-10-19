@@ -167,6 +167,15 @@
             android:exported="false" />
 
         <!-- T10b: reads the clipboard once in focus, sends it, closes; never shown. -->
+        <!-- F3: the camera, for a photo the computer asked for. -->
+        <activity
+            android:name=".files.CameraActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity
             android:name=".clip.SendClipboardActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"

@@ -53,6 +53,8 @@ object Prefs {
     private const val KEY_PEN_CURVE = "pen_curve"
     private const val KEY_GAMEPAD_CONTROLLER = "gamepad_controller"
     private const val KEY_DECK_COLUMNS = "deck_columns"
+    private const val KEY_CAMERA_ASKS = "camera_asks"
+    private const val KEY_CAMERA_CLIPBOARD = "camera_clipboard"
 
     /** The trackpad speed slider's range and default (F3). */
     const val TRACKPAD_SENSITIVITY_MIN = 0.5f
@@ -401,6 +403,22 @@ object Prefs {
         prefs(ctx).edit {
             putFloat(KEY_TRACKPAD_SENSITIVITY, value.coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX))
         }
+        bump()
+    }
+
+    /** The computer may ask for a photo, offered in a notification (F3). */
+    fun cameraAsks(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_CAMERA_ASKS, true)
+
+    fun setCameraAsks(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CAMERA_ASKS, on) }
+        bump()
+    }
+
+    /** A photo asked for goes onto the computer's clipboard too (F3). */
+    fun cameraClipboard(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_CAMERA_CLIPBOARD, true)
+
+    fun setCameraClipboard(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CAMERA_CLIPBOARD, on) }
         bump()
     }
 

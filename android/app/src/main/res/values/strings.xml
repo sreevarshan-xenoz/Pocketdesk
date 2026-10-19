@@ -788,4 +788,14 @@
     <string name="state_unit_day">d</string>
     <string name="state_unit_hour">h</string>
     <string name="state_unit_minute">min</string>
+    <string name="camera_channel">Photos the computer asks for</string>
+    <string name="camera_channel_description">Offers the camera when a computer asks this phone for a photo</string>
+    <string name="camera_ask_title">%1$s asks for a photo</string>
+    <string name="camera_ask_text">Tap to open the camera; the photo goes to the computer</string>
+    <string name="camera_denied">Pocketdesk needs the camera permission to open the camera</string>
+    <string name="camera_none">No camera app on this phone</string>
+    <string name="settings_camera_asks">Photos the computer asks for</string>
+    <string name="settings_camera_asks_summary">When the computer asks, a notification opens the camera; the photo goes to the computer</string>
+    <string name="settings_camera_clipboard">Also onto its clipboard</string>
+    <string name="settings_camera_clipboard_summary">The photo goes onto the computer\'s clipboard as well as into its received files</string>
 </resources>
