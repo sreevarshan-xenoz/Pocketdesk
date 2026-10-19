@@ -2030,6 +2030,14 @@ Built 2026-10-20 on the owner's night of features; nothing by hand yet.
 - [ ] With the A71 linked and "Photos the computer asks for" on: the tray's Take a photo under it, then the phone's notification, the camera, and the photo in the received files; the same from the Overview's button, with its notice.
 - [ ] The phone away, or Files off for it: Take a photo greyed in the tray and on the Overview, its hover saying why.
 
+## 134. The deck on the home screen (G3)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet. Presses that type or press keys reach the computer: with the owner's OK.
+- [ ] Place "Pocketdesk: deck": its first six buttons, as the deck sheet shows them; ↻ asks again.
+- [ ] With the app swiped away: a media or link button pressed from the widget runs on the computer, the line saying "<label>: Done" (the bridge started by the tap).
+- [ ] The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
+- [ ] Connect to another computer, then press a button still drawn for the first: nothing is sent, the widget redrawn for the new one.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

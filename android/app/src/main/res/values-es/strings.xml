@@ -824,4 +824,9 @@
     <string name="state_widget_not_shared">Este ordenador no comparte cómo va</string>
     <string name="settings_state_widget_auto">El widget de estado se actualiza solo</string>
     <string name="settings_state_widget_auto_summary">El widget de la pantalla de inicio pregunta al ordenador cómo va cada 30 minutos como mucho, nunca con datos móviles. Desactivado, solo pregunta al tocarlo.</string>
+    <string name="deck_widget_name">Pocketdesk: botonera</string>
+    <string name="deck_widget_description">Los botones de la botonera del último ordenador, desde la pantalla de inicio.</string>
+    <string name="deck_widget_refresh">Volver a pedir los botones</string>
+    <string name="deck_widget_said">%1$s: %2$s</string>
+    <string name="deck_widget_no_answer">El ordenador aún no responde</string>
 </resources>
