@@ -239,12 +239,10 @@ fn disks() -> Vec<Disk> {
 
 #[cfg(not(windows))]
 fn disks() -> Vec<Disk> {
-    std::process::Command::new("df")
-        .args(["-kP"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| parse_df(&String::from_utf8_lossy(&o.stdout)))
+    // Local filesystems only, and within 3 s: a dead network mount hangs a
+    // plain `df`, and with it the phone's control loop (F2 review).
+    pocketdesk_core::local::network::output_within("df", &["-klP"], Duration::from_secs(3))
+        .map(|out| parse_df(&String::from_utf8_lossy(&out)))
         .unwrap_or_default()
 }
 
