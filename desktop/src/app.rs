@@ -84,8 +84,8 @@ const PERMISSIONS: [(Capability, &str, &str); 16] = [
     ),
     (
         Capability::Cast,
-        "Show its screen here",
-        "The phone can show its own screen in a window here, when its owner starts it on the phone.",
+        "Show its screen or camera here",
+        "The phone can show its own screen, or its camera, in a window here, when its owner starts it on the phone.",
     ),
     (
         Capability::Tasks,
@@ -1409,7 +1409,7 @@ impl PocketdeskApp {
                         session.transport.to_uppercase(),
                         session.peer,
                         if session.cast {
-                            " · showing its screen"
+                            " · showing its screen or camera"
                         } else if session.control_only {
                             " · control only"
                         } else if session.sound_only {

@@ -801,4 +801,9 @@
     <string name="settings_calls_needs_access">அறிவிப்பு அணுகல் தேவை: அழைப்பு அதிலிருந்து கவனிக்கப்படுகிறது, கணினியின் பதில்களும் அதில் வருகின்றன</string>
     <string name="settings_calls_decline">அழைப்புகளை நிராகரிக்க கணினியை அனுமதி</string>
     <string name="settings_calls_decline_summary">அமைதிப்படுத்து அருகே நிராகரி சேர்க்கும்; அழைப்புகளை முடிக்க அனுமதி கேட்கும்</string>
+    <string name="card_show_camera">கேமராவைக் காட்டு</string>
+    <string name="cast_showing_camera">%1$s இல் கேமராவைக் காட்டுகிறது</string>
+    <string name="cast_camera_denied">கேமராவைக் காட்ட Pocketdesk க்குக் கேமரா அனுமதி தேவை</string>
+    <string name="cast_no_camera">Pocketdesk காட்டக்கூடிய கேமரா இந்தக் கைபேசியில் இல்லை</string>
+    <string name="cast_camera_lost">கேமரா நின்றது: வேறொரு செயலி அதை எடுத்திருக்கலாம்</string>
 </resources>

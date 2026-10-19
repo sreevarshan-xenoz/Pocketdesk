@@ -807,4 +807,9 @@
     <string name="settings_calls_needs_access">Necesita acceso a las notificaciones: la llamada se vigila, y llegan las respuestas del ordenador, desde él</string>
     <string name="settings_calls_decline">Dejar que el ordenador rechace llamadas</string>
     <string name="settings_calls_decline_summary">Añade Rechazar junto a Silenciar; pide finalizar llamadas</string>
+    <string name="card_show_camera">Mostrar cámara</string>
+    <string name="cast_showing_camera">Mostrando la cámara en %1$s</string>
+    <string name="cast_camera_denied">Pocketdesk necesita el permiso de cámara para mostrar la cámara</string>
+    <string name="cast_no_camera">Este teléfono no tiene una cámara que Pocketdesk pueda mostrar</string>
+    <string name="cast_camera_lost">La cámara se detuvo: puede que otra app la haya tomado</string>
 </resources>
