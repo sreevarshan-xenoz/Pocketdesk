@@ -52,24 +52,30 @@ class DeckWidget : AppWidgetProvider() {
         val ask = generation.incrementAndGet()
         showAsking(app, app.getString(R.string.deck_loading))
         val noAnswer = {
-            if (generation.get() == ask) {
-                Kept.failed(app, host.address, app.getString(R.string.deck_failed, app.getString(R.string.deck_widget_no_answer)))
-                asking = null
-                redrawAll(app)
+            val newest = synchronized(generation) {
+                (generation.get() == ask).also { newest ->
+                    if (newest) {
+                        Kept.failed(app, host.address, app.getString(R.string.deck_failed, app.getString(R.string.deck_widget_no_answer)))
+                        asking = null
+                    }
+                }
             }
+            if (newest) redrawAll(app)
         }
         bounded("deck-widget-list", onTimeout = noAnswer) {
             val answer = ask(app) { RustCore.listDeck(host.address, host.controlPort) }
-            // Only the newest ask keeps what it heard.
-            if (generation.get() != ask) return@bounded
             val json = answer.getOrNull()?.takeIf { runCatching { Deck.parse(it) }.isSuccess }
-            if (json != null) {
-                Kept.save(app, host.address, json)
-            } else {
-                val why = app.plainErrorText(answer.exceptionOrNull()?.message)
-                Kept.failed(app, host.address, app.getString(R.string.deck_failed, why))
+            val why = app.plainErrorText(answer.exceptionOrNull()?.message)
+            // Only the newest ask keeps what it heard, checked and written at once.
+            synchronized(generation) {
+                if (generation.get() != ask) return@bounded
+                if (json != null) {
+                    Kept.save(app, host.address, json)
+                } else {
+                    Kept.failed(app, host.address, app.getString(R.string.deck_failed, why))
+                }
+                asking = null
             }
-            asking = null
             redrawAll(app)
         }
     }
@@ -156,6 +162,7 @@ class DeckWidget : AppWidgetProvider() {
 
             private fun prefs(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
+            @Synchronized
             fun read(ctx: Context, lastComputer: String?): Kept {
                 val p = prefs(ctx)
                 val listFor = p.getString(KEY_FOR, null)
@@ -164,7 +171,11 @@ class DeckWidget : AppWidgetProvider() {
                     if (listFor != null && lastComputer != null) p.edit { clear() }
                     return Kept(null, false, null)
                 }
-                return Kept(p.getString(KEY_JSON, null), p.getBoolean(KEY_FAILED, false), p.getString(KEY_LINE, null))
+                // A list that no longer reads counts as a failure, so it is asked again.
+                val json = p.getString(KEY_JSON, null)
+                val readable = json?.takeIf { runCatching { Deck.parse(it) }.isSuccess }
+                val failed = p.getBoolean(KEY_FAILED, false) || (json != null && readable == null)
+                return Kept(readable, failed, p.getString(KEY_LINE, null))
             }
 
             @Synchronized
@@ -244,8 +255,10 @@ class DeckWidget : AppWidgetProvider() {
         fun keep(context: Context, computer: String, json: String) {
             val app = context.applicationContext
             if (HostStore.lastHost(app)?.address != computer) return
-            generation.incrementAndGet()
-            Kept.save(app, computer, json)
+            synchronized(generation) {
+                generation.incrementAndGet()
+                Kept.save(app, computer, json)
+            }
             redrawAll(app)
         }
 
