@@ -1839,7 +1839,8 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] The same while typing on the computer: no line until the keyboard has been quiet that long.
 - [ ] The phone back, and gone again: a second line; staying gone: no more.
 - [ ] The switch on the Devices page, and the time in Settings, applied without a restart.
-- [ ] A real lock, on a computer where locking is allowed (not this box), Windows and Linux.
+- [ ] A real lock, on a computer where locking is allowed (not this box), Windows; on Linux, that it never locks.
+- [ ] A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
 
 ## Recording results
 
