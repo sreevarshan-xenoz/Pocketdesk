@@ -218,8 +218,8 @@ impl PhotosView {
             } else if now_unix.saturating_sub(asked) > ANSWER_SECS {
                 self.waiting = None;
                 self.notice = crate::notice::Notice::error(
-                    "The phone did not answer. On the phone, turn on Settings, \"Recent photos on \
-                     the computer\"; here, Files must be on for it in Devices.",
+                    "The phone did not answer. Turn on \"Recent photos on the computer\" in \
+                     Pocketdesk's Settings on the phone, and \"Send and browse files\" for it in Devices.",
                 );
             }
         }

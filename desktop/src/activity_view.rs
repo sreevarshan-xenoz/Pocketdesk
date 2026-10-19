@@ -113,7 +113,7 @@ impl ActivityView {
         if !log_on {
             ui.horizontal_wrapped(|ui| {
                 ui.label("The event log is off, so nothing new shows here.");
-                if ui.button("Settings").clicked() {
+                if ui.button("Turn it on in Settings").clicked() {
                     action = Some(Action::OpenSettings);
                 }
             });

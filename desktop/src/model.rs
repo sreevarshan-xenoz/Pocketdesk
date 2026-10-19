@@ -300,21 +300,21 @@ pub fn phone_rows<'a>(
                 ring: if !allows(Capability::Ring) {
                     Err("Ring is off for this phone, on the Devices page.")
                 } else if !device.linked {
-                    Err("Not linked now: it rings while it keeps a link to this computer, which a session or Ring from the computer in its own Settings opens.")
+                    Err("Not linked now: it rings while it keeps a link to this computer, which a session or \"Ring from the computer\" in Pocketdesk's Settings on the phone opens.")
                 } else {
                     Ok(())
                 },
                 mute: if !allows(Capability::Mute) {
                     Err("Mute is off for this phone, on the Devices page.")
                 } else if !device.linked {
-                    Err("Not linked now: it is muted while it keeps a link to this computer, which \"Let the computer mute this phone\" in its own Settings opens.")
+                    Err("Not linked now: it is muted while it keeps a link to this computer, which \"Let the computer mute this phone\" in Pocketdesk's Settings on the phone opens.")
                 } else {
                     Ok(())
                 },
                 file: if !allows(Capability::Files) {
                     Err("Files are off for this phone, on the Devices page.")
                 } else if !device.takes_files {
-                    Err("Files reach it in a session, or at home with \"Files from the computer in the background\" on in its Settings.")
+                    Err("Files reach it in a session, or at home with \"Files from the computer in the background\" on in Pocketdesk's Settings on the phone.")
                 } else {
                     Ok(())
                 },

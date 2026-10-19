@@ -62,8 +62,10 @@ impl NotesView {
             Ok(_) => {
                 // Queued: the server sends it within a minute, once the
                 // phone is connected.
-                self.notice =
-                    crate::notice::Notice::done(format!("Queued {what} for {}", note.app));
+                self.notice = crate::notice::Notice::done(format!(
+                    "Asked the phone to send {what} to {}.",
+                    note.app
+                ));
                 self.drafts
                     .remove(&(note.device_id.clone(), note.key.clone()));
             }
@@ -86,7 +88,7 @@ impl NotesView {
                     "Notifications from your phone that you can answer appear here: \
                      their buttons, and a reply box for chats. The phone sends them once \
                      \"This phone's notifications\" is on, and lets you answer once \
-                     \"Let the computer answer notifications\" is on, in the phone's Settings.",
+                     \"Let the computer answer notifications\" is on, in Pocketdesk's Settings on the phone.",
                 )
                 .color(crate::theme::muted(ui)),
             );
@@ -115,8 +117,9 @@ impl NotesView {
                     }
                     ui.label(
                         RichText::new(format!(
-                            "from {}",
-                            crate::model::device_label(devices, &note.device_id)
+                            "From {} · {}",
+                            crate::model::device_label(devices, &note.device_id),
+                            crate::words::ago(now_unix, note.at_unix)
                         ))
                         .small()
                         .color(crate::theme::muted(ui)),

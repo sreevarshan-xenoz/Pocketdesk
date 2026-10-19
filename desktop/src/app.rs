@@ -95,12 +95,12 @@ const PERMISSIONS: [(Capability, &str, &str); 16] = [
     (
         Capability::Ring,
         "Ring this phone from here",
-        "Ring it from here when it is lost, at most once a minute. The phone rings only with \"Ring from the computer\" on in its own Settings.",
+        "Ring it from here when it is lost, at most once a minute. The phone rings only with \"Ring from the computer\" on in Pocketdesk's Settings on the phone.",
     ),
     (
         Capability::Mute,
         "Mute this phone from here",
-        "Turn on the phone's Do Not Disturb from here for a while, and see when it is quiet. The phone allows it only with \"Let the computer mute this phone\" on in its own Settings.",
+        "Turn on the phone's Do Not Disturb from here for a while, and see when it is quiet. The phone allows it only with \"Let the computer mute this phone\" on in Pocketdesk's Settings on the phone.",
     ),
     (
         Capability::AwayLock,
@@ -859,8 +859,7 @@ impl PocketdeskApp {
         } else {
             status_line(ui, crate::theme::MUTED, "The server is not running");
             ui.label(
-                "Phones cannot connect until it starts. It starts at logon once \
-                 installed (`pocketdesk install` on Windows, the systemd user unit on Linux).",
+                "Phones cannot connect until it starts. Once installed, it starts when you sign in.",
             );
             if ui
                 .add_enabled(self.job.is_none(), egui::Button::new("Start server"))
@@ -945,7 +944,7 @@ impl PocketdeskApp {
                 // Asked, not sent: the server reads the clipboard then, and
                 // shows a notification if it cannot send it (D5 review).
                 Ok(_) => Ok(format!(
-                    "Asked the server to send the clipboard to {who}; a notification says if it cannot."
+                    "Sending the clipboard to {who}; a notification says if it cannot."
                 )),
                 Err(e) => Err(format!("Could not send the clipboard to {who}: {e}")),
             },
@@ -1199,7 +1198,7 @@ impl PocketdeskApp {
                     } else if !device.permissions.allows(Capability::Ring) {
                         "Ring is off for this phone, in its section below."
                     } else if !device.linked {
-                        "Not linked now: it rings in a session, or with Ring from the computer on in its own Settings."
+                        "Not linked now: it rings in a session, or with \"Ring from the computer\" on in Pocketdesk's Settings on the phone."
                     } else {
                         "Ring it for 30 seconds, through Do Not Disturb when the phone lets alarms through: at full volume before Android 17, at the phone's alarm volume on 17 and newer. At most once a minute."
                     };
@@ -1780,7 +1779,7 @@ impl PocketdeskApp {
             ui.label(
                 RichText::new(
                     "No phone or computer can take a file right now. A phone can in a session, or \
-                     with \"Files from the computer in the background\" on in its Settings; \
+                     with \"Files from the computer in the background\" on in Pocketdesk's Settings on the phone; \
                      another of your computers, while its link is up. Files land in the \
                      phone's folder for files from computers (Downloads/Pocketdesk unless chosen).",
                 )

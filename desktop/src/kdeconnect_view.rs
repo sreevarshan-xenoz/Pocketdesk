@@ -389,7 +389,7 @@ fn permission_boxes(
             KdePermission::Notifications,
             &mut permissions.notifications,
             "Show its notifications here",
-            "In full, as KDE Connect sends them (it does not keep private ones back), with notification sync on in its KDE Connect app and Settings, Notifications, Phone notifications on here",
+            "In full, as KDE Connect sends them (it does not keep private ones back), with notification sync on in its KDE Connect app and Settings → Notifications and texts → Phone notifications on here",
         ),
     ] {
         if ui

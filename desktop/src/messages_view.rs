@@ -142,7 +142,7 @@ impl MessagesView {
                 list.label(
                     RichText::new(
                         "No texts yet. A phone shares its texts once its owner turns on \
-                         \"Show texts on my computer\" in the phone's Settings.",
+                         \"Show texts on my computer\" in Pocketdesk's Settings on the phone.",
                     )
                     .color(muted),
                 );
@@ -203,7 +203,7 @@ impl MessagesView {
                             .hint_text("Reply"),
                     );
                     if pane
-                        .add_enabled(!self.draft.trim().is_empty(), egui::Button::new("Send"))
+                        .add_enabled(!self.draft.trim().is_empty(), egui::Button::new("Send reply"))
                         .clicked()
                     {
                         self.send(state_dir, &device, &address, now_unix);

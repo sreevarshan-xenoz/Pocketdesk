@@ -1,4 +1,4 @@
-//! The tray icon and its menu ([`crate::tray_menu`]): Open, Pair a phone…,
+//! The tray icon and its menu ([`crate::tray_menu`]): Open, Pair a phone,
 //! each paired phone's actions (D5), Quit.
 //!
 //! Menu clicks arrive on the menu's own channel. The window may be hidden

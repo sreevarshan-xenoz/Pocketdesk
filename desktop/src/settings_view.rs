@@ -597,7 +597,7 @@ impl SettingsForm {
                 row(ui, "clipboard_push", |ui| {
                     ui.checkbox(
                         &mut e.clipboard_push,
-                        "send what I copy to connected phones (those with Clipboard on)",
+                        "send what I copy to connected phones (those with \"Share the clipboard\" on in Devices)",
                     );
                 });
                 row(ui, "clipboard_history", |ui| {
@@ -689,7 +689,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "Only once the phone allows it: \"Let the computer control this phone\" in its Pocketdesk Settings.",
+                        "Only once the phone allows it: \"Let the computer control this phone\" in Pocketdesk's Settings on the phone.",
                     );
                 });
                 if cfg!(windows) {

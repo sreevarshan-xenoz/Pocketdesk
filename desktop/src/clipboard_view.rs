@@ -57,7 +57,7 @@ pub fn origin(entry: &ClipEntry, devices: &[Device]) -> String {
     }
 }
 
-/// The phones and computers a text can go to now: linked, with Clipboard on.
+/// The phones and computers a text can go to now: linked, with "Share the clipboard" on.
 pub fn targets(devices: &[Device]) -> Vec<&Device> {
     devices
         .iter()
@@ -145,7 +145,7 @@ impl ClipboardView {
                         crate::words::ago(now_unix, entry.at_unix)
                     );
                     if entry.cut {
-                        head.push_str(" · kept cut, it was long");
+                        head.push_str(" · shortened, it was too long to keep");
                     }
                     ui.label(RichText::new(head).color(crate::theme::muted(ui)));
                     ui.label(preview(entry));
@@ -155,9 +155,9 @@ impl ClipboardView {
                         }
                         // A cut entry is not what was copied (D3 review).
                         let why = if entry.cut {
-                            "Kept cut, not as it was copied: copy it instead."
+                            "Kept shortened, so it would not arrive as copied. Use Copy instead."
                         } else {
-                            "No phone with Clipboard on is linked now."
+                            "No phone with \"Share the clipboard\" on (Devices) is linked now."
                         };
                         ui.add_enabled_ui(!targets.is_empty() && !entry.cut, |ui| {
                             ui.menu_button("Send to…", |ui| {

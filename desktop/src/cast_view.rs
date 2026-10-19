@@ -407,7 +407,7 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                     } else {
                         ui.colored_label(
                             egui::Color32::LIGHT_GRAY,
-                            "To control the phone from here, turn on \u{201c}Let the computer control this phone\u{201d} in its Pocketdesk Settings.",
+                            "To control the phone from here, turn on \u{201c}Let the computer control this phone\u{201d} in Pocketdesk's Settings on the phone.",
                         );
                     }
                 });

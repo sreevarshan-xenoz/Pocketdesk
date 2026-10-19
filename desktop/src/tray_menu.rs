@@ -49,7 +49,7 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
     };
     let mut entries = vec![
         item("Open Pocketdesk", Some(TrayAction::Open)),
-        item("Pair a phone…", Some(TrayAction::Pair)),
+        item("Pair a phone", Some(TrayAction::Pair)),
     ];
     if !rows.is_empty() {
         entries.push(Entry::Separator);
@@ -87,7 +87,7 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
                         .then(|| TrayAction::Mute(id(), if muted { 0 } else { 60 })),
                 ),
                 item(
-                    "Send clipboard",
+                    "Send the clipboard",
                     row.clipboard
                         .is_ok()
                         .then(|| TrayAction::SendClipboard(id())),
@@ -137,7 +137,7 @@ mod tests {
             labels(&menu),
             [
                 ("Open Pocketdesk".to_string(), true),
-                ("Pair a phone…".to_string(), true),
+                ("Pair a phone".to_string(), true),
                 ("-".to_string(), false),
                 ("Quit".to_string(), true),
             ]
@@ -201,7 +201,7 @@ mod tests {
                     action: Some(TrayAction::Mute("ready".to_string(), 60))
                 },
                 Entry::Item {
-                    label: "Send clipboard".to_string(),
+                    label: "Send the clipboard".to_string(),
                     action: Some(TrayAction::SendClipboard("ready".to_string()))
                 },
                 Entry::Item {

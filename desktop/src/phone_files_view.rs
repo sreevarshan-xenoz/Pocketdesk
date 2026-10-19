@@ -184,7 +184,7 @@ impl PhoneFilesView {
                 Some(false) => {
                     self.waiting = None;
                     self.notice = crate::notice::Notice::error(
-                        "The phone did not answer. Is it connected, with Files on in Devices, \
+                        "The phone did not answer. Is it connected, with \"Send and browse files\" on in Devices, \
                          and Pocketdesk allowed to run in the background on it?",
                     );
                 }
@@ -214,7 +214,7 @@ impl PhoneFilesView {
         if listing.roots.is_empty() {
             ui.label(
                 RichText::new(
-                    "The phone shares no folder yet: add one in its Settings, \"Folders the computer may open\".",
+                    "The phone shares no folder yet: add one in Pocketdesk's Settings on the phone, \"Folders the computer may open\".",
                 )
                 .color(crate::theme::muted(ui)),
             );
