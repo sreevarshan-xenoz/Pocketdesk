@@ -256,6 +256,22 @@ pub struct PhoneRow<'a> {
     pub mute: Result<(), &'static str>,
     pub file: Result<(), &'static str>,
     pub link: Result<(), &'static str>,
+    /// A text to its clipboard (D3's Send to…, D5's tray).
+    pub clipboard: Result<(), &'static str>,
+}
+
+/// Whether a text can go to `device`'s clipboard now: one rule for the
+/// Clipboard page and the tray (D5 review).
+pub fn clipboard_reach(device: &Device) -> Result<(), &'static str> {
+    if !device.permissions.allows(Capability::Clipboard) {
+        Err("Clipboard is off for it, on the Devices page.")
+    } else if !device.linked {
+        Err(
+            "Not linked now: a text reaches it while it keeps a link to this computer, which a session or a background feature opens.",
+        )
+    } else {
+        Ok(())
+    }
 }
 
 /// The Overview's phones (N6): paired phones only (other computers have
@@ -310,6 +326,7 @@ pub fn phone_rows<'a>(
                 } else {
                     Ok(())
                 },
+                clipboard: clipboard_reach(device),
             }
         })
         .collect()

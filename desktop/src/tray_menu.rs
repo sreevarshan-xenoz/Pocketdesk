@@ -4,8 +4,6 @@
 //! the Overview's buttons (`model::phone_rows`), whose reasons the Overview
 //! shows (a tray menu has no hover text).
 
-use pocketdesk_core::protocol::permissions::Capability;
-
 use crate::model::{self, Device, PhoneRow};
 
 /// What the user picked from the tray menu.
@@ -74,7 +72,6 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
         // here, and nothing over the owner's own Do Not Disturb.
         let muted = model::muted_from_here(device.quiet.as_ref(), now_unix);
         let owners = !muted && model::quiet_by_owner(device.quiet.as_ref());
-        let clipboard = device.linked && device.permissions.allows(Capability::Clipboard);
         entries.push(Entry::Phone {
             label,
             items: vec![
@@ -86,7 +83,9 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
                 ),
                 item(
                     "Send clipboard",
-                    clipboard.then(|| TrayAction::SendClipboard(id())),
+                    row.clipboard
+                        .is_ok()
+                        .then(|| TrayAction::SendClipboard(id())),
                 ),
                 item(
                     "Send file…",
@@ -106,6 +105,7 @@ mod tests {
     use crate::model::Snapshot;
     use pocketdesk_core::local::phone_quiet::PhoneQuiet;
     use pocketdesk_core::local::phone_status::PhoneBattery;
+    use pocketdesk_core::protocol::permissions::Capability;
 
     fn labels(entries: &[Entry]) -> Vec<(String, bool)> {
         entries
