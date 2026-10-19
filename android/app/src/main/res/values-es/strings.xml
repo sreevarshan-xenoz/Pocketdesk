@@ -842,4 +842,6 @@
     <string name="media_widget_pause">Pausa</string>
     <string name="media_widget_refused">El ordenador lo rechazó</string>
     <string name="media_widget_unreadable">No se pudo leer la respuesta del ordenador</string>
+    <string name="media_tile_label">Música del ordenador</string>
+    <string name="media_tile_hint">Toca para reproducir o pausar</string>
 </resources>

@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
+import android.service.quicksettings.TileService
 import android.text.format.DateUtils
 import android.view.View
 import android.widget.RemoteViews
@@ -212,7 +213,31 @@ class MediaWidget : AppWidgetProvider() {
             context.sendBroadcast(Intent(context, MediaWidget::class.java).setAction(ACTION_FOLLOW))
         }
 
+        /** What the last computer plays as kept, for the music tile (G6). */
+        data class Latest(val playing: NowPlaying?, val failed: Boolean, val line: String?, val asking: Boolean)
+
+        fun latest(context: Context): Latest {
+            val host = HostStore.lastHost(context)
+            val kept = Kept.read(context, host?.address)
+            val playing = kept.json?.takeIf { !kept.failed }
+                ?.let { json -> runCatching { parsePlaying(JSONObject(json)) }.getOrNull() }
+            return Latest(playing, kept.failed, kept.line, asking)
+        }
+
+        /** Play or pause the last computer's music, as the widget's button does (G6's tile). */
+        fun playPause(context: Context) {
+            val host = HostStore.lastHost(context) ?: return
+            context.sendBroadcast(
+                Intent(context, MediaWidget::class.java)
+                    .setAction(ACTION_PRESS)
+                    .putExtra(EXTRA_COMPUTER, host.address)
+                    .putExtra(EXTRA_COMMAND, MediaWidgetPlan.command(MediaWidgetPlan.Button.PlayPause)),
+            )
+        }
+
         private fun redrawAll(app: Context) {
+            // The music tile reads the same answer; it is asked to look again (G6).
+            runCatching { TileService.requestListeningState(app, ComponentName(app, MediaTileService::class.java)) }
             val manager = AppWidgetManager.getInstance(app) ?: return
             val ids = manager.getAppWidgetIds(ComponentName(app, MediaWidget::class.java))
             if (ids.isNotEmpty()) redraw(app, manager, ids)
