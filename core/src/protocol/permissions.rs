@@ -112,7 +112,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         // Its recent photos (C7).
         | crate::protocol::phone_photos::LIST
         | crate::protocol::phone_photos::PHOTOS
-        | crate::protocol::phone_photos::FETCH => Capability::Files,
+        | crate::protocol::phone_photos::FETCH
+        | crate::protocol::phone_photos::TAKE => Capability::Files,
         "kdeconnect.pocketdesk.audio" => Capability::Audio,
         // Waking another machine through this one is a power action too.
         "kdeconnect.pocketdesk.power"

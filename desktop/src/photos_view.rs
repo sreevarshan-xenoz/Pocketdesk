@@ -237,6 +237,17 @@ impl PhotosView {
             if self.waiting.as_ref().is_some_and(|(p, _)| p == phone) {
                 ui.spinner();
             }
+            // F3: a new photo, taken on the phone, lands with the received files.
+            if ui
+                .button("Take a photo with the phone")
+                .on_hover_text("The phone shows a notification that opens its camera; the photo comes here as a received file.")
+                .clicked()
+                && self.ask(state_dir, phone, Ask::Take, now_unix)
+            {
+                self.notice = crate::notice::Notice::done(
+                    "Asked the phone: tap its notification to take the photo.",
+                );
+            }
         });
         let Some(kept) = kept else {
             return;

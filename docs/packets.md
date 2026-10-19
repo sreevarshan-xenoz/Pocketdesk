@@ -52,6 +52,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.phone_photos` | yes |  | Files | phone_photos |
 | `kdeconnect.pocketdesk.phone_photos.fetch` |  | yes |  | phone_photos |
 | `kdeconnect.pocketdesk.phone_photos.list` |  | yes |  | phone_photos |
+| `kdeconnect.pocketdesk.phone_photos.take` |  | yes |  | phone_photos |
 | `kdeconnect.pocketdesk.power` | yes |  | Power | power |
 | `kdeconnect.pocketdesk.privacy` | yes | yes | Power | privacy |
 | `kdeconnect.pocketdesk.quiet` |  | yes |  | phone_quiet |
