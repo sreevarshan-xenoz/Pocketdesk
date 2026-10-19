@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-624 open items.
+629 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 354 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 357 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 46 |
 | A phone with a SIM | 21 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 88 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 54 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 56 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -738,6 +738,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - "How it is doing" on the A71 against this box: the CPU moving under load, memory, each fixed drive (no removable or network drive), the battery when there is one, uptime.
 - "This computer's state" off in desktop Settings: the sheet says so, without a restart.
 - The sheet's asking stops when it closes; Spanish and Tamil; font scale 2.0.
+
+**128. Take a photo with the phone (F3)**
+
+- "Take a photo with the phone" on the Phone page: the A71's notification "<computer> asks for a photo" with the app in the background.
+- "Also onto its clipboard" off: the file only; "Photos the computer asks for" off: no notification.
+- Spanish and Tamil.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1608,3 +1614,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **126. The deck (F1)**
 
 - 2, 3 and 4 a row; a long label; Spanish and Tamil; TalkBack reads each button's label.
+
+**128. Take a photo with the phone (F3)**
+
+- Its tap: the camera permission prompt the first time, then the camera; the photo in the received files and on the computer's clipboard.
+- The camera left with Back: nothing sent; the activity killed while the camera runs (Don't keep activities): the photo still sent.
