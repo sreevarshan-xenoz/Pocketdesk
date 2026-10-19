@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-616 open items.
+618 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 353 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 354 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 44 |
 | A phone with a SIM | 21 |
 | A second phone | 6 |
 | Away from home: another network, or through a router | 9 |
@@ -431,6 +431,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **61. Portrait sessions (T9b)**
 
 - A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
+- Switching between Direct touch and Trackpad mid-session: the pane changes without a new decoder (no keyframe gap).
 
 **62. A mouse on the phone (T9c)**
 
@@ -877,6 +878,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **60. Pinch-zoom in trackpad mode (T9a)**
 
 - Zoomed in, the cursor's travel matches the finger's on-screen distance, and scrolling is not slowed by the zoom.
+
+**61. Portrait sessions (T9b)**
+
+- Pane: two panes with Direct touch: taps land on the point under the finger in the smaller picture.
 
 **62. A mouse on the phone (T9c)**
 

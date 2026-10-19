@@ -1133,6 +1133,13 @@ Owed:
 - [x] Turning the phone: on its side the A71 keeps one pane, the stream full screen (C5 changed this: it had split side by side, the stream on half the screen).
 - [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
 
+After the owner tried it (2026-10-19: the chrome over the picture, a trackpad three quarters of the screen, and a trackpad in Direct touch), on the A71 against a throwaway server, input off:
+- [x] Direct touch, held upright: one pane, the desktop centred with the link and window chips above it and the mode chip, keyboard and menu below, none over the picture.
+- [x] Trackpad, held upright: the desktop in a pane with room above and below it for the same chrome, none over the picture, the trackpad and shortcut bar about 40 % of the screen.
+- [ ] Switching between Direct touch and Trackpad mid-session: the pane changes without a new decoder (no keyframe gap).
+- [ ] Pane: two panes with Direct touch: taps land on the point under the finger in the smaller picture.
+- [x] "Show connection details" on, held upright: the details, the link and the window chips sit above the picture in both modes (the bands follow the chrome's measured height).
+
 ## 62. A mouse on the phone (T9c)
 
 No mouse was at hand; with none connected, a session on the A71 started and Back ended it as before. Owed, with a USB OTG or Bluetooth mouse:
