@@ -67,13 +67,26 @@ fn write(state_dir: &Path, answers: Vec<Outcome>) -> io::Result<()> {
     std::fs::rename(&tmp, &path)
 }
 
-/// Keep `outcome`, replacing an earlier state of the same answer; the
-/// oldest go past [`MAX_KEPT`].
+/// How far along a state is: an answer only moves forward (E1 review), so
+/// a state written late never replaces a later one.
+fn rank(state: &State) -> u8 {
+    match state {
+        State::Waiting => 0,
+        State::Sent => 1,
+        State::Handed | State::NotSent { .. } => 2,
+    }
+}
+
+/// Keep `outcome`: a new answer goes last, the oldest past [`MAX_KEPT`];
+/// one already kept is updated where it is, and only forward.
 pub fn record(state_dir: &Path, outcome: Outcome) -> io::Result<()> {
     let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let mut answers = read(state_dir);
-    answers.retain(|a| a.id != outcome.id);
-    answers.push(outcome);
+    match answers.iter_mut().find(|a| a.id == outcome.id) {
+        Some(kept) if rank(&kept.state) > rank(&outcome.state) => return Ok(()),
+        Some(kept) => *kept = outcome,
+        None => answers.push(outcome),
+    }
     let len = answers.len();
     if len > MAX_KEPT {
         answers.drain(..len - MAX_KEPT);
@@ -168,6 +181,28 @@ mod tests {
         );
         clear(&dir).unwrap();
         assert!(read(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// E1 review: a state written late never takes an answer back, and an
+    /// answer updated keeps its place.
+    #[test]
+    fn an_answer_only_moves_forward_and_keeps_its_place() {
+        let dir = temp_dir("forward");
+        record(&dir, outcome("a", State::Waiting)).unwrap();
+        record(&dir, outcome("b", State::Waiting)).unwrap();
+        record(&dir, outcome("a", State::Sent)).unwrap();
+        record(&dir, outcome("a", State::Waiting)).unwrap();
+        assert_eq!(
+            read(&dir)[0],
+            outcome("a", State::Sent),
+            "not back to waiting"
+        );
+        record(&dir, outcome("a", State::Handed)).unwrap();
+        record(&dir, outcome("a", State::Sent)).unwrap();
+        let kept = read(&dir);
+        assert_eq!(kept[0].state, State::Handed);
+        assert_eq!(kept[1].id, "b", "updated where it was");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

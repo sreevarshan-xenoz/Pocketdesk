@@ -570,7 +570,13 @@ impl Plugin for NotificationPlugin {
                 .ok()
                 .and_then(|r| r.ok())
                 .unwrap_or(false);
-                if kept && !answered.ok {
+                if !kept {
+                    // Seen, so a word that came too early or for the wrong
+                    // phone is not lost without a trace (E1 review).
+                    tracing::info!(
+                        "A phone's word on an answer was not kept: no answer sent to it waits"
+                    );
+                } else if !answered.ok {
                     let reason = answered.reason.unwrap_or_default();
                     tracing::info!("An answer to a phone notification was not sent: {reason}");
                     tell_not_sent(&reason);
@@ -647,8 +653,9 @@ pub(crate) fn answer_packet(notes: &[PhoneNote], request: &AnswerRequest) -> Opt
     Some(notification_action::with_answer_id(packet, &request.id))
 }
 
-/// Keep where an answer stands (E1), off the caller's thread.
-fn note_answer(request: &AnswerRequest, state: answers::State) {
+/// Keep where an answer stands (E1), off the runtime but in order (E1
+/// review): each write is waited for, so states land as they happened.
+async fn note_answer(request: &AnswerRequest, state: answers::State) {
     if cfg!(test) {
         return;
     }
@@ -662,11 +669,23 @@ fn note_answer(request: &AnswerRequest, state: answers::State) {
         state,
         at_unix: unix_now(),
     };
-    std::thread::spawn(move || {
-        if let Err(e) = answers::record(&dir, outcome) {
-            tracing::warn!("Where an answer stands was not kept: {e}");
-        }
-    });
+    let kept = tokio::task::spawn_blocking(move || answers::record(&dir, outcome)).await;
+    if let Ok(Err(e)) = kept {
+        tracing::warn!("Where an answer stands was not kept: {e}");
+    }
+}
+
+/// An answer this computer drops, kept with why (E1), not only logged.
+async fn dropped(request: &AnswerRequest, reason: &str) {
+    tracing::info!("An answer to a phone notification was dropped: {reason}");
+    note_answer(
+        request,
+        answers::State::NotSent {
+            reason: reason.to_string(),
+        },
+    )
+    .await;
+    tell_not_sent(reason);
 }
 
 /// An answer that will not reach the app, said on the desktop too (E1): one
@@ -712,7 +731,7 @@ pub async fn run_answers() {
         let now = unix_now();
         let new = phone_notes::take_all(&dir, now);
         for request in &new {
-            note_answer(request, answers::State::Waiting);
+            note_answer(request, answers::State::Waiting).await;
         }
         waiting.extend(new);
         if waiting.is_empty() {
@@ -722,43 +741,32 @@ pub async fn run_answers() {
         let clients = crate::state::clone_clients().await;
         let mut still = Vec::new();
         for request in waiting.drain(..) {
-            // Each answer this computer drops is kept with why (E1), not
-            // only logged.
-            let dropped = |request: &AnswerRequest, reason: &str| {
-                tracing::info!("An answer to a phone notification was dropped: {reason}");
-                note_answer(
-                    request,
-                    answers::State::NotSent {
-                        reason: reason.to_string(),
-                    },
-                );
-                tell_not_sent(reason);
-            };
             let Some(packet) = answer_packet(&notes, &request) else {
-                dropped(&request, "the notification no longer offers that answer");
+                dropped(&request, "the notification no longer offers that answer").await;
                 continue;
             };
             if !crate::plugins::pair::permits(&request.device_id, &packet.packet_type) {
                 dropped(
                     &request,
                     "Notifications is off for this phone, on the Devices page",
-                );
+                )
+                .await;
                 continue;
             }
             let Some(phone) = clients.iter().find(|c| c.device_id() == request.device_id) else {
                 if now.saturating_sub(request.created_unix) < phone_notes::ANSWER_TTL_SECS {
                     still.push(request);
                 } else {
-                    dropped(&request, "the phone did not connect within a minute");
+                    dropped(&request, "the phone did not connect within a minute").await;
                 }
                 continue;
             };
-            match phone.send_packet(&packet).await {
-                Ok(()) => note_answer(&request, answers::State::Sent),
-                Err(e) => {
-                    tracing::warn!("An answer to a phone notification was not sent: {e}");
-                    dropped(&request, "the link to the phone failed");
-                }
+            // Kept as sent before it goes (E1 review): the phone's word can
+            // come back before a write after the send would land.
+            note_answer(&request, answers::State::Sent).await;
+            if let Err(e) = phone.send_packet(&packet).await {
+                tracing::warn!("An answer to a phone notification was not sent: {e}");
+                dropped(&request, "the link to the phone failed").await;
             }
         }
         waiting = still;
