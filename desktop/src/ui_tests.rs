@@ -211,7 +211,13 @@ fn the_overview_shows_a_phone_with_its_battery_and_actions() {
         app.query_by_label("Battery 42 %, charging · no recent session")
             .is_some()
     );
-    for action in ["Ring", "Mute for an hour", "Send file…", "Send link…"] {
+    for action in [
+        "Ring",
+        "Mute for an hour",
+        "Send file…",
+        "Send link…",
+        "Send the clipboard",
+    ] {
         assert!(app.query_by_label(action).is_some(), "{action}");
     }
 }

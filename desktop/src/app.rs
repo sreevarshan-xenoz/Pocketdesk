@@ -970,6 +970,7 @@ impl PocketdeskApp {
         let mut mute = None;
         let mut send_file = None;
         let mut open_link = None;
+        let mut send_clip = None;
         // One short block per phone, so it fits a narrow window (N6).
         for row in &rows {
             let device = row.device;
@@ -1077,6 +1078,19 @@ impl PocketdeskApp {
                     {
                         open_link = Some(device.id.clone());
                     }
+                    // As the tray offers it (E5): this computer's clipboard
+                    // as it is when pressed.
+                    let clip_why = row.clipboard.err().unwrap_or(
+                        "This computer's clipboard as it is now, never a copy a password manager marks private.",
+                    );
+                    if ui
+                        .add_enabled(row.clipboard.is_ok(), egui::Button::new("Send the clipboard"))
+                        .on_hover_text(clip_why)
+                        .on_disabled_hover_text(clip_why)
+                        .clicked()
+                    {
+                        send_clip = Some(device.id.clone());
+                    }
                 });
             });
         }
@@ -1105,6 +1119,9 @@ impl PocketdeskApp {
         if let Some(id) = open_link {
             self.overview_link = Some((id, String::new()));
             self.overview_link_focus = true;
+        }
+        if let Some(id) = send_clip {
+            self.send_clipboard(&id);
         }
     }
 
