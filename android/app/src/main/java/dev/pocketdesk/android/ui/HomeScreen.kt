@@ -105,6 +105,7 @@ fun HomeScreen(
     // D3: the computer whose card opened the clipboard history.
     var historyFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var deckFor by remember { mutableStateOf<HostStore.Host?>(null) }
+    var stateFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var names by remember { mutableIntStateOf(0) }
     LaunchedEffect(hosts) {
         // The names the computers gave themselves on this run's connections.
@@ -381,6 +382,7 @@ fun HomeScreen(
                         onRename = { renaming = host },
                         onHistory = { historyFor = host },
                         onDeck = { deckFor = host },
+                        onState = { stateFor = host },
                     )
                 }
                 item {
@@ -516,6 +518,16 @@ fun HomeScreen(
             wakeSettingsFor = null
             wakeVersion++
         }
+    }
+
+    // F2: how the computer is doing.
+    stateFor?.let { host ->
+        StateSheet(
+            address = host.address,
+            controlPort = host.controlPort,
+            computer = HostStore.shownName(context, host.address),
+            onDismiss = { stateFor = null },
+        )
     }
 
     // F1: the computer's deck, outside a session.
@@ -685,6 +697,7 @@ private fun HostCard(
     onRename: () -> Unit,
     onHistory: () -> Unit,
     onDeck: () -> Unit,
+    onState: () -> Unit,
 ) {
     val title = name ?: host.address
     val connectLabel = stringResource(R.string.connect)
@@ -716,6 +729,8 @@ private fun HostCard(
                             add(R.string.sound_button to onSound)
                             // F1: the buttons its owner set up there.
                             add(R.string.card_deck to onDeck)
+                            // F2: its CPU, memory, disks, battery, uptime.
+                            add(R.string.card_state to onState)
                             // D3: an earlier copy, sent to this computer again.
                             add(R.string.card_send_earlier_copy to onHistory)
                             if (hasWake) add(R.string.wake to onWake)

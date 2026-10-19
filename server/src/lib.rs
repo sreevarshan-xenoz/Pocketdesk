@@ -56,6 +56,7 @@ pub mod ring_phone;
 pub mod service;
 pub mod session_telemetry;
 pub mod state;
+pub mod system_state;
 pub mod toast_answers;
 pub mod transfers;
 pub mod v2_multiplexer;

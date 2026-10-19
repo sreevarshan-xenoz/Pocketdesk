@@ -58,7 +58,7 @@ impl Plugin for BatteryPlugin {
 
 /// `(charge %, charging)`, or `None` on a machine without a battery.
 #[cfg(not(windows))]
-async fn read_battery() -> Option<(u8, bool)> {
+pub(crate) async fn read_battery() -> Option<(u8, bool)> {
     match (read_battery_charge().await, read_is_charging().await) {
         (Some(charge), Some(charging)) => Some((charge, charging)),
         _ => None,
@@ -67,7 +67,7 @@ async fn read_battery() -> Option<(u8, bool)> {
 
 /// `(charge %, charging)`, or `None` on a machine without a battery.
 #[cfg(windows)]
-async fn read_battery() -> Option<(u8, bool)> {
+pub(crate) async fn read_battery() -> Option<(u8, bool)> {
     use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
     let mut status = SYSTEM_POWER_STATUS::default();
     unsafe { GetSystemPowerStatus(&mut status) }.ok()?;

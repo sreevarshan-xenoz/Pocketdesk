@@ -110,6 +110,10 @@ pub struct Config {
     /// off, it is shown as a notification instead.
     #[serde(default = "default_true")]
     pub open_links: bool,
+    /// Answer a paired phone's ask for this computer's state: CPU, memory,
+    /// disks, battery, uptime (F2).
+    #[serde(default = "default_true")]
+    pub share_state: bool,
     /// Let a phone with Input add a screen of its own shape (T10j, Sway).
     #[serde(default = "default_true")]
     pub virtual_screens: bool,
@@ -301,6 +305,7 @@ impl Default for Config {
             sms_keep: default_sms_keep(),
             sms_names: true,
             open_links: true,
+            share_state: true,
             virtual_screens: true,
             clipboard_push: true,
             computer_clipboard: false,
@@ -497,6 +502,7 @@ impl Config {
         "notifications_per_minute",
         "sms_notify",
         "open_links",
+        "share_state",
         "virtual_screens",
         "clipboard_push",
         "computer_clipboard",

@@ -1973,6 +1973,14 @@ Built 2026-10-20 on the owner's night of features; nothing here ran on a device 
 - [ ] A button edited after the phone listed it: "the computer's deck has changed".
 - [ ] 2, 3 and 4 a row; a long label; Spanish and Tamil; TalkBack reads each button's label.
 
+## 127. How the computer is doing (F2)
+
+Built 2026-10-20 on the owner's night of features; the computer's half read this box live in a test (memory and uptime), nothing on a device yet.
+- [ ] "How it is doing" on the A71 against this box: the CPU moving under load, memory, each fixed drive (no removable or network drive), the battery when there is one, uptime.
+- [ ] The same against Linux: `df`'s disks once each (btrfs subvolumes, bind mounts), the battery.
+- [ ] "This computer's state" off in desktop Settings: the sheet says so, without a restart.
+- [ ] The sheet's asking stops when it closes; Spanish and Tamil; font scale 2.0.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

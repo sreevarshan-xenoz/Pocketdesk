@@ -769,4 +769,20 @@
     <string name="deck_waiting">Esperando al dueño del ordenador</string>
     <string name="settings_deck_columns">Botones por fila</string>
     <string name="settings_deck_columns_summary">Cuántos botones de la botonera del ordenador caben en una fila en este teléfono</string>
+    <string name="card_state">Cómo está</string>
+    <string name="state_title">Cómo está %1$s</string>
+    <string name="state_loading">Preguntando al ordenador…</string>
+    <string name="state_failed">No se pudo preguntar al ordenador: %1$s</string>
+    <string name="state_not_shared">Este ordenador no comparte cómo está. Su app Pocketdesk lo activa en Settings, This computer\'s state.</string>
+    <string name="state_stale">No responde ahora: así estaba.</string>
+    <string name="state_cpu">CPU</string>
+    <string name="state_memory">Memoria</string>
+    <string name="state_disk">Disco %1$s</string>
+    <string name="state_battery">Batería</string>
+    <string name="state_battery_charging">%1$d %% · cargando</string>
+    <string name="state_uptime">Encendido desde hace</string>
+    <string name="state_of">de</string>
+    <string name="state_unit_day">d</string>
+    <string name="state_unit_hour">h</string>
+    <string name="state_unit_minute">min</string>
 </resources>

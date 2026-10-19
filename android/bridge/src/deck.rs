@@ -1,4 +1,5 @@
-//! The deck (F1): the computer's buttons, listed and pressed.
+//! The deck (F1): the computer's buttons, listed and pressed; and the
+//! computer's state (F2), asked the same way.
 
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -8,11 +9,21 @@ use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 const DECK: &str = "kdeconnect.pocketdesk.deck";
 const DECK_PRESS: &str = "kdeconnect.pocketdesk.deck_press";
 const DECK_RESULT: &str = "kdeconnect.pocketdesk.deck_result";
+const SYSTEM: &str = "kdeconnect.pocketdesk.system";
 
 /// The computer's buttons: `{"buttons": [{"index", "label", "kind"}]}`.
 pub async fn list_deck(address: String, port: u16) -> Result<String, String> {
     let request = NetworkPacket::new(DECK).with_body(serde_json::json!({}));
     crate::api::query_peer(&address, port, &request, DECK, Duration::from_secs(5))
+        .await
+        .map(|body| body.to_string())
+}
+
+/// The computer's state (F2): CPU, memory, disks, battery and uptime, or
+/// `{"off": true}`.
+pub async fn system_state(address: String, port: u16) -> Result<String, String> {
+    let request = NetworkPacket::new(SYSTEM).with_body(serde_json::json!({}));
+    crate::api::query_peer(&address, port, &request, SYSTEM, Duration::from_secs(6))
         .await
         .map(|body| body.to_string())
 }

@@ -127,6 +127,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     ("open_links", "Links from phones", Section::Phones),
+    ("share_state", "This computer's state", Section::Phones),
     ("phone_battery_alerts", "Phones' batteries", Section::Phones),
     (
         "virtual_screens",
@@ -231,6 +232,7 @@ pub fn applies_live(key: &str) -> bool {
             | "tasks"
             | "deck"
             | "deck_enabled"
+            | "share_state"
             | "home_assistant"
             | "mqtt_broker"
             | "mqtt_user"
@@ -650,6 +652,12 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.open_links,
                         "open in the browser (off: show as a notification)",
+                    );
+                });
+                row(ui, "share_state", |ui| {
+                    ui.checkbox(
+                        &mut e.share_state,
+                        "phones may see this computer's CPU, memory, disks, battery and uptime",
                     );
                 });
                 row(ui, "phone_battery_alerts", |ui| {
