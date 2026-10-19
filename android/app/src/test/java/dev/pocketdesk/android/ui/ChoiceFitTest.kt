@@ -15,6 +15,18 @@ class ChoiceFitTest {
     }
 
     @Test
+    fun threeChoicesAreCrowdedBeforeTheyBecomeAList() {
+        assertEquals(ChoiceFit.Layout.Segments, ChoiceFit.layout(3, segmentsFit = true, crowdedFit = true))
+        assertEquals(
+            "Direct touch, Trackpad and Pen at font scale 1.0 (E6)",
+            ChoiceFit.Layout.Crowded,
+            ChoiceFit.layout(3, segmentsFit = false, crowdedFit = true),
+        )
+        assertEquals(ChoiceFit.Layout.List, ChoiceFit.layout(3, segmentsFit = false, crowdedFit = false))
+        assertEquals("four are never full segments", ChoiceFit.Layout.Crowded, ChoiceFit.layout(4, segmentsFit = true, crowdedFit = true))
+    }
+
+    @Test
     fun theRowFitsOnlyWhenEveryWordFitsItsSegment() {
         assertTrue(ChoiceFit.fits(200f, listOf(120f, 80f, 199.5f)))
         assertTrue(ChoiceFit.fits(200f, listOf(200f)))

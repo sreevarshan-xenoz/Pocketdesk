@@ -92,6 +92,7 @@
     <string name="mode_direct_touch">நேரடித் தொடுதல்</string>
     <string name="mode_trackpad">டிராக்பேட்</string>
     <string name="mode_pen">பேனா</string>
+    <string name="mode_change">உள்ளீட்டு முறையை மாற்று</string>
     <string name="ring_pc">கணினியை ஒலிக்கச் செய்</string>
     <string name="paired">இணைக்கப்பட்டது ✓</string>
     <string name="privacy_error">தனியுரிமை: %1$s</string>
@@ -122,7 +123,7 @@
     <string name="row_quality">தரம்</string>
     <string name="row_window">சாளரம்</string>
     <string name="row_monitor">முகவரித் திரை</string>
-    <string name="row_gamepad">கேம்பேட்</string>
+    <string name="row_gamepad">கேம்பேடைக் காட்டு</string>
     <string name="gamepad_close">கேம்பேடை மூடு</string>
     <string name="gamepad_click">கிளிக்</string>
     <string name="gamepad_mouse">சுட்டி</string>

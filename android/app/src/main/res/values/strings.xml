@@ -101,6 +101,7 @@
     <string name="mode_direct_touch">Direct touch</string>
     <string name="mode_trackpad">Trackpad</string>
     <string name="mode_pen">Pen</string>
+    <string name="mode_change">Change input mode</string>
     <string name="ring_pc">Ring the computer</string>
     <string name="paired">Paired ✓</string>
     <string name="privacy_error">Privacy: %1$s</string>
@@ -131,7 +132,7 @@
     <string name="row_quality">Quality</string>
     <string name="row_window">Window</string>
     <string name="row_monitor">Monitor</string>
-    <string name="row_gamepad">Gamepad</string>
+    <string name="row_gamepad">Show the gamepad</string>
     <string name="gamepad_close">Close the gamepad</string>
     <string name="gamepad_click">Click</string>
     <string name="gamepad_mouse">Mouse</string>

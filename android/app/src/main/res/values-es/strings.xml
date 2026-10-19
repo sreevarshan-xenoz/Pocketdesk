@@ -92,6 +92,7 @@
     <string name="mode_direct_touch">Toque directo</string>
     <string name="mode_trackpad">Panel táctil</string>
     <string name="mode_pen">Lápiz</string>
+    <string name="mode_change">Cambiar el modo de entrada</string>
     <string name="ring_pc">Hacer sonar el ordenador</string>
     <string name="paired">Emparejado ✓</string>
     <string name="privacy_error">Privacidad: %1$s</string>
@@ -122,7 +123,7 @@
     <string name="row_quality">Calidad</string>
     <string name="row_window">Ventana</string>
     <string name="row_monitor">Monitor</string>
-    <string name="row_gamepad">Mando</string>
+    <string name="row_gamepad">Mostrar el mando</string>
     <string name="gamepad_close">Cerrar el mando</string>
     <string name="gamepad_click">Clic</string>
     <string name="gamepad_mouse">Ratón</string>
