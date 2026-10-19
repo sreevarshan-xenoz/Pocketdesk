@@ -50,6 +50,7 @@ object Prefs {
     private const val KEY_SHOW_DRIVING = "show_driving"
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
     private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
+    private const val KEY_PEN_CURVE = "pen_curve"
 
     /** The trackpad speed slider's range and default (F3). */
     const val TRACKPAD_SENSITIVITY_MIN = 0.5f
@@ -389,6 +390,15 @@ object Prefs {
         prefs(ctx).edit {
             putFloat(KEY_TRACKPAD_SENSITIVITY, value.coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX))
         }
+        bump()
+    }
+
+    /** How hard the pen must press for full ink (E3). */
+    fun penCurve(ctx: Context): dev.pocketdesk.android.stream.PenCurve =
+        dev.pocketdesk.android.stream.PenCurve.fromKey(prefs(ctx).getString(KEY_PEN_CURVE, null))
+
+    fun setPenCurve(ctx: Context, curve: dev.pocketdesk.android.stream.PenCurve) {
+        prefs(ctx).edit { putString(KEY_PEN_CURVE, curve.key) }
         bump()
     }
 }

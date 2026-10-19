@@ -17,7 +17,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
@@ -40,11 +42,14 @@ private const val NORM_RANGE = 65535
 /**
  * How touch on the video surface is translated into remote input.
  * [DirectTouch] maps the screen 1:1 to the desktop (tap where you see);
- * [Trackpad] is indirect control: drag moves the cursor, tap clicks.
+ * [Trackpad] is indirect control: drag moves the cursor, tap clicks;
+ * [Pen] is direct touch as a pen, with pressure and a stylus's tilt (E3),
+ * offered only when the computer takes one.
  */
 enum class InputMode {
     DirectTouch,
     Trackpad,
+    Pen,
 }
 
 /**
@@ -249,6 +254,7 @@ fun RemoteDesktopView(
             layout = videoLayout,
             mapping = mapping,
             sensitivity = Prefs.trackpadSensitivity(context),
+            penCurve = Prefs.penCurve(context),
             modifier = Modifier
                 .matchParentSize()
                 .pointerInput(zoomGesturesEnabled) {
@@ -325,13 +331,14 @@ private fun InputOverlay(
     layout: VideoLayout,
     mapping: DesktopMapping?,
     sensitivity: Float,
+    penCurve: PenCurve,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     fun send(block: () -> Unit) = scope.launch(padOrdered) { block() }
 
     Box(
-        modifier.pointerInput(address to port to mode to layout to mapping to sensitivity) {
+        modifier.pointerInput(address to port to mode to layout to mapping to sensitivity to penCurve) {
             fun mappedPoint(pos: Offset): Pair<Int, Int> {
                 // Viewport -> scale-1 content space -> letterboxed video
                 // pixel -> desktop coordinate -> normalized axis value.
@@ -376,10 +383,48 @@ private fun InputOverlay(
 
             fun sendPad(outputs: List<PadOutput>) = sendPadOutputs(address, port, outputs) { send(it) }
 
+            // E3: every event, hover included, which a gesture's first
+            // down never sees; the pen's own states live in PenStroke.
+            if (mode == InputMode.Pen) {
+                val pen = PenStroke(penCurve)
+                fun sendPen(s: PenSample) = send {
+                    RustCore.sendPen(s.xNorm, s.yNorm, s.pressure, s.tiltX, s.tiltY, s.flags)
+                }
+                try {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: continue
+                            val stylus = change.type == PointerType.Stylus || change.type == PointerType.Eraser
+                            val motion = event.motionEvent
+                            val sample = pen.event(
+                                at = mappedPoint(change.position),
+                                contact = change.pressed,
+                                hovering = stylus && !change.pressed && event.type != PointerEventType.Exit,
+                                fingers = event.changes.count { it.pressed },
+                                pressure = change.pressure,
+                                tilt = motion?.getAxisValue(android.view.MotionEvent.AXIS_TILT) ?: 0f,
+                                orientation = motion?.getOrientation(0) ?: 0f,
+                                barrel = motion != null &&
+                                    motion.buttonState and android.view.MotionEvent.BUTTON_STYLUS_PRIMARY != 0,
+                                eraser = change.type == PointerType.Eraser,
+                            )
+                            if (sample != null) sendPen(sample)
+                        }
+                    }
+                } finally {
+                    // Torn down mid-stroke: never leave the pen down.
+                    pen.lift()?.let(::sendPenOutliving)
+                }
+                return@pointerInput
+            }
+
             try {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 when (mode) {
+                    // Handled above, before any gesture.
+                    InputMode.Pen -> Unit
                     InputMode.DirectTouch -> {
                         // Defer the first packet until we know this is a
                         // one-finger gesture, not the start of a pinch.

@@ -95,6 +95,8 @@ import dev.pocketdesk.android.service.SessionForegroundService
 import dev.pocketdesk.android.status.BatteryEffect
 import dev.pocketdesk.android.stream.DesktopAudio
 import dev.pocketdesk.android.stream.InputMode
+import dev.pocketdesk.android.stream.inputModes
+import dev.pocketdesk.android.stream.nextMode
 import dev.pocketdesk.android.stream.RemoteDesktopView
 import dev.pocketdesk.android.stream.ShortcutBar
 import dev.pocketdesk.android.stream.StatsHud
@@ -767,8 +769,11 @@ fun RemoteScreen(
             RustCore.sendQualityPreset(next).onFailure { qualityPresetError = context.plainErrorText(it.message) }
         }
     }
+    // E3: the pen, where the computer says it takes one, on its ready stream
+    // just after the picture starts.
+    var penOffered by remember(address) { mutableStateOf(false) }
     fun toggleMode() {
-        mode = if (mode == InputMode.DirectTouch) InputMode.Trackpad else InputMode.DirectTouch
+        mode = nextMode(mode, inputModes(penOffered))
     }
 
     // Each time the stream comes up, the control link is dialed at once:
@@ -781,6 +786,20 @@ fun RemoteScreen(
             // U3: the name the computer gave itself on this connection.
             RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
         }
+    }
+    LaunchedEffect(streamUps) {
+        if (streamUps == 0) return@LaunchedEffect
+        var offered = false
+        for (attempt in 0 until 10) {
+            if (withContext(Dispatchers.IO) { RustCore.penSupported() }) {
+                offered = true
+                break
+            }
+            delay(500)
+        }
+        penOffered = offered
+        // A computer that does not take a pen (an older one, met again).
+        if (!offered && mode == InputMode.Pen) mode = InputMode.DirectTouch
     }
     ControlLinkEffect(address, controlPort, streamUps)
     ClipboardSyncEffect(address, controlPort, enabled = clipboardSync)
@@ -1256,10 +1275,10 @@ fun RemoteScreen(
                             // the shortcut pill and the HUD: a bare text label
                             // over video reads as a caption, not as the toggle it
                             // is.
-                            val modeLabel = if (mode == InputMode.DirectTouch) {
-                                stringResource(R.string.mode_direct_touch)
-                            } else {
-                                stringResource(R.string.mode_trackpad)
+                            val modeLabel = when (mode) {
+                                InputMode.DirectTouch -> stringResource(R.string.mode_direct_touch)
+                                InputMode.Trackpad -> stringResource(R.string.mode_trackpad)
+                                InputMode.Pen -> stringResource(R.string.mode_pen)
                             }
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1277,7 +1296,11 @@ fun RemoteScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 LlIcon(
-                                    if (mode == InputMode.DirectTouch) LlIcons.Touch else LlIcons.Mouse,
+                                    when (mode) {
+                                        InputMode.DirectTouch -> LlIcons.Touch
+                                        InputMode.Trackpad -> LlIcons.Mouse
+                                        InputMode.Pen -> LlIcons.Pen
+                                    },
                                     null,
                                     tint = Color.White,
                                     size = 16.dp,
@@ -1541,8 +1564,9 @@ fun RemoteScreen(
     if (showQuick) {
         QuickSettingsSheet(
             onDismiss = { showQuick = false },
-            trackpad = mode == InputMode.Trackpad,
-            onSetTrackpad = { mode = if (it) InputMode.Trackpad else InputMode.DirectTouch },
+            mode = mode,
+            modes = inputModes(penOffered),
+            onSetMode = { mode = it },
             viewOnly = viewOnly,
             onSetViewOnly = ::applyViewOnly,
             qualityPreset = qualityPreset,

@@ -53,6 +53,11 @@
     <string name="link_poor">மோசமான இணைப்பு</string>
     <string name="settings_trackpad_speed">டிராக்பேட் வேகம்</string>
     <string name="settings_trackpad_speed_summary">டிராக்பேட் முறையில் விரல் நகர்வுக்கு சுட்டி எவ்வளவு நகரும்</string>
+    <string name="settings_pen_pressure">பேனா அழுத்தம்</string>
+    <string name="settings_pen_pressure_summary">பேனா முறையில், முழு மை பெற எவ்வளவு அழுத்த வேண்டும். ஸ்டைலஸ் சிறப்பாக வரையும்: பெரும்பாலான தொலைபேசிகள் விரலின் அழுத்தத்தை ஊகிக்க மட்டுமே செய்யும்.</string>
+    <string name="pen_pressure_soft">மென்மை</string>
+    <string name="pen_pressure_even">சமம்</string>
+    <string name="pen_pressure_firm">உறுதி</string>
     <string name="settings_system">சிஸ்டம்</string>
     <string name="settings_about">பற்றி</string>
     <string name="app_version">பதிப்பு %1$s</string>
@@ -84,6 +89,7 @@
     <string name="exit">வெளியேறு</string>
     <string name="mode_direct_touch">நேரடித் தொடுதல்</string>
     <string name="mode_trackpad">டிராக்பேட்</string>
+    <string name="mode_pen">பேனா</string>
     <string name="ring_pc">PC ஒலியெழுப்பு</string>
     <string name="paired">இணைக்கப்பட்டது ✓</string>
     <string name="privacy_error">தனியுரிமை: %1$s</string>
@@ -155,6 +161,7 @@
     <string name="row_pairing">இணைப்பு</string>
     <string name="value_direct_touch">நேரடித் தொடுதல்</string>
     <string name="value_trackpad">டிராக்பேட்</string>
+    <string name="value_pen">பேனா</string>
     <string name="value_quality_auto">தானியங்கி</string>
     <string name="value_quality_max">அதிகபட்சம்</string>
     <string name="value_quality_balanced">சமநிலை</string>

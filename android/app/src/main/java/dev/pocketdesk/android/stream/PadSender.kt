@@ -67,3 +67,8 @@ const val SCROLL_DP_PER_NOTCH = 24f
 fun releaseLeftButton() {
     padScope.launch { RustCore.sendMouseClick(0, false) }
 }
+
+/** Send a pen's last sample from a scope that outlives the view (E3). */
+fun sendPenOutliving(s: PenSample) {
+    padScope.launch { RustCore.sendPen(s.xNorm, s.yNorm, s.pressure, s.tiltX, s.tiltY, s.flags) }
+}

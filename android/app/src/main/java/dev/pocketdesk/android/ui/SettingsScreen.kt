@@ -135,6 +135,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 { Prefs.setCaptureMouse(context, it) },
             )
             TrackpadSpeed()
+            PenPressure()
             SettingSwitch(
                 stringResource(R.string.settings_show_driving),
                 stringResource(R.string.settings_show_driving_summary),
@@ -389,6 +390,31 @@ private fun TrackpadSpeed() {
         },
         trailingContent = { Text("%.2f×".format(speed), style = MaterialTheme.typography.labelLarge) },
     )
+}
+
+/** E3: how hard the pen presses for full ink, and what draws best. */
+@Composable
+private fun PenPressure() {
+    val context = LocalContext.current
+    val curves = dev.pocketdesk.android.stream.PenCurve.entries
+    val chosen = Prefs.penCurve(context)
+    Column {
+        ChoiceRow(
+            stringResource(R.string.settings_pen_pressure),
+            listOf(
+                stringResource(R.string.pen_pressure_soft),
+                stringResource(R.string.pen_pressure_even),
+                stringResource(R.string.pen_pressure_firm),
+            ),
+            curves.indexOf(chosen),
+        ) { Prefs.setPenCurve(context, curves[it]) }
+        Text(
+            stringResource(R.string.settings_pen_pressure_summary),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+        )
+    }
 }
 
 private fun appVersionName(context: android.content.Context): String =

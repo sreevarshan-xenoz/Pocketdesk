@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.stream.InputMode
 
 /**
  * The session's command centre, in groups (U4): Screen and input, Share,
@@ -54,8 +55,9 @@ import dev.pocketdesk.android.bridge.RustCore
 @Composable
 fun QuickSettingsSheet(
     onDismiss: () -> Unit,
-    trackpad: Boolean,
-    onSetTrackpad: (Boolean) -> Unit,
+    mode: InputMode,
+    modes: List<InputMode>,
+    onSetMode: (InputMode) -> Unit,
     viewOnly: Boolean,
     onSetViewOnly: (Boolean) -> Unit,
     qualityPreset: Int,
@@ -106,9 +108,15 @@ fun QuickSettingsSheet(
             GroupHeader(stringResource(R.string.group_view))
             ChoiceRow(
                 stringResource(R.string.row_input_mode),
-                listOf(stringResource(R.string.value_direct_touch), stringResource(R.string.value_trackpad)),
-                if (trackpad) 1 else 0,
-            ) { onSetTrackpad(it == 1) }
+                modes.map {
+                    when (it) {
+                        InputMode.DirectTouch -> stringResource(R.string.value_direct_touch)
+                        InputMode.Trackpad -> stringResource(R.string.value_trackpad)
+                        InputMode.Pen -> stringResource(R.string.value_pen)
+                    }
+                },
+                modes.indexOf(mode).coerceAtLeast(0),
+            ) { onSetMode(modes[it]) }
             ToggleRow(LlIcons.Eye, stringResource(R.string.row_view_only), viewOnly, onSetViewOnly)
             val presets = listOf(
                 RustCore.PRESET_AUTO,
