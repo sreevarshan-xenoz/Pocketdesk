@@ -9,6 +9,7 @@ mod api;
 mod cancel;
 mod cast;
 mod clipboard_push;
+mod deck;
 mod download;
 mod link;
 mod links;
@@ -1335,6 +1336,41 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendLin
     let address = jstring_to_string(&mut env, &address);
     let url = jstring_to_string(&mut env, &url);
     let json = envelope_unit(RUNTIME.block_on(links::send_link(address, port as u16, url)));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's deck (F1): `{"ok": "{\"buttons\": [...]}"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeListDeck(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope(RUNTIME.block_on(deck::list_deck(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
+/// Press the deck's button at `index`, listed as `label` (F1):
+/// `{"ok": "{\"index\", \"ok\", \"reason\"}"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePressDeck(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    index: jint,
+    label: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let label = jstring_to_string(&mut env, &label);
+    let json = envelope(RUNTIME.block_on(deck::press_deck(
+        address,
+        port as u16,
+        index.max(0) as u32,
+        label,
+    )));
     to_jstring(&mut env, json)
 }
 

@@ -95,6 +95,8 @@ object RustCore {
     private external fun nativeCastControlTake(timeoutMs: Int): String?
     private external fun nativeCastState(): String
     private external fun nativeListTasks(address: String, port: Int): String
+    private external fun nativeListDeck(address: String, port: Int): String
+    private external fun nativePressDeck(address: String, port: Int, index: Int, label: String): String
     private external fun nativeRunTask(address: String, port: Int, name: String, id: String): String
     private external fun nativeTaskResult(id: String): String
     private external fun nativeStopCast()
@@ -561,6 +563,13 @@ object RustCore {
 
     /** End the phone's session if it is a cast, and no other session the person opened since. */
     fun stopCast() = nativeStopCast()
+
+    /** The computer's deck (F1): `{"buttons": [{"index", "label", "kind"}]}`. */
+    fun listDeck(address: String, port: Int): Result<String> = envelope(nativeListDeck(address, port))
+
+    /** Press the deck's button at [index], listed as [label] (F1): `{"index", "ok", "reason"}`. */
+    fun pressDeck(address: String, port: Int, index: Int, label: String): Result<String> =
+        envelope(nativePressDeck(address, port, index, label))
 
     /** The computer's named tasks (ecosystem 1c): `{"tasks": [{"name", "ask"}]}`. */
     fun listTasks(address: String, port: Int): Result<String> = envelope(nativeListTasks(address, port))
