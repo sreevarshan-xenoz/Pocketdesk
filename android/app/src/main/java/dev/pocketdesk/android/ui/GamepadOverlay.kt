@@ -60,7 +60,18 @@ fun GamepadOverlay(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier.fillMaxSize()) {
+    Box(
+        modifier
+            .fillMaxSize()
+            // What the controls leave is the overlay's: a palm between them
+            // must not reach the computer through the stream below (E4
+            // review). Children see each event first, in the Main pass.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                }
+            },
+    ) {
         IconButton(
             onClick = onClose,
             modifier = Modifier
