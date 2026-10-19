@@ -566,7 +566,7 @@ class TransferService : Service() {
                 // A provider that cannot say how big the file is (a
                 // stream): copy it so the desktop is told an exact size.
                 descriptor.close()
-                sendCopy(address, port, uri, name)
+                sendCopy(address, port, uri, name, drive)
             }
         }
     } catch (t: Throwable) {
@@ -656,7 +656,7 @@ class TransferService : Service() {
         return Result.failure(TransferRetry.Refusal(reason))
     }
 
-    private fun sendCopy(address: String, port: Int, uri: Uri, name: String): Result<Unit> {
+    private fun sendCopy(address: String, port: Int, uri: Uri, name: String, drive: String?): Result<Unit> {
         val dir = File(cacheDir, "share").apply { mkdirs() }
         // The bridge names the file after its path: copy straight to a name
         // that is a plain file name here (the desktop makes it safe there).
@@ -668,10 +668,17 @@ class TransferService : Service() {
                 requireNotNull(input) { "content stream unavailable" }
                 copy.outputStream().use { output -> input.copyTo(output) }
             }
-            if (copy.length() == 0L) {
-                Result.failure(IllegalStateException("$name is empty"))
-            } else {
-                RustCore.sendFile(address, port, copy.absolutePath)
+            val size = copy.length()
+            when {
+                size == 0L -> Result.failure(IllegalStateException("$name is empty"))
+                // A file the computer's drive asked for says so (D8 review):
+                // sent as any other, it would land in its Downloads.
+                drive != null -> {
+                    val descriptor = android.os.ParcelFileDescriptor.open(copy, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                    val source = SourceId.of(uri.toString(), size, lastModified(uri))
+                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source, null, drive)
+                }
+                else -> RustCore.sendFile(address, port, copy.absolutePath)
             }
         } finally {
             copy.delete()
