@@ -147,6 +147,7 @@ mod tests {
             at_unix: 0,
             actions: vec![],
             reply: true,
+            messages: vec![],
         };
         let listed = newest_first(vec![note("old"), note("new")]);
         assert_eq!(listed[0].key, "new");

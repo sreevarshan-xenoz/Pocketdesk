@@ -1,6 +1,7 @@
 pub mod backoff;
 pub mod clipboard;
 pub mod connection;
+pub mod conversation;
 pub mod kdeconnect;
 pub mod link;
 pub mod notification_action;

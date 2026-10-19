@@ -593,6 +593,8 @@ pub(crate) fn answerable(
         at_unix: now_unix.saturating_sub(waited_secs(body)),
         actions,
         reply,
+        // A chat's recent messages (D4), held to their limits.
+        messages: pocketdesk_core::protocol::conversation::messages(body),
     })
 }
 
@@ -876,6 +878,24 @@ mod tests {
         assert!(answerable("phone", &no_id, 100).is_none());
     }
 
+    /// D4: a chat's messages are kept on its note, held to their limits.
+    #[test]
+    fn a_chat_keeps_its_messages() {
+        let chat = json!({
+            "id": "0|com.chat|1", "app": "Chat", "title": "Ann", "text": "Lunch?",
+            "requestReplyId": "0|com.chat|1",
+            "messages": [
+                {"from": "Ann", "text": "Are you free?", "time": 1000},
+                {"from": "", "text": "Yes", "time": 2000, "mine": true},
+                {"from": "Ann", "text": "Lunch?", "time": 3000}
+            ]
+        });
+        let note = answerable("phone", &chat, 100).unwrap();
+        assert_eq!(note.messages.len(), 3);
+        assert!(note.messages[1].mine);
+        assert_eq!(note.messages[2].text, "Lunch?");
+    }
+
     #[test]
     fn an_answer_goes_only_as_the_notification_offered() {
         let notes = vec![PhoneNote {
@@ -887,6 +907,7 @@ mod tests {
             at_unix: 1,
             actions: vec!["Mark as read".into()],
             reply: false,
+            messages: vec![],
         }];
         let ask = |device: &str, key: &str, answer: Answer| AnswerRequest {
             id: "00000000-0000-0000-0000-000000000000".into(),
