@@ -16,6 +16,7 @@ import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.ComputerState
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 /**
@@ -49,6 +50,9 @@ class StateWidget : AppWidgetProvider() {
             return
         }
         val pending = goAsync()
+        // Only the newest ask writes what it heard (G1 review): an older,
+        // slower one never overwrites it.
+        val ask = generation.incrementAndGet()
         // Drawn at once, saying it asks, so a tap is seen (G1 review).
         askingFor = host.address
         redraw(app, manager, ids)
@@ -56,22 +60,36 @@ class StateWidget : AppWidgetProvider() {
         thread(name = "state-widget") {
             try {
                 val asked = thread(name = "state-widget-ask") {
-                    RustCore.start(app)
-                    RustCore.systemState(host.address, host.controlPort)
-                        .onSuccess { Kept.save(app, host.address, it) }
-                        .onFailure { Kept.failed(app, host.address) }
+                    // An Error from the library is a failure, never the app's crash.
+                    val answer = try {
+                        RustCore.start(app)
+                        RustCore.systemState(host.address, host.controlPort)
+                    } catch (e: Throwable) {
+                        Result.failure(e)
+                    }
+                    // An answer after the wait is drawn when it comes.
+                    finish(app, host.address, ask, answer.getOrNull())
                 }
                 asked.join(TimeUnit.SECONDS.toMillis(ASK_SECONDS))
-                if (asked.isAlive) Kept.failed(app, host.address)
-                askingFor = null
-                redraw(app, manager, ids)
+                if (asked.isAlive) finish(app, host.address, ask, null)
             } catch (e: Exception) {
                 Log.w(TAG, "state widget refresh failed", e)
             } finally {
-                askingFor = null
                 pending.finish()
             }
         }
+    }
+
+    /** Keep and draw what ask [ask] heard ([json], or null for nothing), if it is still the newest. */
+    private fun finish(app: Context, computer: String, ask: Long, json: String?) {
+        synchronized(generation) {
+            if (generation.get() != ask) return
+            if (json != null) Kept.save(app, computer, json) else Kept.failed(app, computer)
+            askingFor = null
+        }
+        val manager = AppWidgetManager.getInstance(app)
+        val ids = manager.getAppWidgetIds(ComponentName(app, StateWidget::class.java))
+        if (ids.isNotEmpty()) redraw(app, manager, ids)
     }
 
     /** The last answer for one computer, kept between draws. */
@@ -94,7 +112,10 @@ class StateWidget : AppWidgetProvider() {
                     return Kept(null, null, false)
                 }
                 val at = p.getLong(KEY_AT, 0L)
-                return Kept(p.getString(KEY_JSON, null), at.takeIf { it > 0 }, p.getBoolean(KEY_FAILED, false))
+                // A reading that no longer reads counts as a failure, so it is asked again (G1 review).
+                val json = p.getString(KEY_JSON, null)
+                val readable = json?.takeIf { runCatching { ComputerState.parse(it) }.isSuccess }
+                return Kept(readable, at.takeIf { it > 0 }, p.getBoolean(KEY_FAILED, false) || (json != null && readable == null))
             }
 
             fun save(ctx: Context, computer: String, json: String) = prefs(ctx).edit {
@@ -123,6 +144,9 @@ class StateWidget : AppWidgetProvider() {
         private const val ACTION_REFRESH = "dev.pocketdesk.android.action.STATE_WIDGET_REFRESH"
         private const val ACTION_FOLLOW = "dev.pocketdesk.android.action.STATE_WIDGET_FOLLOW"
         private const val ASK_SECONDS = 8L
+
+        /** The newest ask in this process. */
+        private val generation = AtomicLong()
 
         /** The computer an ask is running for in this process, if one is. */
         @Volatile
