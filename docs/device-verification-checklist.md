@@ -2015,6 +2015,15 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] Stop pressed while the camera is still opening: the camera's indicator goes.
 - [ ] Another app taking the camera: "The camera stopped", the cast ended.
 
+## 132. The computer's state on the home screen (G1)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet.
+- [ ] Place "Pocketdesk: how it is doing" on the A71's home screen: "Asking the computer…", then the last computer's name, `CPU · Mem · Disk · Bat` and "Updated <time>".
+- [ ] A tap with the server stopped: "Not answering · from <time>", the numbers kept; a tap with it back: updated.
+- [ ] `share_state` off on the computer: the widget says it does not share.
+- [ ] Connect to another computer, then go Home: the widget follows it, asked once.
+- [ ] "State widget refreshes by itself" off: no ask in the logcat at the next period; on mobile data with it on: none either.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
