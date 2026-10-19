@@ -22,6 +22,24 @@ A 2026 KDE thread asks for a device panel in the tray and dragging files onto a 
 - **The app never reads the clipboard itself.** It writes a `clipboard_out/` request (D3's) with `current: true` and no text. The server reads its clipboard when it takes the request, with the rules a push already keeps: a copy a password manager marks private, or a pairing link, is never sent ("nothing to send").
 - **Requests from before D5** have no `current` and read as before. A `current` request carrying text is refused.
 
+## Review
+
+**Fresh review: 0 Critical, 4 Important, 7 Minor.** Fixed one commit each:
+- a blank clipboard, or one past a push's 256 KiB, was sent;
+- a tray send was left out of the clipboard's history;
+- a refused send was only in the log, and the notice read as sent (now a desktop notification, and "asked");
+- a phone away had every item greyed with nothing to say why (now "· away" in its title).
+
+Minors fixed:
+- a request for the clipboard now goes stale after 10 s, not 60;
+- one rule for a text to a phone's clipboard (`model::clipboard_reach`);
+- stable menu ids on Windows;
+- tests for the lazy read and the ids.
+
+Left as they are:
+- the Linux tray's update blocks the window's thread while D-Bus answers;
+- Ring's and Mute's refusals stay on the Overview.
+
 ## Not done
 
 - **Files dropped on the tray icon.** Windows' notification area takes no drops (`Shell_NotifyIcon` has no drop target), and neither does a StatusNotifierItem. Send To (T10e) and the window's drop stay the ways to drop.

@@ -1821,6 +1821,8 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] The A71 away: its items greyed out.
 - [ ] A phone named with `&` (Windows) or `_` (Linux): the name as written.
 - [ ] Linux: the same menu in a real panel.
+- [ ] Send clipboard with an empty clipboard, and with over 256 KiB of text: a notification says it was not sent.
+- [ ] A tray pick with the server stopped, and with a server from before D5: nothing sent, and the notice says only that it asked.
 
 ## Recording results
 

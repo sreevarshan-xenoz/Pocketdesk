@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-585 open items.
+587 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 344 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 345 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 81 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 41 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 42 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -701,6 +701,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Send clipboard: the computer's copy on the phone; a password manager's private copy not sent.
 - Send file…: the window opens on Files with the phone chosen.
 - The A71 away: its items greyed out.
+- Send clipboard with an empty clipboard, and with over 256 KiB of text: a notification says it was not sent.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1479,3 +1480,4 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **116. The tray you act from (D5)**
 
 - Ring, Mute for an hour and then Unmute, from the tray with the window hidden: the phone answers, the window stays hidden.
+- A tray pick with the server stopped, and with a server from before D5: nothing sent, and the notice says only that it asked.
