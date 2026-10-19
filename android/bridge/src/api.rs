@@ -2507,6 +2507,7 @@ const STOPPED_BY_PHONE: &[u8] = b"stopped by the phone";
 
 async fn teardown_streaming_handle(handle: StreamingHandle) {
     crate::session::REMOTE.lock().unwrap().take();
+    crate::session::SCREEN_FEATURES.lock().unwrap().take();
     crate::cast::stop();
     VIDEO_RX.lock().await.take();
     AUDIO_RX.lock().await.take();
@@ -2674,6 +2675,8 @@ async fn install_streaming(
     *VIDEO_RX.lock().await = Some(packet_rx);
     *AUDIO_RX.lock().await = Some(audio_rx);
     *crate::VIDEO_BYTES.lock().unwrap_or_else(|e| e.into_inner()) = Some(video_bytes);
+    *crate::session::SCREEN_FEATURES.lock().unwrap() =
+        (!input_only).then(|| remote.screen_features.clone());
     *crate::session::REMOTE.lock().unwrap() = input_only.then_some(remote);
     if mode == pocketdesk_core::streaming::SessionMode::Cast {
         crate::cast::start(connection.clone(), client_cancel.clone());
@@ -3619,6 +3622,48 @@ pub async fn send_mouse_abs(x_norm: u16, y_norm: u16) -> Result<(), String> {
     .await;
     if let Err(e) = &send {
         tracing::warn!(error = %e, "send_mouse_abs failed");
+    }
+    send
+}
+
+/// Whether the live screen session's computer takes a pen (E3): it said
+/// so on its ready stream. False with no screen session, or from a computer
+/// before E3.
+pub fn pen_supported() -> bool {
+    crate::session::SCREEN_FEATURES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|f| {
+            f.load(std::sync::atomic::Ordering::Acquire)
+                & pocketdesk_core::streaming::SCREEN_FEATURE_PEN
+                != 0
+        })
+}
+
+/// Send one pen sample (E3) on the screen session.
+pub async fn send_pen(sample: pocketdesk_core::streaming::PenSample) -> Result<(), String> {
+    let conn = {
+        let guard = (*STREAMING_HANDLE).lock().await;
+        guard.as_ref().map(|h| h.connection.clone())
+    }
+    .ok_or_else(|| "The pen needs a screen session".to_string())?;
+    let data = InputPacket::Pen(sample).encode();
+    let send = async {
+        let mut stream = conn
+            .open_uni()
+            .await
+            .map_err(|e| format!("QUIC open stream: {e}"))?;
+        stream
+            .write_all(&data)
+            .await
+            .map_err(|e| format!("QUIC write: {e}"))?;
+        stream.finish().map_err(|e| format!("QUIC finish: {e}"))?;
+        Ok(())
+    }
+    .await;
+    if let Err(e) = &send {
+        tracing::warn!(error = %e, "send_pen failed");
     }
     send
 }

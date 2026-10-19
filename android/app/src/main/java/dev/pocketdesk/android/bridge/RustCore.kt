@@ -120,6 +120,8 @@ object RustCore {
     ): String
 
     private external fun nativeSendMouseAbs(xNorm: Int, yNorm: Int): String
+    private external fun nativeSendPen(xNorm: Int, yNorm: Int, pressure: Int, tiltX: Int, tiltY: Int, flags: Int): String
+    private external fun nativePenSupported(): Boolean
     private external fun nativeSendMouseClick(button: Int, pressed: Boolean): String
 
     private external fun nativeSendKeyboardEvent(
@@ -665,6 +667,22 @@ object RustCore {
      */
     fun sendMouseAbs(xNorm: Int, yNorm: Int): Result<Unit> =
         envelope(nativeSendMouseAbs(xNorm, yNorm)).map { }
+
+    /** A pen sample (E3): its flags (pen in contact, in range, side button, eraser). */
+    const val PEN_CONTACT = 1
+    const val PEN_IN_RANGE = 2
+    const val PEN_BARREL = 4
+    const val PEN_ERASER = 8
+
+    /**
+     * One pen sample on the screen session (E3): position as [sendMouseAbs],
+     * pressure 0..=65535, tilt in degrees (-90..=90), and the `PEN_*` flags.
+     */
+    fun sendPen(xNorm: Int, yNorm: Int, pressure: Int, tiltX: Int, tiltY: Int, flags: Int): Result<Unit> =
+        envelope(nativeSendPen(xNorm, yNorm, pressure, tiltX, tiltY, flags)).map { }
+
+    /** Whether the screen session's computer takes a pen (E3): it said so as the session began. */
+    fun penSupported(): Boolean = nativePenSupported()
 
     /**
      * Mouse button press/release. [button] is the wire encoding:

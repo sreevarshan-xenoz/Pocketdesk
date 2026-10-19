@@ -864,6 +864,45 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendMou
     to_jstring(&mut env, json)
 }
 
+/// Send one pen sample (E3): position 0..=65535 as an absolute move,
+/// pressure 0..=65535, tilt in degrees, and the `PEN_*` flags.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendPen(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    x_norm: jint,
+    y_norm: jint,
+    pressure: jint,
+    tilt_x: jint,
+    tilt_y: jint,
+    flags: jint,
+) -> jstring {
+    let unsigned = |v: jint| v.clamp(0, u16::MAX as i32) as u16;
+    let tilt = |v: jint| {
+        let max = i32::from(pocketdesk_core::streaming::input_packet::PEN_MAX_TILT);
+        v.clamp(-max, max) as i8
+    };
+    let sample = pocketdesk_core::streaming::PenSample {
+        x_norm: unsigned(x_norm),
+        y_norm: unsigned(y_norm),
+        pressure: unsigned(pressure),
+        tilt_x: tilt(tilt_x),
+        tilt_y: tilt(tilt_y),
+        flags: (flags & 0xFF) as u8,
+    };
+    let json = envelope_unit(RUNTIME.block_on(api::send_pen(sample)));
+    to_jstring(&mut env, json)
+}
+
+/// Whether the screen session's computer takes a pen (E3).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePenSupported(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jboolean {
+    api::pen_supported() as jboolean
+}
+
 /// Send a mouse button press/release. `button` is the wire encoding:
 /// 0=Left, 1=Middle, 2=Right, 3=Back, 4=Forward.
 #[unsafe(no_mangle)]
