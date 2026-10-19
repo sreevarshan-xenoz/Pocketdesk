@@ -37,8 +37,9 @@ The phone shows how its computer is doing, without a session:
 ## The computer
 
 `server/src/system_state.rs` reads, on a blocking thread:
-- **Windows:** `GetSystemTimes` sampled twice 250 ms apart (or against the last sample within a minute), `GlobalMemoryStatusEx`, `GetLogicalDriveStringsW` with `GetDriveTypeW`/`GetDiskFreeSpaceExW`, `GetTickCount64`.
-- **Linux:** `/proc/stat`, `/proc/meminfo` (`MemTotal - MemAvailable`), `df -kP`, `/proc/uptime`.
+- **The CPU, on both:** two samples 250 ms apart, or against the last sample when it is between 200 ms and a minute old (the sheet asks every 3 s).
+- **Windows:** `GetSystemTimes`, `GlobalMemoryStatusEx`, `GetLogicalDrives` with `GetDriveTypeW`/`GetDiskFreeSpaceExW`, `GetTickCount64`.
+- **Linux:** `/proc/stat` (its first eight columns), `/proc/meminfo` (`MemTotal - MemAvailable`), `df -klP` within 3 s, `/proc/uptime`.
 - **The battery:** the battery plugin's own reading.
 
 The parsers are pure and tested.
@@ -53,3 +54,28 @@ The parsers are pure and tested.
 - **Computer:** the parsers (`/proc/stat`, `/proc/meminfo`, `df -kP`, `/proc/uptime`), the CPU arithmetic, the body's shape.
 - **Phone:** JVM tests of the sizes' words and the bars.
 - **Owed (device):** the sheet against this box and Linux.
+
+## As built
+
+As specified, with the details above:
+- **The menu item:** "How it is doing" on the phone.
+- **The disks:** each device once, at its shortest mount point. Optical drives, zram and what is under `/media` or `/run/media` are left out.
+- **When the computer goes quiet:** the last answer stays, marked "Not answering now: this is how it was".
+- **The asking:** only while the app is in front.
+- **Not checked on a device** (the owner's night of features): checklist §127.
+
+## Review
+
+A fresh review found 0 Critical and 4 Important issues, fixed one commit each:
+- `df` with no deadline (a dead network mount hung it): now `df -klP` within 3 s;
+- a disk once per mount, and USB sticks counted as fixed;
+- the sheet asking every 3 s in the background;
+- old readings shown as live.
+
+Minors fixed:
+- guest time counted twice;
+- a CPU reading that is not a number;
+- SECURITY.md limit 33;
+- the spec's calls.
+
+Minor left: two phones asking at once share the CPU sample, so each reads a shorter window.
