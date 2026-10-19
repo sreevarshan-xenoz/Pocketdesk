@@ -125,6 +125,8 @@ object RustCore {
     private external fun nativeSendMouseAbs(xNorm: Int, yNorm: Int): String
     private external fun nativeSendPen(xNorm: Int, yNorm: Int, pressure: Int, tiltX: Int, tiltY: Int, flags: Int): String
     private external fun nativePenSupported(): Boolean
+    private external fun nativeSendLaser(dx: Int, dy: Int, show: Boolean): String
+    private external fun nativeLaserSupported(): Boolean
     private external fun nativeSendMouseClick(button: Int, pressed: Boolean): String
 
     private external fun nativeSendKeyboardEvent(
@@ -696,6 +698,12 @@ object RustCore {
 
     /** Whether the screen session's computer takes a pen (E3): it said so as the session began. */
     fun penSupported(): Boolean = nativePenSupported()
+
+    /** Move the laser dot by [dx]/[dy] pointer pixels, or hide it (G4). */
+    fun sendLaser(dx: Int, dy: Int, show: Boolean): Result<Unit> = envelope(nativeSendLaser(dx, dy, show)).map { }
+
+    /** Whether the remote's computer draws a laser dot (G4). */
+    fun laserSupported(): Boolean = runCatching { nativeLaserSupported() }.getOrDefault(false)
 
     /**
      * Mouse button press/release. [button] is the wire encoding:

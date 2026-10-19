@@ -55,6 +55,7 @@ object Prefs {
     private const val KEY_CALLS_DECLINE = "calls_decline"
     private const val KEY_AIR_MOUSE_SPEED = "air_mouse_speed"
     private const val KEY_AIR_MOUSE = "air_mouse"
+    private const val KEY_AIR_LASER = "air_laser"
     private const val KEY_PEN_CURVE = "pen_curve"
     private const val KEY_GAMEPAD_CONTROLLER = "gamepad_controller"
     private const val KEY_DECK_COLUMNS = "deck_columns"
@@ -424,6 +425,14 @@ object Prefs {
 
     /** The remote shows the air mouse rather than the trackpad (F4): the last choice. */
     fun airMouse(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_AIR_MOUSE, false)
+
+    /** Whether the air mouse moves the computer's laser dot instead of its pointer (G4). */
+    fun airLaser(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_AIR_LASER, false)
+
+    fun setAirLaser(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_AIR_LASER, on) }
+        bump()
+    }
 
     fun setAirMouse(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_AIR_MOUSE, on) }

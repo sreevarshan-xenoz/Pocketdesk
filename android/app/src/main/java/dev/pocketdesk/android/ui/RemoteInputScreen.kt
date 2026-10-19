@@ -26,6 +26,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -92,6 +93,9 @@ fun RemoteInputScreen(
     var attempt by remember { mutableIntStateOf(0) }
     val gyro = remember { hasGyroscope(context) }
     var air by remember { mutableStateOf(Prefs.airMouse(context)) }
+    // G4: the laser dot, offered once the computer admitted the remote and said it draws one.
+    var laser by remember { mutableStateOf(Prefs.airLaser(context)) }
+    val laserOffered = remember(state) { state == State.Ready && RustCore.laserSupported() }
 
     // Ecosystem 1f: other apps hear the remote start and end.
     val tell = remember(address) { SessionTell("remote") }
@@ -287,7 +291,31 @@ fun RemoteInputScreen(
                     KeyRow(RemoteSession.media, ::tap)
                     KeyRow(RemoteSession.presenter, ::tap)
                     if (air && gyro) {
-                        AirPad(address = address, port = port, modifier = Modifier.weight(1f).fillMaxWidth())
+                        AirPad(
+                            address = address,
+                            port = port,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            laser = laser && laserOffered,
+                        )
+                        if (laserOffered) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    stringResource(R.string.remote_laser),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Switch(
+                                    checked = laser,
+                                    onCheckedChange = {
+                                        laser = it
+                                        Prefs.setAirLaser(context, it)
+                                    },
+                                )
+                            }
+                        }
                     } else {
                         ControlDock(
                             address = address,

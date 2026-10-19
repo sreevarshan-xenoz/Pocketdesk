@@ -823,4 +823,6 @@
     <string name="deck_widget_refresh">பொத்தான்களை மீண்டும் கேள்</string>
     <string name="deck_widget_said">%1$s: %2$s</string>
     <string name="deck_widget_no_answer">கணினியிடமிருந்து இன்னும் பதில் இல்லை</string>
+    <string name="remote_laser">லேசர் சுட்டி</string>
+    <string name="air_hint_laser">இங்கே அழுத்திப் பிடித்து, தொலைபேசியைத் திருப்பி கணினித் திரையில் சிவப்புப் புள்ளியை நகர்த்தவும்; விட்டால் மறையும். ஒரு தட்டு சுட்டியில் சொடுக்கும்.</string>
 </resources>

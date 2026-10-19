@@ -829,4 +829,6 @@
     <string name="deck_widget_refresh">Volver a pedir los botones</string>
     <string name="deck_widget_said">%1$s: %2$s</string>
     <string name="deck_widget_no_answer">El ordenador aún no responde</string>
+    <string name="remote_laser">Puntero láser</string>
+    <string name="air_hint_laser">Mantén pulsado aquí y gira el teléfono para mover un punto rojo en la pantalla del ordenador; suelta para ocultarlo. Un toque hace clic en el puntero.</string>
 </resources>
