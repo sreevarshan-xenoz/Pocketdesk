@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -92,6 +93,9 @@ fun writeLocalClipboard(ctx: Context, text: String) {
 fun ClipboardHistorySheet(
     onDismiss: () -> Unit,
     onPick: (String) -> Unit,
+    // From Home (D3): the computer a tap sends to; in a session, null (a tap
+    // copies, and sends with the session's sync).
+    sendTo: String? = null,
 ) {
     val context = LocalContext.current
     val entries = remember { mutableStateOf(ClipHistory.all(context)) }
@@ -103,15 +107,27 @@ fun ClipboardHistorySheet(
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             ) {
-                Text(
-                    stringResource(R.string.clipboard_history),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = { confirmClear = true },
-                ) {
-                    Text(stringResource(R.string.clear), color = MaterialTheme.colorScheme.error)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.clipboard_history),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    // What a tap does, from Home (E6).
+                    if (sendTo != null) {
+                        Text(
+                            stringResource(R.string.clipboard_tap_sends, sendTo),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                // Only with something to clear (E6).
+                if (entries.value.isNotEmpty()) {
+                    TextButton(
+                        onClick = { confirmClear = true },
+                    ) {
+                        Text(stringResource(R.string.clear), color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
             HorizontalDivider()
@@ -130,7 +146,9 @@ fun ClipboardHistorySheet(
                                 tint = MaterialTheme.colorScheme.outline,
                             )
                             Text(
-                                stringResource(R.string.clipboard_empty),
+                                stringResource(
+                                    if (sendTo != null) R.string.clipboard_empty_home else R.string.clipboard_empty,
+                                ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -138,6 +156,7 @@ fun ClipboardHistorySheet(
                     }
                 }
                 items(entries.value) { entry ->
+                    val pickLabel = stringResource(if (sendTo != null) R.string.clipboard_send else R.string.clipboard_copy)
                     Text(
                         entry,
                         style = MaterialTheme.typography.bodyMedium,
@@ -145,12 +164,14 @@ fun ClipboardHistorySheet(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
+                            // 48 dp to the touch, with what a tap does (E6).
+                            .heightIn(min = 48.dp)
+                            .clickable(onClickLabel = pickLabel) {
                                 ClipHistory.add(context, entry)
                                 entries.value = ClipHistory.all(context)
                                 onPick(entry)
                             }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
             }

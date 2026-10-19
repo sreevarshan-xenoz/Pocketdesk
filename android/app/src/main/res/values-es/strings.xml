@@ -298,6 +298,10 @@
     <string name="clipboard_history">Historial del portapapeles</string>
     <string name="clear">Borrar</string>
     <string name="clipboard_empty">Aún no se ha capturado nada: copia algo o activa la sincronización del portapapeles.</string>
+    <string name="clipboard_tap_sends">Toca uno para enviarlo a %1$s</string>
+    <string name="clipboard_empty_home">Aún no se ha copiado nada. El texto que pasa durante una sesión, o con el portapapeles del ordenador en segundo plano, aparece aquí.</string>
+    <string name="clipboard_send">Enviar</string>
+    <string name="clipboard_copy">Copiar</string>
     <string name="clipboard_clear_message">Esto elimina todas las entradas guardadas del portapapeles en este teléfono.</string>
 
     <!-- Shortcut bar group captions (C9); key caps stay literal -->
@@ -736,7 +740,7 @@
     <string name="health_control_blocked">El ordenador no puede controlar este teléfono: la Protección avanzada solo permite servicios de accesibilidad a las herramientas de accesibilidad.</string>
     <string name="health_download_folder">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>
     <string name="health_screenshots_stopped">Las capturas nuevas dejaron de ir al ordenador cuando se retiró el acceso a las fotos. Vuelve a activarlo en Ajustes.</string>
-    <string name="health_settings">Ajustes</string>
+    <string name="health_settings">Abrir Ajustes</string>
     <string name="settings_health">Avisarme cuando algo deje de funcionar</string>
     <string name="settings_health_summary">En Inicio, y en una notificación tras una actualización</string>
     <plurals name="health_count">
@@ -750,5 +754,5 @@
     <string name="phone_notifications_hold_back">Retener con No molestar</string>
     <string name="phone_notifications_hold_back_summary">Mientras No molestar silencia una notificación en este teléfono, tampoco se envía al ordenador</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
-    <string name="card_send_earlier_copy">Enviar una copia anterior</string>
+    <string name="card_send_earlier_copy">Enviar desde el historial del portapapeles</string>
 </resources>

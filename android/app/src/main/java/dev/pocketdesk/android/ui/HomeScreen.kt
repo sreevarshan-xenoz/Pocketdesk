@@ -172,6 +172,8 @@ fun HomeScreen(
             if (Prefs.healthDismissed(context) != null) Prefs.setHealthDismissed(context, null)
         }
     }
+    // The Health card's Choose opens the picker itself (E6).
+    val chooseFolder = rememberDownloadFolderPicker()
     val showHealth = Prefs.healthAlerts(context) &&
         Health.shows(healthProblems.orEmpty(), Prefs.healthDismissed(context))
     // Read once per resume (system services), not on every recomposition.
@@ -313,7 +315,8 @@ fun HomeScreen(
                             problems = healthProblems.orEmpty(),
                             onFix = { HealthCheck.openFix(context, it) },
                             onTurnOffControl = { Prefs.setControlFromComputer(context, false) },
-                            onChooseFolder = onOpenSettings,
+                            onChooseFolder = chooseFolder,
+                            onOpenSettings = onOpenSettings,
                             onNotNow = { Prefs.setHealthDismissed(context, Health.key(healthProblems.orEmpty())) },
                         )
                     }
@@ -518,6 +521,7 @@ fun HomeScreen(
     historyFor?.let { host ->
         val shown = HostStore.shownName(context, host.address)
         ClipboardHistorySheet(
+            sendTo = shown,
             onDismiss = { historyFor = null },
             onPick = { text ->
                 historyFor = null
@@ -693,17 +697,30 @@ private fun HostCard(
                         LlIcon(LlIcons.MoreVert, stringResource(R.string.card_more, title))
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        val entries = buildList {
+                        // What it does first, then its upkeep, then Remove (E6).
+                        val uses = buildList {
                             // The phone as the computer's speaker and mic (N5).
                             add(R.string.sound_button to onSound)
-                            if (hasWake) add(R.string.wake to onWake)
-                            add(R.string.wake_settings to onWakeSettings)
-                            add(R.string.doctor_title to onCheck)
-                            add(R.string.card_rename to onRename)
                             // D3: an earlier copy, sent to this computer again.
                             add(R.string.card_send_earlier_copy to onHistory)
+                            if (hasWake) add(R.string.wake to onWake)
                         }
-                        entries.forEach { (label, action) ->
+                        val upkeep = listOf(
+                            R.string.wake_settings to onWakeSettings,
+                            R.string.doctor_title to onCheck,
+                            R.string.card_rename to onRename,
+                        )
+                        uses.forEach { (label, action) ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(label)) },
+                                onClick = {
+                                    menu = false
+                                    action()
+                                },
+                            )
+                        }
+                        HorizontalDivider()
+                        upkeep.forEach { (label, action) ->
                             DropdownMenuItem(
                                 text = { Text(stringResource(label)) },
                                 onClick = {
@@ -797,6 +814,7 @@ private fun HealthCard(
     onTurnOffControl: () -> Unit,
     /** Pocketdesk's Settings: the download folder, screenshots. */
     onChooseFolder: () -> Unit,
+    onOpenSettings: () -> Unit,
     onNotNow: () -> Unit,
 ) {
     Card(
@@ -826,7 +844,7 @@ private fun HealthCard(
                         HealthProblem.DOWNLOAD_FOLDER ->
                             TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.health_choose)) }
                         HealthProblem.SCREENSHOTS_STOPPED ->
-                            TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.health_settings)) }
+                            TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.health_settings)) }
                         else -> TextButton(onClick = { onFix(problem) }) { Text(stringResource(R.string.health_fix)) }
                     }
                 }

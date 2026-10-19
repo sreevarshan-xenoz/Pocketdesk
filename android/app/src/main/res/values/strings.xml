@@ -302,6 +302,10 @@
     <string name="clipboard_history">Clipboard history</string>
     <string name="clear">Clear</string>
     <string name="clipboard_empty">Nothing captured yet — copy something or turn on clipboard sync.</string>
+    <string name="clipboard_tap_sends">Tap one to send it to %1$s</string>
+    <string name="clipboard_empty_home">Nothing copied yet. Text that crosses during a session, or with the computer\'s clipboard in the background, appears here.</string>
+    <string name="clipboard_send">Send</string>
+    <string name="clipboard_copy">Copy</string>
     <string name="clipboard_clear_message">This deletes every saved clipboard entry from this phone.</string>
 
     <!-- Shortcut bar group captions (C9); the key captions are the key_* strings (U6) -->
@@ -740,7 +744,7 @@
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>
     <string name="health_download_folder">The folder picked for files from computers is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
     <string name="health_screenshots_stopped">New screenshots stopped going to the computer when photo access was taken away. Turn it on again in Settings.</string>
-    <string name="health_settings">Settings</string>
+    <string name="health_settings">Open Settings</string>
     <string name="settings_health">Tell me when something stops working</string>
     <string name="settings_health_summary">On Home, and in a notification after an update</string>
     <plurals name="health_count">
@@ -753,5 +757,5 @@
     <string name="phone_notifications_hold_back">Hold back in Do Not Disturb</string>
     <string name="phone_notifications_hold_back_summary">While Do Not Disturb silences a notification on this phone, it is not sent to the computer either</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
-    <string name="card_send_earlier_copy">Send an earlier copy</string>
+    <string name="card_send_earlier_copy">Send from clipboard history</string>
 </resources>

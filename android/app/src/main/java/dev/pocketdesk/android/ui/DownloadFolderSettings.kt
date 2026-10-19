@@ -25,23 +25,10 @@ fun DownloadFolderSetting() {
     val context = LocalContext.current
     val resumes = rememberResumes()
     var version by remember { mutableIntStateOf(0) }
-    val picked = Prefs.downloadTree(context)
     val tree = remember(resumes, version) { DownloadTarget.tree(context) }
     val lost = remember(resumes, version) { DownloadTarget.treeLost(context) }
-    val pick =
-        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { chosen: Uri? ->
-            if (chosen != null) {
-                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                val kept = runCatching { context.contentResolver.takePersistableUriPermission(chosen, flags) }.isSuccess
-                if (kept) {
-                    // The folder before it is let go, so grants do not pile
-                    // up; the same one picked again keeps its grant.
-                    if (picked != chosen.toString()) release(context, picked)
-                    Prefs.setDownloadTree(context, chosen.toString())
-                }
-                version++
-            }
-        }
+    val picked = remember(resumes, version) { Prefs.downloadTree(context) }
+    val pick = rememberDownloadFolderPicker { version++ }
     val where = when {
         tree != null -> DownloadTarget.treeName(context, tree) ?: stringResource(R.string.settings_download_folder_picked)
         else -> stringResource(R.string.settings_download_folder_default)
@@ -49,7 +36,7 @@ fun DownloadFolderSetting() {
     SettingLink(
         stringResource(R.string.settings_download_folder),
         if (lost) stringResource(R.string.settings_download_folder_lost) else where,
-    ) { pick.launch(null) }
+    ) { pick() }
     if (picked != null) {
         SettingLink(stringResource(R.string.settings_download_folder_reset), null) {
             release(context, picked)
@@ -64,6 +51,32 @@ fun DownloadFolderSetting() {
  * unless "Folders the computer may open" shares the folder (grants are per
  * folder, not per feature).
  */
+/**
+ * Android's folder picker for where files from computers land, kept with
+ * its grant; [onPicked] after a choice. Settings and Home's Health card
+ * (E6: its Choose had only opened Settings) share it.
+ */
+@Composable
+fun rememberDownloadFolderPicker(onPicked: () -> Unit = {}): () -> Unit {
+    val context = LocalContext.current
+    val launcher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { chosen: Uri? ->
+            if (chosen != null) {
+                val picked = Prefs.downloadTree(context)
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                val kept = runCatching { context.contentResolver.takePersistableUriPermission(chosen, flags) }.isSuccess
+                if (kept) {
+                    // The folder before it is let go, so grants do not pile
+                    // up; the same one picked again keeps its grant.
+                    if (picked != chosen.toString()) release(context, picked)
+                    Prefs.setDownloadTree(context, chosen.toString())
+                }
+                onPicked()
+            }
+        }
+    return { launcher.launch(null) }
+}
+
 private fun release(context: android.content.Context, tree: String?) {
     tree ?: return
     val shared = dev.pocketdesk.android.files.PhoneFolders.all(context).any { it.uri == tree }
