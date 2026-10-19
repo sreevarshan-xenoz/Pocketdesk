@@ -50,6 +50,8 @@ impl Plugin for PhoneFilesPlugin {
             return Ok(());
         }
         let device = sender.device_id().to_string();
+        // The drive may be waiting for it (D8).
+        crate::drive::live::listing_came(&device, &listing);
         let dir = crate::state::state_dir().map_err(|e| {
             pocketdesk_core::error::PocketdeskError::Other {
                 detail: e.to_string(),
