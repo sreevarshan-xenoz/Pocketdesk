@@ -55,6 +55,21 @@ pub struct PhotosView {
     copying: Option<mpsc::Receiver<Result<egui::ColorImage, String>>>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
+    /// The phones files reach now (a session, or linked at home), read
+    /// with the photos: only those can be asked for a photo (F3 review).
+    reach: Option<pocketdesk_core::local::sessions::LiveMirror>,
+}
+
+/// The phones files reach now, from the live sessions' mirror: in a
+/// session, or linked at home.
+fn reachable(
+    state_dir: &Path,
+    now_unix: u64,
+) -> Option<pocketdesk_core::local::sessions::LiveMirror> {
+    std::fs::read_to_string(state_dir.join(pocketdesk_core::local::paths::LIVE_FILE))
+        .ok()
+        .and_then(|raw| pocketdesk_core::local::sessions::parse_mirror(&raw))
+        .filter(|m| m.is_fresh(now_unix))
 }
 
 /// Where the photo `name` of `size` bytes (0 unknown) from `device`, asked
@@ -190,6 +205,7 @@ impl PhotosView {
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_none_or(|t| t.elapsed() >= REFRESH) {
             self.kept = store::read(state_dir);
+            self.reach = reachable(state_dir, pocketdesk_core::local::pin::now_unix());
             self.read_at = Some(Instant::now());
         }
     }
@@ -238,11 +254,12 @@ impl PhotosView {
                 ui.spinner();
             }
             // F3: a new photo, taken on the phone, lands with the received files.
-            if ui
-                .button("Take a photo with the phone")
+            let reaches = self.reach.as_ref().is_some_and(|m| m.files_reach(phone));
+            let take = ui
+                .add_enabled(reaches, egui::Button::new("Take a photo with the phone"))
                 .on_hover_text("The phone shows a notification that opens its camera; the photo comes here as a received file.")
-                .clicked()
-                && self.ask(state_dir, phone, Ask::Take, now_unix)
+                .on_disabled_hover_text("The phone is not linked now with \"Send and browse files\": open Pocketdesk on the phone, with \"Photos the computer asks for\" on in its Settings.");
+            if take.clicked() && self.ask(state_dir, phone, Ask::Take, now_unix)
             {
                 self.notice = crate::notice::Notice::done(
                     "Asked the phone: tap its notification to take the photo.",
