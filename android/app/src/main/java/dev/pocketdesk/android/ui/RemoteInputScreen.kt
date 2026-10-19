@@ -90,6 +90,8 @@ fun RemoteInputScreen(
     var state by remember { mutableStateOf(State.Connecting) }
     var reason by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
+    val gyro = remember { hasGyroscope(context) }
+    var air by remember { mutableStateOf(Prefs.airMouse(context)) }
 
     // Ecosystem 1f: other apps hear the remote start and end.
     val tell = remember(address) { SessionTell("remote") }
@@ -265,6 +267,13 @@ fun RemoteInputScreen(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
+                if (state == State.Ready && gyro) {
+                    // F4: the air mouse or the trackpad, the last one kept.
+                    TextButton(onClick = {
+                        air = !air
+                        Prefs.setAirMouse(context, air)
+                    }) { Text(stringResource(if (air) R.string.remote_trackpad else R.string.remote_air)) }
+                }
                 if (state == State.Ready) {
                     TextButton(onClick = {
                         keyboardOpen = !keyboardOpen
@@ -277,12 +286,16 @@ fun RemoteInputScreen(
                 State.Ready -> {
                     KeyRow(RemoteSession.media, ::tap)
                     KeyRow(RemoteSession.presenter, ::tap)
-                    ControlDock(
-                        address = address,
-                        port = port,
-                        modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
-                        onFailed = { notice = it },
-                    )
+                    if (air && gyro) {
+                        AirPad(address = address, port = port, modifier = Modifier.weight(1f).fillMaxWidth())
+                    } else {
+                        ControlDock(
+                            address = address,
+                            port = port,
+                            modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
+                            onFailed = { notice = it },
+                        )
+                    }
                 }
                 else ->
                     Status(

@@ -799,4 +799,10 @@
     <string name="settings_camera_asks_needs_access">Needs notification access: Pocketdesk\'s background link to the computer runs from it</string>
     <string name="settings_camera_clipboard">Also onto its clipboard</string>
     <string name="settings_camera_clipboard_summary">The photo goes onto the computer\'s clipboard as well as into its received files</string>
+    <string name="remote_air">Air mouse</string>
+    <string name="remote_trackpad">Trackpad</string>
+    <string name="air_hint">Hold here and point the phone to move the pointer. Tap to click.</string>
+    <string name="air_none">This phone has no gyroscope, so it cannot be an air mouse.</string>
+    <string name="settings_air_speed">Air mouse speed</string>
+    <string name="settings_air_speed_summary">How far the pointer moves as you turn the phone in Remote\'s air mouse</string>
 </resources>
