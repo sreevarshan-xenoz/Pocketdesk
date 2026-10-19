@@ -17,6 +17,10 @@ pub const PHOTOS: &str = "kdeconnect.pocketdesk.phone_photos";
 /// Computer → phone: `{id}`, send that photo to the computer.
 pub const FETCH: &str = "kdeconnect.pocketdesk.phone_photos.fetch";
 
+/// Computer → phone: `{}`, offer its owner the camera; the photo taken is
+/// sent to the computer as a file (F3).
+pub const TAKE: &str = "kdeconnect.pocketdesk.phone_photos.take";
+
 /// Photos one answer carries, at most.
 pub const MAX_PHOTOS: usize = 24;
 

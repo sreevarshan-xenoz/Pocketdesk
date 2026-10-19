@@ -49,7 +49,7 @@ object RecentPhotoPrefs {
  */
 class RecentPhotos(private val ctx: Context) {
     /** A request as the bridge kept it. */
-    private data class Request(val host: String, val port: Int, val fetch: Boolean, val id: Long)
+    private data class Request(val host: String, val port: Int, val fetch: Boolean, val id: Long, val take: Boolean = false)
 
     /** The ids the last answer listed: the only ones a fetch may name. */
     @Volatile
@@ -60,11 +60,14 @@ class RecentPhotos(private val ctx: Context) {
     fun tick() {
         val requests = takeRequests()
         val on = RecentPhotoPrefs.on(ctx)
+        // F3: a photo asked for comes on the same link (F3 review: it was kept
+        // only for Recent photos, so an ask never reached a phone without it).
+        val camera = CameraAsk.enabled(ctx)
         // Nothing turned on and nothing asked: nothing to do (N7).
-        if (!on && requests.isEmpty()) return
+        if (!on && !camera && requests.isEmpty()) return
         val own = PhoneLink.target(ctx)
         // The computer's requests come on the control link: kept while on.
-        if (on && RecentPhotoPrefs.granted(ctx) && own != null && RustCore.controlPeer() == null) {
+        if (((on && RecentPhotoPrefs.granted(ctx)) || camera) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - lastConnectMs >= RECONNECT_MS) {
                 lastConnectMs = now
@@ -72,7 +75,13 @@ class RecentPhotos(private val ctx: Context) {
             }
         }
         for (request in requests) {
-            if (!PhoneFilesRule.fromOwnComputer(request.host, request.port, own?.address, own?.controlPort)) continue
+            val ownComputer = PhoneFilesRule.fromOwnComputer(request.host, request.port, own?.address, own?.controlPort)
+            // F3: a photo asked for is offered to the owner, whatever Recent photos says.
+            if (request.take) {
+                if (CameraAsk.shouldOffer(CameraAsk.enabled(ctx), ownComputer)) CameraAsk.offer(ctx, request.host, request.port)
+                continue
+            }
+            if (!ownComputer) continue
             runCatching { if (request.fetch) fetch(request) else list(request) }
                 .onFailure { Log.w(TAG, "a request for this phone's photos failed", it) }
         }
@@ -83,7 +92,7 @@ class RecentPhotos(private val ctx: Context) {
             val array = JSONArray(RustCore.takePhotoRequests())
             (0 until array.length()).map { i ->
                 val o = array.getJSONObject(i)
-                Request(o.getString("host"), o.getInt("port"), o.getBoolean("fetch"), o.optLong("id", -1))
+                Request(o.getString("host"), o.getInt("port"), o.getBoolean("fetch"), o.optLong("id", -1), o.optBoolean("take", false))
             }
         }.getOrDefault(emptyList())
 

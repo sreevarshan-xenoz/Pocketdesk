@@ -10,7 +10,7 @@ use std::time::Duration;
 use pocketdesk_core::error::Result;
 use pocketdesk_core::local::phone_photos::{self as store, Ask};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
-use pocketdesk_core::protocol::phone_photos::{FETCH, LIST, PHOTOS, Photos, fetch_body};
+use pocketdesk_core::protocol::phone_photos::{FETCH, LIST, PHOTOS, Photos, TAKE, fetch_body};
 
 pub struct PhonePhotosPlugin;
 
@@ -32,7 +32,7 @@ impl Plugin for PhonePhotosPlugin {
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &[LIST, FETCH]
+        &[LIST, FETCH, TAKE]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
@@ -78,6 +78,7 @@ pub(crate) fn request_packet(request: &store::Request) -> NetworkPacket {
     match request.ask {
         Ask::List => NetworkPacket::new(LIST).with_body(serde_json::json!({})),
         Ask::Fetch(id) => NetworkPacket::new(FETCH).with_body(fetch_body(id)),
+        Ask::Take => NetworkPacket::new(TAKE).with_body(serde_json::json!({})),
     }
 }
 
@@ -136,12 +137,14 @@ mod tests {
         let fetch = request_packet(&request(Ask::Fetch(7)));
         assert_eq!(fetch.packet_type, FETCH);
         assert_eq!(fetch.body["id"], 7);
+        // F3: the camera, offered to the phone's owner.
+        assert_eq!(request_packet(&request(Ask::Take)).packet_type, TAKE);
     }
 
     #[test]
     fn the_photos_packets_need_files() {
         use pocketdesk_core::protocol::permissions::{Capability, capability_for};
-        for t in [LIST, PHOTOS, FETCH] {
+        for t in [LIST, PHOTOS, FETCH, TAKE] {
             assert_eq!(capability_for(t), Some(Capability::Files), "{t}");
         }
     }

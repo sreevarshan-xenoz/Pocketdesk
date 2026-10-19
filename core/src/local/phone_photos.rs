@@ -213,6 +213,8 @@ pub enum Ask {
     List,
     /// That photo, sent to the computer.
     Fetch(u64),
+    /// A new photo, the phone's owner taking it with the camera (F3).
+    Take,
 }
 
 /// One request for the server to send.

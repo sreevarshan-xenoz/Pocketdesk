@@ -779,4 +779,15 @@
     <string name="state_unit_day">நா</string>
     <string name="state_unit_hour">ம</string>
     <string name="state_unit_minute">நி</string>
+    <string name="camera_channel">கணினி கேட்கும் படங்கள்</string>
+    <string name="camera_channel_description">ஒரு கணினி இந்தக் கைபேசியிடம் படம் கேட்கும்போது கேமராவைத் தருகிறது</string>
+    <string name="camera_ask_title">%1$s ஒரு படம் கேட்கிறது</string>
+    <string name="camera_ask_text">கேமராவைத் திறக்கத் தட்டவும்; படம் கணினிக்குச் செல்லும்</string>
+    <string name="camera_denied">கேமராவைத் திறக்க Pocketdesk க்குக் கேமரா அனுமதி தேவை</string>
+    <string name="camera_none">இந்தக் கைபேசியில் கேமரா செயலி இல்லை</string>
+    <string name="settings_camera_asks">கணினி கேட்கும் படங்கள்</string>
+    <string name="settings_camera_asks_summary">கணினி கேட்கும்போது, ஒரு அறிவிப்பு கேமராவைத் திறக்கும்; படம் கணினிக்குச் செல்லும்</string>
+    <string name="settings_camera_asks_needs_access">அறிவிப்பு அணுகல் தேவை: கணினியுடனான Pocketdesk இன் பின்னணி இணைப்பு அதிலிருந்து இயங்குகிறது</string>
+    <string name="settings_camera_clipboard">அதன் கிளிப்போர்டுக்கும்</string>
+    <string name="settings_camera_clipboard_summary">படம் கணினியின் பெற்ற கோப்புகளுடன் அதன் கிளிப்போர்டுக்கும் செல்லும்</string>
 </resources>

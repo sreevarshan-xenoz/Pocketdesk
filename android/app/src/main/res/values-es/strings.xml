@@ -785,4 +785,15 @@
     <string name="state_unit_day">d</string>
     <string name="state_unit_hour">h</string>
     <string name="state_unit_minute">min</string>
+    <string name="camera_channel">Fotos que pide el ordenador</string>
+    <string name="camera_channel_description">Ofrece la cámara cuando un ordenador pide una foto a este teléfono</string>
+    <string name="camera_ask_title">%1$s pide una foto</string>
+    <string name="camera_ask_text">Toca para abrir la cámara; la foto va al ordenador</string>
+    <string name="camera_denied">Pocketdesk necesita el permiso de cámara para abrir la cámara</string>
+    <string name="camera_none">No hay app de cámara en este teléfono</string>
+    <string name="settings_camera_asks">Fotos que pide el ordenador</string>
+    <string name="settings_camera_asks_summary">Cuando el ordenador la pide, una notificación abre la cámara; la foto va al ordenador</string>
+    <string name="settings_camera_asks_needs_access">Necesita acceso a las notificaciones: el enlace de Pocketdesk con el ordenador funciona desde él</string>
+    <string name="settings_camera_clipboard">También a su portapapeles</string>
+    <string name="settings_camera_clipboard_summary">La foto va al portapapeles del ordenador además de a sus archivos recibidos</string>
 </resources>

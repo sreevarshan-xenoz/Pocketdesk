@@ -3,4 +3,6 @@
      clipboard as content URIs. -->
 <paths>
     <cache-path name="clipboard" path="clipboard/" />
+    <!-- F3: a photo the computer asked for, taken by the camera app. -->
+    <cache-path name="camera" path="camera/" />
 </paths>
