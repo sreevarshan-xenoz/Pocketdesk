@@ -74,6 +74,9 @@ object PaneRule {
      * ([hinge] when a fold made it): on a phone held upright, as tall as a
      * desktop of [videoAspect] (width / height) is at full width, within
      * [MIN_PORTRAIT_STREAM] and [MAX_PORTRAIT_STREAM]; otherwise half.
+     * While the session is not [up], the upright stream pane takes the whole
+     * screen: its card (the reason, Retry) does not fit a quarter of it, and
+     * the dock below has nothing to drive meanwhile.
      */
     fun streamFraction(
         split: PaneSplit,
@@ -81,7 +84,9 @@ object PaneRule {
         widthPx: Float,
         heightPx: Float,
         videoAspect: Float,
+        up: Boolean = true,
     ): Float {
+        if (split == PaneSplit.Horizontal && !hinge && !up) return 1f
         if (split != PaneSplit.Horizontal || hinge || videoAspect <= 0f || widthPx <= 0f || heightPx <= 0f) return 0.5f
         return (widthPx / videoAspect / heightPx).coerceIn(MIN_PORTRAIT_STREAM, MAX_PORTRAIT_STREAM)
     }

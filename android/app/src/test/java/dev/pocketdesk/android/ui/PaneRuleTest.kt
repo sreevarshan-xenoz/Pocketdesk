@@ -32,6 +32,17 @@ class PaneRuleTest {
     }
 
     @Test
+    fun aSessionThatIsNotUpTakesTheWholeUprightScreenForItsCard() {
+        // The card's reason and Retry do not fit a quarter of the screen, and
+        // the dock has nothing to drive while the session is down.
+        assertEquals(1f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 16f / 9f, up = false), 1e-4f)
+        assertEquals(1f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 0f, up = false), 1e-4f)
+        // A hinge's half and side by side are big enough: unchanged.
+        assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Horizontal, true, 1080f, 2400f, 16f / 9f, up = false), 1e-4f)
+        assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Vertical, false, 1600f, 2400f, 16f / 9f, up = false), 1e-4f)
+    }
+
+    @Test
     fun theModeAndTheWindowGiveTheSplitAndPictureInPictureIsOnePane() {
         val portrait = 400f to 860f
         val wideLandscape = 860f to 400f

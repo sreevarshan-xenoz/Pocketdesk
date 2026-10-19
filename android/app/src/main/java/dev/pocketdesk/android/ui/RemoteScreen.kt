@@ -975,6 +975,7 @@ fun RemoteScreen(
             widthPx = window.width.toFloat(),
             heightPx = window.height.toFloat(),
             videoAspect = if (videoSize.height > 0) videoSize.width.toFloat() / videoSize.height else 0f,
+            up = status is StreamStatus.Up,
         )
         val streamHeight = with(density) { (window.height * streamShare).toDp() }.coerceAtMost(maxHeight)
         // Only the stream Box's size changes across a fold, so the SurfaceView
