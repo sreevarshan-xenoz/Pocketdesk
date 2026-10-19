@@ -189,7 +189,7 @@ class CastService : Service() {
                         // C8: the computer may control the phone while it is shown.
                         control = dev.pocketdesk.android.control.ControlRunner(this) { on ->
                             if (!finished) {
-                                update(getString(if (on) R.string.cast_showing_controlled else R.string.cast_showing, address))
+                                update(getString(if (on) R.string.cast_showing_controlled else R.string.cast_showing, shown))
                             }
                         }.also { it.start() }
                     }
