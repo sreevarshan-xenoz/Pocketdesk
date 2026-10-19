@@ -538,7 +538,7 @@ class PhoneNotificationListener : NotificationListenerService() {
                 mine = m.person == null || m.person?.key?.let { it == style.user.key } == true,
             )
         }
-        val out = ConversationRule.messages(raw, getString(R.string.conversation_code_hidden))
+        val out = ConversationRule.messages(raw)
         if (out.isEmpty()) return null
         return JSONArray().apply {
             out.forEach { m ->
