@@ -113,6 +113,9 @@ object Shortcuts {
         AppWidgetManager.getInstance(app)?.let { widgets ->
             val ids = widgets.getAppWidgetIds(ComponentName(app, ConnectWidget::class.java))
             if (ids.isNotEmpty()) ConnectWidget.update(app, widgets, ids)
+            // G1: the state widget follows the last computer too.
+            val stateIds = widgets.getAppWidgetIds(ComponentName(app, StateWidget::class.java))
+            if (stateIds.isNotEmpty()) StateWidget.follow(app)
         }
         // The tile reads the last computer each time the panel opens; this
         // only asks for a refresh where the system honours it.

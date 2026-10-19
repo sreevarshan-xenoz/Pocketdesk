@@ -812,4 +812,16 @@
     <string name="cast_camera_denied">Pocketdesk necesita el permiso de cámara para mostrar la cámara</string>
     <string name="cast_no_camera">Este teléfono no tiene una cámara que Pocketdesk pueda mostrar</string>
     <string name="cast_camera_lost">La cámara se detuvo: puede que otra app la haya tomado</string>
+    <string name="state_widget_name">Pocketdesk: cómo va</string>
+    <string name="state_widget_description">CPU, memoria, disco y batería del último ordenador. Toca para volver a preguntar.</string>
+    <string name="state_widget_cpu">CPU %1$d %%</string>
+    <string name="state_widget_memory">Mem %1$d %%</string>
+    <string name="state_widget_disk">Disco %1$d %%</string>
+    <string name="state_widget_battery">Bat %1$d %%</string>
+    <string name="state_widget_updated">Actualizado %1$s</string>
+    <string name="state_widget_stale">No responde · de %1$s</string>
+    <string name="state_widget_not_answering">No responde</string>
+    <string name="state_widget_not_shared">Este ordenador no comparte cómo va</string>
+    <string name="settings_state_widget_auto">El widget de estado se actualiza solo</string>
+    <string name="settings_state_widget_auto_summary">El widget de la pantalla de inicio pregunta al ordenador cómo va cada 30 minutos como mucho. Desactivado, solo pregunta al tocarlo.</string>
 </resources>
