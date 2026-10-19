@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-569 open items.
+573 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 333 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 336 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 79 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 38 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 39 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -681,6 +681,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - `pocketdesk clipboard` lists both, newest first; `--send 2 --to` puts the older on the phone.
 - The history turned off in `config.toml` by hand is emptied at the next text and listed as none.
 - The Clipboard page by hand: Copy, Send to…, Clear and its confirm, a cut entry's Send greyed.
+
+**114. Continue reading on phone (D6)**
+
+- Chrome (Windows): "Continue reading on phone" on a long article mid-way; the phone's notification opens it in Chrome scrolled to that paragraph.
+- A page with a `#section` link: the fragment replaced, the page still scrolled there.
+- The browser's own page (`chrome://extensions`): sent at its top, no error.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1442,3 +1448,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A real system update (the fingerprint path), and a listener that stays unbound after one.
 - The card in Spanish and Tamil, and with TalkBack.
+
+**114. Continue reading on phone (D6)**
+
+- Firefox: the same, the extension loaded from `about:debugging`.

@@ -1797,6 +1797,13 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] A KDE Connect device's text, and another computer's, in the history.
 - [ ] Linux (`wl-paste`).
 
+## 114. Continue reading on phone (D6)
+
+- [ ] Chrome (Windows): "Continue reading on phone" on a long article mid-way; the phone's notification opens it in Chrome scrolled to that paragraph.
+- [ ] Firefox: the same, the extension loaded from `about:debugging`.
+- [ ] A page with a `#section` link: the fragment replaced, the page still scrolled there.
+- [ ] The browser's own page (`chrome://extensions`): sent at its top, no error.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

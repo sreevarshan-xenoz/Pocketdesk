@@ -2,16 +2,18 @@
   "manifest_version": 3,
   "name": "Pocketdesk: send to phone",
   "version": "0.4.0",
-  "description": "Send the page, a link or an image to your phone through Pocketdesk on this computer.",
+  "description": "Send the page, a link or an image to your phone through Pocketdesk on this computer, or continue reading there.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuLOlIAWBSW/7o6fHB2mOvcnNUXOba2Mnqh3mlRbWUjRvDlyqJCM8samhZ9VPkq1MLIEvQRoM2A30e7r9XzQDiCnZ7SLJCpdsEKE2Fh7sCbEqdI73HKnCqYBGgMpweFfseEh+I4Ke7MD09Qi4zod80EwOVebvkL+1n7vSzv/t9pGQ36M8pUTrIqI+rq29HNeNwMdDLaxmM2zEFU5KIBeGG9dXWtakgscZ3+aIMHEhFoM7LX1/MuTzyFOUd/PU887RRIg1wX9SXDpMuTBsutztNDyv5np6KkV2zLXy8/DcoJYVmyORxjcz+NpwpD4K5NgGF+mbPojRLnSV5x3Lx2AtJwIDAQAB",
   "icons": {
     "48": "icon-48.png",
     "128": "icon-128.png"
   },
   "permissions": [
+    "activeTab",
     "contextMenus",
     "nativeMessaging",
-    "notifications"
+    "notifications",
+    "scripting"
   ],
   "background": {
     "service_worker": "background.js",
