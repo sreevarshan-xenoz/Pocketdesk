@@ -966,6 +966,8 @@ fun RemoteScreen(
             pip = inPictureInPicture,
             // A phone on its side is wide, not a tablet (C5).
             smallestWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp.toFloat(),
+            // Direct touch and the pen touch the picture: no trackpad under it.
+            touchesStream = mode != InputMode.Trackpad,
         )
         val dualPane = split != PaneSplit.None
         // An upright phone's stream pane keeps room above and below the

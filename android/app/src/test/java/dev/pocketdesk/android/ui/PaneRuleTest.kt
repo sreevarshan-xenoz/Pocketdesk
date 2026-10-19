@@ -36,6 +36,19 @@ class PaneRuleTest {
     }
 
     @Test
+    fun anUprightPhoneTouchingTheDesktopItselfHasNoTrackpadUnderIt() {
+        // Direct touch and Pen touch the picture: auto gives it the whole
+        // screen, centred, with the chrome in the room above and below it.
+        assertEquals(PaneSplit.None, PaneRule.resolve(PaneMode.Auto, PaneSplit.None, 411f, 914f, pip = false, smallestWidthDp = 411f, touchesStream = true))
+        // The trackpad keeps its dock under the stream.
+        assertEquals(PaneSplit.Horizontal, PaneRule.resolve(PaneMode.Auto, PaneSplit.None, 411f, 914f, pip = false, smallestWidthDp = 411f, touchesStream = false))
+        // Asked for two panes, two panes; a hinge and a tablet keep their split.
+        assertEquals(PaneSplit.Horizontal, PaneRule.resolve(PaneMode.Dual, PaneSplit.None, 411f, 914f, pip = false, smallestWidthDp = 411f, touchesStream = true))
+        assertEquals(PaneSplit.Horizontal, PaneRule.resolve(PaneMode.Auto, PaneSplit.Horizontal, 411f, 914f, pip = false, smallestWidthDp = 411f, touchesStream = true))
+        assertEquals(PaneSplit.Vertical, PaneRule.resolve(PaneMode.Auto, PaneSplit.None, 1280f, 800f, pip = false, smallestWidthDp = 800f, touchesStream = true))
+    }
+
+    @Test
     fun theUprightStreamPaneHasRoomForItsChromeOffThePicture() {
         // A 4:3 desktop is 810 px tall at 1080 wide; 700 px of bands above
         // and below it for the chrome.

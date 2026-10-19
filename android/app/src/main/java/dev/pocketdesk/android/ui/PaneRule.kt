@@ -47,7 +47,9 @@ object PaneRule {
      * (measured without the on-screen keyboard), [fold] a hinge or none:
      * Auto as [autoSplit]; Dual two panes, stacked when upright (as Auto
      * there) and side by side otherwise; Single one. Picture-in-picture shows
-     * the stream alone.
+     * the stream alone. When the input [touchesStream] (direct touch, the
+     * pen), Auto keeps an upright phone to one pane: a trackpad under the
+     * picture would drive nothing, and the picture gets the whole screen.
      */
     fun resolve(
         mode: PaneMode,
@@ -56,11 +58,13 @@ object PaneRule {
         heightDp: Float,
         pip: Boolean,
         smallestWidthDp: Float = WIDE_DP,
+        touchesStream: Boolean = false,
     ): PaneSplit {
         if (pip) return PaneSplit.None
         val auto = autoSplit(fold, widthDp, heightDp, smallestWidthDp)
         return when (mode) {
-            PaneMode.Auto -> auto
+            PaneMode.Auto ->
+                if (auto == PaneSplit.Horizontal && fold == PaneSplit.None && touchesStream) PaneSplit.None else auto
             PaneMode.Dual -> if (auto != PaneSplit.None) auto else PaneSplit.Vertical
             PaneMode.Single -> PaneSplit.None
         }
