@@ -11,4 +11,5 @@ pub mod tray;
 pub mod tray;
 pub mod tray_instance;
 pub mod tray_menu;
+pub mod tray_watch;
 pub mod words;

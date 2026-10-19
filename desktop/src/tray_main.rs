@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use pocketdesk_desktop::{model, tray::Tray, tray_instance, tray_menu::TrayAction};
+use pocketdesk_desktop::{model, tray::Tray, tray_instance, tray_menu::TrayAction, tray_watch};
 
 /// How often the menu is brought up to date with the phones.
 const REFRESH: Duration = Duration::from_secs(1);
@@ -42,6 +42,8 @@ fn main() {
     let mut refreshed: Option<Instant> = None;
     // The session log's tail, read again only when it changes (N6 review).
     let mut log = (None, std::collections::HashMap::new());
+    // What only the window shows (E2 review): it is started for each new one.
+    let mut seen = tray_watch::Seen::default();
     loop {
         wait(&woken, REFRESH);
         for action in tray.take_actions() {
@@ -58,6 +60,12 @@ fn main() {
                     stamp,
                     model::last_sessions(&model::session_log_tail(&state_dir)),
                 );
+            }
+            let approvals: Vec<String> = snapshot.approvals.iter().map(|r| r.id.clone()).collect();
+            if seen.any_new(tray_watch::waiting(&state_dir, &approvals, now))
+                && let Err(e) = open_window(&state_dir, "overview", None)
+            {
+                eprintln!("Pocketdesk tray: the window did not start ({e})");
             }
             let rows = model::phone_rows(&snapshot, &log.1);
             tray.show(pocketdesk_desktop::tray_menu::menu(
