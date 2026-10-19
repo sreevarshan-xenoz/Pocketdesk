@@ -126,6 +126,10 @@ pub struct Config {
     /// stay on disk, owner-only.
     #[serde(default)]
     pub clipboard_history: u32,
+    /// Serve the phones' shared folders (T10g) read-only as WebDAV on
+    /// loopback, behind a token (D8). Off by default.
+    #[serde(default)]
+    pub phone_drive: bool,
     /// Work with KDE Connect devices (3a–3c): on by default (the owner's
     /// decision); off, a connection opening with `{` is refused as before.
     #[serde(default = "default_true")]
@@ -287,6 +291,7 @@ impl Default for Config {
             clipboard_push: true,
             computer_clipboard: false,
             clipboard_history: 0,
+            phone_drive: false,
             kdeconnect_compat: true,
             phone_battery_alerts: true,
             wake_announce: true,
@@ -479,6 +484,7 @@ impl Config {
         "clipboard_push",
         "computer_clipboard",
         "clipboard_history",
+        "phone_drive",
         "kdeconnect_compat",
         "phone_battery_alerts",
         "sms_keep",

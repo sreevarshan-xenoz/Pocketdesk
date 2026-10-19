@@ -70,6 +70,10 @@ pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
 pub const PHONE_FILES_FILE: &str = "phone_files.json";
 /// The desktop app's requests to browse them (T10g).
 pub const PHONE_FILES_DIR: &str = "phone_files_out";
+/// Where the phone's folders are served as a drive (D8), while they are.
+pub const DRIVE_FILE: &str = "drive.json";
+/// Files fetched for the drive, each removed once served (D8).
+pub const DRIVE_CACHE_DIR: &str = "drive_cache";
 /// Each phone's last recent photos (C7).
 pub const PHONE_PHOTOS_FILE: &str = "phone_photos.json";
 /// Their thumbnails, a folder per phone (C7).
