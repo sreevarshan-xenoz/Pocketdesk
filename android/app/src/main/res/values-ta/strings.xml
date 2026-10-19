@@ -825,4 +825,13 @@
     <string name="deck_widget_no_answer">கணினியிடமிருந்து இன்னும் பதில் இல்லை</string>
     <string name="remote_laser">லேசர் சுட்டி</string>
     <string name="air_hint_laser">இங்கே அழுத்திப் பிடித்து, தொலைபேசியைத் திருப்பி கணினித் திரையில் சிவப்புப் புள்ளியை நகர்த்தவும்; விட்டால் மறையும். ஒரு தட்டு சுட்டியில் சொடுக்கும்.</string>
+    <string name="media_widget_name">Pocketdesk: இசை</string>
+    <string name="media_widget_description">கடைசி கணினியில் ஒலிப்பது, முந்தையது, இயக்கு/இடைநிறுத்து, அடுத்தது உடன்.</string>
+    <string name="media_widget_refresh">என்ன ஒலிக்கிறது என மீண்டும் கேள்</string>
+    <string name="media_widget_nothing">எதுவும் ஒலிக்கவில்லை</string>
+    <string name="media_widget_read">%1$s இல் படிக்கப்பட்டது</string>
+    <string name="media_widget_previous">முந்தையது</string>
+    <string name="media_widget_next">அடுத்தது</string>
+    <string name="media_widget_play">இயக்கு</string>
+    <string name="media_widget_pause">இடைநிறுத்து</string>
 </resources>

@@ -835,4 +835,17 @@
     <string name="deck_widget_no_answer">No answer from the computer yet</string>
     <string name="remote_laser">Laser pointer</string>
     <string name="air_hint_laser">Hold here and turn the phone to move a red dot on the computer\'s screen; let go to hide it. A tap clicks at the pointer.</string>
+    <string name="media_widget_name">Pocketdesk: playing</string>
+    <string name="media_widget_description">What your last computer plays, with Previous, Play/Pause and Next.</string>
+    <string name="media_widget_refresh">Ask what plays again</string>
+    <string name="media_widget_nothing">Nothing is playing</string>
+    <string name="media_widget_read">Read at %1$s</string>
+    <string name="media_widget_previous">Previous</string>
+    <string name="media_widget_next">Next</string>
+    <string name="media_widget_play">Play</string>
+    <string name="media_widget_pause">Pause</string>
+    <string name="media_widget_previous_glyph" translatable="false">⏮</string>
+    <string name="media_widget_next_glyph" translatable="false">⏭</string>
+    <string name="media_widget_play_glyph" translatable="false">▶</string>
+    <string name="media_widget_pause_glyph" translatable="false">⏸</string>
 </resources>

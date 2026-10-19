@@ -59,7 +59,7 @@ private data class AudioSnapshot(
 )
 
 /** The `playing` object of a `media` answer (T8c), or null when nothing plays. */
-private fun parsePlaying(body: JSONObject): NowPlaying? {
+internal fun parsePlaying(body: JSONObject): NowPlaying? {
     val o = body.optJSONObject("playing") ?: return null
     return NowPlaying(
         title = o.optString("title"),
