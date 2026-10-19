@@ -90,6 +90,6 @@ pub fn register_all() -> PluginSet {
     registry.register(sms::SmsPlugin);
     registry.register(links::LinksPlugin::default());
     registry.register(tasks::TasksPlugin);
-    registry.register(deck::DeckPlugin::default());
+    registry.register(deck::DeckPlugin);
     registry
 }

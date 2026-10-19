@@ -5,7 +5,7 @@
 //! media: Audio; a link: Links). Every press is answered.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, LazyLock, Mutex as StdMutex};
+use std::sync::{LazyLock, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::error::Result;
@@ -14,7 +14,6 @@ use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin}
 use pocketdesk_core::protocol::permissions::Capability;
 use pocketdesk_core::streaming::input_packet::InputPacket;
 use serde_json::{Value, json};
-use tokio::sync::Mutex;
 
 use crate::input_injector::InputInjector;
 
@@ -135,37 +134,38 @@ fn within_rate(device: &str, now: Instant) -> bool {
     true
 }
 
-/// The deck's plugin, holding the injector its keys and text go through.
-pub struct DeckPlugin {
-    injector: Arc<Mutex<Option<InputInjector>>>,
+/// The injector the deck's keys and text go through, one for the server,
+/// used on blocking threads only.
+static INJECTOR: LazyLock<StdMutex<Option<InputInjector>>> = LazyLock::new(Default::default);
+
+/// Run `use_it` with the deck's injector, made on first use. Blocks: call
+/// it on a blocking thread, never the runtime's (making an injector runs a
+/// program on Linux, and typing a long text takes a while).
+fn with_injector(
+    use_it: impl FnOnce(&mut InputInjector) -> std::result::Result<(), String>,
+) -> std::result::Result<(), String> {
+    let mut slot = INJECTOR.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.is_none() {
+        *slot =
+            Some(InputInjector::new().map_err(|e| format!("the computer cannot type here: {e}"))?);
+    }
+    use_it(slot.as_mut().expect("made above"))
 }
 
-impl Default for DeckPlugin {
-    fn default() -> Self {
-        Self {
-            injector: Arc::new(Mutex::new(None)),
-        }
-    }
+/// Run `use_it` with the injector on a blocking thread.
+async fn inject(
+    use_it: impl FnOnce(&mut InputInjector) -> std::result::Result<(), String> + Send + 'static,
+) -> std::result::Result<(), String> {
+    tokio::task::spawn_blocking(move || with_injector(use_it))
+        .await
+        .map_err(|e| format!("the keys did not go through: {e}"))?
 }
+
+/// The deck's plugin.
+#[derive(Default)]
+pub struct DeckPlugin;
 
 impl DeckPlugin {
-    /// Send `packets` through the injector, made on first use.
-    async fn inject(&self, packets: &[InputPacket]) -> std::result::Result<(), String> {
-        let mut slot = self.injector.lock().await;
-        if slot.is_none() {
-            *slot = Some(
-                InputInjector::new().map_err(|e| format!("the computer cannot type here: {e}"))?,
-            );
-        }
-        let injector = slot.as_mut().expect("made above");
-        for packet in packets {
-            injector
-                .handle_input_packet(packet)
-                .map_err(|e| format!("the keys did not go through: {e}"))?;
-        }
-        Ok(())
-    }
-
     /// Do `action` for `device`.
     async fn perform(&self, device: &str, action: &DeckAction) -> std::result::Result<(), String> {
         match action {
@@ -174,25 +174,26 @@ impl DeckPlugin {
                     return Err("another phone is driving the computer".into());
                 }
                 let codes: Vec<u16> = codes.iter().map(|c| c.0).collect();
-                let mut slot = self.injector.lock().await;
-                if slot.is_none() {
-                    *slot = Some(
-                        InputInjector::new()
-                            .map_err(|e| format!("the computer cannot type here: {e}"))?,
-                    );
-                }
-                let injector = slot.as_mut().expect("made above");
-                press_combination(&codes, &mut |key, pressed| {
-                    injector
-                        .handle_input_packet(&InputPacket::KeyEvent { key, pressed })
-                        .map_err(|e| format!("the keys did not go through: {e}"))
+                inject(move |injector| {
+                    press_combination(&codes, &mut |key, pressed| {
+                        injector
+                            .handle_input_packet(&InputPacket::KeyEvent { key, pressed })
+                            .map_err(|e| format!("the keys did not go through: {e}"))
+                    })
                 })
+                .await
             }
             DeckAction::Text(text) => {
                 if !crate::driving::may_drive(device) {
                     return Err("another phone is driving the computer".into());
                 }
-                self.inject(&[InputPacket::Text(text.clone())]).await
+                let text = text.clone();
+                inject(move |injector| {
+                    injector
+                        .handle_input_packet(&InputPacket::Text(text))
+                        .map_err(|e| format!("the text did not go through: {e}"))
+                })
+                .await
             }
             DeckAction::Task(name) => super::tasks::start_from_deck(device, name)
                 .map_err(|why| format!("the task did not start: {why}")),
