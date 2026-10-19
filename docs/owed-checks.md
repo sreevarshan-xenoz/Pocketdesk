@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-642 open items.
+647 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 364 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 367 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 48 |
-| A phone with a SIM | 21 |
+| A phone with a SIM | 22 |
 | A second phone | 7 |
 | Away from home: another network, or through a router | 9 |
-| A second computer | 5 |
+| A second computer | 6 |
 | A Linux desktop (the Azure VM serves for some) | 88 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 60 |
@@ -758,6 +758,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The permission granted while notification access was already on: the next call shows (no restart).
 - Two calls one after another; a call ending while its note is on its way.
 
+**132. The computer's state on the home screen (G1)**
+
+- Place "Pocketdesk: how it is doing" on the A71's home screen: "Asking the computer…", then the last computer's name, `CPU · Mem · Disk · Bat` and "Updated <time>".
+- A tap with the server stopped: "Not answering · from <time>", the numbers kept; a tap with it back: updated.
+- `share_state` off on the computer: the widget says it does not share.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1007,6 +1013,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Settings shows the Android 17 notes beside "Ring from the computer" and "Show texts on my computer".
 
+**132. The computer's state on the home screen (G1)**
+
+- "State widget refreshes by itself" off: no ask in the logcat at the next period; on mobile data with it on: none either.
+
 ## A second phone
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -1093,6 +1103,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **113. Clipboard history and Resend (D3)**
 
 - A KDE Connect device's text, and another computer's, in the history.
+
+**132. The computer's state on the home screen (G1)**
+
+- Connect to another computer, then go Home: the widget follows it, asked once.
 
 ## A Linux desktop (the Azure VM serves for some)
 

@@ -815,4 +815,16 @@
     <string name="cast_camera_denied">Pocketdesk needs the camera permission to show the camera</string>
     <string name="cast_no_camera">This phone has no camera Pocketdesk can show</string>
     <string name="cast_camera_lost">The camera stopped: another app may have taken it</string>
+    <string name="state_widget_name">Pocketdesk: how it is doing</string>
+    <string name="state_widget_description">Your last computer\'s CPU, memory, disk and battery. Tap to ask again.</string>
+    <string name="state_widget_cpu">CPU %1$d %%</string>
+    <string name="state_widget_memory">Mem %1$d %%</string>
+    <string name="state_widget_disk">Disk %1$d %%</string>
+    <string name="state_widget_battery">Bat %1$d %%</string>
+    <string name="state_widget_updated">Updated %1$s</string>
+    <string name="state_widget_stale">Not answering · from %1$s</string>
+    <string name="state_widget_not_answering">Not answering</string>
+    <string name="state_widget_not_shared">This computer does not share how it is doing</string>
+    <string name="settings_state_widget_auto">State widget refreshes by itself</string>
+    <string name="settings_state_widget_auto_summary">The home-screen widget asks the computer how it is doing every 30 minutes at most, never over mobile data. Off, it asks only when tapped.</string>
 </resources>

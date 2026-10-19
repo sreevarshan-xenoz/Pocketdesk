@@ -254,6 +254,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.shareBattery(context),
                 { Prefs.setShareBattery(context, it) },
             )
+            // G1: the state widget's own refresh.
+            SettingSwitch(
+                stringResource(R.string.settings_state_widget_auto),
+                stringResource(R.string.settings_state_widget_auto_summary),
+                Prefs.stateWidgetAuto(context),
+                { Prefs.setStateWidgetAuto(context, it) },
+            )
             // Android shows other apps' media only to an app with notification access.
             SettingSwitch(
                 stringResource(R.string.settings_phone_media),

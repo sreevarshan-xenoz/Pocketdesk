@@ -30,6 +30,7 @@ object Prefs {
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_SHARE_BATTERY = "share_battery"
+    private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
@@ -200,6 +201,19 @@ object Prefs {
 
     fun setShareBattery(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_SHARE_BATTERY, enabled) }
+        bump()
+    }
+
+    /**
+     * Whether the state widget (G1) asks the computer at the system's
+     * widget period (at most every 30 minutes). On by default; off, it asks
+     * only when tapped or placed.
+     */
+    fun stateWidgetAuto(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_STATE_WIDGET_AUTO, true)
+
+    fun setStateWidgetAuto(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_STATE_WIDGET_AUTO, enabled) }
         bump()
     }
 
