@@ -24,6 +24,8 @@ mod idle_cost;
 pub mod inbox;
 pub mod input_injector;
 #[cfg(windows)]
+mod input_pen_windows;
+#[cfg(windows)]
 mod input_sendinput;
 #[cfg(windows)]
 pub mod install_windows;
@@ -44,6 +46,7 @@ pub mod notification_monitor;
 pub mod offers;
 pub mod packets;
 pub mod peer_computers;
+pub mod pen;
 pub mod platform;
 pub mod plugins;
 pub mod privacy;

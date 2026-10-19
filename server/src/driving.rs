@@ -135,6 +135,8 @@ pub fn is_shared() -> bool {
 pub struct Held {
     buttons: BTreeSet<u8>,
     keys: BTreeSet<u16>,
+    /// The pen's last sample while in range (E3).
+    pen: Option<pocketdesk_core::streaming::PenSample>,
 }
 
 impl Held {
@@ -155,6 +157,9 @@ impl Held {
                     self.keys.remove(key);
                 }
             }
+            InputPacket::Pen(sample) => {
+                self.pen = sample.in_range().then_some(*sample);
+            }
             _ => {}
         }
     }
@@ -174,7 +179,12 @@ impl Held {
                     button,
                     pressed: false,
                 });
-        keys.chain(buttons).collect()
+        // A pen in range leaves it where it was (E3).
+        let pen = self
+            .pen
+            .take()
+            .map(|last| InputPacket::Pen(crate::pen::lifted(&last)));
+        keys.chain(buttons).chain(pen).collect()
     }
 }
 
@@ -331,6 +341,32 @@ mod tests {
             }
         )));
         assert!(held.take_releases().is_empty());
+    }
+
+    #[test]
+    fn a_pen_in_range_is_lifted_where_it_was_and_a_pen_gone_is_not() {
+        use pocketdesk_core::streaming::{PEN_CONTACT, PEN_IN_RANGE, PenSample};
+        let mut held = Held::default();
+        let touching = PenSample {
+            x_norm: 100,
+            y_norm: 200,
+            pressure: 30_000,
+            flags: PEN_CONTACT | PEN_IN_RANGE,
+            ..PenSample::default()
+        };
+        held.note(&InputPacket::Pen(touching));
+        let releases = held.take_releases();
+        assert_eq!(releases.len(), 1);
+        let InputPacket::Pen(lift) = releases[0] else {
+            panic!("not a pen: {:?}", releases[0]);
+        };
+        assert_eq!((lift.x_norm, lift.y_norm), (100, 200));
+        assert!(!lift.in_range(), "lifted and out of range");
+        assert!(held.take_releases().is_empty(), "once");
+
+        held.note(&InputPacket::Pen(touching));
+        held.note(&InputPacket::Pen(PenSample::default()));
+        assert!(held.take_releases().is_empty(), "the pen had left");
     }
 
     fn body(bodies: &[(String, NetworkPacket)], device: &str) -> serde_json::Value {
