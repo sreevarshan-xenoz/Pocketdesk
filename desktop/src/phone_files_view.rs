@@ -269,30 +269,31 @@ impl PhoneFilesView {
                 .color(crate::theme::muted(ui)),
             );
         }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if listing.entries.is_empty() {
-                ui.label(RichText::new("Empty").color(crate::theme::muted(ui)));
-            }
-            for entry in &listing.entries {
-                ui.horizontal(|ui| {
-                    let mut path = listing.path.clone();
-                    path.push(entry.name.clone());
-                    if entry.dir {
-                        if ui.link(format!("{}/", entry.name)).clicked() {
-                            self.ask(state_dir, &phone, Kind::List, root, path, now_unix);
-                        }
-                    } else {
-                        ui.label(&entry.name);
-                        ui.label(
-                            RichText::new(size_text(entry.size)).color(crate::theme::muted(ui)),
-                        );
-                        if ui.small_button("Download").clicked() {
-                            self.ask(state_dir, &phone, Kind::Fetch, root, path, now_unix);
-                        }
+        // The page scrolls as a whole (E5): a scroll area of its own here
+        // filled the page and pushed the photos below out of reach.
+        if listing.entries.is_empty() {
+            ui.label(RichText::new("Empty").color(crate::theme::muted(ui)));
+        }
+        for entry in &listing.entries {
+            ui.horizontal(|ui| {
+                let mut path = listing.path.clone();
+                path.push(entry.name.clone());
+                if entry.dir {
+                    if ui.link(format!("{}/", entry.name)).clicked() {
+                        self.ask(state_dir, &phone, Kind::List, root, path, now_unix);
                     }
-                });
-            }
-        });
+                } else {
+                    ui.label(&entry.name);
+                    ui.label(
+                        RichText::new(size_text(entry.size)).color(crate::theme::muted(ui)),
+                    );
+                    if ui.small_button("Download").clicked() {
+                        self.ask(state_dir, &phone, Kind::Fetch, root, path, now_unix);
+                    }
+                }
+            });
+        }
+
     }
 }
 
