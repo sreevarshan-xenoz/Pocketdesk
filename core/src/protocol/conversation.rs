@@ -19,6 +19,10 @@ pub const MAX_FROM_CHARS: usize = 64;
 /// A message's text, at most, in characters.
 pub const MAX_TEXT_CHARS: usize = 1000;
 
+/// The earliest a message's time may be, unix milliseconds (1973): an app
+/// that says seconds, or nothing sane, is taken as saying no time.
+pub const MIN_AT_MS: u64 = 100_000_000_000;
+
 /// One message of a conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
@@ -59,7 +63,11 @@ pub fn messages(body: &serde_json::Value) -> Vec<Message> {
             Some(Message {
                 from,
                 text,
-                at_ms: m.get("time").and_then(|v| v.as_u64()).unwrap_or(0),
+                at_ms: m
+                    .get("time")
+                    .and_then(|v| v.as_u64())
+                    .filter(|t| *t >= MIN_AT_MS)
+                    .unwrap_or(0),
                 mine,
             })
         })
@@ -106,9 +114,10 @@ mod tests {
             Message {
                 from: "Ann".into(),
                 text: "hi".into(),
-                at_ms: 1000,
+                at_ms: 0,
                 mine: false
-            }
+            },
+            "1000 ms is no time"
         );
         assert_eq!(got[1].from, "", "the owner's own have no sender");
         assert!(got[1].mine);
