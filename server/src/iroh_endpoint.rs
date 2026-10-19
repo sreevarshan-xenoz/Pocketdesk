@@ -528,6 +528,8 @@ pub struct WanSettings {
     pub allow_hevc: bool,
     /// Whether a slow link may lower the frame rate (R6f).
     pub slow_link_frame_rate: bool,
+    /// Whether a remote is offered the laser dot (G4).
+    pub laser: bool,
     pub capture_backend: pocketdesk_core::streaming::CaptureBackend,
     pub mic_relay_device: Option<String>,
     /// Where phones' casts go (T10k); `None` refuses them.
@@ -567,6 +569,7 @@ pub async fn spawn_wan_endpoint(
         pairing_required,
         allow_hevc,
         slow_link_frame_rate,
+        laser,
         capture_backend,
         mic_relay_device,
         cast,
@@ -674,6 +677,7 @@ pub async fn spawn_wan_endpoint(
                 streaming_server.set_session_telemetry(true);
                 streaming_server.set_hevc_allowed(allow_hevc);
                 streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);
+                streaming_server.set_laser(laser);
                 streaming_server.set_capture_backend(capture_backend);
                 streaming_server.set_screen_grant(crate::state::screen_grant());
                 // The gate judges the deviceId the client announces in-band

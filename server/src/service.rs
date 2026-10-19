@@ -402,6 +402,7 @@ pub async fn run(config: Config) -> Result<()> {
             pairing_required: config.pairing_required,
             allow_hevc: config.allow_hevc,
             slow_link_frame_rate: config.slow_link_frame_rate,
+            laser: config.laser_pointer && crate::laser::available(),
             capture_backend: config.capture_backend,
             mic_relay_device: config.mic_relay_device.clone(),
             cast: cast_tx.clone(),
@@ -638,6 +639,7 @@ pub async fn run(config: Config) -> Result<()> {
                     let pairing_required = config.pairing_required;
                     let allow_hevc = config.allow_hevc;
                     let slow_link_frame_rate = config.slow_link_frame_rate;
+                    let laser = config.laser_pointer && crate::laser::available();
                     let capture_backend = config.capture_backend;
                     let mic_relay_device = config.mic_relay_device.clone();
                     let cast_tx = cast_tx.clone();
@@ -686,6 +688,7 @@ pub async fn run(config: Config) -> Result<()> {
                                 streaming_server.set_session_telemetry(true);
                                 streaming_server.set_hevc_allowed(allow_hevc);
                                 streaming_server.set_slow_link_frame_rate(slow_link_frame_rate);
+                                streaming_server.set_laser(laser);
                                 streaming_server.set_capture_backend(capture_backend);
                                 streaming_server.set_screen_grant(state::screen_grant());
                                 // The gate judges the deviceId the client announces in-band

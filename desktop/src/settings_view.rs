@@ -108,6 +108,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("video_quality", "Video quality", Section::Phones),
     ("allow_hevc", "H.265 (HEVC)", Section::Phones),
     ("slow_link_frame_rate", "Slow links", Section::Phones),
+    (
+        "laser_pointer",
+        "Laser pointer from phones",
+        Section::Phones,
+    ),
     ("input_control", "Several phones at once", Section::Phones),
     (
         "input_idle_secs",
@@ -583,6 +588,16 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.slow_link_frame_rate,
                         "lower the frame rate to keep the picture moving",
+                    );
+                });
+                row(ui, "laser_pointer", |ui| {
+                    ui.checkbox(
+                        &mut e.laser_pointer,
+                        "the air mouse in a phone's Remote can show a red dot here",
+                    )
+                    .on_hover_text(
+                        "A dot above every window that never takes a click, for a talk. \
+                         Drawn on Windows; elsewhere the phone is not offered it yet.",
                     );
                 });
                 row(ui, "input_control", |ui| {
