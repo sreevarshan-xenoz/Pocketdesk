@@ -1882,7 +1882,7 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] From a toast (N3), the window hidden: a failure's desktop notification.
 ## 121. The tray on its own (E2)
 
-- [ ] Windows: `scripts/memory_at_rest.ps1 -Tray`, the tray program at rest beside the server.
+- [x] Windows: `scripts/memory_at_rest.ps1 -Tray`, the tray program at rest beside the server (2026-10-19: 2.1 MB private, 13 MB working set; the reliability spec's D7 section).
 - [ ] Windows: starting `pocketdesk-app` starts `pocketdesk-tray` once (a second window launch starts no second tray); closing the window leaves the tray.
 - [ ] Each item from the tray program: Ring, Mute and Unmute, Send clipboard; Open, Pair a phone… and Send file… with the window closed (it starts on that page, Files with the phone chosen) and with it open (it comes to the front on that page).
 - [ ] With the window closed: a phone that must ask, an ask-first task, and a phone's "Show screen" each start the window (once each), with the prompt or the screen.

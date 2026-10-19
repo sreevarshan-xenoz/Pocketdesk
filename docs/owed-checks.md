@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-597 open items.
+603 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 351 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 352 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
 | A second phone | 5 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 5 |
-| A Linux desktop (the Azure VM serves for some) | 84 |
+| A Linux desktop (the Azure VM serves for some) | 85 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 43 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 47 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -718,6 +718,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A phone from before E1: "sent, but no word from the phone" after a minute.
 - From a toast (N3), the window hidden: a failure's desktop notification.
 
+**121. The tray on its own (E2)**
+
+- With the window closed: a phone that must ask, an ask-first task, and a phone's "Show screen" each start the window (once each), with the prompt or the screen.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1293,6 +1297,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Linux: the same by hand (`/proc/<pid>/status` VmRSS and RssAnon), the app in a Wayland session.
 
+**121. The tray on its own (E2)**
+
+- Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close).
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -1512,3 +1520,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **117. The phone's folders as a drive (D8)**
 
 - Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).
+
+**121. The tray on its own (E2)**
+
+- Windows: starting `pocketdesk-app` starts `pocketdesk-tray` once (a second window launch starts no second tray); closing the window leaves the tray.
+- Each item from the tray program: Ring, Mute and Unmute, Send clipboard; Open, Pair a phone… and Send file… with the window closed (it starts on that page, Files with the phone chosen) and with it open (it comes to the front on that page).
+- Quit from the tray program closes the window too; with no window open, an app started just after Quit stays open.
+- An install without `pocketdesk-tray`: the app's own tray, as before.

@@ -193,3 +193,5 @@ Both held steady across the three minutes (the app's private bytes 84.9 → 84.3
 **Cut:** nothing. The server is small, and the app's share is the framework's and the driver's. The next step that would move the app's number is not running it at rest: the tray living in a small process of its own, the window started only when opened. That is a design change for a later cycle, not a cut here.
 
 **Owed:** Linux (checklist §119).
+
+**After E2 (2026-10-19):** the tray is now `pocketdesk-tray`, a program of its own, and the window closes when closed. Measured the same way (`memory_at_rest.ps1 -Tray`): `pocketdesk-tray` 13 MB working set, **2.1 MB private** (steady); the server beside it 34 MB and 9.9 MB. At rest the app's 77–85 MB is now about 2 MB.
