@@ -2024,6 +2024,12 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] Connect to another computer, then go Home: the widget follows it, asked once.
 - [ ] "State widget refreshes by itself" off: no ask in the logcat at the next period; on mobile data with it on: none either.
 
+## 133. Take a photo from the tray and the Overview (G2)
+
+Built 2026-10-20 on the owner's night of features; nothing by hand yet.
+- [ ] With the A71 linked and "Photos the computer asks for" on: the tray's Take a photo under it, then the phone's notification, the camera, and the photo in the received files; the same from the Overview's button, with its notice.
+- [ ] The phone away, or Files off for it: Take a photo greyed in the tray and on the Overview, its hover saying why.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
