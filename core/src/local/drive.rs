@@ -32,9 +32,11 @@ impl DriveInfo {
         format!("dav://127.0.0.1:{}/{}/", self.port, self.token)
     }
 
-    /// The address Windows' Explorer opens (its WebDAV client's form).
+    /// The address Windows' Explorer opens (its WebDAV client's form), by
+    /// IPv4: `localhost` may be tried as `::1` first, where nothing
+    /// listens (D8 review).
     pub fn windows_path(&self) -> String {
-        format!(r"\\localhost@{}\DavWWWRoot\{}", self.port, self.token)
+        format!(r"\\127.0.0.1@{}\DavWWWRoot\{}", self.port, self.token)
     }
 }
 
@@ -92,7 +94,7 @@ mod tests {
         );
         assert!(
             info.windows_path()
-                .starts_with(r"\\localhost@51234\DavWWWRoot\")
+                .starts_with(r"\\127.0.0.1@51234\DavWWWRoot\")
         );
         clear(&dir).unwrap();
         clear(&dir).unwrap();
