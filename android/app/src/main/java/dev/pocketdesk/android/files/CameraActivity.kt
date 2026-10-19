@@ -74,10 +74,7 @@ class CameraActivity : ComponentActivity() {
 
     private fun launchCamera() {
         val dir = File(cacheDir, "camera").apply { mkdirs() }
-        dir.listFiles()?.let { files ->
-            val stale = CameraAsk.stale(files.map { it.name to it.lastModified() }, System.currentTimeMillis())
-            files.filter { it.name in stale }.forEach { it.delete() }
-        }
+        CameraAsk.sweep(dir, System.currentTimeMillis())
         val file = File(dir, "photo-${System.currentTimeMillis()}.jpg")
         val uri = FileProvider.getUriForFile(this, ClipboardImages.authority(this), file)
         photo = uri

@@ -29,7 +29,13 @@ object CameraAsk {
     /** Offer the camera for the computer at [address]:[port]. */
     fun offer(ctx: Context, address: String, port: Int) {
         val app = ctx.applicationContext
+        // Photos sent before and left in the cache go at each ask too (F3 review).
+        sweep(java.io.File(app.cacheDir, "camera"), System.currentTimeMillis())
         val manager = app.getSystemService(NotificationManager::class.java) ?: return
+        if (!manager.areNotificationsEnabled()) {
+            Log.w(TAG, "the computer asked for a photo, but this app's notifications are off")
+            return
+        }
         if (manager.getNotificationChannel(CHANNEL) == null) {
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL, app.getString(R.string.camera_channel), NotificationManager.IMPORTANCE_HIGH)
@@ -62,6 +68,13 @@ object CameraAsk {
     /** Take the offer away (the photo is being taken). */
     fun withdraw(ctx: Context) {
         ctx.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
+    }
+
+    /** Delete the camera folder's photos older than an hour. */
+    fun sweep(dir: java.io.File, nowMs: Long) {
+        val files = dir.listFiles() ?: return
+        val old = stale(files.map { it.name to it.lastModified() }, nowMs)
+        files.filter { it.name in old }.forEach { it.delete() }
     }
 
     /** Files in the camera's folder older than an hour, by name and time, to delete. */
