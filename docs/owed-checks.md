@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-662 open items.
+666 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 375 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 379 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
 | A phone with a SIM | 22 |
@@ -780,6 +780,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Pause from the widget: the music stops, and the button turns to Play; Next: the next track shown.
 - Nothing playing: "Nothing is playing", no buttons; Audio off for the phone on the computer: the refusal, no old track.
 - The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
+
+**137. The computer's music from Quick Settings (G6)**
+
+- Add "Computer's music" to the A71's Quick Settings; with music on the computer, a tap pauses it, the shade still open showing "Asking the computer…", then the track, the tile off; a tap again plays, the tile on.
+- On the lock screen: a tap asks to unlock first.
+- Audio off for the phone on the computer: the refusal as the subtitle.
+- Opened after an hour: "Tap to play or pause", not the old track.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
