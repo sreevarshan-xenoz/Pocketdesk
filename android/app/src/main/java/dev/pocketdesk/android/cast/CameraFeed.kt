@@ -21,10 +21,9 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
     private val manager = ctx.getSystemService(CameraManager::class.java)
     private val thread = HandlerThread("cast-camera").apply { start() }
     private val handler = Handler(thread.looper)
+    // Guarded by `this`: a stop while the camera opens must close it (F6 review).
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
-
-    @Volatile
     private var closed = false
 
     /** The back camera's id, or the first one when there is no back camera. */
@@ -55,11 +54,14 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
                 id,
                 object : CameraDevice.StateCallback() {
                     override fun onOpened(camera: CameraDevice) {
-                        if (closed) {
+                        val keep = synchronized(this@CameraFeed) {
+                            if (!closed) device = camera
+                            !closed
+                        }
+                        if (!keep) {
                             camera.close()
                             return
                         }
-                        device = camera
                         startSession(camera, surface)
                     }
 
@@ -85,14 +87,19 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
                 listOf(surface),
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(configured: CameraCaptureSession) {
-                        if (closed) {
+                        val keep = synchronized(this@CameraFeed) {
+                            if (!closed) session = configured
+                            !closed
+                        }
+                        if (!keep) {
                             configured.close()
                             return
                         }
-                        session = configured
-                        val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply { addTarget(surface) }
-                        runCatching { configured.setRepeatingRequest(request.build(), null, handler) }
-                            .onFailure { lost("the camera would not start") }
+                        // The camera may close meanwhile: its request then throws (F6 review).
+                        runCatching {
+                            val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply { addTarget(surface) }
+                            configured.setRepeatingRequest(request.build(), null, handler)
+                        }.onFailure { lost("the camera would not start") }
                     }
 
                     override fun onConfigureFailed(failed: CameraCaptureSession) = lost("the camera would not start")
@@ -104,16 +111,21 @@ class CameraFeed(private val ctx: Context, private val onLost: () -> Unit) {
 
     private fun lost(why: String) {
         Log.w(TAG, "camera lost: $why")
-        if (!closed) onLost()
+        if (!synchronized(this) { closed }) onLost()
     }
 
     fun close() {
-        closed = true
-        runCatching { session?.close() }
-        runCatching { device?.close() }
-        session = null
-        device = null
-        thread.quitSafely()
+        val (open, camera) = synchronized(this) {
+            closed = true
+            val held = session to device
+            session = null
+            device = null
+            held
+        }
+        runCatching { open?.close() }
+        runCatching { camera?.close() }
+        // Left running until a camera still opening has said so and been closed.
+        handler.post { thread.quitSafely() }
     }
 
     companion object {
