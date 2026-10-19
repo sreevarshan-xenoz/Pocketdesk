@@ -407,6 +407,8 @@ private fun TrackpadSpeed() {
 private fun PenPressure() {
     val context = LocalContext.current
     val curves = dev.pocketdesk.android.stream.PenCurve.entries
+    // Read again when a choice is saved, so the chosen one redraws (E6 review).
+    Prefs.observedVersion()
     val chosen = Prefs.penCurve(context)
     // A row like its neighbours (E6): title and summary, the choice under.
     SettingRow(stringResource(R.string.settings_pen_pressure), stringResource(R.string.settings_pen_pressure_summary))
