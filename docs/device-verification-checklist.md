@@ -1138,6 +1138,8 @@ After the owner tried it (2026-10-19: the chrome over the picture, a trackpad th
 - [x] Trackpad, held upright: the desktop in a pane with room above and below it for the same chrome, none over the picture, the trackpad and shortcut bar about 40 % of the screen.
 - [x] Switching between Direct touch and Trackpad mid-session: the pane changes without a new decoder (three switches, the session held, no decoder surface change in logcat; 2026-10-19).
 - [x] The chrome stays on screen when held upright (12 s untouched in both modes), and the menu opens with one tap (2026-10-19).
+- [x] Turned on its side the chrome fades over the full-screen picture as before; turned upright again it comes back by itself (2026-10-19).
+- [ ] Pinch-zoomed upright: the zoomed picture stays inside its area, not under the chrome (adb cannot pinch).
 - [ ] Pane: two panes with Direct touch: taps land on the point under the finger in the smaller picture.
 - [x] "Show connection details" on, held upright: the details, the link and the window chips sit above the picture in both modes (the bands follow the chrome's measured height).
 
