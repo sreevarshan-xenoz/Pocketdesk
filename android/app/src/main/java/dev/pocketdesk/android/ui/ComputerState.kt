@@ -39,6 +39,9 @@ object ComputerState {
         }
     }
 
+    /** A CPU reading as a percentage, or null when it is not a number. */
+    fun cpu(value: Double): Float? = value.takeIf { !it.isNaN() }?.toFloat()?.coerceIn(0f, 100f)
+
     /** A space from its parts, or null when it says nothing. */
     fun space(name: String, used: Long, total: Long): Space? =
         if (total <= 0 || used < 0) null else Space(name, minOf(used, total), total)
@@ -55,7 +58,8 @@ object ComputerState {
         }.orEmpty()
         val battery = body.optJSONObject("battery")
         return State(
-            cpu = if (body.isNull("cpu") || !body.has("cpu")) null else body.optDouble("cpu").toFloat().coerceIn(0f, 100f),
+            // optDouble is NaN for a value that is not a number (F2 review).
+            cpu = if (body.isNull("cpu") || !body.has("cpu")) null else cpu(body.optDouble("cpu")),
             memory = memory,
             disks = disks,
             batteryCharge = battery?.optInt("charge", -1)?.takeIf { it in 0..100 },

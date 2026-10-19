@@ -17,6 +17,13 @@ class ComputerStateTest {
     }
 
     @Test
+    fun aCpuReadingIsAPercentageOrNothing() {
+        assertEquals(23.5f, ComputerState.cpu(23.5)!!, 1e-6f)
+        assertEquals(100f, ComputerState.cpu(130.0)!!, 1e-6f)
+        assertNull(ComputerState.cpu(Double.NaN))
+    }
+
+    @Test
     fun uptimeIsSaidInItsTwoLargestUnits() {
         assertEquals("3 d 4 h", ComputerState.uptime(3 * 86_400L + 4 * 3_600 + 59, "d", "h", "min"))
         assertEquals("5 h 12 min", ComputerState.uptime(5 * 3_600L + 12 * 60 + 30, "d", "h", "min"))
