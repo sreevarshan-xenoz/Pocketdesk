@@ -25,6 +25,11 @@ pub const MAX_TEXT: usize = 64 * 1024;
 /// How long a send request waits for the server.
 pub const REQUEST_TTL_SECS: u64 = 60;
 
+/// How long a request for the clipboard now waits (D5 review): the
+/// clipboard is read when the server takes it, so a server that starts
+/// later must not send what was copied since.
+pub const CURRENT_TTL_SECS: u64 = 10;
+
 /// One text that crossed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClipEntry {
@@ -234,8 +239,12 @@ pub fn take_sends(state_dir: &Path, now_unix: u64) -> Vec<SendRequest> {
         else {
             continue;
         };
-        let fresh =
-            request.created_unix <= now_unix && now_unix - request.created_unix <= REQUEST_TTL_SECS;
+        let ttl = if request.current {
+            CURRENT_TTL_SECS
+        } else {
+            REQUEST_TTL_SECS
+        };
+        let fresh = request.created_unix <= now_unix && now_unix - request.created_unix <= ttl;
         // Text to send, or the clipboard now (D5), never both or neither.
         let what = if request.current {
             request.text.is_empty()
@@ -386,6 +395,11 @@ mod tests {
         assert!(
             take_sends(&dir, 101).is_empty(),
             "text with current, or neither"
+        );
+        request_current(&dir, "p", 100).unwrap();
+        assert!(
+            take_sends(&dir, 100 + CURRENT_TTL_SECS + 1).is_empty(),
+            "the clipboard now, asked too long ago"
         );
         // A request from before D5 reads as a text to send.
         write("6c1f2a0e-0000-4000-8000-000000000003", "hi", "");
