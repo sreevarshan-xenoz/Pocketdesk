@@ -535,7 +535,11 @@ class PhoneNotificationListener : NotificationListenerService() {
                 from = m.person?.name?.toString(),
                 text = m.text?.toString(),
                 timeMs = m.timestamp,
-                mine = m.person == null || m.person?.key?.let { it == style.user.key } == true,
+                // The owner's own: no person (androidx's convention), or the
+                // style's user, by key or, for apps that give none, by name.
+                mine = m.person == null || m.person == style.user ||
+                    m.person?.key?.let { it == style.user.key } == true ||
+                    (m.person?.key == null && !style.user.name.isNullOrBlank() && m.person?.name == style.user.name),
             )
         }
         val out = ConversationRule.messages(raw)
