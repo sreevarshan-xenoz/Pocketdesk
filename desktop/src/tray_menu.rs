@@ -61,7 +61,12 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
         // A phone away has every item greyed: its title says why (D5
         // review), as the tray has no hover text.
         if row.place == model::Place::Away {
-            label.push_str(" · away");
+            label.push_str(" · Away");
+        }
+        // Why Mute is greyed or Unmute offered (E5): Do Not Disturb, or the
+        // mute's minutes left.
+        if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now_unix) {
+            label.push_str(&format!(" · {quiet}"));
         }
         if let Some(battery) = device
             .battery
@@ -186,7 +191,7 @@ mod tests {
         assert_eq!(labels(&menu)[3].0, "Pixel · 64 %, charging");
         assert_eq!(
             labels(&menu)[4].0,
-            "Old · away",
+            "Old · Away",
             "away said; an hour-old battery left out"
         );
         assert_eq!(

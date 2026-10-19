@@ -1003,12 +1003,7 @@ impl PocketdeskApp {
                 if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now) {
                     facts.push(quiet);
                 }
-                if model::mute_refused(device.quiet.as_ref(), now) {
-                    facts.push(
-                        "it said no to the mute: turn on \"Let the computer mute this phone\" in its Settings"
-                            .to_string(),
-                    );
-                }
+
                 if row.place != model::Place::Session {
                     facts.push(match row.last_session {
                         Some(at) => format!("last session {}", crate::words::ago(now, at)),
@@ -1017,6 +1012,16 @@ impl PocketdeskApp {
                     });
                 }
                 ui.label(RichText::new(facts.join(" · ")).color(crate::theme::muted(ui)));
+                // A refused mute on its own line, as a warning (E5): in the
+                // facts it read as one more fact.
+                if model::mute_refused(device.quiet.as_ref(), now) {
+                    ui.label(
+                        RichText::new(
+                            "It said no to the mute: turn on \"Let the computer mute this phone\" in Pocketdesk's Settings on the phone.",
+                        )
+                        .color(crate::theme::warn(ui)),
+                    );
+                }
                 ui.horizontal_wrapped(|ui| {
                     let ring_why = row.ring.err().unwrap_or(
                         "Ring it for 30 seconds, through Do Not Disturb when the phone lets alarms through. At most once a minute.",

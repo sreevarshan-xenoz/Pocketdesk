@@ -37,7 +37,8 @@ impl Filter {
         match self {
             Filter::All => true,
             Filter::Sessions => kind.starts_with("session_"),
-            Filter::Phones => kind.starts_with("phone_"),
+            // A lock when a phone left is about phones too (E5).
+            Filter::Phones => kind.starts_with("phone_") || kind == "away_locked",
             Filter::FilesAndLinks => matches!(kind, "file_received" | "link_received"),
             Filter::Messages => matches!(kind, "notification" | "text_received"),
             Filter::Hooks => kind == "hook_ran" || kind.starts_with("task_"),
@@ -134,7 +135,22 @@ impl ActivityView {
             .filter(|e| self.filter.admits(&e.event))
             .collect();
         if shown.is_empty() {
-            ui.label("Nothing yet. Sessions, phones, files, links, notifications and hooks show here as they happen.");
+            // A filter that hides everything says so, with the way back (E5).
+            if self.filter != Filter::All && !self.events.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("Nothing of this kind yet.").color(crate::theme::muted(ui)),
+                    );
+                    if ui.button("Show all").clicked() {
+                        self.filter = Filter::All;
+                    }
+                });
+            } else {
+                ui.label(
+                    RichText::new("Nothing yet. Sessions, phones, files, links, notifications and hooks show here as they happen.")
+                        .color(crate::theme::muted(ui)),
+                );
+            }
             return action;
         }
         let received = &self.received;
@@ -328,6 +344,13 @@ fn file_path(
 mod tests {
     use super::*;
     use pocketdesk_core::local::events::EventsDetail;
+
+    #[test]
+    fn a_lock_when_a_phone_left_shows_under_phones() {
+        assert!(Filter::Phones.admits("away_locked"));
+        assert!(Filter::Phones.admits("phone_linked"));
+        assert!(!Filter::Sessions.admits("away_locked"));
+    }
     use pocketdesk_core::local::received::ReceivedFile;
     use serde_json::json;
 
