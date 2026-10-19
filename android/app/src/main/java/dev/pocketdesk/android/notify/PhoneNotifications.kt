@@ -345,8 +345,12 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
-        // D4: a chat's recent messages, only with the notification in full.
-        if (out.full) conversation(sbn.notification)?.let { body.put("messages", it) }
+        // D4: a chat's recent messages, only with the notification in full
+        // and answerable from the computer, which keeps them only then (D4
+        // review: the toast alone had sent the whole history).
+        if (out.full && Prefs.answerNotifications(this) && (offered.isNotEmpty() || reply != null)) {
+            conversation(sbn.notification)?.let { body.put("messages", it) }
+        }
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
