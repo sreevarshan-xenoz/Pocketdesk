@@ -73,7 +73,8 @@ pub(crate) fn parse_proc_stat(text: &str) -> Option<(u64, u64)> {
         return None;
     }
     let idle = values[3] + values.get(4).copied().unwrap_or(0);
-    Some((idle, values.iter().sum()))
+    // The first eight: guest time is already counted in user and nice.
+    Some((idle, values.iter().take(8).sum()))
 }
 
 /// `/proc/meminfo` as (used, total) bytes: total less what is available.
@@ -341,7 +342,8 @@ mod tests {
 
     #[test]
     fn proc_stat_counts_iowait_as_idle() {
-        let stat = "cpu  100 20 30 400 50 6 7 8 0 0\ncpu0 1 2 3 4 5 6 7 8 0 0\n";
+        // Guest and guest_nice (9 and 10) are left out: already in user and nice.
+        let stat = "cpu  100 20 30 400 50 6 7 8 9 10\ncpu0 1 2 3 4 5 6 7 8 0 0\n";
         assert_eq!(parse_proc_stat(stat), Some((450, 621)));
         assert_eq!(parse_proc_stat("intr 1 2 3"), None);
     }
