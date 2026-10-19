@@ -64,11 +64,17 @@ class CallWatch(private val ctx: Context) {
 
     private fun rang(number: String?) {
         if (!Prefs.callsOn(ctx)) return
-        val id = ++serial
+        // Ringing again (Android tells it once without the number, then
+        // with it): the same note, updated, never a second (F5 review).
+        val id = ringing?.removePrefix(CallRule.ID_PREFIX)?.toLongOrNull() ?: ++serial
+        // Known as ringing at once, on this thread: an end that comes before
+        // the note goes still takes it away (F5 review).
+        ringing = CallRule.ID_PREFIX + id
         PhoneLink.worker.execute {
             val name = number?.takeIf { it.isNotBlank() }?.let { contactName(ctx, it) }
             val note = CallRule.note(id, number, name, mayDecline(ctx))
-            ringing = note.id
+            // Ended while the name was looked up: the note is not sent.
+            if (ringing != note.id) return@execute
             val body = JSONObject()
                 .put("id", note.id)
                 .put("app", "Phone")
