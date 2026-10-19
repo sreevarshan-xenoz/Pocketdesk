@@ -59,7 +59,11 @@ fun TasksSheet(address: String, controlPort: Int, onDismiss: () -> Unit) {
         val listed = withContext(Dispatchers.IO) { RustCore.listTasks(address, controlPort) }
         listed
             .mapCatching { json ->
-                val array = JSONObject(json).optJSONArray("tasks")
+                val body = JSONObject(json)
+                // A computer that refused says why (E7), rather than an
+                // empty list that would read as "no tasks yet".
+                body.optString("error").takeIf { it.isNotBlank() }?.let { throw IllegalStateException(it) }
+                val array = body.optJSONArray("tasks")
                 (0 until (array?.length() ?: 0)).map { i ->
                     val task = array!!.getJSONObject(i)
                     Task(task.optString("name"), task.optBoolean("ask", true))
@@ -199,6 +203,7 @@ private fun statusText(status: Status): String =
         Status.Denied -> stringResource(R.string.tasks_denied)
         Status.Busy -> stringResource(R.string.tasks_busy)
         Status.Unknown -> stringResource(R.string.tasks_unknown)
+        Status.NotPermitted -> stringResource(R.string.tasks_not_permitted)
         is Status.NotSent -> stringResource(R.string.tasks_not_sent, status.why)
         Status.NoAnswer -> stringResource(R.string.tasks_no_answer)
     }

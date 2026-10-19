@@ -101,6 +101,29 @@ fn result(id: &str, body: Value) -> NetworkPacket {
     NetworkPacket::new(TASK_RESULT).with_body(body)
 }
 
+/// Why a phone's tasks request was refused, in the Devices page's words.
+const NOT_PERMITTED: &str = "\"Start my tasks\" is turned off for this phone on the computer";
+
+/// Answer a listing or a start the phone's permissions refused, so it is
+/// told why instead of waiting on an answer that never comes (E7).
+pub(crate) async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    let reply = match packet.packet_type.as_str() {
+        TASKS => {
+            NetworkPacket::new(TASKS).with_body(json!({ "tasks": [], "error": NOT_PERMITTED }))
+        }
+        TASK_RUN => {
+            let id = packet.body.get("id").and_then(Value::as_str).unwrap_or("");
+            if !valid_run_id(id) {
+                return;
+            }
+            // A code, as the phone's run follower reads refusals.
+            refused(id, "not_permitted")
+        }
+        _ => return,
+    };
+    let _ = sender.send_packet(&reply).await;
+}
+
 fn refused(id: &str, reason: &str) -> NetworkPacket {
     result(id, json!({ "state": "refused", "reason": reason }))
 }
@@ -669,5 +692,50 @@ mod tests {
             text.contains("40000") || text.contains("39999"),
             "the end: {text}"
         );
+    }
+
+    struct Phone(std::sync::Mutex<Vec<NetworkPacket>>);
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Phone {
+        fn device_id(&self) -> &str {
+            "phone-a"
+        }
+        fn connection_id(&self) -> &str {
+            "phone-a"
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.0.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    /// A phone with "Start my tasks" off is told so at once (E7): it had
+    /// waited for a listing that never came, then said the computer did
+    /// not answer; and a start it sends anyway is refused by its id.
+    #[tokio::test]
+    async fn a_refused_tasks_request_is_answered_with_why() {
+        let phone = Phone(Default::default());
+        crate::plugins::answer_denied(&NetworkPacket::new(TASKS), &phone).await;
+        let run = NetworkPacket::new(TASK_RUN).with_body(json!({"name": "build", "id": "t-run-9"}));
+        crate::plugins::answer_denied(&run, &phone).await;
+        let sent = phone.0.lock().unwrap().clone();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0].packet_type, TASKS);
+        assert_eq!(sent[0].body["tasks"], json!([]));
+        assert!(
+            sent[0].body["error"]
+                .as_str()
+                .unwrap()
+                .contains("Start my tasks")
+        );
+        assert_eq!(sent[1].packet_type, TASK_RESULT);
+        assert_eq!(sent[1].body["id"], "t-run-9");
+        assert_eq!(sent[1].body["state"], "refused");
+        assert_eq!(sent[1].body["reason"], "not_permitted");
+        // A start with no id gets nothing back.
+        let bad = NetworkPacket::new(TASK_RUN).with_body(json!({"name": "build"}));
+        crate::plugins::answer_denied(&bad, &phone).await;
+        assert_eq!(phone.0.lock().unwrap().len(), 2);
     }
 }

@@ -289,6 +289,11 @@ fun AudioControlSheet(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // A device's own id (Windows' endpoint id, PulseAudio's
+                        // sink name) is shown only to tell apart two devices
+                        // with one name (E7: it had been under every device).
+                        val sharedNames = s.sinks.groupBy { it.description }
+                            .filter { (name, same) -> name.isNotBlank() && same.size > 1 }.keys
                         LazyColumn(modifier = Modifier.padding(bottom = 24.dp)) {
                             items(s.sinks, key = { it.name }) { sink ->
                                 ListItem(
@@ -305,14 +310,18 @@ fun AudioControlSheet(
                                             },
                                         )
                                     },
-                                    supportingContent = {
-                                        Text(
-                                            sink.name,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                    supportingContent = if (sink.description in sharedNames) {
+                                        {
+                                            Text(
+                                                sink.name,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    } else {
+                                        null
                                     },
                                     leadingContent = { LlIcon(LlIcons.Volume, null) },
                                     trailingContent = {

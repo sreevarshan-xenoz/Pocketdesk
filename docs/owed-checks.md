@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-618 open items.
+617 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 354 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 353 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 44 |
 | A phone with a SIM | 21 |
@@ -413,7 +413,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **58. The computer's media from the phone (T8c)**
 
-- Nothing playing: "Nothing is playing".
+- Nothing playing: "Nothing is playing" (2026-10-19: something was playing on this box, so not reached).
 - The card cleared to the error alone with Audio off (fixed after the run).
 
 **59. The phone's media from the computer (T8d)**
@@ -507,7 +507,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **80. Named tasks (ecosystem 1c)**
 
 - The desktop app's Allow / Deny prompt itself (clicked, not written), Deny on the phone, and the Settings task editor.
-- "Start my tasks" off: the phone gives up with "no answer" after 20 s.
 
 **81. Send from the browser (ecosystem 1d)**
 

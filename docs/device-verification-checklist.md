@@ -1094,7 +1094,8 @@ On the A71 against Windows, 2026-10-15, LAN, input off for the phone. A silent t
 
 Owed:
 - [ ] A real player with a title: a browser video, Spotify; Next and Previous.
-- [ ] Nothing playing: "Nothing is playing".
+- [ ] Nothing playing: "Nothing is playing" (2026-10-19: something was playing on this box, so not reached).
+- [x] The Sound sheet's output devices by name alone (2026-10-19, A71, throwaway server). Found there: each had its Windows endpoint id under its name; fixed, the id shows only for two devices with one name.
 - [ ] The card cleared to the error alone with Audio off (fixed after the run).
 - [x] Linux: with `mpv` and its MPRIS plugin playing, the card showed "VM Test Tone" by "Pocketdesk · mpv", and Pause on the phone paused it (`playerctl status`: Paused).
 - [ ] Linux: `playerctl` missing.
@@ -1378,7 +1379,7 @@ A71 → this Windows box, LAN, debug server, 2026-10-16, three tasks in config.t
 
 Owed:
 - [ ] The desktop app's Allow / Deny prompt itself (clicked, not written), Deny on the phone, and the Settings task editor.
-- [ ] "Start my tasks" off: the phone gives up with "no answer" after 20 s.
+- [x] "Start my tasks" off: the phone gives up with "no answer" after 20 s. Found there: it showed the bridge's "The desktop did not answer over the control connection"; fixed, the computer answers at once and the sheet says 'Could not ask the computer: "Start my tasks" is turned off for this phone on the computer' (2026-10-19, A71, throwaway server).
 - [ ] Linux (`sh -c`), a long output's end on the phone, and two phones at once.
 
 ## 81. Send from the browser (ecosystem 1d)

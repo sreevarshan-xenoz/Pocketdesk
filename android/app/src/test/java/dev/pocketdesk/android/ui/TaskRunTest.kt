@@ -25,6 +25,9 @@ class TaskRunTest {
         assertEquals(Status.Denied, TaskRun.status("refused", null, false, "denied", asks = true))
         assertEquals(Status.Busy, TaskRun.status("refused", null, false, "busy", asks = true))
         assertEquals(Status.Unknown, TaskRun.status("refused", null, false, "unknown", asks = true))
+        // "Start my tasks" off for this phone (E7): said as such, not as no such task.
+        assertEquals(Status.NotPermitted, TaskRun.status("refused", null, false, "not_permitted", asks = true))
+        assertEquals("not_permitted", TaskRun.told(Status.NotPermitted)["reason"])
         assertEquals(Status.Unknown, TaskRun.status("refused", null, false, null, asks = true))
     }
 
