@@ -1064,10 +1064,10 @@ fun RemoteScreen(
         // UI refresh: chrome auto-hide timer. Sticky (never fades) while any
         // sheet is open or a side-by-side (or hinged) dock is on screen — that
         // dock is a permanent control surface, and fading the stream chrome
-        // next to it would look broken. An upright phone's small stream pane
-        // fades as a full one does, or the chrome would cover it for good.
+        // next to it would look broken. Nor on an upright phone, where the
+        // chrome sits in the bands off the picture (PaneRule.chromeStays).
         val chromeSticky = showQuick || showPicker || showMonitorPicker ||
-            showPairing || showAudio || showHistory || PaneRule.chromeStays(split, hinge) ||
+            showPairing || showAudio || showHistory || PaneRule.chromeStays(split, hinge, banded) ||
             keyboardOpen || showSendText || showFiles
         LaunchedEffect(chromeVisible, status, chromeSticky) {
             if (chromeVisible && !chromeSticky && status is StreamStatus.Up) {

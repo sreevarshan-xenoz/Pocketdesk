@@ -71,12 +71,14 @@ object PaneRule {
     }
 
     /**
-     * Whether a [split]'s dock keeps the session's chrome from fading: a
-     * side-by-side dock or a hinge's is a control surface of its own, but
-     * on an upright phone the chrome would sit over a small stream for good.
+     * Whether the session's chrome stays rather than fading: beside a
+     * side-by-side dock or a hinge's, a control surface of its own; and on
+     * an upright phone whose picture keeps bands for it ([banded]), where it
+     * covers nothing, so fading it would hide the controls for nothing and
+     * bringing it back by tapping a trackpad's picture would click.
      */
-    fun chromeStays(split: PaneSplit, hinge: Boolean): Boolean =
-        split == PaneSplit.Vertical || (split == PaneSplit.Horizontal && hinge)
+    fun chromeStays(split: PaneSplit, hinge: Boolean, banded: Boolean = false): Boolean =
+        banded || split == PaneSplit.Vertical || (split == PaneSplit.Horizontal && hinge)
 
     /**
      * Whether the keyboard bar, along the window's bottom, covers the stream

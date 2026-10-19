@@ -120,12 +120,17 @@ class PaneRuleTest {
     }
 
     @Test
-    fun onlyTheUprightSplitFadesItsChromeAndKeepsTheStreamClearOfTheKeyboardBar() {
+    fun theChromeFadesOnlyOverThePictureAndTheStreamStaysClearOfTheKeyboardBar() {
         // The upright split's stream sits on top: the bar covers the dock.
         assertEquals(false, PaneRule.chromeStays(PaneSplit.Horizontal, hinge = false))
         assertEquals(true, PaneRule.chromeStays(PaneSplit.Vertical, hinge = false))
         assertEquals(true, PaneRule.chromeStays(PaneSplit.Horizontal, hinge = true))
         assertEquals(false, PaneRule.chromeStays(PaneSplit.None, hinge = false))
+        // Held upright, the chrome sits in the bands off the picture: it stays,
+        // alone or over the trackpad (fading it would hide the controls for
+        // nothing, and a tap on a trackpad's picture to bring it back clicks).
+        assertEquals(true, PaneRule.chromeStays(PaneSplit.Horizontal, hinge = false, banded = true))
+        assertEquals(true, PaneRule.chromeStays(PaneSplit.None, hinge = false, banded = true))
         assertEquals(false, PaneRule.streamUnderKeyboardBar(PaneSplit.Horizontal))
         assertEquals(true, PaneRule.streamUnderKeyboardBar(PaneSplit.Vertical))
         assertEquals(true, PaneRule.streamUnderKeyboardBar(PaneSplit.None))
