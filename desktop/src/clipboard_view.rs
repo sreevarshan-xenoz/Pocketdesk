@@ -15,8 +15,8 @@ use crate::model::Device;
 /// How often the history is read again while the page is open.
 const REFRESH: Duration = Duration::from_secs(2);
 
-/// How long a first press of Clear waits for the second.
-const CONFIRM: Duration = Duration::from_secs(5);
+/// How long Clear's question waits for its answer.
+const CONFIRM: Duration = Duration::from_secs(30);
 
 /// The most characters of an entry shown.
 const PREVIEW_CHARS: usize = 280;
@@ -71,8 +71,8 @@ pub fn targets(devices: &[Device]) -> Vec<&Device> {
 pub struct ClipboardView {
     entries: Vec<ClipEntry>,
     read_at: Option<Instant>,
-    /// Clear pressed once, when: a press within [`CONFIRM`] empties the
-    /// history (D3 review: an armed Clear had stayed armed for good).
+    /// Clear's question asked, when: it goes after [`CONFIRM`] unanswered
+    /// (D3 review: an armed Clear had stayed armed for good).
     confirm_clear: Option<Instant>,
 }
 
@@ -107,13 +107,14 @@ impl ClipboardView {
                 self.confirm_clear = None;
             }
             if !self.entries.is_empty() {
-                let label = if self.confirm_clear.is_some() {
-                    "Clear: sure?"
-                } else {
-                    "Clear history"
-                };
-                if ui.button(label).clicked() {
-                    if self.confirm_clear.is_some() {
+                // Asked as the other forgettings are, with what it forgets
+                // (E5): the button had turned into "Clear: sure?" for 5 s.
+                if self.confirm_clear.is_some() {
+                    ui.label(format!(
+                        "Forget all {} texts kept here?",
+                        self.entries.len()
+                    ));
+                    if ui.button("Clear").clicked() {
                         action = Some(match clip_history::clear(state_dir) {
                             Ok(()) => {
                                 self.entries.clear();
@@ -123,9 +124,11 @@ impl ClipboardView {
                             Err(e) => Action::Failed(format!("Not cleared: {e}")),
                         });
                         self.confirm_clear = None;
-                    } else {
-                        self.confirm_clear = Some(Instant::now());
+                    } else if ui.button("Cancel").clicked() {
+                        self.confirm_clear = None;
                     }
+                } else if ui.button("Clear history…").clicked() {
+                    self.confirm_clear = Some(Instant::now());
                 }
             }
         });

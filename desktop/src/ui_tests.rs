@@ -376,5 +376,20 @@ fn the_clipboard_page_lists_what_crossed() {
     assert!(app.query_by_label_contains("From Test Phone").is_some());
     assert!(app.query_by_label_contains("From this computer").is_some());
     assert_eq!(app.query_all_by_label("Copy").count(), 2, "one each");
-    assert!(app.query_by_label("Clear history").is_some());
+    // Clear asks, with what it forgets, and Cancel keeps them (E5).
+    let mut app = app;
+    app.get_by_label("Clear history…").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label("Forget all 2 texts kept here?")
+            .is_some()
+    );
+    app.get_by_label("Cancel").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("from here").is_some(), "kept");
+    app.get_by_label("Clear history…").click();
+    app.run_steps(3);
+    app.get_by_label("Clear").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("from here").is_none(), "cleared");
 }
