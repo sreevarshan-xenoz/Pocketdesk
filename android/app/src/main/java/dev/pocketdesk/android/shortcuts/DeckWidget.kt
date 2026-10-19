@@ -51,7 +51,7 @@ class DeckWidget : AppWidgetProvider() {
         val ask = generation.incrementAndGet()
         line(app, host.address, app.getString(R.string.deck_loading))
         bounded("deck-widget-list") {
-            val answer = RustCore.listDeck(host.address, host.controlPort)
+            val answer = ask(app) { RustCore.listDeck(host.address, host.controlPort) }
             // Only the newest ask keeps what it heard.
             if (generation.get() != ask) return@bounded
             val json = answer.getOrNull()?.takeIf { runCatching { Deck.parse(it) }.isSuccess }
@@ -72,7 +72,7 @@ class DeckWidget : AppWidgetProvider() {
         if (index < 0 || label.isBlank() || !pressing.add(index)) return
         line(app, host.address, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_loading)))
         bounded("deck-widget-press", onEnd = { pressing.remove(index) }) {
-            val answer = RustCore.pressDeck(host.address, host.controlPort, index, label)
+            val answer = ask(app) { RustCore.pressDeck(host.address, host.controlPort, index, label) }
             val outcome = answer.mapCatching { Deck.outcome(it) }.getOrNull()
             val words = when (DeckWidgetPlan.said(outcome)) {
                 DeckWidgetPlan.Said.Done -> app.getString(R.string.deck_done)
@@ -82,6 +82,18 @@ class DeckWidget : AppWidgetProvider() {
             }
             line(app, host.address, app.getString(R.string.deck_widget_said, label, words))
         }
+    }
+
+    /**
+     * The bridge's [request], with the bridge started first: a widget's tap
+     * may start the process, which then has no identity or pins until it is
+     * (G3 review). An Error from the library is a failure, said on the line.
+     */
+    private fun ask(app: Context, request: () -> Result<String>): Result<String> = try {
+        RustCore.start(app)
+        request()
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 
     /**
