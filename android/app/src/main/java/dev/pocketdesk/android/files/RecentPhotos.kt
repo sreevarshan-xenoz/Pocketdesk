@@ -60,11 +60,14 @@ class RecentPhotos(private val ctx: Context) {
     fun tick() {
         val requests = takeRequests()
         val on = RecentPhotoPrefs.on(ctx)
+        // F3: a photo asked for comes on the same link (F3 review: it was kept
+        // only for Recent photos, so an ask never reached a phone without it).
+        val camera = CameraAsk.enabled(ctx)
         // Nothing turned on and nothing asked: nothing to do (N7).
-        if (!on && requests.isEmpty()) return
+        if (!on && !camera && requests.isEmpty()) return
         val own = PhoneLink.target(ctx)
         // The computer's requests come on the control link: kept while on.
-        if (on && RecentPhotoPrefs.granted(ctx) && own != null && RustCore.controlPeer() == null) {
+        if (((on && RecentPhotoPrefs.granted(ctx)) || camera) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - lastConnectMs >= RECONNECT_MS) {
                 lastConnectMs = now

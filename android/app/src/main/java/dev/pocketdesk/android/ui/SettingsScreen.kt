@@ -166,13 +166,19 @@ fun SettingsScreen(onBack: () -> Unit) {
             DeckColumns()
 
             SettingsHeader(stringResource(R.string.settings_files_links))
-            // F3: a photo the computer asks for.
+            // F3: a photo the computer asks for; the listener keeps its link.
+            val cameraNeedsAccess = Prefs.cameraAsks(context) &&
+                !dev.pocketdesk.android.notify.PhoneNotificationPrefs.accessGranted(context)
             SettingSwitch(
                 stringResource(R.string.settings_camera_asks),
-                stringResource(R.string.settings_camera_asks_summary),
+                stringResource(
+                    if (cameraNeedsAccess) R.string.settings_camera_asks_needs_access else R.string.settings_camera_asks_summary,
+                ),
                 Prefs.cameraAsks(context),
                 { Prefs.setCameraAsks(context, it) },
+                warning = cameraNeedsAccess,
             )
+            if (cameraNeedsAccess) AllowNotificationAccess()
             if (Prefs.cameraAsks(context)) {
                 SettingSwitch(
                     stringResource(R.string.settings_camera_clipboard),

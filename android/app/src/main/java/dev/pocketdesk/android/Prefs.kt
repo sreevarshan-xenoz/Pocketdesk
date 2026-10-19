@@ -406,8 +406,11 @@ object Prefs {
         bump()
     }
 
-    /** The computer may ask for a photo, offered in a notification (F3). */
-    fun cameraAsks(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_CAMERA_ASKS, true)
+    /**
+     * The computer may ask for a photo, offered in a notification (F3). Off
+     * by default, as the other features that keep a link to the computer.
+     */
+    fun cameraAsks(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_CAMERA_ASKS, false)
 
     fun setCameraAsks(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CAMERA_ASKS, on) }
