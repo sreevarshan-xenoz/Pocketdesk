@@ -25,7 +25,7 @@ const REFRESH: Duration = Duration::from_secs(1);
 pub const PAGE_KEY: &str = "page";
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 15] = [
+const PERMISSIONS: [(Capability, &str, &str); 16] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -100,6 +100,11 @@ const PERMISSIONS: [(Capability, &str, &str); 15] = [
         Capability::Mute,
         "Mute this phone from here",
         "Turn on the phone's Do Not Disturb from here for a while, and see when it is quiet. The phone allows it only with \"Let the computer mute this phone\" on in its own Settings.",
+    ),
+    (
+        Capability::AwayLock,
+        "Lock this computer when it leaves",
+        "When the phone's link has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone asleep may lose its link, so reading or watching without touching anything can lock too. Windows only for now: on Linux it never locks.",
     ),
 ];
 

@@ -130,6 +130,10 @@ pub struct Config {
     /// loopback, behind a token (D8). Off by default.
     #[serde(default)]
     pub phone_drive: bool,
+    /// How long a phone with "Lock this computer when it leaves" on must be
+    /// gone before the computer locks (D9), in minutes, 2 to 60.
+    #[serde(default = "default_away_lock_minutes")]
+    pub away_lock_minutes: u32,
     /// Work with KDE Connect devices (3a–3c): on by default (the owner's
     /// decision); off, a connection opening with `{` is refused as before.
     #[serde(default = "default_true")]
@@ -187,6 +191,10 @@ pub struct Config {
 
 fn default_transfer_keep_hours() -> u32 {
     24
+}
+
+fn default_away_lock_minutes() -> u32 {
+    5
 }
 
 fn default_input_idle_secs() -> u32 {
@@ -292,6 +300,7 @@ impl Default for Config {
             computer_clipboard: false,
             clipboard_history: 0,
             phone_drive: false,
+            away_lock_minutes: default_away_lock_minutes(),
             kdeconnect_compat: true,
             phone_battery_alerts: true,
             wake_announce: true,
@@ -485,6 +494,7 @@ impl Config {
         "computer_clipboard",
         "clipboard_history",
         "phone_drive",
+        "away_lock_minutes",
         "kdeconnect_compat",
         "phone_battery_alerts",
         "sms_keep",

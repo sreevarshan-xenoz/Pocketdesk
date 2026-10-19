@@ -42,10 +42,13 @@ pub enum Capability {
     /// Be muted from this computer, and tell it whether the phone is in Do
     /// Not Disturb (D2).
     Mute,
+    /// Lock this computer when the phone leaves (D9): about what the
+    /// computer does, as Ring is; off unless chosen.
+    AwayLock,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 15] = [
+    pub const ALL: [Capability; 16] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -61,13 +64,15 @@ impl Capability {
         Capability::Tasks,
         Capability::Ring,
         Capability::Mute,
+        Capability::AwayLock,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
     /// behaviour, except running commands, which a pairing PIN should not
-    /// hand out.
+    /// hand out, and locking this computer when it leaves, which only the
+    /// owner turns on (D9).
     pub fn default_allowed(self) -> bool {
-        self != Capability::Exec
+        !matches!(self, Capability::Exec | Capability::AwayLock)
     }
 }
 
@@ -160,6 +165,8 @@ pub struct DevicePermissions {
     pub ring: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mute: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away_lock: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -183,6 +190,7 @@ impl DevicePermissions {
             Capability::Tasks => &mut self.tasks,
             Capability::Ring => &mut self.ring,
             Capability::Mute => &mut self.mute,
+            Capability::AwayLock => &mut self.away_lock,
         }
     }
 
@@ -203,6 +211,7 @@ impl DevicePermissions {
             Capability::Tasks => self.tasks,
             Capability::Ring => self.ring,
             Capability::Mute => self.mute,
+            Capability::AwayLock => self.away_lock,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -306,7 +315,9 @@ mod tests {
         for capability in Capability::ALL {
             assert_eq!(
                 none.allows(capability),
-                capability != Capability::Exec,
+                // Nor lock this computer when it leaves, which only the
+                // owner turns on (D9).
+                !matches!(capability, Capability::Exec | Capability::AwayLock),
                 "{capability:?}"
             );
         }

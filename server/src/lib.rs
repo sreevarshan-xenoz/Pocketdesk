@@ -4,6 +4,7 @@
 
 pub mod approvals;
 pub mod audio_control;
+pub(crate) mod away_lock;
 pub mod bench;
 pub mod browser_host;
 pub mod cast_relay;
