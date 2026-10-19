@@ -455,6 +455,29 @@ impl PocketdeskApp {
         }
     }
 
+    /// Go to the page the tray program or a second launch asked for, and
+    /// come forward; or quit, as the tray program's Quit asks (E2).
+    fn open_asked(
+        &mut self,
+        ctx: &egui::Context,
+        open: pocketdesk_core::local::app_open::OpenRequest,
+    ) {
+        if open.page == "quit" {
+            self.quitting = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if let Some(tab) = Tab::from_key(&open.page) {
+            if tab == Tab::Files && open.phone.is_some() {
+                self.send_to = open.phone;
+            }
+            self.switch_to(tab);
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
     /// The tray's menu for the phones as last read (D5); rebuilt by the
     /// tray only when it changes.
     fn update_tray(&mut self) {
@@ -2025,6 +2048,11 @@ impl eframe::App for PocketdeskApp {
         }
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
             self.refresh();
+            // E2: a page asked for by the tray program or a second launch.
+            if let Some(open) = pocketdesk_core::local::app_open::take(&self.state_dir, now_unix())
+            {
+                self.open_asked(ctx, open);
+            }
             self.raise_for_approvals(ctx);
             self.raise_for_tasks(ctx);
             self.update_tray();
