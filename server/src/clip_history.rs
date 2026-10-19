@@ -128,9 +128,18 @@ async fn send(
         .find(|c| c.device_id() == request.device_id)
         .ok_or("the phone is not connected")?;
     let text = if request.current {
-        now_text.await.ok_or(
+        // Held as a push is (D5 review): never blank, never past a push's
+        // size, which the phone's control line takes.
+        let text = now_text.await.filter(|t| !t.trim().is_empty()).ok_or(
             "nothing to send: the clipboard holds no text, or a private copy or a pairing link",
-        )?
+        )?;
+        if text.len() > crate::clipboard_push::MAX_PUSH {
+            return Err(format!(
+                "the clipboard holds more than {} KiB of text, too much to send",
+                crate::clipboard_push::MAX_PUSH / 1024
+            ));
+        }
+        text
     } else {
         request.text.clone()
     };
@@ -217,6 +226,33 @@ mod tests {
         assert_eq!(a.sent.lock().unwrap()[0].body["content"], "now");
         let refused = send(&request, &clients, true, async { None }).await;
         assert!(refused.unwrap_err().starts_with("nothing to send"));
+        // Blank, or more than a push carries (D5 review).
+        let blank = send(&request, &clients, true, async { Some(" \t ".to_string()) }).await;
+        assert!(blank.unwrap_err().starts_with("nothing to send"));
+        let long = "x".repeat(crate::clipboard_push::MAX_PUSH + 1);
+        let refused = send(&request, &clients, true, async move { Some(long) }).await;
+        assert!(refused.unwrap_err().contains("too much"));
         assert_eq!(a.sent.lock().unwrap().len(), 1);
+    }
+
+    /// D5 review: the clipboard is read only once the send may go.
+    #[tokio::test]
+    async fn the_clipboard_is_not_read_for_a_send_that_cannot_go() {
+        let a = Arc::new(Phone {
+            id: "phone-a",
+            sent: Mutex::default(),
+        });
+        let clients: Vec<Arc<dyn DeviceSender>> = vec![a.clone()];
+        let mut request = SendRequest {
+            id: "x".to_string(),
+            device_id: "phone-a".to_string(),
+            text: String::new(),
+            created_unix: 1,
+            current: true,
+        };
+        let never = || async { panic!("the clipboard was read") };
+        assert!(send(&request, &clients, false, never()).await.is_err());
+        request.device_id = "phone-b".to_string();
+        assert!(send(&request, &clients, true, never()).await.is_err());
     }
 }
