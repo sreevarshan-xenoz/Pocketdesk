@@ -164,7 +164,7 @@ impl PhoneFilesView {
             self.phone = Some(phones[0].id.clone());
         }
         let phone = self.phone.clone().unwrap_or_default();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for d in &phones {
                 if ui
                     .selectable_label(d.id == phone, crate::model::device_label(devices, &d.id))
@@ -249,7 +249,7 @@ impl PhoneFilesView {
             .map(|r| r.name.clone())
             .unwrap_or_default();
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.strong(
                 std::iter::once(root_name.as_str())
                     .chain(listing.path.iter().map(String::as_str))
@@ -277,7 +277,7 @@ impl PhoneFilesView {
             ui.label(RichText::new("Empty").color(crate::theme::muted(ui)));
         }
         for entry in &listing.entries {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let mut path = listing.path.clone();
                 path.push(entry.name.clone());
                 if entry.dir {

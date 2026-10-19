@@ -186,7 +186,7 @@ impl KdeConnectView {
         });
         let mut ask = None;
         for pending in &self.pending {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if pending.from_device {
                     ui.label(
                         RichText::new(format!(
@@ -242,7 +242,7 @@ impl KdeConnectView {
             ui.label(RichText::new("None has connected yet.").weak());
         }
         for device in &mut self.rows {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(&device.name).strong());
                 let paired = if device.paired {
                     "paired"
@@ -305,7 +305,7 @@ impl KdeConnectView {
                 }
             });
             if let Some(permissions) = device.permissions.as_mut() {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.add_space(16.0);
                     if let Some((permission, on)) = permission_boxes(ui, running, permissions) {
                         ask = Some(KdeAsk::Permission {

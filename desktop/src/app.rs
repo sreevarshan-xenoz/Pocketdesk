@@ -1144,29 +1144,31 @@ impl PocketdeskApp {
         let mut confirmed = None;
         let mut ring = None;
         let now = now_unix();
-        egui::Grid::new("devices")
-            .num_columns(6)
-            .striped(true)
-            .spacing([16.0, 8.0])
-            .show(ui, |ui| {
-                for device in &self.snapshot.devices {
-                    ui.vertical(|ui| {
-                        // Room for a name and a short id on one line each.
-                        ui.set_min_width(170.0);
-                        if let Some(name) = &device.name {
-                            ui.label(RichText::new(name).strong());
-                        }
-                        ui.monospace(short(&device.id)).on_hover_text(&device.id);
-                    });
-                    ui.label(match device.grant_remaining {
-                        None if device.computer => "a computer".to_string(),
-                        None => "permanent".to_string(),
-                        Some(secs) => format!("{} left", human_duration(secs)),
-                    });
+        // E5: a block per device, its parts wrapping, as the Overview's
+        // phones are: a grid of six columns ran off a small window.
+        for device in &self.snapshot.devices {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    if let Some(name) = &device.name {
+                        ui.label(RichText::new(name).strong());
+                    }
+                    ui.monospace(short(&device.id)).on_hover_text(&device.id);
+                    ui.label(
+                        RichText::new(match device.grant_remaining {
+                            None if device.computer => "a computer".to_string(),
+                            None => "permanent".to_string(),
+                            Some(secs) => format!("{} left", human_duration(secs)),
+                        })
+                        .color(crate::theme::muted(ui)),
+                    );
+                    // Where it is, in the Overview's words (E5).
                     if device.connected {
-                        ui.label(RichText::new("connected").color(crate::theme::good(ui)));
+                        ui.label(RichText::new("In a session").color(crate::theme::good(ui)));
+                    } else if device.linked {
+                        ui.label(RichText::new("Linked").color(crate::theme::good(ui)));
                     } else {
-                        ui.label(RichText::new("—").color(crate::theme::muted(ui)));
+                        ui.label(RichText::new("Away").color(crate::theme::muted(ui)));
                     }
                     ui.label(battery_text(device.battery.as_ref(), now))
                         .on_hover_text("The phone's battery, as it last reported it in a session");
@@ -1191,28 +1193,30 @@ impl PocketdeskApp {
                     {
                         ring = Some(device.id.clone());
                     }
-                    // U5: "Unpair" for a pairing everywhere, asked by name.
-                    if self.confirm_revoke.as_deref() == Some(&device.id) {
-                        ui.vertical(|ui| {
-                            ui.label(format!(
-                                "Unpair {}? It must pair again to connect.",
-                                model::device_label(&self.snapshot.devices, &device.id)
-                            ));
-                            ui.horizontal(|ui| {
-                                if ui.button("Unpair").clicked() {
-                                    confirmed = Some(device.id.clone());
-                                }
-                                if ui.button("Cancel").clicked() {
-                                    revoke = Some(None);
-                                }
-                            });
-                        });
-                    } else if ui.button("Unpair…").clicked() {
+                    if self.confirm_revoke.as_deref() != Some(&device.id)
+                        && ui.button("Unpair…").clicked()
+                    {
                         revoke = Some(Some(device.id.clone()));
                     }
-                    ui.end_row();
+                });
+                // U5: "Unpair" for a pairing everywhere, asked by name.
+                if self.confirm_revoke.as_deref() == Some(&device.id) {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!(
+                            "Unpair {}? It must pair again to connect.",
+                            model::device_label(&self.snapshot.devices, &device.id)
+                        ));
+                        if ui.button("Unpair").clicked() {
+                            confirmed = Some(device.id.clone());
+                        }
+                        if ui.button("Cancel").clicked() {
+                            revoke = Some(None);
+                        }
+                    });
                 }
             });
+            ui.add_space(4.0);
+        }
         ui.add_space(12.0);
         ui.label(
             RichText::new(
@@ -1401,7 +1405,7 @@ impl PocketdeskApp {
             };
             let media = &playing.media;
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(format!("Playing on {}:", self.label(id)));
                 ui.label(RichText::new(media_line(media)).strong());
             });

@@ -111,7 +111,7 @@ impl ActivityView {
     ) -> Option<Action> {
         let mut action = None;
         if !log_on {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("The event log is off, so nothing new shows here.");
                 if ui.button("Settings").clicked() {
                     action = Some(Action::OpenSettings);
@@ -141,28 +141,21 @@ impl ActivityView {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                egui::Grid::new("activity")
-                    .num_columns(4)
-                    .striped(true)
-                    .spacing([14.0, 6.0])
-                    .show(ui, |ui| {
-                        for event in shown {
-                            ui.label(RichText::new(crate::words::ago(now_unix, event.at)).weak());
-                            ui.label(phone(event, devices));
-                            ui.label(describe(event));
-                            match file_path(event, received) {
-                                Some(path) => {
-                                    if ui.small_button("Show in folder").clicked() {
-                                        action = Some(Action::ShowFile(path));
-                                    }
-                                }
-                                None => {
-                                    ui.label("");
-                                }
-                            }
-                            ui.end_row();
+                // E5: a row per event that wraps; a grid of four columns
+                // ran a long link or title off the page.
+                for event in shown {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(crate::words::ago(now_unix, event.at)).weak());
+                        ui.label(phone(event, devices));
+                        ui.label(describe(event));
+                        if let Some(path) = file_path(event, received)
+                            && ui.small_button("Show in folder").clicked()
+                        {
+                            action = Some(Action::ShowFile(path));
                         }
                     });
+                    ui.separator();
+                }
             });
         action
     }

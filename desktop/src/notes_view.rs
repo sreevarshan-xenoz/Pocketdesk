@@ -133,7 +133,7 @@ impl NotesView {
                         };
                         ui.label(RichText::new(line).small().color(colour));
                     }
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         for action in &note.actions {
                             if ui.button(action).clicked() {
                                 self.answer(
