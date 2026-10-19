@@ -1990,6 +1990,14 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] The camera left with Back: nothing sent; the activity killed while the camera runs (Don't keep activities): the photo still sent.
 - [ ] Spanish and Tamil.
 
+## 129. An air mouse (F4)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet (the pointer is this box's input: with the owner).
+- [ ] Remote's "Air mouse" on the A71: held flat, turning moves the pointer across and tilting moves it up and down, a still hand moving nothing; the last choice kept.
+- [ ] A tap clicks without moving the pointer; a press and turn moves without clicking; nothing moves after letting go.
+- [ ] "Air mouse speed" at 0.5 and 3; a slow link (moves add up, no replay).
+- [ ] A phone without a gyroscope keeps the trackpad.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -790,4 +790,10 @@
     <string name="settings_camera_asks_needs_access">அறிவிப்பு அணுகல் தேவை: கணினியுடனான Pocketdesk இன் பின்னணி இணைப்பு அதிலிருந்து இயங்குகிறது</string>
     <string name="settings_camera_clipboard">அதன் கிளிப்போர்டுக்கும்</string>
     <string name="settings_camera_clipboard_summary">படம் கணினியின் பெற்ற கோப்புகளுடன் அதன் கிளிப்போர்டுக்கும் செல்லும்</string>
+    <string name="remote_air">காற்றுச் சுட்டி</string>
+    <string name="remote_trackpad">டிராக்பேட்</string>
+    <string name="air_hint">கைபேசியைத் தட்டையாக, அதன் மேற்பகுதி திரையை நோக்கிப் பிடிக்கவும். சுட்டியை நகர்த்த இங்கே அழுத்தித் திருப்பவும்; கிளிக் செய்யத் தட்டவும்.</string>
+    <string name="air_none">இந்தக் கைபேசியில் சுழல்காட்டி இல்லை, எனவே காற்றுச் சுட்டியாக இருக்க முடியாது.</string>
+    <string name="settings_air_speed">காற்றுச் சுட்டியின் வேகம்</string>
+    <string name="settings_air_speed_summary">ரிமோட்டின் காற்றுச் சுட்டியில் கைபேசியைத் திருப்பும்போது சுட்டி எவ்வளவு நகரும்</string>
 </resources>

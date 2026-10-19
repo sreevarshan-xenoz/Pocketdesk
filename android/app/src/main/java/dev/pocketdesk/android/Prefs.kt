@@ -50,6 +50,8 @@ object Prefs {
     private const val KEY_SHOW_DRIVING = "show_driving"
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
     private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
+    private const val KEY_AIR_MOUSE_SPEED = "air_mouse_speed"
+    private const val KEY_AIR_MOUSE = "air_mouse"
     private const val KEY_PEN_CURVE = "pen_curve"
     private const val KEY_GAMEPAD_CONTROLLER = "gamepad_controller"
     private const val KEY_DECK_COLUMNS = "deck_columns"
@@ -395,6 +397,23 @@ object Prefs {
     }
 
     /** How far the cursor moves per finger pixel on the trackpad. */
+    /** How fast the air mouse moves the pointer (F4), as the trackpad's range. */
+    fun airMouseSpeed(ctx: Context): Float =
+        prefs(ctx).getFloat(KEY_AIR_MOUSE_SPEED, 1f).coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)
+
+    fun setAirMouseSpeed(ctx: Context, value: Float) {
+        prefs(ctx).edit { putFloat(KEY_AIR_MOUSE_SPEED, value.coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)) }
+        bump()
+    }
+
+    /** The remote shows the air mouse rather than the trackpad (F4): the last choice. */
+    fun airMouse(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_AIR_MOUSE, false)
+
+    fun setAirMouse(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_AIR_MOUSE, on) }
+        bump()
+    }
+
     fun trackpadSensitivity(ctx: Context): Float =
         prefs(ctx).getFloat(KEY_TRACKPAD_SENSITIVITY, TRACKPAD_SENSITIVITY_DEFAULT)
             .coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)

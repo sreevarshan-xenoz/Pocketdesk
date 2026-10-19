@@ -156,6 +156,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 { Prefs.setCaptureMouse(context, it) },
             )
             TrackpadSpeed()
+            AirMouseSpeed()
             PenPressure()
             SettingSwitch(
                 stringResource(R.string.settings_gamepad_controller),
@@ -415,6 +416,35 @@ private fun TrackpadSpeed() {
                     onValueChangeFinished = { Prefs.setTrackpadSensitivity(context, speed) },
                     valueRange = Prefs.TRACKPAD_SENSITIVITY_MIN..Prefs.TRACKPAD_SENSITIVITY_MAX,
                     // 0.25 apart.
+                    steps = 9,
+                    modifier = Modifier.semantics { contentDescription = title },
+                )
+            }
+        },
+        trailingContent = { Text("%.2f×".format(speed), style = MaterialTheme.typography.labelLarge) },
+    )
+}
+
+/** F4: how fast the air mouse moves the pointer, on the trackpad's range. */
+@Composable
+private fun AirMouseSpeed() {
+    val context = LocalContext.current
+    val title = stringResource(R.string.settings_air_speed)
+    var speed by remember { mutableFloatStateOf(Prefs.airMouseSpeed(context)) }
+    ListItem(
+        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+        supportingContent = {
+            Column {
+                Text(
+                    stringResource(R.string.settings_air_speed_summary),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = speed,
+                    onValueChange = { speed = it },
+                    onValueChangeFinished = { Prefs.setAirMouseSpeed(context, speed) },
+                    valueRange = Prefs.TRACKPAD_SENSITIVITY_MIN..Prefs.TRACKPAD_SENSITIVITY_MAX,
                     steps = 9,
                     modifier = Modifier.semantics { contentDescription = title },
                 )
