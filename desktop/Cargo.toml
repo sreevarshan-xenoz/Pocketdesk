@@ -11,6 +11,11 @@ publish = false
 name = "pocketdesk-app"
 path = "src/main.rs"
 
+# The tray on its own, with no window (E2).
+[[bin]]
+name = "pocketdesk-tray"
+path = "src/tray_main.rs"
+
 [dependencies]
 pocketdesk-core = { path = "../core", default-features = false, features = ["local"] }
 eframe = { version = "0.36", default-features = false, features = ["accesskit", "glow", "default_fonts", "persistence", "x11", "wayland"] }

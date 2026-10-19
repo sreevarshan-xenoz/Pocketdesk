@@ -9,5 +9,6 @@ pub mod tray;
 #[cfg(target_os = "linux")]
 #[path = "tray_linux.rs"]
 pub mod tray;
+pub mod tray_instance;
 pub mod tray_menu;
 pub mod words;
