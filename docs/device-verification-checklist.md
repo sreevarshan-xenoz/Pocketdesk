@@ -1824,6 +1824,16 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] Send clipboard with an empty clipboard, and with over 256 KiB of text: a notification says it was not sent.
 - [ ] A tray pick with the server stopped, and with a server from before D5: nothing sent, and the notice says only that it asked.
 
+## 117. The phone's folders as a drive (D8)
+
+- [ ] With the A71 sharing a folder: `curl -X PROPFIND -H "Depth: 1"` on the address lists the phone, its folders and their files.
+- [ ] File Explorer at the Windows address: browse, open a photo, copy one out.
+- [ ] A file over 50 MB in Explorer (refused by Windows' limit), and with curl.
+- [ ] Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).
+- [ ] A phone from before D8: the file lands in Downloads, the drive answers 504 after the wait.
+- [ ] The setting off: the address gone from the Phone page, and the port closed.
+- [ ] Linux: Files or Dolphin at the `dav://` address.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
