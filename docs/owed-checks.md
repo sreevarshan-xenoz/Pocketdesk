@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-653 open items.
+658 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 370 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 371 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 48 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
 | A phone with a SIM | 22 |
 | A second phone | 7 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
 | A Linux desktop (the Azure VM serves for some) | 88 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 23 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 62 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
@@ -770,6 +770,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With the app swiped away: a media or link button pressed from the widget runs on the computer, the line saying "<label>: Done" (the bridge started by the tap).
 - The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
 
+**135. A laser pointer for the air mouse (G4)**
+
+- Held still for 5 s: the dot stays; let go: it hides. Pressed again quickly: the dot is not hidden mid-gesture.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -959,6 +963,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Remote's "Air mouse" on the A71: held flat, turning moves the pointer across and tilting moves it up and down, a still hand moving nothing; the last choice kept.
 - A tap clicks without moving the pointer; a press and turn moves without clicking; nothing moves after letting go.
+
+**135. A laser pointer for the air mouse (G4)**
+
+- Remote on the A71 with the air mouse on: "Laser pointer" under the pad; on, a press shows a red dot in the middle of the pointer's screen, turning moves it, the pointer stays put.
+- Desktop Settings "Laser pointer from phones" off, after a restart: the switch is not offered.
+- A slide show (PowerPoint or a browser's): a tap with the laser on still advances or clicks at the pointer.
 
 ## A phone with a SIM
 
@@ -1480,6 +1490,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The gamepad in portrait and landscape on the A71 and a 360 dp phone; at font scale 2.0.
 - TalkBack on the new rows (the mode chip's action, the gamepad's keys, the folders' Remove).
+
+**135. A laser pointer for the air mouse (G4)**
+
+- Two screens: the dot crosses where they meet and stops at an edge, never between them; larger on a 4K screen.
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
