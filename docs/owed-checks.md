@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-631 open items.
+629 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 371 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 368 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
 | A phone with a SIM | 21 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 87 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 49 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 50 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -711,11 +711,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **120. Answers that say how they went (E1)**
 
-- With the throwaway chat app: a reply from the Notifications page reads "handed to the app".
-- The notification swiped away on the phone before the answer arrives: "not sent: the notification is gone from the phone", and a desktop notification.
-- Answering off on the phone: "answering is off on the phone".
-- The phone away for more than a minute: "the phone did not connect within a minute".
-- A phone from before E1: "sent, but no word from the phone" after a minute.
+- A desktop notification for such a failure.
+- A phone from before E1: "sent, but no word from the phone" after a minute. Seen in passing 2026-10-19: an answer sent into a link the phone had just dropped (the app force-stopped) stays "sent", which the page shows as no word back.
 - From a toast (N3), the window hidden: a failure's desktop notification.
 
 **121. The tray on its own (E2)**
@@ -1576,6 +1573,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **117. The phone's folders as a drive (D8)**
 
 - Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).
+
+**120. Answers that say how they went (E1)**
+
+- The phone away for more than a minute, its notification still kept: "the phone did not connect within a minute". (Run 2026-10-19 with the listener off: the phone never sent the notification, so the answer was refused at once as no longer offered, before any wait.)
 
 **121. The tray on its own (E2)**
 
