@@ -433,7 +433,11 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                         rect,
                         ui.id().with("cast-picture"),
                         egui::Sense::click_and_drag(),
-                    );
+                    )
+                    // Named for a screen reader (E5).
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Phone screen")
+                    });
                     ui.painter().image(
                         texture.id(),
                         rect,

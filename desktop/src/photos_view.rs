@@ -226,7 +226,7 @@ impl PhotosView {
         self.finish(ui.ctx(), state_dir, now_unix);
         ui.horizontal_wrapped(|ui| {
             let label = if kept.is_some() {
-                "Refresh"
+                "Refresh photos"
             } else {
                 "Show the phone's recent photos"
             };
@@ -268,7 +268,9 @@ impl PhotosView {
                         Some(texture) => {
                             ui.add(
                                 egui::Image::new(&texture)
-                                    .fit_to_exact_size(egui::vec2(TILE, TILE)),
+                                    .fit_to_exact_size(egui::vec2(TILE, TILE))
+                                    // Its name for a screen reader (E5).
+                                    .alt_text(&photo.name),
                             )
                             .on_hover_text(&photo.name);
                         }
@@ -288,13 +290,24 @@ impl PhotosView {
                     )
                     .on_hover_text(&photo.name);
                     ui.horizontal(|ui| {
-                        if ui.small_button("Save").clicked() {
+                        // Each says which photo to a screen reader (E5):
+                        // a page of "Save" said nothing of which.
+                        let named = |response: egui::Response, what: &str| {
+                            let label = format!("{what} {}", photo.name);
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label)
+                            });
+                            response
+                        };
+                        if named(ui.small_button("Save"), "Save").clicked() {
                             action = Some((photo.id, photo.name.clone(), photo.size, Then::Save));
                         }
-                        if openable(&photo.name) && ui.small_button("Open").clicked() {
+                        if openable(&photo.name) && named(ui.small_button("Open"), "Open").clicked()
+                        {
                             action = Some((photo.id, photo.name.clone(), photo.size, Then::Open));
                         }
-                        if copyable(&photo.name) && ui.small_button("Copy").clicked() {
+                        if copyable(&photo.name) && named(ui.small_button("Copy"), "Copy").clicked()
+                        {
                             action = Some((photo.id, photo.name.clone(), photo.size, Then::Copy));
                         }
                     });
@@ -549,11 +562,15 @@ mod tests {
             PhotosView::default(),
         );
         harness.run_steps(3);
-        assert!(harness.query_by_label("Refresh").is_some());
-        assert_eq!(harness.query_all_by_label("Save").count(), 2);
-        assert_eq!(harness.query_all_by_label("Copy").count(), 1);
+        assert!(harness.query_by_label("Refresh photos").is_some());
+        // Each button names its photo (E5).
+        assert!(harness.query_by_label("Save IMG_1.jpg").is_some());
+        assert!(harness.query_by_label("Save clip.mp4.exe").is_some());
         // Only the picture may be opened or copied.
-        assert_eq!(harness.query_all_by_label("Open").count(), 1);
+        assert!(harness.query_by_label("Copy IMG_1.jpg").is_some());
+        assert!(harness.query_by_label("Open IMG_1.jpg").is_some());
+        assert!(harness.query_by_label("Open clip.mp4.exe").is_none());
+        assert!(harness.query_by_label("Copy clip.mp4.exe").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

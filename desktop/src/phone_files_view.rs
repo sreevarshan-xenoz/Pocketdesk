@@ -244,7 +244,7 @@ impl PhoneFilesView {
                     self.ask(state_dir, &phone, Kind::List, root.id, Vec::new(), now_unix);
                 }
             }
-            if ui.button("Refresh").clicked()
+            if ui.button("Refresh folders").clicked()
                 && let Some(root) = listing.root
             {
                 self.ask(
