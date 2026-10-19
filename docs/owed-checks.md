@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-620 open items.
+624 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 351 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 354 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 46 |
 | A phone with a SIM | 21 |
 | A second phone | 7 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 5 |
-| A Linux desktop (the Azure VM serves for some) | 87 |
+| A Linux desktop (the Azure VM serves for some) | 88 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 54 |
 
@@ -733,6 +733,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A button of each kind set up in the desktop app's Settings, listed on the A71's Deck from Home and from the session menu, with its icon.
 - A button edited after the phone listed it: "the computer's deck has changed".
 
+**127. How the computer is doing (F2)**
+
+- "How it is doing" on the A71 against this box: the CPU moving under load, memory, each fixed drive (no removable or network drive), the battery when there is one, uptime.
+- "This computer's state" off in desktop Settings: the sheet says so, without a restart.
+- The sheet's asking stops when it closes; Spanish and Tamil; font scale 2.0.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1344,6 +1350,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **123. A gamepad on the phone (E4)**
 
 - Linux.
+
+**127. How the computer is doing (F2)**
+
+- The same against Linux: `df`'s disks once each (btrfs subvolumes, bind mounts), the battery.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
