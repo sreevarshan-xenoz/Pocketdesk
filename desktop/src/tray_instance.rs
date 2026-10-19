@@ -64,16 +64,31 @@ fn socket_path() -> std::path::PathBuf {
     dir.join("pocketdesk-tray.sock")
 }
 
-/// Claim the tray; `None` when another tray program holds it.
+/// Claim the tray; `None` when another tray program holds it. Binding
+/// first, so two starting at once cannot both win (E2 review); a socket
+/// left by a tray that died, which nothing answers, is replaced.
 #[cfg(unix)]
 pub fn claim() -> Option<TrayClaim> {
+    use std::os::unix::net::{UnixListener, UnixStream};
     let path = socket_path();
-    if std::os::unix::net::UnixStream::connect(&path).is_ok() {
-        return None;
+    let socket = match UnixListener::bind(&path) {
+        Ok(socket) => socket,
+        Err(_) if UnixStream::connect(&path).is_ok() => return None,
+        Err(_) => {
+            let _ = std::fs::remove_file(&path);
+            UnixListener::bind(&path).ok()?
+        }
+    };
+    // Each probe ([`running`], a second tray's) is taken and dropped: left
+    // waiting, they would fill the backlog and a later connect would hang
+    // (E2 review).
+    if let Ok(probes) = socket.try_clone() {
+        std::thread::spawn(move || {
+            for probe in probes.incoming() {
+                drop(probe);
+            }
+        });
     }
-    // A socket left by a tray that died: nothing answers it.
-    let _ = std::fs::remove_file(&path);
-    let socket = std::os::unix::net::UnixListener::bind(&path).ok()?;
     Some(TrayClaim { _socket: socket })
 }
 
