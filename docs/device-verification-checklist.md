@@ -1922,6 +1922,18 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] A screen reader (Narrator) names each photo's Save, Open and Copy, the pairing code and the phone's screen.
 - [ ] The tray: a phone's title says Do Not Disturb or the mute's minutes left; Send the clipboard and Pair a phone.
 
+## 125. The phone app's design pass (E6)
+
+- [x] `ChoiceRowTest` on the A71: four choices and three at 1.0 and 2.0, and three that even crowded do not fit (2026-10-19, all five pass).
+- [x] Home's ⋮ menu: Sound, Send from clipboard history, Wake, then Wake settings, Check connection, Rename, then Remove (2026-10-19).
+- [x] Settings' Input group, Pen pressure as a row saving its choice, at font scale 1.0 and 2.0 (2026-10-19).
+- [ ] The session menu with Pen offered: three segments at 1.0; at 2.0 crowded.
+- [ ] The gamepad in portrait and landscape on the A71 and a 360 dp phone; at font scale 2.0.
+- [ ] The history sheet from Home: says a tap sends, entries 48 dp, no Clear when empty.
+- [ ] The Health card's Choose opens the folder picker.
+- [ ] TalkBack on the new rows (the mode chip's action, the gamepad's keys, the folders' Remove).
+- [ ] Spanish and Tamil on the changed screens.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
