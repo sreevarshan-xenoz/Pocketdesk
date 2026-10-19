@@ -103,23 +103,31 @@ pub async fn run_sends() {
             // private copy or a pairing link).
             let now_text = async { crate::plugins::clipboard::read_text().await.ok().flatten() };
             match send(&request, &clients, allowed, now_text).await {
-                // Not kept again (D3 review): it is in the history, from
-                // where it first came.
-                Ok(()) => tracing::info!("Put a copy on {}'s clipboard", request.device_id),
+                Ok(text) => {
+                    // A text from the history is not kept again (D3
+                    // review); the clipboard now crossed for the first
+                    // time, perhaps (D5 review), and the writer skips it
+                    // when it is the newest kept.
+                    if request.current {
+                        note(&text, None);
+                    }
+                    tracing::info!("Put a copy on {}'s clipboard", request.device_id)
+                }
                 Err(reason) => tracing::info!("{} not sent the copy: {reason}", request.device_id),
             }
         }
     }
 }
 
-/// Send one text to its phone: allowed and connected. A request for the
-/// clipboard now (D5) sends what `now_text` reads, only once it may go.
+/// Send one text to its phone: allowed and connected, and say what went. A
+/// request for the clipboard now (D5) sends what `now_text` reads, only
+/// once it may go.
 async fn send(
     request: &SendRequest,
     clients: &[Arc<dyn DeviceSender>],
     allowed: bool,
     now_text: impl std::future::Future<Output = Option<String>>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     if !allowed {
         return Err("Clipboard is off for this phone".to_string());
     }
@@ -146,7 +154,8 @@ async fn send(
     phone
         .send_packet(&crate::clipboard_push::packet(&text))
         .await
-        .map_err(|e| format!("could not send: {e}"))
+        .map_err(|e| format!("could not send: {e}"))?;
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -190,7 +199,10 @@ mod tests {
             current: false,
         };
         let none = || async { None };
-        send(&request, &clients, true, none()).await.unwrap();
+        assert_eq!(
+            send(&request, &clients, true, none()).await.unwrap(),
+            "hello"
+        );
         let sent = a.sent.lock().unwrap().clone();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].packet_type, "kdeconnect.clipboard");
@@ -220,9 +232,8 @@ mod tests {
             created_unix: 1,
             current: true,
         };
-        send(&request, &clients, true, async { Some("now".to_string()) })
-            .await
-            .unwrap();
+        let sent = send(&request, &clients, true, async { Some("now".to_string()) }).await;
+        assert_eq!(sent.unwrap(), "now", "what went, for the history");
         assert_eq!(a.sent.lock().unwrap()[0].body["content"], "now");
         let refused = send(&request, &clients, true, async { None }).await;
         assert!(refused.unwrap_err().starts_with("nothing to send"));
