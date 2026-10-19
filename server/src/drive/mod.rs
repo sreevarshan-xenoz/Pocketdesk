@@ -254,7 +254,12 @@ impl Drive {
         let Some((name, parent)) = path.split_last() else {
             return Ok(Node::Dir(device, root, Vec::new()));
         };
-        if !valid_name(name) || !parent.iter().all(|p| valid_name(p)) {
+        // The phone lists no hidden name, and answers nothing below one
+        // (D8 review): not there, without asking.
+        if !valid_name(name)
+            || !parent.iter().all(|p| valid_name(p))
+            || path.iter().any(|p| p.starts_with('.'))
+        {
             return Err(Fail::NotFound);
         }
         // From the folder it is in: a name not there is not asked for.
@@ -430,9 +435,12 @@ async fn serve_one<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     mut stream: S,
 ) -> std::io::Result<()> {
     let mut buf = Vec::with_capacity(1024);
+    // The whole head within the wait, not each read: a byte every few
+    // seconds holds no slot for hours (D8 review).
+    let head_by = tokio::time::Instant::now() + HEAD_WAIT;
     let end = loop {
         let mut chunk = [0u8; 1024];
-        let n = tokio::time::timeout(HEAD_WAIT, stream.read(&mut chunk))
+        let n = tokio::time::timeout_at(head_by, stream.read(&mut chunk))
             .await
             .map_err(|_| std::io::Error::other("no request in time"))??;
         if n == 0 {

@@ -379,6 +379,43 @@ async fn more_fetches_than_the_phone_sends_are_asked_again_later() {
     stop.cancel();
 }
 
+/// D8 review: nothing below a hidden name is asked of the phone.
+#[tokio::test]
+async fn a_hidden_folder_is_not_there_without_asking() {
+    let phone = stand_in("hidden");
+    let (addr, stop) = start(phone.clone()).await;
+    let r = ask(
+        addr,
+        "PROPFIND",
+        &format!("/{TOKEN}/Pixel/DCIM/.thumbnails/x.jpg"),
+        "",
+    )
+    .await;
+    assert_eq!(code(&r), 404);
+    assert_eq!(
+        phone.lists.load(Ordering::SeqCst),
+        1,
+        "only the phone's folders, to find DCIM"
+    );
+    let _ = std::fs::remove_dir_all(&phone.cache);
+    stop.cancel();
+}
+
+/// D8 review: a head that trickles in is dropped at the head's deadline.
+#[tokio::test(start_paused = true)]
+async fn a_head_that_never_ends_is_dropped() {
+    let phone = stand_in("trickle");
+    let (addr, stop) = start(phone.clone()).await;
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    stream.write_all(b"PROPFIND /").await.unwrap();
+    tokio::time::sleep(HEAD_WAIT + Duration::from_secs(1)).await;
+    let mut out = Vec::new();
+    let read = stream.read_to_end(&mut out).await;
+    assert!(read.is_err() || out.is_empty(), "closed with no answer");
+    let _ = std::fs::remove_dir_all(&phone.cache);
+    stop.cancel();
+}
+
 /// D8 review: a client that leaves while the phone is asked ends the asking.
 #[tokio::test]
 async fn a_client_that_leaves_ends_the_fetch() {
