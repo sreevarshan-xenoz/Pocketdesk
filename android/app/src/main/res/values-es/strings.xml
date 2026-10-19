@@ -823,5 +823,5 @@
     <string name="state_widget_not_answering">No responde</string>
     <string name="state_widget_not_shared">Este ordenador no comparte cómo va</string>
     <string name="settings_state_widget_auto">El widget de estado se actualiza solo</string>
-    <string name="settings_state_widget_auto_summary">El widget de la pantalla de inicio pregunta al ordenador cómo va cada 30 minutos como mucho. Desactivado, solo pregunta al tocarlo.</string>
+    <string name="settings_state_widget_auto_summary">El widget de la pantalla de inicio pregunta al ordenador cómo va cada 30 minutos como mucho, nunca con datos móviles. Desactivado, solo pregunta al tocarlo.</string>
 </resources>

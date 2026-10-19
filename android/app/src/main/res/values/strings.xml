@@ -826,5 +826,5 @@
     <string name="state_widget_not_answering">Not answering</string>
     <string name="state_widget_not_shared">This computer does not share how it is doing</string>
     <string name="settings_state_widget_auto">State widget refreshes by itself</string>
-    <string name="settings_state_widget_auto_summary">The home-screen widget asks the computer how it is doing every 30 minutes at most. Off, it asks only when tapped.</string>
+    <string name="settings_state_widget_auto_summary">The home-screen widget asks the computer how it is doing every 30 minutes at most, never over mobile data. Off, it asks only when tapped.</string>
 </resources>

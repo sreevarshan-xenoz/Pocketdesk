@@ -15,10 +15,11 @@ object StateWidgetPlan {
     /**
      * Whether to ask the computer: always for a tap or when it was never
      * [tried] (a widget just placed, a new last computer); for the system's
-     * period only when the owner lets it refresh by itself.
+     * period only when the owner lets it refresh by itself, and the network
+     * is not [metered] (mobile data: G1 review).
      */
-    fun ask(why: Why, tried: Boolean, auto: Boolean): Boolean =
-        why == Why.Tap || !tried || auto
+    fun ask(why: Why, tried: Boolean, auto: Boolean, metered: Boolean): Boolean =
+        why == Why.Tap || !tried || (auto && !metered)
 
     /** Whether the computer was asked already: it answered, or it failed. */
     fun tried(json: String?, failed: Boolean): Boolean = json != null || failed

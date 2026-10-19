@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
 import android.text.format.DateUtils
 import android.util.Log
 import android.widget.RemoteViews
@@ -45,7 +46,7 @@ class StateWidget : AppWidgetProvider() {
         if (ids.isEmpty()) return
         val host = HostStore.lastHost(app)
         val kept = Kept.read(app, host?.address)
-        if (host == null || !StateWidgetPlan.ask(why, StateWidgetPlan.tried(kept.json, kept.failed), auto)) {
+        if (host == null || !StateWidgetPlan.ask(why, StateWidgetPlan.tried(kept.json, kept.failed), auto, metered(app))) {
             redraw(app, manager, ids)
             return
         }
@@ -79,6 +80,10 @@ class StateWidget : AppWidgetProvider() {
             }
         }
     }
+
+    /** Whether the network now is metered (or there is none known). */
+    private fun metered(app: Context): Boolean =
+        app.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered ?: true
 
     /** Keep and draw what ask [ask] heard ([json], or null for nothing), if it is still the newest. */
     private fun finish(app: Context, computer: String, ask: Long, json: String?) {

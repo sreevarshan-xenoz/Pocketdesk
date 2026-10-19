@@ -10,10 +10,12 @@ import org.junit.Test
 class StateWidgetPlanTest {
     @Test
     fun aTapOrAFirstDrawAlwaysAsksAndThePeriodOnlyWhenAllowed() {
-        assertTrue(StateWidgetPlan.ask(StateWidgetPlan.Why.Tap, tried = true, auto = false))
-        assertTrue(StateWidgetPlan.ask(StateWidgetPlan.Why.Period, tried = false, auto = false))
-        assertTrue(StateWidgetPlan.ask(StateWidgetPlan.Why.Period, tried = true, auto = true))
-        assertFalse(StateWidgetPlan.ask(StateWidgetPlan.Why.Period, tried = true, auto = false))
+        assertTrue(StateWidgetPlan.ask(StateWidgetPlan.Why.Tap, tried = true, auto = false, metered = true))
+        assertTrue(StateWidgetPlan.ask(StateWidgetPlan.Why.Period, tried = false, auto = false, metered = true))
+        assertTrue(StateWidgetPlan.ask(StateWidgetPlan.Why.Period, tried = true, auto = true, metered = false))
+        assertFalse(StateWidgetPlan.ask(StateWidgetPlan.Why.Period, tried = true, auto = false, metered = false))
+        // The widget's own refresh never dials over mobile data (G1 review).
+        assertFalse(StateWidgetPlan.ask(StateWidgetPlan.Why.Period, tried = true, auto = true, metered = true))
         // A computer that never answered was tried: not asked again at each period (G1 review).
         assertTrue(StateWidgetPlan.tried(json = null, failed = true))
         assertTrue(StateWidgetPlan.tried(json = "{}", failed = false))
