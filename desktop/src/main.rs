@@ -11,10 +11,8 @@ mod clipboard_view;
 mod computers_view;
 mod diagnostics_view;
 mod fonts;
-mod icon;
 mod kdeconnect_view;
 mod messages_view;
-mod model;
 mod nav;
 mod notes_view;
 mod notice;
@@ -27,24 +25,26 @@ mod reveal;
 mod settings_view;
 mod single_instance;
 mod theme;
-#[cfg(not(target_os = "linux"))]
-mod tray;
 #[cfg(test)]
 mod ui_tests;
-// N6: a StatusNotifierItem over D-Bus, no GTK.
-#[cfg(target_os = "linux")]
-#[path = "tray_linux.rs"]
-mod tray;
-mod tray_menu;
-mod words;
 
 use eframe::egui;
+// What the window shares with the tray program (E2).
+use pocketdesk_desktop::{icon, model, tray, tray_instance, tray_menu, words};
 
 const TITLE: &str = "Pocketdesk";
 
 fn main() -> eframe::Result {
     let Some(instance) = single_instance::acquire(TITLE) else {
-        // Another copy is running; it has been brought to the front.
+        // Another copy is running; it has been brought to the front, and
+        // a page asked for goes to it (E2).
+        if let (Some(page), Ok(dir)) = (
+            nav::page_from_args(std::env::args_os()),
+            pocketdesk_core::local::paths::state_dir(),
+        ) {
+            let now = pocketdesk_core::local::pin::now_unix();
+            let _ = pocketdesk_core::local::app_open::request(&dir, page.key(), None, now);
+        }
         return Ok(());
     };
     // `--page <name>` opens on a page (nav.rs names them).
@@ -57,15 +57,30 @@ fn main() -> eframe::Result {
         }
     };
 
-    // The tray must exist on the event-loop thread (Windows) before the
-    // window opens. Without one (e.g. no StatusNotifier host), closing the
-    // window quits instead of hiding.
-    let tray = match tray::Tray::new() {
-        Ok(tray) => Some(tray),
-        Err(e) => {
-            eprintln!("Pocketdesk: no tray icon ({e}); closing the window will quit");
+    // E2: the tray program, when installed beside this window, holds the
+    // tray (started now if it is not running), and closing the window
+    // quits it. Otherwise the window holds the tray, which must exist on
+    // the event-loop thread (Windows) before the window opens; without one
+    // (e.g. no StatusNotifier host), closing the window quits too.
+    let tray_program = std::env::current_exe()
+        .ok()
+        .and_then(|exe| tray_instance::program_beside(&exe));
+    let tray = match tray_program {
+        Some(program) => {
+            if !tray_instance::running()
+                && let Err(e) = tray_instance::start(&program)
+            {
+                eprintln!("Pocketdesk: the tray program did not start ({e})");
+            }
             None
         }
+        None => match tray::Tray::new() {
+            Ok(tray) => Some(tray),
+            Err(e) => {
+                eprintln!("Pocketdesk: no tray icon ({e}); closing the window will quit");
+                None
+            }
+        },
     };
 
     let options = eframe::NativeOptions {
@@ -100,7 +115,8 @@ fn main() -> eframe::Result {
             // Lesser text readable in both themes (U1 review).
             theme::install(&cc.egui_ctx);
             if tray.is_some() {
-                tray::Tray::wake_on_click(cc.egui_ctx.clone());
+                let ctx = cc.egui_ctx.clone();
+                tray::Tray::wake_on_click(move || ctx.request_repaint());
             }
             single_instance::wake_with(cc.egui_ctx.clone());
             // `--page`, else the page shown when the app last closed.

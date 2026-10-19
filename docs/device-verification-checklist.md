@@ -1880,6 +1880,15 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] The phone away for more than a minute: "the phone did not connect within a minute".
 - [ ] A phone from before E1: "sent, but no word from the phone" after a minute.
 - [ ] From a toast (N3), the window hidden: a failure's desktop notification.
+## 121. The tray on its own (E2)
+
+- [x] Windows: `scripts/memory_at_rest.ps1 -Tray`, the tray program at rest beside the server (2026-10-19: 2.1 MB private, 13 MB working set; the reliability spec's D7 section).
+- [ ] Windows: starting `pocketdesk-app` starts `pocketdesk-tray` once (a second window launch starts no second tray); closing the window leaves the tray.
+- [ ] Each item from the tray program: Ring, Mute and Unmute, Send clipboard; Open, Pair a phone… and Send file… with the window closed (it starts on that page, Files with the phone chosen) and with it open (it comes to the front on that page).
+- [ ] With the window closed: a phone that must ask, an ask-first task, and a phone's "Show screen" each start the window (once each), with the prompt or the screen.
+- [ ] Quit from the tray program closes the window too; with no window open, an app started just after Quit stays open.
+- [ ] An install without `pocketdesk-tray`: the app's own tray, as before.
+- [ ] Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close).
 
 ## Recording results
 

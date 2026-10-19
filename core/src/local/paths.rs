@@ -80,6 +80,8 @@ pub const PHONE_PHOTOS_FILE: &str = "phone_photos.json";
 pub const PHONE_PHOTOS_DIR: &str = "phone_photos";
 /// The desktop app's requests for them (C7).
 pub const PHONE_PHOTOS_OUT_DIR: &str = "phone_photos_out";
+/// The window's page to open, from the tray program or a second launch (E2).
+pub const APP_OPEN_FILE: &str = "app_open.json";
 /// Phone notifications the computer can answer (T10c).
 pub const PHONE_NOTES_FILE: &str = "phone_notifications.json";
 /// How each answer to them went (E1).

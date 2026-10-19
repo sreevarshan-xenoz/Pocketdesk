@@ -6,10 +6,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+# `cargo run -p pocketdesk-desktop` runs the window, as before E2.
+default-run = "pocketdesk-app"
 
 [[bin]]
 name = "pocketdesk-app"
 path = "src/main.rs"
+
+# The tray on its own, with no window (E2).
+[[bin]]
+name = "pocketdesk-tray"
+path = "src/tray_main.rs"
 
 [dependencies]
 pocketdesk-core = { path = "../core", default-features = false, features = ["local"] }
