@@ -105,7 +105,12 @@ impl ComputersView {
                 .clicked()
             {
                 let link = std::mem::take(&mut self.link).trim().to_string();
-                self.ask(state_dir, ComputerAsk::Pair { link }, now_unix, "Pairing…");
+                self.ask(
+                    state_dir,
+                    ComputerAsk::Pair { link },
+                    now_unix,
+                    "Asked the other computer to pair.",
+                );
             }
         });
         if let Some(last) = &self.file.last_pairing {

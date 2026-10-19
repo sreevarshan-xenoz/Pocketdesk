@@ -269,4 +269,43 @@ mod tests {
             "the owner's own Do Not Disturb is left alone"
         );
     }
+
+    #[test]
+    fn a_phone_s_title_says_why_mute_is_greyed_or_unmute_offered() {
+        let title_of = |quiet: PhoneQuiet| {
+            let mut phone = Device {
+                id: "p".to_string(),
+                name: Some("Pixel".to_string()),
+                linked: true,
+                quiet: Some(quiet),
+                ..Default::default()
+            };
+            phone.permissions.set(Capability::Mute, true);
+            let snapshot = Snapshot {
+                devices: vec![phone],
+                ..Default::default()
+            };
+            let rows = model::phone_rows(&snapshot, &Default::default());
+            match &menu(&rows, &snapshot.devices, 1_000)[3] {
+                Entry::Phone { label, .. } => label.clone(),
+                other => panic!("not a phone: {other:?}"),
+            }
+        };
+        let quiet = PhoneQuiet {
+            quiet: true,
+            until_unix: None,
+            by_computer: false,
+            updated_unix: 1_000,
+            refused_unix: None,
+        };
+        assert!(title_of(quiet).ends_with(" · Do Not Disturb"));
+        assert!(
+            title_of(PhoneQuiet {
+                until_unix: Some(1_000 + 25 * 60),
+                by_computer: true,
+                ..quiet
+            })
+            .ends_with(" · muted from here, 25 min left")
+        );
+    }
 }

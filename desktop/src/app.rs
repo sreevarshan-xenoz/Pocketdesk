@@ -2339,7 +2339,6 @@ fn on_wayland() -> bool {
 
 #[cfg(test)]
 mod tests {
-    /// N6 review: Wayland lets no app hide its own window.
     #[test]
     fn a_paired_computer_is_not_shown_a_phone_s_switches() {
         for capability in [
@@ -2360,6 +2359,7 @@ mod tests {
         assert_eq!(away_lock_unavailable().is_none(), cfg!(windows));
     }
 
+    /// N6 review: Wayland lets no app hide its own window.
     #[test]
     fn closing_hides_to_the_tray_except_on_wayland() {
         use super::closes_to_tray;
