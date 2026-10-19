@@ -133,6 +133,7 @@ fn action_id(action: &TrayAction) -> String {
         TrayAction::Mute(id, minutes) => format!("mute:{minutes}:{id}"),
         TrayAction::SendClipboard(id) => format!("clipboard:{id}"),
         TrayAction::SendFile(id) => format!("file:{id}"),
+        TrayAction::TakePhoto(id) => format!("photo:{id}"),
     }
 }
 
@@ -161,6 +162,7 @@ mod tests {
             TrayAction::Mute("p".into(), 0),
             TrayAction::SendClipboard("p".into()),
             TrayAction::SendFile("p".into()),
+            TrayAction::TakePhoto("p".into()),
             TrayAction::Ring("q".into()),
         ];
         let ids: std::collections::HashSet<String> = actions.iter().map(action_id).collect();

@@ -19,6 +19,8 @@ pub enum TrayAction {
     SendClipboard(String),
     /// The window, on Files with this phone chosen.
     SendFile(String),
+    /// G2: the phone offers its camera; the photo lands here (F3).
+    TakePhoto(String),
 }
 
 /// One line of the menu.
@@ -100,6 +102,11 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
                 item(
                     "Send file…",
                     row.file.is_ok().then(|| TrayAction::SendFile(id())),
+                ),
+                // F3's ask reaches a phone files reach (G2).
+                item(
+                    "Take a photo",
+                    row.file.is_ok().then(|| TrayAction::TakePhoto(id())),
                 ),
             ],
         });
@@ -212,6 +219,10 @@ mod tests {
                 Entry::Item {
                     label: "Send file…".to_string(),
                     action: Some(TrayAction::SendFile("ready".to_string()))
+                },
+                Entry::Item {
+                    label: "Take a photo".to_string(),
+                    action: Some(TrayAction::TakePhoto("ready".to_string()))
                 },
             ]
         );
