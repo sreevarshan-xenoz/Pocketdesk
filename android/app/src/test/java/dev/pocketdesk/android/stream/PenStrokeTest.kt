@@ -32,6 +32,28 @@ class PenStrokeTest {
     }
 
     @Test
+    fun aStylusTouchingRightAfterItsHoverEndsStaysInRange() {
+        val pen = PenStroke(PenCurve.Even)
+        pen.event(at, contact = false, hovering = true, fingers = 0, pressure = 0f)
+        assertNull(
+            "the hover's end waits",
+            pen.event(at, contact = false, hovering = false, fingers = 0, pressure = 0f, exiting = true),
+        )
+        val down = pen.event(at, contact = true, hovering = false, fingers = 1, pressure = 0.5f)!!
+        assertEquals(RustCore.PEN_CONTACT or RustCore.PEN_IN_RANGE, down.flags)
+        assertNull("touched: nothing left to expire", pen.expireExit())
+    }
+
+    @Test
+    fun aStylusThatLeavesForGoodLeavesOnceTheGraceEnds() {
+        val pen = PenStroke(PenCurve.Even)
+        pen.event(at, contact = false, hovering = true, fingers = 0, pressure = 0f)
+        pen.event(at, contact = false, hovering = false, fingers = 0, pressure = 0f, exiting = true)
+        assertEquals(0, pen.expireExit()!!.flags)
+        assertNull(pen.expireExit())
+    }
+
+    @Test
     fun aSecondFingerLiftsThePenUntilEveryFingerIsUp() {
         val pen = PenStroke(PenCurve.Even)
         pen.event(at, contact = true, hovering = false, fingers = 1, pressure = 1f)

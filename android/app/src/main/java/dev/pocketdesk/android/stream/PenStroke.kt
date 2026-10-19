@@ -33,6 +33,9 @@ enum class PenCurve(val key: String, private val gamma: Float) {
     }
 }
 
+/** How long a stylus's hover end waits for its touch (E3 review). */
+const val EXIT_GRACE_MS = 80L
+
 /** The input modes a session offers: the pen only where the computer takes one (E3). */
 fun inputModes(pen: Boolean): List<InputMode> =
     if (pen) {
@@ -85,9 +88,16 @@ class PenStroke(private val curve: PenCurve) {
     private var pinching = false
 
     /**
+     * A stylus's hover ended: Android says so just before it touches, so the
+     * leaving waits [EXIT_GRACE_MS] for a touch ([expireExit]) rather than
+     * dropping out of range before every stroke (E3 review).
+     */
+    private var exitPending = false
+
+    /**
      * One event at [at] (normalized): [contact] while touching, [hovering]
-     * for a stylus in range above it, [fingers] pressed now. Pressure and
-     * tilt as Android reports them.
+     * for a stylus in range above it, [fingers] pressed now, [exiting] when a
+     * stylus's hover ended. Pressure and tilt as Android reports them.
      */
     fun event(
         at: Pair<Int, Int>,
@@ -99,7 +109,13 @@ class PenStroke(private val curve: PenCurve) {
         orientation: Float = 0f,
         barrel: Boolean = false,
         eraser: Boolean = false,
+        exiting: Boolean = false,
     ): PenSample? {
+        if (exiting && !contact && last?.inRange == true) {
+            exitPending = true
+            return null
+        }
+        exitPending = false
         if (fingers >= 2) {
             pinching = true
             return lift()
@@ -126,6 +142,13 @@ class PenStroke(private val curve: PenCurve) {
         )
         last = sample
         return sample
+    }
+
+    /** A hover's end with no touch after it: the pen leaves now. */
+    fun expireExit(): PenSample? {
+        if (!exitPending) return null
+        exitPending = false
+        return lift()
     }
 
     /** The pen leaves where it was, if it is in range (a pinch, the view gone). */

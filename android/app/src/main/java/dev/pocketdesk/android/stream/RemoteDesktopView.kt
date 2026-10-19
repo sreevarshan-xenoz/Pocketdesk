@@ -398,10 +398,12 @@ private fun InputOverlay(
                             val change = event.changes.firstOrNull() ?: continue
                             val stylus = change.type == PointerType.Stylus || change.type == PointerType.Eraser
                             val motion = event.motionEvent
+                            val exiting = stylus && event.type == PointerEventType.Exit
                             val sample = pen.event(
                                 at = mappedPoint(change.position),
                                 contact = change.pressed,
-                                hovering = stylus && !change.pressed && event.type != PointerEventType.Exit,
+                                hovering = stylus && !change.pressed && !exiting,
+                                exiting = exiting,
                                 fingers = event.changes.count { it.pressed },
                                 pressure = change.pressure,
                                 tilt = motion?.getAxisValue(android.view.MotionEvent.AXIS_TILT) ?: 0f,
@@ -411,6 +413,12 @@ private fun InputOverlay(
                                 eraser = change.type == PointerType.Eraser,
                             )
                             if (sample != null) sendPen(sample)
+                            if (exiting) {
+                                scope.launch {
+                                    kotlinx.coroutines.delay(EXIT_GRACE_MS)
+                                    pen.expireExit()?.let(::sendPen)
+                                }
+                            }
                         }
                     }
                 } finally {
