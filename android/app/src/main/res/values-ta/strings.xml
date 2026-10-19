@@ -838,4 +838,9 @@
     <string name="media_widget_unreadable">கணினியின் பதிலைப் படிக்க முடியவில்லை</string>
     <string name="media_tile_label">கணினியின் இசை</string>
     <string name="media_tile_hint">இயக்க அல்லது இடைநிறுத்த தட்டவும்</string>
+    <string name="wake_tile_label">கணினியை எழுப்பு</string>
+    <string name="wake_tile_not_yet">அது விழித்திருக்கும்போது ஒருமுறை இணைக்கவும்</string>
+    <string name="wake_tile_off">அதற்கு எழுப்புதல் அணைக்கப்பட்டுள்ளது</string>
+    <string name="wake_tile_sent">எழுப்புதல் அனுப்பப்பட்டது</string>
+    <string name="wake_tile_failed">எழுப்புதல் போகவில்லை</string>
 </resources>
