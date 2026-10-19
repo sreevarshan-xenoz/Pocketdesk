@@ -1,10 +1,11 @@
 # Pocketdesk: send to phone
 
-A browser extension that adds three items to the right-click menu: **Send page to phone**, **Send link to phone** and **Send image to phone**. It hands each to Pocketdesk on this computer, which sends it to your phone:
+A browser extension that adds four items to the right-click menu: **Send page to phone**, **Continue reading on phone**, **Send link to phone** and **Send image to phone**. It hands each to Pocketdesk on this computer, which sends it to your phone:
 - a link arrives as a notification that opens it;
+- **Continue reading on phone** sends the page with a text fragment for the first words of the paragraph at the top of the window, so the phone's browser opens it scrolled there (Chrome and Firefox 131+ on the phone; others open the page at its top);
 - an image arrives as a file in the phone's Downloads.
 
-It talks only to the Pocketdesk program on this computer, through the browser's native messaging. It has no network access of its own and no listener, and it reads nothing from pages but what you right-click.
+It talks only to the Pocketdesk program on this computer, through the browser's native messaging. It has no network access of its own and no listener. It reads nothing from pages but what you right-click, and, for **Continue reading on phone**, the first words of the paragraph at the top of the window, which go to the phone in the link (`activeTab` and `scripting` let it, only on the page you right-clicked, only then).
 
 ## Set up
 

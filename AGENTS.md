@@ -42,6 +42,7 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-19: **D6, continue reading on the phone (branch `feat/continue-reading`; spec `docs/superpowers/specs/2026-10-19-continue-reading-design.md`).** The browser extension's "Continue reading on phone" sends the page with a text fragment for the paragraph at the top of the window, so the phone's browser opens it there. Handing off what is playing is left out: the computer's media controls name no link. Owed: the extension in a browser (checklist §114).
 - 2026-10-19: **D3, clipboard history and Resend (branch `feat/clip-history`; spec `docs/superpowers/specs/2026-10-18-clip-history-design.md`, with as-built and review sections).**
   - **The computer:** with Settings "Clipboard history" above 0 (off by default), the last texts that crossed either way are kept owner-only (`clip_history.json`, SECURITY.md limit 28), on the Clipboard page with Copy and Send to… and in `pocketdesk clipboard [--send N --to]`.
   - **The phone:** "Send an earlier copy" on each computer's menu on Home.
