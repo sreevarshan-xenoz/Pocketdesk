@@ -1940,6 +1940,59 @@ mod tests {
         );
     }
 
+    /// E3: a pen sample is the tablet's events: pressure only in contact,
+    /// the tool while in range, the side button with it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_pen_sample_is_the_tablet_s_events() {
+        use pocketdesk_core::streaming::{PEN_BARREL, PEN_CONTACT, PEN_IN_RANGE};
+        fn value(events: &[InputEvent], kind: u16, code: u16) -> Option<i32> {
+            events
+                .iter()
+                .find(|e| e.event_type().0 == kind && e.code() == code)
+                .map(|e| e.value())
+        }
+        let touching = pen_events(&PenSample {
+            x_norm: 10,
+            y_norm: 20,
+            pressure: 300,
+            tilt_x: 5,
+            tilt_y: -5,
+            flags: PEN_CONTACT | PEN_IN_RANGE | PEN_BARREL,
+        });
+        assert_eq!(
+            value(&touching, EV_ABS, AbsoluteAxisCode::ABS_X.0),
+            Some(10)
+        );
+        assert_eq!(
+            value(&touching, EV_ABS, AbsoluteAxisCode::ABS_PRESSURE.0),
+            Some(300)
+        );
+        assert_eq!(
+            value(&touching, EV_ABS, AbsoluteAxisCode::ABS_TILT_Y.0),
+            Some(-5)
+        );
+        assert_eq!(value(&touching, EV_KEY, KeyCode::BTN_TOOL_PEN.0), Some(1));
+        assert_eq!(value(&touching, EV_KEY, KeyCode::BTN_TOUCH.0), Some(1));
+        assert_eq!(value(&touching, EV_KEY, KeyCode::BTN_STYLUS.0), Some(1));
+        assert_eq!(touching.last().map(|e| e.event_type().0), Some(EV_SYN));
+
+        let hovering = pen_events(&PenSample {
+            pressure: 300,
+            flags: PEN_IN_RANGE,
+            ..PenSample::default()
+        });
+        assert_eq!(
+            value(&hovering, EV_ABS, AbsoluteAxisCode::ABS_PRESSURE.0),
+            Some(0)
+        );
+        assert_eq!(value(&hovering, EV_KEY, KeyCode::BTN_TOUCH.0), Some(0));
+        assert_eq!(value(&hovering, EV_KEY, KeyCode::BTN_TOOL_PEN.0), Some(1));
+
+        let gone = pen_events(&PenSample::default());
+        assert_eq!(value(&gone, EV_KEY, KeyCode::BTN_TOOL_PEN.0), Some(0));
+    }
+
     /// Roadmap 2064: a uinput device that faults at write time is rebuilt and
     /// the packet retried, instead of ending the session's input path for good.
     ///
