@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-628 open items.
+618 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 365 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 355 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
 | A phone with a SIM | 21 |
@@ -41,7 +41,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - FGS notification is present ("Streaming to <ip>"), survives home/swipe-away attempts; its Disconnect action ends the session.
 - Screen-off for 1 min, wake → stream still live (wake lock + keepalive; plan #13).
 - Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5). "Drops" means **frames the phone never received** — the holes in the server's per-frame sequence numbers, counted where only the client can count them. So a saturated link must move it (the desktop's transport task trims its backlog before a stall clears), while a frame that arrives late and intact must not: the number can come back down when an out-of-order frame lands, and that is correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the desktop's `src` rate, not here.
-- Status chip: kill the server → "Down: <reason>" chip + Retry rebuilds after restarting the server.
 - R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing or upside-down frames (YInvert handling).
 - R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (x,y)" shows that monitor's wl_output origin and frames are its size.
 - R4 C1 codec negotiation, default off: connect normally → server log shows "Client codec caps negotiated" with `codec=H.264` even on a HEVC-capable phone (allow_hevc defaults false); video unaffected.
@@ -57,12 +56,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **2a. Desktop-side session visibility + kick (R4 D2)**
 
 - Consent notice: first phone connect → desktop shows a "Pocketdesk: a device is streaming this desktop" notification with device id + LAN/WAN + peer (headless: the same line appears in the server log instead).
-- `pocketdesk status` during the session → tailscale output plus a "Streaming sessions (live):" line (short device id, transport, peer, up-seconds). With no session: "none live".
-- `pocketdesk kick <id-prefix>` (≥6 chars, or full id, or peer IP) → phone shows the Down status chip within ~2 s and the status line disappears; other sessions are untouched.
-- `pocketdesk kick all` ends every live session at once.
-- kick with no running server → "no running Pocketdesk server to kick through", nothing written; a bogus target logs "kick: no live session matched" and the live session survives.
-- Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/pocketdesk/kick` (`all\n<unix-secs older than 60s>`), start the daemon, connect a phone → the session must NOT be killed (the expired request is dropped with a warn on first tick).
-- Phone disconnect (normal Exit) → status line goes away within ~2 s; no leftover session in `live_sessions.json` (registry deregisters on pipeline exit).
 
 **2b. Compositor-true latency read (R4 E3)**
 
@@ -176,8 +169,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **14. Blackout / pocket mode (Tier-3 #15 remainder)**
 
 - "Blackout" → black screen, "double-tap to unlock" hint, screen dimmed; stream continues (watch desktop from another device or check fps in logcat).
-- Screenshot during blackout → blocked (FLAG_SECURE); Recents thumbnail blank/secure.
-- Double-tap or system back unlocks; back never exits the session while blacked out.
+- Recents thumbnail blank during blackout.
+- Double-tap unlocks.
 - Entering PiP while blacked-out auto-clears the overlay.
 - Pocket test: with overlay on, phone in pocket should not send spurious input (touch consumed by overlay).
 
@@ -395,11 +388,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Closing the sheet before the answer, and the toast still showing.
 - A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
 
-**53. The local API (T7)**
-
-- `send` of a folder with `--wait`, and a phone that leaves mid-send (exit 1).
-- A broken config.toml with `--json` (exit 1, JSON).
-
 **54. Automation apps on the phone (T7b)**
 
 - A share naming one of two saved computers goes to that one (the A71 has one saved).
@@ -415,14 +403,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Chrome's and Firefox's share sheets ("Open on computer" listed, the title and link they share).
 - The desktop app's Send link, and its refusal for a phone with Links off.
-- The phone's "Links from the computer" off: a link dropped.
 
 **57. The phone's battery on the computer (T8b)**
 
 - The Devices tab's text, and its age after the session ends.
 - Catching up after a Wi-Fi drop.
 - Unpairing the phone: its report gone from the file within 5 s.
-- The phone's "Share battery with the computer" off: no report; the desktop's "Phones' batteries" off: no notification.
+- The desktop's "Phones' batteries" off: no notification.
 - A real discharge to 15 %, and Android's own low flag.
 
 **58. The computer's media from the phone (T8c)**

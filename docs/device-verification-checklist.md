@@ -54,7 +54,7 @@ of exactly that, including the one fix that merged without its confirming observ
       and intact must not: the number can come back down when an out-of-order frame lands, and that is
       correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the
       desktop's `src` rate, not here.
-- [ ] Status chip: kill the server → "Down: <reason>" chip + Retry rebuilds after restarting the server.
+- [x] Status chip: kill the server → "Down: <reason>" chip + Retry rebuilds after restarting the server. Seen: "The computer took too long to answer. Make sure it is awake and reachable." with Retry about 45 s after the server stopped; once it was back the session came back by itself, no Retry needed (2026-10-19, A71, throwaway server, by script).
 - [ ] R4 B1 screencopy backend (desktop-observable): starting a stream on
       Hyprland must NOT raise the portal screen-share grant dialog; server log shows
       "Capture started via backend Screencopy". If instead it shows "Capture backend
@@ -130,18 +130,24 @@ not part of C4.
 - [ ] Consent notice: first phone connect → desktop shows a "Pocketdesk: a device is
       streaming this desktop" notification with device id + LAN/WAN + peer (headless: the same
       line appears in the server log instead).
-- [ ] `pocketdesk status` during the session → tailscale output plus a "Streaming sessions
+- [x] `pocketdesk status` during the session → tailscale output plus a "Streaming sessions
       (live):" line (short device id, transport, peer, up-seconds). With no session: "none live".
-- [ ] `pocketdesk kick <id-prefix>` (≥6 chars, or full id, or peer IP) → phone shows the Down
+      Found: on a computer without Tailscale it stopped at "tailscale status failed" and listed
+      nothing; fixed, it now says "Tailscale: not running (it is optional)" and lists the session (2026-10-19, A71, throwaway server, by script).
+- [x] `pocketdesk kick <id-prefix>` (≥6 chars, or full id, or peer IP) → phone shows the Down
       status chip within ~2 s and the status line disappears; other sessions are untouched.
-- [ ] `pocketdesk kick all` ends every live session at once.
-- [ ] kick with no running server → "no running Pocketdesk server to kick through", nothing
+      By an 8-character prefix: gone in 2 s, the phone saying "The connection to the computer
+      dropped…" with Retry, which opened a new session (2026-10-19, A71, throwaway server, by script) (one phone, so "other sessions" untried).
+- [x] `pocketdesk kick all` ends every live session at once (2026-10-19, A71, throwaway server, by script).
+- [x] kick with no running server → "no running Pocketdesk server to kick through", nothing
       written; a bogus target logs "kick: no live session matched" and the live session survives.
-- [ ] Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/pocketdesk/kick`
+      Now worded "no running Pocketdesk server to end sessions through"; nothing in `kicks/` (2026-10-19, A71, throwaway server, by script).
+- [x] Stale request safety: with no daemon running, hand-write `$XDG_STATE_HOME/pocketdesk/kick`
       (`all\n<unix-secs older than 60s>`), start the daemon, connect a phone → the session must
-      NOT be killed (the expired request is dropped with a warn on first tick).
-- [ ] Phone disconnect (normal Exit) → status line goes away within ~2 s; no leftover session in
-      `live_sessions.json` (registry deregisters on pipeline exit).
+      NOT be killed (the expired request is dropped with a warn on first tick). Done with a request
+      file in `kicks/` (since N7, one file each) two minutes old: taken, and the session held (2026-10-19, A71, throwaway server, by script).
+- [x] Phone disconnect (normal Exit) → status line goes away within ~2 s; no leftover session in
+      `live_sessions.json` (registry deregisters on pipeline exit) (2026-10-19, A71, throwaway server, by script).
 
 ## 2b. Compositor-true latency read (R4 E3)
 
@@ -335,8 +341,10 @@ is still filling in is dimmed. What to confirm on a real phone:
 ## 14. Blackout / pocket mode (Tier-3 #15 remainder)
 
 - [ ] "Blackout" → black screen, "double-tap to unlock" hint, screen dimmed; stream continues (watch desktop from another device or check fps in logcat).
-- [ ] Screenshot during blackout → blocked (FLAG_SECURE); Recents thumbnail blank/secure.
-- [ ] Double-tap or system back unlocks; back never exits the session while blacked out.
+- [x] Screenshot during blackout → blocked (FLAG_SECURE): the window flagged secure and a screencap all black; the flag gone after Back (2026-10-19, A71, throwaway server, by script).
+- [ ] Recents thumbnail blank during blackout.
+- [x] System Back unlocks and does not exit the session (2026-10-19, A71, throwaway server, by script).
+- [ ] Double-tap unlocks.
 - [ ] Entering PiP while blacked-out auto-clears the overlay.
 - [ ] Pocket test: with overlay on, phone in pocket should not send spurious input (touch consumed by overlay).
 
@@ -1015,8 +1023,8 @@ On this box with the A71, 2026-10-15 (`docs/local-api.md`):
 
 Owed:
 - [ ] The Linux host: `status`, `devices`, `send --wait`.
-- [ ] `send` of a folder with `--wait`, and a phone that leaves mid-send (exit 1).
-- [ ] A broken config.toml with `--json` (exit 1, JSON).
+- [x] `send` of a folder with `--wait`, and a phone that leaves mid-send (exit 1). Five files and one in a sub-folder "sent" in 4 s, MD5s matching; the app force-stopped 2 s into six 40 MB files: "offered" (exit 4) while the offer's 10 minutes run, then exit 1 at 637 s, "6 of 6 files not sent: the phone did not take it in time" (2026-10-19, A71, throwaway server, by script).
+- [x] A broken config.toml with `--json` (exit 1, JSON): `status --json` gave `api` 1 and the TOML error (2026-10-19, A71, throwaway server, by script).
 
 ## 54. Automation apps on the phone (T7b)
 
@@ -1057,7 +1065,7 @@ Owed:
 - [ ] The desktop app's Send link, and its refusal for a phone with Links off.
 - [x] `open_links = false`: links shown as notifications, none opened (2026-10-15, six links from "Open on computer").
 - [x] Six links within a minute: the sixth refused ("more than 5 a minute").
-- [ ] The phone's "Links from the computer" off: a link dropped.
+- [x] The phone's "Links from the computer" off: a link dropped (no notification; on again, it showed). The computer says "sent to the phone" either way, since the phone does not answer (2026-10-19, A71, throwaway server, by script).
 - [x] Linux (2026-10-15, the release dry run's build on an Azure VM under a headless Sway, the A71 over the internet): "Open on computer" reached `xdg-open` with the link (the sentence's full stop left out), and no zombie process was left; `pocketdesk link` from the Linux CLI gave the phone its notification.
 
 ## 57. The phone's battery on the computer (T8b)
@@ -1071,7 +1079,8 @@ Owed:
 - [x] After the review fixes: the report written at the session's start, and no control connection in the next 70 s beyond the two the session opened (the old loop dialed one per 15 s without a link).
 - [ ] Catching up after a Wi-Fi drop.
 - [ ] Unpairing the phone: its report gone from the file within 5 s.
-- [ ] The phone's "Share battery with the computer" off: no report; the desktop's "Phones' batteries" off: no notification.
+- [x] The phone's "Share battery with the computer" off: no report in 30 s of a background link; on again, the report within a minute (2026-10-19, A71, throwaway server, by script).
+- [ ] The desktop's "Phones' batteries" off: no notification.
 - [x] Linux: a faked 11 % was recorded and warned about in the log, but **no notification was shown**: every Linux notification failed (`notify-send --expire` is not an option). Fixed (`--expire-time`); owed: see it shown on Linux.
 - [ ] A real discharge to 15 %, and Android's own low flag.
 

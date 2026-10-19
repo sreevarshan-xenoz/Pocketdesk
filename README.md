@@ -276,7 +276,7 @@ curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/s
 **Management commands** (after install):
 
 ```bash
-pocketdesk status             # Tailscale status of this machine
+pocketdesk status             # Live sessions, and Tailscale's status if it runs
 pocketdesk sessions           # Recent streaming-session outcomes
 pocketdesk bench --baseline bench/baselines   # Encode tail vs the committed baseline
 pocketdesk capabilities       # KDE Connect capability sets in use
