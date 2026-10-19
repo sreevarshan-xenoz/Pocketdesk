@@ -11,7 +11,18 @@ struct StandIn {
     files: HashMap<(u32, Vec<String>), Vec<u8>>,
     lists: AtomicUsize,
     fetches: AtomicUsize,
+    /// Fetches given up on before they finished.
+    abandoned: Arc<AtomicUsize>,
     cache: PathBuf,
+}
+
+/// Counts a fetch dropped before it finished.
+struct Abandoned(Arc<AtomicUsize>);
+
+impl Drop for Abandoned {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 fn path(parts: &[&str]) -> Vec<String> {
@@ -47,7 +58,11 @@ fn stand_in(name: &str) -> Arc<StandIn> {
         listing(
             Some(7),
             vec![],
-            vec![entry("Camera", true, 0), entry("a & b.jpg", false, 5)],
+            vec![
+                entry("Camera", true, 0),
+                entry("a & b.jpg", false, 5),
+                entry("slow.bin", false, 9),
+            ],
         ),
     );
     listings.insert(
@@ -64,6 +79,7 @@ fn stand_in(name: &str) -> Arc<StandIn> {
         files,
         lists: AtomicUsize::new(0),
         fetches: AtomicUsize::new(0),
+        abandoned: Arc::new(AtomicUsize::new(0)),
         cache,
     })
 }
@@ -88,6 +104,11 @@ impl Phones for StandIn {
     }
     async fn fetch(&self, _device: &str, root: u32, path: &[String]) -> Result<PathBuf, Fail> {
         self.fetches.fetch_add(1, Ordering::SeqCst);
+        if path.last().map(String::as_str) == Some("slow.bin") {
+            // A phone that never sends it.
+            let _abandoned = Abandoned(self.abandoned.clone());
+            std::future::pending::<()>().await;
+        }
         let bytes = self
             .files
             .get(&(root, path.to_vec()))
@@ -274,6 +295,34 @@ async fn a_file_is_fetched_served_once_and_removed() {
     )
     .await;
     assert_eq!(code(&with_body), 207, "{with_body}");
+    let _ = std::fs::remove_dir_all(&phone.cache);
+    stop.cancel();
+}
+
+/// D8 review: a client that leaves while the phone is asked ends the asking.
+#[tokio::test]
+async fn a_client_that_leaves_ends_the_fetch() {
+    let phone = stand_in("leave");
+    let (addr, stop) = start(phone.clone()).await;
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let request = format!("GET /{TOKEN}/Pixel/DCIM/slow.bin HTTP/1.1\r\nHost: x\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while phone.fetches.load(Ordering::SeqCst) == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "TIMEOUT: never fetched"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    drop(stream);
+    while phone.abandoned.load(Ordering::SeqCst) == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "TIMEOUT: the fetch went on"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let _ = std::fs::remove_dir_all(&phone.cache);
     stop.cancel();
 }

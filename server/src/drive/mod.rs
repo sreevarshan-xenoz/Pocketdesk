@@ -402,7 +402,13 @@ async fn serve_one<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
         body_left = body_left.saturating_sub(n as u64);
     }
     let head_only = request.method == "HEAD";
-    match answer(drive, &request).await {
+    // A client that leaves while the phone is asked (WebClient gives up
+    // after a minute) ends the asking, and frees its slot (D8 review).
+    let answered = tokio::select! {
+        answered = answer(drive, &request) => answered,
+        () = gone(&mut stream) => return Ok(()),
+    };
+    match answered {
         Answer::Text(code, headers, body) => {
             write_text(&mut stream, code, &headers, &body, head_only).await
         }
@@ -446,6 +452,17 @@ async fn write_text<S: tokio::io::AsyncWrite + Unpin>(
         stream.write_all(body.as_bytes()).await?;
     }
     stream.flush().await
+}
+
+/// Whether the client has closed its side (or the connection failed):
+/// anything it sends meanwhile is set aside.
+async fn gone<S: tokio::io::AsyncRead + Unpin>(stream: &mut S) {
+    let mut chunk = [0u8; 512];
+    while let Ok(n) = stream.read(&mut chunk).await {
+        if n == 0 {
+            return;
+        }
+    }
 }
 
 struct RemoveOnDrop(PathBuf);
