@@ -58,6 +58,8 @@
     <string name="pen_pressure_soft">மென்மை</string>
     <string name="pen_pressure_even">சமம்</string>
     <string name="pen_pressure_firm">உறுதி</string>
+    <string name="settings_gamepad_controller">கணினிக்கு கேம் கன்ட்ரோலர்</string>
+    <string name="settings_gamepad_controller_summary">இந்தத் தொலைபேசியுடன் இணைத்த கன்ட்ரோலர் அமர்வின்போது கணினியில் விளையாடும்: A என்பது Enter, B Esc, X Space, Y Tab, மேல் பொத்தான்கள் Page Up, Page Down, Select Backspace, Start ஒரு கிளிக், இடது குச்சி சுட்டி, வலது சக்கரம்</string>
     <string name="settings_system">சிஸ்டம்</string>
     <string name="settings_about">பற்றி</string>
     <string name="app_version">பதிப்பு %1$s</string>
@@ -120,6 +122,11 @@
     <string name="row_quality">தரம்</string>
     <string name="row_window">சாளரம்</string>
     <string name="row_monitor">முகவரித் திரை</string>
+    <string name="row_gamepad">கேம்பேட்</string>
+    <string name="gamepad_close">கேம்பேடை மூடு</string>
+    <string name="gamepad_click">கிளிக்</string>
+    <string name="gamepad_mouse">சுட்டி</string>
+    <string name="gamepad_scroll">உருட்டு</string>
     <string name="row_pane">பலக அமைப்பு</string>
     <string name="row_clipboard">கிளிப்போர்ட் ஒத்திசைவு</string>
     <string name="row_history">கிளிப்போர்ட் வரலாறு</string>
@@ -640,6 +647,9 @@
     <string name="key_ctrl_alt_del">Ctrl+Alt+Del</string>
     <string name="key_print_screen">PrtSc</string>
     <string name="key_escape">Esc</string>
+    <string name="key_enter">Enter</string>
+    <string name="key_space">Space</string>
+    <string name="key_backspace">Backspace</string>
     <string name="key_tab">Tab</string>
     <string name="key_home">Home</string>
     <string name="key_end">End</string>

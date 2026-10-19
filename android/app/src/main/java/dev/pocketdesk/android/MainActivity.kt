@@ -228,6 +228,17 @@ class MainActivity : ComponentActivity() {
             captured = dev.pocketdesk.android.stream.CapturedMouse.captured,
         )
 
+    // E4: a game controller's keys and sticks go to the session's gamepad
+    // first, while a session takes one. Activity.dispatchKeyEvent is the
+    // framework's public method; androidx only marks its own override of it
+    // restricted, and a controller's keys must be seen before any view's.
+    @android.annotation.SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean =
+        dev.pocketdesk.android.stream.ConnectedGamepad.key(event) || super.dispatchKeyEvent(event)
+
+    override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean =
+        dev.pocketdesk.android.stream.ConnectedGamepad.motion(event) || super.dispatchGenericMotionEvent(event)
+
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean =
         mouseKeySwallowed(keyCode, event) || super.onKeyDown(keyCode, event)
 

@@ -137,6 +137,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             TrackpadSpeed()
             PenPressure()
             SettingSwitch(
+                stringResource(R.string.settings_gamepad_controller),
+                stringResource(R.string.settings_gamepad_controller_summary),
+                Prefs.gamepadController(context),
+                { Prefs.setGamepadController(context, it) },
+            )
+            SettingSwitch(
                 stringResource(R.string.settings_show_driving),
                 stringResource(R.string.settings_show_driving_summary),
                 Prefs.showDriving(context),

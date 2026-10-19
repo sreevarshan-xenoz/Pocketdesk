@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-611 open items.
+617 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 357 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 361 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 42 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
 | A phone with a SIM | 21 |
 | A second phone | 6 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 5 |
-| A Linux desktop (the Azure VM serves for some) | 86 |
+| A Linux desktop (the Azure VM serves for some) | 87 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 47 |
 
@@ -730,6 +730,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A pinch while in Pen lifts the pen and zooms the view, and the stroke does not go on after it.
 - Pen is not offered on a computer from before E3, and a session that meets one again goes back to Direct touch.
 
+**123. A gamepad on the phone (E4)**
+
+- Closing it (× or Back) with a button held lets the button go.
+- A game (one that takes Enter, the arrows and Space) by hand.
+- A real controller connected to the phone (none here): buttons, D-pad or hat, both sticks; Settings off leaves it to Android.
+- Two buttons at once, and a stick held while pressing a button.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -901,6 +908,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **122. The phone as a pen (E3)**
 
 - A stylus (the A71 has none): hover moves the cursor without drawing, tilt and the side button reach the app.
+
+**123. A gamepad on the phone (E4)**
+
+- The on-screen gamepad from the A71 into a scratch window that logs keys: each button's key down and up once, the D-pad's arrows, the left stick moving the pointer, the right stick scrolling.
 
 ## A phone with a SIM
 
@@ -1320,6 +1331,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **122. The phone as a pen (E3)**
 
 - Linux: the uinput tablet (Krita, or `libinput debug-events` showing a tablet tool), and the mouse fallback without uinput.
+
+**123. A gamepad on the phone (E4)**
+
+- Linux.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

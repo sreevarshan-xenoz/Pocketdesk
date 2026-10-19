@@ -1902,6 +1902,15 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] Control moving to another phone mid-stroke lifts the pen.
 - [ ] Linux: the uinput tablet (Krita, or `libinput debug-events` showing a tablet tool), and the mouse fallback without uinput.
 
+## 123. A gamepad on the phone (E4)
+
+- [ ] The on-screen gamepad from the A71 into a scratch window that logs keys: each button's key down and up once, the D-pad's arrows, the left stick moving the pointer, the right stick scrolling.
+- [ ] Closing it (× or Back) with a button held lets the button go.
+- [ ] A game (one that takes Enter, the arrows and Space) by hand.
+- [ ] A real controller connected to the phone (none here): buttons, D-pad or hat, both sticks; Settings off leaves it to Android.
+- [ ] Two buttons at once, and a stick held while pressing a button.
+- [ ] Linux.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

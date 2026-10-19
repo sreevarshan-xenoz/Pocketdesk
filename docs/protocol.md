@@ -265,7 +265,7 @@ Every `kdeconnect.pocketdesk.*` packet carries `"llVersion": 1` (`kdeconnect.rs`
 | 2 | `MouseScroll` | Scroll amount | Injected; Input |
 | 3 | `KeyEvent` | evdev code, pressed | Injected; Input |
 | 4 | `Text` | UTF-8 string | Injected; Input |
-| 5 | `Gamepad` | Button mask | Injected; Input |
+| 5 | `Gamepad` | Six axes i16 (sticks, triggers) and a button mask | Injected as keys and the mouse (A Enter, B Esc, X Space, Y Tab, LB/RB Page Up/Down, Select Backspace, Start a click, the D-pad the arrows, the left stick the mouse, the right the wheel); Input |
 | 6 | `MouseMoveAbs` | x, y normalized u16 | Injected; Input |
 | 7 | `RequestKeyframe` | — | Control |
 | 8 | `WindowCrop` | Rectangle and window address | Control |

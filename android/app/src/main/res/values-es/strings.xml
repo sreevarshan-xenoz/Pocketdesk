@@ -58,6 +58,8 @@
     <string name="pen_pressure_soft">Suave</string>
     <string name="pen_pressure_even">Normal</string>
     <string name="pen_pressure_firm">Firme</string>
+    <string name="settings_gamepad_controller">Mando conectado al ordenador</string>
+    <string name="settings_gamepad_controller_summary">Un mando conectado a este teléfono juega en el ordenador durante una sesión: A es Intro, B Esc, X Espacio, Y Tab, los gatillos superiores Re Pág y Av Pág, Select Retroceso, Start un clic, la palanca izquierda el ratón y la derecha la rueda</string>
     <string name="settings_system">Sistema</string>
     <string name="settings_about">Acerca de</string>
     <string name="app_version">Versión %1$s</string>
@@ -120,6 +122,11 @@
     <string name="row_quality">Calidad</string>
     <string name="row_window">Ventana</string>
     <string name="row_monitor">Monitor</string>
+    <string name="row_gamepad">Mando</string>
+    <string name="gamepad_close">Cerrar el mando</string>
+    <string name="gamepad_click">Clic</string>
+    <string name="gamepad_mouse">Ratón</string>
+    <string name="gamepad_scroll">Desplazar</string>
     <string name="row_pane">Distribución</string>
     <string name="row_clipboard">Sincronizar portapapeles</string>
     <string name="row_history">Historial del portapapeles</string>
@@ -645,6 +652,9 @@
     <string name="key_ctrl_alt_del">Ctrl+Alt+Supr</string>
     <string name="key_print_screen">Impr Pant</string>
     <string name="key_escape">Esc</string>
+    <string name="key_enter">Intro</string>
+    <string name="key_space">Espacio</string>
+    <string name="key_backspace">Retroceso</string>
     <string name="key_tab">Tab</string>
     <string name="key_home">Inicio</string>
     <string name="key_end">Fin</string>
