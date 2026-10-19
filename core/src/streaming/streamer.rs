@@ -93,6 +93,17 @@ impl Drop for CastEnded {
     }
 }
 
+/// What a screen session's ready stream says this computer takes (E3): a
+/// pen only for a phone whose input is taken (E3 review: one in view-only
+/// was offered a pen whose every stroke was dropped).
+fn screen_feature_byte(input: bool) -> u8 {
+    let mut byte = super::client::SCREEN_FEATURES_SAID;
+    if input {
+        byte |= super::client::SCREEN_FEATURE_PEN;
+    }
+    byte
+}
+
 /// Whether a session without a picture drops `packet`: it is about a
 /// picture, or a sound the session does not have. A remote (T10i) has no
 /// sound; a sound session (N5) is the computer's mic, so it keeps the mic.
@@ -611,9 +622,7 @@ impl StreamingServer {
                         timestamp_us: 0,
                     };
                     let mut said = header.as_bytes().to_vec();
-                    said.push(
-                        super::client::SCREEN_FEATURES_SAID | super::client::SCREEN_FEATURE_PEN,
-                    );
+                    said.push(screen_feature_byte(!force_view_only));
                     if let Err(e) = ready.write_all(&said).await {
                         debug!(error = %e, "Could not say what this computer takes");
                     }
@@ -2504,6 +2513,20 @@ mod tests {
         assert!(claim.cast);
         assert!(claim.input_only, "a cast is sent no picture");
         assert_eq!(claim.device_id.as_deref(), Some("device-c1"));
+    }
+
+    #[test]
+    fn a_pen_is_offered_only_to_a_phone_whose_input_is_taken() {
+        use super::super::client::{SCREEN_FEATURE_PEN, screen_features};
+        assert_eq!(
+            screen_features(&[screen_feature_byte(true)]) & SCREEN_FEATURE_PEN,
+            SCREEN_FEATURE_PEN
+        );
+        assert_eq!(
+            screen_features(&[screen_feature_byte(false)]) & SCREEN_FEATURE_PEN,
+            0,
+            "said, and no pen"
+        );
     }
 
     #[test]
