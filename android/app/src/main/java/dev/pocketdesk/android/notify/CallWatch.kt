@@ -26,6 +26,10 @@ class CallWatch(private val ctx: Context) {
 
     private var serial = 0L
     private var mutedByUs = false
+
+    /** Whether the listener is registered: [start] may run again. */
+    @Volatile
+    private var registered = false
     private val telephony = ctx.getSystemService(TelephonyManager::class.java)
 
     @Suppress("DEPRECATION") // TelephonyCallback gives no number; this, with the call log permission, does.
@@ -39,17 +43,23 @@ class CallWatch(private val ctx: Context) {
         }
     }
 
-    /** Listen, when the switch is on and the phone's state may be read. */
+    /**
+     * Listen, when the switch is on and the phone's state may be read, if
+     * not listening yet. Called at the listener's start and again on its
+     * ticks: the permission is usually granted while it runs (F5 review).
+     */
     @Suppress("DEPRECATION")
     fun start() {
-        if (!granted(ctx, Manifest.permission.READ_PHONE_STATE)) return
+        if (registered || !Prefs.callsOn(ctx) || !granted(ctx, Manifest.permission.READ_PHONE_STATE)) return
         runCatching { telephony?.listen(listener, PhoneStateListener.LISTEN_CALL_STATE) }
+            .onSuccess { registered = true }
             .onFailure { Log.w(TAG, "could not listen to calls", it) }
     }
 
     @Suppress("DEPRECATION")
     fun stop() {
         runCatching { telephony?.listen(listener, PhoneStateListener.LISTEN_NONE) }
+        registered = false
     }
 
     private fun rang(number: String?) {
