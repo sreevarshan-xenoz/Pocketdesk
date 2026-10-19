@@ -484,7 +484,7 @@ impl InputPacket {
                 Ok(InputPacket::KeyEvent { key, pressed })
             }
             TAG_PEN => {
-                anyhow::ensure!(data.len() >= 10, "Pen packet too short");
+                anyhow::ensure!(data.len() == 10, "Pen packet is not 10 bytes");
                 let tilt = |b: u8| (b as i8).clamp(-PEN_MAX_TILT, PEN_MAX_TILT);
                 Ok(InputPacket::Pen(PenSample {
                     x_norm: u16::from_le_bytes(data[1..3].try_into().unwrap()),
@@ -641,6 +641,9 @@ mod tests {
             other => panic!("wrong variant: {other:?}"),
         }
         assert!(InputPacket::decode(&data[..9]).is_err(), "short");
+        let mut long = data.clone();
+        long.push(0);
+        assert!(InputPacket::decode(&long).is_err(), "exactly ten bytes");
     }
 
     #[test]
