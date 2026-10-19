@@ -93,30 +93,46 @@ pub(crate) fn parse_meminfo(text: &str) -> Option<(u64, u64)> {
     Some((total.saturating_sub(available), total))
 }
 
-/// `df -kP`'s disks: real filesystems (`/dev/…`), each mount point once.
+/// `df -kP`'s disks: real filesystems (`/dev/…`), each device once, at
+/// its shortest mount point (a btrfs subvolume or a bind mount is the same
+/// device again), leaving out what is not fixed: optical drives, zram and
+/// what is mounted under `/media` or `/run/media` (a USB stick).
 // Linux reads it; the tests hold it on every system.
 #[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn parse_df(text: &str) -> Vec<Disk> {
-    let mut disks: Vec<Disk> = Vec::new();
+    let mut found: Vec<(String, Disk)> = Vec::new();
     for line in text.lines().skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 6 || !parts[0].starts_with("/dev/") || parts[0].starts_with("/dev/loop") {
+        if parts.len() < 6 {
+            continue;
+        }
+        let device = parts[0];
+        if !device.starts_with("/dev/")
+            || ["/dev/loop", "/dev/sr", "/dev/zram"]
+                .iter()
+                .any(|p| device.starts_with(p))
+        {
+            continue;
+        }
+        let mount = parts[5..].join(" ");
+        if mount.starts_with("/media/") || mount.starts_with("/run/media/") {
             continue;
         }
         let (Ok(total_kb), Ok(used_kb)) = (parts[1].parse::<u64>(), parts[2].parse::<u64>()) else {
             continue;
         };
-        let mount = parts[5..].join(" ");
-        if disks.iter().any(|d| d.name == mount) {
-            continue;
-        }
-        disks.push(Disk {
+        let disk = Disk {
             name: mount,
             used: used_kb * 1024,
             total: total_kb * 1024,
-        });
+        };
+        match found.iter_mut().find(|(d, _)| d == device) {
+            Some((_, kept)) if disk.name.len() < kept.name.len() => *kept = disk,
+            Some(_) => {}
+            None => found.push((device.to_string(), disk)),
+        }
     }
-    disks
+    found.into_iter().map(|(_, disk)| disk).collect()
 }
 
 /// `/proc/uptime`'s first number, in whole seconds.
@@ -347,11 +363,17 @@ mod tests {
                   tmpfs              8000000         0   8000000       0% /dev/shm\n\
                   /dev/loop3          65536     65536         0     100% /snap/core/1\n\
                   /dev/nvme0n1p1     1048576    262144    786432      25% /boot/efi\n\
-                  /dev/sdb1         10000000   5000000   5000000      50% /media/my disk\n";
+                  /dev/sdb1         10000000   5000000   5000000      50% /media/my disk\n\
+                  /dev/nvme0n1p2   488281250 244140625 244140625      50% /home\n\
+                  /dev/sr0             60000     60000         0     100% /mnt/cd\n\
+                  /dev/zram0         8000000         0   8000000       0% /zram\n\
+                  /dev/sdc1         20000000   1000000  19000000       5% /data disk\n";
         let disks = parse_df(df);
+        // The root's subvolume at /home is the same device; the stick
+        // under /media, the CD and zram are not fixed disks.
         assert_eq!(
             disks.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
-            vec!["/", "/boot/efi", "/media/my disk"]
+            vec!["/", "/boot/efi", "/data disk"]
         );
         assert_eq!(disks[0].total, 488_281_250 * 1024);
         assert_eq!(disks[0].used, 244_140_625 * 1024);
