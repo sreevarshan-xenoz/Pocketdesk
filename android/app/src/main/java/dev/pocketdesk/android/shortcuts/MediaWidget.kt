@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import android.text.format.DateUtils
 import android.view.View
 import android.widget.RemoteViews
@@ -61,13 +62,24 @@ class MediaWidget : AppWidgetProvider() {
 
     /** Send [command] when there is one, then ask what plays; only the newest ask writes. */
     private fun ask(app: Context, host: HostStore.Host, command: String?) {
-        val ask = generation.incrementAndGet()
-        asking = true
+        // Taken with the flag at once, so an older ask's end never clears it (G5 review).
+        val ask = synchronized(generation) {
+            asking = true
+            generation.incrementAndGet()
+        }
+        val started = SystemClock.elapsedRealtime()
         redrawAll(app)
         val noAnswer = {
             finish(app, host.address, ask) { Kept.failed(app, host.address, app.getString(R.string.deck_widget_no_answer)) }
         }
-        WidgetAsk.bounded(this, "media-widget", onTimeout = noAnswer) {
+        // A worker that threw never leaves "Asking…" up (G5 review).
+        val ended = {
+            val stuck = synchronized(generation) {
+                (generation.get() == ask && asking).also { if (it) asking = false }
+            }
+            if (stuck) redrawAll(app)
+        }
+        WidgetAsk.bounded(this, "media-widget", onEnd = ended, onTimeout = noAnswer) {
             if (command != null) {
                 val sent = WidgetAsk.ask(app) { audio(host, JSONObject().put("action", "mediaControl").put("command", command)) }
                 val refusal = sent.fold({ refusal(it) }, { app.plainErrorText(it.message) })
@@ -75,7 +87,12 @@ class MediaWidget : AppWidgetProvider() {
                     finish(app, host.address, ask) { Kept.failed(app, host.address, refusal) }
                     return@bounded
                 }
-                // The player takes a moment to say what changed.
+                // The player takes a moment to say what changed; a command that
+                // took most of the wait leaves the reading to ↻ (G5 review).
+                if (SystemClock.elapsedRealtime() - started > READ_AFTER_MS) {
+                    finish(app, host.address, ask) {}
+                    return@bounded
+                }
                 Thread.sleep(SETTLE_MS)
             }
             val answer = WidgetAsk.ask(app) { audio(host, JSONObject().put("action", "media")) }
@@ -170,7 +187,10 @@ class MediaWidget : AppWidgetProvider() {
         private const val ACTION_PRESS = "dev.pocketdesk.android.action.MEDIA_WIDGET_PRESS"
         private const val EXTRA_COMPUTER = "computer"
         private const val EXTRA_COMMAND = "command"
-        private const val SETTLE_MS = 400L
+        private const val SETTLE_MS = 300L
+
+        /** Past this, a press does not read what plays: the 8 s wait would end first. */
+        private const val READ_AFTER_MS = 4_000L
 
         /** The newest ask in this process: only it keeps what it heard. */
         private val generation = AtomicLong()
