@@ -421,6 +421,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         val callsOn = Prefs.callsOn(this)
         // The permission is often granted while the listener runs (F5 review).
         if (callsOn) android.os.Handler(android.os.Looper.getMainLooper()).post { calls.start() }
+        calls.retry()
         if ((answering || callsOn) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {

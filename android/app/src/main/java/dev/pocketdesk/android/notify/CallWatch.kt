@@ -25,6 +25,7 @@ class CallWatch(private val ctx: Context) {
         private set
 
     private var serial = 0L
+    @Volatile
     private var mutedByUs = false
 
     /** Whether the listener is registered: [start] may run again. */
@@ -60,6 +61,7 @@ class CallWatch(private val ctx: Context) {
     fun stop() {
         runCatching { telephony?.listen(listener, PhoneStateListener.LISTEN_NONE) }
         registered = false
+        unmute()
     }
 
     private fun rang(number: String?) {
@@ -88,15 +90,39 @@ class CallWatch(private val ctx: Context) {
     }
 
     private fun ended() {
+        unmute()
         val shown = ringing ?: return
         ringing = null
-        if (mutedByUs) {
-            mutedByUs = false
-            runCatching { audio()?.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_UNMUTE, 0) }
+        cancelling = shown
+        PhoneLink.worker.execute { sendCancel() }
+    }
+
+    /**
+     * The note of a call that ended, until the computer has it taken away:
+     * a send refused while the link rests is tried again on the next tick
+     * (F5 review).
+     */
+    @Volatile
+    private var cancelling: String? = null
+
+    /** Take the ended call's note away on the computer; tried again by [retry]. */
+    private fun sendCancel() {
+        val shown = cancelling ?: return
+        if (PhoneLink.sendNow(ctx, "kdeconnect.notification", JSONObject().put("id", shown).put("isCancel", true))) {
+            if (cancelling == shown) cancelling = null
         }
-        PhoneLink.worker.execute {
-            PhoneLink.sendNow(ctx, "kdeconnect.notification", JSONObject().put("id", shown).put("isCancel", true))
-        }
+    }
+
+    /** Tried on the listener's ticks: a cancel that did not go. */
+    fun retry() {
+        if (cancelling != null) PhoneLink.worker.execute { sendCancel() }
+    }
+
+    /** Let the ring sound again if the computer silenced it. */
+    private fun unmute() {
+        if (!mutedByUs) return
+        mutedByUs = false
+        runCatching { audio()?.adjustStreamVolume(AudioManager.STREAM_RING, AudioManager.ADJUST_UNMUTE, 0) }
     }
 
     /** Do [act] for the call ringing now: null when done, else why not. */
@@ -106,7 +132,7 @@ class CallWatch(private val ctx: Context) {
             mutedByUs = true
         }.exceptionOrNull()?.let {
             Log.w(TAG, "could not silence the call", it)
-            "the phone would not silence it: allow Pocketdesk Do Not Disturb access on the phone"
+            "the phone would not silence it: Android lets no app but the phone's own silence some calls"
         }
         CallRule.Act.Decline -> if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.P) {
             "this phone's Android lets no app end calls"
