@@ -1066,9 +1066,16 @@ fun RemoteScreen(
         // dock is a permanent control surface, and fading the stream chrome
         // next to it would look broken. Nor on an upright phone, where the
         // chrome sits in the bands off the picture (PaneRule.chromeStays).
+        val chromeStaysHere = PaneRule.chromeStays(split, hinge, banded)
         val chromeSticky = showQuick || showPicker || showMonitorPicker ||
-            showPairing || showAudio || showHistory || PaneRule.chromeStays(split, hinge, banded) ||
+            showPairing || showAudio || showHistory || chromeStaysHere ||
             keyboardOpen || showSendText || showFiles
+        // Where the chrome stays, it is shown: it may have faded before (on
+        // its side, or in picture-in-picture), and staying hidden would leave
+        // empty bands and no controls.
+        LaunchedEffect(chromeStaysHere) {
+            if (chromeStaysHere) chromeVisible = true
+        }
         LaunchedEffect(chromeVisible, status, chromeSticky) {
             if (chromeVisible && !chromeSticky && status is StreamStatus.Up) {
                 delay(6_000)
