@@ -31,7 +31,8 @@ pub struct KdeConnectView {
     pending: Vec<Pending>,
     finding: bool,
     read_at: Option<Instant>,
-    notice: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
     /// Switches clicked, shown as clicked until the server has written
     /// them (or a while has passed): a read in between would flip them
     /// back (3c review).
@@ -117,6 +118,11 @@ pub fn rows(paired: &[KdeDevice], seen: &[SeenDevice]) -> Vec<Row> {
 }
 
 impl KdeConnectView {
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path, now_unix: u64) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
@@ -167,11 +173,11 @@ impl KdeConnectView {
                 match kdeconnect::ask_to_find(state_dir, now_unix, FIND_SECS) {
                     Ok(()) => {
                         self.finding = true;
-                        self.notice = Some(
-                            "Looking for a minute: open KDE Connect on the device.".to_string(),
+                        self.notice = crate::notice::Notice::working(
+                            "Looking for a minute: open KDE Connect on the device.",
                         );
                     }
-                    Err(e) => self.notice = Some(format!("Not asked: {e}")),
+                    Err(e) => self.notice = crate::notice::Notice::error(format!("Not asked: {e}")),
                 }
             }
         });
@@ -312,18 +318,15 @@ impl KdeConnectView {
                 }),
                 _ => None,
             };
-            self.notice = Some(match devices::request(state_dir, ask, now_unix) {
+            self.notice = match devices::request(state_dir, ask, now_unix) {
                 Ok(_) => {
                     self.held.extend(switch);
-                    said.to_string()
+                    crate::notice::Notice::done(said)
                 }
-                Err(e) => format!("Not asked: {e}"),
-            });
+                Err(e) => crate::notice::Notice::error(format!("Not asked: {e}")),
+            };
             // Read again soon, for the answer.
             self.read_at = None;
-        }
-        if let Some(notice) = &self.notice {
-            ui.label(RichText::new(notice).weak());
         }
     }
 }

@@ -21,7 +21,8 @@ pub struct ComputersView {
     link: String,
     /// The computer whose Unpair waits for its answer.
     forgetting: Option<String>,
-    notice: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
 }
 
 /// A link's state in words.
@@ -45,6 +46,11 @@ pub fn looks_like_link(text: &str) -> bool {
 }
 
 impl ComputersView {
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
@@ -56,11 +62,11 @@ impl ComputersView {
     fn ask(&mut self, state_dir: &Path, ask: ComputerAsk, now_unix: u64, done: &str) {
         match computers::request(state_dir, ask, now_unix) {
             Ok(_) => {
-                self.notice = Some(done.to_string());
+                self.notice = crate::notice::Notice::done(done);
                 // Read again soon, for the outcome.
                 self.read_at = None;
             }
-            Err(e) => self.notice = Some(format!("Not asked: {e}")),
+            Err(e) => self.notice = crate::notice::Notice::error(format!("Not asked: {e}")),
         }
     }
 
@@ -144,9 +150,6 @@ impl ComputersView {
                 now_unix,
                 "Unpaired here. Unpair this computer in the other one's Devices page too.",
             );
-        }
-        if let Some(notice) = &self.notice {
-            ui.label(RichText::new(notice).weak());
         }
     }
 }

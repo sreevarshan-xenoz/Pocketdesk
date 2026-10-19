@@ -93,10 +93,16 @@ pub struct MessagesView {
     messages: Vec<Message>,
     pending: Vec<ReplyRequest>,
     read_at: Option<Instant>,
-    notice: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
 }
 
 impl MessagesView {
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
@@ -106,14 +112,18 @@ impl MessagesView {
         self.read_at = Some(Instant::now());
     }
 
-    fn send(&mut self, state_dir: &Path, device: &str, address: &str, now_unix: u64) {
+    /// Queue the draft; whether it was queued.
+    fn send(&mut self, state_dir: &Path, device: &str, address: &str, now_unix: u64) -> bool {
         match sms::queue_reply(state_dir, device, address, &self.draft, now_unix) {
             Ok(_) => {
                 self.draft.clear();
-                self.notice = None;
                 self.read_at = None;
+                true
             }
-            Err(e) => self.notice = Some(e.to_string()),
+            Err(e) => {
+                self.notice = crate::notice::Notice::error(e.to_string());
+                false
+            }
         }
     }
 
@@ -229,17 +239,13 @@ impl MessagesView {
                         let ready = !self.new_number.trim().is_empty() && !self.draft.trim().is_empty();
                         if pane.add_enabled(ready, egui::Button::new("Send")).clicked() {
                             let number = self.new_number.trim().to_string();
-                            self.send(state_dir, &chosen, &number, now_unix);
-                            if self.notice.is_none() {
+                            if self.send(state_dir, &chosen, &number, now_unix) {
                                 self.selected = Some((chosen, number));
                                 self.new_number.clear();
                             }
                         }
                     }
                 }
-            }
-            if let Some(notice) = &self.notice {
-                pane.label(RichText::new(notice).color(crate::theme::bad(pane)));
             }
         });
     }

@@ -2116,6 +2116,18 @@ impl eframe::App for PocketdeskApp {
                     .show(ui, |ui| self.page(ui));
             }
         });
+        // What a page said happened becomes the one notice (E5).
+        let said = [
+            self.notes.take_notice(),
+            self.phone_files.take_notice(),
+            self.photos.take_notice(),
+            self.kdeconnect.take_notice(),
+            self.computers.take_notice(),
+            self.messages.take_notice(),
+        ];
+        if let Some(notice) = said.into_iter().flatten().last() {
+            self.notice = Some(notice);
+        }
         self.approval_prompt(ui);
         self.task_prompt(ui);
     }

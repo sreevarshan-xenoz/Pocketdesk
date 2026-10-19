@@ -53,7 +53,8 @@ pub struct PhotosView {
     pending: Vec<Pending>,
     /// A full image being decoded for Copy.
     copying: Option<mpsc::Receiver<Result<egui::ColorImage, String>>>,
-    notice: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
 }
 
 /// Where the photo `name` of `size` bytes (0 unknown) from `device`, asked
@@ -181,6 +182,11 @@ fn decode(path: PathBuf) -> mpsc::Receiver<Result<egui::ColorImage, String>> {
 }
 
 impl PhotosView {
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_none_or(|t| t.elapsed() >= REFRESH) {
             self.kept = store::read(state_dir);
@@ -192,7 +198,7 @@ impl PhotosView {
         match store::request(state_dir, device, ask, now_unix) {
             Ok(_) => true,
             Err(e) => {
-                self.notice = Some(format!("Could not ask the phone: {e}"));
+                self.notice = crate::notice::Notice::error(format!("Could not ask the phone: {e}"));
                 false
             }
         }
@@ -211,10 +217,9 @@ impl PhotosView {
                 self.waiting = None;
             } else if now_unix.saturating_sub(asked) > ANSWER_SECS {
                 self.waiting = None;
-                self.notice = Some(
+                self.notice = crate::notice::Notice::error(
                     "The phone did not answer. On the phone, turn on Settings, \"Recent photos on \
-                     the computer\"; here, Files must be on for it in Devices."
-                        .to_string(),
+                     the computer\"; here, Files must be on for it in Devices.",
                 );
             }
         }
@@ -227,15 +232,13 @@ impl PhotosView {
             };
             if ui.button(label).clicked() && self.ask(state_dir, phone, Ask::List, now_unix) {
                 self.waiting = Some((phone.to_string(), now_unix));
-                self.notice = None;
+                self.notice =
+                    crate::notice::Notice::working("Asked the phone for its recent photos…");
             }
             if self.waiting.as_ref().is_some_and(|(p, _)| p == phone) {
                 ui.spinner();
             }
         });
-        if let Some(notice) = &self.notice {
-            ui.label(RichText::new(notice).italics());
-        }
         let Some(kept) = kept else {
             return;
         };
@@ -329,7 +332,7 @@ impl PhotosView {
             return;
         }
         if self.ask(state_dir, phone, Ask::Fetch(id), now_unix) {
-            self.notice = Some(format!("Asked the phone for {name}…"));
+            self.notice = crate::notice::Notice::working(format!("Asked the phone for {name}…"));
             self.pending.push(Pending {
                 device: phone.to_string(),
                 name,
@@ -343,15 +346,18 @@ impl PhotosView {
     /// Do what a photo was fetched for, now it is at `path`.
     fn then(&mut self, path: PathBuf, name: &str, then: Then) {
         match then {
-            Then::Save => self.notice = Some(format!("Saved {name} to {}.", path.display())),
+            Then::Save => {
+                self.notice =
+                    crate::notice::Notice::done(format!("Saved {name} to {}.", path.display()))
+            }
             Then::Open => {
                 self.notice = match open_file(&path) {
-                    Ok(()) => None,
-                    Err(e) => Some(format!("Could not open {name}: {e}")),
+                    Ok(()) => crate::notice::Notice::done(format!("Opened {name}.")),
+                    Err(e) => crate::notice::Notice::error(format!("Could not open {name}: {e}")),
                 };
             }
             Then::Copy => {
-                self.notice = Some(format!("Copying {name}…"));
+                self.notice = crate::notice::Notice::working(format!("Copying {name}…"));
                 self.copying = Some(decode(path));
             }
         }
@@ -378,7 +384,7 @@ impl PhotosView {
                 match path {
                     Some(path) => self.then(path, &p.name, p.then),
                     None => {
-                        self.notice = Some(format!(
+                        self.notice = crate::notice::Notice::error(format!(
                             "{} did not arrive. Is the phone connected, with Recent photos on?",
                             p.name
                         ))
@@ -391,11 +397,11 @@ impl PhotosView {
             match rx.try_recv() {
                 Ok(Ok(image)) => {
                     ctx.copy_image(image);
-                    self.notice = Some("Copied.".to_string());
+                    self.notice = crate::notice::Notice::done("Copied.");
                     self.copying = None;
                 }
                 Ok(Err(e)) => {
-                    self.notice = Some(e);
+                    self.notice = crate::notice::Notice::error(e);
                     self.copying = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {

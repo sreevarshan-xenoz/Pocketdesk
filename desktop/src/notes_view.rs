@@ -21,7 +21,8 @@ pub struct NotesView {
     /// Each notification's reply being typed, by phone and key.
     drafts: HashMap<(String, String), String>,
     read_at: Option<Instant>,
-    notice: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
 }
 
 /// The notifications to list, newest first.
@@ -31,6 +32,11 @@ pub fn newest_first(mut notes: Vec<PhoneNote>) -> Vec<PhoneNote> {
 }
 
 impl NotesView {
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
@@ -56,11 +62,12 @@ impl NotesView {
             Ok(_) => {
                 // Queued: the server sends it within a minute, once the
                 // phone is connected.
-                self.notice = Some(format!("Queued {what} for {}", note.app));
+                self.notice =
+                    crate::notice::Notice::done(format!("Queued {what} for {}", note.app));
                 self.drafts
                     .remove(&(note.device_id.clone(), note.key.clone()));
             }
-            Err(e) => self.notice = Some(e.to_string()),
+            Err(e) => self.notice = crate::notice::Notice::error(e.to_string()),
         }
     }
 
@@ -73,9 +80,6 @@ impl NotesView {
     ) {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(REFRESH);
-        if let Some(notice) = &self.notice {
-            ui.label(RichText::new(notice).italics());
-        }
         if self.notes.is_empty() {
             ui.label(
                 RichText::new(

@@ -27,7 +27,8 @@ pub struct PhoneFilesView {
     phone: Option<String>,
     listings: BTreeMap<String, Kept>,
     read_at: Option<Instant>,
-    notice: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
     /// The phone and the time of the list request still waiting for an answer.
     waiting: Option<(String, u64)>,
     /// Where the server serves the phones' folders as a drive (D8), while
@@ -83,6 +84,11 @@ pub fn size_text(bytes: u64) -> String {
 }
 
 impl PhoneFilesView {
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
@@ -104,16 +110,16 @@ impl PhoneFilesView {
         match store::request(state_dir, phone, kind, root, &path, now_unix) {
             Ok(_) => {
                 self.waiting = (kind == Kind::List).then(|| (phone.to_string(), now_unix));
-                self.notice = Some(match kind {
-                    Kind::List => "Asked the phone…".to_string(),
-                    Kind::Fetch => format!(
+                self.notice = match kind {
+                    Kind::List => crate::notice::Notice::working("Asked the phone…"),
+                    Kind::Fetch => crate::notice::Notice::done(format!(
                         "Asked the phone to send {}; it arrives where received files land.",
                         path.last().map(String::as_str).unwrap_or("it")
-                    ),
-                });
+                    )),
+                };
                 self.read_at = None;
             }
-            Err(e) => self.notice = Some(format!("Not asked: {e}")),
+            Err(e) => self.notice = crate::notice::Notice::error(format!("Not asked: {e}")),
         }
     }
 
@@ -173,21 +179,17 @@ impl PhoneFilesView {
             match answered(asked_unix, kept_unix, now_unix) {
                 Some(true) => {
                     self.waiting = None;
-                    self.notice = None;
+                    self.notice = crate::notice::Notice::done("The phone answered.");
                 }
                 Some(false) => {
                     self.waiting = None;
-                    self.notice = Some(
+                    self.notice = crate::notice::Notice::error(
                         "The phone did not answer. Is it connected, with Files on in Devices, \
-                         and Pocketdesk allowed to run in the background on it?"
-                            .to_string(),
+                         and Pocketdesk allowed to run in the background on it?",
                     );
                 }
                 None => {}
             }
-        }
-        if let Some(notice) = &self.notice {
-            ui.label(RichText::new(notice).italics());
         }
         let kept = self.listings.get(&phone).cloned();
         let Some(Kept { listing, at_unix }) = kept else {
@@ -284,16 +286,13 @@ impl PhoneFilesView {
                     }
                 } else {
                     ui.label(&entry.name);
-                    ui.label(
-                        RichText::new(size_text(entry.size)).color(crate::theme::muted(ui)),
-                    );
+                    ui.label(RichText::new(size_text(entry.size)).color(crate::theme::muted(ui)));
                     if ui.small_button("Download").clicked() {
                         self.ask(state_dir, &phone, Kind::Fetch, root, path, now_unix);
                     }
                 }
             });
         }
-
     }
 }
 
