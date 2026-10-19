@@ -1874,12 +1874,14 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 
 ## 120. Answers that say how they went (E1)
 
-- [ ] With the throwaway chat app: a reply from the Notifications page reads "handed to the app".
-- [ ] The notification swiped away on the phone before the answer arrives: "not sent: the notification is gone from the phone", and a desktop notification.
-- [ ] Answering off on the phone: "answering is off on the phone".
-- [ ] The phone away for more than a minute: "the phone did not connect within a minute".
-- [ ] A phone from before E1: "sent, but no word from the phone" after a minute.
+- [x] With the throwaway chat app: a reply from the computer (an answer request as the Notifications page writes it) is kept as "handed", and the chat app logged the reply (2026-10-19, A71, by script).
+- [x] The notification gone (the reply cleared it) and answered again: not sent; the computer had already dropped it and said "the notification no longer offers that answer" (2026-10-19). The phone's own "gone from the phone", for an answer that overtakes the phone's word, is not reached this way.
+- [ ] A desktop notification for such a failure.
+- [x] Answering off on the phone (its Settings switch, the app running on): "answering is off on the phone" (2026-10-19).
+- [ ] The phone away for more than a minute, its notification still kept: "the phone did not connect within a minute". (Run 2026-10-19 with the listener off: the phone never sent the notification, so the answer was refused at once as no longer offered, before any wait.)
+- [ ] A phone from before E1: "sent, but no word from the phone" after a minute. Seen in passing 2026-10-19: an answer sent into a link the phone had just dropped (the app force-stopped) stays "sent", which the page shows as no word back.
 - [ ] From a toast (N3), the window hidden: a failure's desktop notification.
+
 ## 121. The tray on its own (E2)
 
 - [x] Windows: `scripts/memory_at_rest.ps1 -Tray`, the tray program at rest beside the server (2026-10-19: 2.1 MB private, 13 MB working set; the reliability spec's D7 section).
