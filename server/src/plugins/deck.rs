@@ -90,14 +90,32 @@ pub(crate) fn decide(
     Ok(action)
 }
 
-/// The key events for a combination: each key pressed in order, then all
-/// let go in reverse, so modifiers hold while the last key is tapped.
-pub(crate) fn key_events(codes: &[u16]) -> Vec<(u16, bool)> {
-    codes
-        .iter()
-        .map(|c| (*c, true))
-        .chain(codes.iter().rev().map(|c| (*c, false)))
-        .collect()
+/// Press a combination through `inject` (a code, pressed or not): each key
+/// pressed in order, then those that went down let go in reverse, so
+/// modifiers hold while the last key is tapped. A press that fails stops
+/// the presses, and every key already down is still let go, a failed
+/// release not stopping the rest: no modifier is left held.
+pub(crate) fn press_combination(
+    codes: &[u16],
+    inject: &mut dyn FnMut(u16, bool) -> std::result::Result<(), String>,
+) -> std::result::Result<(), String> {
+    let mut down = Vec::with_capacity(codes.len());
+    let mut failed = None;
+    for code in codes {
+        match inject(*code, true) {
+            Ok(()) => down.push(*code),
+            Err(why) => {
+                failed = Some(why);
+                break;
+            }
+        }
+    }
+    for code in down.iter().rev() {
+        if let Err(why) = inject(*code, false) {
+            failed.get_or_insert(why);
+        }
+    }
+    failed.map_or(Ok(()), Err)
 }
 
 /// Whether `device` may press again at `now`; counts it.
@@ -156,11 +174,19 @@ impl DeckPlugin {
                     return Err("another phone is driving the computer".into());
                 }
                 let codes: Vec<u16> = codes.iter().map(|c| c.0).collect();
-                let packets: Vec<InputPacket> = key_events(&codes)
-                    .into_iter()
-                    .map(|(key, pressed)| InputPacket::KeyEvent { key, pressed })
-                    .collect();
-                self.inject(&packets).await
+                let mut slot = self.injector.lock().await;
+                if slot.is_none() {
+                    *slot = Some(
+                        InputInjector::new()
+                            .map_err(|e| format!("the computer cannot type here: {e}"))?,
+                    );
+                }
+                let injector = slot.as_mut().expect("made above");
+                press_combination(&codes, &mut |key, pressed| {
+                    injector
+                        .handle_input_packet(&InputPacket::KeyEvent { key, pressed })
+                        .map_err(|e| format!("the keys did not go through: {e}"))
+                })
             }
             DeckAction::Text(text) => {
                 if !crate::driving::may_drive(device) {
@@ -355,18 +381,56 @@ mod tests {
         );
     }
 
+    /// Runs a combination against a fake injector that fails where told,
+    /// returning what it was asked to do.
+    fn run(codes: &[u16], fail: &[(u16, bool)]) -> (Vec<(u16, bool)>, bool) {
+        let mut seen = Vec::new();
+        let outcome = press_combination(codes, &mut |key, pressed| {
+            seen.push((key, pressed));
+            if fail.contains(&(key, pressed)) {
+                Err(format!("{key} failed"))
+            } else {
+                Ok(())
+            }
+        });
+        (seen, outcome.is_ok())
+    }
+
     #[test]
     fn a_combination_presses_in_order_and_lets_go_in_reverse() {
         assert_eq!(
-            key_events(&[29, 42, 50]),
-            vec![
-                (29, true),
-                (42, true),
-                (50, true),
-                (50, false),
-                (42, false),
-                (29, false)
-            ]
+            run(&[29, 42, 50], &[]),
+            (
+                vec![
+                    (29, true),
+                    (42, true),
+                    (50, true),
+                    (50, false),
+                    (42, false),
+                    (29, false)
+                ],
+                true
+            )
+        );
+    }
+
+    #[test]
+    fn a_failed_press_still_lets_go_of_every_key_down() {
+        // Ctrl and Shift went down, M failed: both are let go, in reverse.
+        assert_eq!(
+            run(&[29, 42, 50], &[(50, true)]),
+            (
+                vec![(29, true), (42, true), (50, true), (42, false), (29, false)],
+                false
+            )
+        );
+        // A release that fails does not stop the others.
+        assert_eq!(
+            run(&[29, 50], &[(50, false)]),
+            (
+                vec![(29, true), (50, true), (50, false), (29, false)],
+                false
+            )
         );
     }
 
