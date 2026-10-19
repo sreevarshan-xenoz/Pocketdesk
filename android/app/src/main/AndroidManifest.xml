@@ -240,6 +240,18 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_state_info" />
         </receiver>
+        <!-- G3: the last computer's deck on the home screen. -->
+        <receiver
+            android:name=".shortcuts.DeckWidget"
+            android:exported="false"
+            android:label="@string/deck_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_deck_info" />
+        </receiver>
         <!-- N5b: incoming texts forwarded to the computer, once the user
              turns it on in Settings and grants RECEIVE_SMS. -->
         <receiver

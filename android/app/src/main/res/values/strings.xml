@@ -827,4 +827,9 @@
     <string name="state_widget_not_shared">This computer does not share how it is doing</string>
     <string name="settings_state_widget_auto">State widget refreshes by itself</string>
     <string name="settings_state_widget_auto_summary">The home-screen widget asks the computer how it is doing every 30 minutes at most, never over mobile data. Off, it asks only when tapped.</string>
+    <string name="deck_widget_name">Pocketdesk: deck</string>
+    <string name="deck_widget_description">Your last computer\'s deck buttons, pressed from the home screen.</string>
+    <string name="deck_widget_refresh">Ask for the buttons again</string>
+    <string name="deck_widget_refresh_glyph" translatable="false">↻</string>
+    <string name="deck_widget_said">%1$s: %2$s</string>
 </resources>

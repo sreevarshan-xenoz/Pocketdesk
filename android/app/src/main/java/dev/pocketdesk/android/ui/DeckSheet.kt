@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.shortcuts.DeckWidget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -61,6 +62,8 @@ fun DeckSheet(address: String, controlPort: Int, computer: String, onDismiss: ()
 
     LaunchedEffect(address, controlPort) {
         withContext(Dispatchers.IO) { RustCore.listDeck(address, controlPort) }
+            // G3: the home screen's deck shows what the sheet heard.
+            .onSuccess { json -> runCatching { Deck.parse(json) }.onSuccess { DeckWidget.keep(context, address, json) } }
             .mapCatching { Deck.parse(it) }
             .onSuccess { buttons = it }
             .onFailure { failure = context.plainErrorText(it.message) }
