@@ -144,6 +144,8 @@ pub struct PocketdeskApp {
     /// The last action's outcome, shown under the tabs.
     notice: Option<crate::notice::Notice>,
     quitting: bool,
+    /// When this window started: a tray's Quit from before it is not for it (E2 review).
+    started_unix: u64,
     pair: PairView,
     /// Loaded when the Settings tab opens; an unreadable file is shown, not
     /// overwritten.
@@ -222,6 +224,7 @@ impl PocketdeskApp {
             renaming: std::collections::HashMap::new(),
             notice: None,
             quitting: false,
+            started_unix: now_unix(),
             pair: PairView::default(),
             settings: None,
             job: None,
@@ -462,9 +465,11 @@ impl PocketdeskApp {
         ctx: &egui::Context,
         open: pocketdesk_core::local::app_open::OpenRequest,
     ) {
-        if open.page == "quit" {
-            self.quitting = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        if open.page == pocketdesk_core::local::app_open::QUIT {
+            if open.quits(self.started_unix) {
+                self.quitting = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
             return;
         }
         if let Some(tab) = Tab::from_key(&open.page) {

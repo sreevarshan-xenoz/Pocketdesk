@@ -118,7 +118,12 @@ fn act(state_dir: &Path, action: TrayAction) -> bool {
         TrayAction::SendFile(id) => open_window(state_dir, "files", Some(id)),
         TrayAction::Quit => {
             // The window goes too, when it runs (E2).
-            let _ = pocketdesk_core::local::app_open::request(state_dir, "quit", None, now);
+            let _ = pocketdesk_core::local::app_open::request(
+                state_dir,
+                pocketdesk_core::local::app_open::QUIT,
+                None,
+                now,
+            );
             return false;
         }
     };

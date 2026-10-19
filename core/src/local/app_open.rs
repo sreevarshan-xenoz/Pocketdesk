@@ -13,6 +13,9 @@ use super::paths::APP_OPEN_FILE;
 /// How long a request waits for the window.
 pub const TTL_SECS: u64 = 10;
 
+/// The page that asks the window to close (the tray's Quit).
+pub const QUIT: &str = "quit";
+
 /// Which page to open, by its key (the window's `Tab::from_key`), and the
 /// phone it is for (Files' send-to), if any.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +24,15 @@ pub struct OpenRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone: Option<String>,
     pub created_unix: u64,
+}
+
+impl OpenRequest {
+    /// Whether this asks a window started at `window_started_unix` to
+    /// close: a Quit written before it started was for a window gone since
+    /// (E2 review), and must not close the next one.
+    pub fn quits(&self, window_started_unix: u64) -> bool {
+        self.page == QUIT && self.created_unix >= window_started_unix
+    }
 }
 
 /// Ask the window to open `page` (for `phone`).
@@ -73,5 +85,22 @@ mod tests {
         request(&dir, "pair", None, 200).unwrap();
         assert_eq!(take(&dir, 100), None, "from the future");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_quit_closes_only_a_window_that_was_open_when_it_was_asked() {
+        let quit = OpenRequest {
+            page: QUIT.into(),
+            phone: None,
+            created_unix: 100,
+        };
+        assert!(quit.quits(90), "the window ran then");
+        assert!(quit.quits(100));
+        assert!(!quit.quits(101), "a window started after the Quit");
+        let files = OpenRequest {
+            page: "files".into(),
+            ..quit
+        };
+        assert!(!files.quits(90));
     }
 }
