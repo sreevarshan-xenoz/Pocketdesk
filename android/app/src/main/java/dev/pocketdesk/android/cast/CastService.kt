@@ -79,6 +79,9 @@ class CastService : Service() {
 
     private val main = Handler(Looper.getMainLooper())
     private var address = ""
+
+    /** The computer as the owner named it, else as it calls itself (E6: not its address). */
+    private val shown: String get() = dev.pocketdesk.android.HostStore.shownName(this, address)
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
     private var encoder: CastEncoder? = null
@@ -111,7 +114,7 @@ class CastService : Service() {
         createChannel()
         // The foreground service's type must be in place before the
         // projection is taken (Android 14).
-        val notification = notification(getString(R.string.cast_connecting, address))
+        val notification = notification(getString(R.string.cast_connecting, shown))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
@@ -151,10 +154,10 @@ class CastService : Service() {
             }
         if (finished) return
         connected.exceptionOrNull()?.let {
-            fail(getString(R.string.cast_failed, address, plainErrorText(it.message)))
+            fail(getString(R.string.cast_failed, shown, plainErrorText(it.message)))
             return
         }
-        update(getString(R.string.cast_waiting, address))
+        update(getString(R.string.cast_waiting, shown))
         var state = State.Waiting
         val since = SystemClock.elapsedRealtime()
         var showing = false
@@ -166,15 +169,15 @@ class CastService : Service() {
             val replaced = cast == "none" && state != State.Connecting
             state = RemoteSession.next(state, cast, closed.takeUnless { replaced })
             if (state == State.Waiting && SystemClock.elapsedRealtime() - since > WAIT_MS) {
-                fail(getString(R.string.cast_failed, address, getString(R.string.cast_no_answer)))
+                fail(getString(R.string.cast_failed, shown, getString(R.string.cast_no_answer)))
                 return
             }
             when (state) {
-                State.TooOld -> return fail(getString(R.string.cast_too_old, address))
+                State.TooOld -> return fail(getString(R.string.cast_too_old, shown))
                 State.Down -> {
                     if (replaced) return finish()
                     if (!showing || closed != null && closed != "session ended") {
-                        return fail(getString(R.string.cast_failed, address, reasonText(closed)))
+                        return fail(getString(R.string.cast_failed, shown, reasonText(closed)))
                     }
                     return finish()
                 }
@@ -182,7 +185,7 @@ class CastService : Service() {
                     if (!showing) {
                         showing = true
                         main.post(::startPicture)
-                        update(getString(R.string.cast_showing, address))
+                        update(getString(R.string.cast_showing, shown))
                         // C8: the computer may control the phone while it is shown.
                         control = dev.pocketdesk.android.control.ControlRunner(this) { on ->
                             if (!finished) {
@@ -221,7 +224,7 @@ class CastService : Service() {
         val made = runCatching { CastEncoder(width, height, ::encoderEnded) }
         val started = made.getOrElse {
             Log.w(TAG, "No encoder for the cast", it)
-            return fail(getString(R.string.cast_failed, address, plainErrorText(it.message)))
+            return fail(getString(R.string.cast_failed, shown, plainErrorText(it.message)))
         }
         encoder = started
         display =
@@ -238,7 +241,7 @@ class CastService : Service() {
                 )
             }.getOrElse {
                 Log.w(TAG, "No virtual display for the cast", it)
-                return fail(getString(R.string.cast_failed, address, plainErrorText(it.message)))
+                return fail(getString(R.string.cast_failed, shown, plainErrorText(it.message)))
             }
     }
 

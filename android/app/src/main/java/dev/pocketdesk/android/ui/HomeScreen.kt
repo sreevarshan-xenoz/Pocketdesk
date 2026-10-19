@@ -207,7 +207,7 @@ fun HomeScreen(
                 if (w.connect) {
                     onConnect(w.host)
                 } else {
-                    wakeSaid = resources.getString(R.string.wake_awake, w.host.address)
+                    wakeSaid = resources.getString(R.string.wake_awake, HostStore.shownName(context, w.host.address))
                 }
                 return@LaunchedEffect
             }
@@ -219,7 +219,7 @@ fun HomeScreen(
         } else {
             wakeSaid = resources.getString(
                 if (w.atHome) R.string.wake_no_answer else R.string.wake_sent,
-                w.host.address,
+                HostStore.shownName(context, w.host.address),
             )
         }
     }
@@ -403,7 +403,7 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        stringResource(R.string.wake_waking, w.host.address, wakingLeft),
+                        stringResource(R.string.wake_waking, HostStore.shownName(context, w.host.address), wakingLeft),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
@@ -446,7 +446,7 @@ fun HomeScreen(
     offeringWake?.let { host ->
         AlertDialog(
             onDismissRequest = { offeringWake = null },
-            title = { Text(stringResource(R.string.wake_offer_title, host.address)) },
+            title = { Text(stringResource(R.string.wake_offer_title, HostStore.shownName(context, host.address))) },
             text = { Text(stringResource(R.string.wake_offer_message)) },
             confirmButton = {
                 TextButton(

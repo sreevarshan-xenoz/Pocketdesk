@@ -74,7 +74,7 @@ private fun postLink(context: Context, address: String, url: String) {
     )
     val notification = Notification.Builder(context, CHANNEL_LINKS)
         .setSmallIcon(R.drawable.ic_stat_pocketdesk)
-        .setContentTitle(context.getString(R.string.link_from_computer, address))
+        .setContentTitle(context.getString(R.string.link_from_computer, dev.pocketdesk.android.HostStore.shownName(context, address)))
         .setContentText(url)
         .setContentIntent(pending)
         .setAutoCancel(true)
