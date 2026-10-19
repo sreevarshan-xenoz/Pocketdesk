@@ -12,6 +12,7 @@ pub mod cast;
 pub mod clip_history;
 pub mod computers;
 pub mod config;
+pub mod deck;
 pub mod device_keys;
 pub mod diagnostics;
 pub mod drive;

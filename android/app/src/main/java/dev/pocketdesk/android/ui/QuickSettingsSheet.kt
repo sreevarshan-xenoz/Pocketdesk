@@ -78,6 +78,7 @@ fun QuickSettingsSheet(
     onTypeClipboard: () -> Unit,
     onOpenFiles: () -> Unit,
     onOpenTasks: () -> Unit,
+    onOpenDeck: () -> Unit,
     micOn: Boolean,
     onSetMic: (Boolean) -> Unit,
     privacyGrab: Boolean,
@@ -155,6 +156,7 @@ fun QuickSettingsSheet(
             ActionRow(LlIcons.Clipboard, stringResource(R.string.row_type_clipboard), onTypeClipboard)
             OpenRow(LlIcons.Folder, stringResource(R.string.row_files), null, onOpenFiles)
             OpenRow(LlIcons.Play, stringResource(R.string.row_tasks), null, onOpenTasks)
+            OpenRow(LlIcons.Keyboard, stringResource(R.string.row_deck), null, onOpenDeck)
             ToggleRow(LlIcons.Mic, stringResource(R.string.row_mic), micOn, onSetMic)
 
             GroupHeader(stringResource(R.string.group_computer))

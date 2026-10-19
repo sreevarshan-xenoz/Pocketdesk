@@ -200,6 +200,7 @@ fun RemoteScreen(
     // F7b: the computer's files.
     var showFiles by remember { mutableStateOf(false) }
     var showTasks by remember { mutableStateOf(false) }
+    var showDeck by remember { mutableStateOf(false) }
     var sendTextNotice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(sendTextNotice) {
         sendTextNotice?.let {
@@ -1575,6 +1576,14 @@ fun RemoteScreen(
         RemoteFilesSheet(address = address, controlPort = controlPort, onDismiss = { showFiles = false })
     }
 
+    if (showDeck) {
+        DeckSheet(
+            address = address,
+            controlPort = controlPort,
+            computer = dev.pocketdesk.android.HostStore.shownName(context, address),
+            onDismiss = { showDeck = false },
+        )
+    }
     if (showTasks) {
         TasksSheet(address = address, controlPort = controlPort, onDismiss = { showTasks = false })
     }
@@ -1758,6 +1767,10 @@ fun RemoteScreen(
             onOpenTasks = {
                 showQuick = false
                 showTasks = true
+            },
+            onOpenDeck = {
+                showQuick = false
+                showDeck = true
             },
             micOn = micShare.on,
             onSetMic = { if (it) micShare.start() else micShare.stop() },

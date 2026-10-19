@@ -1659,6 +1659,10 @@ forged log line"
             // A computer's iroh key (2f): it holds itself to a paired
             // device's bound TLS key, on the home road.
             "kdeconnect.pocketdesk.wan_key",
+            // The deck (F1): the listing tells only labels and kinds, and a
+            // press is held to the phone's permission for its action.
+            "kdeconnect.pocketdesk.deck",
+            "kdeconnect.pocketdesk.deck_press",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(

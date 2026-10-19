@@ -162,6 +162,18 @@ async fn push(
         .map_err(|e| format!("could not send: {e}"))
 }
 
+/// Open a checked link from a phone's deck (F1) as a phone's own link is:
+/// in the browser with "Links from phones" opening them, else shown in a
+/// notification.
+pub(crate) fn open_or_show(url: &str) -> std::result::Result<(), String> {
+    if OPEN_LINKS.load(Ordering::Relaxed) {
+        open_detached(url)
+    } else {
+        show_link("Pocketdesk: a link from your phone's deck", url);
+        Ok(())
+    }
+}
+
 /// Open `url` on a thread of its own, never the phone's packet loop: a
 /// browser that is slow to start, or Windows asking which app to use, would
 /// hold it. A link that cannot be opened is shown instead.

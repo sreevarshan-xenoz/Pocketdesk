@@ -163,6 +163,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.gamepadController(context),
                 { Prefs.setGamepadController(context, it) },
             )
+            DeckColumns()
 
             SettingsHeader(stringResource(R.string.settings_files_links))
             SettingSwitch(
@@ -422,6 +423,21 @@ private fun PenPressure() {
         curves.indexOf(chosen),
         horizontal = 16.dp,
     ) { Prefs.setPenCurve(context, curves[it]) }
+}
+
+/** F1: how many of the computer's deck buttons a row holds. */
+@Composable
+private fun DeckColumns() {
+    val context = LocalContext.current
+    Prefs.observedVersion()
+    val choices = listOf(2, 3, 4)
+    SettingRow(stringResource(R.string.settings_deck_columns), stringResource(R.string.settings_deck_columns_summary))
+    ChoiceRow(
+        null,
+        choices.map { it.toString() },
+        choices.indexOf(dev.pocketdesk.android.ui.Deck.columns(Prefs.deckColumns(context))),
+        horizontal = 16.dp,
+    ) { Prefs.setDeckColumns(context, choices[it]) }
 }
 
 private fun appVersionName(context: android.content.Context): String =

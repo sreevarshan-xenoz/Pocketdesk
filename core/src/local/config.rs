@@ -175,6 +175,12 @@ pub struct Config {
     /// (`[[tasks]]`, ecosystem 1c).
     #[serde(default)]
     pub tasks: Vec<super::tasks::TaskSpec>,
+    /// Buttons a phone shows as its deck and presses (`[[deck]]`, F1).
+    #[serde(default)]
+    pub deck: Vec<super::deck::DeckButton>,
+    /// Phones may list and press the deck's buttons.
+    #[serde(default = "default_true")]
+    pub deck_enabled: bool,
     /// Publish this computer and its phones to Home Assistant through an
     /// MQTT broker (ecosystem 1e).
     #[serde(default)]
@@ -312,6 +318,8 @@ impl Default for Config {
             events_detail: super::events::EventsDetail::Metadata,
             hooks: std::collections::BTreeMap::new(),
             tasks: Vec::new(),
+            deck: Vec::new(),
+            deck_enabled: true,
             home_assistant: false,
             mqtt_broker: String::new(),
             mqtt_user: String::new(),
@@ -508,6 +516,8 @@ impl Config {
         "events_detail",
         "hooks",
         "tasks",
+        "deck",
+        "deck_enabled",
         "home_assistant",
         "mqtt_broker",
         "mqtt_user",
@@ -604,6 +614,28 @@ mod tests {
         let again = Config::load_from(&path).unwrap();
         assert!(!again.open_links);
         assert_eq!(again.hooks, hand.hooks);
+    }
+
+    #[test]
+    fn deck_buttons_are_saved_and_read_back() {
+        let path = temp("deck");
+        let mut config = Config::default();
+        assert!(config.deck_enabled, "the deck is on unless turned off");
+        config.deck.push(crate::local::deck::DeckButton {
+            label: "Mute mic".into(),
+            keys: Some("ctrl+shift+m".into()),
+            ..Default::default()
+        });
+        config.deck.push(crate::local::deck::DeckButton {
+            label: "Next".into(),
+            media: Some("next".into()),
+            ..Default::default()
+        });
+        config.deck_enabled = false;
+        config.save_to(&path).unwrap();
+        let again = Config::load_from(&path).unwrap();
+        assert_eq!(again.deck, config.deck);
+        assert!(!again.deck_enabled);
     }
 
     #[test]

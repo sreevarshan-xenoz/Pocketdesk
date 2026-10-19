@@ -1,6 +1,7 @@
 pub mod audio_control;
 pub mod battery;
 pub mod clipboard;
+pub mod deck;
 pub mod exec;
 pub mod file_browse;
 pub mod input;
@@ -89,5 +90,6 @@ pub fn register_all() -> PluginSet {
     registry.register(sms::SmsPlugin);
     registry.register(links::LinksPlugin::default());
     registry.register(tasks::TasksPlugin);
+    registry.register(deck::DeckPlugin);
     registry
 }

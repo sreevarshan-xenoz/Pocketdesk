@@ -52,6 +52,7 @@ object Prefs {
     private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
     private const val KEY_PEN_CURVE = "pen_curve"
     private const val KEY_GAMEPAD_CONTROLLER = "gamepad_controller"
+    private const val KEY_DECK_COLUMNS = "deck_columns"
 
     /** The trackpad speed slider's range and default (F3). */
     const val TRACKPAD_SENSITIVITY_MIN = 0.5f
@@ -400,6 +401,15 @@ object Prefs {
         prefs(ctx).edit {
             putFloat(KEY_TRACKPAD_SENSITIVITY, value.coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX))
         }
+        bump()
+    }
+
+    /** How many of the computer's deck buttons a row holds (F1). */
+    fun deckColumns(ctx: Context): Int =
+        prefs(ctx).getInt(KEY_DECK_COLUMNS, dev.pocketdesk.android.ui.Deck.DEFAULT_COLUMNS)
+
+    fun setDeckColumns(ctx: Context, columns: Int) {
+        prefs(ctx).edit { putInt(KEY_DECK_COLUMNS, dev.pocketdesk.android.ui.Deck.columns(columns)) }
         bump()
     }
 

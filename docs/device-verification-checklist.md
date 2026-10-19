@@ -1963,6 +1963,16 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] TalkBack on the new rows (the mode chip's action, the gamepad's keys, the folders' Remove).
 - [ ] Spanish and Tamil on the changed screens.
 
+## 126. The deck (F1)
+
+Built 2026-10-20 on the owner's night of features; nothing here ran on a device yet.
+- [ ] A button of each kind set up in the desktop app's Settings, listed on the A71's Deck from Home and from the session menu, with its icon.
+- [ ] Keys (`ctrl+shift+m`, `alt+tab`) into a scratch window here: pressed in order, all let go (input reaches this box: with the owner).
+- [ ] Text typed into a scratch window; a task that asks first, the owner's Allow here; media Play/Pause and Next; a link opening in the browser.
+- [ ] Each refusal on the button: Input, Tasks, Audio or Links off for the phone; "Deck" off; another phone driving.
+- [ ] A button edited after the phone listed it: "the computer's deck has changed".
+- [ ] 2, 3 and 4 a row; a long label; Spanish and Tamil; TalkBack reads each button's label.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
