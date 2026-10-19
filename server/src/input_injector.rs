@@ -630,7 +630,15 @@ impl InputInjector {
                 };
             }
             if let WindowsPenState::Ready(pen) = &mut self.pen.windows {
-                return pen.inject(sample);
+                match pen.inject(sample) {
+                    Ok(()) => return Ok(()),
+                    // A pen Windows makes but never takes (E3 review): the
+                    // mouse stands in from now on.
+                    Err(e) => {
+                        tracing::warn!(error = %e, "The synthetic pen does not work here: the pen is the mouse");
+                        self.pen.windows = WindowsPenState::Unavailable;
+                    }
+                }
             }
         }
         #[cfg(target_os = "linux")]

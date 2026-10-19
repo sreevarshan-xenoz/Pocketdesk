@@ -95,7 +95,16 @@ pub(crate) struct WindowsPen {
     phase: PenPhase,
     /// A refused injection was said; said again only once one works.
     refused_said: bool,
+    /// Windows took a step from this pen once: refusals since are the
+    /// window's (an elevated one, the secure desktop), not the pen's.
+    worked: bool,
+    /// Samples refused in a row before anything worked.
+    refused_samples: u32,
 }
+
+/// Samples refused in a row, with none ever taken, before the pen is given
+/// up for the mouse (E3 review): a pen this Windows makes but never takes.
+pub(crate) const GIVE_UP_AFTER: u32 = 8;
 
 // SAFETY: the handle is a plain device handle, used from one thread at a
 // time behind the injector's `&mut self`.
@@ -111,19 +120,28 @@ impl WindowsPen {
             device,
             phase: PenPhase::Away,
             refused_said: false,
+            worked: false,
+            refused_samples: 0,
         })
     }
 
     /// Inject `sample`: each step it takes from where the pen was. A step
     /// Windows refuses (the secure desktop, an elevated window) is said
-    /// once, and the pen moves on as if it had gone.
+    /// once, and the pen moves on as if it had gone. An error once
+    /// [`GIVE_UP_AFTER`] samples in a row were refused and none was ever
+    /// taken: this pen does not work here, and the mouse should stand in.
     pub(crate) fn inject(&mut self, sample: &PenSample) -> Result<()> {
         let at = crate::pen::to_pixels(sample.x_norm, sample.y_norm, virtual_screen());
-        for step in crate::pen::steps(self.phase, sample) {
+        let steps = crate::pen::steps(self.phase, sample);
+        let mut taken = steps.is_empty();
+        for step in steps {
             let info = [pen_info(sample, step, at)];
             // SAFETY: a device this struct made, and one filled pen info.
             match unsafe { InjectSyntheticPointerInput(self.device, &info) } {
-                Ok(()) => self.refused_said = false,
+                Ok(()) => {
+                    self.refused_said = false;
+                    taken = true;
+                }
                 Err(e) if !self.refused_said => {
                     self.refused_said = true;
                     warn!(error = %e, ?step, "Windows refused the pen's input");
@@ -132,8 +150,23 @@ impl WindowsPen {
             }
         }
         self.phase = PenPhase::of(sample);
+        if taken {
+            self.worked = true;
+            self.refused_samples = 0;
+        } else {
+            self.refused_samples += 1;
+        }
+        if give_up(self.worked, self.refused_samples) {
+            anyhow::bail!("Windows took none of {} pen samples", self.refused_samples);
+        }
         Ok(())
     }
+}
+
+/// Whether a pen that has [`worked`](WindowsPen) or not, with `refused`
+/// samples in a row, is given up for the mouse.
+pub(crate) fn give_up(worked: bool, refused: u32) -> bool {
+    !worked && refused >= GIVE_UP_AFTER
 }
 
 impl Drop for WindowsPen {
@@ -180,6 +213,16 @@ mod tests {
         assert_eq!(down.penFlags, PEN_FLAG_BARREL);
         assert_eq!(down.pointerInfo.ptPixelLocation, POINT { x: 10, y: 20 });
         assert_eq!(down.pointerInfo.pointerType, PT_PEN);
+    }
+
+    #[test]
+    fn a_pen_is_given_up_only_if_windows_never_took_it() {
+        assert!(!give_up(false, GIVE_UP_AFTER - 1));
+        assert!(give_up(false, GIVE_UP_AFTER));
+        assert!(
+            !give_up(true, 1000),
+            "refusals after it worked are the window's, not the pen's"
+        );
     }
 
     /// Makes a real synthetic pen and draws a stroke with it: run by hand
