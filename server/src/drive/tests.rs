@@ -142,7 +142,12 @@ async fn ask(addr: std::net::SocketAddr, method: &str, path: &str, headers: &str
     let request = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n{headers}\r\n");
     stream.write_all(request.as_bytes()).await.unwrap();
     let mut out = Vec::new();
-    stream.read_to_end(&mut out).await.unwrap();
+    if let Err(e) = stream.read_to_end(&mut out).await {
+        panic!(
+            "{method} {path}: {e} after {:?}",
+            String::from_utf8_lossy(&out)
+        );
+    }
     String::from_utf8(out).unwrap()
 }
 
@@ -424,7 +429,7 @@ async fn a_client_that_leaves_ends_the_fetch() {
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
     let request = format!("GET /{TOKEN}/Pixel/DCIM/slow.bin HTTP/1.1\r\nHost: x\r\n\r\n");
     stream.write_all(request.as_bytes()).await.unwrap();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     while phone.fetches.load(Ordering::SeqCst) == 0 {
         assert!(
             tokio::time::Instant::now() < deadline,

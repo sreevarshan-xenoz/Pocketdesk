@@ -537,6 +537,22 @@ async fn write_text<S: tokio::io::AsyncWrite + Unpin>(
     stream.flush().await
 }
 
+/// End a connection gracefully: our side half-closed, then the client's
+/// read to its end (briefly), so the close is no reset that could overtake
+/// the answer it has not read yet.
+async fn close(stream: &mut tokio::net::TcpStream) {
+    let _ = stream.shutdown().await;
+    let mut chunk = [0u8; 512];
+    let drained = async {
+        while let Ok(n) = stream.read(&mut chunk).await {
+            if n == 0 {
+                break;
+            }
+        }
+    };
+    let _ = tokio::time::timeout(Duration::from_secs(2), drained).await;
+}
+
 /// Whether the client has closed its side (or the connection failed):
 /// anything it sends meanwhile is set aside.
 async fn gone<S: tokio::io::AsyncRead + Unpin>(stream: &mut S) {
@@ -579,14 +595,16 @@ pub async fn serve(
         let stop = stop.clone();
         tokio::spawn(async move {
             let _slot = slot;
+            let mut stream = stream;
             tokio::select! {
-                _ = stop.cancelled() => {}
-                served = serve_one(&drive, stream) => {
+                _ = stop.cancelled() => return,
+                served = serve_one(&drive, &mut stream) => {
                     if let Err(e) = served {
                         tracing::debug!("A drive request ended: {e}");
                     }
                 }
             }
+            close(&mut stream).await;
         });
     }
 }
