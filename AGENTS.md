@@ -42,6 +42,7 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-19: **The next cycle (plan `docs/research/2026-10-19-next-cycle.md`).** From 2026's requests (KDE's forum: gamepad, the phone as a drawing tablet; Phone Link: replies that never arrive, with nothing said) and D7's measurement. Order: E1 answers that say how they went, E2 the tray on its own, E3 the phone as a pen, E4 a gamepad on the phone, E5–E6 the design passes on both apps, E7 the owed checks here (batch 2).
 - 2026-10-19: **D7, memory at rest (branch `perf/memory-at-rest`; results in the reliability spec's D7 section).**
   - **Measured** with `scripts/memory_at_rest.ps1` (release builds, no phone, the app minimized): the server holds 9.7 MB private (35 MB working set) and the app 77–85 MB (88 MB), both steady.
   - **No cut:** a bare eframe window holds more (117 MB on glow, 426 MB on wgpu), so the app's share is the framework's and the graphics driver's.
