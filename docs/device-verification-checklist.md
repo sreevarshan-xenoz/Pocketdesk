@@ -2007,6 +2007,14 @@ Built 2026-10-20 on the owner's night of features; needs a phone with a SIM.
 - [ ] The permission granted while notification access was already on: the next call shows (no restart).
 - [ ] Two calls one after another; a call ending while its note is on its way.
 
+## 131. The phone's camera on the computer (F6, part 1)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet.
+- [ ] "Show camera" on the A71: the camera permission asked once, then the back camera in the computer's cast window, landscape, live; the notification's Stop ends it and the camera's indicator goes.
+- [ ] "Show its screen or camera here" off for the phone: refused, with its reason.
+- [ ] Stop pressed while the camera is still opening: the camera's indicator goes.
+- [ ] Another app taking the camera: "The camera stopped", the cast ended.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

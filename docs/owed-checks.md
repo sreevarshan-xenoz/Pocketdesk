@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-638 open items.
+642 open items.
 
 | Where | Items |
 |---|---|
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 88 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 56 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 60 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1637,3 +1637,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Its tap: the camera permission prompt the first time, then the camera; the photo in the received files and on the computer's clipboard.
 - The camera left with Back: nothing sent; the activity killed while the camera runs (Don't keep activities): the photo still sent.
+
+**131. The phone's camera on the computer (F6, part 1)**
+
+- "Show camera" on the A71: the camera permission asked once, then the back camera in the computer's cast window, landscape, live; the notification's Stop ends it and the camera's indicator goes.
+- "Show its screen or camera here" off for the phone: refused, with its reason.
+- Stop pressed while the camera is still opening: the camera's indicator goes.
+- Another app taking the camera: "The camera stopped", the cast ended.
