@@ -156,9 +156,10 @@ fun RemoteDesktopView(
     // Real encoded frame size, reported by the decoder (the initial width/
     // height are only a guess until the first SPS).
     var videoSize by remember { mutableStateOf<IntSize?>(null) }
-    // This detector serves DirectTouch only: in Trackpad the engine tells a
-    // pinch (zoom, T9a) from a two-finger scroll itself.
-    val zoomGesturesEnabled = inputMode == InputMode.DirectTouch
+    // This detector serves DirectTouch and Pen (whose second finger lifts the
+    // pen, E3 review): in Trackpad the engine tells a pinch (zoom, T9a) from
+    // a two-finger scroll itself.
+    val zoomGesturesEnabled = inputMode != InputMode.Trackpad
 
     BoxWithConstraints(modifier) {
         val containerW = constraints.maxWidth.toFloat()
