@@ -1,5 +1,6 @@
 //! The deck (F1): the computer's buttons, listed and pressed.
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
@@ -16,6 +17,11 @@ pub async fn list_deck(address: String, port: u16) -> Result<String, String> {
         .map(|body| body.to_string())
 }
 
+/// One press in flight at a time: the computer's answers name no press,
+/// and the shared connection hands a waiter the first of its type, so two
+/// at once could each take the other's (F1 review).
+static PRESSING: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(Default::default);
+
 /// Press the button listed at `index` as `label`: `{"index", "ok", "reason"}`.
 /// A key combination or a link is done at once; a task that asks first is
 /// answered as it starts waiting, so the answer comes within a few seconds.
@@ -25,6 +31,7 @@ pub async fn press_deck(
     index: u32,
     label: String,
 ) -> Result<String, String> {
+    let _alone = PRESSING.lock().await;
     let request = press_packet(index, &label);
     crate::api::query_peer(
         &address,
