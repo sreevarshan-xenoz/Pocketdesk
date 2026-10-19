@@ -426,6 +426,8 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/phone_status.json` | Each paired phone's last battery report: charge, charging, when it came. Written by the server at most every 5 s; a phone no longer paired is dropped | Default | `core/src/local/phone_status.rs`, `server/src/plugins/phone_battery.rs` |
 | `<state>/links_out/` | Links the app or `pocketdesk link` hands to a phone, one file each, taken within 60 s | Default | `core/src/local/links.rs` |
 | `<state>/rings_out/` | Rings the app or `pocketdesk ring` asks for (N1), one file each, taken within 60 s | Default | `core/src/local/rings.rs` |
+| `<state>/quiet_out/` | Mutes the app or `pocketdesk quiet` asks for (D2), one file each, taken within 60 s | Default | `core/src/local/quiet.rs` |
+| `<state>/phone_quiet.json` | Each phone's Do Not Disturb as it last said (D2): quiet, the end of a mute from here, a refusal | Default | `core/src/local/phone_quiet.rs` |
 | `<state>/kdeconnect_seen.json` | KDE Connect devices that completed the handshake (3a): their KDE id, name, when, paired or not; the newest 32. Written only by the server | Owner-only | `core/src/local/kdeconnect.rs` |
 | `<state>/kdeconnect_find` | Until when the desktop app asks the server to look for KDE Connect devices (2 minutes at most) | Default | same |
 | `<state>/kdeconnect_devices.json` | Paired KDE Connect devices (3b): KDE id, name, the SHA-256 of the certificate each paired with, when, and what each may do (3c) | Owner-only | `core/src/local/kdeconnect_devices.rs` |
