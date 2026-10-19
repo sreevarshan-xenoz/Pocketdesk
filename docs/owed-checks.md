@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-589 open items.
+591 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 344 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 345 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
 | A second phone | 5 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 5 |
-| A Linux desktop (the Azure VM serves for some) | 83 |
+| A Linux desktop (the Azure VM serves for some) | 84 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 43 |
 
@@ -705,6 +705,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The switch on the Devices page, and the time in Settings, applied without a restart.
 - A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
 
+**119. Memory at rest (D7)**
+
+- The app with a phone linked and a session running, then at rest again: back to its number.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1275,6 +1279,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **118. Lock when the phone leaves (D9)**
 
 - A real lock, on a computer where locking is allowed (not this box), Windows; on Linux, that it never locks.
+
+**119. Memory at rest (D7)**
+
+- Linux: the same by hand (`/proc/<pid>/status` VmRSS and RssAnon), the app in a Wayland session.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

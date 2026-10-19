@@ -174,3 +174,22 @@ Run on 2026-10-16: the A71 against this Windows box, on the LAN, with the releas
 **The read-through of capture and sound teardown across sessions** (the plan's second half, done by the review): each session has its own D3D device, frame pool and capture session, and its own audio client; the `FrameArrived` callback holds only a channel sender; the sound's thread runs on a child token, so none outlives its session by much. What is shared across sessions: the windows-core factory cache (kept for good; now safe with the MTA held), COM initialisation on capture and sound threads never undone (harmless with the MTA held), and capture and sound threads that finish after their session returns, overlapping the next session's start (seen by the test, which found nothing). Not looked at: whether the capture device needs `SetMultithreadProtected` within a session.
 
 **Not covered by the test:** a toast per session as the server shows one (they would fill the owner's screen), sound actually playing (the loopback opens either way; with nothing playing no sound is encoded), and the real server's stop.
+
+## D7: memory at rest (2026-10-19)
+
+**Why:** Phone Link's memory is a recurring complaint; R4 and R6c measured the server's CPU at rest, and its memory only once (33 MB, R4).
+
+**How:** `scripts/memory_at_rest.ps1` starts release builds of the server and the desktop app over a throwaway state and config folder, with no phone and the app minimized (as it rests). It lets them settle a minute, samples each every 10 s for 3 minutes, and gives the medians. Windows 11, an RTX 3060 and a Radeon iGPU, main at `0857d12`.
+
+| Process | Working set | Private bytes |
+|---|---|---|
+| `pocketdesk` (the server) | 35 MB | 9.6–9.7 MB |
+| `pocketdesk-app` | 88 MB | 77–85 MB |
+
+Both held steady across the three minutes (the app's private bytes 84.9 → 84.3 MB), so nothing grows at rest.
+
+**Where the app's memory goes:** to egui and the graphics driver, not to Pocketdesk's data. A bare eframe 0.36 window with the app's features, measured the same way, held 117 MB private on glow and 426 MB on wgpu (Direct3D 12). So the app holds less than the framework alone holds in a bare window, likely its smaller window, and the renderer already used is the lighter one. The system fonts it adds (U1) are mapped, not read in, so they count as shared pages, not private.
+
+**Cut:** nothing. The server is small, and the app's share is the framework's and the driver's. The next step that would move the app's number is not running it at rest: the tray living in a small process of its own, the window started only when opened. That is a design change for a later cycle, not a cut here.
+
+**Owed:** Linux (checklist §119).
