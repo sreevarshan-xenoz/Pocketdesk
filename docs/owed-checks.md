@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-633 open items.
+638 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 359 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 364 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 48 |
 | A phone with a SIM | 21 |
@@ -749,6 +749,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - "Air mouse speed" at 0.5 and 3; a slow link (moves add up, no replay).
 - A phone without a gyroscope keeps the trackpad.
+
+**130. Ringing calls on the computer (F5)**
+
+- A call ringing on the phone: "Call from <name> (<number>)" on the computer within a second or two, in the toast and on the Notifications page; gone when it stops ringing (answered on the phone, declined, missed).
+- Silence from the toast: the ring stops (or the refusal, said); the ringer's volume back after the call.
+- Decline (with "Let the computer decline calls"): the call ends; with a call waiting, which one ends.
+- The permission granted while notification access was already on: the next call shows (no restart).
+- Two calls one after another; a call ending while its note is on its way.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
