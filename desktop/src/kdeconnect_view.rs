@@ -31,6 +31,9 @@ pub struct KdeConnectView {
     pending: Vec<Pending>,
     finding: bool,
     read_at: Option<Instant>,
+    /// The device whose Unpair waits for its answer (E5: asked by name, as
+    /// Devices and Other computers ask).
+    unpairing: Option<String>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
     /// Switches clicked, shown as clicked until the server has written
@@ -279,8 +282,19 @@ impl KdeConnectView {
                             device_id: device_id.clone(),
                         });
                     }
-                    if answer(ui, running, "Unpair") {
-                        ask = Some(KdeAsk::Unpair { device_id });
+                    if self.unpairing.as_deref() == Some(device_id.as_str()) {
+                        ui.label(format!(
+                            "Unpair {}? It must pair again to connect.",
+                            device.name
+                        ));
+                        if answer(ui, running, "Unpair") {
+                            self.unpairing = None;
+                            ask = Some(KdeAsk::Unpair { device_id });
+                        } else if ui.button("Cancel").clicked() {
+                            self.unpairing = None;
+                        }
+                    } else if answer(ui, running, "Unpair…") {
+                        self.unpairing = Some(device_id);
                     }
                 } else if ui
                     .add_enabled(running, egui::Button::new("Pair"))
