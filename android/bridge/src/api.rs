@@ -2960,6 +2960,38 @@ pub async fn stop_cast() {
 }
 
 #[cfg(test)]
+mod laser_tests {
+    use pocketdesk_core::streaming::{REMOTE_FEATURE_LASER, REMOTE_FEATURES_SAID, RemoteFlags};
+
+    /// G4: the laser only on a remote whose computer said it draws one.
+    #[test]
+    fn a_remote_is_offered_the_laser_only_when_its_computer_said_so() {
+        let remote = |said: u8, sound: bool, cast: bool| {
+            let flags = RemoteFlags {
+                input_only: true,
+                sound,
+                cast,
+                ..Default::default()
+            };
+            flags
+                .screen_features
+                .store(said, std::sync::atomic::Ordering::Release);
+            super::laser_offered(&flags)
+        };
+        let laser = REMOTE_FEATURES_SAID | REMOTE_FEATURE_LASER;
+        assert!(remote(laser, false, false));
+        assert!(
+            !remote(REMOTE_FEATURES_SAID, false, false),
+            "said, and no dot"
+        );
+        assert!(!remote(0, false, false), "a computer before G4");
+        assert!(!remote(laser, true, false), "a sound session");
+        assert!(!remote(laser, false, true), "a cast");
+        assert!(!super::laser_supported(), "no remote");
+    }
+}
+
+#[cfg(test)]
 mod cast_state_tests {
     use super::{sound_grants, state_name};
     use pocketdesk_core::streaming::{
@@ -3639,6 +3671,49 @@ pub fn pen_supported() -> bool {
                 & pocketdesk_core::streaming::SCREEN_FEATURE_PEN
                 != 0
         })
+}
+
+/// Whether the remote's computer draws a laser dot (G4): it said so on the
+/// remote's ready stream. False with no remote, or from a computer before G4.
+pub fn laser_supported() -> bool {
+    crate::session::REMOTE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(laser_offered)
+}
+
+/// Whether `remote`'s computer offered it the laser: a remote, never a sound
+/// session, whose ready byte has the laser bit.
+fn laser_offered(remote: &pocketdesk_core::streaming::RemoteFlags) -> bool {
+    remote.input_only
+        && !remote.sound
+        && !remote.cast
+        && remote
+            .screen_features
+            .load(std::sync::atomic::Ordering::Acquire)
+            & pocketdesk_core::streaming::REMOTE_FEATURE_LASER
+            != 0
+}
+
+/// Move the laser dot by `dx`/`dy`, or hide it (G4), on the remote.
+pub async fn send_laser(dx: i16, dy: i16, show: bool) -> Result<(), String> {
+    let conn = {
+        let guard = (*STREAMING_HANDLE).lock().await;
+        guard.as_ref().map(|h| h.connection.clone())
+    }
+    .ok_or_else(|| "The laser needs a remote".to_string())?;
+    let data = InputPacket::Laser { dx, dy, show }.encode();
+    let mut stream = conn
+        .open_uni()
+        .await
+        .map_err(|e| format!("QUIC open stream: {e}"))?;
+    stream
+        .write_all(&data)
+        .await
+        .map_err(|e| format!("QUIC write: {e}"))?;
+    stream.finish().map_err(|e| format!("QUIC finish: {e}"))?;
+    Ok(())
 }
 
 /// Send one pen sample (E3) on the screen session.
