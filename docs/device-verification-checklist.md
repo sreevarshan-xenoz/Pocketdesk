@@ -1704,7 +1704,8 @@ On the A71 against a throwaway server:
 - [x] A notification closed on the phone closes its toast at once.
 - [x] An hour in forced deep idle (USB in): all 12 arrive within a second.
 - [ ] Doze on battery without USB, where the phone suspends; a notification waiting through it and arriving marked late.
-- [ ] Settings "When the computer is out of reach": each choice on screen, and Don't wait dropping a notification posted while the computer is away.
+- [x] Settings "When the computer is out of reach" chosen on screen (A71, by taps on the phone, 2026-10-19): Don't wait dropped a notification posted while the computer was away; Wait up to an hour kept one and sent it once the computer was back, its event saying 127 s late.
+- [ ] "Wait up to 10 minutes" on screen, and one posted more than 10 minutes before the computer comes back.
 - [ ] A computer from before C3: notifications arrive once each, as before.
 - [ ] The computer's Notifications permission off: nothing waits on the phone.
 - [ ] Linux: the late line in a D-Bus notification.
@@ -1749,8 +1750,9 @@ On the A71 against a throwaway server:
 - [x] Three JPEGs pushed into DCIM/Camera: listed newest first with thumbnails; one fetched into the received files, checksums matching.
 - [x] The grid with each photo's Save, Copy and Open (a picture only), in the desktop's headless harness.
 - [ ] The Phone page by hand: Refresh, Save, Open and Copy.
-- [ ] The phone's switch off, and photo access denied: the page says why.
-- [ ] A phone with thousands of photos: the newest 24, quickly.
+- [x] The phone's switch off: the computer keeps its reason, "Recent photos are turned off in Pocketdesk's Settings on the phone", with no photos (2026-10-19, A71, by script).
+- [ ] Photo access denied: the same with its reason; and the page showing either (by eye).
+- [x] A phone with a thousand camera photos: the newest 24 answered in 3 to 4 s (2026-10-19, A71, twice; the photos made for the test and removed after).
 - [ ] HEIC photos: thumbnails shown, Copy saying it cannot.
 - [ ] Android 8 or 9: the legacy thumbnail path.
 
@@ -1846,10 +1848,12 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - Nothing landed in Downloads; the fetched files waited in `drive_cache/`.
 - Owed: Explorer, which opens a window on the owner's screen, and everything below.
 - [ ] File Explorer at the Windows address: browse, open a photo, copy one out.
-- [ ] A file over 50 MB in Explorer (refused by Windows' limit), and with curl.
+- [x] A file over 50 MB with curl: 60 MB in 10 s through the drive from the A71, its MD5 matching the phone's, nothing in Downloads (2026-10-19).
+- [ ] A file over 50 MB in Explorer (refused by Windows' limit).
 - [ ] Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).
 - [ ] A phone from before D8: the file lands in Downloads, the drive answers 504 after the wait.
-- [ ] The setting off: the address gone from the Phone page, and the port closed.
+- [x] The setting off: `drive.json` gone and the port closed within seconds, without a restart (2026-10-19, curl).
+- [ ] The setting off: the address gone from the Phone page (by eye).
 - [ ] Linux: Files or Dolphin at the `dav://` address.
 ## 118. Lock when the phone leaves (D9)
 
