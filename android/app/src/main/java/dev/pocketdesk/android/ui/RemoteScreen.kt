@@ -61,6 +61,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -316,6 +317,12 @@ fun RemoteScreen(
     // showStream off and on alone could land in one frame, which Compose
     // merges into no change: the old view stayed, and nothing reconnected.
     var streamEpoch by remember { mutableIntStateOf(0) }
+    // The tallest the top and bottom chrome have been this session, in px:
+    // an upright phone keeps that much room above and below the picture, so
+    // the chrome (it grows with the details, a relayed link or the window
+    // chips) never sits on the desktop, and the room stays as it fades.
+    var topChromePx by remember { mutableIntStateOf(0) }
+    var bottomChromePx by remember { mutableIntStateOf(0) }
     var showMonitorPicker by remember { mutableStateOf(false) }
     // The computer's screens, for the chrome's screen switcher. Read once per
     // session; the picker in Quick Settings reads them fresh.
@@ -971,8 +978,12 @@ fun RemoteScreen(
         )
         val dualPane = split != PaneSplit.None
         // An upright phone's stream pane keeps room above and below the
-        // picture, so its chrome is not drawn over the desktop.
-        val stacked = split == PaneSplit.Horizontal && !hinge
+        // picture, so its chrome is not drawn over the desktop: stacked over
+        // the trackpad, or alone (Direct touch, Pen).
+        val upright = !inPictureInPicture && window.height >= window.width * PaneRule.PORTRAIT_RATIO
+        val banded = upright && ((split == PaneSplit.Horizontal && !hinge) || split == PaneSplit.None)
+        val topBandPx = maxOf(with(density) { PaneRule.TOP_BAND_DP.dp.toPx() }, topChromePx.toFloat())
+        val bottomBandPx = maxOf(with(density) { PaneRule.BOTTOM_BAND_DP.dp.toPx() }, bottomChromePx.toFloat())
         val vertical = split == PaneSplit.Vertical
         val streamShare = PaneRule.streamFraction(
             split,
@@ -983,7 +994,7 @@ fun RemoteScreen(
             // Up and showing a picture: until then the card or the wait hint
             // keeps the whole screen, so the pane changes size once, not thrice.
             up = status is StreamStatus.Up && !awaitingPicture,
-            bandsPx = with(density) { (PaneRule.TOP_BAND_DP + PaneRule.BOTTOM_BAND_DP).dp.toPx() },
+            bandsPx = topBandPx + bottomBandPx,
         )
         val streamHeight = with(density) { (window.height * streamShare).toDp() }.coerceAtMost(maxHeight)
         // Only the stream Box's size changes across a fold, so the SurfaceView
@@ -1039,8 +1050,11 @@ fun RemoteScreen(
                     awaitingPicture = false
                 },
                 secure = blackout,
-                modifier = if (stacked) {
-                    Modifier.fillMaxSize().padding(top = PaneRule.TOP_BAND_DP.dp, bottom = PaneRule.BOTTOM_BAND_DP.dp)
+                modifier = if (banded) {
+                    Modifier.fillMaxSize().padding(
+                        top = with(density) { topBandPx.toDp() },
+                        bottom = with(density) { bottomBandPx.toDp() },
+                    )
                 } else {
                     Modifier.fillMaxSize()
                 },
@@ -1236,7 +1250,11 @@ fun RemoteScreen(
                     Box(modifier = Modifier.fillMaxSize()) {
                         // Clear of Exit (48 dp at the top end): the details run
                         // wider in some languages (U6, found in Tamil).
-                        Column(modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 72.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .onSizeChanged { if (it.height > topChromePx) topChromePx = it.height }
+                                .padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 72.dp),
+                        ) {
                             StatsHud(
                                 address = address,
                                 controlPort = controlPort,
@@ -1351,7 +1369,11 @@ fun RemoteScreen(
             ) {
                 // C5: the chrome's text stops at 1.3x (ChromeText).
                 androidx.compose.runtime.CompositionLocalProvider(LocalDensity provides chromeDensity) {
-                    Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .onSizeChanged { if (it.height > bottomChromePx) bottomChromePx = it.height }
+                            .padding(bottom = 8.dp),
+                    ) {
                         // The 16 flat TextButtons collapsed into one floating
                         // action disc opening QuickSettingsSheet. Input mode stays
                         // outside — it is the toggle used mid-gesture — and
