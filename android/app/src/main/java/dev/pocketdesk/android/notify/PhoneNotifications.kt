@@ -13,7 +13,9 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import dev.pocketdesk.android.Prefs
+import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -324,7 +326,17 @@ class PhoneNotificationListener : NotificationListenerService() {
         val infos = actionInfos(actions)
         val offered = NotificationActionRule.offered(infos)
         val reply = NotificationActionRule.replyIndex(infos)?.let { actions[it] }
-        val offer = NotificationActionRule.signature(offered, reply != null)
+        // D4: a chat's recent messages, only for a notification the computer
+        // may answer, which keeps them only then (D4 review: the toast alone
+        // had sent the whole history). Read before deciding whether anything
+        // is new: a new message can leave the title and text as they were.
+        val thread =
+            if (Prefs.answerNotifications(this) && (offered.isNotEmpty() || reply != null)) {
+                conversation(sbn.notification)
+            } else {
+                null
+            }
+        val offer = NotificationActionRule.signature(offered, reply != null) + ConversationRule.digest(thread?.toString())
         val out = rule.decide(note, enabled = true, shared = PhoneNotificationPrefs.shared(this), offer = offer)
         if (out == null) {
             // Nothing new to send; an app that posts again often replaces
@@ -343,6 +355,8 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
+        // Only with the notification in full.
+        if (out.full) thread?.let { body.put("messages", it) }
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
@@ -505,6 +519,36 @@ class PhoneNotificationListener : NotificationListenerService() {
             otherProfile = sbn.user != Process.myUserHandle(),
             clearable = sbn.isClearable,
         )
+    }
+
+    /**
+     * A chat notification's recent messages (D4), as [ConversationRule]
+     * lets them go, or null for one that is not a chat. A message with no
+     * person is the phone owner's own.
+     */
+    private fun conversation(n: Notification): JSONArray? {
+        val style = runCatching {
+            androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(n)
+        }.getOrNull() ?: return null
+        val raw = style.messages.map { m ->
+            ConversationRule.Raw(
+                from = m.person?.name?.toString(),
+                text = m.text?.toString(),
+                timeMs = m.timestamp,
+                // The owner's own: no person (androidx's convention), or the
+                // style's user, by key or, for apps that give none, by name.
+                mine = m.person == null || m.person == style.user ||
+                    m.person?.key?.let { it == style.user.key } == true ||
+                    (m.person?.key == null && !style.user.name.isNullOrBlank() && m.person?.name == style.user.name),
+            )
+        }
+        val out = ConversationRule.messages(raw)
+        if (out.isEmpty()) return null
+        return JSONArray().apply {
+            out.forEach { m ->
+                put(JSONObject().put("from", m.from).put("text", m.text).put("time", m.timeMs).put("mine", m.mine))
+            }
+        }
     }
 
     private fun appLabel(pkg: String): String =

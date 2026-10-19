@@ -1804,6 +1804,14 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] A page with a `#section` link: the fragment replaced, the page still scrolled there.
 - [ ] The browser's own page (`chrome://extensions`): sent at its top, no error.
 
+## 115. Conversations (D4)
+
+- [ ] A real chat app on the A71: the thread on the Notifications page, oldest first, the owner's own lines set apart, a reply going through.
+- [ ] A second message with the same text: the thread grows.
+- [ ] A group chat: each sender named.
+- [ ] A one-time code arriving in a chat: no thread sent.
+- [ ] "Let the computer answer notifications" off: no messages sent.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

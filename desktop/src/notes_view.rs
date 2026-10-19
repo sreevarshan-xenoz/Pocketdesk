@@ -89,8 +89,21 @@ impl NotesView {
             for note in &notes {
                 ui.group(|ui| {
                     ui.strong(format!("{}: {}", note.app, note.title));
-                    if !note.text.is_empty() {
-                        ui.label(&note.text);
+                    if note.messages.is_empty() {
+                        if !note.text.is_empty() {
+                            ui.label(&note.text);
+                        }
+                    } else {
+                        // D4: a chat's recent messages, as a thread.
+                        for (line, mine) in thread_lines(&note.messages, note.at_unix, now_unix) {
+                            if mine {
+                                ui.label(
+                                    RichText::new(line).italics().color(crate::theme::muted(ui)),
+                                );
+                            } else {
+                                ui.label(line);
+                            }
+                        }
                     }
                     ui.label(
                         RichText::new(format!(
@@ -132,6 +145,39 @@ impl NotesView {
     }
 }
 
+/// A chat's messages as the page shows them (D4): "Ann · 5 min ago: text",
+/// oldest first, each with whether it is the owner's own ("You"), which the
+/// page sets apart by style, not by name alone (a contact may be called
+/// "You"). The phone's clock need not agree with this one (C3): a message's
+/// age is the note's own (`note_at_unix`, when it came on the phone) plus
+/// how much older it is than the newest message.
+pub fn thread_lines(
+    messages: &[pocketdesk_core::protocol::conversation::Message],
+    note_at_unix: u64,
+    now_unix: u64,
+) -> Vec<(String, bool)> {
+    let newest = messages.iter().map(|m| m.at_ms).max().unwrap_or(0);
+    messages
+        .iter()
+        .map(|m| {
+            let who = if m.mine {
+                "You"
+            } else if m.from.is_empty() {
+                "Someone"
+            } else {
+                m.from.as_str()
+            };
+            let line = if m.at_ms == 0 {
+                format!("{who}: {}", m.text)
+            } else {
+                let at = note_at_unix.saturating_sub((newest - m.at_ms) / 1000);
+                format!("{who} · {}: {}", crate::words::ago(now_unix, at), m.text)
+            };
+            (line, m.mine)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,8 +193,69 @@ mod tests {
             at_unix: 0,
             actions: vec![],
             reply: true,
+            messages: vec![],
         };
         let listed = newest_first(vec![note("old"), note("new")]);
         assert_eq!(listed[0].key, "new");
+    }
+
+    /// D4: a chat's thread, the owner's own as "You", aged from the note.
+    #[test]
+    fn a_chat_reads_as_a_thread() {
+        use pocketdesk_core::protocol::conversation::Message;
+        let lines = thread_lines(
+            &[
+                Message {
+                    from: "Ann".into(),
+                    text: "Lunch?".into(),
+                    at_ms: 0,
+                    mine: false,
+                },
+                Message {
+                    from: String::new(),
+                    text: "Yes".into(),
+                    at_ms: 0,
+                    mine: true,
+                },
+            ],
+            100,
+            100,
+        );
+        assert_eq!(
+            lines,
+            [
+                ("Ann: Lunch?".to_string(), false),
+                ("You: Yes".to_string(), true)
+            ]
+        );
+        // The phone's clock an hour off: the newest is as old as the note,
+        // the older one two minutes before it.
+        let base = 1_800_000_000_000;
+        let timed = thread_lines(
+            &[
+                Message {
+                    from: "Ann".into(),
+                    text: "Hi".into(),
+                    at_ms: base,
+                    mine: false,
+                },
+                Message {
+                    from: "Ann".into(),
+                    text: "There".into(),
+                    at_ms: base + 120_000,
+                    mine: false,
+                },
+            ],
+            10_000,
+            10_000,
+        );
+        assert_eq!(
+            timed[1].0,
+            format!("Ann · {}: There", crate::words::ago(10_000, 10_000))
+        );
+        assert_eq!(
+            timed[0].0,
+            format!("Ann · {}: Hi", crate::words::ago(10_000, 10_000 - 120))
+        );
     }
 }

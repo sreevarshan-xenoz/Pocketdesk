@@ -39,6 +39,9 @@ pub struct PhoneNote {
     /// Whether it takes a typed reply.
     #[serde(default)]
     pub reply: bool,
+    /// A chat's recent messages, oldest first (D4), when the phone sent them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<crate::protocol::conversation::Message>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -241,6 +244,7 @@ mod tests {
             at_unix: at,
             actions: vec!["Mark as read".into()],
             reply: true,
+            messages: vec![],
         }
     }
 
