@@ -104,10 +104,28 @@ const PERMISSIONS: [(Capability, &str, &str); 16] = [
     ),
     (
         Capability::AwayLock,
-        "Lock this computer when it leaves",
+        "Lock this computer when this phone leaves",
         "When the phone's link has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone asleep may lose its link, so reading or watching without touching anything can lock too. Windows only for now: on Linux it never locks.",
     ),
 ];
+
+/// Whether a device is shown `capability`'s switch (E5): a paired computer
+/// is not a phone to ring, mute, cast or lock this computer by.
+fn shown_for(capability: Capability, computer: bool) -> bool {
+    !(computer
+        && matches!(
+            capability,
+            Capability::Ring | Capability::Mute | Capability::AwayLock | Capability::Cast
+        ))
+}
+
+/// Why "Lock this computer when this phone leaves" cannot be turned on
+/// here, if it cannot: this computer cannot tell yet whether someone is at
+/// it (E5).
+fn away_lock_unavailable() -> Option<&'static str> {
+    (!cfg!(windows))
+        .then_some("Linux cannot tell yet whether someone is at the keyboard, so it never locks.")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -1268,13 +1286,30 @@ impl PocketdeskApp {
                         ask = Some((device.id.clone(), ask_first));
                     }
                     for (capability, label, hint) in PERMISSIONS {
+                        if !shown_for(capability, device.computer) {
+                            continue;
+                        }
                         let mut allowed = device.permissions.allows(capability);
+                        let unavailable = (capability == Capability::AwayLock)
+                            .then(away_lock_unavailable)
+                            .flatten();
                         if ui
-                            .checkbox(&mut allowed, label)
+                            .add_enabled(unavailable.is_none(), egui::Checkbox::new(&mut allowed, label))
                             .on_hover_text(hint)
+                            .on_disabled_hover_text(unavailable.unwrap_or(hint))
                             .changed()
                         {
                             change = Some((device.id.clone(), capability, allowed));
+                        }
+                        // While it is on, what it waits for, in plain sight (E5).
+                        if capability == Capability::AwayLock && allowed && unavailable.is_none() {
+                            let minutes = self.config.as_ref().map_or(5, |c| c.away_lock_minutes);
+                            ui.label(
+                                RichText::new(format!(
+                                    "Locks after {minutes} min away with nobody at the keyboard (Settings, Phones)."
+                                ))
+                                .color(crate::theme::muted(ui)),
+                            );
                         }
                     }
                 });
@@ -2277,6 +2312,26 @@ fn on_wayland() -> bool {
 #[cfg(test)]
 mod tests {
     /// N6 review: Wayland lets no app hide its own window.
+    #[test]
+    fn a_paired_computer_is_not_shown_a_phone_s_switches() {
+        for capability in [
+            Capability::Ring,
+            Capability::Mute,
+            Capability::AwayLock,
+            Capability::Cast,
+        ] {
+            assert!(!shown_for(capability, true), "{capability:?}");
+            assert!(shown_for(capability, false), "{capability:?}");
+        }
+        assert!(shown_for(Capability::Clipboard, true));
+        assert!(shown_for(Capability::Files, true));
+    }
+
+    #[test]
+    fn the_away_lock_says_why_it_is_off_where_it_never_locks() {
+        assert_eq!(away_lock_unavailable().is_none(), cfg!(windows));
+    }
+
     #[test]
     fn closing_hides_to_the_tray_except_on_wayland() {
         use super::closes_to_tray;
