@@ -102,7 +102,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `phone_linked`, `phone_unlinked` | — (any connection the phone holds to this computer, a brief one for a single send included) | — |
 | `phone_battery` | `charge`, `charging` | — |
 | `phone_quiet` | `quiet` | — |
-| `away_locked` | — (the phone with "Lock this computer when it leaves" on that left last; the computer was locked, D9) | — |
+| `away_locked` | `failed: true` when the lock failed and will be tried again in a minute (the phone with "Lock this computer when it leaves" on that left last; D9) | — |
 | `phone_battery_low` | `charge` | — |
 | `notification` | `app`, and `late_secs` (seconds) for one that waited on the phone a minute or more (C3) | `title`, `text` |
 | `text_received` | — | `from`, `body` |

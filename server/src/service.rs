@@ -95,8 +95,12 @@ pub async fn run(config: Config) -> Result<()> {
 
     // The inbox folders the app's requests land in, watched (R6c).
     crate::inbox::start(&state_dir);
-    // Test seams (2g, 2h): said, so one left set by mistake is noticed.
-    for seam in ["POCKETDESK_CLIPBOARD_FILE", "POCKETDESK_DOWNLOAD_DIR"] {
+    // Test seams (2g, 2h, D9): said, so one left set by mistake is noticed.
+    for seam in [
+        "POCKETDESK_CLIPBOARD_FILE",
+        "POCKETDESK_DOWNLOAD_DIR",
+        "POCKETDESK_LOCK_FILE",
+    ] {
         if let Some(value) = std::env::var_os(seam) {
             let path = std::path::Path::new(&value);
             if path.is_absolute() {
