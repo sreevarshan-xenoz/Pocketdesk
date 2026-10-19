@@ -131,6 +131,13 @@ impl KdeConnectView {
             return;
         }
         self.rows = rows(&devices::devices(state_dir), &kdeconnect::read(state_dir));
+        // A question for a device no longer paired here is not asked again
+        // when it pairs later (E5 review).
+        if let Some(id) = &self.unpairing
+            && !self.rows.iter().any(|r| r.paired && &r.device_id == id)
+        {
+            self.unpairing = None;
+        }
         hold(&mut self.rows, &mut self.held, Instant::now());
         self.batteries = phone_status::read(state_dir);
         self.pending = devices::pending(state_dir, now_unix);
@@ -241,7 +248,11 @@ impl KdeConnectView {
         if self.rows.is_empty() {
             ui.label(
                 RichText::new(
-                    "No KDE Connect device has connected yet. Press Find, then open KDE Connect on the device.",
+                    if running {
+                        "No KDE Connect device has connected yet. Press Find, then open KDE Connect on the device."
+                    } else {
+                        "No KDE Connect device has connected yet. Start the server with KDE Connect devices on, then press Find."
+                    },
                 )
                 .weak(),
             );
