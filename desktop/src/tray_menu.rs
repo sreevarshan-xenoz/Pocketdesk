@@ -58,6 +58,11 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
         let device = row.device;
         let id = || device.id.clone();
         let mut label = model::device_label(devices, &device.id);
+        // A phone away has every item greyed: its title says why (D5
+        // review), as the tray has no hover text.
+        if row.place == model::Place::Away {
+            label.push_str(" · away");
+        }
         if let Some(battery) = device
             .battery
             .as_ref()
@@ -179,7 +184,11 @@ mod tests {
             .collect();
         assert_eq!(phones.len(), 2);
         assert_eq!(labels(&menu)[3].0, "Pixel · 64 %, charging");
-        assert_eq!(labels(&menu)[4].0, "Old", "an hour-old battery is left out");
+        assert_eq!(
+            labels(&menu)[4].0,
+            "Old · away",
+            "away said; an hour-old battery left out"
+        );
         assert_eq!(
             items(phones[0]),
             [
