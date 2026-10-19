@@ -42,6 +42,7 @@ object LlIcons {
     val Mouse = LlGlyph(R.drawable.ic_ll_mouse)
     val Touch = LlGlyph(R.drawable.ic_ll_touch)
     val Pen = LlGlyph(R.drawable.ic_ll_pen)
+    val Gamepad = LlGlyph(R.drawable.ic_ll_gamepad)
     val Wifi = LlGlyph(R.drawable.ic_ll_wifi)
     val Lan = LlGlyph(R.drawable.ic_ll_lan)
     val Lock = LlGlyph(R.drawable.ic_ll_lock)

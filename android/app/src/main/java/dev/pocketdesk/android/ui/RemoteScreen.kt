@@ -94,9 +94,12 @@ import dev.pocketdesk.android.media.PhoneMediaEffect
 import dev.pocketdesk.android.service.SessionForegroundService
 import dev.pocketdesk.android.status.BatteryEffect
 import dev.pocketdesk.android.stream.DesktopAudio
+import dev.pocketdesk.android.stream.ConnectedGamepad
+import dev.pocketdesk.android.stream.GamepadState
 import dev.pocketdesk.android.stream.InputMode
 import dev.pocketdesk.android.stream.inputModes
 import dev.pocketdesk.android.stream.nextMode
+import dev.pocketdesk.android.stream.sendGamepadOrdered
 import dev.pocketdesk.android.stream.RemoteDesktopView
 import dev.pocketdesk.android.stream.ShortcutBar
 import dev.pocketdesk.android.stream.StatsHud
@@ -247,6 +250,27 @@ fun RemoteScreen(
     // UI refresh: the old 16-button bottom bar became a floating action disc
     // opening this grouped sheet; only the input-mode toggle stayed outside.
     var showQuick by remember { mutableStateOf(false) }
+    // E4: the phone as a gamepad, on screen or connected; one state for both.
+    var showGamepad by remember { mutableStateOf(false) }
+    val gamepad = remember { GamepadState() }
+    var gamepadRepeat by remember { mutableStateOf<Job?>(null) }
+    fun sendGamepad() {
+        sendGamepadOrdered(gamepad.axes.copyOf(), gamepad.buttons)
+        // The computer moves the mouse and scrolls once per packet: a stick
+        // held off centre is sent again until it is back.
+        if (gamepad.moving && gamepadRepeat?.isActive != true) {
+            gamepadRepeat = scope.launch {
+                while (gamepad.moving) {
+                    delay(GamepadState.REPEAT_MS)
+                    if (gamepad.moving) sendGamepadOrdered(gamepad.axes.copyOf(), gamepad.buttons)
+                }
+            }
+        }
+    }
+    fun releaseGamepad() {
+        gamepadRepeat?.cancel()
+        if (gamepad.reset()) sendGamepadOrdered(gamepad.axes.copyOf(), gamepad.buttons)
+    }
     // R3#7 single-window streaming: the picked window + the layout box the
     // picker reported (needed to remap direct-touch through the crop).
     var cropWindow by remember { mutableStateOf<DesktopWindow?>(null) }
@@ -573,7 +597,41 @@ fun RemoteScreen(
     // Tier-3 #15 remainder: while blackout is on, back just uncovers the
     // phone — it must never drop a session the user can't currently see.
     androidx.activity.compose.BackHandler(enabled = !inPictureInPicture) {
-        if (blackout) blackout = false else onExit()
+        when {
+            blackout -> blackout = false
+            // E4: Back closes the gamepad, not the session.
+            showGamepad -> {
+                showGamepad = false
+                releaseGamepad()
+            }
+            else -> onExit()
+        }
+    }
+
+    // E4: a controller connected to the phone plays while this session is
+    // in front; nothing it held stays held when it goes.
+    val controllerOn = Prefs.gamepadController(context)
+    DisposableEffect(controllerOn) {
+        if (controllerOn) {
+            ConnectedGamepad.sink = object : ConnectedGamepad.Sink {
+                override fun button(bit: Int, down: Boolean) {
+                    scope.launch { if (gamepad.press(bit, down)) sendGamepad() }
+                }
+
+                override fun motion(lx: Float, ly: Float, rx: Float, ry: Float, hatX: Float, hatY: Float) {
+                    scope.launch {
+                        val left = gamepad.stick(left = true, x = lx, y = ly)
+                        val right = gamepad.stick(left = false, x = rx, y = ry)
+                        val hat = gamepad.hat(hatX, hatY)
+                        if (left || right || hat) sendGamepad()
+                    }
+                }
+            }
+        }
+        onDispose {
+            ConnectedGamepad.sink = null
+            releaseGamepad()
+        }
     }
 
     LaunchedEffect(address) {
@@ -1411,6 +1469,17 @@ fun RemoteScreen(
             )
         }
 
+        if (showGamepad && !inPictureInPicture) {
+            GamepadOverlay(
+                pad = gamepad,
+                onChange = ::sendGamepad,
+                onClose = {
+                    showGamepad = false
+                    releaseGamepad()
+                },
+            )
+        }
+
         // Blackout overlay: last child = topmost. Opaque black covers the
         // (already secure) video surface, the tap detector consumes every
         // gesture so nothing reaches the remote input layer, and a
@@ -1585,6 +1654,10 @@ fun RemoteScreen(
             onPickMonitor = {
                 showQuick = false
                 showMonitorPicker = true
+            },
+            onGamepad = {
+                showQuick = false
+                showGamepad = true
             },
             paneMode = paneMode,
             onSetPane = { paneMode = it },

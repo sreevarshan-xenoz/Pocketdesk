@@ -66,6 +66,7 @@ fun QuickSettingsSheet(
     onPickWindow: () -> Unit,
     monitorValue: String,
     onPickMonitor: () -> Unit,
+    onGamepad: () -> Unit,
     paneMode: PaneMode,
     onSetPane: (PaneMode) -> Unit,
     desktopSound: Boolean,
@@ -145,6 +146,7 @@ fun QuickSettingsSheet(
             ) { onSetPane(PaneMode.entries[it]) }
             OpenRow(LlIcons.Desktop, stringResource(R.string.row_window), windowValue, onPickWindow)
             OpenRow(LlIcons.Monitor, stringResource(R.string.row_monitor), monitorValue, onPickMonitor)
+            ActionRow(LlIcons.Gamepad, stringResource(R.string.row_gamepad), onGamepad)
 
             GroupHeader(stringResource(R.string.group_share))
             ToggleRow(LlIcons.Clipboard, stringResource(R.string.row_clipboard), clipboardSync, onSetClipboardSync)

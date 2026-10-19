@@ -67,6 +67,8 @@
     <string name="pen_pressure_soft">Soft</string>
     <string name="pen_pressure_even">Even</string>
     <string name="pen_pressure_firm">Firm</string>
+    <string name="settings_gamepad_controller">Game controller to the computer</string>
+    <string name="settings_gamepad_controller_summary">A controller connected to this phone plays on the computer during a session: A is Enter, B Esc, X Space, Y Tab, the bumpers Page Up and Down, Select Backspace, Start a click, the left stick the mouse and the right the wheel</string>
     <string name="settings_system">System</string>
     <string name="settings_about">About</string>
     <string name="app_version">Version %1$s</string>
@@ -129,6 +131,11 @@
     <string name="row_quality">Quality</string>
     <string name="row_window">Window</string>
     <string name="row_monitor">Monitor</string>
+    <string name="row_gamepad">Gamepad</string>
+    <string name="gamepad_close">Close the gamepad</string>
+    <string name="gamepad_click">Click</string>
+    <string name="gamepad_mouse">Mouse</string>
+    <string name="gamepad_scroll">Scroll</string>
     <string name="row_pane">Pane layout</string>
     <string name="row_clipboard">Clipboard sync</string>
     <string name="row_history">Clipboard history</string>
@@ -649,6 +656,9 @@
     <string name="key_ctrl_alt_del">Ctrl+Alt+Del</string>
     <string name="key_print_screen">PrtSc</string>
     <string name="key_escape">Esc</string>
+    <string name="key_enter">Enter</string>
+    <string name="key_space">Space</string>
+    <string name="key_backspace">Backspace</string>
     <string name="key_tab">Tab</string>
     <string name="key_home">Home</string>
     <string name="key_end">End</string>

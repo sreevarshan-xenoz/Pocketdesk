@@ -51,6 +51,7 @@ object Prefs {
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
     private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
     private const val KEY_PEN_CURVE = "pen_curve"
+    private const val KEY_GAMEPAD_CONTROLLER = "gamepad_controller"
 
     /** The trackpad speed slider's range and default (F3). */
     const val TRACKPAD_SENSITIVITY_MIN = 0.5f
@@ -250,6 +251,15 @@ object Prefs {
     }
 
     /** Whether a mouse connected to the phone drives the computer's cursor in a session (T9c). On by default. */
+    /** A game controller connected to the phone plays on the computer (E4). */
+    fun gamepadController(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_GAMEPAD_CONTROLLER, true)
+
+    fun setGamepadController(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_GAMEPAD_CONTROLLER, enabled) }
+        bump()
+    }
+
     fun captureMouse(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_CAPTURE_MOUSE, true)
 
