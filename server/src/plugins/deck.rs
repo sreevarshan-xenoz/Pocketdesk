@@ -9,7 +9,7 @@ use std::sync::{LazyLock, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::error::Result;
-use pocketdesk_core::local::deck::{DeckAction, DeckButton, usable};
+use pocketdesk_core::local::deck::{DeckAction, DeckButton, MAX_BUTTONS, usable};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
 use pocketdesk_core::protocol::permissions::Capability;
 use pocketdesk_core::streaming::input_packet::InputPacket;
@@ -78,7 +78,11 @@ pub(crate) fn decide(
     if !enabled {
         return Err("the deck is turned off on the computer".into());
     }
-    let Some(button) = buttons.get(index).filter(|b| b.label == label) else {
+    // Only a listed button: the listing stops at MAX_BUTTONS (F1 review).
+    let Some(button) = buttons
+        .get(index)
+        .filter(|b| index < MAX_BUTTONS && b.label == label)
+    else {
         return Err("the computer's deck has changed: open it again".into());
     };
     let action = button.action()?;
@@ -446,6 +450,33 @@ mod tests {
                 vec![(29, true), (50, true), (50, false), (29, false)],
                 false
             )
+        );
+    }
+
+    #[test]
+    fn a_button_past_the_listing_cannot_be_pressed() {
+        let buttons: Vec<DeckButton> = (0..=MAX_BUTTONS)
+            .map(|i| keys(&format!("B{i}"), "ctrl+c"))
+            .collect();
+        assert!(
+            decide(
+                true,
+                &buttons,
+                MAX_BUTTONS - 1,
+                &format!("B{}", MAX_BUTTONS - 1),
+                |_| true
+            )
+            .is_ok()
+        );
+        assert!(
+            decide(
+                true,
+                &buttons,
+                MAX_BUTTONS,
+                &format!("B{MAX_BUTTONS}"),
+                |_| true
+            )
+            .is_err()
         );
     }
 
