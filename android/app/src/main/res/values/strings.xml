@@ -64,7 +64,7 @@
     <string name="settings_trackpad_speed">Trackpad speed</string>
     <string name="settings_trackpad_speed_summary">How far the cursor moves for each finger movement in trackpad mode</string>
     <string name="settings_pen_pressure">Pen pressure</string>
-    <string name="settings_pen_pressure_summary">In pen mode, how hard you press for full ink. A stylus draws best: most phones only guess the pressure of a finger.</string>
+    <string name="settings_pen_pressure_summary">In pen mode, how hard you press for full ink. A stylus draws best: most phones only guess the pressure of a finger</string>
     <string name="pen_pressure_soft">Soft</string>
     <string name="pen_pressure_even">Even</string>
     <string name="pen_pressure_firm">Firm</string>
@@ -356,13 +356,13 @@
     <string name="phone_notifications_service">Pocketdesk: show on computer</string>
     <string name="phone_notifications_share">This phone\'s notifications on my computer</string>
     <string name="phone_notifications_share_summary">Notifications from this phone appear on the computer you used last</string>
-    <string name="phone_notifications_no_access">Needs notification access</string>
+    <string name="phone_notifications_no_access">Needs notification access: allow it below</string>
     <string name="phone_notifications_apps_empty">Apps appear here once they notify. None is shared until you switch it on.</string>
     <string name="texts_show">Show texts on my computer</string>
     <string name="texts_show_summary">Texts this phone receives appear in Messages on the computer you used last</string>
     <string name="texts_reply">Reply from my computer</string>
     <string name="texts_reply_summary">The computer can send texts through this phone</string>
-    <string name="texts_reply_needs_access">Needs notification access: replies arrive through it</string>
+    <string name="texts_reply_needs_access">Needs notification access: allow it below</string>
     <!-- N6: waking a computer from the phone -->
     <string name="save">Save</string>
     <string name="wake_settings">Wake settings</string>
@@ -534,7 +534,7 @@
     <string name="settings_clipboard_background">Computer\'s clipboard in the background</string>
     <string name="settings_clipboard_background_summary">What you copy on the computer reaches this phone without a session, also away from home. It needs notification access, which keeps the connection</string>
     <string name="phone_notifications_answer">Let the computer answer notifications</string>
-    <string name="phone_notifications_answer_summary">The computer can press a notification\'s buttons and reply to chats, as you: from its Notifications tab, or from the notification it shows. Only notifications sent in full, and only from your own computer</string>
+    <string name="phone_notifications_answer_summary">The computer can press a notification\'s buttons and reply to chats, as you: from its Notifications page, or from the notification it shows. Only notifications sent in full, and only from your own computer</string>
     <string name="phone_notifications_wait">When the computer is out of reach</string>
     <string name="phone_notifications_wait_summary">Notifications wait on this phone, in memory only, and go when the computer answers, marked late with how long they waited. At most 20 wait</string>
     <string name="phone_notifications_wait_10">Wait up to 10 minutes</string>
@@ -546,8 +546,8 @@
     <string name="settings_files_background">Files from the computer in the background</string>
     <string name="settings_files_background_summary">What the computer sends arrives without a session, where files from computers go, at home or, with Files over the internet, from away. It needs notification access, which keeps the connection</string>
     <string name="settings_phone_folders">Folders the computer may open</string>
-    <string name="settings_phone_folders_summary">The computer\'s Phone tab can list these folders and copy their files to itself. Nothing else on the phone is reachable. While any folder is shared it stays connected to the computer, using notification access</string>
-    <string name="phone_folders_empty">None yet: the computer cannot open anything on this phone. Add a folder to let its Phone tab list it and copy files from it</string>
+    <string name="settings_phone_folders_summary">The computer\'s Phone page can list these folders and copy their files to itself. Nothing else on the phone is reachable. While any folder is shared it stays connected to the computer, using notification access</string>
+    <string name="phone_folders_empty">None yet: the computer cannot open anything on this phone. Add a folder to let its Phone page list it and copy files from it</string>
     <string name="phone_folders_add">Add folder</string>
     <string name="phone_folders_remove">Remove</string>
     <string name="phone_folders_remove_named">Remove %1$s</string>
@@ -556,10 +556,10 @@
     <string name="screenshots_on">Send new screenshots</string>
     <string name="screenshots_on_summary">A screenshot taken on this phone goes to its computer a moment later. Asks for access to photos, and uses notification access to run in the background</string>
     <string name="recent_photos_on">Recent photos on the computer</string>
-    <string name="recent_photos_on_summary">Your computer\'s Phone page shows your newest camera photos (DCIM) as small pictures, and fetches one when you ask. Off until you turn it on</string>
+    <string name="recent_photos_on_summary">Your computer\'s Phone page shows your newest camera photos (DCIM) as small pictures, and fetches one when you ask</string>
     <string name="recent_photos_needs_photos">Pocketdesk needs access to photos for this: turn it on again to allow it</string>
-    <string name="recent_photos_needs_access">The computer asks through the phone\'s notification access, which is off: allow it below</string>
-    <string name="screenshots_needs_access">Needs notification access to run in the background</string>
+    <string name="recent_photos_needs_access">Needs notification access: allow it below</string>
+    <string name="screenshots_needs_access">Needs notification access: allow it below</string>
     <string name="screenshots_needs_photos">Needs access to all photos: allow it in Android\'s settings for Pocketdesk</string>
     <string name="screenshots_clipboard">Put on the computer\'s clipboard</string>
     <string name="screenshots_save">Save on the computer, with its received files</string>
@@ -716,15 +716,15 @@
     <string name="control_service_label">Pocketdesk control</string>
     <string name="control_service_description">While this phone shows its screen on your computer with Pocketdesk, and you allow it in Pocketdesk\'s Settings, that computer can tap, swipe, scroll, type into the field you are in, and press Back, Home and Recents. Android lets the service read what is on the screen; Pocketdesk reads only the field it types into, and sends nothing it reads anywhere.</string>
     <string name="settings_control_from_computer">Let the computer control this phone</string>
-    <string name="settings_control_summary_off">While this phone shows its screen on a computer, that computer can tap, swipe and type on it. Uses an Accessibility service, which Android\'s Advanced Protection does not allow.</string>
-    <string name="settings_control_summary_needs_service">Almost: turn on \"Pocketdesk control\" in Android\'s Accessibility settings. If Android greys it out, open Pocketdesk\'s App info, then ⋮, Allow restricted settings.</string>
-    <string name="settings_control_summary_on">On: while this phone shows its screen on a computer, that computer can tap, swipe, type and press Back and Home. Not while the phone is locked, apart from Back and Home.</string>
+    <string name="settings_control_summary_off">While this phone shows its screen on a computer, that computer can tap, swipe and type on it. Uses an Accessibility service, which Android\'s Advanced Protection does not allow</string>
+    <string name="settings_control_summary_needs_service">Almost: turn on \"Pocketdesk control\" in Android\'s Accessibility settings. If Android greys it out, open Pocketdesk\'s App info, then ⋮, Allow restricted settings</string>
+    <string name="settings_control_summary_on">On: while this phone shows its screen on a computer, that computer can tap, swipe, type and press Back and Home. Not while the phone is locked, apart from Back and Home</string>
     <string name="cast_showing_controlled">This phone\'s screen is shown and controlled on %1$s</string>
     <string name="settings_control_open_accessibility">Open Accessibility settings</string>
     <string name="settings_download_folder">Files from computers go to</string>
     <string name="settings_download_folder_default">Downloads/Pocketdesk</string>
     <string name="settings_download_folder_picked">The folder you picked</string>
-    <string name="settings_download_folder_lost">The folder you picked is gone or no longer allowed, so files go to Downloads/Pocketdesk. Tap to pick another.</string>
+    <string name="settings_download_folder_lost">The folder you picked is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
     <string name="settings_download_folder_reset">Use Downloads/Pocketdesk again</string>
     <string name="transfer_folder_gone">The folder picked for files from computers is gone or no longer allowed, so this went to Downloads/Pocketdesk.</string>
     <!-- D1: health after updates. -->
@@ -755,7 +755,7 @@
     </plurals>
     <!-- D2: quiet hours kept in step. -->
     <string name="settings_let_computer_mute">Let the computer mute this phone</string>
-    <string name="settings_let_computer_mute_summary">Your computer can turn on Do Not Disturb for a while, up to a day, and sees when this phone is quiet. Calls and messages your Do Not Disturb settings let through still come. Keeps a link to the computer, so it needs notification access.</string>
+    <string name="settings_let_computer_mute_summary">Your computer can turn on Do Not Disturb for a while, up to a day, and sees when this phone is quiet. Calls and messages your Do Not Disturb settings let through still come. Keeps a link to the computer, so it needs notification access</string>
     <string name="phone_notifications_hold_back">Hold back in Do Not Disturb</string>
     <string name="phone_notifications_hold_back_summary">While Do Not Disturb silences a notification on this phone, it is not sent to the computer either</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->

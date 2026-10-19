@@ -55,7 +55,7 @@
     <string name="settings_trackpad_speed">Velocidad del panel táctil</string>
     <string name="settings_trackpad_speed_summary">Cuánto se mueve el cursor por cada movimiento del dedo en modo panel táctil</string>
     <string name="settings_pen_pressure">Presión del lápiz</string>
-    <string name="settings_pen_pressure_summary">En modo lápiz, cuánto hay que presionar para el trazo completo. Un lápiz óptico dibuja mejor: la mayoría de los teléfonos solo estiman la presión de un dedo.</string>
+    <string name="settings_pen_pressure_summary">En modo lápiz, cuánto hay que presionar para el trazo completo. Un lápiz óptico dibuja mejor: la mayoría de los teléfonos solo estiman la presión de un dedo</string>
     <string name="pen_pressure_soft">Suave</string>
     <string name="pen_pressure_even">Normal</string>
     <string name="pen_pressure_firm">Firme</string>
@@ -352,13 +352,13 @@
     <string name="phone_notifications_service">Pocketdesk: mostrar en el ordenador</string>
     <string name="phone_notifications_share">Notificaciones de este teléfono en mi ordenador</string>
     <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste</string>
-    <string name="phone_notifications_no_access">Necesita acceso a las notificaciones</string>
+    <string name="phone_notifications_no_access">Necesita acceso a las notificaciones: permítelo abajo</string>
     <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Ninguna se comparte hasta que la actives.</string>
     <string name="texts_show">Mostrar mensajes en mi ordenador</string>
     <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste</string>
     <string name="texts_reply">Responder desde mi ordenador</string>
     <string name="texts_reply_summary">El ordenador puede enviar SMS a través de este teléfono</string>
-    <string name="texts_reply_needs_access">Necesita acceso a las notificaciones: las respuestas llegan por ahí</string>
+    <string name="texts_reply_needs_access">Necesita acceso a las notificaciones: permítelo abajo</string>
     <!-- N6: waking a computer from the phone -->
     <string name="save">Guardar</string>
     <string name="wake_settings">Ajustes de encendido</string>
@@ -530,7 +530,7 @@
     <string name="settings_clipboard_background">Portapapeles del equipo en segundo plano</string>
     <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>
-    <string name="phone_notifications_answer_summary">El equipo puede pulsar los botones de una notificación y responder chats, en tu nombre: desde su pestaña Notificaciones o desde la notificación que muestra. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
+    <string name="phone_notifications_answer_summary">El equipo puede pulsar los botones de una notificación y responder chats, en tu nombre: desde su página Notificaciones o desde la notificación que muestra. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
     <string name="phone_notifications_wait">Cuando el equipo no está al alcance</string>
     <string name="phone_notifications_wait_summary">Las notificaciones esperan en este teléfono, solo en memoria, y se envían cuando el equipo responde, marcadas como tardías con lo que esperaron. Esperan 20 como máximo</string>
     <string name="phone_notifications_wait_10">Esperar hasta 10 minutos</string>
@@ -542,8 +542,8 @@
     <string name="settings_files_background">Archivos del equipo en segundo plano</string>
     <string name="settings_files_background_summary">Lo que envía el equipo llega sin una sesión, donde van los archivos de ordenadores, en casa o, con Archivos por internet, desde fuera. Necesita acceso a las notificaciones, que mantiene la conexión</string>
     <string name="settings_phone_folders">Carpetas que puede abrir el equipo</string>
-    <string name="settings_phone_folders_summary">La pestaña Teléfono del equipo puede listar estas carpetas y copiar sus archivos. Nada más del teléfono es accesible. Mientras haya una carpeta compartida se mantiene conectado al equipo, usando el acceso a las notificaciones</string>
-    <string name="phone_folders_empty">Ninguna aún: el equipo no puede abrir nada en este teléfono. Añade una carpeta para que su pestaña Teléfono la liste y copie archivos</string>
+    <string name="settings_phone_folders_summary">La página Teléfono del equipo puede listar estas carpetas y copiar sus archivos. Nada más del teléfono es accesible. Mientras haya una carpeta compartida se mantiene conectado al equipo, usando el acceso a las notificaciones</string>
+    <string name="phone_folders_empty">Ninguna aún: el equipo no puede abrir nada en este teléfono. Añade una carpeta para que su página Teléfono la liste y copie archivos</string>
     <string name="phone_folders_add">Añadir carpeta</string>
     <string name="phone_folders_remove">Quitar</string>
     <string name="phone_folders_remove_named">Quitar %1$s</string>
@@ -552,10 +552,10 @@
     <string name="screenshots_on">Enviar capturas nuevas</string>
     <string name="screenshots_on_summary">Una captura de pantalla hecha en este teléfono llega a su equipo un momento después. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
     <string name="recent_photos_on">Fotos recientes en el equipo</string>
-    <string name="recent_photos_on_summary">La página Teléfono del equipo muestra tus fotos de cámara más nuevas (DCIM) en pequeño, y trae una cuando la pides. Desactivado hasta que lo actives</string>
+    <string name="recent_photos_on_summary">La página Teléfono del equipo muestra tus fotos de cámara más nuevas (DCIM) en pequeño, y trae una cuando la pides</string>
     <string name="recent_photos_needs_photos">Pocketdesk necesita acceso a las fotos para esto: actívalo de nuevo para permitirlo</string>
-    <string name="recent_photos_needs_access">El equipo pregunta a través del acceso a notificaciones del teléfono, que está desactivado: permítelo abajo</string>
-    <string name="screenshots_needs_access">Necesita acceso a las notificaciones para funcionar en segundo plano</string>
+    <string name="recent_photos_needs_access">Necesita acceso a las notificaciones: permítelo abajo</string>
+    <string name="screenshots_needs_access">Necesita acceso a las notificaciones: permítelo abajo</string>
     <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
     <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>
     <string name="screenshots_save">Guardarlas en el equipo, con lo que recibe</string>
@@ -712,15 +712,15 @@
     <string name="control_service_label">Control de Pocketdesk</string>
     <string name="control_service_description">Mientras este teléfono muestra su pantalla en tu ordenador con Pocketdesk, y lo permites en los Ajustes de Pocketdesk, ese ordenador puede tocar, deslizar, desplazar, escribir en el campo en el que estás y pulsar Atrás, Inicio y Recientes. Android permite al servicio leer lo que hay en la pantalla; Pocketdesk solo lee el campo en el que escribe y no envía nada de lo que lee.</string>
     <string name="settings_control_from_computer">Dejar que el ordenador controle este teléfono</string>
-    <string name="settings_control_summary_off">Mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar y escribir en él. Usa un servicio de accesibilidad, que la Protección avanzada de Android no permite.</string>
-    <string name="settings_control_summary_needs_service">Casi: activa «Control de Pocketdesk» en los ajustes de Accesibilidad de Android. Si Android lo muestra en gris, abre la información de la app de Pocketdesk, luego ⋮, Permitir ajustes restringidos.</string>
-    <string name="settings_control_summary_on">Activado: mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar, escribir y pulsar Atrás e Inicio. No con el teléfono bloqueado, salvo Atrás e Inicio.</string>
+    <string name="settings_control_summary_off">Mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar y escribir en él. Usa un servicio de accesibilidad, que la Protección avanzada de Android no permite</string>
+    <string name="settings_control_summary_needs_service">Casi: activa «Control de Pocketdesk» en los ajustes de Accesibilidad de Android. Si Android lo muestra en gris, abre la información de la app de Pocketdesk, luego ⋮, Permitir ajustes restringidos</string>
+    <string name="settings_control_summary_on">Activado: mientras este teléfono muestra su pantalla en un ordenador, ese ordenador puede tocar, deslizar, escribir y pulsar Atrás e Inicio. No con el teléfono bloqueado, salvo Atrás e Inicio</string>
     <string name="cast_showing_controlled">La pantalla de este teléfono se muestra y se controla en %1$s</string>
     <string name="settings_control_open_accessibility">Abrir los ajustes de Accesibilidad</string>
     <string name="settings_download_folder">Los archivos de ordenadores van a</string>
     <string name="settings_download_folder_default">Descargas/Pocketdesk</string>
     <string name="settings_download_folder_picked">La carpeta que elegiste</string>
-    <string name="settings_download_folder_lost">La carpeta que elegiste ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk. Toca para elegir otra.</string>
+    <string name="settings_download_folder_lost">La carpeta que elegiste ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>
     <string name="settings_download_folder_reset">Volver a usar Descargas/Pocketdesk</string>
     <string name="transfer_folder_gone">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que esto fue a Descargas/Pocketdesk.</string>
     <!-- D1: health after updates. -->
@@ -752,7 +752,7 @@
     </plurals>
     <!-- D2: quiet hours kept in step. -->
     <string name="settings_let_computer_mute">Dejar que el ordenador silencie este teléfono</string>
-    <string name="settings_let_computer_mute_summary">Tu ordenador puede activar No molestar durante un tiempo, hasta un día, y ve cuándo este teléfono está en silencio. Las llamadas y los mensajes que tus ajustes de No molestar dejan pasar siguen llegando. Mantiene un enlace con el ordenador, así que necesita acceso a las notificaciones.</string>
+    <string name="settings_let_computer_mute_summary">Tu ordenador puede activar No molestar durante un tiempo, hasta un día, y ve cuándo este teléfono está en silencio. Las llamadas y los mensajes que tus ajustes de No molestar dejan pasar siguen llegando. Mantiene un enlace con el ordenador, así que necesita acceso a las notificaciones</string>
     <string name="phone_notifications_hold_back">Retener con No molestar</string>
     <string name="phone_notifications_hold_back_summary">Mientras No molestar silencia una notificación en este teléfono, tampoco se envía al ordenador</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
