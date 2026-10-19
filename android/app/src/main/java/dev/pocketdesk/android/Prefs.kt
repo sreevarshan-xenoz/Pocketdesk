@@ -250,7 +250,6 @@ object Prefs {
         bump()
     }
 
-    /** Whether a mouse connected to the phone drives the computer's cursor in a session (T9c). On by default. */
     /** A game controller connected to the phone plays on the computer (E4). */
     fun gamepadController(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_GAMEPAD_CONTROLLER, true)
@@ -260,6 +259,7 @@ object Prefs {
         bump()
     }
 
+    /** Whether a mouse connected to the phone drives the computer's cursor in a session (T9c). On by default. */
     fun captureMouse(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_CAPTURE_MOUSE, true)
 

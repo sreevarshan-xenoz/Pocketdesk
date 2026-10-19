@@ -91,16 +91,16 @@ fun GamepadOverlay(
             verticalAlignment = Alignment.Bottom,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PadKey("LB", stringResource(R.string.key_page_up), PadButton.LB, pad, onChange, Bumper, 92.dp, 40.dp)
+                PadKey("LB", stringResource(R.string.key_page_up), PadButton.LB, pad, onChange, Bumper, 92.dp, KEY)
                 Stick(left = true, caption = stringResource(R.string.gamepad_mouse), pad = pad, onChange = onChange)
                 Dpad(pad, onChange)
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PadKey("Select", stringResource(R.string.key_backspace), PadButton.SELECT, pad, onChange, Bumper, 84.dp, 40.dp)
-                PadKey("Start", stringResource(R.string.gamepad_click), PadButton.START, pad, onChange, Bumper, 84.dp, 40.dp)
+                PadKey("Select", stringResource(R.string.key_backspace), PadButton.SELECT, pad, onChange, Bumper, 84.dp, KEY)
+                PadKey("Start", stringResource(R.string.gamepad_click), PadButton.START, pad, onChange, Bumper, 84.dp, KEY)
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PadKey("RB", stringResource(R.string.key_page_down), PadButton.RB, pad, onChange, Bumper, 92.dp, 40.dp)
+                PadKey("RB", stringResource(R.string.key_page_down), PadButton.RB, pad, onChange, Bumper, 92.dp, KEY)
                 FaceButtons(pad, onChange)
                 Stick(left = false, caption = stringResource(R.string.gamepad_scroll), pad = pad, onChange = onChange)
             }
@@ -112,9 +112,12 @@ private val Scrim = Color.Black.copy(alpha = 0.45f)
 private val Held = Color.White.copy(alpha = 0.45f)
 private val Bumper = RoundedCornerShape(12.dp)
 
+/** Every key is 48 dp to the touch at least (C5's rule; E4 review). */
+private val KEY = 48.dp
+
 @Composable
 private fun Dpad(pad: GamepadState, onChange: () -> Unit) {
-    val key = 44.dp
+    val key = KEY
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         PadKey("↑", null, PadButton.UP, pad, onChange, CircleShape, key, key)
         Row {
@@ -165,10 +168,11 @@ private fun PadKey(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(width, height)
-            .padding(2.dp)
+            .padding(1.dp)
             .clip(shape)
             .background(if (held) Held else Scrim)
-            .semantics {
+            // One stop for a screen reader: the key with what it does.
+            .semantics(mergeDescendants = true) {
                 role = Role.Button
                 contentDescription = description
                 onClick {
