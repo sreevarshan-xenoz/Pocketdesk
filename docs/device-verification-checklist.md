@@ -1785,6 +1785,18 @@ On the A71 (Android 16) against a throwaway server, phone notifications shown no
 - [ ] A Do Not Disturb that silences but still lists notifications.
 - [ ] A phone with a bedtime mode switching on during a mute.
 
+## 113. Clipboard history and Resend (D3)
+
+On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_device.sh`, in the evening's batch):
+
+- [ ] An earlier copy sent from Home's card menu reaches the computer's clipboard, and the history keeps it as the phone's.
+- [ ] The computer's copy pushed to the phone is kept as this computer's.
+- [ ] `pocketdesk clipboard` lists both, newest first; `--send 2 --to` puts the older on the phone.
+- [ ] The history turned off in `config.toml` by hand is emptied at the next text and listed as none.
+- [ ] The Clipboard page by hand: Copy, Send to…, Clear and its confirm, a cut entry's Send greyed.
+- [ ] A KDE Connect device's text, and another computer's, in the history.
+- [ ] Linux (`wl-paste`).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -20,7 +20,6 @@ KDE's Remote Input request (2026-02-12, https://discuss.kde.org/t/kde-connect-re
 - **Left out:**
   - copies marked private, which never cross anyway;
   - a pairing link;
-  - an image, kept as a line ("an image") without its bytes;
   - text over 64 KiB, kept cut, with a note.
 - **Repeats:** the same text again moves to the top.
 
@@ -33,7 +32,7 @@ KDE's Remote Input request (2026-02-12, https://discuss.kde.org/t/kde-connect-re
 
 "Clear history" empties it. Turning the setting off clears it at once.
 
-**Local API:** `pocketdesk clipboard [--json]` lists the history, and `pocketdesk clipboard send <phone> <index>` sends one entry.
+**Local API:** `pocketdesk clipboard [--json]` lists the history, and `pocketdesk clipboard --send N --to <phone>` sends the Nth entry (1 the newest).
 
 ### On the phone
 
@@ -57,3 +56,28 @@ The history sheet's entries gain "Send to computer". It sends that text to the p
   - the computer's copy shows as from this computer;
   - Send to a phone puts it on the A71's clipboard;
   - Send to computer from the phone's sheet works.
+
+## As built, and the review
+
+- **What counts as crossed:**
+  - a phone's or computer's text that set this computer's clipboard (`note_from_phone`, which every phone, KDE device and computer path goes through);
+  - this computer's own copy, once it went to anyone: a phone pushed to, a linked computer, a KDE device, or the phone that asked for the clipboard itself in a session.
+
+  The same text as the newest is not written again, so a phone asking every few seconds writes nothing.
+- **One writer:** a single thread in order, fed by a queue of 64 (more are dropped), reads the setting at each text, holds the file to it (emptied at 0, trimmed when lowered) and adds the text. The server also holds it to the setting at start. The page and `pocketdesk clipboard` read only what the setting allows.
+- **Not kept:** a pairing link anywhere in a text, in any case (the check that keeps it off phones too); a copy marked private, which never crosses.
+- **Send to…:**
+  - goes to a linked phone or computer with Clipboard on;
+  - a cut entry is not sent;
+  - a resend keeps its entry's origin;
+  - the page says it asked, not that it sent.
+- **The phone:** "Send an earlier copy" on each computer's ⋮ menu opens its own history; a pick goes to that computer as the Send clipboard tile does, over the internet road when the one-off connection fails (`ClipboardSend`).
+- **Fresh review: 0 Critical, 5 Important.** Fixed one commit each:
+  - the setting held only after the app's Save;
+  - a thread per text, out of order and unbounded;
+  - crossings to computers, KDE devices and a phone's own asking left out;
+  - the pairing-link check only at the start of a text;
+  - no internet road from Home.
+
+  Minors fixed: an unreadable file overwritten, a resend's origin, cut entries sent, Clear's confirm armed for good, "Sent" before it went, the menu's words, the doc comment. Left: the 2 s read of the file on the page; entries of an unpaired phone kept until they fall off; the list's places shifting between listing and `--send`.
+- **Device check:** in the evening's batch (checklist §113).

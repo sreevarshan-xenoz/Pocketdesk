@@ -428,6 +428,8 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/rings_out/` | Rings the app or `pocketdesk ring` asks for (N1), one file each, taken within 60 s | Default | `core/src/local/rings.rs` |
 | `<state>/quiet_out/` | Mutes the app or `pocketdesk quiet` asks for (D2), one file each, taken within 60 s | Default | `core/src/local/quiet.rs` |
 | `<state>/phone_quiet.json` | Each phone's Do Not Disturb as it last said (D2): quiet, the end of a mute from here, a refusal | Default | `core/src/local/phone_quiet.rs` |
+| `<state>/clip_history.json` | The texts that crossed between this computer and its phones (D3), newest first, while `clipboard_history` is above 0; in plain text | Owner-only | `core/src/local/clip_history.rs` |
+| `<state>/clipboard_out/` | Texts the app or `pocketdesk clipboard --send` asks to put on a phone's clipboard (D3), one file each, taken within 60 s | Owner-only | `core/src/local/clip_history.rs` |
 | `<state>/kdeconnect_seen.json` | KDE Connect devices that completed the handshake (3a): their KDE id, name, when, paired or not; the newest 32. Written only by the server | Owner-only | `core/src/local/kdeconnect.rs` |
 | `<state>/kdeconnect_find` | Until when the desktop app asks the server to look for KDE Connect devices (2 minutes at most) | Default | same |
 | `<state>/kdeconnect_devices.json` | Paired KDE Connect devices (3b): KDE id, name, the SHA-256 of the certificate each paired with, when, and what each may do (3c) | Owner-only | `core/src/local/kdeconnect_devices.rs` |

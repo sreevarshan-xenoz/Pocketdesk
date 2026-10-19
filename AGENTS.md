@@ -42,6 +42,11 @@ This file provides guidance to the AI agent when working with code in this repos
 
 The detailed build journal lives in `git log` — one conventional commit per logical change, so status bullets here must stay at the milestone level, not the file/function level.
 
+- 2026-10-19: **D3, clipboard history and Resend (branch `feat/clip-history`; spec `docs/superpowers/specs/2026-10-18-clip-history-design.md`, with as-built and review sections).**
+  - **The computer:** with Settings "Clipboard history" above 0 (off by default), the last texts that crossed either way are kept owner-only (`clip_history.json`, SECURITY.md limit 28), on the Clipboard page with Copy and Send to… and in `pocketdesk clipboard [--send N --to]`.
+  - **The phone:** "Send an earlier copy" on each computer's menu on Home.
+  - **Fresh review (0 Critical, 5 Important), fixed one commit each:** the setting held only after Save, a thread per text, crossings left out, the pairing-link check, and no internet road from Home.
+  - **Owed:** the device check (checklist §113, in the evening's batch), the page by hand, Linux.
 - 2026-10-18: **D2, quiet hours kept in step (branch `feat/quiet`; spec `docs/superpowers/specs/2026-10-18-quiet-design.md`, with as-built and review sections).**
   - **The phone:** a notification its Do Not Disturb silences is not sent to the computer (on by default). With "Let the computer mute this phone" (off by default), its own computer may turn Do Not Disturb on for up to a day:
     - only from "all";
