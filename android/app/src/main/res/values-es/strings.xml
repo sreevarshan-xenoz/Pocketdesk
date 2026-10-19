@@ -798,7 +798,7 @@
     <string name="settings_camera_clipboard_summary">La foto va al portapapeles del ordenador además de a sus archivos recibidos</string>
     <string name="remote_air">Ratón aéreo</string>
     <string name="remote_trackpad">Panel táctil</string>
-    <string name="air_hint">Mantén pulsado aquí y apunta con el teléfono para mover el puntero. Toca para hacer clic.</string>
+    <string name="air_hint">Sujeta el teléfono plano, con la parte de arriba hacia la pantalla. Mantén pulsado aquí y gíralo para mover el puntero; toca para hacer clic.</string>
     <string name="air_none">Este teléfono no tiene giroscopio, así que no puede ser un ratón aéreo.</string>
     <string name="settings_air_speed">Velocidad del ratón aéreo</string>
     <string name="settings_air_speed_summary">Cuánto se mueve el puntero al girar el teléfono en el ratón aéreo del mando</string>

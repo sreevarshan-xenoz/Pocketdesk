@@ -24,6 +24,20 @@ class AirMouseTest {
     }
 
     @Test
+    fun aPressHoldsItsFirstMovesBackAndATapClicks() {
+        val press = AirPress(downMs = 1_000)
+        // The thumb's tilt in the first moments moves nothing.
+        assertEquals(0 to 0, press.move(3, -2, nowMs = 1_050))
+        // Past the hold, the held moves go with the new one.
+        assertEquals(7 to -2, press.move(4, 0, nowMs = 1_150))
+        assertEquals(false, press.release(nowMs = 1_300))
+        val tap = AirPress(downMs = 0)
+        tap.move(10, 10, nowMs = 40)
+        assertEquals(true, tap.release(nowMs = 200))
+        assertEquals(false, AirPress(downMs = 0).release(nowMs = 400))
+    }
+
+    @Test
     fun speedScalesAndAPauseIsNotATurn() {
         assertEquals(-18 to 0, AirMouse(2f).step(rateX = 0f, rateZ = 1f, dtSec = 0.01f))
         assertEquals(0 to 0, AirMouse(1f).step(rateX = 5f, rateZ = 5f, dtSec = 0.5f))

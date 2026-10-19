@@ -48,6 +48,38 @@ class AirMouse(private val speed: Float) {
 
         /** A press shorter than this, moving under [TAP_PX], is a click. */
         const val TAP_MS = 250L
-        const val TAP_PX = 12
+        const val TAP_PX = 40
+
+        /** Moves wait this long into a press, so a tap's thumb does not move the pointer. */
+        const val HOLD_MS = 120L
     }
+}
+
+/**
+ * One press of the air pad (F4 review): its first [AirMouse.HOLD_MS] the
+ * moves are held back, so the thumb's own press tilting the phone moves
+ * nothing; past it they go, the held ones first. A short press that moved
+ * little is a click, and its held moves are dropped.
+ */
+class AirPress(private val downMs: Long) {
+    private var heldX = 0
+    private var heldY = 0
+    private var total = 0
+
+    /** The move to send now for a move of [dx], [dy] at [nowMs], or 0 to 0 while held back. */
+    fun move(dx: Int, dy: Int, nowMs: Long): Pair<Int, Int> {
+        total += kotlin.math.abs(dx) + kotlin.math.abs(dy)
+        if (nowMs - downMs < AirMouse.HOLD_MS) {
+            heldX += dx
+            heldY += dy
+            return 0 to 0
+        }
+        val out = (heldX + dx) to (heldY + dy)
+        heldX = 0
+        heldY = 0
+        return out
+    }
+
+    /** Let go at [nowMs]: whether the press was a click. */
+    fun release(nowMs: Long): Boolean = nowMs - downMs < AirMouse.TAP_MS && total < AirMouse.TAP_PX
 }
