@@ -87,6 +87,7 @@ fun HomeScreen(
     onRemote: (HostStore.Host) -> Unit,
     onSound: (HostStore.Host) -> Unit,
     onCast: (HostStore.Host) -> Unit,
+    onCamera: (HostStore.Host) -> Unit,
     onConnectFound: (HostStore.Host) -> Unit,
     onAdd: () -> Unit,
     onScan: () -> Unit,
@@ -353,6 +354,7 @@ fun HomeScreen(
                         onRemote = { onRemote(host) },
                         onSound = { onSound(host) },
                         onCast = { onCast(host) },
+                        onCamera = { onCamera(host) },
                         onConnect = {
                             if (!Prefs.offerWake(context)) {
                                 onConnect(host)
@@ -690,6 +692,7 @@ private fun HostCard(
     onRemote: () -> Unit,
     onSound: () -> Unit,
     onCast: () -> Unit,
+    onCamera: () -> Unit,
     onWake: () -> Unit,
     onWakeSettings: () -> Unit,
     onCheck: () -> Unit,
@@ -731,6 +734,8 @@ private fun HostCard(
                             add(R.string.card_deck to onDeck)
                             // F2: its CPU, memory, disks, battery, uptime.
                             add(R.string.card_state to onState)
+                            // F6: the back camera, shown in the computer's window.
+                            add(R.string.card_show_camera to onCamera)
                             // D3: an earlier copy, sent to this computer again.
                             add(R.string.card_send_earlier_copy to onHistory)
                             if (hasWake) add(R.string.wake to onWake)

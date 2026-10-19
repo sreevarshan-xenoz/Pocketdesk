@@ -49,6 +49,7 @@ class CastService : Service() {
         const val EXTRA_PORT = "port"
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_RESULT_DATA = "resultData"
+        const val EXTRA_CAMERA = "camera"
 
         private const val TAG = "CastService"
         private const val CHANNEL_ID = "pocketdesk-cast"
@@ -63,6 +64,17 @@ class CastService : Service() {
         @Volatile
         var castingTo: String? = null
             private set
+
+        /** Show the phone's back camera on [address] (F6), the camera permission granted. */
+        fun startCamera(context: Context, address: String, port: Int) {
+            context.startForegroundService(
+                Intent(context, CastService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(EXTRA_ADDRESS, address)
+                    .putExtra(EXTRA_PORT, port)
+                    .putExtra(EXTRA_CAMERA, true),
+            )
+        }
 
         /** Start a cast to [address] with the consent Android returned. */
         fun start(context: Context, address: String, port: Int, resultCode: Int, data: Intent) {
@@ -86,6 +98,11 @@ class CastService : Service() {
     private var display: VirtualDisplay? = null
     private var encoder: CastEncoder? = null
 
+    /** F6: the back camera instead of the screen, and its feed once shown. */
+    private var camera = false
+    private var feed: CameraFeed? = null
+    private var started = false
+
     @Volatile
     private var finished = false
 
@@ -97,12 +114,31 @@ class CastService : Service() {
             return START_NOT_STICKY
         }
         // One cast at a time: a second start while one runs is ignored.
-        if (intent?.action != ACTION_START || projection != null || finished) {
-            if (projection == null) stopSelf()
+        if (intent?.action != ACTION_START || started || finished) {
+            if (!started) stopSelf()
             return START_NOT_STICKY
         }
         address = intent.getStringExtra(EXTRA_ADDRESS).orEmpty()
         val port = intent.getIntExtra(EXTRA_PORT, 0)
+        // F6: the back camera, not the screen: no projection, a camera service.
+        if (intent.getBooleanExtra(EXTRA_CAMERA, false)) {
+            camera = true
+            started = true
+            createChannel()
+            val notification = notification(getString(R.string.cast_connecting, shown))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            if (address.isEmpty() || checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                fail(getString(R.string.cast_camera_denied))
+                return START_NOT_STICKY
+            }
+            castingTo = address
+            Thread({ run(port) }, "cast-session").start()
+            return START_NOT_STICKY
+        }
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
         val data =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -129,6 +165,7 @@ class CastService : Service() {
             return START_NOT_STICKY
         }
         projection = taken
+        started = true
         taken.registerCallback(
             object : MediaProjection.Callback() {
                 override fun onStop() = finish()
@@ -185,9 +222,9 @@ class CastService : Service() {
                     if (!showing) {
                         showing = true
                         main.post(::startPicture)
-                        update(getString(R.string.cast_showing, shown))
-                        // C8: the computer may control the phone while it is shown.
-                        control = dev.pocketdesk.android.control.ControlRunner(this) { on ->
+                        update(getString(if (camera) R.string.cast_showing_camera else R.string.cast_showing, shown))
+                        // C8: the computer may control the phone while its screen is shown.
+                        if (!camera) control = dev.pocketdesk.android.control.ControlRunner(this) { on ->
                             if (!finished) {
                                 update(getString(if (on) R.string.cast_showing_controlled else R.string.cast_showing, shown))
                             }
@@ -217,6 +254,7 @@ class CastService : Service() {
     }
 
     private fun startPicture() {
+        if (camera) return startCamera()
         val projection = projection ?: return
         if (finished || encoder != null) return
         val (w, h, dpi) = screen()
@@ -245,11 +283,31 @@ class CastService : Service() {
             }
     }
 
+    /** F6: the back camera into a new encoder at the camera's size. */
+    private fun startCamera() {
+        if (finished || encoder != null) return
+        val made = CameraFeed(this) { fail(getString(R.string.cast_camera_lost)) }
+        val (width, height) = made.size() ?: run {
+            made.close()
+            return fail(getString(R.string.cast_no_camera))
+        }
+        val coding = runCatching { CastEncoder(width, height, ::encoderEnded) }.getOrElse {
+            made.close()
+            Log.w(TAG, "No encoder for the camera", it)
+            return fail(getString(R.string.cast_failed, shown, plainErrorText(it.message)))
+        }
+        encoder = coding
+        feed = made
+        if (!made.open(coding.surface)) fail(getString(R.string.cast_no_camera))
+    }
+
     private fun encoderEnded() = finish()
 
     /** A turned phone: a new encoder at the new shape, the display drawn into it. */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        // The camera's frames keep their shape whichever way the phone turns.
+        if (camera) return
         val old = encoder ?: return
         val shown = display ?: return
         val (w, h, dpi) = screen()
@@ -283,10 +341,13 @@ class CastService : Service() {
             val shown = display
             val coding = encoder
             val taken = projection
+            val lens = feed
             display = null
             encoder = null
             projection = null
+            feed = null
             shown?.release()
+            lens?.close()
             Thread {
                 coding?.release()
                 runCatching { taken?.stop() }

@@ -810,4 +810,9 @@
     <string name="settings_calls_needs_access">Needs notification access: the call is watched, and the computer\'s answers arrive, from it</string>
     <string name="settings_calls_decline">Let the computer decline calls</string>
     <string name="settings_calls_decline_summary">Adds Decline beside Silence; asks to end calls</string>
+    <string name="card_show_camera">Show camera</string>
+    <string name="cast_showing_camera">Showing the camera on %1$s</string>
+    <string name="cast_camera_denied">Pocketdesk needs the camera permission to show the camera</string>
+    <string name="cast_no_camera">This phone has no camera Pocketdesk can show</string>
+    <string name="cast_camera_lost">The camera stopped: another app may have taken it</string>
 </resources>

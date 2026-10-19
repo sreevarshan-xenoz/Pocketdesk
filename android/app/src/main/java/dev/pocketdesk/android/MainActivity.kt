@@ -170,6 +170,16 @@ class MainActivity : ComponentActivity() {
             // Denied is non-fatal: the service still runs, just without a visible notification.
         }
 
+    /** The computer the camera waits for its permission to be shown on (F6). */
+    private var cameraTo: HostStore.Host? = null
+
+    private val cameraPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val host = cameraTo ?: return@registerForActivityResult
+            cameraTo = null
+            if (granted) dev.pocketdesk.android.cast.CastService.startCamera(this, host.address, host.port)
+        }
+
     /** The computer a cast waits for Android's consent to (T10k). */
     private var castTo: HostStore.Host? = null
 
@@ -407,6 +417,16 @@ class MainActivity : ComponentActivity() {
                                                 getSystemService(android.media.projection.MediaProjectionManager::class.java)
                                                     .createScreenCaptureIntent(),
                                             )
+                                        },
+                                        onCamera = { host ->
+                                            HostStore.save(this@MainActivity, host)
+                                            maybeRequestNotificationPermission()
+                                            if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                                dev.pocketdesk.android.cast.CastService.startCamera(this@MainActivity, host.address, host.port)
+                                            } else {
+                                                cameraTo = host
+                                                cameraPermission.launch(android.Manifest.permission.CAMERA)
+                                            }
                                         },
                                         onConnectFound = { host ->
                                             // Not saved until it pairs: an mDNS
