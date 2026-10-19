@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-629 open items.
+633 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 357 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 359 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 46 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 48 |
 | A phone with a SIM | 21 |
 | A second phone | 7 |
 | Away from home: another network, or through a router | 9 |
@@ -745,6 +745,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - "Also onto its clipboard" off: the file only; "Photos the computer asks for" off (the default): no notification, and the Phone page's button disabled while the phone is not linked.
 - Spanish and Tamil.
 
+**129. An air mouse (F4)**
+
+- "Air mouse speed" at 0.5 and 3; a slow link (moves add up, no replay).
+- A phone without a gyroscope keeps the trackpad.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -929,6 +934,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Keys (`ctrl+shift+m`, `alt+tab`) into a scratch window here: pressed in order, all let go (input reaches this box: with the owner).
 - Text typed into a scratch window; a task that asks first, the owner's Allow here; media Play/Pause and Next; a link opening in the browser.
+
+**129. An air mouse (F4)**
+
+- Remote's "Air mouse" on the A71: held flat, turning moves the pointer across and tilting moves it up and down, a still hand moving nothing; the last choice kept.
+- A tap clicks without moving the pointer; a press and turn moves without clicking; nothing moves after letting go.
 
 ## A phone with a SIM
 
