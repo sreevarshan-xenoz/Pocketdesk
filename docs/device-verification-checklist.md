@@ -1833,6 +1833,13 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] A phone from before D8: the file lands in Downloads, the drive answers 504 after the wait.
 - [ ] The setting off: the address gone from the Phone page, and the port closed.
 - [ ] Linux: Files or Dolphin at the `dav://` address.
+## 118. Lock when the phone leaves (D9)
+
+- [ ] The A71 with the switch on, a throwaway server with `POCKETDESK_LOCK_FILE` set on this box: Wi-Fi off on the phone, a line in the file after the set time, and the `away_locked` event.
+- [ ] The same while typing on the computer: no line until the keyboard has been quiet that long.
+- [ ] The phone back, and gone again: a second line; staying gone: no more.
+- [ ] The switch on the Devices page, and the time in Settings, applied without a restart.
+- [ ] A real lock, on a computer where locking is allowed (not this box), Windows and Linux.
 
 ## Recording results
 
