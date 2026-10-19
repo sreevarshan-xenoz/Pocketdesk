@@ -463,6 +463,10 @@ impl PocketdeskApp {
                     self.send_clipboard(&id);
                     false
                 }
+                TrayAction::TakePhoto(id) => {
+                    self.take_photo(&id);
+                    false
+                }
                 TrayAction::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -952,6 +956,25 @@ impl PocketdeskApp {
         );
     }
 
+    /// Ask the phone `id` for a photo (F3, from the tray and the Overview:
+    /// G2), and say how that went.
+    fn take_photo(&mut self, id: &str) {
+        let who = self.label(id);
+        self.notice = crate::notice::Notice::outcome(
+            match pocketdesk_core::local::phone_photos::request(
+                &self.state_dir,
+                id,
+                pocketdesk_core::local::phone_photos::Ask::Take,
+                now_unix(),
+            ) {
+                Ok(_) => Ok(format!(
+                    "Asked {who}: tap its notification to take the photo (\"Photos the computer asks for\" on in its Settings); it lands with the received files."
+                )),
+                Err(e) => Err(format!("Could not ask {who} for a photo: {e}")),
+            },
+        );
+    }
+
     /// The Overview's phones (N6): where each is, its battery and last
     /// session, and Ring, Send file… and Send link… for it.
     fn phones_panel(&mut self, ui: &mut egui::Ui) {
@@ -971,6 +994,7 @@ impl PocketdeskApp {
         let mut send_file = None;
         let mut open_link = None;
         let mut send_clip = None;
+        let mut take_photo = None;
         // One short block per phone, so it fits a narrow window (N6).
         for row in &rows {
             let device = row.device;
@@ -1091,6 +1115,18 @@ impl PocketdeskApp {
                     {
                         send_clip = Some(device.id.clone());
                     }
+                    // G2: as the tray offers it, where files reach the phone.
+                    let photo_why = row.file.err().unwrap_or(
+                        "With \"Photos the computer asks for\" on in Pocketdesk's Settings on the phone, it shows a notification that opens its camera; the photo comes here as a received file.",
+                    );
+                    if ui
+                        .add_enabled(row.file.is_ok(), egui::Button::new("Take a photo"))
+                        .on_hover_text(photo_why)
+                        .on_disabled_hover_text(photo_why)
+                        .clicked()
+                    {
+                        take_photo = Some(device.id.clone());
+                    }
                 });
             });
         }
@@ -1122,6 +1158,9 @@ impl PocketdeskApp {
         }
         if let Some(id) = send_clip {
             self.send_clipboard(&id);
+        }
+        if let Some(id) = take_photo {
+            self.take_photo(&id);
         }
     }
 

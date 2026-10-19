@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-647 open items.
+649 open items.
 
 | Where | Items |
 |---|---|
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 6 |
 | A Linux desktop (the Azure VM serves for some) | 88 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 60 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 62 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1658,3 +1658,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - "Show its screen or camera here" off for the phone: refused, with its reason.
 - Stop pressed while the camera is still opening: the camera's indicator goes.
 - Another app taking the camera: "The camera stopped", the cast ended.
+
+**133. Take a photo from the tray and the Overview (G2)**
+
+- With the A71 linked and "Photos the computer asks for" on: the tray's Take a photo under it, then the phone's notification, the camera, and the photo in the received files; the same from the Overview's button, with its notice.
+- The phone away, or Files off for it: Take a photo greyed in the tray and on the Overview, its hover saying why.
