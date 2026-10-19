@@ -975,7 +975,9 @@ fun RemoteScreen(
             widthPx = window.width.toFloat(),
             heightPx = window.height.toFloat(),
             videoAspect = if (videoSize.height > 0) videoSize.width.toFloat() / videoSize.height else 0f,
-            up = status is StreamStatus.Up,
+            // Up and showing a picture: until then the card or the wait hint
+            // keeps the whole screen, so the pane changes size once, not thrice.
+            up = status is StreamStatus.Up && !awaitingPicture,
         )
         val streamHeight = with(density) { (window.height * streamShare).toDp() }.coerceAtMost(maxHeight)
         // Only the stream Box's size changes across a fold, so the SurfaceView
