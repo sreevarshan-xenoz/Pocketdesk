@@ -89,8 +89,15 @@ impl NotesView {
             for note in &notes {
                 ui.group(|ui| {
                     ui.strong(format!("{}: {}", note.app, note.title));
-                    if !note.text.is_empty() {
-                        ui.label(&note.text);
+                    if note.messages.is_empty() {
+                        if !note.text.is_empty() {
+                            ui.label(&note.text);
+                        }
+                    } else {
+                        // D4: a chat's recent messages, as a thread.
+                        for line in thread_lines(&note.messages, now_unix) {
+                            ui.label(line);
+                        }
                     }
                     ui.label(
                         RichText::new(format!(
@@ -132,6 +139,35 @@ impl NotesView {
     }
 }
 
+/// A chat's messages as the page shows them (D4): "Ann · 5 min ago: text",
+/// "You · …" for the phone's owner, oldest first.
+pub fn thread_lines(
+    messages: &[pocketdesk_core::protocol::conversation::Message],
+    now_unix: u64,
+) -> Vec<String> {
+    messages
+        .iter()
+        .map(|m| {
+            let who = if m.mine {
+                "You"
+            } else if m.from.is_empty() {
+                "Someone"
+            } else {
+                m.from.as_str()
+            };
+            if m.at_ms == 0 {
+                format!("{who}: {}", m.text)
+            } else {
+                format!(
+                    "{who} · {}: {}",
+                    crate::words::ago(now_unix, m.at_ms / 1000),
+                    m.text
+                )
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +187,43 @@ mod tests {
         };
         let listed = newest_first(vec![note("old"), note("new")]);
         assert_eq!(listed[0].key, "new");
+    }
+
+    /// D4: a chat's thread, the owner's own as "You".
+    #[test]
+    fn a_chat_reads_as_a_thread() {
+        use pocketdesk_core::protocol::conversation::Message;
+        let now = 10_000;
+        let lines = thread_lines(
+            &[
+                Message {
+                    from: "Ann".into(),
+                    text: "Lunch?".into(),
+                    at_ms: 0,
+                    mine: false,
+                },
+                Message {
+                    from: String::new(),
+                    text: "Yes".into(),
+                    at_ms: 0,
+                    mine: true,
+                },
+            ],
+            now,
+        );
+        assert_eq!(lines, ["Ann: Lunch?", "You: Yes"]);
+        let timed = thread_lines(
+            &[Message {
+                from: "Ann".into(),
+                text: "Hi".into(),
+                at_ms: (now - 120) * 1000,
+                mine: false,
+            }],
+            now,
+        );
+        assert!(
+            timed[0].starts_with("Ann · ") && timed[0].ends_with(": Hi"),
+            "{timed:?}"
+        );
     }
 }
