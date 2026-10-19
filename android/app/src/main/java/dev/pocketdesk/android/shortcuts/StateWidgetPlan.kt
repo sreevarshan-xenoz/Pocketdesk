@@ -35,7 +35,8 @@ object StateWidgetPlan {
     /** What the time line says. */
     enum class When { Updated, StaleSince, NotAnswering, Asking }
 
-    fun timeLine(readAt: Long?, failed: Boolean): When = when {
+    fun timeLine(readAt: Long?, failed: Boolean, asking: Boolean): When = when {
+        asking -> When.Asking
         readAt != null && !failed -> When.Updated
         readAt != null -> When.StaleSince
         failed -> When.NotAnswering

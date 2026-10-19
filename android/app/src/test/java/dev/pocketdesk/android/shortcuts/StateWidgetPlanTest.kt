@@ -40,10 +40,12 @@ class StateWidgetPlanTest {
 
     @Test
     fun theTimeLineSaysWhetherTheLastTryAnswered() {
-        assertEquals(StateWidgetPlan.When.Updated, StateWidgetPlan.timeLine(readAt = 5L, failed = false))
-        assertEquals(StateWidgetPlan.When.StaleSince, StateWidgetPlan.timeLine(readAt = 5L, failed = true))
-        assertEquals(StateWidgetPlan.When.NotAnswering, StateWidgetPlan.timeLine(readAt = null, failed = true))
-        assertEquals(StateWidgetPlan.When.Asking, StateWidgetPlan.timeLine(readAt = null, failed = false))
+        assertEquals(StateWidgetPlan.When.Updated, StateWidgetPlan.timeLine(readAt = 5L, failed = false, asking = false))
+        assertEquals(StateWidgetPlan.When.StaleSince, StateWidgetPlan.timeLine(readAt = 5L, failed = true, asking = false))
+        assertEquals(StateWidgetPlan.When.NotAnswering, StateWidgetPlan.timeLine(readAt = null, failed = true, asking = false))
+        assertEquals(StateWidgetPlan.When.Asking, StateWidgetPlan.timeLine(readAt = null, failed = false, asking = false))
+        // While an ask runs the widget says so, over whatever it shows (G1 review).
+        assertEquals(StateWidgetPlan.When.Asking, StateWidgetPlan.timeLine(readAt = 5L, failed = true, asking = true))
     }
 
     @Test

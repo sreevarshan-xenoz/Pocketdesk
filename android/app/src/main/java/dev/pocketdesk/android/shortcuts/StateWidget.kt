@@ -50,6 +50,9 @@ class StateWidget : AppWidgetProvider() {
             return
         }
         val pending = goAsync()
+        // Drawn at once, saying it asks, so a tap is seen (G1 review).
+        askingFor = host.address
+        redraw(app, manager, ids)
         // A broadcast has about 10 s: the answer or the failure is drawn by then.
         thread(name = "state-widget") {
             try {
@@ -61,10 +64,12 @@ class StateWidget : AppWidgetProvider() {
                 }
                 asked.join(TimeUnit.SECONDS.toMillis(ASK_SECONDS))
                 if (asked.isAlive) Kept.failed(app, host.address)
+                askingFor = null
                 redraw(app, manager, ids)
             } catch (e: Exception) {
                 Log.w(TAG, "state widget refresh failed", e)
             } finally {
+                askingFor = null
                 pending.finish()
             }
         }
@@ -115,6 +120,10 @@ class StateWidget : AppWidgetProvider() {
         private const val ACTION_FOLLOW = "dev.pocketdesk.android.action.STATE_WIDGET_FOLLOW"
         private const val ASK_SECONDS = 8L
 
+        /** The computer an ask is running for in this process, if one is. */
+        @Volatile
+        private var askingFor: String? = null
+
         /**
          * The last computer may have changed: draw from what is kept, and
          * ask once when nothing is kept for it.
@@ -134,7 +143,7 @@ class StateWidget : AppWidgetProvider() {
                     host?.let { HostStore.shownName(context, it.address) } ?: context.getString(R.string.tile_no_computer),
                 )
                 setTextViewText(R.id.widget_state_numbers, numbers(context, state))
-                setTextViewText(R.id.widget_state_when, timeLine(context, if (state == null) null else kept.readAt, kept.failed))
+                setTextViewText(R.id.widget_state_when, timeLine(context, if (state == null) null else kept.readAt, kept.failed, host != null && askingFor == host.address))
                 setOnClickPendingIntent(
                     R.id.widget_state_root,
                     if (host == null) {
@@ -169,9 +178,9 @@ class StateWidget : AppWidgetProvider() {
             ).joinToString(" · ")
         }
 
-        private fun timeLine(context: Context, readAt: Long?, failed: Boolean): String {
+        private fun timeLine(context: Context, readAt: Long?, failed: Boolean, asking: Boolean): String {
             val time = readAt?.let { DateFormat.getTimeFormat(context).format(Date(it)) }
-            return when (StateWidgetPlan.timeLine(readAt, failed)) {
+            return when (StateWidgetPlan.timeLine(readAt, failed, asking)) {
                 StateWidgetPlan.When.Updated -> context.getString(R.string.state_widget_updated, time)
                 StateWidgetPlan.When.StaleSince -> context.getString(R.string.state_widget_stale, time)
                 StateWidgetPlan.When.NotAnswering -> context.getString(R.string.state_widget_not_answering)
