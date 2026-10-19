@@ -968,6 +968,9 @@ fun RemoteScreen(
             smallestWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp.toFloat(),
         )
         val dualPane = split != PaneSplit.None
+        // An upright phone's stream pane keeps room above and below the
+        // picture, so its chrome is not drawn over the desktop.
+        val stacked = split == PaneSplit.Horizontal && !hinge
         val vertical = split == PaneSplit.Vertical
         val streamShare = PaneRule.streamFraction(
             split,
@@ -978,6 +981,7 @@ fun RemoteScreen(
             // Up and showing a picture: until then the card or the wait hint
             // keeps the whole screen, so the pane changes size once, not thrice.
             up = status is StreamStatus.Up && !awaitingPicture,
+            bandsPx = with(density) { (PaneRule.TOP_BAND_DP + PaneRule.BOTTOM_BAND_DP).dp.toPx() },
         )
         val streamHeight = with(density) { (window.height * streamShare).toDp() }.coerceAtMost(maxHeight)
         // Only the stream Box's size changes across a fold, so the SurfaceView
@@ -1033,7 +1037,11 @@ fun RemoteScreen(
                     awaitingPicture = false
                 },
                 secure = blackout,
-                modifier = Modifier.fillMaxSize(),
+                modifier = if (stacked) {
+                    Modifier.fillMaxSize().padding(top = PaneRule.TOP_BAND_DP.dp, bottom = PaneRule.BOTTOM_BAND_DP.dp)
+                } else {
+                    Modifier.fillMaxSize()
+                },
             )
         }
 

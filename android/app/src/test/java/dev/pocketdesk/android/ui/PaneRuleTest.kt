@@ -19,16 +19,29 @@ class PaneRuleTest {
 
     @Test
     fun aPortraitStreamPaneIsAsTallAsTheVideoNeeds() {
-        // 1080 px wide, 2400 tall; a 16:9 desktop is 607.5 px tall at full width.
-        assertEquals(607.5f / 2400f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 16f / 9f), 1e-4f)
-        // A 21:9 one is shorter, but the pane keeps a quarter of the screen.
-        assertEquals(0.25f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 2560f / 1080f), 1e-4f)
-        // A tall desktop takes no more than 60 %, so the controls keep room.
+        // 1080 px wide, 2400 tall; a 3:4 desktop is 1440 px tall at full width.
+        assertEquals(1440f / 2400f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 0.75f), 1e-4f)
+        // A 16:9 or 21:9 one is shorter, but the trackpad needs no more than
+        // 45 % of the screen: the pane keeps 55 %.
+        assertEquals(0.55f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 16f / 9f), 1e-4f)
+        assertEquals(0.55f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 2560f / 1080f), 1e-4f)
+        // A tall (3:4) desktop takes its 60 %; a taller one no more than 70 %,
+        // so the trackpad keeps room.
         assertEquals(0.6f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 0.75f), 1e-4f)
+        assertEquals(0.7f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 0.5f), 1e-4f)
         // No video yet, a hinge (it sits in the middle), or side by side: half.
         assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 0f), 1e-4f)
         assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Horizontal, true, 1080f, 2400f, 16f / 9f), 1e-4f)
         assertEquals(0.5f, PaneRule.streamFraction(PaneSplit.Vertical, false, 1600f, 2400f, 16f / 9f), 1e-4f)
+    }
+
+    @Test
+    fun theUprightStreamPaneHasRoomForItsChromeOffThePicture() {
+        // A 4:3 desktop is 810 px tall at 1080 wide; 700 px of bands above
+        // and below it for the chrome.
+        assertEquals((810f + 700f) / 2400f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 4f / 3f, bandsPx = 700f), 1e-4f)
+        // The trackpad keeps at least 30 % of the screen.
+        assertEquals(0.7f, PaneRule.streamFraction(PaneSplit.Horizontal, false, 1080f, 2400f, 0.75f, bandsPx = 500f), 1e-4f)
     }
 
     @Test

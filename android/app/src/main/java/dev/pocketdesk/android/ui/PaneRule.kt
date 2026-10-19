@@ -11,9 +11,20 @@ object PaneRule {
     /** A window this much taller than wide is a phone held upright. */
     const val PORTRAIT_RATIO = 1.25f
 
-    /** The least and most of a portrait screen the stream pane takes. */
-    const val MIN_PORTRAIT_STREAM = 0.25f
-    const val MAX_PORTRAIT_STREAM = 0.6f
+    /**
+     * The least and most of a portrait screen the stream pane takes: the
+     * trackpad needs no more than 45 % of it, and keeps at least 30 %.
+     */
+    const val MIN_PORTRAIT_STREAM = 0.55f
+    const val MAX_PORTRAIT_STREAM = 0.7f
+
+    /**
+     * The room an upright stream pane keeps above and below the picture for
+     * its chrome (the link, the details and window chips on top; the mode,
+     * keyboard and menu below), so none of it sits on the desktop.
+     */
+    const val TOP_BAND_DP = 148f
+    const val BOTTOM_BAND_DP = 76f
 
     /**
      * The split for [fold] (a hinge, or none) in a window [widthDp] by
@@ -72,8 +83,9 @@ object PaneRule {
     /**
      * The share of the window's height the stream pane takes in a [split]
      * ([hinge] when a fold made it): on a phone held upright, as tall as a
-     * desktop of [videoAspect] (width / height) is at full width, within
-     * [MIN_PORTRAIT_STREAM] and [MAX_PORTRAIT_STREAM]; otherwise half.
+     * desktop of [videoAspect] (width / height) is at full width plus
+     * [bandsPx] of room for the chrome, within [MIN_PORTRAIT_STREAM] and
+     * [MAX_PORTRAIT_STREAM]; otherwise half.
      * While the session is not [up], the upright stream pane takes the whole
      * screen: its card (the reason, Retry) does not fit a quarter of it, and
      * the dock below has nothing to drive meanwhile.
@@ -85,9 +97,10 @@ object PaneRule {
         heightPx: Float,
         videoAspect: Float,
         up: Boolean = true,
+        bandsPx: Float = 0f,
     ): Float {
         if (split == PaneSplit.Horizontal && !hinge && !up) return 1f
         if (split != PaneSplit.Horizontal || hinge || videoAspect <= 0f || widthPx <= 0f || heightPx <= 0f) return 0.5f
-        return (widthPx / videoAspect / heightPx).coerceIn(MIN_PORTRAIT_STREAM, MAX_PORTRAIT_STREAM)
+        return ((widthPx / videoAspect + bandsPx) / heightPx).coerceIn(MIN_PORTRAIT_STREAM, MAX_PORTRAIT_STREAM)
     }
 }
