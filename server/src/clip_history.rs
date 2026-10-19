@@ -113,7 +113,22 @@ pub async fn run_sends() {
                     }
                     tracing::info!("Put a copy on {}'s clipboard", request.device_id)
                 }
-                Err(reason) => tracing::info!("{} not sent the copy: {reason}", request.device_id),
+                Err(reason) => {
+                    tracing::info!("{} not sent the copy: {reason}", request.device_id);
+                    // Asked from the tray, its window hidden: the refusal
+                    // is shown, or the pick seems to do nothing (D5 review).
+                    if request.current && !cfg!(test) {
+                        let short: String = request.device_id.chars().take(8).collect();
+                        let body = format!("Phone {short}: {reason}");
+                        std::thread::spawn(move || {
+                            crate::platform::notify(
+                                "The clipboard was not sent",
+                                &body,
+                                Duration::from_secs(10),
+                            );
+                        });
+                    }
+                }
             }
         }
     }

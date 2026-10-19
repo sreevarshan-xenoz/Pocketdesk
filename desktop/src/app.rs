@@ -890,7 +890,11 @@ impl PocketdeskApp {
                 id,
                 now_unix(),
             ) {
-                Ok(_) => Ok(format!("Asked {who} to take the clipboard.")),
+                // Asked, not sent: the server reads the clipboard then, and
+                // shows a notification if it cannot send it (D5 review).
+                Ok(_) => Ok(format!(
+                    "Asked the server to send the clipboard to {who}; a notification says if it cannot."
+                )),
                 Err(e) => Err(format!("Could not send the clipboard to {who}: {e}")),
             },
         );
