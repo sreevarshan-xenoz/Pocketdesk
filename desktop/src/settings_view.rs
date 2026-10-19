@@ -6,6 +6,7 @@ use eframe::egui::{self, RichText};
 use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
+use pocketdesk_core::local::deck::{DeckButton, MAX_BUTTONS as DECK_MAX_BUTTONS};
 use pocketdesk_core::local::events::{EventsDetail, KINDS, hookable};
 use pocketdesk_core::local::home_assistant as ha;
 use pocketdesk_core::local::tasks::{
@@ -171,6 +172,8 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("events_detail", "Details in events", Section::Automation),
     ("hooks", "Hooks", Section::Automation),
     ("tasks", "Tasks", Section::Automation),
+    ("deck_enabled", "Deck", Section::Automation),
+    ("deck", "Deck buttons", Section::Automation),
     ("home_assistant", "Home Assistant", Section::Automation),
     (
         "mqtt_broker",
@@ -226,6 +229,8 @@ pub fn applies_live(key: &str) -> bool {
             | "events_detail"
             | "hooks"
             | "tasks"
+            | "deck"
+            | "deck_enabled"
             | "home_assistant"
             | "mqtt_broker"
             | "mqtt_user"
@@ -397,6 +402,11 @@ impl SettingsForm {
             task_problems(&self.edited.tasks)
                 .into_iter()
                 .map(|problem| ("tasks", problem)),
+        );
+        problems.extend(
+            deck_problems(&self.edited.deck)
+                .into_iter()
+                .map(|problem| ("deck", problem)),
         );
         if self.edited.home_assistant
             && let Err(why) = ha::parse_broker(&self.edited.mqtt_broker)
@@ -890,6 +900,74 @@ impl SettingsForm {
                         .weak(),
                     );
                 });
+                row(ui, "deck_enabled", |ui| {
+                    ui.checkbox(
+                        &mut e.deck_enabled,
+                        "phones may show and press the buttons below",
+                    );
+                });
+                row(ui, "deck", |ui| {
+                    let mut remove = None;
+                    for (i, button) in e.deck.iter_mut().enumerate() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut button.label)
+                                    .desired_width(110.0)
+                                    .hint_text("label"),
+                            );
+                            let mut kind = deck_kind(button);
+                            egui::ComboBox::from_id_salt(("deck-kind", i))
+                                .selected_text(deck_kind_words(kind))
+                                .show_ui(ui, |ui| {
+                                    for k in DECK_KINDS {
+                                        ui.selectable_value(&mut kind, k, deck_kind_words(k));
+                                    }
+                                });
+                            if kind != deck_kind(button) {
+                                set_deck_kind(button, kind);
+                            }
+                            if kind == "media" {
+                                let value = deck_value_mut(button);
+                                egui::ComboBox::from_id_salt(("deck-media", i))
+                                    .selected_text(media_words(value))
+                                    .show_ui(ui, |ui| {
+                                        for m in ["playPause", "next", "previous"] {
+                                            ui.selectable_value(
+                                                value,
+                                                m.to_string(),
+                                                media_words(m),
+                                            );
+                                        }
+                                    });
+                            } else {
+                                ui.add(
+                                    egui::TextEdit::singleline(deck_value_mut(button))
+                                        .desired_width(240.0)
+                                        .hint_text(deck_hint(kind)),
+                                );
+                            }
+                            if ui.small_button("Remove").clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = remove {
+                        e.deck.remove(i);
+                    }
+                    if e.deck.len() < DECK_MAX_BUTTONS && ui.button("Add button").clicked() {
+                        e.deck.push(DeckButton {
+                            keys: Some(String::new()),
+                            ..Default::default()
+                        });
+                    }
+                    ui.label(
+                        RichText::new(
+                            "Each button shows on the phone's Deck and does its action here when pressed, if the phone may: keys and text need \"Control the mouse and keyboard\", a task \"Start my tasks\", media Audio, a link \"Open its links here\". The phone sees the labels, never the keys, links or text.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                });
                 row(ui, "home_assistant", |ui| {
                     ui.checkbox(
                         &mut e.home_assistant,
@@ -1079,6 +1157,109 @@ fn unknown_hook_kinds(hooks: &std::collections::BTreeMap<String, String>) -> Vec
         .map(String::as_str)
         .filter(|kind| !hookable(kind))
         .collect()
+}
+
+/// The kinds of deck button, in the editor's order.
+const DECK_KINDS: [&str; 5] = ["keys", "task", "media", "link", "text"];
+
+/// A deck button's kind: which of its actions it holds (keys when none).
+fn deck_kind(button: &DeckButton) -> &'static str {
+    if button.task.is_some() {
+        "task"
+    } else if button.media.is_some() {
+        "media"
+    } else if button.link.is_some() {
+        "link"
+    } else if button.text.is_some() {
+        "text"
+    } else {
+        "keys"
+    }
+}
+
+/// Make `button` a `kind` button, keeping what was typed when it fits.
+fn set_deck_kind(button: &mut DeckButton, kind: &str) {
+    let old = [
+        button.keys.take(),
+        button.task.take(),
+        button.media.take(),
+        button.link.take(),
+        button.text.take(),
+    ]
+    .into_iter()
+    .flatten()
+    .next()
+    .unwrap_or_default();
+    let value = if kind == "media" {
+        "playPause".to_string()
+    } else {
+        old
+    };
+    match kind {
+        "task" => button.task = Some(value),
+        "media" => button.media = Some(value),
+        "link" => button.link = Some(value),
+        "text" => button.text = Some(value),
+        _ => button.keys = Some(value),
+    }
+}
+
+/// The value the editor's box edits for `button`'s kind.
+fn deck_value_mut(button: &mut DeckButton) -> &mut String {
+    let slot = match deck_kind(button) {
+        "task" => &mut button.task,
+        "media" => &mut button.media,
+        "link" => &mut button.link,
+        "text" => &mut button.text,
+        _ => &mut button.keys,
+    };
+    slot.get_or_insert_with(String::new)
+}
+
+fn deck_kind_words(kind: &str) -> &'static str {
+    match kind {
+        "task" => "Start a task",
+        "media" => "Media",
+        "link" => "Open a link",
+        "text" => "Type text",
+        _ => "Press keys",
+    }
+}
+
+fn deck_hint(kind: &str) -> &'static str {
+    match kind {
+        "task" => "the task's name",
+        "link" => "https://…",
+        "text" => "the text to type",
+        _ => "ctrl+shift+m",
+    }
+}
+
+fn media_words(media: &str) -> &'static str {
+    match media {
+        "next" => "Next",
+        "previous" => "Previous",
+        _ => "Play/Pause",
+    }
+}
+
+/// What is wrong with the deck's buttons, in words for the user.
+fn deck_problems(buttons: &[DeckButton]) -> Vec<String> {
+    let mut problems = Vec::new();
+    if buttons.len() > DECK_MAX_BUTTONS {
+        problems.push(format!("Deck: at most {DECK_MAX_BUTTONS} buttons."));
+    }
+    for (i, button) in buttons.iter().enumerate() {
+        if let Err(why) = button.action() {
+            let which = if button.label.trim().is_empty() {
+                format!("button {}", i + 1)
+            } else {
+                format!("\"{}\"", button.label.trim())
+            };
+            problems.push(format!("Deck: {which}: {why}."));
+        }
+    }
+    problems
 }
 
 /// What is wrong with the tasks, in words for the user.
@@ -1336,6 +1517,47 @@ mod tests {
             problems.iter().any(|p| p.contains("different")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn a_deck_button_changes_kind_keeping_what_was_typed() {
+        let mut button = DeckButton {
+            label: "Site".into(),
+            keys: Some("https://example.org/".into()),
+            ..Default::default()
+        };
+        assert_eq!(deck_kind(&button), "keys");
+        set_deck_kind(&mut button, "link");
+        assert_eq!(deck_kind(&button), "link");
+        assert_eq!(button.link.as_deref(), Some("https://example.org/"));
+        assert!(button.keys.is_none(), "one action at a time");
+        set_deck_kind(&mut button, "media");
+        assert_eq!(button.media.as_deref(), Some("playPause"));
+        deck_value_mut(&mut button).replace_range(.., "next");
+        assert_eq!(button.media.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn deck_problems_name_the_button() {
+        let good = DeckButton {
+            label: "Copy".into(),
+            keys: Some("ctrl+c".into()),
+            ..Default::default()
+        };
+        let bad = DeckButton {
+            label: "Oops".into(),
+            keys: Some("ctrl+banana".into()),
+            ..Default::default()
+        };
+        let unnamed = DeckButton {
+            keys: Some("a".into()),
+            ..Default::default()
+        };
+        assert!(deck_problems(std::slice::from_ref(&good)).is_empty());
+        let problems = deck_problems(&[good, bad, unnamed]);
+        assert_eq!(problems.len(), 2);
+        assert!(problems[0].contains("Oops") && problems[0].contains("banana"));
+        assert!(problems[1].contains("button 3"));
     }
 
     #[test]
