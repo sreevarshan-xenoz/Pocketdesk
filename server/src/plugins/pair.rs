@@ -1663,6 +1663,9 @@ forged log line"
             // press is held to the phone's permission for its action.
             "kdeconnect.pocketdesk.deck",
             "kdeconnect.pocketdesk.deck_press",
+            // The computer's state (F2): what a paired phone already sees of
+            // the battery, with the CPU, memory, disks and uptime.
+            "kdeconnect.pocketdesk.system",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(

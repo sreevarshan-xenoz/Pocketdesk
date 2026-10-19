@@ -57,6 +57,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.quiet` |  | yes |  | phone_quiet |
 | `kdeconnect.pocketdesk.quiet_state` | yes |  | Mute | phone_quiet |
 | `kdeconnect.pocketdesk.sms_sent` | yes |  | Texts | sms |
+| `kdeconnect.pocketdesk.system` | yes | yes | none (any paired phone) | system |
 | `kdeconnect.pocketdesk.task_result` |  | yes |  | tasks |
 | `kdeconnect.pocketdesk.task_run` | yes |  | Tasks | tasks |
 | `kdeconnect.pocketdesk.tasks` | yes | yes | Tasks | tasks |
