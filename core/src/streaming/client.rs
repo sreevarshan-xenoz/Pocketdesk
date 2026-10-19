@@ -80,6 +80,23 @@ pub fn sound_grant(payload: &[u8]) -> u8 {
         .unwrap_or(0)
 }
 
+/// A screen session's ready stream carries one byte of what the computer
+/// takes (E3): this bit marks the byte as said. Computers before E3 send a
+/// screen session no ready stream, and read as taking none of it.
+pub const SCREEN_FEATURES_SAID: u8 = 0x80;
+/// The computer takes pen samples ([`super::InputPacket::Pen`]).
+pub const SCREEN_FEATURE_PEN: u8 = 1;
+
+/// What a screen session's ready stream says the computer takes, from its
+/// payload: 0 when it says nothing.
+pub fn screen_features(payload: &[u8]) -> u8 {
+    payload
+        .first()
+        .copied()
+        .filter(|b| b & SCREEN_FEATURES_SAID != 0)
+        .unwrap_or(0)
+}
+
 /// What a session is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SessionMode {
@@ -283,6 +300,9 @@ pub struct RemoteFlags {
     /// A sound session's grants as the computer said them ([`sound_grant`]):
     /// 0 until said, or from a computer that does not say.
     pub sound_granted: Arc<std::sync::atomic::AtomicU8>,
+    /// A screen session's features as the computer said them
+    /// ([`screen_features`], E3): 0 until said, or from a computer before E3.
+    pub screen_features: Arc<std::sync::atomic::AtomicU8>,
     /// The computer sent a picture or sound anyway: it does not know
     /// input-only sessions, and the session was closed.
     pub too_old: Arc<std::sync::atomic::AtomicBool>,
@@ -925,6 +945,22 @@ mod remote_tests {
     }
 
     #[test]
+    fn a_screen_session_hears_whether_the_computer_takes_a_pen() {
+        assert_eq!(
+            screen_features(&[SCREEN_FEATURES_SAID | SCREEN_FEATURE_PEN]) & SCREEN_FEATURE_PEN,
+            SCREEN_FEATURE_PEN
+        );
+        // Nothing said: no pen offered.
+        assert_eq!(screen_features(&[]), 0);
+        assert_eq!(screen_features(&[SCREEN_FEATURE_PEN]), 0);
+        // A screen session's ready stream is read, never fed to the decoder.
+        assert_eq!(
+            remote_stream(transport::STREAM_KIND_READY, false, false),
+            RemoteStream::Ready
+        );
+    }
+
+    #[test]
     fn a_sound_session_takes_sound_and_refuses_a_picture() {
         assert_eq!(
             remote_stream(transport::STREAM_KIND_READY, true, true),
@@ -1057,6 +1093,18 @@ async fn recv_with_cancel(
                         // the mode): that one is closed, not read.
                         match remote_stream(header.stream_kind, remote.input_only, remote.sound) {
                             RemoteStream::Ready => {
+                                // A screen session hears what the computer
+                                // takes (E3); it was admitted already, by its
+                                // picture.
+                                if !remote.input_only {
+                                    if let Ok(payload) = recv_stream.read_to_end(16).await {
+                                        remote.screen_features.store(
+                                            screen_features(&payload),
+                                            std::sync::atomic::Ordering::Release,
+                                        );
+                                    }
+                                    continue;
+                                }
                                 // A sound session hears what it may do (N5).
                                 if remote.sound
                                     && let Ok(payload) = recv_stream.read_to_end(16).await

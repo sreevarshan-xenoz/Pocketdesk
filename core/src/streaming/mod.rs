@@ -80,7 +80,10 @@ pub use client::StreamingClient;
 /// [`StreamingClient`] itself (the Android decoder): see
 /// [`client::report_samples`].
 pub use client::report_samples;
-pub use client::{SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID, sound_grant};
+pub use client::{
+    SCREEN_FEATURE_PEN, SCREEN_FEATURES_SAID, SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID,
+    screen_features, sound_grant,
+};
 pub use connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, QuinnConnection,
     SharedConnection, TransportFamily,
@@ -89,7 +92,8 @@ pub use connection::{
 pub use dht::{DhtAddressLookup, dht_resolver};
 pub use encoder_detect::{AvailableEncoders, HardwareEncoder, probe_encoders, resolve_encoder};
 pub use input_packet::{
-    InputPacket, MAX_SAMPLES_PER_FRAME, SAMPLE_DECODE, SAMPLE_E2E, SAMPLE_RENDER, SampleBatch,
+    InputPacket, MAX_SAMPLES_PER_FRAME, PEN_BARREL, PEN_CONTACT, PEN_ERASER, PEN_IN_RANGE,
+    PenSample, SAMPLE_DECODE, SAMPLE_E2E, SAMPLE_RENDER, SampleBatch,
 };
 #[cfg(feature = "wan")]
 pub use iroh::SecretKey as IrohSecretKey;

@@ -102,6 +102,7 @@ fn about_the_stream(packet: &InputPacket, sound: bool) -> bool {
         _ => matches!(
             packet,
             InputPacket::MouseMoveAbs { .. }
+                | InputPacket::Pen(_)
                 | InputPacket::RequestKeyframe
                 | InputPacket::WindowCrop { .. }
                 | InputPacket::FullQuality { .. }
@@ -597,6 +598,28 @@ impl StreamingServer {
                 info!("Sound session: no capture or encode, sound both ways");
             } else {
                 info!("Input-only session: no capture, encode or sound");
+            }
+        } else {
+            // A screen session hears what this computer takes (E3); an older
+            // phone reads the ready stream and ignores its bytes.
+            match connection.open_uni().await {
+                Ok(mut ready) => {
+                    let header = super::transport::PacketHeader {
+                        sequence: 0,
+                        stream_kind: super::transport::STREAM_KIND_READY,
+                        is_keyframe: false,
+                        timestamp_us: 0,
+                    };
+                    let mut said = header.as_bytes().to_vec();
+                    said.push(
+                        super::client::SCREEN_FEATURES_SAID | super::client::SCREEN_FEATURE_PEN,
+                    );
+                    if let Err(e) = ready.write_all(&said).await {
+                        debug!(error = %e, "Could not say what this computer takes");
+                    }
+                    let _ = ready.finish();
+                }
+                Err(e) => debug!(error = %e, "Could not say what this computer takes"),
             }
         }
         // The relay learns of the cast, with a way to ask the phone for a
@@ -1528,6 +1551,14 @@ impl StreamingServer {
                                                     ) if !cropped => {
                                                         let (x_norm, y_norm) = space.remap(x_norm, y_norm);
                                                         InputPacket::MouseMoveAbs { x_norm, y_norm }
+                                                    }
+                                                    // A pen lands where a tap would (E3).
+                                                    (InputPacket::Pen(mut pen), Some(space))
+                                                        if !cropped =>
+                                                    {
+                                                        (pen.x_norm, pen.y_norm) =
+                                                            space.remap(pen.x_norm, pen.y_norm);
+                                                        InputPacket::Pen(pen)
                                                     }
                                                     (packet, _) => packet,
                                                 };
@@ -2487,6 +2518,11 @@ mod tests {
         assert!(about_the_stream(&InputPacket::RequestKeyframe, false));
         assert!(!about_the_stream(
             &InputPacket::MouseMove { dx: 1, dy: 1 },
+            false
+        ));
+        // A pen draws on the picture there is not (E3).
+        assert!(about_the_stream(
+            &InputPacket::Pen(crate::streaming::input_packet::PenSample::default()),
             false
         ));
     }
