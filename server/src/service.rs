@@ -799,8 +799,14 @@ fn tailscale_status_line(status: Result<String>) -> String {
 }
 
 pub async fn print_status() -> Result<()> {
+    // Bounded: a `tailscale` that hangs must not hang `status` with it.
     let status = match TailscaleClient::new() {
-        Ok(tailscale) => tailscale.status_text().await,
+        Ok(tailscale) => {
+            match tokio::time::timeout(Duration::from_secs(3), tailscale.status_text()).await {
+                Ok(status) => status,
+                Err(_) => Err(anyhow::anyhow!("tailscale did not answer in 3 s")),
+            }
+        }
         Err(e) => Err(e),
     };
     println!("{}", tailscale_status_line(status));
