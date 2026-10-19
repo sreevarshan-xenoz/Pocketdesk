@@ -152,6 +152,20 @@ fn with_injector(
     use_it(slot.as_mut().expect("made above"))
 }
 
+/// Make the deck's injector at start when the deck has buttons (`wanted`):
+/// on Linux a uinput device made at the moment of a press can miss its
+/// first events, so a press's first key (the Ctrl of Ctrl+C) was lost.
+pub fn warm_up(wanted: bool) {
+    if !wanted {
+        return;
+    }
+    tokio::task::spawn_blocking(|| {
+        if let Err(why) = with_injector(|_| Ok(())) {
+            tracing::warn!("The deck cannot type here: {why}");
+        }
+    });
+}
+
 /// Run `use_it` with the injector on a blocking thread.
 async fn inject(
     use_it: impl FnOnce(&mut InputInjector) -> std::result::Result<(), String> + Send + 'static,

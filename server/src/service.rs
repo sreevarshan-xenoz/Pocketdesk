@@ -189,6 +189,8 @@ pub async fn run(config: Config) -> Result<()> {
     }
     crate::plugins::links::configure(config.open_links);
     crate::virtual_screen::configure(config.virtual_screens);
+    // The deck's injector now, not at its first press (F1 review).
+    crate::plugins::deck::warm_up(config.deck_enabled && !config.deck.is_empty());
     // The desktop app's answers to the phones' notifications (T10c).
     tokio::spawn(crate::plugins::notification::run_answers());
     // The clipboard to connected phones as it changes (T10b), and shared
