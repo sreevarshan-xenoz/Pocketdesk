@@ -23,6 +23,9 @@ class DeckTest {
         assertEquals("Audio is turned off for this phone on the computer", refused.reason)
         assertNull(Deck.outcome(false, "").reason)
         assertNull(Deck.outcome(false, null).reason)
+        // A task that asks first is done here but waits there.
+        assertEquals(Deck.Outcome(true, null, waiting = true), Deck.outcome(true, null, waiting = true))
+        assertEquals(false, Deck.outcome(false, "no", waiting = true).waiting)
     }
 
     @Test

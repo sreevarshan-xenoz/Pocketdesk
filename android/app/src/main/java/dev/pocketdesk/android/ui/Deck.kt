@@ -11,8 +11,11 @@ object Deck {
     /** One button: [index] in the computer's list, pressed with [label]. */
     data class Button(val index: Int, val label: String, val kind: String)
 
-    /** How a press went: [ok], or the computer's [reason]. */
-    data class Outcome(val ok: Boolean, val reason: String?)
+    /**
+     * How a press went: [ok], or the computer's [reason]; [waiting] when it
+     * waits for the computer's owner (a task that asks first).
+     */
+    data class Outcome(val ok: Boolean, val reason: String?, val waiting: Boolean = false)
 
     /** The kinds a button may have; any other is shown as keys. */
     val KINDS = listOf("keys", "task", "media", "link", "text")
@@ -28,8 +31,8 @@ object Deck {
     }
 
     /** A press's answer: ok, or why not (null when the computer gave none). */
-    fun outcome(ok: Boolean, reason: String?): Outcome =
-        Outcome(ok, if (ok) null else reason?.takeIf { it.isNotBlank() })
+    fun outcome(ok: Boolean, reason: String?, waiting: Boolean = false): Outcome =
+        Outcome(ok, if (ok) null else reason?.takeIf { it.isNotBlank() }, ok && waiting)
 
     /** The buttons in rows of [columns], the last row short. */
     fun rows(buttons: List<Button>, columns: Int): List<List<Button>> =
@@ -47,6 +50,6 @@ object Deck {
     /** A press's answer as JSON. */
     fun outcome(json: String): Outcome {
         val body = JSONObject(json)
-        return outcome(body.optBoolean("ok", false), body.optString("reason"))
+        return outcome(body.optBoolean("ok", false), body.optString("reason"), body.optBoolean("waiting", false))
     }
 }

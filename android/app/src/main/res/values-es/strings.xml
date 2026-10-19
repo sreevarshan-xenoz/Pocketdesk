@@ -766,6 +766,7 @@
     <string name="deck_none">El ordenador aún no tiene botones. Prepáralos en su app Pocketdesk, Settings, Deck buttons.</string>
     <string name="deck_failed">No se pudo preguntar al ordenador: %1$s</string>
     <string name="deck_done">Hecho</string>
+    <string name="deck_waiting">Esperando al dueño del ordenador</string>
     <string name="settings_deck_columns">Botones por fila</string>
     <string name="settings_deck_columns_summary">Cuántos botones de la botonera del ordenador caben en una fila en este teléfono</string>
 </resources>

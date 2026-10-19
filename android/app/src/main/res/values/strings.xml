@@ -769,6 +769,7 @@
     <string name="deck_none">The computer has no deck buttons yet. Set some up in its Pocketdesk app, Settings, Deck buttons.</string>
     <string name="deck_failed">Could not ask the computer: %1$s</string>
     <string name="deck_done">Done</string>
+    <string name="deck_waiting">Waiting for the computer\'s owner</string>
     <string name="settings_deck_columns">Deck buttons per row</string>
     <string name="settings_deck_columns_summary">How many of the computer\'s deck buttons a row holds on this phone</string>
 </resources>

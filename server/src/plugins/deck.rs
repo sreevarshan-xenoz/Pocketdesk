@@ -232,9 +232,16 @@ impl DeckPlugin {
     }
 }
 
-fn result(index: usize, outcome: &std::result::Result<(), String>) -> NetworkPacket {
+/// Whether the task `name` among `tasks` asks its owner before it runs.
+fn task_asks(tasks: &[pocketdesk_core::local::tasks::TaskSpec], name: &str) -> bool {
+    tasks.iter().any(|t| t.name == name && t.ask)
+}
+
+/// The answer to a press: done (`waiting` when it waits for the owner's
+/// yes, a task that asks first), or refused with why.
+fn result(index: usize, outcome: &std::result::Result<bool, String>) -> NetworkPacket {
     let body = match outcome {
-        Ok(()) => json!({ "index": index, "ok": true }),
+        Ok(waiting) => json!({ "index": index, "ok": true, "waiting": waiting }),
         Err(reason) => json!({ "index": index, "ok": false, "reason": reason }),
     };
     NetworkPacket::new(DECK_RESULT).with_body(body)
@@ -291,7 +298,8 @@ impl Plugin for DeckPlugin {
                                 json!({ "kind": action.kind(), "ok": done.is_ok() }),
                                 json!({ "label": label }),
                             );
-                            done
+                            // A task that asks first has only asked yet (F1 review).
+                            done.map(|()| matches!(&action, DeckAction::Task(name) if task_asks(&config.tasks, name)))
                         }
                         Err(why) => Err(why),
                     }
@@ -478,6 +486,24 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_task_that_asks_first_is_answered_as_waiting() {
+        let tasks = [pocketdesk_core::local::tasks::TaskSpec {
+            name: "build".into(),
+            command: "make".into(),
+            ask: true,
+            deadline_secs: 60,
+        }];
+        assert!(task_asks(&tasks, "build"));
+        assert!(!task_asks(&tasks, "deploy"));
+        let waiting = result(2, &Ok(true));
+        assert_eq!(waiting.body["ok"], true);
+        assert_eq!(waiting.body["waiting"], true);
+        let refused = result(2, &Err("no".into()));
+        assert_eq!(refused.body["ok"], false);
+        assert_eq!(refused.body["reason"], "no");
     }
 
     #[test]

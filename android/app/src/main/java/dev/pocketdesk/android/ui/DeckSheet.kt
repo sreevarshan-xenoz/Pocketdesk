@@ -107,7 +107,9 @@ fun DeckSheet(address: String, controlPort: Int, computer: String, onDismiss: ()
                                             val ok = outcome.getOrNull()?.ok == true
                                             val text = outcome.fold(
                                                 onSuccess = {
-                                                    if (it.ok) {
+                                                    if (it.waiting) {
+                                                        resources.getString(R.string.deck_waiting)
+                                                    } else if (it.ok) {
                                                         resources.getString(R.string.deck_done)
                                                     } else {
                                                         context.plainErrorText(it.reason)
