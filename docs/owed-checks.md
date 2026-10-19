@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-615 open items.
+614 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 350 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 349 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 44 |
 | A phone with a SIM | 21 |
@@ -367,7 +367,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **50. Resumable transfers (T6a)**
 
 - A file from the remote browser broken and continued.
-- "Retry failed files" off: a broken file fails at once, and no part is kept.
+- "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
 - "Unfinished files: not kept" on the desktop: a retry starts over.
 - A file that changes between attempts starts over (the prefix hash).
 - The app killed mid-download, then the offer fetched again within its 10 minutes.
@@ -626,7 +626,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Doze on battery without USB, where the phone suspends; a notification waiting through it and arriving marked late.
 - A computer from before C3: notifications arrive once each, as before.
-- The computer's Notifications permission off: nothing waits on the phone.
 
 **108. The phone with large fonts, landscape and TalkBack (C5)**
 

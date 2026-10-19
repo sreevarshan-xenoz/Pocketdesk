@@ -978,7 +978,7 @@ On the A71 against Windows, 2026-10-15:
 
 Owed:
 - [ ] A file from the remote browser broken and continued.
-- [ ] "Retry failed files" off: a broken file fails at once, and no part is kept.
+- [ ] "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
 - [ ] "Unfinished files: not kept" on the desktop: a retry starts over.
 - [ ] A file that changes between attempts starts over (the prefix hash).
 - [ ] The app killed mid-download, then the offer fetched again within its 10 minutes.
@@ -1729,7 +1729,7 @@ On the A71 against a throwaway server:
 - [x] Settings "When the computer is out of reach" chosen on screen (A71, by taps on the phone, 2026-10-19): Don't wait dropped a notification posted while the computer was away; Wait up to an hour kept one and sent it once the computer was back, its event saying 127 s late.
 - [ ] "Wait up to 10 minutes" on screen, and one posted more than 10 minutes before the computer comes back.
 - [ ] A computer from before C3: notifications arrive once each, as before.
-- [ ] The computer's Notifications permission off: nothing waits on the phone.
+- [x] The computer's Notifications permission off: nothing waits on the phone. A notification posted then was refused (logged once) and did not arrive in the minute after the permission was turned on again (2026-10-19, A71, throwaway server, by script).
 - [ ] Linux: the late line in a D-Bus notification.
 
 ## 107. The desktop app's headless harness (C4)
