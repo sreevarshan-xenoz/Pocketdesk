@@ -17,11 +17,20 @@ object MediaTilePlan {
         Playing(true),
     }
 
-    fun look(hasComputer: Boolean, playing: NowPlaying?, failed: Boolean, asking: Boolean): Look = when {
+    /** A reading older than this is not shown as what plays now (G6 review). */
+    const val FRESH_MS = 10 * 60 * 1000L
+
+    fun look(
+        hasComputer: Boolean,
+        playing: NowPlaying?,
+        failed: Boolean,
+        asking: Boolean,
+        ageMs: Long = 0L,
+    ): Look = when {
         !hasComputer -> Look.NoComputer
         asking -> Look.Asking
         failed -> Look.Failed
-        playing == null -> Look.Unknown
+        playing == null || ageMs > FRESH_MS -> Look.Unknown
         playing.isPlaying -> Look.Playing
         else -> Look.Paused
     }

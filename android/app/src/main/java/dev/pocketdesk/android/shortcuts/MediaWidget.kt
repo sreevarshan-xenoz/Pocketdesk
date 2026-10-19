@@ -213,14 +213,14 @@ class MediaWidget : AppWidgetProvider() {
         }
 
         /** What the last computer plays as kept, for the music tile (G6). */
-        data class Latest(val playing: NowPlaying?, val failed: Boolean, val line: String?, val asking: Boolean)
+        data class Latest(val playing: NowPlaying?, val failed: Boolean, val line: String?, val asking: Boolean, val readAt: Long?)
 
         fun latest(context: Context): Latest {
             val host = HostStore.lastHost(context)
             val kept = Kept.read(context, host?.address)
             val playing = kept.json?.takeIf { !kept.failed }
                 ?.let { json -> runCatching { parsePlaying(JSONObject(json)) }.getOrNull() }
-            return Latest(playing, kept.failed, kept.line, asking)
+            return Latest(playing, kept.failed, kept.line, asking, kept.readAt)
         }
 
         /** Play or pause the last computer's music, as the widget's button does (G6's tile). */

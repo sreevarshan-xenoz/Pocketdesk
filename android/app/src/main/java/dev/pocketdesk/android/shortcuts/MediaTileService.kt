@@ -33,16 +33,21 @@ class MediaTileService : TileService() {
         val tile = qsTile ?: return
         val host = HostStore.lastHost(this)
         val latest = MediaWidget.latest(this)
-        val look = MediaTilePlan.look(host != null, latest.playing, latest.failed, latest.asking)
-        tile.label = getString(R.string.media_tile_label)
+        val age = latest.readAt?.let { System.currentTimeMillis() - it } ?: 0L
+        val look = MediaTilePlan.look(host != null, latest.playing, latest.failed, latest.asking, age)
+        val said = when (look) {
+            MediaTilePlan.Look.NoComputer -> getString(R.string.tile_no_computer)
+            MediaTilePlan.Look.Asking -> getString(R.string.deck_loading)
+            MediaTilePlan.Look.Failed -> latest.line ?: getString(R.string.media_tile_hint)
+            MediaTilePlan.Look.Unknown -> getString(R.string.media_tile_hint)
+            MediaTilePlan.Look.Paused, MediaTilePlan.Look.Playing -> latest.playing?.headline()
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = when (look) {
-                MediaTilePlan.Look.NoComputer -> getString(R.string.tile_no_computer)
-                MediaTilePlan.Look.Asking -> getString(R.string.deck_loading)
-                MediaTilePlan.Look.Failed -> latest.line ?: getString(R.string.media_tile_hint)
-                MediaTilePlan.Look.Unknown -> getString(R.string.media_tile_hint)
-                MediaTilePlan.Look.Paused, MediaTilePlan.Look.Playing -> latest.playing?.headline()
-            }
+            tile.label = getString(R.string.media_tile_label)
+            tile.subtitle = said
+        } else {
+            // No subtitle before Android 10: the track or why not is the label (G6 review).
+            tile.label = if (look == MediaTilePlan.Look.Unknown) getString(R.string.media_tile_label) else said
         }
         tile.state = if (look.on) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.updateTile()
@@ -51,7 +56,7 @@ class MediaTileService : TileService() {
     override fun onClick() {
         super.onClick()
         if (HostStore.lastHost(this) == null) {
-            openApp()
+            if (isLocked) unlockAndRun { openApp() } else openApp()
             return
         }
         // Behind the phone's lock, as the deck's buttons are on the home screen.
