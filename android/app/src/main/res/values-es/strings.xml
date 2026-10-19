@@ -840,4 +840,6 @@
     <string name="media_widget_next">Siguiente</string>
     <string name="media_widget_play">Reproducir</string>
     <string name="media_widget_pause">Pausa</string>
+    <string name="media_widget_refused">El ordenador lo rechazó</string>
+    <string name="media_widget_unreadable">No se pudo leer la respuesta del ordenador</string>
 </resources>

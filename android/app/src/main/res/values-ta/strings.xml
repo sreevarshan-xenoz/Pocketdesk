@@ -834,4 +834,6 @@
     <string name="media_widget_next">அடுத்தது</string>
     <string name="media_widget_play">இயக்கு</string>
     <string name="media_widget_pause">இடைநிறுத்து</string>
+    <string name="media_widget_refused">கணினி மறுத்தது</string>
+    <string name="media_widget_unreadable">கணினியின் பதிலைப் படிக்க முடியவில்லை</string>
 </resources>

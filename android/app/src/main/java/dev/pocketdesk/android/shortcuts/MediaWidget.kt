@@ -82,7 +82,7 @@ class MediaWidget : AppWidgetProvider() {
         WidgetAsk.bounded(this, "media-widget", onEnd = ended, onTimeout = noAnswer) {
             if (command != null) {
                 val sent = WidgetAsk.ask(app) { audio(host, JSONObject().put("action", "mediaControl").put("command", command)) }
-                val refusal = sent.fold({ refusal(it) }, { app.plainErrorText(it.message) })
+                val refusal = sent.fold({ refusal(app, it) }, { app.plainErrorText(it.message) })
                 if (refusal != null) {
                     finish(app, host.address, ask) { Kept.failed(app, host.address, refusal) }
                     return@bounded
@@ -97,7 +97,7 @@ class MediaWidget : AppWidgetProvider() {
             }
             val answer = WidgetAsk.ask(app) { audio(host, JSONObject().put("action", "media")) }
             val json = answer.getOrNull()
-            val refusal = answer.fold({ refusal(it) }, { app.plainErrorText(it.message) })
+            val refusal = answer.fold({ refusal(app, it) }, { app.plainErrorText(it.message) })
             finish(app, host.address, ask) {
                 if (json != null && refusal == null) Kept.save(app, host.address, json) else Kept.failed(app, host.address, refusal.orEmpty())
             }
@@ -120,11 +120,19 @@ class MediaWidget : AppWidgetProvider() {
     private fun audio(host: HostStore.Host, body: JSONObject): Result<String> =
         RustCore.audioControl(host.address, host.controlPort, body.toString())
 
-    /** The computer's refusal in an answer (Audio off for this phone), or null. */
-    private fun refusal(json: String): String? = runCatching {
+    /**
+     * The computer's refusal in an answer (Audio off for this phone), or
+     * null; said as the app says errors (G5 review).
+     */
+    private fun refusal(app: Context, json: String): String? = runCatching {
         val body = JSONObject(json)
-        if (body.optBoolean("ok", true)) null else body.optString("error").ifBlank { "refused" }
-    }.getOrElse { "an answer that did not read" }
+        if (body.optBoolean("ok", true)) {
+            null
+        } else {
+            body.optString("error").takeIf { it.isNotBlank() }?.let { app.plainErrorText(it) }
+                ?: app.getString(R.string.media_widget_refused)
+        }
+    }.getOrElse { app.getString(R.string.media_widget_unreadable) }
 
     /** What plays on the last computer, kept between draws. */
     private class Kept(val json: String?, val readAt: Long?, val failed: Boolean, val line: String?) {
@@ -222,7 +230,9 @@ class MediaWidget : AppWidgetProvider() {
         fun redraw(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val host = HostStore.lastHost(context)
             val kept = Kept.read(context, host?.address)
-            val playing: NowPlaying? = kept.json?.let { json -> runCatching { parsePlaying(JSONObject(json)) }.getOrNull() }
+            // After a failure only why is shown, never the old track (G5 review).
+            val shownJson = kept.json?.takeIf { !kept.failed }
+            val playing: NowPlaying? = shownJson?.let { json -> runCatching { parsePlaying(JSONObject(json)) }.getOrNull() }
             val views = RemoteViews(context.packageName, R.layout.widget_media)
             views.setTextViewText(
                 R.id.widget_media_host,
@@ -231,7 +241,7 @@ class MediaWidget : AppWidgetProvider() {
             val title = when {
                 host == null -> ""
                 playing != null -> playing.headline()
-                kept.json != null -> context.getString(R.string.media_widget_nothing)
+                shownJson != null -> context.getString(R.string.media_widget_nothing)
                 else -> ""
             }
             views.setTextViewText(R.id.widget_media_title, title)

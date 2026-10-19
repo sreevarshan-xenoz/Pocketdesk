@@ -844,8 +844,10 @@
     <string name="media_widget_next">Next</string>
     <string name="media_widget_play">Play</string>
     <string name="media_widget_pause">Pause</string>
-    <string name="media_widget_previous_glyph" translatable="false">⏮</string>
-    <string name="media_widget_next_glyph" translatable="false">⏭</string>
-    <string name="media_widget_play_glyph" translatable="false">▶</string>
-    <string name="media_widget_pause_glyph" translatable="false">⏸</string>
+    <string name="media_widget_previous_glyph" translatable="false">⏮︎</string>
+    <string name="media_widget_next_glyph" translatable="false">⏭︎</string>
+    <string name="media_widget_play_glyph" translatable="false">▶︎</string>
+    <string name="media_widget_pause_glyph" translatable="false">⏸︎</string>
+    <string name="media_widget_refused">The computer refused</string>
+    <string name="media_widget_unreadable">The computer\'s answer did not read</string>
 </resources>
