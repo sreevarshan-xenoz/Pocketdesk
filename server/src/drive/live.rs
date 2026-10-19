@@ -249,6 +249,8 @@ pub async fn run() {
                     stop.cancel();
                 }
                 let _ = store::clear(&dir);
+                // Files kept for a re-read go with it.
+                let _ = std::fs::remove_dir_all(dir.join(DRIVE_CACHE_DIR));
                 tracing::info!("Stopped serving the phones' folders as a drive");
             }
             _ => {}

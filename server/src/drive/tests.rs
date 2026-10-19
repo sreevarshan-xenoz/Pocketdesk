@@ -122,10 +122,17 @@ impl Phones for StandIn {
 }
 
 async fn start(phone: Arc<StandIn>) -> (std::net::SocketAddr, tokio_util::sync::CancellationToken) {
+    start_keeping(phone, FILE_KEEP).await
+}
+
+async fn start_keeping(
+    phone: Arc<StandIn>,
+    keep: Duration,
+) -> (std::net::SocketAddr, tokio_util::sync::CancellationToken) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let stop = tokio_util::sync::CancellationToken::new();
-    let drive = Arc::new(Drive::new(TOKEN.to_string(), phone));
+    let drive = Arc::new(Drive::new(TOKEN.to_string(), phone).keeping_files(keep));
     tokio::spawn(serve(listener, drive, stop.clone()));
     (addr, stop)
 }
@@ -264,7 +271,7 @@ async fn folders_are_listed_from_the_phone_and_kept() {
 }
 
 #[tokio::test]
-async fn a_file_is_fetched_served_once_and_removed() {
+async fn a_file_is_fetched_once_read_again_in_pieces_and_removed_later() {
     let phone = stand_in("file");
     let (addr, stop) = start(phone.clone()).await;
     let file = format!("/{TOKEN}/Pixel/DCIM/a%20%26%20b.jpg");
@@ -280,9 +287,17 @@ async fn a_file_is_fetched_served_once_and_removed() {
     let got = ask(addr, "GET", &file, "").await;
     assert_eq!(code(&got), 200);
     assert!(got.ends_with("\r\n\r\nhello"), "{got}");
-    assert_eq!(phone.fetches.load(Ordering::SeqCst), 1);
-    let left = std::fs::read_dir(&phone.cache).unwrap().count();
-    assert_eq!(left, 0, "the fetched file is removed once served");
+    assert!(got.contains("Accept-Ranges: bytes\r\n"), "{got}");
+    // Read again, and in a piece: from what was fetched (D8 review).
+    let again = ask(addr, "GET", &file, "").await;
+    assert!(again.ends_with("\r\n\r\nhello"), "{again}");
+    let piece = ask(addr, "GET", &file, "Range: bytes=1-3\r\n").await;
+    assert_eq!(code(&piece), 206, "{piece}");
+    assert!(piece.contains("Content-Range: bytes 1-3/5\r\n"), "{piece}");
+    assert!(piece.ends_with("\r\n\r\nell"), "{piece}");
+    let past = ask(addr, "GET", &file, "Range: bytes=9-\r\n").await;
+    assert_eq!(code(&past), 416, "{past}");
+    assert_eq!(phone.fetches.load(Ordering::SeqCst), 1, "fetched once");
     let folder = ask(addr, "GET", &format!("/{TOKEN}/Pixel/DCIM/"), "").await;
     assert_eq!(code(&folder), 200);
     // A body is read and set aside.
@@ -295,6 +310,71 @@ async fn a_file_is_fetched_served_once_and_removed() {
     )
     .await;
     assert_eq!(code(&with_body), 207, "{with_body}");
+    let _ = std::fs::remove_dir_all(&phone.cache);
+    stop.cancel();
+}
+
+/// D8 review: a fetched file is kept a while, then removed and fetched again.
+#[tokio::test]
+async fn a_kept_file_goes_when_its_time_is_up() {
+    let phone = stand_in("expire");
+    let (addr, stop) = start_keeping(phone.clone(), Duration::ZERO).await;
+    let file = format!("/{TOKEN}/Pixel/DCIM/a%20%26%20b.jpg");
+    assert_eq!(code(&ask(addr, "GET", &file, "").await), 200);
+    assert_eq!(code(&ask(addr, "GET", &file, "").await), 200);
+    assert_eq!(
+        phone.fetches.load(Ordering::SeqCst),
+        2,
+        "kept no time: fetched again"
+    );
+    assert_eq!(
+        std::fs::read_dir(&phone.cache).unwrap().count(),
+        1,
+        "the first removed when the second was asked for"
+    );
+    let _ = std::fs::remove_dir_all(&phone.cache);
+    stop.cancel();
+}
+
+/// D8 review: no more than the phone can send are asked at once.
+#[tokio::test]
+async fn more_fetches_than_the_phone_sends_are_asked_again_later() {
+    let phone = stand_in("busy");
+    let (addr, stop) = start(phone.clone()).await;
+    let slow = format!("GET /{TOKEN}/Pixel/DCIM/slow.bin HTTP/1.1\r\nHost: x\r\n\r\n");
+    let mut held = Vec::new();
+    for _ in 0..FETCHES_AT_ONCE {
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        stream.write_all(slow.as_bytes()).await.unwrap();
+        held.push(stream);
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while phone.fetches.load(Ordering::SeqCst) < FETCHES_AT_ONCE {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "TIMEOUT: the fetches never began"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let busy = ask(
+        addr,
+        "GET",
+        &format!("/{TOKEN}/Pixel/DCIM/a%20%26%20b.jpg"),
+        "",
+    )
+    .await;
+    assert_eq!(code(&busy), 503, "{busy}");
+    assert!(busy.contains("Retry-After: 5\r\n"), "{busy}");
+    // Folders are still listed meanwhile.
+    let listed = ask(
+        addr,
+        "PROPFIND",
+        &format!("/{TOKEN}/Pixel/DCIM/"),
+        "Depth: 1\r\n",
+    )
+    .await;
+    assert_eq!(code(&listed), 207);
+    drop(held);
     let _ = std::fs::remove_dir_all(&phone.cache);
     stop.cancel();
 }

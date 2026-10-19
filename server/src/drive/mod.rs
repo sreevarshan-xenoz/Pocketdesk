@@ -22,6 +22,14 @@ use dav::Prop;
 /// How long a listing is kept: a file manager looks again and again.
 pub const LISTING_KEEP: Duration = Duration::from_secs(30);
 
+/// How long a fetched file is kept (D8 review): a file manager reads it
+/// again, or in pieces, and each would cross from the phone again.
+pub const FILE_KEEP: Duration = Duration::from_secs(60);
+
+/// Files fetched from phones at once, at most: the phone sends one at a
+/// time, so more only wait, each holding a connection.
+pub const FETCHES_AT_ONCE: usize = 2;
+
 /// Why the drive could not answer from a phone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fail {
@@ -126,6 +134,10 @@ pub struct Drive {
     token: String,
     phones: Arc<dyn Phones>,
     kept: Mutex<HashMap<Asked, (Instant, Listing)>>,
+    /// Files fetched, for [`FILE_KEEP`]: when, where.
+    fetched: Mutex<HashMap<Asked, (Instant, PathBuf)>>,
+    file_keep: Duration,
+    fetching: tokio::sync::Semaphore,
 }
 
 /// A listing asked for: its phone, root (none for the roots alone) and path.
@@ -137,7 +149,53 @@ impl Drive {
             token,
             phones,
             kept: Mutex::new(HashMap::new()),
+            fetched: Mutex::new(HashMap::new()),
+            file_keep: FILE_KEEP,
+            fetching: tokio::sync::Semaphore::new(FETCHES_AT_ONCE),
         }
+    }
+
+    /// The same, keeping fetched files `keep` (tests).
+    #[cfg(test)]
+    fn keeping_files(mut self, keep: Duration) -> Self {
+        self.file_keep = keep;
+        self
+    }
+
+    /// A file, fetched from its phone or kept from a fetch a moment ago.
+    async fn file(&self, device: &str, root: u32, path: &[String]) -> Result<PathBuf, u16> {
+        let key = (device.to_string(), Some(root), path.to_vec());
+        {
+            let mut fetched = self.fetched.lock().unwrap_or_else(|e| e.into_inner());
+            fetched.retain(|_, (at, file)| {
+                let keep = at.elapsed() < self.file_keep;
+                if !keep {
+                    let _ = std::fs::remove_file(file);
+                }
+                keep
+            });
+            if let Some((_, file)) = fetched.get(&key)
+                && file.exists()
+            {
+                return Ok(file.clone());
+            }
+        }
+        // More than the phone can send at once: asked again later.
+        let Ok(_slot) = self.fetching.try_acquire() else {
+            return Err(503);
+        };
+        let file = self
+            .phones
+            .fetch(device, root, path)
+            .await
+            .map_err(Fail::status)?;
+        let mut fetched = self.fetched.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, old)) = fetched.insert(key, (Instant::now(), file.clone()))
+            && old != file
+        {
+            let _ = std::fs::remove_file(old);
+        }
+        Ok(file)
     }
 
     /// A listing, kept for [`LISTING_KEEP`].
@@ -282,7 +340,8 @@ enum Answer {
     Text(u16, Vec<(&'static str, String)>, String),
     /// A file's HEAD: its size from the listing, nothing fetched.
     Size(u64),
-    File(PathBuf, u64),
+    /// A file's bytes from the first to before the end, of its whole size.
+    File(PathBuf, u64, u64, u64),
 }
 
 const ALLOW: &str = "OPTIONS, PROPFIND, GET, HEAD";
@@ -335,15 +394,24 @@ async fn answer(drive: &Drive, request: &dav::Request) -> Answer {
             _ => status(200),
         },
         _ => match node {
-            Node::File(device, root, path, _) => {
-                match drive.phones.fetch(&device, root, &path).await {
-                    Ok(file) => {
-                        let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
-                        Answer::File(file, size)
+            Node::File(device, root, path, _) => match drive.file(&device, root, &path).await {
+                Ok(file) => {
+                    let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+                    match dav::byte_range(request.range.as_deref(), size) {
+                        None => Answer::File(file, 0, size, size),
+                        Some(Some((first, last))) => Answer::File(file, first, last + 1, size),
+                        Some(None) => Answer::Text(
+                            416,
+                            vec![("Content-Range", format!("bytes */{size}"))],
+                            String::new(),
+                        ),
                     }
-                    Err(fail) => status(fail.status()),
                 }
-            }
+                Err(503) => {
+                    Answer::Text(503, vec![("Retry-After", "5".to_string())], String::new())
+                }
+                Err(code) => status(code),
+            },
             _ => Answer::Text(
                 200,
                 vec![("Content-Type", "text/plain; charset=utf-8".to_string())],
@@ -415,24 +483,31 @@ async fn serve_one<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
         Answer::Size(size) => {
             let head = dav::head(
                 200,
-                &[("Content-Type", "application/octet-stream".to_string())],
+                &[
+                    ("Content-Type", "application/octet-stream".to_string()),
+                    ("Accept-Ranges", "bytes".to_string()),
+                ],
                 size,
             );
             stream.write_all(head.as_bytes()).await?;
             stream.flush().await
         }
-        Answer::File(path, size) => {
-            // Served once, then gone, whatever happens to the connection.
-            let _gone = RemoveOnDrop(path.clone());
-            let head = dav::head(
-                200,
-                &[("Content-Type", "application/octet-stream".to_string())],
-                size,
-            );
+        Answer::File(path, first, end, size) => {
+            use tokio::io::AsyncSeekExt;
+            let mut headers = vec![
+                ("Content-Type", "application/octet-stream".to_string()),
+                ("Accept-Ranges", "bytes".to_string()),
+            ];
+            let whole = first == 0 && end == size;
+            if !whole {
+                headers.push(("Content-Range", format!("bytes {first}-{}/{size}", end - 1)));
+            }
+            let head = dav::head(if whole { 200 } else { 206 }, &headers, end - first);
             stream.write_all(head.as_bytes()).await?;
             if !head_only {
                 let mut file = tokio::fs::File::open(&path).await?;
-                tokio::io::copy(&mut file, &mut stream).await?;
+                file.seek(std::io::SeekFrom::Start(first)).await?;
+                tokio::io::copy(&mut file.take(end - first), &mut stream).await?;
             }
             stream.flush().await
         }
@@ -462,14 +537,6 @@ async fn gone<S: tokio::io::AsyncRead + Unpin>(stream: &mut S) {
         if n == 0 {
             return;
         }
-    }
-}
-
-struct RemoveOnDrop(PathBuf);
-
-impl Drop for RemoveOnDrop {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
     }
 }
 

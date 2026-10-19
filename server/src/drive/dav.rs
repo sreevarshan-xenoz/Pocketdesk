@@ -20,6 +20,8 @@ pub struct Request {
     pub depth: u8,
     pub content_length: u64,
     pub chunked: bool,
+    /// `Range`, as sent.
+    pub range: Option<String>,
 }
 
 /// The head of a request, `None` when it does not read.
@@ -51,6 +53,7 @@ pub fn parse_head(head: &[u8]) -> Option<Request> {
         depth: 1,
         content_length: 0,
         chunked: false,
+        range: None,
     };
     for line in lines {
         let Some((name, value)) = line.split_once(':') else {
@@ -61,10 +64,38 @@ pub fn parse_head(head: &[u8]) -> Option<Request> {
             "depth" => request.depth = u8::from(value != "0"),
             "content-length" => request.content_length = value.parse().ok()?,
             "transfer-encoding" => request.chunked = !value.eq_ignore_ascii_case("identity"),
+            "range" => request.range = Some(value.to_string()),
             _ => {}
         }
     }
     Some(request)
+}
+
+/// The bytes a `Range` header asks of a file of `size` bytes, first and
+/// last included: `None` for the whole file (no header, or one this does
+/// not take: units other than bytes, several ranges); `Some(None)` when it
+/// asks for nothing the file has (416).
+pub fn byte_range(header: Option<&str>, size: u64) -> Option<Option<(u64, u64)>> {
+    let spec = header?.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (start, end) = spec.split_once('-')?;
+    let (start, end) = (start.trim(), end.trim());
+    let range = if start.is_empty() {
+        // The last `n` bytes.
+        let n: u64 = end.parse().ok()?;
+        (n > 0 && size > 0).then(|| (size.saturating_sub(n), size - 1))
+    } else {
+        let first: u64 = start.parse().ok()?;
+        let last = if end.is_empty() {
+            size.saturating_sub(1)
+        } else {
+            end.parse::<u64>().ok()?.min(size.saturating_sub(1))
+        };
+        (first < size && first <= last).then_some((first, last))
+    };
+    Some(range)
 }
 
 /// The decoded parts of `path`, empty ones dropped; `None` when a part does
@@ -219,11 +250,13 @@ pub fn http_date(unix: u64) -> String {
 pub fn head(status: u16, headers: &[(&str, String)], length: u64) -> String {
     let reason = match status {
         200 => "OK",
+        206 => "Partial Content",
         207 => "Multi-Status",
         400 => "Bad Request",
         404 => "Not Found",
         405 => "Method Not Allowed",
         413 => "Content Too Large",
+        416 => "Range Not Satisfiable",
         501 => "Not Implemented",
         502 => "Bad Gateway",
         503 => "Service Unavailable",
@@ -257,6 +290,7 @@ mod tests {
                 depth: 0,
                 content_length: 12,
                 chunked: false,
+                range: None,
             }
         );
         let r = parse_head(b"GET http://127.0.0.1:9/t/x HTTP/1.1\r\nDepth: infinity\r\n").unwrap();
@@ -275,6 +309,28 @@ mod tests {
             assert!(parse_head(bad).is_none(), "{bad:?}");
         }
         assert!(parse_head(b"GET /x HTTP/1.1\r\nContent-Length: lots\r\n").is_none());
+    }
+
+    #[test]
+    fn a_range_is_one_span_of_bytes_within_the_file() {
+        assert_eq!(byte_range(None, 10), None);
+        assert_eq!(byte_range(Some("bytes=2-5"), 10), Some(Some((2, 5))));
+        assert_eq!(byte_range(Some("bytes=7-"), 10), Some(Some((7, 9))));
+        assert_eq!(byte_range(Some("bytes=-3"), 10), Some(Some((7, 9))));
+        assert_eq!(byte_range(Some("bytes=8-100"), 10), Some(Some((8, 9))));
+        assert_eq!(
+            byte_range(Some("bytes=10-"), 10),
+            Some(None),
+            "past the end"
+        );
+        assert_eq!(byte_range(Some("bytes=5-2"), 10), Some(None));
+        assert_eq!(
+            byte_range(Some("bytes=0-1,4-5"), 10),
+            None,
+            "several: whole"
+        );
+        assert_eq!(byte_range(Some("items=0-1"), 10), None);
+        assert_eq!(byte_range(Some("bytes=x-1"), 10), None);
     }
 
     #[test]
