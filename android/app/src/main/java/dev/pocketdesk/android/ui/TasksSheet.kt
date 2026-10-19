@@ -203,6 +203,7 @@ private fun statusText(status: Status): String =
         Status.Denied -> stringResource(R.string.tasks_denied)
         Status.Busy -> stringResource(R.string.tasks_busy)
         Status.Unknown -> stringResource(R.string.tasks_unknown)
+        Status.NotPermitted -> stringResource(R.string.tasks_not_permitted)
         is Status.NotSent -> stringResource(R.string.tasks_not_sent, status.why)
         Status.NoAnswer -> stringResource(R.string.tasks_no_answer)
     }

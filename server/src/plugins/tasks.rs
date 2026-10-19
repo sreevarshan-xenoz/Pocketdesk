@@ -116,7 +116,8 @@ pub(crate) async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSen
             if !valid_run_id(id) {
                 return;
             }
-            refused(id, NOT_PERMITTED)
+            // A code, as the phone's run follower reads refusals.
+            refused(id, "not_permitted")
         }
         _ => return,
     };
@@ -731,12 +732,7 @@ mod tests {
         assert_eq!(sent[1].packet_type, TASK_RESULT);
         assert_eq!(sent[1].body["id"], "t-run-9");
         assert_eq!(sent[1].body["state"], "refused");
-        assert!(
-            sent[1].body["reason"]
-                .as_str()
-                .unwrap()
-                .contains("Start my tasks")
-        );
+        assert_eq!(sent[1].body["reason"], "not_permitted");
         // A start with no id gets nothing back.
         let bad = NetworkPacket::new(TASK_RUN).with_body(json!({"name": "build"}));
         crate::plugins::answer_denied(&bad, &phone).await;

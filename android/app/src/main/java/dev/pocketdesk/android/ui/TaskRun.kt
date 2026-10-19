@@ -24,12 +24,15 @@ object TaskRun {
         /** The computer has no such task (any more). */
         data object Unknown : Status
 
+        /** "Start my tasks" is off for this phone on the computer (E7). */
+        data object NotPermitted : Status
+
         /** The start never left the phone: why. */
         data class NotSent(val why: String) : Status
 
         /**
-         * Nothing came back in time: the computer may not let this phone
-         * start tasks (it drops such a start without a word), or went away.
+         * Nothing came back in time: the computer went away, or is from
+         * before E7 and drops a start this phone may not make without a word.
          */
         data object NoAnswer : Status
     }
@@ -54,6 +57,7 @@ object TaskRun {
                 when (reason) {
                     "denied" -> Status.Denied
                     "busy" -> Status.Busy
+                    "not_permitted" -> Status.NotPermitted
                     else -> Status.Unknown
                 }
             else -> Status.Waiting(asks)
@@ -73,6 +77,7 @@ object TaskRun {
             Status.Denied -> mapOf("state" to "refused", "reason" to "denied")
             Status.Busy -> mapOf("state" to "refused", "reason" to "busy")
             Status.Unknown -> mapOf("state" to "refused", "reason" to "unknown")
+            Status.NotPermitted -> mapOf("state" to "refused", "reason" to "not_permitted")
             is Status.NotSent -> mapOf("state" to "not_sent")
             Status.NoAnswer -> mapOf("state" to "no_answer")
             is Status.Waiting, Status.Running -> emptyMap()

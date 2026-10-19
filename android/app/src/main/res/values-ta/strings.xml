@@ -608,6 +608,7 @@
     <string name="tasks_denied">கணினியில் மறுக்கப்பட்டது</string>
     <string name="tasks_busy">தொடங்கவில்லை: ஏற்கனவே இயங்குகிறது, அல்லது இரண்டு பணிகள் இயங்குகின்றன</string>
     <string name="tasks_unknown">தொடங்கவில்லை: கணினியில் அந்தப் பணி இல்லை</string>
+    <string name="tasks_not_permitted">தொடங்கவில்லை: கணினியில் இந்தத் தொலைபேசிக்கு \"Start my tasks\" அணைக்கப்பட்டுள்ளது</string>
     <string name="tasks_output_cut">வெளியீட்டின் முடிவு மட்டுமே காட்டப்படுகிறது.</string>
     <string name="tasks_not_sent">அனுப்பப்படவில்லை: %1$s</string>
     <string name="tasks_no_answer">பதில் இல்லை: இந்தத் தொலைபேசி பணிகளைத் தொடங்க அனுமதிக்கப்படாமல் இருக்கலாம் (கணினியில், சாதனங்கள், \"என் பணிகளைத் தொடங்கு\")</string>
