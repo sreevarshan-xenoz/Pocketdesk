@@ -181,7 +181,7 @@ pub fn answer_line(outcome: &Outcome, now_unix: u64) -> (String, Tone) {
             Tone::Waiting,
         ),
         State::Sent if now_unix.saturating_sub(outcome.at_unix) >= NO_WORD_SECS => (
-            "Your answer: sent, but no word from the phone (an older app on it says nothing)"
+            "Your answer: sent, but no word back from the phone (an older app on it, or the link dropped)"
                 .to_string(),
             Tone::Waiting,
         ),
