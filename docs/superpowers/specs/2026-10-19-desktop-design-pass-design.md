@@ -44,7 +44,7 @@ Grouped as they will be committed, one group each.
    - no command names on the Overview;
    - "Sending the clipboard to …" in place of "Asked the server…";
    - "Send reply" on Messages as on Notifications;
-   - the Settings section summary and two rows into the row pattern;
+   - the Settings section summary;
    - the right section name in KDE Connect's hover;
    - "Pair a phone" with no ellipsis in the tray;
    - "Send the clipboard" in the tray and on the Overview's phone row.
@@ -68,15 +68,35 @@ Grouped as they will be committed, one group each.
 ## Not done
 
 - A tray action that fails still says so only in the log; showing it takes the window or a notification, left for the tray's next pass.
+- Two Settings rows ("Send to phone", "Send from the browser") into the row pattern, and Home Assistant's broker fields out of their grid.
 
 ## Testing
 
+- **Unit tests:** the Phone page is not one that scrolls itself; a computer is shown none of a phone's switches; the lock says why it is off where it never locks; the Phones filter takes lock events; an answer with no word back is a warning; one size for every page; the tray title's Do Not Disturb and mute.
 - **The C4 harness:**
   - every page opens;
-  - the Phone page scrolls to its photos;
-  - KDE Connect's Unpair asks first (Cancel keeps it);
-  - Devices shows no phone switches for a computer;
-  - the empty pages' buttons;
-  - the cast bar's contrast in both themes (the theme test's 4.5:1 rule on its colours).
-- **Snapshots** (the CI job): updated for the pages whose look changed.
-- **By hand (checklist §124):** each page at the 640 px minimum width and in both themes.
+  - Notifications and Phone files with no phone offer Pair a phone, which opens Pair;
+  - Clipboard's Clear asks, Cancel keeps and Clear clears;
+  - each photo's buttons name the photo;
+  - the Overview's phone has Send the clipboard;
+  - Devices' Unpair still asks by name.
+- **Snapshots** (the CI job): drawn anew for the Overview, Devices and Settings, whose look changed, from the job's own pictures.
+- **By hand (checklist §124):** each page at the 640 px minimum width and in both themes, the cast bar in the light theme, KDE Connect's Unpair (it needs the server running), and the Phone page with a long folder and photos.
+
+## As built
+
+All thirteen groups, one commit each, plus the Overview's Send the clipboard (from the review). Pages hand their notice to the app (`take_notice`) and their empty state's button its page (`take_go_to`); the app gathers both each frame.
+
+## Review
+
+**Fresh review: 0 Critical, 2 Important, 9 Minor.**
+
+- **Fixed:**
+  - "Asked the phone…" notices waited up to five minutes for an answer only a page drawn could give: they are plain notices now, gone in seconds, and the answer shows on the page;
+  - the spec claimed more than was built: the Overview's Send the clipboard is added, and the rest of the claims now match what was done;
+  - minors: a stale Unpair question in KDE Connect, its empty state with the server stopped, a queued text replacing an earlier error, a notice shown a frame late, "Pairing…" said as done, a test for the tray title, a doc comment out of place.
+- **Left as they are:**
+  - one notice survives when two pages speak in one frame (the Phone page's two parts, rarely);
+  - the tray rebuilds its menu each minute while a mute counts down;
+  - Ring stays, greyed with its reason, for a paired computer;
+  - on Linux an away lock already on shows checked and greyed.

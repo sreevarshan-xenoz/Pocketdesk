@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-617 open items.
+625 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 361 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 367 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 43 |
 | A phone with a SIM | 21 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 87 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 20 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 47 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 49 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -736,6 +736,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A game (one that takes Enter, the arrows and Space) by hand.
 - A real controller connected to the phone (none here): buttons, D-pad or hat, both sticks; Settings off leaves it to Android.
 - Two buttons at once, and a stick held while pressing a button.
+
+**124. The desktop app's design pass (E5)**
+
+- Each page at the 640 px minimum width, in both themes: no row runs off the page (Devices, KDE Connect, Activity, Notifications, Phone files, Sessions).
+- The Phone page with a long folder: the photos below are in reach, and every photo row shows.
+- The cast window's bar in the light theme: its buttons readable.
+- KDE Connect's Unpair… asks by name; Cancel keeps it.
+- Devices: a paired computer has no Ring, Mute, cast or lock switches; the lock's note shows while it is on.
+- Notices: "Asked the phone…" on the Phone page goes in seconds; an error shows in red.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1562,3 +1571,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Each item from the tray program: Ring, Mute and Unmute, Send clipboard; Open, Pair a phone… and Send file… with the window closed (it starts on that page, Files with the phone chosen) and with it open (it comes to the front on that page).
 - Quit from the tray program closes the window too; with no window open, an app started just after Quit stays open.
 - An install without `pocketdesk-tray`: the app's own tray, as before.
+
+**124. The desktop app's design pass (E5)**
+
+- A screen reader (Narrator) names each photo's Save, Open and Copy, the pairing code and the phone's screen.
+- The tray: a phone's title says Do Not Disturb or the mute's minutes left; Send the clipboard and Pair a phone.
