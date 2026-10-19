@@ -21,7 +21,10 @@ pub struct NotesView {
     /// Each notification's reply being typed, by phone and key.
     drafts: HashMap<(String, String), String>,
     read_at: Option<Instant>,
-    notice: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
+    /// The page an empty state's button asked for (E5).
+    go_to: Option<crate::app::Tab>,
 }
 
 /// The notifications to list, newest first.
@@ -31,6 +34,15 @@ pub fn newest_first(mut notes: Vec<PhoneNote>) -> Vec<PhoneNote> {
 }
 
 impl NotesView {
+    /// The page its empty state's button asked for, since the last call (E5).
+    pub fn take_go_to(&mut self) -> Option<crate::app::Tab> {
+        self.go_to.take()
+    }
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
@@ -56,11 +68,14 @@ impl NotesView {
             Ok(_) => {
                 // Queued: the server sends it within a minute, once the
                 // phone is connected.
-                self.notice = Some(format!("Queued {what} for {}", note.app));
+                self.notice = crate::notice::Notice::done(format!(
+                    "Asked the phone to send {what} to {}.",
+                    note.app
+                ));
                 self.drafts
                     .remove(&(note.device_id.clone(), note.key.clone()));
             }
-            Err(e) => self.notice = Some(e.to_string()),
+            Err(e) => self.notice = crate::notice::Notice::error(e.to_string()),
         }
     }
 
@@ -73,19 +88,20 @@ impl NotesView {
     ) {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(REFRESH);
-        if let Some(notice) = &self.notice {
-            ui.label(RichText::new(notice).italics());
-        }
         if self.notes.is_empty() {
             ui.label(
                 RichText::new(
                     "Notifications from your phone that you can answer appear here: \
                      their buttons, and a reply box for chats. The phone sends them once \
                      \"This phone's notifications\" is on, and lets you answer once \
-                     \"Let the computer answer notifications\" is on, in the phone's Settings.",
+                     \"Let the computer answer notifications\" is on, in Pocketdesk's Settings on the phone.",
                 )
                 .color(crate::theme::muted(ui)),
             );
+            // With no phone paired, the step before (E5).
+            if devices.is_empty() && ui.button("Pair a phone").clicked() {
+                self.go_to = Some(crate::app::Tab::Pair);
+            }
             return;
         }
         let notes = self.notes.clone();
@@ -111,8 +127,9 @@ impl NotesView {
                     }
                     ui.label(
                         RichText::new(format!(
-                            "from {}",
-                            crate::model::device_label(devices, &note.device_id)
+                            "From {} · {}",
+                            crate::model::device_label(devices, &note.device_id),
+                            crate::words::ago(now_unix, note.at_unix)
                         ))
                         .small()
                         .color(crate::theme::muted(ui)),
@@ -126,10 +143,11 @@ impl NotesView {
                             Tone::Done => crate::theme::good(ui),
                             Tone::Failed => crate::theme::bad(ui),
                             Tone::Waiting => crate::theme::muted(ui),
+                            Tone::Unsure => crate::theme::warn(ui),
                         };
                         ui.label(RichText::new(line).small().color(colour));
                     }
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         for action in &note.actions {
                             if ui.button(action).clicked() {
                                 self.answer(
@@ -167,6 +185,9 @@ pub enum Tone {
     Waiting,
     Done,
     Failed,
+    /// Sent, and the phone never said how it went (E5: said in the warning
+    /// colour, not as waiting).
+    Unsure,
 }
 
 /// How long an answer sent to the phone may go unanswered before the page
@@ -181,9 +202,9 @@ pub fn answer_line(outcome: &Outcome, now_unix: u64) -> (String, Tone) {
             Tone::Waiting,
         ),
         State::Sent if now_unix.saturating_sub(outcome.at_unix) >= NO_WORD_SECS => (
-            "Your answer: sent, but no word back from the phone (an older app on it, or the link dropped)"
+            "Your answer was sent, but the phone has not said whether it arrived (an older app on it, or the link dropped)"
                 .to_string(),
-            Tone::Waiting,
+            Tone::Unsure,
         ),
         State::Sent => ("Your answer: sent to the phone…".to_string(), Tone::Waiting),
         State::Handed => ("Your answer: handed to the app".to_string(), Tone::Done),
@@ -246,7 +267,12 @@ mod tests {
         assert!(
             answer_line(&at(State::Sent), 1_000 + NO_WORD_SECS)
                 .0
-                .contains("no word")
+                .contains("has not said")
+        );
+        assert_eq!(
+            answer_line(&at(State::Sent), 1_000 + NO_WORD_SECS).1,
+            Tone::Unsure,
+            "a warning, not waiting (E5)"
         );
         assert_eq!(answer_line(&at(State::Handed), 1_000).1, Tone::Done);
         let refused = answer_line(

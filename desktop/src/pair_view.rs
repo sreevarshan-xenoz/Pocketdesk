@@ -286,7 +286,11 @@ impl PairView {
             return;
         };
         ui.horizontal_top(|ui| {
-            ui.add(egui::Image::new(texture).fit_to_exact_size(egui::vec2(260.0, 260.0)));
+            ui.add(
+                egui::Image::new(texture)
+                    .fit_to_exact_size(egui::vec2(260.0, 260.0))
+                    .alt_text("Pairing code to scan with the phone"),
+            );
             ui.add_space(16.0);
             ui.vertical(|ui| {
                 ui.label(RichText::new("Pair a phone").heading());

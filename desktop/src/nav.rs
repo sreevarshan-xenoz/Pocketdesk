@@ -107,7 +107,6 @@ impl Tab {
             Tab::Files
                 | Tab::Messages
                 | Tab::Notifications
-                | Tab::Phone
                 | Tab::Clipboard
                 | Tab::Activity
                 | Tab::Logs
@@ -164,6 +163,13 @@ pub fn page_from_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_phone_page_scrolls_as_a_whole_so_its_photos_are_in_reach() {
+        // Its folders and its photos are two lists, one under the other
+        // (E5): a scroll area for the first had pushed the second away.
+        assert!(!Tab::Phone.scrolls_itself());
+    }
 
     #[test]
     fn every_page_is_in_exactly_one_group() {

@@ -378,6 +378,9 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
         egui::Panel::top("cast-control")
             .frame(egui::Frame::NONE.fill(egui::Color32::from_gray(24)).inner_margin(4.0))
             .show(ui, |ui| {
+                // The bar is dark whatever the theme: in the light one its
+                // buttons were dark text on near black, about 1.5:1 (E5).
+                ui.style_mut().visuals = egui::Visuals::dark();
                 ui.horizontal_wrapped(|ui| {
                     if phone_takes {
                         ui.add_enabled_ui(!watch_only, |ui| {
@@ -404,7 +407,7 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                     } else {
                         ui.colored_label(
                             egui::Color32::LIGHT_GRAY,
-                            "To control the phone from here, turn on \u{201c}Let the computer control this phone\u{201d} in its Pocketdesk Settings.",
+                            "To control the phone from here, turn on \u{201c}Let the computer control this phone\u{201d} in Pocketdesk's Settings on the phone.",
                         );
                     }
                 });
@@ -430,7 +433,11 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                         rect,
                         ui.id().with("cast-picture"),
                         egui::Sense::click_and_drag(),
-                    );
+                    )
+                    // Named for a screen reader (E5).
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Phone screen")
+                    });
                     ui.painter().image(
                         texture.id(),
                         rect,

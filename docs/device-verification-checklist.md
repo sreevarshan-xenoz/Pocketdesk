@@ -1911,6 +1911,17 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] Two buttons at once, and a stick held while pressing a button.
 - [ ] Linux.
 
+## 124. The desktop app's design pass (E5)
+
+- [ ] Each page at the 640 px minimum width, in both themes: no row runs off the page (Devices, KDE Connect, Activity, Notifications, Phone files, Sessions).
+- [ ] The Phone page with a long folder: the photos below are in reach, and every photo row shows.
+- [ ] The cast window's bar in the light theme: its buttons readable.
+- [ ] KDE Connect's Unpair… asks by name; Cancel keeps it.
+- [ ] Devices: a paired computer has no Ring, Mute, cast or lock switches; the lock's note shows while it is on.
+- [ ] Notices: "Asked the phone…" on the Phone page goes in seconds; an error shows in red.
+- [ ] A screen reader (Narrator) names each photo's Save, Open and Copy, the pairing code and the phone's screen.
+- [ ] The tray: a phone's title says Do Not Disturb or the mute's minutes left; Send the clipboard and Pair a phone.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

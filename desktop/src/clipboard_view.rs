@@ -15,8 +15,8 @@ use crate::model::Device;
 /// How often the history is read again while the page is open.
 const REFRESH: Duration = Duration::from_secs(2);
 
-/// How long a first press of Clear waits for the second.
-const CONFIRM: Duration = Duration::from_secs(5);
+/// How long Clear's question waits for its answer.
+const CONFIRM: Duration = Duration::from_secs(30);
 
 /// The most characters of an entry shown.
 const PREVIEW_CHARS: usize = 280;
@@ -31,6 +31,8 @@ pub enum Action {
     Failed(String),
     /// Open Settings: the history is off.
     OpenSettings,
+    /// Open Pair: nothing is paired to copy with (E5).
+    Pair,
 }
 
 /// An entry's text as the page shows it: its first lines, at most
@@ -57,7 +59,7 @@ pub fn origin(entry: &ClipEntry, devices: &[Device]) -> String {
     }
 }
 
-/// The phones and computers a text can go to now: linked, with Clipboard on.
+/// The phones and computers a text can go to now: linked, with "Share the clipboard" on.
 pub fn targets(devices: &[Device]) -> Vec<&Device> {
     devices
         .iter()
@@ -69,8 +71,8 @@ pub fn targets(devices: &[Device]) -> Vec<&Device> {
 pub struct ClipboardView {
     entries: Vec<ClipEntry>,
     read_at: Option<Instant>,
-    /// Clear pressed once, when: a press within [`CONFIRM`] empties the
-    /// history (D3 review: an armed Clear had stayed armed for good).
+    /// Clear's question asked, when: it goes after [`CONFIRM`] unanswered
+    /// (D3 review: an armed Clear had stayed armed for good).
     confirm_clear: Option<Instant>,
 }
 
@@ -105,13 +107,14 @@ impl ClipboardView {
                 self.confirm_clear = None;
             }
             if !self.entries.is_empty() {
-                let label = if self.confirm_clear.is_some() {
-                    "Clear: sure?"
-                } else {
-                    "Clear history"
-                };
-                if ui.button(label).clicked() {
-                    if self.confirm_clear.is_some() {
+                // Asked as the other forgettings are, with what it forgets
+                // (E5): the button had turned into "Clear: sure?" for 5 s.
+                if self.confirm_clear.is_some() {
+                    ui.label(format!(
+                        "Forget all {} texts kept here?",
+                        self.entries.len()
+                    ));
+                    if ui.button("Clear").clicked() {
                         action = Some(match clip_history::clear(state_dir) {
                             Ok(()) => {
                                 self.entries.clear();
@@ -121,9 +124,11 @@ impl ClipboardView {
                             Err(e) => Action::Failed(format!("Not cleared: {e}")),
                         });
                         self.confirm_clear = None;
-                    } else {
-                        self.confirm_clear = Some(Instant::now());
+                    } else if ui.button("Cancel").clicked() {
+                        self.confirm_clear = None;
                     }
+                } else if ui.button("Clear history…").clicked() {
+                    self.confirm_clear = Some(Instant::now());
                 }
             }
         });
@@ -132,6 +137,14 @@ impl ClipboardView {
                 RichText::new("Nothing yet: copy something on a connected phone, or here with \"Clipboard to phones\" on.")
                     .color(crate::theme::muted(ui)),
             );
+            // The next step, with its button (E5).
+            if devices.is_empty() {
+                if ui.button("Pair a phone").clicked() {
+                    action = Some(Action::Pair);
+                }
+            } else if ui.button("Clipboard settings").clicked() {
+                action = Some(Action::OpenSettings);
+            }
             return action;
         }
         let targets = targets(devices);
@@ -145,7 +158,7 @@ impl ClipboardView {
                         crate::words::ago(now_unix, entry.at_unix)
                     );
                     if entry.cut {
-                        head.push_str(" · kept cut, it was long");
+                        head.push_str(" · shortened, it was too long to keep");
                     }
                     ui.label(RichText::new(head).color(crate::theme::muted(ui)));
                     ui.label(preview(entry));
@@ -155,9 +168,9 @@ impl ClipboardView {
                         }
                         // A cut entry is not what was copied (D3 review).
                         let why = if entry.cut {
-                            "Kept cut, not as it was copied: copy it instead."
+                            "Kept shortened, so it would not arrive as copied. Use Copy instead."
                         } else {
-                            "No phone with Clipboard on is linked now."
+                            "No phone with \"Share the clipboard\" on (Devices) is linked now."
                         };
                         ui.add_enabled_ui(!targets.is_empty() && !entry.cut, |ui| {
                             ui.menu_button("Send to…", |ui| {

@@ -27,7 +27,10 @@ pub struct PhoneFilesView {
     phone: Option<String>,
     listings: BTreeMap<String, Kept>,
     read_at: Option<Instant>,
-    notice: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
+    /// The page an empty state's button asked for (E5).
+    go_to: Option<crate::app::Tab>,
     /// The phone and the time of the list request still waiting for an answer.
     waiting: Option<(String, u64)>,
     /// Where the server serves the phones' folders as a drive (D8), while
@@ -66,23 +69,16 @@ fn answered(asked_unix: u64, kept_unix: Option<u64>, now_unix: u64) -> Option<bo
     }
 }
 
-/// A size in words.
-pub fn size_text(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
-}
-
 impl PhoneFilesView {
+    /// The page its empty state's button asked for, since the last call (E5).
+    pub fn take_go_to(&mut self) -> Option<crate::app::Tab> {
+        self.go_to.take()
+    }
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
@@ -104,16 +100,16 @@ impl PhoneFilesView {
         match store::request(state_dir, phone, kind, root, &path, now_unix) {
             Ok(_) => {
                 self.waiting = (kind == Kind::List).then(|| (phone.to_string(), now_unix));
-                self.notice = Some(match kind {
-                    Kind::List => "Asked the phone…".to_string(),
-                    Kind::Fetch => format!(
+                self.notice = match kind {
+                    Kind::List => crate::notice::Notice::done("Asked the phone…"),
+                    Kind::Fetch => crate::notice::Notice::done(format!(
                         "Asked the phone to send {}; it arrives where received files land.",
                         path.last().map(String::as_str).unwrap_or("it")
-                    ),
-                });
+                    )),
+                };
                 self.read_at = None;
             }
-            Err(e) => self.notice = Some(format!("Not asked: {e}")),
+            Err(e) => self.notice = crate::notice::Notice::error(format!("Not asked: {e}")),
         }
     }
 
@@ -141,13 +137,25 @@ impl PhoneFilesView {
         }
         let phones: Vec<&Device> = devices.iter().filter(|d| d.takes_files).collect();
         if phones.is_empty() {
-            ui.label(
-                RichText::new(
-                    "No phone is connected. A phone with folders shared (its Settings, \"Folders the \
-                     computer may open\") stays connected to answer, through notification access.",
-                )
-                .color(crate::theme::muted(ui)),
-            );
+            // The next step, with its button (E5).
+            if devices.is_empty() {
+                ui.label(RichText::new("No phone is paired yet.").color(crate::theme::muted(ui)));
+                if ui.button("Pair a phone").clicked() {
+                    self.go_to = Some(crate::app::Tab::Pair);
+                }
+            } else {
+                ui.label(
+                    RichText::new(
+                        "No phone that shares folders is linked now. A phone with folders shared \
+                         (\"Folders the computer may open\" in Pocketdesk's Settings on the phone) \
+                         stays linked to answer, through notification access.",
+                    )
+                    .color(crate::theme::muted(ui)),
+                );
+                if ui.button("Devices").clicked() {
+                    self.go_to = Some(crate::app::Tab::Devices);
+                }
+            }
             return;
         }
         if self
@@ -158,7 +166,7 @@ impl PhoneFilesView {
             self.phone = Some(phones[0].id.clone());
         }
         let phone = self.phone.clone().unwrap_or_default();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for d in &phones {
                 if ui
                     .selectable_label(d.id == phone, crate::model::device_label(devices, &d.id))
@@ -172,22 +180,18 @@ impl PhoneFilesView {
             let kept_unix = self.listings.get(&asking).map(|k| k.at_unix);
             match answered(asked_unix, kept_unix, now_unix) {
                 Some(true) => {
+                    // The listing shows: nothing to say (E5 review).
                     self.waiting = None;
-                    self.notice = None;
                 }
                 Some(false) => {
                     self.waiting = None;
-                    self.notice = Some(
-                        "The phone did not answer. Is it connected, with Files on in Devices, \
-                         and Pocketdesk allowed to run in the background on it?"
-                            .to_string(),
+                    self.notice = crate::notice::Notice::error(
+                        "The phone did not answer. Is it connected, with \"Send and browse files\" on in Devices, \
+                         and Pocketdesk allowed to run in the background on it?",
                     );
                 }
                 None => {}
             }
-        }
-        if let Some(notice) = &self.notice {
-            ui.label(RichText::new(notice).italics());
         }
         let kept = self.listings.get(&phone).cloned();
         let Some(Kept { listing, at_unix }) = kept else {
@@ -212,7 +216,7 @@ impl PhoneFilesView {
         if listing.roots.is_empty() {
             ui.label(
                 RichText::new(
-                    "The phone shares no folder yet: add one in its Settings, \"Folders the computer may open\".",
+                    "The phone shares no folder yet: add one in Pocketdesk's Settings on the phone, \"Folders the computer may open\".",
                 )
                 .color(crate::theme::muted(ui)),
             );
@@ -224,7 +228,7 @@ impl PhoneFilesView {
                     self.ask(state_dir, &phone, Kind::List, root.id, Vec::new(), now_unix);
                 }
             }
-            if ui.button("Refresh").clicked()
+            if ui.button("Refresh folders").clicked()
                 && let Some(root) = listing.root
             {
                 self.ask(
@@ -247,7 +251,7 @@ impl PhoneFilesView {
             .map(|r| r.name.clone())
             .unwrap_or_default();
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.strong(
                 std::iter::once(root_name.as_str())
                     .chain(listing.path.iter().map(String::as_str))
@@ -269,36 +273,37 @@ impl PhoneFilesView {
                 .color(crate::theme::muted(ui)),
             );
         }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if listing.entries.is_empty() {
-                ui.label(RichText::new("Empty").color(crate::theme::muted(ui)));
-            }
-            for entry in &listing.entries {
-                ui.horizontal(|ui| {
-                    let mut path = listing.path.clone();
-                    path.push(entry.name.clone());
-                    if entry.dir {
-                        if ui.link(format!("{}/", entry.name)).clicked() {
-                            self.ask(state_dir, &phone, Kind::List, root, path, now_unix);
-                        }
-                    } else {
-                        ui.label(&entry.name);
-                        ui.label(
-                            RichText::new(size_text(entry.size)).color(crate::theme::muted(ui)),
-                        );
-                        if ui.small_button("Download").clicked() {
-                            self.ask(state_dir, &phone, Kind::Fetch, root, path, now_unix);
-                        }
+        // The page scrolls as a whole (E5): a scroll area of its own here
+        // filled the page and pushed the photos below out of reach.
+        if listing.entries.is_empty() {
+            ui.label(RichText::new("This folder is empty.").color(crate::theme::muted(ui)));
+        }
+        for entry in &listing.entries {
+            ui.horizontal_wrapped(|ui| {
+                let mut path = listing.path.clone();
+                path.push(entry.name.clone());
+                if entry.dir {
+                    if ui.link(format!("{}/", entry.name)).clicked() {
+                        self.ask(state_dir, &phone, Kind::List, root, path, now_unix);
                     }
-                });
-            }
-        });
+                } else {
+                    ui.label(&entry.name);
+                    ui.label(
+                        RichText::new(crate::words::human_size(entry.size))
+                            .color(crate::theme::muted(ui)),
+                    );
+                    if ui.small_button("Download").clicked() {
+                        self.ask(state_dir, &phone, Kind::Fetch, root, path, now_unix);
+                    }
+                }
+            });
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ANSWER_SECS, answered, size_text};
+    use super::{ANSWER_SECS, answered};
 
     #[test]
     fn a_list_request_is_answered_by_a_newer_listing_or_given_up() {
@@ -314,6 +319,8 @@ mod tests {
 
     #[test]
     fn sizes_read_as_people_say_them() {
+        // The one way every page says a size (E5).
+        let size_text = crate::words::human_size;
         assert_eq!(size_text(512), "512 B");
         assert_eq!(size_text(1536), "1.5 KB");
         assert_eq!(size_text(5 * 1024 * 1024), "5.0 MB");

@@ -211,7 +211,13 @@ fn the_overview_shows_a_phone_with_its_battery_and_actions() {
         app.query_by_label("Battery 42 %, charging · no recent session")
             .is_some()
     );
-    for action in ["Ring", "Mute for an hour", "Send file…", "Send link…"] {
+    for action in [
+        "Ring",
+        "Mute for an hour",
+        "Send file…",
+        "Send link…",
+        "Send the clipboard",
+    ] {
         assert!(app.query_by_label(action).is_some(), "{action}");
     }
 }
@@ -281,6 +287,24 @@ fn empty_sessions_and_files_say_what_to_do_next() {
         app.query_by_label(Tab::Pair.purpose()).is_some(),
         "Pair opened"
     );
+}
+
+/// With no phone paired, the Notifications and Phone files pages each offer
+/// Pair a phone, which opens Pair (E5). (Clipboard's, the same, shows only
+/// with its history on.)
+#[test]
+fn empty_pages_with_no_phone_offer_pairing() {
+    let fixture = Fixture::new();
+    for page in [Tab::Notifications, Tab::Phone] {
+        let mut app = fixture.open(Some(page));
+        app.run_steps(3);
+        app.get_by_label("Pair a phone").click();
+        app.run_steps(3);
+        assert!(
+            app.query_by_label(Tab::Pair.purpose()).is_some(),
+            "{page:?}: Pair opened"
+        );
+    }
 }
 
 /// The Overview, Devices and Settings at 720×480 in both themes, compared
@@ -358,5 +382,20 @@ fn the_clipboard_page_lists_what_crossed() {
     assert!(app.query_by_label_contains("From Test Phone").is_some());
     assert!(app.query_by_label_contains("From this computer").is_some());
     assert_eq!(app.query_all_by_label("Copy").count(), 2, "one each");
-    assert!(app.query_by_label("Clear history").is_some());
+    // Clear asks, with what it forgets, and Cancel keeps them (E5).
+    let mut app = app;
+    app.get_by_label("Clear history…").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label("Forget all 2 texts kept here?")
+            .is_some()
+    );
+    app.get_by_label("Cancel").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("from here").is_some(), "kept");
+    app.get_by_label("Clear history…").click();
+    app.run_steps(3);
+    app.get_by_label("Clear").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("from here").is_none(), "cleared");
 }

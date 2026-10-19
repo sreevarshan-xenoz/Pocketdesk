@@ -31,7 +31,11 @@ pub struct KdeConnectView {
     pending: Vec<Pending>,
     finding: bool,
     read_at: Option<Instant>,
-    notice: Option<String>,
+    /// The device whose Unpair waits for its answer (E5: asked by name, as
+    /// Devices and Other computers ask).
+    unpairing: Option<String>,
+    /// What it said happened, until the app takes it (E5).
+    notice: Option<crate::notice::Notice>,
     /// Switches clicked, shown as clicked until the server has written
     /// them (or a while has passed): a read in between would flip them
     /// back (3c review).
@@ -117,11 +121,23 @@ pub fn rows(paired: &[KdeDevice], seen: &[SeenDevice]) -> Vec<Row> {
 }
 
 impl KdeConnectView {
+    /// What this page said happened since the last call, for the app's one
+    /// notice (E5).
+    pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
+        self.notice.take()
+    }
     fn refresh(&mut self, state_dir: &Path, now_unix: u64) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
         }
         self.rows = rows(&devices::devices(state_dir), &kdeconnect::read(state_dir));
+        // A question for a device no longer paired here is not asked again
+        // when it pairs later (E5 review).
+        if let Some(id) = &self.unpairing
+            && !self.rows.iter().any(|r| r.paired && &r.device_id == id)
+        {
+            self.unpairing = None;
+        }
         hold(&mut self.rows, &mut self.held, Instant::now());
         self.batteries = phone_status::read(state_dir);
         self.pending = devices::pending(state_dir, now_unix);
@@ -167,17 +183,17 @@ impl KdeConnectView {
                 match kdeconnect::ask_to_find(state_dir, now_unix, FIND_SECS) {
                     Ok(()) => {
                         self.finding = true;
-                        self.notice = Some(
-                            "Looking for a minute: open KDE Connect on the device.".to_string(),
+                        self.notice = crate::notice::Notice::done(
+                            "Looking for a minute: open KDE Connect on the device.",
                         );
                     }
-                    Err(e) => self.notice = Some(format!("Not asked: {e}")),
+                    Err(e) => self.notice = crate::notice::Notice::error(format!("Not asked: {e}")),
                 }
             }
         });
         let mut ask = None;
         for pending in &self.pending {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if pending.from_device {
                     ui.label(
                         RichText::new(format!(
@@ -230,10 +246,19 @@ impl KdeConnectView {
             });
         }
         if self.rows.is_empty() {
-            ui.label(RichText::new("None has connected yet.").weak());
+            ui.label(
+                RichText::new(
+                    if running {
+                        "No KDE Connect device has connected yet. Press Find, then open KDE Connect on the device."
+                    } else {
+                        "No KDE Connect device has connected yet. Start the server with KDE Connect devices on, then press Find."
+                    },
+                )
+                .weak(),
+            );
         }
         for device in &mut self.rows {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(&device.name).strong());
                 let paired = if device.paired {
                     "paired"
@@ -273,8 +298,19 @@ impl KdeConnectView {
                             device_id: device_id.clone(),
                         });
                     }
-                    if answer(ui, running, "Unpair") {
-                        ask = Some(KdeAsk::Unpair { device_id });
+                    if self.unpairing.as_deref() == Some(device_id.as_str()) {
+                        ui.label(format!(
+                            "Unpair {}? It must pair again to connect.",
+                            device.name
+                        ));
+                        if answer(ui, running, "Unpair") {
+                            self.unpairing = None;
+                            ask = Some(KdeAsk::Unpair { device_id });
+                        } else if ui.button("Cancel").clicked() {
+                            self.unpairing = None;
+                        }
+                    } else if answer(ui, running, "Unpair…") {
+                        self.unpairing = Some(device_id);
                     }
                 } else if ui
                     .add_enabled(running, egui::Button::new("Pair"))
@@ -285,7 +321,7 @@ impl KdeConnectView {
                 }
             });
             if let Some(permissions) = device.permissions.as_mut() {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.add_space(16.0);
                     if let Some((permission, on)) = permission_boxes(ui, running, permissions) {
                         ask = Some(KdeAsk::Permission {
@@ -312,18 +348,15 @@ impl KdeConnectView {
                 }),
                 _ => None,
             };
-            self.notice = Some(match devices::request(state_dir, ask, now_unix) {
+            self.notice = match devices::request(state_dir, ask, now_unix) {
                 Ok(_) => {
                     self.held.extend(switch);
-                    said.to_string()
+                    crate::notice::Notice::done(said)
                 }
-                Err(e) => format!("Not asked: {e}"),
-            });
+                Err(e) => crate::notice::Notice::error(format!("Not asked: {e}")),
+            };
             // Read again soon, for the answer.
             self.read_at = None;
-        }
-        if let Some(notice) = &self.notice {
-            ui.label(RichText::new(notice).weak());
         }
     }
 }
@@ -372,7 +405,7 @@ fn permission_boxes(
             KdePermission::Notifications,
             &mut permissions.notifications,
             "Show its notifications here",
-            "In full, as KDE Connect sends them (it does not keep private ones back), with notification sync on in its KDE Connect app and Settings, Notifications, Phone notifications on here",
+            "In full, as KDE Connect sends them (it does not keep private ones back), with notification sync on in its KDE Connect app and Settings → Notifications and texts → Phone notifications on here",
         ),
     ] {
         if ui

@@ -49,7 +49,7 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
     };
     let mut entries = vec![
         item("Open Pocketdesk", Some(TrayAction::Open)),
-        item("Pair a phone…", Some(TrayAction::Pair)),
+        item("Pair a phone", Some(TrayAction::Pair)),
     ];
     if !rows.is_empty() {
         entries.push(Entry::Separator);
@@ -61,7 +61,12 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
         // A phone away has every item greyed: its title says why (D5
         // review), as the tray has no hover text.
         if row.place == model::Place::Away {
-            label.push_str(" · away");
+            label.push_str(" · Away");
+        }
+        // Why Mute is greyed or Unmute offered (E5): Do Not Disturb, or the
+        // mute's minutes left.
+        if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now_unix) {
+            label.push_str(&format!(" · {quiet}"));
         }
         if let Some(battery) = device
             .battery
@@ -87,7 +92,7 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
                         .then(|| TrayAction::Mute(id(), if muted { 0 } else { 60 })),
                 ),
                 item(
-                    "Send clipboard",
+                    "Send the clipboard",
                     row.clipboard
                         .is_ok()
                         .then(|| TrayAction::SendClipboard(id())),
@@ -137,7 +142,7 @@ mod tests {
             labels(&menu),
             [
                 ("Open Pocketdesk".to_string(), true),
-                ("Pair a phone…".to_string(), true),
+                ("Pair a phone".to_string(), true),
                 ("-".to_string(), false),
                 ("Quit".to_string(), true),
             ]
@@ -186,7 +191,7 @@ mod tests {
         assert_eq!(labels(&menu)[3].0, "Pixel · 64 %, charging");
         assert_eq!(
             labels(&menu)[4].0,
-            "Old · away",
+            "Old · Away",
             "away said; an hour-old battery left out"
         );
         assert_eq!(
@@ -201,7 +206,7 @@ mod tests {
                     action: Some(TrayAction::Mute("ready".to_string(), 60))
                 },
                 Entry::Item {
-                    label: "Send clipboard".to_string(),
+                    label: "Send the clipboard".to_string(),
                     action: Some(TrayAction::SendClipboard("ready".to_string()))
                 },
                 Entry::Item {
@@ -262,6 +267,45 @@ mod tests {
                 action: None
             },
             "the owner's own Do Not Disturb is left alone"
+        );
+    }
+
+    #[test]
+    fn a_phone_s_title_says_why_mute_is_greyed_or_unmute_offered() {
+        let title_of = |quiet: PhoneQuiet| {
+            let mut phone = Device {
+                id: "p".to_string(),
+                name: Some("Pixel".to_string()),
+                linked: true,
+                quiet: Some(quiet),
+                ..Default::default()
+            };
+            phone.permissions.set(Capability::Mute, true);
+            let snapshot = Snapshot {
+                devices: vec![phone],
+                ..Default::default()
+            };
+            let rows = model::phone_rows(&snapshot, &Default::default());
+            match &menu(&rows, &snapshot.devices, 1_000)[3] {
+                Entry::Phone { label, .. } => label.clone(),
+                other => panic!("not a phone: {other:?}"),
+            }
+        };
+        let quiet = PhoneQuiet {
+            quiet: true,
+            until_unix: None,
+            by_computer: false,
+            updated_unix: 1_000,
+            refused_unix: None,
+        };
+        assert!(title_of(quiet).ends_with(" · Do Not Disturb"));
+        assert!(
+            title_of(PhoneQuiet {
+                until_unix: Some(1_000 + 25 * 60),
+                by_computer: true,
+                ..quiet
+            })
+            .ends_with(" · muted from here, 25 min left")
         );
     }
 }

@@ -37,7 +37,8 @@ impl Filter {
         match self {
             Filter::All => true,
             Filter::Sessions => kind.starts_with("session_"),
-            Filter::Phones => kind.starts_with("phone_"),
+            // A lock when a phone left is about phones too (E5).
+            Filter::Phones => kind.starts_with("phone_") || kind == "away_locked",
             Filter::FilesAndLinks => matches!(kind, "file_received" | "link_received"),
             Filter::Messages => matches!(kind, "notification" | "text_received"),
             Filter::Hooks => kind == "hook_ran" || kind.starts_with("task_"),
@@ -111,9 +112,9 @@ impl ActivityView {
     ) -> Option<Action> {
         let mut action = None;
         if !log_on {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("The event log is off, so nothing new shows here.");
-                if ui.button("Settings").clicked() {
+                if ui.button("Turn it on in Settings").clicked() {
                     action = Some(Action::OpenSettings);
                 }
             });
@@ -134,35 +135,43 @@ impl ActivityView {
             .filter(|e| self.filter.admits(&e.event))
             .collect();
         if shown.is_empty() {
-            ui.label("Nothing yet. Sessions, phones, files, links, notifications and hooks show here as they happen.");
+            // A filter that hides everything says so, with the way back (E5).
+            if self.filter != Filter::All && !self.events.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new("Nothing of this kind yet.").color(crate::theme::muted(ui)),
+                    );
+                    if ui.button("Show all").clicked() {
+                        self.filter = Filter::All;
+                    }
+                });
+            } else {
+                ui.label(
+                    RichText::new("Nothing yet. Sessions, phones, files, links, notifications and hooks show here as they happen.")
+                        .color(crate::theme::muted(ui)),
+                );
+            }
             return action;
         }
         let received = &self.received;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                egui::Grid::new("activity")
-                    .num_columns(4)
-                    .striped(true)
-                    .spacing([14.0, 6.0])
-                    .show(ui, |ui| {
-                        for event in shown {
-                            ui.label(RichText::new(crate::words::ago(now_unix, event.at)).weak());
-                            ui.label(phone(event, devices));
-                            ui.label(describe(event));
-                            match file_path(event, received) {
-                                Some(path) => {
-                                    if ui.small_button("Show in folder").clicked() {
-                                        action = Some(Action::ShowFile(path));
-                                    }
-                                }
-                                None => {
-                                    ui.label("");
-                                }
-                            }
-                            ui.end_row();
+                // E5: a row per event that wraps; a grid of four columns
+                // ran a long link or title off the page.
+                for event in shown {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(crate::words::ago(now_unix, event.at)).weak());
+                        ui.label(phone(event, devices));
+                        ui.label(describe(event));
+                        if let Some(path) = file_path(event, received)
+                            && ui.small_button("Show in folder").clicked()
+                        {
+                            action = Some(Action::ShowFile(path));
                         }
                     });
+                    ui.separator();
+                }
             });
         action
     }
@@ -196,15 +205,10 @@ fn number(event: &Event, key: &str) -> Option<i64> {
     event.fields.get(key).and_then(Value::as_i64)
 }
 
-/// `2_100_000` -> "2.1 MB".
+/// A size as every page says it (E5: Files and Activity had told one
+/// file's size two ways).
 fn size(bytes: i64) -> String {
-    let b = bytes.max(0) as f64;
-    match bytes {
-        ..1_000 => format!("{bytes} B"),
-        1_000..1_000_000 => format!("{:.0} KB", b / 1e3),
-        1_000_000..1_000_000_000 => format!("{:.1} MB", b / 1e6),
-        _ => format!("{:.1} GB", b / 1e9),
-    }
+    crate::words::human_size(bytes.max(0) as u64)
 }
 
 /// What happened, in words.
@@ -335,6 +339,13 @@ fn file_path(
 mod tests {
     use super::*;
     use pocketdesk_core::local::events::EventsDetail;
+
+    #[test]
+    fn a_lock_when_a_phone_left_shows_under_phones() {
+        assert!(Filter::Phones.admits("away_locked"));
+        assert!(Filter::Phones.admits("phone_linked"));
+        assert!(!Filter::Sessions.admits("away_locked"));
+    }
     use pocketdesk_core::local::received::ReceivedFile;
     use serde_json::json;
 
@@ -371,7 +382,7 @@ mod tests {
         );
         assert_eq!(
             describe(&event("file_received", json!({"size": 2_100_000}))),
-            "File received (2.1 MB)"
+            "File received (2.0 MB)"
         );
         assert_eq!(
             describe(&event("file_received", json!({"folder": true}))),

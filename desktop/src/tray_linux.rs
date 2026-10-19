@@ -1,6 +1,6 @@
 //! The tray on Linux (N6): a StatusNotifierItem over D-Bus (`ksni`), with
 //! the same icon, tooltip and menu as on Windows ([`crate::tray_menu`]:
-//! Open Pocketdesk, Pair a phone…, each paired phone's actions (D5), Quit);
+//! Open Pocketdesk, Pair a phone, each paired phone's actions (D5), Quit);
 //! a click on the icon opens the window.
 //!
 //! tray-icon's Linux menu needs a GTK main loop the app does not run; this
@@ -198,7 +198,7 @@ mod tests {
                 _ => "?".into(),
             })
             .collect();
-        assert_eq!(labels, ["Open Pocketdesk", "Pair a phone…", "-", "Quit"]);
+        assert_eq!(labels, ["Open Pocketdesk", "Pair a phone", "-", "Quit"]);
         let mut item = item;
         for entry in &menu {
             if let ksni::MenuItem::Standard(s) = entry {

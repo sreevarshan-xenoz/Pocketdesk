@@ -95,19 +95,37 @@ const PERMISSIONS: [(Capability, &str, &str); 16] = [
     (
         Capability::Ring,
         "Ring this phone from here",
-        "Ring it from here when it is lost, at most once a minute. The phone rings only with \"Ring from the computer\" on in its own Settings.",
+        "Ring it from here when it is lost, at most once a minute. The phone rings only with \"Ring from the computer\" on in Pocketdesk's Settings on the phone.",
     ),
     (
         Capability::Mute,
         "Mute this phone from here",
-        "Turn on the phone's Do Not Disturb from here for a while, and see when it is quiet. The phone allows it only with \"Let the computer mute this phone\" on in its own Settings.",
+        "Turn on the phone's Do Not Disturb from here for a while, and see when it is quiet. The phone allows it only with \"Let the computer mute this phone\" on in Pocketdesk's Settings on the phone.",
     ),
     (
         Capability::AwayLock,
-        "Lock this computer when it leaves",
+        "Lock this computer when this phone leaves",
         "When the phone's link has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone asleep may lose its link, so reading or watching without touching anything can lock too. Windows only for now: on Linux it never locks.",
     ),
 ];
+
+/// Whether a device is shown `capability`'s switch (E5): a paired computer
+/// is not a phone to ring, mute, cast or lock this computer by.
+fn shown_for(capability: Capability, computer: bool) -> bool {
+    !(computer
+        && matches!(
+            capability,
+            Capability::Ring | Capability::Mute | Capability::AwayLock | Capability::Cast
+        ))
+}
+
+/// Why "Lock this computer when this phone leaves" cannot be turned on
+/// here, if it cannot: this computer cannot tell yet whether someone is at
+/// it (E5).
+fn away_lock_unavailable() -> Option<&'static str> {
+    (!cfg!(windows))
+        .then_some("Linux cannot tell yet whether someone is at the keyboard, so it never locks.")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -822,6 +840,7 @@ impl PocketdeskApp {
                     Some(crate::clipboard_view::Action::OpenSettings) => {
                         self.switch_to(Tab::Settings)
                     }
+                    Some(crate::clipboard_view::Action::Pair) => self.switch_to(Tab::Pair),
                     None => {}
                 }
             }
@@ -841,8 +860,7 @@ impl PocketdeskApp {
         } else {
             status_line(ui, crate::theme::MUTED, "The server is not running");
             ui.label(
-                "Phones cannot connect until it starts. It starts at logon once \
-                 installed (`pocketdesk install` on Windows, the systemd user unit on Linux).",
+                "Phones cannot connect until it starts. Once installed, it starts when you sign in.",
             );
             if ui
                 .add_enabled(self.job.is_none(), egui::Button::new("Start server"))
@@ -927,7 +945,7 @@ impl PocketdeskApp {
                 // Asked, not sent: the server reads the clipboard then, and
                 // shows a notification if it cannot send it (D5 review).
                 Ok(_) => Ok(format!(
-                    "Asked the server to send the clipboard to {who}; a notification says if it cannot."
+                    "Sending the clipboard to {who}; a notification says if it cannot."
                 )),
                 Err(e) => Err(format!("Could not send the clipboard to {who}: {e}")),
             },
@@ -952,6 +970,7 @@ impl PocketdeskApp {
         let mut mute = None;
         let mut send_file = None;
         let mut open_link = None;
+        let mut send_clip = None;
         // One short block per phone, so it fits a narrow window (N6).
         for row in &rows {
             let device = row.device;
@@ -986,12 +1005,7 @@ impl PocketdeskApp {
                 if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now) {
                     facts.push(quiet);
                 }
-                if model::mute_refused(device.quiet.as_ref(), now) {
-                    facts.push(
-                        "it said no to the mute: turn on \"Let the computer mute this phone\" in its Settings"
-                            .to_string(),
-                    );
-                }
+
                 if row.place != model::Place::Session {
                     facts.push(match row.last_session {
                         Some(at) => format!("last session {}", crate::words::ago(now, at)),
@@ -1000,6 +1014,16 @@ impl PocketdeskApp {
                     });
                 }
                 ui.label(RichText::new(facts.join(" · ")).color(crate::theme::muted(ui)));
+                // A refused mute on its own line, as a warning (E5): in the
+                // facts it read as one more fact.
+                if model::mute_refused(device.quiet.as_ref(), now) {
+                    ui.label(
+                        RichText::new(
+                            "It said no to the mute: turn on \"Let the computer mute this phone\" in Pocketdesk's Settings on the phone.",
+                        )
+                        .color(crate::theme::warn(ui)),
+                    );
+                }
                 ui.horizontal_wrapped(|ui| {
                     let ring_why = row.ring.err().unwrap_or(
                         "Ring it for 30 seconds, through Do Not Disturb when the phone lets alarms through. At most once a minute.",
@@ -1054,6 +1078,19 @@ impl PocketdeskApp {
                     {
                         open_link = Some(device.id.clone());
                     }
+                    // As the tray offers it (E5): this computer's clipboard
+                    // as it is when pressed.
+                    let clip_why = row.clipboard.err().unwrap_or(
+                        "This computer's clipboard as it is now, never a copy a password manager marks private.",
+                    );
+                    if ui
+                        .add_enabled(row.clipboard.is_ok(), egui::Button::new("Send the clipboard"))
+                        .on_hover_text(clip_why)
+                        .on_disabled_hover_text(clip_why)
+                        .clicked()
+                    {
+                        send_clip = Some(device.id.clone());
+                    }
                 });
             });
         }
@@ -1082,6 +1119,9 @@ impl PocketdeskApp {
         if let Some(id) = open_link {
             self.overview_link = Some((id, String::new()));
             self.overview_link_focus = true;
+        }
+        if let Some(id) = send_clip {
+            self.send_clipboard(&id);
         }
     }
 
@@ -1144,29 +1184,31 @@ impl PocketdeskApp {
         let mut confirmed = None;
         let mut ring = None;
         let now = now_unix();
-        egui::Grid::new("devices")
-            .num_columns(6)
-            .striped(true)
-            .spacing([16.0, 8.0])
-            .show(ui, |ui| {
-                for device in &self.snapshot.devices {
-                    ui.vertical(|ui| {
-                        // Room for a name and a short id on one line each.
-                        ui.set_min_width(170.0);
-                        if let Some(name) = &device.name {
-                            ui.label(RichText::new(name).strong());
-                        }
-                        ui.monospace(short(&device.id)).on_hover_text(&device.id);
-                    });
-                    ui.label(match device.grant_remaining {
-                        None if device.computer => "a computer".to_string(),
-                        None => "permanent".to_string(),
-                        Some(secs) => format!("{} left", human_duration(secs)),
-                    });
+        // E5: a block per device, its parts wrapping, as the Overview's
+        // phones are: a grid of six columns ran off a small window.
+        for device in &self.snapshot.devices {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    if let Some(name) = &device.name {
+                        ui.label(RichText::new(name).strong());
+                    }
+                    ui.monospace(short(&device.id)).on_hover_text(&device.id);
+                    ui.label(
+                        RichText::new(match device.grant_remaining {
+                            None if device.computer => "a computer".to_string(),
+                            None => "permanent".to_string(),
+                            Some(secs) => format!("{} left", human_duration(secs)),
+                        })
+                        .color(crate::theme::muted(ui)),
+                    );
+                    // Where it is, in the Overview's words (E5).
                     if device.connected {
-                        ui.label(RichText::new("connected").color(crate::theme::good(ui)));
+                        ui.label(RichText::new("In a session").color(crate::theme::good(ui)));
+                    } else if device.linked {
+                        ui.label(RichText::new("Linked").color(crate::theme::good(ui)));
                     } else {
-                        ui.label(RichText::new("—").color(crate::theme::muted(ui)));
+                        ui.label(RichText::new("Away").color(crate::theme::muted(ui)));
                     }
                     ui.label(battery_text(device.battery.as_ref(), now))
                         .on_hover_text("The phone's battery, as it last reported it in a session");
@@ -1179,7 +1221,7 @@ impl PocketdeskApp {
                     } else if !device.permissions.allows(Capability::Ring) {
                         "Ring is off for this phone, in its section below."
                     } else if !device.linked {
-                        "Not linked now: it rings in a session, or with Ring from the computer on in its own Settings."
+                        "Not linked now: it rings in a session, or with \"Ring from the computer\" on in Pocketdesk's Settings on the phone."
                     } else {
                         "Ring it for 30 seconds, through Do Not Disturb when the phone lets alarms through: at full volume before Android 17, at the phone's alarm volume on 17 and newer. At most once a minute."
                     };
@@ -1191,28 +1233,30 @@ impl PocketdeskApp {
                     {
                         ring = Some(device.id.clone());
                     }
-                    // U5: "Unpair" for a pairing everywhere, asked by name.
-                    if self.confirm_revoke.as_deref() == Some(&device.id) {
-                        ui.vertical(|ui| {
-                            ui.label(format!(
-                                "Unpair {}? It must pair again to connect.",
-                                model::device_label(&self.snapshot.devices, &device.id)
-                            ));
-                            ui.horizontal(|ui| {
-                                if ui.button("Unpair").clicked() {
-                                    confirmed = Some(device.id.clone());
-                                }
-                                if ui.button("Cancel").clicked() {
-                                    revoke = Some(None);
-                                }
-                            });
-                        });
-                    } else if ui.button("Unpair…").clicked() {
+                    if self.confirm_revoke.as_deref() != Some(&device.id)
+                        && ui.button("Unpair…").clicked()
+                    {
                         revoke = Some(Some(device.id.clone()));
                     }
-                    ui.end_row();
+                });
+                // U5: "Unpair" for a pairing everywhere, asked by name.
+                if self.confirm_revoke.as_deref() == Some(&device.id) {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!(
+                            "Unpair {}? It must pair again to connect.",
+                            model::device_label(&self.snapshot.devices, &device.id)
+                        ));
+                        if ui.button("Unpair").clicked() {
+                            confirmed = Some(device.id.clone());
+                        }
+                        if ui.button("Cancel").clicked() {
+                            revoke = Some(None);
+                        }
+                    });
                 }
             });
+            ui.add_space(4.0);
+        }
         ui.add_space(12.0);
         ui.label(
             RichText::new(
@@ -1264,13 +1308,30 @@ impl PocketdeskApp {
                         ask = Some((device.id.clone(), ask_first));
                     }
                     for (capability, label, hint) in PERMISSIONS {
+                        if !shown_for(capability, device.computer) {
+                            continue;
+                        }
                         let mut allowed = device.permissions.allows(capability);
+                        let unavailable = (capability == Capability::AwayLock)
+                            .then(away_lock_unavailable)
+                            .flatten();
                         if ui
-                            .checkbox(&mut allowed, label)
+                            .add_enabled(unavailable.is_none(), egui::Checkbox::new(&mut allowed, label))
                             .on_hover_text(hint)
+                            .on_disabled_hover_text(unavailable.unwrap_or(hint))
                             .changed()
                         {
                             change = Some((device.id.clone(), capability, allowed));
+                        }
+                        // While it is on, what it waits for, in plain sight (E5).
+                        if capability == Capability::AwayLock && allowed && unavailable.is_none() {
+                            let minutes = self.config.as_ref().map_or(5, |c| c.away_lock_minutes);
+                            ui.label(
+                                RichText::new(format!(
+                                    "Locks after {minutes} min away with nobody at the keyboard (Settings, Phones)."
+                                ))
+                                .color(crate::theme::muted(ui)),
+                            );
                         }
                     }
                 });
@@ -1401,7 +1462,7 @@ impl PocketdeskApp {
             };
             let media = &playing.media;
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(format!("Playing on {}:", self.label(id)));
                 ui.label(RichText::new(media_line(media)).strong());
             });
@@ -1741,7 +1802,7 @@ impl PocketdeskApp {
             ui.label(
                 RichText::new(
                     "No phone or computer can take a file right now. A phone can in a session, or \
-                     with \"Files from the computer in the background\" on in its Settings; \
+                     with \"Files from the computer in the background\" on in Pocketdesk's Settings on the phone; \
                      another of your computers, while its link is up. Files land in the \
                      phone's folder for files from computers (Downloads/Pocketdesk unless chosen).",
                 )
@@ -2116,6 +2177,24 @@ impl eframe::App for PocketdeskApp {
                     .show(ui, |ui| self.page(ui));
             }
         });
+        // What a page said happened becomes the one notice (E5).
+        let said = [
+            self.notes.take_notice(),
+            self.phone_files.take_notice(),
+            self.photos.take_notice(),
+            self.kdeconnect.take_notice(),
+            self.computers.take_notice(),
+            self.messages.take_notice(),
+        ];
+        if let Some(notice) = said.into_iter().flatten().last() {
+            self.notice = Some(notice);
+            // Shown now, not at the next refresh (E5 review).
+            ui.ctx().request_repaint();
+        }
+        // An empty page's button asked for another page (E5).
+        if let Some(tab) = self.notes.take_go_to().or(self.phone_files.take_go_to()) {
+            self.switch_to(tab);
+        }
         self.approval_prompt(ui);
         self.task_prompt(ui);
     }
@@ -2260,6 +2339,26 @@ fn on_wayland() -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_paired_computer_is_not_shown_a_phone_s_switches() {
+        for capability in [
+            Capability::Ring,
+            Capability::Mute,
+            Capability::AwayLock,
+            Capability::Cast,
+        ] {
+            assert!(!shown_for(capability, true), "{capability:?}");
+            assert!(shown_for(capability, false), "{capability:?}");
+        }
+        assert!(shown_for(Capability::Clipboard, true));
+        assert!(shown_for(Capability::Files, true));
+    }
+
+    #[test]
+    fn the_away_lock_says_why_it_is_off_where_it_never_locks() {
+        assert_eq!(away_lock_unavailable().is_none(), cfg!(windows));
+    }
+
     /// N6 review: Wayland lets no app hide its own window.
     #[test]
     fn closing_hides_to_the_tray_except_on_wayland() {
