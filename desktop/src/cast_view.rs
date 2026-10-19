@@ -378,6 +378,9 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
         egui::Panel::top("cast-control")
             .frame(egui::Frame::NONE.fill(egui::Color32::from_gray(24)).inner_margin(4.0))
             .show(ui, |ui| {
+                // The bar is dark whatever the theme: in the light one its
+                // buttons were dark text on near black, about 1.5:1 (E5).
+                ui.style_mut().visuals = egui::Visuals::dark();
                 ui.horizontal_wrapped(|ui| {
                     if phone_takes {
                         ui.add_enabled_ui(!watch_only, |ui| {
