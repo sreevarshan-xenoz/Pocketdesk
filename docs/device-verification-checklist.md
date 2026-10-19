@@ -1789,10 +1789,12 @@ On the A71 (Android 16) against a throwaway server, phone notifications shown no
 
 On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_device.sh`, in the evening's batch):
 
-- [ ] An earlier copy sent from Home's card menu reaches the computer's clipboard, and the history keeps it as the phone's.
-- [ ] The computer's copy pushed to the phone is kept as this computer's.
-- [ ] `pocketdesk clipboard` lists both, newest first; `--send 2 --to` puts the older on the phone.
-- [ ] The history turned off in `config.toml` by hand is emptied at the next text and listed as none.
+- [x] An earlier copy sent from Home's card menu reaches the computer's clipboard, and the history keeps it as the phone's.
+- [x] The computer's copy pushed to the phone is kept as this computer's.
+- [x] `pocketdesk clipboard` lists both, newest first; `--send 2 --to` puts the older on the phone.
+- [x] The history turned off in `config.toml` by hand is emptied at the next text and listed as none.
+
+**Run 2026-10-19 (A71, throwaway server, the build of main with D3–D9):** all four above passed by script.
 - [ ] The Clipboard page by hand: Copy, Send to…, Clear and its confirm, a cut entry's Send greyed.
 - [ ] A KDE Connect device's text, and another computer's, in the history.
 - [ ] Linux (`wl-paste`).
@@ -1807,10 +1809,18 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 ## 115. Conversations (D4)
 
 - [ ] A real chat app on the A71: the thread on the Notifications page, oldest first, the owner's own lines set apart, a reply going through.
-- [ ] A second message with the same text: the thread grows.
-- [ ] A group chat: each sender named.
-- [ ] A one-time code arriving in a chat: no thread sent.
-- [ ] "Let the computer answer notifications" off: no messages sent.
+- [x] A second message with the same text: the thread grows.
+- [x] A group chat: each sender named.
+- [x] A one-time code arriving in a chat: no thread sent.
+- [x] "Let the computer answer notifications" off: no messages sent.
+
+**Run 2026-10-19 (A71, throwaway server, a throwaway chat app posting MessagingStyle threads):**
+- The thread was kept with its notification, oldest first, the owner's own lines marked.
+- A repeated message grew it.
+- A group named each sender. Android titles a group's notification after the last sender, so the page heads it with that name.
+- With a code in the thread, the phone sent the notification without its content, and the computer forgot the earlier note: the code reached the computer nowhere (notes, log, events).
+- Answering off kept no note.
+- Owed: a real chat app, the page by hand, a reply.
 
 ## 116. The tray you act from (D5)
 
@@ -1826,7 +1836,15 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 
 ## 117. The phone's folders as a drive (D8)
 
-- [ ] With the A71 sharing a folder: `curl -X PROPFIND -H "Depth: 1"` on the address lists the phone, its folders and their files.
+- [x] With the A71 sharing a folder: `curl -X PROPFIND -H "Depth: 1"` on the address lists the phone, its folders and their files.
+
+**Run 2026-10-19 (A71, throwaway server):**
+- A folder shared through Android's picker was listed through the drive: the phone, its folder, a sub-folder and the files with their sizes. The first listing took 1.7 s.
+- A 3 MB file came in 1.0 s, its MD5 matching the phone's. Read again, it came in 0.1 s from the kept copy.
+- A byte range answered 206, and a HEAD gave the size without fetching.
+- A wrong token answered 404.
+- Nothing landed in Downloads; the fetched files waited in `drive_cache/`.
+- Owed: Explorer, which opens a window on the owner's screen, and everything below.
 - [ ] File Explorer at the Windows address: browse, open a photo, copy one out.
 - [ ] A file over 50 MB in Explorer (refused by Windows' limit), and with curl.
 - [ ] Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).
@@ -1835,8 +1853,14 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] Linux: Files or Dolphin at the `dav://` address.
 ## 118. Lock when the phone leaves (D9)
 
-- [ ] The A71 with the switch on, a throwaway server with `POCKETDESK_LOCK_FILE` set on this box: Wi-Fi off on the phone, a line in the file after the set time, and the `away_locked` event.
-- [ ] The same while typing on the computer: no line until the keyboard has been quiet that long.
+- [x] The A71 with the switch on, a throwaway server with `POCKETDESK_LOCK_FILE` set on this box: Wi-Fi off on the phone, a line in the file after the set time, and the `away_locked` event.
+- [x] The same while typing on the computer: no line until the keyboard has been quiet that long.
+
+**Run 2026-10-19 (A71, throwaway server, the seam checked before anything left; this box never locked):**
+- The phone's link was dropped 35–45 s after its Wi-Fi went off.
+- The computer was in use during the run. The first departure locked nothing within six minutes, the idle check holding it.
+- The second wrote one line when the keyboard and mouse had been quiet for the set 2 minutes, 4 min 9 s after the drop.
+- Once per departure: still to see with the computer untouched throughout.
 - [ ] The phone back, and gone again: a second line; staying gone: no more.
 - [ ] The switch on the Devices page, and the time in Settings, applied without a restart.
 - [ ] A real lock, on a computer where locking is allowed (not this box), Windows; on Linux, that it never locks.

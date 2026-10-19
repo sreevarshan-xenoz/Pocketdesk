@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-600 open items.
+589 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 355 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 344 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 41 |
 | A phone with a SIM | 21 |
@@ -676,10 +676,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **113. Clipboard history and Resend (D3)**
 
-- An earlier copy sent from Home's card menu reaches the computer's clipboard, and the history keeps it as the phone's.
-- The computer's copy pushed to the phone is kept as this computer's.
-- `pocketdesk clipboard` lists both, newest first; `--send 2 --to` puts the older on the phone.
-- The history turned off in `config.toml` by hand is emptied at the next text and listed as none.
 - The Clipboard page by hand: Copy, Send to…, Clear and its confirm, a cut entry's Send greyed.
 
 **114. Continue reading on phone (D6)**
@@ -687,13 +683,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Chrome (Windows): "Continue reading on phone" on a long article mid-way; the phone's notification opens it in Chrome scrolled to that paragraph.
 - A page with a `#section` link: the fragment replaced, the page still scrolled there.
 - The browser's own page (`chrome://extensions`): sent at its top, no error.
-
-**115. Conversations (D4)**
-
-- A second message with the same text: the thread grows.
-- A group chat: each sender named.
-- A one-time code arriving in a chat: no thread sent.
-- "Let the computer answer notifications" off: no messages sent.
 
 **116. The tray you act from (D5)**
 
@@ -705,7 +694,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **117. The phone's folders as a drive (D8)**
 
-- With the A71 sharing a folder: `curl -X PROPFIND -H "Depth: 1"` on the address lists the phone, its folders and their files.
 - File Explorer at the Windows address: browse, open a photo, copy one out.
 - A file over 50 MB in Explorer (refused by Windows' limit), and with curl.
 - A phone from before D8: the file lands in Downloads, the drive answers 504 after the wait.
@@ -713,8 +701,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **118. Lock when the phone leaves (D9)**
 
-- The A71 with the switch on, a throwaway server with `POCKETDESK_LOCK_FILE` set on this box: Wi-Fi off on the phone, a line in the file after the set time, and the `away_locked` event.
-- The same while typing on the computer: no line until the keyboard has been quiet that long.
 - The phone back, and gone again: a second line; staying gone: no more.
 - The switch on the Devices page, and the time in Settings, applied without a restart.
 - A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
