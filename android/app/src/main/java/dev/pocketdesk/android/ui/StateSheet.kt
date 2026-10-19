@@ -20,8 +20,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +47,11 @@ fun StateSheet(address: String, controlPort: Int, computer: String, onDismiss: (
     var state by remember { mutableStateOf<ComputerState.State?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(address, controlPort) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // Only while the app is in front: asking every few seconds in the
+    // background would wake the radio and the computer for nothing (F2 review).
+    LaunchedEffect(address, controlPort, lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
         while (isActive) {
             withContext(Dispatchers.IO) { RustCore.systemState(address, controlPort) }
                 .mapCatching { ComputerState.parse(it) }
@@ -54,6 +61,7 @@ fun StateSheet(address: String, controlPort: Int, computer: String, onDismiss: (
                 }
                 .onFailure { if (state == null) failure = context.plainErrorText(it.message) }
             delay(REFRESH_MS)
+        }
         }
     }
 
