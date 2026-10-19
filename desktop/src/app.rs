@@ -840,6 +840,7 @@ impl PocketdeskApp {
                     Some(crate::clipboard_view::Action::OpenSettings) => {
                         self.switch_to(Tab::Settings)
                     }
+                    Some(crate::clipboard_view::Action::Pair) => self.switch_to(Tab::Pair),
                     None => {}
                 }
             }
@@ -2170,6 +2171,10 @@ impl eframe::App for PocketdeskApp {
         ];
         if let Some(notice) = said.into_iter().flatten().last() {
             self.notice = Some(notice);
+        }
+        // An empty page's button asked for another page (E5).
+        if let Some(tab) = self.notes.take_go_to().or(self.phone_files.take_go_to()) {
+            self.switch_to(tab);
         }
         self.approval_prompt(ui);
         self.task_prompt(ui);

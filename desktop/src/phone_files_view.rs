@@ -29,6 +29,8 @@ pub struct PhoneFilesView {
     read_at: Option<Instant>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
+    /// The page an empty state's button asked for (E5).
+    go_to: Option<crate::app::Tab>,
     /// The phone and the time of the list request still waiting for an answer.
     waiting: Option<(String, u64)>,
     /// Where the server serves the phones' folders as a drive (D8), while
@@ -84,6 +86,10 @@ pub fn size_text(bytes: u64) -> String {
 }
 
 impl PhoneFilesView {
+    /// The page its empty state's button asked for, since the last call (E5).
+    pub fn take_go_to(&mut self) -> Option<crate::app::Tab> {
+        self.go_to.take()
+    }
     /// What this page said happened since the last call, for the app's one
     /// notice (E5).
     pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
@@ -147,13 +153,25 @@ impl PhoneFilesView {
         }
         let phones: Vec<&Device> = devices.iter().filter(|d| d.takes_files).collect();
         if phones.is_empty() {
-            ui.label(
-                RichText::new(
-                    "No phone is connected. A phone with folders shared (its Settings, \"Folders the \
-                     computer may open\") stays connected to answer, through notification access.",
-                )
-                .color(crate::theme::muted(ui)),
-            );
+            // The next step, with its button (E5).
+            if devices.is_empty() {
+                ui.label(RichText::new("No phone is paired yet.").color(crate::theme::muted(ui)));
+                if ui.button("Pair a phone").clicked() {
+                    self.go_to = Some(crate::app::Tab::Pair);
+                }
+            } else {
+                ui.label(
+                    RichText::new(
+                        "No phone that shares folders is linked now. A phone with folders shared \
+                         (\"Folders the computer may open\" in Pocketdesk's Settings on the phone) \
+                         stays linked to answer, through notification access.",
+                    )
+                    .color(crate::theme::muted(ui)),
+                );
+                if ui.button("Devices").clicked() {
+                    self.go_to = Some(crate::app::Tab::Devices);
+                }
+            }
             return;
         }
         if self
@@ -274,7 +292,7 @@ impl PhoneFilesView {
         // The page scrolls as a whole (E5): a scroll area of its own here
         // filled the page and pushed the photos below out of reach.
         if listing.entries.is_empty() {
-            ui.label(RichText::new("Empty").color(crate::theme::muted(ui)));
+            ui.label(RichText::new("This folder is empty.").color(crate::theme::muted(ui)));
         }
         for entry in &listing.entries {
             ui.horizontal_wrapped(|ui| {

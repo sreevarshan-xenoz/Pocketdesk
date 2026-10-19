@@ -23,6 +23,8 @@ pub struct NotesView {
     read_at: Option<Instant>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
+    /// The page an empty state's button asked for (E5).
+    go_to: Option<crate::app::Tab>,
 }
 
 /// The notifications to list, newest first.
@@ -32,6 +34,10 @@ pub fn newest_first(mut notes: Vec<PhoneNote>) -> Vec<PhoneNote> {
 }
 
 impl NotesView {
+    /// The page its empty state's button asked for, since the last call (E5).
+    pub fn take_go_to(&mut self) -> Option<crate::app::Tab> {
+        self.go_to.take()
+    }
     /// What this page said happened since the last call, for the app's one
     /// notice (E5).
     pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
@@ -92,6 +98,10 @@ impl NotesView {
                 )
                 .color(crate::theme::muted(ui)),
             );
+            // With no phone paired, the step before (E5).
+            if devices.is_empty() && ui.button("Pair a phone").clicked() {
+                self.go_to = Some(crate::app::Tab::Pair);
+            }
             return;
         }
         let notes = self.notes.clone();

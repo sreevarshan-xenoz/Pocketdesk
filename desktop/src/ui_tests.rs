@@ -283,6 +283,24 @@ fn empty_sessions_and_files_say_what_to_do_next() {
     );
 }
 
+/// With no phone paired, the Notifications and Phone files pages each offer
+/// Pair a phone, which opens Pair (E5). (Clipboard's, the same, shows only
+/// with its history on.)
+#[test]
+fn empty_pages_with_no_phone_offer_pairing() {
+    let fixture = Fixture::new();
+    for page in [Tab::Notifications, Tab::Phone] {
+        let mut app = fixture.open(Some(page));
+        app.run_steps(3);
+        app.get_by_label("Pair a phone").click();
+        app.run_steps(3);
+        assert!(
+            app.query_by_label(Tab::Pair.purpose()).is_some(),
+            "{page:?}: Pair opened"
+        );
+    }
+}
+
 /// The Overview, Devices and Settings at 720×480 in both themes, compared
 /// with the pictures under `desktop/tests/snapshots/` (C4). They need a GPU
 /// renderer, so only with the `snapshots` feature; CI draws them with

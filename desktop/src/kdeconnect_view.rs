@@ -239,7 +239,12 @@ impl KdeConnectView {
             });
         }
         if self.rows.is_empty() {
-            ui.label(RichText::new("None has connected yet.").weak());
+            ui.label(
+                RichText::new(
+                    "No KDE Connect device has connected yet. Press Find, then open KDE Connect on the device.",
+                )
+                .weak(),
+            );
         }
         for device in &mut self.rows {
             ui.horizontal_wrapped(|ui| {

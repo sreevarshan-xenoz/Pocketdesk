@@ -31,6 +31,8 @@ pub enum Action {
     Failed(String),
     /// Open Settings: the history is off.
     OpenSettings,
+    /// Open Pair: nothing is paired to copy with (E5).
+    Pair,
 }
 
 /// An entry's text as the page shows it: its first lines, at most
@@ -132,6 +134,14 @@ impl ClipboardView {
                 RichText::new("Nothing yet: copy something on a connected phone, or here with \"Clipboard to phones\" on.")
                     .color(crate::theme::muted(ui)),
             );
+            // The next step, with its button (E5).
+            if devices.is_empty() {
+                if ui.button("Pair a phone").clicked() {
+                    action = Some(Action::Pair);
+                }
+            } else if ui.button("Clipboard settings").clicked() {
+                action = Some(Action::OpenSettings);
+            }
             return action;
         }
         let targets = targets(devices);
