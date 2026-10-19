@@ -715,4 +715,6 @@
     <string name="phone_notifications_hold_back_summary">தொந்தரவு செய்ய வேண்டாம் நிலை இந்தத் தொலைபேசியில் ஓர் அறிவிப்பை அமைதியாக்கும்போது, அது கணினிக்கும் அனுப்பப்படாது</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
     <string name="card_send_earlier_copy">முந்தைய நகலை அனுப்பு</string>
+    <!-- D4: a chat message that looks like a one-time code, in its place. -->
+    <string name="conversation_code_hidden">(ஒரு குறியீடு, அனுப்பப்படவில்லை)</string>
 </resources>

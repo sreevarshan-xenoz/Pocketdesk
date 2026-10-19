@@ -724,4 +724,6 @@
     <string name="phone_notifications_hold_back_summary">While Do Not Disturb silences a notification on this phone, it is not sent to the computer either</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
     <string name="card_send_earlier_copy">Send an earlier copy</string>
+    <!-- D4: a chat message that looks like a one-time code, in its place. -->
+    <string name="conversation_code_hidden">(a code, not sent)</string>
 </resources>

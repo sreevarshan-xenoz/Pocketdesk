@@ -721,4 +721,6 @@
     <string name="phone_notifications_hold_back_summary">Mientras No molestar silencia una notificación en este teléfono, tampoco se envía al ordenador</string>
     <!-- D3: the phone's clipboard history, sent to a computer from Home. -->
     <string name="card_send_earlier_copy">Enviar una copia anterior</string>
+    <!-- D4: a chat message that looks like a one-time code, in its place. -->
+    <string name="conversation_code_hidden">(un código, no enviado)</string>
 </resources>

@@ -13,7 +13,9 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import dev.pocketdesk.android.Prefs
+import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -343,6 +345,8 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
+        // D4: a chat's recent messages, only with the notification in full.
+        if (out.full) conversation(sbn.notification)?.let { body.put("messages", it) }
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
@@ -505,6 +509,32 @@ class PhoneNotificationListener : NotificationListenerService() {
             otherProfile = sbn.user != Process.myUserHandle(),
             clearable = sbn.isClearable,
         )
+    }
+
+    /**
+     * A chat notification's recent messages (D4), as [ConversationRule]
+     * lets them go, or null for one that is not a chat. A message with no
+     * person is the phone owner's own.
+     */
+    private fun conversation(n: Notification): JSONArray? {
+        val style = runCatching {
+            androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(n)
+        }.getOrNull() ?: return null
+        val raw = style.messages.map { m ->
+            ConversationRule.Raw(
+                from = m.person?.name?.toString(),
+                text = m.text?.toString(),
+                timeMs = m.timestamp,
+                mine = m.person == null || m.person?.key?.let { it == style.user.key } == true,
+            )
+        }
+        val out = ConversationRule.messages(raw, getString(R.string.conversation_code_hidden))
+        if (out.isEmpty()) return null
+        return JSONArray().apply {
+            out.forEach { m ->
+                put(JSONObject().put("from", m.from).put("text", m.text).put("time", m.timeMs).put("mine", m.mine))
+            }
+        }
     }
 
     private fun appLabel(pkg: String): String =
