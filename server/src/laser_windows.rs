@@ -12,13 +12,13 @@ use windows::Win32::Graphics::Gdi::{CreateEllipticRgn, CreateSolidBrush, SetWind
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, HWND_TOPMOST, LWA_ALPHA, MSG,
-    PM_REMOVE, PeekMessageW, RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_SHOWWINDOW,
+    PM_REMOVE, PeekMessageW, RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW,
     SetLayeredWindowAttributes, SetWindowPos, ShowWindow, WNDCLASSW, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 use windows::core::w;
 
-use crate::laser::{Area, DOT_PX, Dot};
+use crate::laser::{Area, DOT_PX, Dot, dot_px};
 
 /// The dot's colour (a presenter's red) and opacity.
 const RGB: (u8, u8, u8) = (230, 30, 40);
@@ -29,9 +29,10 @@ enum Move {
     Hide,
 }
 
+static SENDER: OnceLock<Mutex<Option<Sender<Move>>>> = OnceLock::new();
+
 /// The dot's thread, started at the first move; `None` when it could not start.
 fn sender() -> Option<Sender<Move>> {
-    static SENDER: OnceLock<Mutex<Option<Sender<Move>>>> = OnceLock::new();
     let slot = SENDER.get_or_init(|| {
         let (tx, rx) = mpsc::channel();
         let started = std::thread::Builder::new()
@@ -45,6 +46,10 @@ fn sender() -> Option<Sender<Move>> {
 
 /// The phone's laser packet: queued for the dot's thread.
 pub fn handle(dx: i16, dy: i16, show: bool) {
+    // A hide with no dot yet starts no thread and no window (G4 review).
+    if !show && SENDER.get().is_none() {
+        return;
+    }
     if let Some(tx) = sender() {
         let _ = tx.send(if show { Move::By(dx, dy) } else { Move::Hide });
     }
@@ -93,13 +98,20 @@ fn create_window() -> Option<HWND> {
     .ok()?;
     unsafe {
         let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), ALPHA, LWA_ALPHA);
-        SetWindowRgn(
-            hwnd,
-            Some(CreateEllipticRgn(0, 0, DOT_PX + 1, DOT_PX + 1)),
-            false,
-        );
+        shape(hwnd, DOT_PX);
     }
     Some(hwnd)
+}
+
+/// The window's round shape at `size`; the system owns the region after.
+unsafe fn shape(hwnd: HWND, size: i32) {
+    unsafe {
+        SetWindowRgn(
+            hwnd,
+            Some(CreateEllipticRgn(0, 0, size + 1, size + 1)),
+            true,
+        );
+    }
 }
 
 fn screens() -> Vec<Area> {
@@ -130,12 +142,16 @@ fn run(moves: Receiver<Move>) {
     let mut dot = Dot::default();
     // Read once per showing: the screens do not change under a moving dot.
     let mut known: Vec<Area> = Vec::new();
+    let mut size = DOT_PX;
     loop {
         let mut msg = MSG::default();
         while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
             unsafe { DispatchMessageW(&msg) };
         }
-        let next = moves.recv_timeout(Duration::from_millis(50));
+        // Hidden, it wakes only to pump its window's messages (G4 review);
+        // shown, often enough to hide a dot whose release was lost.
+        let wait = if dot.idle_soon() { 50 } else { 250 };
+        let next = moves.recv_timeout(Duration::from_millis(wait));
         let now = Instant::now();
         match next {
             Ok(Move::By(dx, dy)) => {
@@ -143,15 +159,20 @@ fn run(moves: Receiver<Move>) {
                     known = screens();
                 }
                 if let Some((x, y)) = dot.moved(dx, dy, &known, pointer(), now) {
+                    let wanted = dot_px(&known, (x, y));
                     unsafe {
+                        if wanted != size {
+                            size = wanted;
+                            shape(hwnd, size);
+                        }
                         let _ = SetWindowPos(
                             hwnd,
                             Some(HWND_TOPMOST),
-                            x - DOT_PX / 2,
-                            y - DOT_PX / 2,
-                            0,
-                            0,
-                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                            x - size / 2,
+                            y - size / 2,
+                            size,
+                            size,
+                            SWP_NOACTIVATE | SWP_SHOWWINDOW,
                         );
                     }
                 }

@@ -6,8 +6,18 @@
 
 use std::time::{Duration, Instant};
 
-/// The dot's size in pixels.
+/// The dot's size in pixels on a 1080-line screen; larger screens get a
+/// larger dot (G4 review: 24 physical pixels were a speck on a 4K one).
 pub const DOT_PX: i32 = 24;
+
+/// The dot's size on the screen holding `at`: [`DOT_PX`] per 1080 lines,
+/// never smaller.
+pub fn dot_px(screens: &[Area], at: (i32, i32)) -> i32 {
+    screens
+        .iter()
+        .find(|s| s.contains(at.0, at.1))
+        .map_or(DOT_PX, |s| (s.height * DOT_PX / 1080).max(DOT_PX))
+}
 
 /// A dot still this long hides by itself: the phone's release may be lost.
 pub const IDLE: Duration = Duration::from_secs(2);
@@ -75,6 +85,12 @@ impl Dot {
     pub fn hide(&mut self) {
         self.at = None;
         self.moved = None;
+    }
+
+    /// Whether the dot is shown and may soon be idle: its thread then
+    /// checks often, and rarely while it is hidden.
+    pub fn idle_soon(&self) -> bool {
+        self.moved.is_some()
     }
 
     /// Whether the dot has been still long enough to hide by itself.
@@ -201,6 +217,20 @@ mod tests {
         assert_eq!(dot.moved(10, 0, &[LEFT], (0, 0), now), Some((1070, 540)));
         dot.hide();
         assert_eq!(dot.moved(10, 0, &[LEFT], (0, 0), now), Some((970, 540)));
+    }
+
+    #[test]
+    fn a_dot_grows_with_its_screen() {
+        let tall = Area {
+            left: 1920,
+            top: 0,
+            width: 3840,
+            height: 2160,
+        };
+        assert_eq!(dot_px(&[LEFT, tall], (10, 10)), DOT_PX);
+        assert_eq!(dot_px(&[LEFT, tall], (2000, 10)), 48);
+        assert_eq!(dot_px(&[RIGHT], (2000, 10)), DOT_PX, "never smaller");
+        assert_eq!(dot_px(&[], (0, 0)), DOT_PX);
     }
 
     #[test]
