@@ -25,8 +25,6 @@ object PadButton {
     const val LEFT = 0x2000
     const val RIGHT = 0x4000
 
-    private const val DPAD = UP or DOWN or LEFT or RIGHT
-
     /** The D-pad's bits for a hat at (x, y), each -1..1, y down. */
     fun hat(x: Float, y: Float): Int {
         var bits = 0
@@ -56,8 +54,6 @@ object PadButton {
         KeyEvent.KEYCODE_DPAD_RIGHT -> RIGHT
         else -> 0
     }
-
-    internal fun dpad(bits: Int): Int = bits and DPAD
 }
 
 /**
@@ -67,8 +63,13 @@ object PadButton {
  * computer moves the mouse and scrolls once per packet.
  */
 class GamepadState {
-    var buttons = 0
-        private set
+    /** Pressed by touch or a controller's keys. */
+    private var pressed = 0
+
+    /** A controller's hat, kept apart so its centred axes never let go of a D-pad held as keys or by touch (E4 review). */
+    private var hatBits = 0
+
+    val buttons: Int get() = pressed or hatBits
 
     /** Left stick x, y; right stick x, y; the triggers. ±32767, y down. */
     val axes = IntArray(6)
@@ -77,8 +78,9 @@ class GamepadState {
     val moving: Boolean get() = (0 until 4).any { axes[it] != 0 }
 
     fun press(bit: Int, down: Boolean): Boolean {
-        val next = if (down) buttons or bit else buttons and bit.inv()
-        return replaceButtons(next)
+        val before = buttons
+        pressed = if (down) pressed or bit else pressed and bit.inv()
+        return buttons != before
     }
 
     /** The left ([left]) or right stick at (x, y), each -1..1, y down. */
@@ -92,21 +94,19 @@ class GamepadState {
     }
 
     /** A hat (a controller's D-pad as an axis) at (x, y). */
-    fun hat(x: Float, y: Float): Boolean =
-        replaceButtons(buttons and PadButton.dpad(buttons).inv() or PadButton.hat(x, y))
+    fun hat(x: Float, y: Float): Boolean {
+        val before = buttons
+        hatBits = PadButton.hat(x, y)
+        return buttons != before
+    }
 
     /** Everything up and centred; whether anything was held. */
     fun reset(): Boolean {
         val held = buttons != 0 || axes.any { it != 0 }
-        buttons = 0
+        pressed = 0
+        hatBits = 0
         axes.fill(0)
         return held
-    }
-
-    private fun replaceButtons(next: Int): Boolean {
-        if (next == buttons) return false
-        buttons = next
-        return true
     }
 
     companion object {

@@ -52,6 +52,17 @@ class GamepadStateTest {
     }
 
     @Test
+    fun aCentredHatLeavesADpadHeldAsAKeyAlone() {
+        val pad = GamepadState()
+        pad.press(PadButton.UP, true)
+        assertFalse("a stick's motion carries a centred hat", pad.hat(0f, 0f))
+        assertEquals(PadButton.UP, pad.buttons)
+        pad.hat(0f, -1f)
+        pad.press(PadButton.UP, false)
+        assertEquals("the hat still holds it", PadButton.UP, pad.buttons)
+    }
+
+    @Test
     fun aControllerSKeysAreTheirBitsAndOtherKeysAreNot() {
         assertEquals(PadButton.A, PadButton.ofKey(KeyEvent.KEYCODE_BUTTON_A))
         assertEquals(PadButton.RB, PadButton.ofKey(KeyEvent.KEYCODE_BUTTON_R1))
