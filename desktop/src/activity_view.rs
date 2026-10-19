@@ -236,6 +236,7 @@ pub fn describe(event: &Event) -> String {
             if flag("charging") { ", charging" } else { "" }
         ),
         "phone_battery_low" => format!("Battery low: {} %", number(event, "charge").unwrap_or(0)),
+        "away_locked" => "Left: this computer was locked".to_string(),
         "phone_quiet" => if flag("quiet") {
             "Do Not Disturb on"
         } else {
