@@ -364,8 +364,13 @@ fn log_refused(device: &str, specs: &[TaskSpec], name: &str, reason: &str) {
 /// Where a run's states go: the phone connection that asked, or nowhere
 /// but the event log (a start from Home Assistant, ecosystem 1e).
 enum Reply {
-    Phone { connection: String, id: String },
+    Phone {
+        connection: String,
+        id: String,
+    },
     Nowhere,
+    /// A phone's deck button (F1): its results go nowhere.
+    Deck,
 }
 
 impl Reply {
@@ -374,6 +379,7 @@ impl Reply {
         match self {
             Self::Phone { .. } => "a phone",
             Self::Nowhere => "Home Assistant",
+            Self::Deck => "a phone's deck",
         }
     }
 
@@ -388,12 +394,33 @@ impl Reply {
 /// phone's start: the same limits, and one that asks first waits for the
 /// owner. Why not, when it does not start.
 pub fn start_for_home_assistant(name: &str) -> std::result::Result<(), &'static str> {
-    start_named(&crate::events::current_config().tasks, name)
+    start_named(
+        &crate::events::current_config().tasks,
+        name,
+        HOME_ASSISTANT_DEVICE,
+        Reply::Nowhere,
+    )
 }
 
-/// [`start_for_home_assistant`] among `specs`.
-fn start_named(specs: &[TaskSpec], name: &str) -> std::result::Result<(), &'static str> {
-    let device = HOME_ASSISTANT_DEVICE.to_string();
+/// Start the task named `name` from `device`'s deck (F1), as a phone's
+/// start: the same limits, and one that asks first waits for the owner.
+pub fn start_from_deck(device: &str, name: &str) -> std::result::Result<(), &'static str> {
+    start_named(
+        &crate::events::current_config().tasks,
+        name,
+        device,
+        Reply::Deck,
+    )
+}
+
+/// Start `name` among `specs` for `device`, its results to `reply`.
+fn start_named(
+    specs: &[TaskSpec],
+    name: &str,
+    device: &str,
+    reply: Reply,
+) -> std::result::Result<(), &'static str> {
+    let device = device.to_string();
     if !within_rate(&device, Instant::now()) {
         return Err("too many starts");
     }
@@ -405,7 +432,7 @@ fn start_named(specs: &[TaskSpec], name: &str) -> std::result::Result<(), &'stat
         log_refused(&device, specs, name, "busy");
         return Err("busy");
     };
-    tokio::spawn(run_claimed(spec, device, held, Reply::Nowhere));
+    tokio::spawn(run_claimed(spec, device, held, reply));
     Ok(())
 }
 
@@ -556,15 +583,21 @@ mod tests {
             ask: false,
             ..spec("ha-quick", if cfg!(windows) { "exit 0" } else { "true" })
         }];
-        assert_eq!(start_named(&specs, "not-one"), Err("unknown"));
+        assert_eq!(
+            start_named(&specs, "not-one", HOME_ASSISTANT_DEVICE, Reply::Nowhere),
+            Err("unknown")
+        );
         let held = claim("ha-quick").unwrap();
         assert_eq!(
-            start_named(&specs, "ha-quick"),
+            start_named(&specs, "ha-quick", HOME_ASSISTANT_DEVICE, Reply::Nowhere),
             Err("busy"),
             "one of each at once"
         );
         drop(held);
-        assert_eq!(start_named(&specs, "ha-quick"), Ok(()));
+        assert_eq!(
+            start_named(&specs, "ha-quick", HOME_ASSISTANT_DEVICE, Reply::Nowhere),
+            Ok(())
+        );
         // Up to 10 s: a loaded CI runner starts a shell slowly.
         for _ in 0..100 {
             if !RUNNING.lock().unwrap().contains("ha-quick") {
@@ -578,9 +611,12 @@ mod tests {
         );
         // Three starts above counted; seven more fill the minute.
         for _ in 0..7 {
-            let _ = start_named(&specs, "not-one");
+            let _ = start_named(&specs, "not-one", HOME_ASSISTANT_DEVICE, Reply::Nowhere);
         }
-        assert_eq!(start_named(&specs, "ha-quick"), Err("too many starts"));
+        assert_eq!(
+            start_named(&specs, "ha-quick", HOME_ASSISTANT_DEVICE, Reply::Nowhere),
+            Err("too many starts")
+        );
     }
 
     #[test]

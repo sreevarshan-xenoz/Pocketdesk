@@ -165,7 +165,7 @@ async fn push(
 /// Open `url` on a thread of its own, never the phone's packet loop: a
 /// browser that is slow to start, or Windows asking which app to use, would
 /// hold it. A link that cannot be opened is shown instead.
-fn open_detached(url: &str) -> std::result::Result<(), String> {
+pub(crate) fn open_detached(url: &str) -> std::result::Result<(), String> {
     let url = url.to_string();
     std::thread::Builder::new()
         .name("open-link".to_string())
