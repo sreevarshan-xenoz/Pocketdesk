@@ -101,7 +101,7 @@
     <string name="mode_direct_touch">Direct touch</string>
     <string name="mode_trackpad">Trackpad</string>
     <string name="mode_pen">Pen</string>
-    <string name="ring_pc">Ring PC</string>
+    <string name="ring_pc">Ring the computer</string>
     <string name="paired">Paired ✓</string>
     <string name="privacy_error">Privacy: %1$s</string>
     <string name="view_only_error">View-only: %1$s</string>
@@ -112,10 +112,10 @@
     <string name="mic_error">Mic share: %1$s</string>
     <string name="mic_unavailable">No Opus encoder on this device (Android 9+)</string>
     <string name="mic_permission_denied">Microphone permission denied</string>
-    <string name="codec_switched">Desktop switched encoder — now %1$s</string>
-    <string name="lock_pc">Lock PC</string>
+    <string name="codec_switched">The computer switched encoder: now %1$s</string>
+    <string name="lock_pc">Lock the computer</string>
     <string name="blackout">Blackout</string>
-    <string name="pip">PiP</string>
+    <string name="pip">Picture-in-picture</string>
     <string name="blackout_unlock">Blackout — double-tap to unlock</string>
 
     <!-- R4 E6: foldable / tablet dual-pane -->
@@ -141,7 +141,7 @@
     <string name="row_history">Clipboard history</string>
     <string name="row_audio">Audio control</string>
     <string name="row_mic">Phone mic share</string>
-    <string name="row_desktop_sound">Desktop sound on this phone</string>
+    <string name="row_desktop_sound">The computer\'s sound on this phone</string>
     <string name="keyboard_open">Keyboard</string>
     <string name="keyboard_hide">Hide keyboard</string>
     <string name="keyboard_mod_off">off</string>
@@ -192,17 +192,17 @@
     <string name="value_unpaired">Not paired</string>
 
     <!-- Foreground-service + notification relay -->
-    <string name="channel_session">Remote desktop session</string>
-    <string name="channel_session_desc">Shown while a remote desktop session keeps this app in the foreground.</string>
+    <string name="channel_session">Session with a computer</string>
+    <string name="channel_session_desc">Shown while a session with a computer keeps this app in the foreground.</string>
     <string name="notif_streaming">Streaming to %1$s</string>
     <string name="disconnect">Disconnect</string>
-    <string name="lock_desktop">Lock desktop</string>
-    <string name="channel_desktop_notifications">Desktop notifications</string>
+    <string name="lock_desktop">Lock the computer</string>
+    <string name="channel_desktop_notifications">Notifications from the computer</string>
     <string name="reply">Reply</string>
     <string name="reply_to">Reply to %1$s</string>
 
     <!-- ShareActivity -->
-    <string name="share_no_host">Pocketdesk: no saved host. Connect once from the app first.</string>
+    <string name="share_no_host">Pocketdesk: no saved computer. Connect to one from the app first.</string>
     <string name="share_nothing">Nothing shareable in this intent.</string>
     <string name="share_sent_clipboard_to">Sent to the clipboard of %1$s.</string>
     <string name="share_failed">Failed: %1$s</string>
@@ -301,21 +301,21 @@
     <string name="siren_dismiss">Silence</string>
 
     <!-- Audio sheet -->
-    <string name="desktop_audio">Desktop audio</string>
+    <string name="desktop_audio">The computer\'s sound</string>
     <string name="audio_volume">Volume · %1$d%%</string>
     <string name="audio_muted">(muted)</string>
     <string name="mute">Mute</string>
     <string name="output_device">Output device</string>
-    <string name="audio_rejected">Desktop rejected the request</string>
+    <string name="audio_rejected">The computer refused the request</string>
     <string name="audio_failed">Audio control failed</string>
-    <string name="err_host_unreachable">Nothing answered on that address. Is Pocketdesk running on the desktop?</string>
-    <string name="err_timeout">The desktop took too long to answer. Make sure it is awake and reachable.</string>
-    <string name="err_lan_only">Not reachable over LAN, and this desktop has no saved internet (WAN) identity yet. Connect once from the same network first.</string>
-    <string name="err_trust_mismatch">Security credentials no longer match this desktop. Pair again to continue.</string>
-    <string name="err_pairing_declined">The desktop declined pairing — the PIN was wrong or expired.</string>
+    <string name="err_host_unreachable">Nothing answered on that address. Is Pocketdesk running on the computer?</string>
+    <string name="err_timeout">The computer took too long to answer. Make sure it is awake and reachable.</string>
+    <string name="err_lan_only">Not reachable on this network, and this computer has no saved internet identity yet. Connect once from the same network first.</string>
+    <string name="err_trust_mismatch">Security credentials no longer match this computer. Pair again to continue.</string>
+    <string name="err_pairing_declined">The computer declined pairing: the PIN was wrong or expired.</string>
     <string name="err_link_dropped">The connection to the computer dropped. It may have slept or left the network.</string>
     <string name="err_generic">Something went wrong reaching the computer.</string>
-    <string name="connecting_still">Still trying… check that the desktop is awake and running Pocketdesk.</string>
+    <string name="connecting_still">Still trying… check that the computer is awake and running Pocketdesk.</string>
     <string name="waiting_for_picture">Connected — waiting for the picture…</string>
     <string name="waiting_for_approval">If this computer asks before each session, allow it there.</string>
     <string name="err_session_refused">This computer turned the session down. If it asks before each session, allow it there; otherwise pair again.</string>
@@ -323,8 +323,8 @@
     <string name="session_menu">Session menu</string>
     <string name="pair_link_title">Pairing with %1$s…</string>
     <string name="pair_link_trying">Trying %1$s</string>
-    <string name="pair_link_expired">This code has expired — show a new one on the desktop and scan again.</string>
-    <string name="pair_link_unreachable">Could not reach the desktop at any of its addresses. Is this phone on the same network or tailnet? (%1$s)</string>
+    <string name="pair_link_expired">This code has expired: show a new one on the computer and scan again.</string>
+    <string name="pair_link_unreachable">Could not reach the computer at any of its addresses. Is this phone on the same network or tailnet? (%1$s)</string>
     <string name="pair_link_invalid">That is not a Pocketdesk pairing code.</string>
     <string name="scan_pairing_code">Scan pairing code</string>
     <string name="scan_hint">Point the camera at the code on the Pair page of the Pocketdesk app on your computer.</string>
