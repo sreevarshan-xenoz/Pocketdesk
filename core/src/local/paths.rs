@@ -82,6 +82,8 @@ pub const PHONE_PHOTOS_DIR: &str = "phone_photos";
 pub const PHONE_PHOTOS_OUT_DIR: &str = "phone_photos_out";
 /// Phone notifications the computer can answer (T10c).
 pub const PHONE_NOTES_FILE: &str = "phone_notifications.json";
+/// How each answer to them went (E1).
+pub const NOTIFICATION_ANSWERS_FILE: &str = "notification_answers.json";
 /// Answers to them the desktop app asks the server to send (T10c).
 pub const NOTIFICATION_OUT_DIR: &str = "notification_out";
 /// Presses for a phone's player (T8d), one file each, taken by the server.

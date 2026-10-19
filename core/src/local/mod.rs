@@ -5,6 +5,7 @@
 //! request, session approvals, the pid file — so it works whether or not the
 //! server is running and needs no socket of its own. Everything here is plain std + serde.
 
+pub mod answers;
 pub mod approval;
 pub mod cast;
 pub mod clip_history;

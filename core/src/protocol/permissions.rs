@@ -123,7 +123,9 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         "kdeconnect.notification"
         // Answers to the phone's notifications (T10c).
         | crate::protocol::notification_action::NOTIFICATION_REPLY
-        | crate::protocol::notification_action::NOTIFICATION_ACTION => Capability::Notifications,
+        | crate::protocol::notification_action::NOTIFICATION_ACTION
+        // And how they went, from the phone (E1).
+        | crate::protocol::notification_action::NOTIFICATION_ANSWERED => Capability::Notifications,
         "kdeconnect.sms.messages" | "kdeconnect.pocketdesk.sms_sent" => Capability::Texts,
         crate::protocol::link::LINK => Capability::Links,
         crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,

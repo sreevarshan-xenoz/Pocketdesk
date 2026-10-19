@@ -71,6 +71,65 @@ pub fn reply_packet(key: &str, message: &str) -> Option<NetworkPacket> {
     })
 }
 
+/// Phone → computer: how an answer went (E1), `{answerId, ok, reason}`.
+pub const NOTIFICATION_ANSWERED: &str = "kdeconnect.pocketdesk.notification_answered";
+
+/// An outcome's reason, at most, in characters.
+pub const MAX_REASON_CHARS: usize = 200;
+
+/// Whether `id` names an answer: the computer's request id, 1 to 64 hex
+/// digits and hyphens.
+pub fn valid_answer_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+/// `packet` with the answer's id (E1), which the phone sends back with how
+/// it went. A phone from before E1 ignores it.
+pub fn with_answer_id(mut packet: NetworkPacket, id: &str) -> NetworkPacket {
+    if valid_answer_id(id) {
+        packet.body["answerId"] = serde_json::json!(id);
+    }
+    packet
+}
+
+/// How an answer went, as the phone said (E1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Answered {
+    pub answer_id: String,
+    /// Handed to the app.
+    pub ok: bool,
+    /// Why not, in words, cleaned and cut.
+    pub reason: Option<String>,
+}
+
+impl Answered {
+    /// The outcome a phone sent, held to its bounds; `None` out of them.
+    pub fn from_body(body: &serde_json::Value) -> Option<Self> {
+        let answer_id = body.get("answerId")?.as_str()?;
+        if !valid_answer_id(answer_id) {
+            return None;
+        }
+        let ok = body.get("ok")?.as_bool()?;
+        let reason = body
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .map(|r| {
+                r.chars()
+                    .filter(|c| !c.is_control() && !super::kdeconnect::is_invisible_format(*c))
+                    .take(MAX_REASON_CHARS)
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            })
+            .filter(|r| !r.is_empty());
+        Some(Self {
+            answer_id: answer_id.to_string(),
+            ok,
+            reason: if ok { None } else { reason },
+        })
+    }
+}
+
 /// The button packet, or `None` when a field is out of bounds.
 pub fn action_packet(key: &str, action: &str) -> Option<NetworkPacket> {
     (valid_key(key) && valid_action(action)).then(|| {
@@ -82,6 +141,38 @@ pub fn action_packet(key: &str, action: &str) -> Option<NetworkPacket> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_outcome_is_held_to_its_bounds() {
+        let id = "6c1f2a0e-0000-4000-8000-000000000001";
+        let ok =
+            Answered::from_body(&serde_json::json!({"answerId": id, "ok": true, "reason": "x"}))
+                .unwrap();
+        assert_eq!((ok.ok, ok.reason), (true, None), "no reason with ok");
+        let long = "a".repeat(MAX_REASON_CHARS + 50);
+        let refused = Answered::from_body(&serde_json::json!({
+            "answerId": id, "ok": false, "reason": format!("the app\nrefused it {long}")
+        }))
+        .unwrap();
+        let reason = refused.reason.unwrap();
+        assert!(!reason.contains('\n') && reason.chars().count() == MAX_REASON_CHARS);
+        for bad in [
+            serde_json::json!({"answerId": "../x", "ok": true}),
+            serde_json::json!({"answerId": id}),
+            serde_json::json!({"ok": true}),
+            serde_json::json!({"answerId": "a".repeat(65), "ok": true}),
+        ] {
+            assert!(Answered::from_body(&bad).is_none(), "{bad}");
+        }
+        let packet = with_answer_id(reply_packet("k", "hi").unwrap(), id);
+        assert_eq!(packet.body["answerId"], id);
+        assert!(
+            with_answer_id(reply_packet("k", "hi").unwrap(), "not an id!")
+                .body
+                .get("answerId")
+                .is_none()
+        );
+    }
 
     #[test]
     fn only_bounded_single_line_titles_are_offered() {
