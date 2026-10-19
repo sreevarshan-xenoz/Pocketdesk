@@ -131,7 +131,7 @@ pub struct Config {
     #[serde(default)]
     pub phone_drive: bool,
     /// How long a phone with "Lock this computer when it leaves" on must be
-    /// gone before the computer locks (D9), in minutes, 1 to 60.
+    /// gone before the computer locks (D9), in minutes, 2 to 60.
     #[serde(default = "default_away_lock_minutes")]
     pub away_lock_minutes: u32,
     /// Work with KDE Connect devices (3a–3c): on by default (the owner's
@@ -194,7 +194,7 @@ fn default_transfer_keep_hours() -> u32 {
 }
 
 fn default_away_lock_minutes() -> u32 {
-    3
+    5
 }
 
 fn default_input_idle_secs() -> u32 {

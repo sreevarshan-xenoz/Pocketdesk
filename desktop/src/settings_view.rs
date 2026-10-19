@@ -624,12 +624,12 @@ impl SettingsForm {
                 row(ui, "away_lock_minutes", |ui| {
                     ui.add(
                         egui::DragValue::new(&mut e.away_lock_minutes)
-                            .range(1..=60)
+                            .range(2..=60)
                             .suffix(" min"),
                     );
                     note(
                         ui,
-                        "For a phone with \"Lock this computer when it leaves\" on (Devices): once it has been gone this long, and on Windows nobody has used the keyboard or mouse meanwhile, the computer locks.",
+                        "For a phone with \"Lock this computer when it leaves\" on (Devices): once its link has been gone this long and nobody has used the keyboard or mouse meanwhile, the computer locks. A phone lying still may lose its link while asleep, so someone reading or watching without touching anything can be locked too. Windows only for now: Linux cannot yet tell whether someone is at the keyboard, so it never locks.",
                     );
                 });
                 row(ui, "open_links", |ui| {

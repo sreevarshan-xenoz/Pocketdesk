@@ -104,7 +104,7 @@ const PERMISSIONS: [(Capability, &str, &str); 16] = [
     (
         Capability::AwayLock,
         "Lock this computer when it leaves",
-        "When the phone's link has been gone for the time in Settings (Phones), and on Windows nobody has used the keyboard or mouse meanwhile, this computer locks. Once per departure.",
+        "When the phone's link has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone asleep may lose its link, so reading or watching without touching anything can lock too. Windows only for now: on Linux it never locks.",
     ),
 ];
 
