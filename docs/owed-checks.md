@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-617 open items.
+614 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 353 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 349 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 44 |
 | A phone with a SIM | 21 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 5 |
 | A Linux desktop (the Azure VM serves for some) | 87 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 22 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 52 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 53 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -367,7 +367,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **50. Resumable transfers (T6a)**
 
 - A file from the remote browser broken and continued.
-- "Retry failed files" off: a broken file fails at once, and no part is kept.
+- "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
 - "Unfinished files: not kept" on the desktop: a retry starts over.
 - A file that changes between attempts starts over (the prefix hash).
 - The app killed mid-download, then the offer fetched again within its 10 minutes.
@@ -383,7 +383,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **52. Download a folder from the remote browser**
 
-- The toast: "Asked the computer for …", and a refusal's reason (Files off, a third folder while two are on the way).
 - Closing the sheet before the answer, and the toast still showing.
 - A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
 
@@ -407,7 +406,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Devices tab's text, and its age after the session ends.
 - Catching up after a Wi-Fi drop.
-- Unpairing the phone: its report gone from the file within 5 s.
 - The desktop's "Phones' batteries" off: no notification.
 - A real discharge to 15 %, and Android's own low flag.
 
@@ -442,7 +440,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **64. The control channel over the internet (T10a)**
 
 - A phone with no iroh key registered (paired, never streamed on the LAN) is refused, with one log line, and works again after one session at home.
-- Unpairing on the desktop ends the internet link's packets at once.
 - A file offer to a phone on the internet link fails as "not reachable", not stuck.
 
 **65. The clipboard outside a session (T10b)**
@@ -629,7 +626,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Doze on battery without USB, where the phone suspends; a notification waiting through it and arriving marked late.
 - A computer from before C3: notifications arrive once each, as before.
-- The computer's Notifications permission off: nothing waits on the phone.
 
 **108. The phone with large fonts, landscape and TalkBack (C5)**
 
@@ -1451,6 +1447,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **47. Check connection (T1)**
 
 - A changed security key (pin a wrong one), and "Scan code again" from the finding: the computer and its key removed, the scanner opened, and the new code trusted.
+
+**52. Download a folder from the remote browser**
+
+- The toast "Asked the computer for …" (the folder arrived, the toast was not caught on screen), and a third folder while two are on the way.
 
 **54. Automation apps on the phone (T7b)**
 
