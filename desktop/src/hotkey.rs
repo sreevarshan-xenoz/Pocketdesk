@@ -128,6 +128,24 @@ pub fn parse(text: &str) -> Option<Hotkey> {
     })
 }
 
+/// The key as people read it: "win+shift+c" is "Win+Shift+C" (H4).
+pub fn display(text: &str) -> String {
+    text.split('+')
+        .map(|part| {
+            let part = part.trim();
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) if part.len() == 1 => first.to_ascii_uppercase().to_string(),
+                Some(first) => {
+                    first.to_ascii_uppercase().to_string() + &chars.as_str().to_ascii_lowercase()
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 /// The phone the key sends to: one the clipboard reaches now, the one in
 /// the newest session when several do; else none.
 pub fn phone<'a>(rows: &'a [PhoneRow<'a>]) -> Option<&'a str> {
@@ -168,6 +186,12 @@ mod tests {
         assert_eq!(parse("ctrl+"), None);
         assert_eq!(parse("ctrl++p"), None);
         assert_eq!(parse("+"), None);
+    }
+
+    #[test]
+    fn a_key_reads_as_people_write_it() {
+        assert_eq!(display("win+shift+c"), "Win+Shift+C");
+        assert_eq!(display(" CTRL + alt + f5 "), "Ctrl+Alt+F5");
     }
 
     /// H3 review: Settings says what the tray made of the key.

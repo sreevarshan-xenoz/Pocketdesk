@@ -116,6 +116,27 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
     entries
 }
 
+/// The menu with `phone`'s "Send the clipboard" naming `key` (H4), the
+/// key that sends it from anywhere (H3), so the key is found where the
+/// action is. Other entries are left as they are.
+pub fn with_key(mut entries: Vec<Entry>, phone: &str, key: &str) -> Vec<Entry> {
+    for entry in &mut entries {
+        if let Entry::Phone { items, .. } = entry {
+            for item in items {
+                if let Entry::Item {
+                    label,
+                    action: Some(TrayAction::SendClipboard(id)),
+                } = item
+                    && id == phone
+                {
+                    label.push_str(&format!(" ({key})"));
+                }
+            }
+        }
+    }
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,6 +251,39 @@ mod tests {
             labels(items(phones[1])).iter().all(|(_, on)| !on),
             "away: nothing can reach it"
         );
+    }
+
+    /// H4: the key is named on its phone's Send the clipboard, nowhere else.
+    #[test]
+    fn the_key_is_named_on_its_phone_s_send_the_clipboard() {
+        let send = |id: &str| Entry::Item {
+            label: "Send the clipboard".to_string(),
+            action: Some(TrayAction::SendClipboard(id.to_string())),
+        };
+        let ring = |id: &str| Entry::Item {
+            label: "Ring".to_string(),
+            action: Some(TrayAction::Ring(id.to_string())),
+        };
+        let menu = vec![
+            Entry::Phone {
+                label: "A".to_string(),
+                items: vec![ring("a"), send("a")],
+            },
+            Entry::Phone {
+                label: "B".to_string(),
+                items: vec![send("b")],
+            },
+        ];
+        let marked = with_key(menu, "a", "Win+Shift+C");
+        assert_eq!(
+            items(&marked[0])[1],
+            Entry::Item {
+                label: "Send the clipboard (Win+Shift+C)".to_string(),
+                action: Some(TrayAction::SendClipboard("a".to_string())),
+            }
+        );
+        assert_eq!(labels(items(&marked[0]))[0].0, "Ring");
+        assert_eq!(labels(items(&marked[1]))[0].0, "Send the clipboard");
     }
 
     /// D2's rules: Unmute for a mute from here, nothing over the owner's own.
