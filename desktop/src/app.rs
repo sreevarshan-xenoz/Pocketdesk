@@ -1657,9 +1657,6 @@ impl PocketdeskApp {
         let compat_on = form.running().kdeconnect_compat;
         let kde_waiting = self.kdeconnect.waiting(&self.state_dir, now_unix());
         for section in crate::settings_view::Section::ALL {
-            if !crate::settings_view::section_shown(&query, section) {
-                continue;
-            }
             // A section with a problem, or a pairing request waiting, stays
             // open until it is dealt with, and its heading says why.
             let held = if form.section_has_problem(section) {
@@ -1672,6 +1669,13 @@ impl PocketdeskApp {
             } else {
                 None
             };
+            // A held section is drawn whole whatever is searched (J2
+            // review: a problem's field, or KDE's Allow, had been hidden).
+            let section_query = if held.is_some() { "" } else { query.as_str() };
+            if !crate::settings_view::section_shown(section_query, section) {
+                continue;
+            }
+            crate::settings_view::set_search(ui.ctx(), section_query);
             let mut header =
                 egui::CollapsingHeader::new(section_heading(ui, section, held.as_deref()))
                     .id_salt(section.title())
@@ -1680,7 +1684,7 @@ impl PocketdeskApp {
             if held.is_some() || !query.is_empty() {
                 header = header.open(Some(true));
             }
-            let extra = |name| crate::settings_view::extra_shown(&query, section, name);
+            let extra = |name| crate::settings_view::extra_shown(section_query, section, name);
             header.show(ui, |ui| {
                 form.show_section(ui, section);
                 match section {

@@ -452,6 +452,31 @@ fn settings_search_shows_what_it_finds() {
     assert!(app.query_by_label("Outside wake port").is_none());
 }
 
+/// J2 review: a section held open by a problem stays, whole, under a
+/// search that does not find it, so the field the save bar names is there.
+#[test]
+fn settings_search_keeps_a_section_with_a_problem() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.config().join("config.toml"),
+        "streaming_port = 5000
+wake_port = 5000
+",
+    )
+    .expect("config");
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("laser");
+    app.run_steps(3);
+    assert!(app.query_by_label("Laser pointer from phones").is_some());
+    assert!(app.query_by_label("Outside wake port").is_some());
+    assert!(
+        app.query_by_label("Wake from the phone").is_some(),
+        "the held section whole"
+    );
+    assert!(app.query_by_label("Control port (TCP)").is_none());
+}
+
 /// The "Find a setting" box: Settings' first text box.
 fn find<'a>(app: &'a Harness<'static, PocketdeskApp>) -> egui_kittest::Node<'a> {
     app.get_all_by_role(egui::accesskit::Role::TextInput)
