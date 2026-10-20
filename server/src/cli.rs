@@ -97,6 +97,22 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Send a command to a phone's automation apps (L6): Tasker, Automate or
+    /// MacroDroid hear it as `dev.pocketdesk.android.event.COMMAND` with its
+    /// name and text. Exit codes: 0 queued, 1 failed, 2 bad arguments, 3 no
+    /// server running
+    PhoneCommand {
+        /// The phone: its device id, or 6 or more of its first characters
+        phone: String,
+        /// The command's name: 1 to 64 printable characters
+        name: String,
+        /// Its text, at most 4096 bytes
+        #[arg(default_value = "")]
+        text: String,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// The clipboard's history (D3): the texts that crossed between this
     /// computer and its phones, newest first; or, with --send, one of them
     /// put on a phone's clipboard again. Exit codes: 0 done, 1 failed, 2 bad

@@ -195,6 +195,8 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::notification::run_answers());
     // L1: notifications closed here, cleared on their phones.
     tokio::spawn(crate::plugins::notification::run_clears());
+    // L6: commands for phones' automation apps.
+    tokio::spawn(crate::plugins::links::run_commands());
     // L4: numbers for phones to dial.
     tokio::spawn(crate::plugins::links::run_dials());
     // The clipboard to connected phones as it changes (T10b), and shared

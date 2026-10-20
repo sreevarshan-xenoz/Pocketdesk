@@ -160,6 +160,58 @@ pub async fn run_dials() {
     }
 }
 
+/// Send the commands queued for phones' automation apps (L6), each to its
+/// own phone if it is connected within a minute and its Command permission
+/// is on. Runs for the server's life.
+pub async fn run_commands() {
+    use pocketdesk_core::local::commands;
+    use pocketdesk_core::protocol::command::{COMMAND, command_body};
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let mut waiting: Vec<commands::CommandRequest> = Vec::new();
+    loop {
+        if waiting.is_empty() {
+            crate::inbox::wait(
+                pocketdesk_core::local::paths::COMMANDS_DIR,
+                Duration::from_millis(500),
+            )
+            .await;
+        } else {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let now = pocketdesk_core::local::pin::now_unix();
+        waiting.extend(commands::take_all(&dir, now));
+        if waiting.is_empty() {
+            continue;
+        }
+        let clients = crate::state::clone_clients().await;
+        let mut still = Vec::new();
+        for command in waiting.drain(..) {
+            if !crate::plugins::pair::permits(&command.device_id, COMMAND) {
+                tracing::info!("A command was not sent: it is off for the phone");
+                continue;
+            }
+            let Some(phone) = clients.iter().find(|c| c.device_id() == command.device_id) else {
+                if now.saturating_sub(command.created_unix) < commands::COMMAND_TTL_SECS {
+                    still.push(command);
+                } else {
+                    tracing::info!(
+                        "A command was not sent: the phone did not connect within a minute"
+                    );
+                }
+                continue;
+            };
+            let packet =
+                NetworkPacket::new(COMMAND).with_body(command_body(&command.name, &command.text));
+            if let Err(e) = phone.send_packet(&packet).await {
+                tracing::warn!("A command was not sent to the phone: {e}");
+            }
+        }
+        waiting = still;
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for LinksPlugin {
     fn name(&self) -> &'static str {
@@ -171,8 +223,13 @@ impl Plugin for LinksPlugin {
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        // A number to dial (L4) goes on the same road as a link.
-        &[LINK, pocketdesk_core::protocol::dial::DIAL]
+        // A number to dial (L4) and a command for the phone's automation
+        // apps (L6) go on the same road as a link.
+        &[
+            LINK,
+            pocketdesk_core::protocol::dial::DIAL,
+            pocketdesk_core::protocol::command::COMMAND,
+        ]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {

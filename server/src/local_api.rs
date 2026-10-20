@@ -100,6 +100,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::Mute => "mute",
         Capability::AwayLock => "away_lock",
         Capability::PhoneSound => "phone_sound",
+        Capability::Command => "command",
         Capability::Dial => "dial",
     }
 }
@@ -541,6 +542,101 @@ pub fn run_call(query: &str, number: &str, as_json: bool) -> i32 {
     } else {
         println!(
             "sent to the phone, whose dialer opens with it (with \"Calls from the computer\" on there)"
+        );
+    }
+    code
+}
+
+/// Send the phone `query` names the command `name` with `text` for its
+/// automation apps (L6), through the server.
+pub fn command_in(
+    state_dir: &Path,
+    query: &str,
+    name: &str,
+    text: &str,
+    running: bool,
+) -> (Value, i32) {
+    use pocketdesk_core::protocol::command::{valid_name, valid_text};
+    if !running {
+        return (
+            error("no Pocketdesk server is running to send it"),
+            exit::NO_SERVER,
+        );
+    }
+    if !valid_name(name) {
+        return (
+            error("not a command name: 1 to 64 printable characters"),
+            exit::BAD_ARGUMENTS,
+        );
+    }
+    if !valid_text(text) {
+        return (
+            error("the text is longer than 4096 bytes, or holds control characters"),
+            exit::BAD_ARGUMENTS,
+        );
+    }
+    let store = match trust_store(state_dir) {
+        Ok(store) => store,
+        Err(reason) => return (error(reason), exit::FAILED),
+    };
+    let device_id = match resolve_phone(&store.trusted_devices(), query) {
+        Ok(id) => id,
+        Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
+    };
+    if store.is_computer(&device_id) {
+        return (
+            error(format!("{device_id} is a computer, not a phone")),
+            exit::BAD_ARGUMENTS,
+        );
+    }
+    if !store.permissions(&device_id).allows(Capability::Command) {
+        return (
+            error(format!(
+                "Send commands to its automation apps is off for {device_id} (the Devices tab)"
+            )),
+            exit::FAILED,
+        );
+    }
+    let now = pocketdesk_core::local::pin::now_unix();
+    match pocketdesk_core::local::commands::request(state_dir, &device_id, name, text, now) {
+        Ok(request) => (
+            versioned(json!({
+                "id": request.id,
+                "device_id": device_id,
+                "name": request.name,
+                "state": "queued",
+            })),
+            exit::DONE,
+        ),
+        Err(e) => (
+            error(format!("could not queue the command: {e}")),
+            exit::FAILED,
+        ),
+    }
+}
+
+/// `pocketdesk phone-command`: [`command_in`] for the owner's state folder.
+pub fn run_command(query: &str, name: &str, text: &str, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
+            return exit::FAILED;
+        }
+    };
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    let (out, code) = command_in(&dir, query, name, text, running);
+    if as_json {
+        print(&out);
+    } else if let Some(reason) = out["error"].as_str() {
+        eprintln!("Error: {reason}");
+    } else {
+        println!(
+            "sent to the phone, which hands it to its automation app (with \"Commands from the computer\" on there)"
         );
     }
     code
@@ -1633,6 +1729,40 @@ mod tests {
             .unwrap();
         let (_, code) = call_in(&dir, "5f1c9b", "112", true);
         assert_eq!(code, exit::FAILED, "Dial off");
+    }
+
+    /// L6: a command is queued for a paired phone with Command on, and
+    /// refused with no server, out of bounds, or Command off.
+    #[test]
+    fn a_command_is_queued_for_a_phone_with_command_on() {
+        let (dir, _) = send_setup("command");
+        assert_eq!(
+            command_in(&dir, "5f1c9b", "lights", "", false).1,
+            exit::NO_SERVER
+        );
+        assert_eq!(
+            command_in(&dir, "5f1c9b", "", "", true).1,
+            exit::BAD_ARGUMENTS
+        );
+        let (out, code) = command_in(&dir, "5f1c9b", "lights", "off", true);
+        assert_eq!(code, exit::DONE, "{out}");
+        assert_eq!(out["state"], "queued");
+        let queued = pocketdesk_core::local::commands::take_all(
+            &dir,
+            pocketdesk_core::local::pin::now_unix(),
+        );
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].text, "off");
+        let mut off = pocketdesk_core::protocol::permissions::DevicePermissions::default();
+        off.set(Capability::Command, false);
+        TrustStore::load_or_create(dir.join(TRUST_FILE))
+            .unwrap()
+            .set_permissions("5f1c9b3d-6e70", off)
+            .unwrap();
+        assert_eq!(
+            command_in(&dir, "5f1c9b", "lights", "", true).1,
+            exit::FAILED
+        );
     }
 
     fn send_setup(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {

@@ -26,7 +26,7 @@ const REFRESH: Duration = Duration::from_secs(1);
 pub const PAGE_KEY: &str = "page";
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 18] = [
+const PERMISSIONS: [(Capability, &str, &str); 19] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -93,6 +93,11 @@ const PERMISSIONS: [(Capability, &str, &str); 18] = [
         "Call on the Messages page (and pocketdesk call) opens the phone's dialer with the number; you press Call on the phone. The phone takes it with \u{201c}Calls from the computer\u{201d} on.",
     ),
     (
+        Capability::Command,
+        "Send commands to its automation apps",
+        "pocketdesk phone-command hands a name and a text to Tasker, Automate or MacroDroid on the phone, with \u{201c}Commands from the computer\u{201d} on there.",
+    ),
+    (
         Capability::PhoneSound,
         "Play its sound here",
         "With its screen shown here, what the phone's apps play comes out of this computer's speakers (when the phone's own setting sends it).",
@@ -131,6 +136,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
                 | Capability::Cast
                 | Capability::PhoneSound
                 | Capability::Dial
+                | Capability::Command
         ))
 }
 
@@ -2999,6 +3005,7 @@ mod tests {
             Capability::Cast,
             Capability::PhoneSound,
             Capability::Dial,
+            Capability::Command,
         ] {
             assert!(!shown_for(capability, true), "{capability:?}");
             assert!(shown_for(capability, false), "{capability:?}");

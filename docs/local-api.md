@@ -154,6 +154,10 @@ Hands a web link to a phone in a session; it waits there as a notification that 
 
 Has a phone dial a number (L4): its dialer opens with it, and the owner presses Call there (the phone takes it with "Calls from the computer" on). The number may have spaces, dashes, dots and brackets, which are dropped; what is left is digits, a `+` only at the start, 3 to 32 characters (never `*` or `#`, which make codes). `{"api": 1, "id": "…", "device_id": "…", "number": "+15550100100", "state": "queued"}`; it goes to the phone if it is connected within a minute. Exit 2 for a number it is not, or a paired computer; 1 for a phone with "Call numbers from here" off; 3 when no server runs.
 
+### `pocketdesk phone-command <phone> <name> [text] --json`
+
+Sends a command to a phone's automation apps (L6): Tasker, Automate or MacroDroid hear `dev.pocketdesk.android.event.COMMAND` with `name` and `text`, with "Commands from the computer to my automation apps" on there. The name is 1 to 64 printable characters; the text at most 4096 bytes. `{"api": 1, "id": "…", "device_id": "…", "name": "…", "state": "queued"}`; it goes to the phone if it is connected within a minute. Exit 2 for a name or text out of bounds, or a paired computer; 1 for a phone with "Send commands to its automation apps" off; 3 when no server runs.
+
 ### `pocketdesk ring <phone> --json`
 
 Asks the server to ring the phone (N1): `{"api": 1, "id": "…", "device_id": "…", "state": "queued"}`. Refused at once (exit 1) when the phone's Ring permission is off or it keeps no link now: it rings in a session, or with "Ring from the computer" on in its own Settings. The server sends at most one ring a minute to a phone, and drops a ring not sent within a minute.
