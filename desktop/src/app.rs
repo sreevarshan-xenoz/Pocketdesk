@@ -2174,6 +2174,11 @@ impl eframe::App for PocketdeskApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.take_files_to_send(ui.ctx());
+        let waiting = crate::nav::Waiting {
+            sessions: self.snapshot.sessions.len(),
+            transfers: self.snapshot.under_way.len(),
+            unsaved: matches!(&self.settings, Some(Ok(form)) if form.dirty()),
+        };
         egui::Panel::left("nav")
             .resizable(false)
             .exact_size(170.0)
@@ -2191,7 +2196,29 @@ impl eframe::App for PocketdeskApp {
                                 );
                             }
                             for tab in group.pages {
-                                if ui.selectable_label(self.tab == *tab, tab.name()).clicked() {
+                                // What waits there, after its name (I3).
+                                let label = match crate::nav::badge(*tab, waiting) {
+                                    Some(badge) => {
+                                        let mut job = egui::text::LayoutJob::default();
+                                        let font = egui::TextStyle::Button.resolve(ui.style());
+                                        job.append(
+                                            tab.name(),
+                                            0.0,
+                                            egui::TextFormat::simple(
+                                                font.clone(),
+                                                ui.visuals().text_color(),
+                                            ),
+                                        );
+                                        job.append(
+                                            &badge,
+                                            8.0,
+                                            egui::TextFormat::simple(font, crate::theme::good(ui)),
+                                        );
+                                        egui::WidgetText::from(job)
+                                    }
+                                    None => egui::WidgetText::from(tab.name()),
+                                };
+                                if ui.selectable_label(self.tab == *tab, label).clicked() {
                                     self.switch_to(*tab);
                                     self.chosen = *tab;
                                 }
