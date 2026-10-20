@@ -64,6 +64,8 @@ class RemoteSessionTest {
         assertFalse("heard from", RemoteSession.goneQuiet(RemoteSession.State.Ready, null, heard))
         assertFalse("not admitted yet", RemoteSession.goneQuiet(RemoteSession.State.Waiting, null, quiet))
         assertFalse("the transport said why", RemoteSession.goneQuiet(RemoteSession.State.Ready, "timed out", quiet))
+        assertFalse("ended already", RemoteSession.goneQuiet(RemoteSession.State.Down, null, quiet))
+        assertFalse("too old", RemoteSession.goneQuiet(RemoteSession.State.TooOld, null, quiet))
     }
 
     /** J6 review: only a session heard from lately counts as healthy. */
