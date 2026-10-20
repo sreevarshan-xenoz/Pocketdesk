@@ -723,6 +723,24 @@ fn an_app_is_muted_from_activity_and_unmuted_in_settings() {
     assert!(pocketdesk_core::local::muted_apps::read(fixture.state()).is_empty());
 }
 
+/// K2b review: Settings says when the muted list cannot be read.
+#[test]
+fn a_broken_muted_list_is_said_in_settings() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture
+            .state()
+            .join(pocketdesk_core::local::paths::MUTED_APPS_FILE),
+        "not json",
+    )
+    .expect("file");
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("muted");
+    app.run_steps(3);
+    assert!(app.query_by_label_contains("could not be read").is_some());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

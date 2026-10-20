@@ -2042,7 +2042,21 @@ impl PocketdeskApp {
     fn muted_apps_setting(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.label(RichText::new(crate::settings_view::EXTRA_MUTED).strong());
-        let muted = pocketdesk_core::local::muted_apps::read(&self.state_dir);
+        // A file that does not parse says so (K2b review: it read as none,
+        // and each mute then failed with no word why).
+        let muted = match pocketdesk_core::local::muted_apps::load(&self.state_dir) {
+            Ok(muted) => muted,
+            Err(e) => {
+                ui.label(
+                    RichText::new(format!(
+                        "{} could not be read ({e}): every app shows. Remove the file to start the list again.",
+                        pocketdesk_core::local::paths::MUTED_APPS_FILE
+                    ))
+                    .color(crate::theme::bad(ui)),
+                );
+                return;
+            }
+        };
         if muted.is_empty() {
             ui.label(
                 RichText::new(
