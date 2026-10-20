@@ -21,6 +21,8 @@
 
 - Searching what an event's line does not show, such as a notification's hidden content.
 - Searching a clipboard text past the 64 KiB the history keeps of it.
+- Showing why a text matched: the search reads the whole text, but its row shows only the first lines, so a word on its sixth line finds a row that does not show it.
+- Forgetting a search when the page is left: like Activity's kind chip, it is kept, in the box, until emptied.
 
 ## Testing
 
@@ -30,3 +32,24 @@
   - Clipboard's by text and by origin.
 - **Harness:** Clipboard narrowed by typing into its box, and the nothing-found line with Clear search.
 - **By hand (checklist §146):** both pages' boxes at the minimum width; Ctrl+F and Esc.
+
+## As built
+
+As designed. The box is `search_box::show`, shared by both pages; Ctrl+F there is J2's `keys::FIND`.
+
+## Review
+
+A fresh review found 0 Critical, 2 Important and 4 Minor.
+
+**Important, fixed one commit each:**
+
+- **Per-frame cost with nothing typed.** Activity built each event's line, and Clipboard lowercased up to 100 texts of 64 KiB, on every frame. Now nothing is built until a word is typed.
+- **Esc on Clipboard.** Clear's question, drawn first, took an Esc pressed in the search box. Esc in a focused box is the box's now.
+
+**Minor:**
+
+- Fixed:
+  - Activity's empty search said nothing of a kind chip narrowing it;
+  - a test config held a literal newline;
+  - there was no harness test for Activity.
+- Written down under "Left out": a text that matches beyond its preview, and a search kept when the page is left.

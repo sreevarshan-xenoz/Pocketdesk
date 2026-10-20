@@ -2176,6 +2176,13 @@ Built 2026-10-20; tested through the harness and units, nothing by hand yet.
 - [ ] The page at the minimum width: the chips wrap whole, not as tall slivers.
 - [ ] After a session ends: it heads "Recent sessions" with its length, its road and "capture to arrival"; a refused phone reads "A device claiming to be …", its retries one line.
 
+## 146. Search on Activity and Clipboard (J4)
+
+Built 2026-10-20; tested through the harness and units, nothing by hand yet.
+- [ ] Activity with a few hundred events: Search by a phone's name, a file's name and a link's host; with a kind chip; nothing found, then Clear search.
+- [ ] Clipboard: Search by a text and by "From …"; with Clear's question open, Esc in the box empties it and leaves the question.
+- [ ] Ctrl+F on each page, scrolled down; both boxes at the minimum width, light and dark.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
