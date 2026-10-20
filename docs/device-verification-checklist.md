@@ -1968,11 +1968,16 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 Built 2026-10-20 on the owner's night of features; nothing here ran on a device yet.
 - [ ] A button of each kind set up in the desktop app's Settings, listed on the A71's Deck from Home and from the session menu, with its icon.
 - [ ] Keys (`ctrl+shift+m`, `alt+tab`) into a scratch window here: pressed in order, all let go (input reaches this box: with the owner).
-- [ ] Text typed into a scratch window; a task that asks first, the owner's Allow here; media Play/Pause and Next; a link opening in the browser.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server with a keys button of `ctrl+a` into a scratch window that logs each key: Ctrl down, A down, A up, Ctrl up, the text selected, nothing left held. `ctrl+shift+m` and `alt+tab` themselves not pressed.
+- [x] Text typed into a scratch window; a task that asks first, the owner's Allow here; media Play/Pause and Next; a link opening in the browser.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: "hello" typed into the scratch window; the ask-first task held and run after Allow; Play/Pause and Next moved the computer's player; the link opened in the browser; with nothing playing, the media button's refusal said so.
 - [ ] Each refusal on the button: Input, Tasks, Audio or Links off for the phone; "Deck" off; another phone driving.
-- [ ] A button edited after the phone listed it: "the computer's deck has changed".
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: Input off refused on the button. The other switches, "Deck" off and another phone driving not run.
+- [x] A button edited after the phone listed it: "the computer's deck has changed".
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server.
 - [ ] 2, 3 and 4 a row; a long label; Spanish and Tamil; TalkBack reads each button's label.
-- [ ] The Activity page (H1): a press reads "A deck button pressed (a media key)", or by its label with "Details in events" on, under "Tasks, deck and hooks".
+- [x] The Activity page (H1): a press reads "A deck button pressed (a media key)", or by its label with "Details in events" on, under "Tasks, deck and hooks".
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server, read through the app's accessibility tree.
 
 ## 127. How the computer is doing (F2)
 
@@ -2023,9 +2028,12 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 ## 132. The computer's state on the home screen (G1)
 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet.
-- [ ] Place "Pocketdesk: how it is doing" on the A71's home screen: "Asking the computer…", then the last computer's name, `CPU · Mem · Disk · Bat` and "Updated <time>".
-- [ ] A tap with the server stopped: "Not answering · from <time>", the numbers kept; a tap with it back: updated.
-- [ ] `share_state` off on the computer: the widget says it does not share.
+- [x] Place "Pocketdesk: how it is doing" on the A71's home screen: "Asking the computer…", then the last computer's name, `CPU · Mem · Disk · Bat` and "Updated <time>".
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: "Test Desk", CPU, memory, disk and battery, "Updated 9:43 AM".
+- [x] A tap with the server stopped: "Not answering · from <time>", the numbers kept; a tap with it back: updated.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server.
+- [x] `share_state` off on the computer: the widget says it does not share.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: "This computer does not share how it is doing" at the next tap, with no restart; on again, the numbers back.
 - [ ] Connect to another computer, then go Home: the widget follows it, asked once.
 - [ ] "State widget refreshes by itself" off: no ask in the logcat at the next period; on mobile data with it on: none either.
 
@@ -2033,23 +2041,31 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 
 Built 2026-10-20 on the owner's night of features; nothing by hand yet.
 - [ ] With the A71 linked and "Photos the computer asks for" on: the tray's Take a photo under it, then the phone's notification, the camera, and the photo in the received files; the same from the Overview's button, with its notice.
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: the Overview's Take a photo, once the phone linked (5 s after the switch went on), brought "Test Desk asks for a photo" within 4 s, and its notice. The tray's menu (in the hidden-icons overflow) and the photo's arrival (refused on `adb reverse`'s loopback, §128) not run. Found first: a phone in a remote alone, with no control link, was offered Take a photo and Send file, and the ask dropped while the page said asked; fixed in `fix/files-reach-needs-link`.
 - [ ] The phone away, or Files off for it: Take a photo greyed in the tray and on the Overview, its hover saying why.
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: greyed on the Overview with the phone away. Its hover, Files off and the tray not run.
 
 ## 134. The deck on the home screen (G3)
 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet. Presses that type or press keys reach the computer: with the owner's OK.
-- [ ] Place "Pocketdesk: deck": its first six buttons, as the deck sheet shows them; ↻ asks again.
-- [ ] With the app swiped away: a media or link button pressed from the widget runs on the computer, the line saying "<label>: Done" (the bridge started by the tap).
+- [x] Place "Pocketdesk: deck": its first six buttons, as the deck sheet shows them; ↻ asks again.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: the six buttons in the config's order; ↻ asked again and cleared an old line.
+- [x] With the app swiped away: a media or link button pressed from the widget runs on the computer, the line saying "<label>: Done" (the bridge started by the tap).
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server, the process killed with `am kill`: "Open example: Done", the link opened. (`am force-stop` cancels the widget's buttons until it is drawn again: a test artifact.)
 - [ ] The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: on `adb reverse` a stopped server closes the tunnel during the handshake, which read "Security credentials no longer match. Pair again" (fixed in `fix/handshake-eof`: it reads as nothing answering). The 8 s wait owed on the LAN road.
 - [ ] Connect to another computer, then press a button still drawn for the first: nothing is sent, the widget redrawn for the new one.
 
 ## 135. A laser pointer for the air mouse (G4)
 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet. The dot is drawn on this box's screen: with the owner there.
 - [ ] Remote on the A71 with the air mouse on: "Laser pointer" under the pad; on, a press shows a red dot in the middle of the pointer's screen, turning moves it, the pointer stays put.
-- [ ] Held still for 5 s: the dot stays; let go: it hides. Pressed again quickly: the dot is not hidden mid-gesture.
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: the switch under the pad; a press showed the dot window (26 px) at the centre of the pointer's screen, the pointer where it was. Turning not run (it needs the phone in a hand).
+- [x] Held still for 5 s: the dot stays; let go: it hides. Pressed again quickly: the dot is not hidden mid-gesture.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server, the window's visibility polled every 50 ms: shown at the press, still after 4 s held still, hidden at the release; two presses back to back kept it shown through both.
 - [ ] Two screens: the dot crosses where they meet and stops at an edge, never between them; larger on a 4K screen.
-- [ ] Desktop Settings "Laser pointer from phones" off, after a restart: the switch is not offered.
+- [x] Desktop Settings "Laser pointer from phones" off, after a restart: the switch is not offered.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server (`laser_pointer = false`, the server restarted, Retry): no switch, the pad's plain hint.
 - [ ] A slide show (PowerPoint or a browser's): a tap with the laser on still advances or clicks at the pointer.
 
 ## 136. The computer's music on the home screen (G5)
@@ -2057,22 +2073,28 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet. The 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] Place "Pocketdesk: playing" with music playing on the computer: its title and artist, Previous, Pause and Next as the player offers them, "Read at <time>".
 - [ ] Pause from the widget: the music stops, and the button turns to Play; Next: the next track shown.
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: Pause stopped the player and the button turned to ▶ Play. Next not run (one track).
 - [ ] Nothing playing: "Nothing is playing", no buttons; Audio off for the phone on the computer: the refusal, no old track.
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: Audio off gave the refusal with no old track. Nothing playing not run.
 - [ ] The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
 
 ## 137. The computer's music from Quick Settings (G6)
 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] Add "Computer's music" to the A71's Quick Settings; with music on the computer, a tap pauses it, the shade still open showing "Asking the computer…", then the track, the tile off; a tap again plays, the tile on.
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server, read through `dumpsys activity service SystemUIService`: the track as the subtitle, and a tap turned the tile from on (2) to off (1).
 - [ ] On the lock screen: a tap asks to unlock first.
-- [ ] Audio off for the phone on the computer: the refusal as the subtitle.
+- [x] Audio off for the phone on the computer: the refusal as the subtitle.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server.
 - [ ] Opened after an hour: "Tap to play or pause", not the old track.
 
 ## 138. Wake the computer from Quick Settings (G7)
 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet. Waking is a magic packet, never a power action on this box; a computer really asleep is owed elsewhere.
 - [ ] Add "Wake computer" to the A71's Quick Settings: its subtitle names the last computer; with its MAC not known yet, "Connect once while it is awake".
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: the subtitle "Test Desk". The unknown MAC not run.
 - [ ] A tap with the computer awake: "Sending the wake…", "Sent, waiting for it to answer…", then "It is awake"; a tap again at once is ignored.
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server, with the shade open and read through `dumpsys`: "It is awake". The steps between and a second tap not seen.
   - 2026-10-20 by script: a tap sent the wake ("Sent the wake to 2 of 2 targets", twice). Its words are not seen: Android 16 draws the tile compact, with no subtitle; at its large size by hand.
 - [ ] On the lock screen: a tap asks to unlock first. With no computer saved: a tap opens the app.
 - [ ] A computer asleep (not this box): woken, "It is awake" within a minute.
@@ -2080,18 +2102,24 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet. Waki
 ## 139. A talk timer in Remote (H2)
 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet.
-- [ ] Remote on the A71: "Timer", 5 minutes: the count down, a buzz at one minute (twice) and three at the end, then "+0:05" in red; a tap stops it.
+- [x] Remote on the A71: "Timer", 5 minutes: the count down, a buzz at one minute (twice) and three at the end, then "+0:05" in red; a tap stops it.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: the count down, the buzzes asked for at one minute left and at the end (alarm usage, `dumpsys vibrator_manager`), "+0:25" in the error red, a tap stopping it. Felt: no, the A71 has vibration off (`vibrateOn = false`, ringer silent), so Android drops every app's buzz.
 - [ ] The screen off, the phone in a pocket: the buzzes still come on time (the session's foreground service).
-- [ ] The link dropped and back mid-talk: the timer still counting; rotated: the same.
+- [x] The link dropped and back mid-talk: the timer still counting; rotated: the same.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: the server restarted under a 10-minute timer, Retry, and a turn to landscape and back; it counted on. Found: a remote does not reconnect by itself after a drop (it waits for Retry), unlike a screen or sound session.
 - [ ] Do Not Disturb on: the buzzes still come; Settings "Talk timer buzzes" off: none.
-- [ ] Landscape and font scale 2.0: all seven lengths reachable; the header not crowded.
+- [x] Landscape and font scale 2.0: all seven lengths reachable; the header not crowded.
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: the list scrolls to 60 minutes; the header holds Trackpad, Keyboard, Exit and Timer. (Changing the font scale restarted the remote.)
 
 ## 140. Send the clipboard to the phone with a key (H3)
 
 Built 2026-10-20 on the owner's night of features; nothing by hand yet. It registers a global key on this box: with the owner there.
 - [ ] Settings "Send the clipboard with a key" = `win+shift+c`, Save: "Registered." under it; with the A71 linked, copy a text on the computer and press it: the text on the phone.
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: another program on this box holds Win+Shift+C (`RegisterHotKey` fails with 1409); `ctrl+alt+shift+p` registered within 5 s. A press while the A71 was only in a remote found no phone, as it should. The text arriving not run.
 - [ ] A combination another app holds: "Another app holds this combination"; freed, registered within 30 s.
-- [ ] No phone in reach: a press says "the last press found no phone".
+  - 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: the tray program's status said taken for Win+Shift+C. The words in Settings not seen: the app keeps the field it loaded, and a key typed into it from outside did not land.
+- [x] No phone in reach: a press says "the last press found no phone".
+  - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: "Registered. The last press found no phone the clipboard reaches."
 - [ ] A password manager's copy: not sent (the server's notification says why).
 - [ ] The tray's menu (H4): the phone it sends to shows "Send the clipboard (Win+Shift+C)"; with the key cleared, the plain label again.
 

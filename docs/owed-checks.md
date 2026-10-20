@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-680 open items.
+665 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 392 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 379 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 49 |
 | A phone with a SIM | 22 |
 | A second phone | 7 |
 | Away from home: another network, or through a router | 9 |
@@ -731,8 +731,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **126. The deck (F1)**
 
 - A button of each kind set up in the desktop app's Settings, listed on the A71's Deck from Home and from the session menu, with its icon.
-- A button edited after the phone listed it: "the computer's deck has changed".
-- The Activity page (H1): a press reads "A deck button pressed (a media key)", or by its label with "Details in events" on, under "Tasks, deck and hooks".
 
 **127. How the computer is doing (F2)**
 
@@ -758,21 +756,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The permission granted while notification access was already on: the next call shows (no restart).
 - Two calls one after another; a call ending while its note is on its way.
 
-**132. The computer's state on the home screen (G1)**
-
-- Place "Pocketdesk: how it is doing" on the A71's home screen: "Asking the computer…", then the last computer's name, `CPU · Mem · Disk · Bat` and "Updated <time>".
-- A tap with the server stopped: "Not answering · from <time>", the numbers kept; a tap with it back: updated.
-- `share_state` off on the computer: the widget says it does not share.
-
 **134. The deck on the home screen (G3)**
 
-- Place "Pocketdesk: deck": its first six buttons, as the deck sheet shows them; ↻ asks again.
-- With the app swiped away: a media or link button pressed from the widget runs on the computer, the line saying "<label>: Done" (the bridge started by the tap).
 - The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
-
-**135. A laser pointer for the air mouse (G4)**
-
-- Held still for 5 s: the dot stays; let go: it hides. Pressed again quickly: the dot is not hidden mid-gesture.
 
 **136. The computer's music on the home screen (G5)**
 
@@ -785,7 +771,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Add "Computer's music" to the A71's Quick Settings; with music on the computer, a tap pauses it, the shade still open showing "Asking the computer…", then the track, the tile off; a tap again plays, the tile on.
 - On the lock screen: a tap asks to unlock first.
-- Audio off for the phone on the computer: the refusal as the subtitle.
 - Opened after an hour: "Tap to play or pause", not the old track.
 
 **138. Wake the computer from Quick Settings (G7)**
@@ -797,17 +782,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **139. A talk timer in Remote (H2)**
 
-- Remote on the A71: "Timer", 5 minutes: the count down, a buzz at one minute (twice) and three at the end, then "+0:05" in red; a tap stops it.
 - The screen off, the phone in a pocket: the buzzes still come on time (the session's foreground service).
-- The link dropped and back mid-talk: the timer still counting; rotated: the same.
 - Do Not Disturb on: the buzzes still come; Settings "Talk timer buzzes" off: none.
-- Landscape and font scale 2.0: all seven lengths reachable; the header not crowded.
 
 **140. Send the clipboard to the phone with a key (H3)**
 
 - Settings "Send the clipboard with a key" = `win+shift+c`, Save: "Registered." under it; with the A71 linked, copy a text on the computer and press it: the text on the phone.
 - A combination another app holds: "Another app holds this combination"; freed, registered within 30 s.
-- No phone in reach: a press says "the last press found no phone".
 - A password manager's copy: not sent (the server's notification says why).
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
@@ -993,7 +974,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **126. The deck (F1)**
 
 - Keys (`ctrl+shift+m`, `alt+tab`) into a scratch window here: pressed in order, all let go (input reaches this box: with the owner).
-- Text typed into a scratch window; a task that asks first, the owner's Allow here; media Play/Pause and Next; a link opening in the browser.
 
 **129. An air mouse (F4)**
 
@@ -1003,7 +983,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **135. A laser pointer for the air mouse (G4)**
 
 - Remote on the A71 with the air mouse on: "Laser pointer" under the pad; on, a press shows a red dot in the middle of the pointer's screen, turning moves it, the pointer stays put.
-- Desktop Settings "Laser pointer from phones" off, after a restart: the switch is not offered.
 - A slide show (PowerPoint or a browser's): a tap with the laser on still advances or clicks at the pointer.
 
 ## A phone with a SIM
