@@ -245,9 +245,19 @@ impl Recorder {
 }
 
 impl Drop for Recorder {
-    /// The file is closed: ffmpeg finishes it once its input ends.
+    /// The file is closed: ffmpeg finishes it once its input ends, given
+    /// three seconds, then it is stopped (L5 review: a stalled disk must not
+    /// hold the window's worker for good).
     fn drop(&mut self) {
         drop(self.stdin.take());
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
@@ -641,7 +651,19 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
                     lock(shared).record_want = !record_want;
                 }
                 if let Some((path, since)) = &recording {
-                    let size = std::fs::metadata(path).map_or(0, |m| m.len());
+                    // Read once a second (L5 review: not on every pass).
+                    let size = ui.ctx().memory_mut(|m| {
+                        let id = egui::Id::new("cast-recording-size");
+                        let (at, size): (u64, u64) = m.data.get_temp(id).unwrap_or((u64::MAX, 0));
+                        let now = since.elapsed().as_secs();
+                        if at == now {
+                            size
+                        } else {
+                            let size = std::fs::metadata(path).map_or(0, |m| m.len());
+                            m.data.insert_temp(id, (now, size));
+                            size
+                        }
+                    });
                     let secs = since.elapsed().as_secs();
                     ui.colored_label(
                         egui::Color32::LIGHT_GRAY,
@@ -877,10 +899,15 @@ fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         &rgba,
     ));
     let dir = user_folder("Pictures");
-    let path = free_name(&dir, &format!("Phone screen {}", stamp(now_unix())), "png");
+    let stem = format!("Phone screen {}", stamp(now_unix()));
     let shared = shared.clone();
     let ctx = ctx.clone();
     std::thread::spawn(move || {
+        // One screenshot at a time picks its name, so two in a second do not
+        // take the same one (L5 review).
+        static SAVING: Mutex<()> = Mutex::new(());
+        let _one = SAVING.lock().unwrap_or_else(|e| e.into_inner());
+        let path = free_name(&dir, &stem, "png");
         let saved = std::fs::create_dir_all(&dir)
             .map_err(|e| e.to_string())
             .and_then(|()| {
