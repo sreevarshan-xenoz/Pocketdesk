@@ -67,7 +67,14 @@ fn main() {
             let snapshot = model::snapshot(&state_dir, now);
             key.follow(&state_dir);
             #[cfg(windows)]
-            player.follow(&state_dir, &snapshot.phone_media);
+            {
+                let in_session: Vec<&str> = snapshot
+                    .sessions
+                    .iter()
+                    .filter_map(|s| s.device_id.as_deref())
+                    .collect();
+                player.follow(&state_dir, &snapshot.phone_media, &in_session, now);
+            }
             let stamp = model::session_log_stamp(&state_dir);
             if stamp != log.0 {
                 log = (

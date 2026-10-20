@@ -10,13 +10,70 @@ use std::collections::BTreeMap;
 use pocketdesk_core::local::phone_media::PhoneMediaState;
 use pocketdesk_core::protocol::phone_media::PhoneMedia;
 
-/// The phone to show: a playing one before a paused one, then the newest
-/// report; none when no phone reports.
-pub fn pick(phones: &BTreeMap<String, PhoneMediaState>) -> Option<(&str, &PhoneMedia)> {
-    phones
-        .iter()
-        .max_by_key(|(_, state)| (state.media.is_playing, state.updated_unix))
-        .map(|(id, state)| (id.as_str(), &state.media))
+/// How long a report counts with no word since: the phone says it again
+/// each minute while its app is in front, and is silent when it is not
+/// (K7 review: a frozen "Playing" whose presses went nowhere).
+pub const FRESH_SECS: u64 = 150;
+
+/// How long a paused phone keeps the media controls (K7 review: the
+/// owner's own media keys went to a phone paused for good).
+pub const PAUSED_SECS: u64 = 300;
+
+/// Which phone the media controls show, kept from one look to the next.
+#[derive(Debug, Default)]
+pub struct Choice {
+    shown: Option<String>,
+    /// Since when each phone has been paused.
+    paused_since: std::collections::HashMap<String, u64>,
+}
+
+impl Choice {
+    /// The phone to show at `now_unix`: one in a session (`in_session`; K7
+    /// review: a phone's background link kept its song after the session),
+    /// whose report is fresh, playing or paused for at most
+    /// [`PAUSED_SECS`]. The one shown stays while it qualifies and nothing
+    /// plays in its stead (K7 review: two playing phones swapped each
+    /// minute); else a playing one first, then the newest.
+    pub fn pick<'a>(
+        &mut self,
+        phones: &'a BTreeMap<String, PhoneMediaState>,
+        in_session: &[&str],
+        now_unix: u64,
+    ) -> Option<(&'a str, &'a PhoneMedia)> {
+        self.paused_since
+            .retain(|id, _| phones.get(id).is_some_and(|s| !s.media.is_playing));
+        for (id, state) in phones {
+            if !state.media.is_playing {
+                self.paused_since.entry(id.clone()).or_insert(now_unix);
+            }
+        }
+        let candidates: Vec<(&str, &PhoneMediaState)> = phones
+            .iter()
+            .filter(|(id, state)| {
+                in_session.contains(&id.as_str())
+                    && now_unix.saturating_sub(state.updated_unix) <= FRESH_SECS
+                    && (state.media.is_playing
+                        || self
+                            .paused_since
+                            .get(*id)
+                            .is_some_and(|since| now_unix.saturating_sub(*since) < PAUSED_SECS))
+            })
+            .map(|(id, state)| (id.as_str(), state))
+            .collect();
+        let any_playing = candidates.iter().any(|(_, s)| s.media.is_playing);
+        let kept = self.shown.as_deref().and_then(|shown| {
+            candidates
+                .iter()
+                .find(|(id, s)| *id == shown && (s.media.is_playing || !any_playing))
+        });
+        let chosen = kept.or_else(|| {
+            candidates
+                .iter()
+                .max_by_key(|(_, s)| (s.media.is_playing, s.updated_unix))
+        });
+        self.shown = chosen.map(|(id, _)| id.to_string());
+        chosen.map(|(id, state)| (*id, &state.media))
+    }
 }
 
 /// A button the media controls pressed.
@@ -68,7 +125,7 @@ mod windows_player {
     };
     use windows::core::{HSTRING, w};
 
-    use super::{Button, command, pick};
+    use super::{Button, Choice, command};
 
     /// The name Windows shows for it: the one the server registers for its
     /// toasts, so the flyout says Pocketdesk, not the program's file.
@@ -249,17 +306,25 @@ mod windows_player {
         read: bool,
         on: bool,
         player: Option<Player>,
-        /// A player Windows would not make is not tried again until the
-        /// setting changes.
-        failed: bool,
+        /// When a player Windows would not make was last tried: tried
+        /// again a minute later (K7 review: one failure at sign-in, before
+        /// the shell was up, had ended it until the setting changed).
+        failed: Option<std::time::Instant>,
+        choice: Choice,
     }
 
+    /// How long a player that failed waits before it is tried again.
+    const RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+
     impl Watch {
-        /// Follow the setting, and show what `phones` play.
+        /// Follow the setting, and show what the phones `in_session` play
+        /// at `now_unix`.
         pub fn follow(
             &mut self,
             state_dir: &Path,
             phones: &std::collections::BTreeMap<String, PhoneMediaState>,
+            in_session: &[&str],
+            now_unix: u64,
         ) {
             let stamp = pocketdesk_core::local::config::Config::path()
                 .ok()
@@ -269,7 +334,7 @@ mod windows_player {
                 // A config that does not read keeps the player as it is.
                 if let Ok(config) = pocketdesk_core::local::config::Config::load() {
                     if config.phone_media_controls != self.on {
-                        self.failed = false;
+                        self.failed = None;
                     }
                     self.on = config.phone_media_controls;
                     self.read = true;
@@ -280,21 +345,25 @@ mod windows_player {
                 self.player = None;
                 return;
             }
-            if self.player.is_none() && !self.failed {
+            let shown = self.choice.pick(phones, in_session, now_unix);
+            if self.player.is_none() && self.failed.is_none_or(|at| at.elapsed() >= RETRY) {
                 match Player::new(state_dir.to_path_buf()) {
-                    Ok(player) => self.player = Some(player),
+                    Ok(player) => {
+                        self.player = Some(player);
+                        self.failed = None;
+                    }
                     Err(e) => {
                         eprintln!("Pocketdesk tray: no media controls ({e})");
-                        self.failed = true;
+                        self.failed = Some(std::time::Instant::now());
                     }
                 }
             }
             if let Some(player) = &mut self.player
-                && let Err(e) = player.show(pick(phones))
+                && let Err(e) = player.show(shown)
             {
                 eprintln!("Pocketdesk tray: the media controls did not update ({e})");
                 self.player = None;
-                self.failed = true;
+                self.failed = Some(std::time::Instant::now());
             }
         }
     }
@@ -319,18 +388,93 @@ mod tests {
         }
     }
 
-    /// K7: a playing phone comes before a paused one, then the newest.
+    /// K7: a playing phone comes before a paused one, then the newest, of
+    /// the phones in a session.
     #[test]
     fn the_playing_phone_is_shown_first() {
         let mut phones = BTreeMap::new();
-        assert_eq!(pick(&phones), None);
+        let all = ["a", "b", "c"];
+        assert_eq!(Choice::default().pick(&phones, &all, 30), None);
         phones.insert("a".to_string(), state("paused, newest", false, 30));
         phones.insert("b".to_string(), state("playing, older", true, 10));
         phones.insert("c".to_string(), state("playing, newer", true, 20));
-        assert_eq!(pick(&phones).map(|(id, _)| id), Some("c"));
+        assert_eq!(
+            Choice::default().pick(&phones, &all, 30).map(|(id, _)| id),
+            Some("c")
+        );
+        assert_eq!(
+            Choice::default()
+                .pick(&phones, &["a", "b"], 30)
+                .map(|(id, _)| id),
+            Some("b"),
+            "only phones in a session (K7 review)"
+        );
         phones.remove("c");
         phones.remove("b");
-        assert_eq!(pick(&phones).map(|(id, _)| id), Some("a"));
+        assert_eq!(
+            Choice::default().pick(&phones, &all, 30).map(|(id, _)| id),
+            Some("a")
+        );
+    }
+
+    /// K7 review: a report not said again is gone, and a paused phone
+    /// keeps its place five minutes.
+    #[test]
+    fn stale_and_long_paused_phones_go() {
+        let mut phones = BTreeMap::new();
+        phones.insert("a".to_string(), state("song", true, 1_000));
+        let mut choice = Choice::default();
+        assert!(choice.pick(&phones, &["a"], 1_000 + FRESH_SECS).is_some());
+        assert_eq!(
+            choice.pick(&phones, &["a"], 1_001 + FRESH_SECS),
+            None,
+            "stale"
+        );
+        phones.insert("a".to_string(), state("song", false, 2_000));
+        assert!(choice.pick(&phones, &["a"], 2_000).is_some());
+        phones.insert("a".to_string(), state("song", false, 2_000 + 120));
+        assert!(choice.pick(&phones, &["a"], 2_000 + 120).is_some());
+        phones.insert("a".to_string(), state("song", false, 2_000 + PAUSED_SECS));
+        assert_eq!(
+            choice.pick(&phones, &["a"], 2_000 + PAUSED_SECS),
+            None,
+            "paused too long"
+        );
+        phones.insert(
+            "a".to_string(),
+            state("song", true, 2_000 + PAUSED_SECS + 10),
+        );
+        assert!(
+            choice
+                .pick(&phones, &["a"], 2_000 + PAUSED_SECS + 10)
+                .is_some(),
+            "playing again"
+        );
+    }
+
+    /// K7 review: the phone shown stays while it plays, whichever said so
+    /// last.
+    #[test]
+    fn the_phone_shown_stays_while_it_plays() {
+        let mut phones = BTreeMap::new();
+        phones.insert("a".to_string(), state("one", true, 10));
+        phones.insert("b".to_string(), state("two", true, 20));
+        let mut choice = Choice::default();
+        assert_eq!(
+            choice.pick(&phones, &["a", "b"], 20).map(|(id, _)| id),
+            Some("b")
+        );
+        phones.insert("a".to_string(), state("one", true, 70));
+        assert_eq!(
+            choice.pick(&phones, &["a", "b"], 70).map(|(id, _)| id),
+            Some("b")
+        );
+        phones.insert("b".to_string(), state("two", false, 75));
+        assert_eq!(
+            choice.pick(&phones, &["a", "b"], 75).map(|(id, _)| id),
+            Some("a"),
+            "a playing one before the shown one paused"
+        );
     }
 
     /// K7: a press toggles only when it would change something.
@@ -374,7 +518,9 @@ mod tests {
         let mut player = Player::new(dir.clone()).expect("a player");
         let mut phones = BTreeMap::new();
         phones.insert("probe".to_string(), state("K7 probe song", true, 1));
-        player.show(pick(&phones)).expect("shown");
+        player
+            .show(Choice::default().pick(&phones, &["probe"], 1))
+            .expect("shown");
         let find = || -> Option<(String, Status, windows::Media::Control::GlobalSystemMediaTransportControlsSession)> {
             let manager = done(Manager::RequestAsync().ok()?)?;
             let sessions = manager.GetSessions().ok()?;
