@@ -105,6 +105,57 @@ impl LinksPlugin {
     }
 }
 
+/// Send the numbers queued for phones to dial (L4), each to its own phone
+/// if it is connected within a minute and its Dial permission is on. Runs
+/// for the server's life.
+pub async fn run_dials() {
+    use pocketdesk_core::local::dials;
+    use pocketdesk_core::protocol::dial::{DIAL, dial_body};
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let mut waiting: Vec<dials::DialRequest> = Vec::new();
+    loop {
+        if waiting.is_empty() {
+            crate::inbox::wait(
+                pocketdesk_core::local::paths::DIALS_DIR,
+                Duration::from_millis(500),
+            )
+            .await;
+        } else {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let now = pocketdesk_core::local::pin::now_unix();
+        waiting.extend(dials::take_all(&dir, now));
+        if waiting.is_empty() {
+            continue;
+        }
+        let clients = crate::state::clone_clients().await;
+        let mut still = Vec::new();
+        for call in waiting.drain(..) {
+            if !crate::plugins::pair::permits(&call.device_id, DIAL) {
+                tracing::info!("A call was not sent: Call numbers from here is off for the phone");
+                continue;
+            }
+            let Some(phone) = clients.iter().find(|c| c.device_id() == call.device_id) else {
+                if now.saturating_sub(call.created_unix) < dials::DIAL_TTL_SECS {
+                    still.push(call);
+                } else {
+                    tracing::info!(
+                        "A call was not sent: the phone did not connect within a minute"
+                    );
+                }
+                continue;
+            };
+            let packet = NetworkPacket::new(DIAL).with_body(dial_body(&call.number));
+            if let Err(e) = phone.send_packet(&packet).await {
+                tracing::warn!("A call was not sent to the phone: {e}");
+            }
+        }
+        waiting = still;
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for LinksPlugin {
     fn name(&self) -> &'static str {
@@ -116,7 +167,8 @@ impl Plugin for LinksPlugin {
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &[LINK]
+        // A number to dial (L4) goes on the same road as a link.
+        &[LINK, pocketdesk_core::protocol::dial::DIAL]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {

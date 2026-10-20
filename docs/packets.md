@@ -29,6 +29,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.deck` | yes | yes | none (any paired phone) | deck |
 | `kdeconnect.pocketdesk.deck_press` | yes |  | none (any paired phone) | deck |
 | `kdeconnect.pocketdesk.deck_result` |  | yes |  | deck |
+| `kdeconnect.pocketdesk.dial` |  | yes |  | links |
 | `kdeconnect.pocketdesk.endpoint` |  | yes |  | server |
 | `kdeconnect.pocketdesk.exec` | yes | yes | Exec | exec |
 | `kdeconnect.pocketdesk.file_fetch` | yes |  | Files | share |
