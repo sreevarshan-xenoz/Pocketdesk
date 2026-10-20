@@ -1297,6 +1297,7 @@ On the Azure VM (headless Sway, uinput root-only) from the A71 over the internet
 Owed:
 - [ ] The owner's approval prompt ("Ask before each session") before ready.
 - [ ] Over the internet road, and a phone driving while another has a picture session (driving rules).
+- [ ] I1: the computer's server restarted under a remote: "Reconnecting in N s…" on its card, then the remote back by itself, the talk timer still counting; Kick from the computer: not retried; Settings "Reconnect by itself" off: Retry only; after ten minutes, "Stopped trying" and the session's notification gone.
 
 ## 74. The phone's battery without a session
 
