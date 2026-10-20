@@ -141,6 +141,8 @@ mod windows_player {
         smtc: SystemMediaTransportControls,
         token: i64,
         target: Target,
+        /// A press changed what shows: the next report is applied anew.
+        stale: Arc<std::sync::atomic::AtomicBool>,
         shown: Option<(String, PhoneMedia)>,
     }
 
@@ -197,10 +199,12 @@ mod windows_player {
                 let smtc: SystemMediaTransportControls = unsafe { interop.GetForWindow(hwnd) }?;
                 let target: Target = Arc::default();
                 let pressed = Arc::clone(&target);
+                let stale = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let restale = Arc::clone(&stale);
                 let token = smtc.ButtonPressed(&TypedEventHandler::<
                     SystemMediaTransportControls,
                     SystemMediaTransportControlsButtonPressedEventArgs,
-                >::new(move |_, args| {
+                >::new(move |smtc, args| {
                     let Some(args) = args.as_ref() else {
                         return Ok(());
                     };
@@ -211,18 +215,32 @@ mod windows_player {
                         SystemMediaTransportControlsButton::Previous => Button::Previous,
                         _ => return Ok(()),
                     };
-                    press(&state_dir, &pressed, button);
+                    // Shown at once as the press leaves it (K7 review: the
+                    // phone's word takes seconds, and a second press meanwhile
+                    // undid the first); the phone's next report is applied
+                    // even if it says the same.
+                    if let Some(playing) = press(&state_dir, &pressed, button)
+                        && let Some(smtc) = smtc.as_ref()
+                    {
+                        let _ = smtc.SetPlaybackStatus(if playing {
+                            MediaPlaybackStatus::Playing
+                        } else {
+                            MediaPlaybackStatus::Paused
+                        });
+                    }
+                    restale.store(true, std::sync::atomic::Ordering::Relaxed);
                     Ok(())
                 }))?;
                 smtc.SetIsEnabled(false)?;
-                Ok::<_, windows::core::Error>((smtc, token, target))
+                Ok::<_, windows::core::Error>((smtc, token, target, stale))
             })();
             match made {
-                Ok((smtc, token, target)) => Ok(Self {
+                Ok((smtc, token, target, stale)) => Ok(Self {
                     hwnd,
                     smtc,
                     token,
                     target,
+                    stale,
                     shown: None,
                 }),
                 Err(e) => {
@@ -235,7 +253,8 @@ mod windows_player {
         /// Show `now`'s phone and what it plays, or nothing.
         pub fn show(&mut self, now: Option<(&str, &PhoneMedia)>) -> windows::core::Result<()> {
             let now = now.map(|(id, media)| (id.to_string(), media.clone()));
-            if now == self.shown {
+            let stale = self.stale.swap(false, std::sync::atomic::Ordering::Relaxed);
+            if now == self.shown && !stale {
                 return Ok(());
             }
             *self.target.lock().unwrap_or_else(|e| e.into_inner()) = now
@@ -281,21 +300,23 @@ mod windows_player {
     }
 
     /// Send `button`'s command to the phone `target` names, as the Sessions
-    /// page's buttons do (held to its Media permission there).
-    fn press(state_dir: &Path, target: &Target, button: Button) {
-        let Some((phone, playing)) = target.lock().unwrap_or_else(|e| e.into_inner()).clone()
-        else {
-            return;
-        };
-        let Some(command) = command(button, playing) else {
-            return;
-        };
+    /// page's buttons do (held to its Media permission there); whether it
+    /// plays after a play or pause sent, which `target` then says.
+    fn press(state_dir: &Path, target: &Target, button: Button) -> Option<bool> {
+        let mut target = target.lock().unwrap_or_else(|e| e.into_inner());
+        let (phone, playing) = target.clone()?;
+        let command = command(button, playing)?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         if let Err(e) = crate::model::press_phone_media(state_dir, &phone, command, now) {
             eprintln!("Pocketdesk tray: a media press was not sent: {e}");
+            return None;
         }
+        (command == "playPause").then(|| {
+            *target = Some((phone, !playing));
+            !playing
+        })
     }
 
     /// The player as Settings has it (K7): read again when the config
@@ -567,6 +588,16 @@ mod tests {
             pressed.contains("\"probe\"") && pressed.contains("playPause"),
             "{pressed}"
         );
+        // Shown paused at once, before the phone's word (K7 review).
+        let mut paused = false;
+        for _ in 0..30 {
+            if find().is_some_and(|(_, status, _)| status == Status::Paused) {
+                paused = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(paused, "paused at once");
         player.show(None).expect("gone");
         let mut gone = false;
         for _ in 0..30 {
