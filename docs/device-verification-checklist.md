@@ -2152,6 +2152,14 @@ Built 2026-10-20 on the owner's word; tested through the harness and units, noth
 - [ ] Phone files: the spinner while a folder is asked for.
 - [ ] Keys: Esc on Unpair, Restart and Clear; Ctrl+Page Up and Down; Enter in the Files and Notifications boxes.
 
+## 143. The Logs page (J1)
+
+Built 2026-10-20; tested through the harness and units, nothing by hand yet.
+- [ ] A debug-level log of several megabytes open on the page: no hitch while it grows, the newest lines at the foot.
+- [ ] The filter and "Warnings and errors only", each alone and together, and the count beside them.
+- [ ] Copy pastes the lines shown; Open log folder opens the folder at the file (Windows, then Linux).
+- [ ] Just after midnight, today's log still empty: the page shows the controls and "0 of the last 0 lines".
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
