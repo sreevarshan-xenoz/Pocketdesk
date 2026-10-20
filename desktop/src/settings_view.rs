@@ -265,6 +265,16 @@ fn drawn_in(key: &str) -> &str {
     }
 }
 
+/// Whether this computer's page draws `key`'s row: some are for one
+/// system only (J2 review: on Windows "grant" opened an empty Connection).
+fn drawn_here(key: &str) -> bool {
+    match key {
+        "remember_screen_grant" => cfg!(target_os = "linux"),
+        "clipboard_hotkey" | "away_lock_minutes" | "mic_relay_device" => cfg!(windows),
+        _ => true,
+    }
+}
+
 /// A row shows for `query` by its name or key, or a setting drawn in it,
 /// or its section's title.
 pub fn row_shown(query: &str, key: &str) -> bool {
@@ -281,9 +291,9 @@ pub fn row_shown(query: &str, key: &str) -> bool {
 /// in it that matches.
 pub fn section_shown(query: &str, section: Section) -> bool {
     matches(query, &[section.title()])
-        || SETTINGS
-            .iter()
-            .any(|(key, _, s)| *s == section && drawn_in(key) == *key && row_shown(query, key))
+        || SETTINGS.iter().any(|(key, _, s)| {
+            *s == section && drawn_in(key) == *key && drawn_here(key) && row_shown(query, key)
+        })
         || extras(section).iter().any(|x| matches(query, &[x]))
 }
 
@@ -1508,6 +1518,24 @@ mod tests {
         assert!(row_shown("broker", "home_assistant"));
         assert!(row_shown("details", "events"));
         assert!(!row_shown("broker", "events"));
+    }
+
+    /// J2 review: a row this system does not draw finds no section.
+    #[test]
+    fn a_search_finds_no_row_this_system_does_not_draw() {
+        use super::{Section, section_shown};
+        assert_eq!(
+            section_shown("sharing grant", Section::Connection),
+            cfg!(target_os = "linux")
+        );
+        assert_eq!(
+            section_shown("clipboard with a key", Section::Phones),
+            cfg!(windows)
+        );
+        assert_eq!(
+            section_shown("mic plays into", Section::Phones),
+            cfg!(windows)
+        );
     }
 
     /// J2: a section shows whole by its title, with a match, or not at all.
