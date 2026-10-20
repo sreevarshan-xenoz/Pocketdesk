@@ -415,11 +415,9 @@ impl PocketdeskApp {
         // Dropped files waiting for "which?" go when the page does, and say
         // so, rather than waiting unseen for a click hours later (J5 review).
         if self.tab == Tab::Files && tab != Tab::Files && !self.dropped.is_empty() {
-            let n = self.dropped.len();
-            self.dropped.clear();
+            let what = dropped_words(&std::mem::take(&mut self.dropped));
             self.notice = crate::notice::Notice::done(format!(
-                "Not sent: {}, since you left the question.",
-                files_count(n)
+                "Not sent: {what}, since you left the question."
             ));
         }
         if self.tab == Tab::Pair && tab != Tab::Pair {
@@ -1984,11 +1982,9 @@ impl PocketdeskApp {
             model::DropTo::Ask(targets) => targets,
             model::DropTo::Send(id) => vec![id],
             model::DropTo::Nobody => {
-                let n = self.dropped.len();
-                self.dropped.clear();
+                let what = dropped_words(&std::mem::take(&mut self.dropped));
                 self.notice = crate::notice::Notice::error(format!(
-                    "Not sent: no phone or computer can take {} now.",
-                    files_count(n)
+                    "Not sent: no phone or computer can take {what} now."
                 ));
                 return;
             }
@@ -1997,7 +1993,7 @@ impl PocketdeskApp {
         let mut cancel = false;
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.strong(format!("Send {} to:", files_count(self.dropped.len())));
+            ui.strong(format!("Send {} to:", dropped_words(&self.dropped)));
             ui.horizontal_wrapped(|ui| {
                 for id in &targets {
                     if ui.button(model::target_label(&self.snapshot, id)).clicked() {
@@ -2014,9 +2010,8 @@ impl PocketdeskApp {
                 self.send_file(&path);
             }
         } else if cancel {
-            let n = self.dropped.len();
-            self.dropped.clear();
-            self.notice = crate::notice::Notice::done(format!("Not sent: {}.", files_count(n)));
+            let what = dropped_words(&std::mem::take(&mut self.dropped));
+            self.notice = crate::notice::Notice::done(format!("Not sent: {what}."));
         }
     }
 
@@ -2735,12 +2730,11 @@ fn chip(ui: &mut egui::Ui, text: &str, fill: egui::Color32) -> egui::Response {
         .response
 }
 
-/// "1 file", "3 files".
-fn files_count(n: usize) -> String {
-    match n {
-        1 => "1 file".to_string(),
-        n => format!("{n} files"),
-    }
+/// Dropped paths in words, a folder as a folder (J5 review: "1 file" for
+/// a dropped folder).
+fn dropped_words(paths: &[PathBuf]) -> String {
+    let folders = paths.iter().filter(|p| p.is_dir()).count();
+    model::files_and_folders(paths.len() - folders, folders)
 }
 
 /// Whether closing the window hides it to the tray: only with a tray, and

@@ -630,6 +630,23 @@ pub fn drop_to(snapshot: &Snapshot) -> DropTo {
     }
 }
 
+/// "1 file", "3 files", "1 folder", "2 files and 1 folder".
+pub fn files_and_folders(files: usize, folders: usize) -> String {
+    let count = |n: usize, one: &str, many: &str| match n {
+        1 => format!("1 {one}"),
+        n => format!("{n} {many}"),
+    };
+    match (files, folders) {
+        (files, 0) => count(files, "file", "files"),
+        (0, folders) => count(folders, "folder", "folders"),
+        (files, folders) => format!(
+            "{} and {}",
+            count(files, "file", "files"),
+            count(folders, "folder", "folders")
+        ),
+    }
+}
+
 /// Files dropped while a question waits join it, each path once (J5
 /// review: the same file dropped twice went twice).
 pub fn join_drops(waiting: &mut Vec<std::path::PathBuf>, dropped: Vec<std::path::PathBuf>) {
@@ -1524,6 +1541,15 @@ mod tests {
         );
         assert_eq!(target_label(&with_computer, "desk-b"), "Desk (computer)");
         assert_eq!(target_label(&with_computer, "phone-a"), "phone-a");
+    }
+
+    /// J5 review: a dropped folder is called a folder.
+    #[test]
+    fn dropped_files_and_folders_in_words() {
+        assert_eq!(files_and_folders(1, 0), "1 file");
+        assert_eq!(files_and_folders(3, 0), "3 files");
+        assert_eq!(files_and_folders(0, 1), "1 folder");
+        assert_eq!(files_and_folders(2, 1), "2 files and 1 folder");
     }
 
     /// J5 review: a second drop joins the files waiting, each path once.
