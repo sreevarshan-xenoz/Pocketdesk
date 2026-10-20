@@ -2366,6 +2366,9 @@ impl PocketdeskApp {
         });
         if !dropped.is_empty() {
             self.switch_to(Tab::Files);
+            // Judged on what can take files now, not up to a second ago: a
+            // phone that just linked must be asked about (J5 review).
+            self.refresh();
             match model::drop_to(&self.snapshot) {
                 // Several could take them: they wait for the owner (J5).
                 model::DropTo::Ask(_) => self.dropped.extend(dropped),
