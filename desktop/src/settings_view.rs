@@ -122,6 +122,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("clipboard_push", "Clipboard to phones", Section::Phones),
     ("clipboard_history", "Clipboard history", Section::Phones),
     (
+        "clipboard_hotkey",
+        "Send the clipboard with a key",
+        Section::Phones,
+    ),
+    (
         "phone_drive",
         "The phone's folders as a drive",
         Section::Phones,
@@ -248,6 +253,7 @@ pub fn applies_live(key: &str) -> bool {
             | "downloads_folder"
             | "remember_screen_grant"
             | "clipboard_history"
+            | "clipboard_hotkey"
             | "phone_drive"
             | "away_lock_minutes"
     )
@@ -638,6 +644,38 @@ impl SettingsForm {
                         "The last texts that crossed between this computer and its phones, either way, kept on this computer for the Clipboard page; 0 keeps none, and emptying it there or here forgets them.",
                     );
                 });
+                // Windows only: elsewhere nothing registers the key (H3 review).
+                if cfg!(windows) {
+                    row(ui, "clipboard_hotkey", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut e.clipboard_hotkey)
+                                .hint_text("win+shift+c")
+                                .desired_width(140.0),
+                        );
+                        let text = e.clipboard_hotkey.trim();
+                        // What the tray program made of it (H3 review).
+                        let status = pocketdesk_core::local::paths::state_dir()
+                            .ok()
+                            .and_then(|dir| pocketdesk_desktop::hotkey::read_status(&dir));
+                        if let Some(words) =
+                            pocketdesk_desktop::hotkey::status_words(text, status.as_ref())
+                        {
+                            note(ui, words);
+                        }
+                        if !text.is_empty() && pocketdesk_desktop::hotkey::parse(text).is_none() {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Ctrl, Alt or Win, then a letter, a digit or F1 to F12, joined by +.",
+                                )
+                                .color(crate::theme::bad(ui)),
+                            );
+                        }
+                        note(
+                            ui,
+                            "Pressed anywhere, sends what this computer has copied to the phone the clipboard reaches (the one in the newest session when several do). It needs the tray program (pocketdesk-tray) beside the app; the window's own tray does not take it. Empty is off. Ctrl+Alt with a letter is AltGr on many keyboards, which types characters such as @: Win+Shift is safer.",
+                        );
+                    });
+                }
                 row(ui, "phone_drive", |ui| {
                     ui.checkbox(
                         &mut e.phone_drive,

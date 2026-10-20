@@ -7,7 +7,9 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use pocketdesk_desktop::{model, tray::Tray, tray_instance, tray_menu::TrayAction, tray_watch};
+use pocketdesk_desktop::{
+    hotkey, model, tray::Tray, tray_instance, tray_menu::TrayAction, tray_watch,
+};
 
 /// How often the menu is brought up to date with the phones.
 const REFRESH: Duration = Duration::from_secs(1);
@@ -44,8 +46,10 @@ fn main() {
     let mut log = (None, std::collections::HashMap::new());
     // What only the window shows (E2 review): it is started for each new one.
     let mut seen = tray_watch::Seen::default();
+    // H3: the key that sends the clipboard, as Settings has it now.
+    let mut key = Key::default();
     loop {
-        wait(&woken, REFRESH);
+        let pressed = wait(&woken, REFRESH);
         if tray.closed() {
             // No icon any more: free the claim, so a tray can start again.
             return;
@@ -55,9 +59,10 @@ fn main() {
                 return;
             }
         }
-        if refreshed.is_none_or(|at| at.elapsed() >= REFRESH) {
+        if pressed || refreshed.is_none_or(|at| at.elapsed() >= REFRESH) {
             let now = now_unix();
             let snapshot = model::snapshot(&state_dir, now);
+            key.follow(&state_dir);
             let stamp = model::session_log_stamp(&state_dir);
             if stamp != log.0 {
                 log = (
@@ -72,6 +77,15 @@ fn main() {
                 eprintln!("Pocketdesk tray: the window did not start ({e})");
             }
             let rows = model::phone_rows(&snapshot, &log.1);
+            // A press queued before its key was taken back is not acted on (H3 review).
+            if pressed && key.status.registered {
+                let to = hotkey::phone(&rows);
+                // Said where the owner looks: this program has no console (H3 review).
+                key.said_press(&state_dir, to.is_some());
+                if let Some(id) = to {
+                    act(&state_dir, TrayAction::SendClipboard(id.to_string()));
+                }
+            }
             tray.show(pocketdesk_desktop::tray_menu::menu(
                 &rows,
                 &snapshot.devices,
@@ -82,33 +96,124 @@ fn main() {
     }
 }
 
+/// The send-the-clipboard key's id with `RegisterHotKey` (H3).
+#[cfg(windows)]
+const HOTKEY_ID: i32 = 0x5044;
+
+/// The send-the-clipboard key as registered (H3), kept to Settings: read
+/// again at each refresh, and registered on this thread, which pumps the
+/// `WM_HOTKEY` it posts. Windows only; elsewhere it does nothing.
+#[derive(Default)]
+struct Key {
+    text: Option<String>,
+    status: hotkey::Status,
+    /// When a taken key was last tried again.
+    tried: Option<Instant>,
+    /// The config file's time when last read: it is read again only when it changes.
+    stamp: Option<std::time::SystemTime>,
+    #[cfg(windows)]
+    registered: bool,
+}
+
+/// How often a key another app holds is tried again.
+const RETRY_TAKEN: Duration = Duration::from_secs(30);
+
+impl Key {
+    /// Say a press's outcome in the status Settings shows.
+    fn said_press(&mut self, state_dir: &Path, reached: bool) {
+        self.status.no_phone = !reached;
+        hotkey::write_status(state_dir, &self.status);
+    }
+
+    fn follow(&mut self, state_dir: &Path) {
+        // A key another app held is tried again now and then (H3 review).
+        let retry = self.status.taken && self.tried.is_none_or(|at| at.elapsed() >= RETRY_TAKEN);
+        let stamp = pocketdesk_core::local::config::Config::path()
+            .ok()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        if self.text.is_some() && stamp == self.stamp && !retry {
+            return;
+        }
+        // A config that does not read (a typo, a save under way) keeps the
+        // key as it is (H3 review); it is read again when it changes.
+        let text = match pocketdesk_core::local::config::Config::load() {
+            Ok(config) => config.clipboard_hotkey.trim().to_string(),
+            Err(_) if self.text.is_some() => return,
+            Err(_) => String::new(),
+        };
+        self.stamp = stamp;
+        if self.text.as_deref() == Some(text.as_str()) && !retry {
+            return;
+        }
+        self.text = Some(text.clone());
+        self.tried = Some(Instant::now());
+        self.status = hotkey::Status {
+            key: text.clone(),
+            ..Default::default()
+        };
+        #[cfg(windows)]
+        {
+            use windows::Win32::UI::Input::KeyboardAndMouse::{
+                HOT_KEY_MODIFIERS, RegisterHotKey, UnregisterHotKey,
+            };
+            if self.registered {
+                // SAFETY: this thread registered it.
+                let _ = unsafe { UnregisterHotKey(None, HOTKEY_ID) };
+                self.registered = false;
+            }
+            if let Some(key) = hotkey::parse(&text) {
+                // SAFETY: no window: WM_HOTKEY goes to this thread's queue.
+                match unsafe {
+                    RegisterHotKey(None, HOTKEY_ID, HOT_KEY_MODIFIERS(key.modifiers), key.key)
+                } {
+                    Ok(()) => self.registered = true,
+                    // Another app holds the combination.
+                    Err(_) => self.status.taken = true,
+                }
+            }
+            self.status.registered = self.registered;
+        }
+        hotkey::write_status(state_dir, &self.status);
+    }
+}
+
 /// Wait up to `timeout` for a pick. On Windows the tray's menu works through
 /// this thread's messages, so they are pumped meanwhile (a pick is queued
-/// while its message is handled).
-fn wait(woken: &std::sync::mpsc::Receiver<()>, timeout: Duration) {
+/// while its message is handled). Whether the send-the-clipboard key was
+/// pressed (H3).
+fn wait(woken: &std::sync::mpsc::Receiver<()>, timeout: Duration) -> bool {
     #[cfg(windows)]
     {
         let _ = woken;
         use windows::Win32::UI::WindowsAndMessaging::{
             DispatchMessageW, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT,
-            TranslateMessage,
+            TranslateMessage, WM_HOTKEY,
         };
         // SAFETY: no handles to wait on; only this thread's messages.
         unsafe {
             MsgWaitForMultipleObjects(None, false, timeout.as_millis() as u32, QS_ALLINPUT);
         }
         let mut msg = MSG::default();
+        let mut pressed = false;
         // SAFETY: a valid MSG to fill; each is translated and dispatched.
         while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
+            // The thread's own WM_HOTKEY has no window to go to.
+            if msg.message == WM_HOTKEY && msg.wParam.0 == HOTKEY_ID as usize {
+                pressed = true;
+                continue;
+            }
             unsafe {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
         }
+        pressed
     }
     #[cfg(not(windows))]
     {
         let _ = woken.recv_timeout(timeout);
+        false
     }
 }
 
