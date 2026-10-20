@@ -1986,6 +1986,8 @@ impl PocketdeskApp {
                 self.notice = crate::notice::Notice::error(format!(
                     "Not sent: no phone or computer can take {what} now."
                 ));
+                // Said with no click to bring a frame (J5 review).
+                ui.ctx().request_repaint();
                 return;
             }
         };
