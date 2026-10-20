@@ -277,7 +277,9 @@ class MediaWidget : AppWidgetProvider() {
                 val (icon, text) = when (body) {
                     MediaWidgetPlan.Body.Nothing -> R.drawable.ic_ll_music to context.getString(R.string.media_widget_nothing)
                     MediaWidgetPlan.Body.Failed ->
-                        R.drawable.ic_ll_warning to (kept.line ?: context.getString(R.string.media_widget_refused))
+                        // A refusal with no words of its own says it was refused (I2 review).
+                        R.drawable.ic_ll_warning to
+                            (kept.line?.takeUnless { it.isBlank() } ?: context.getString(R.string.media_widget_refused))
                     MediaWidgetPlan.Body.NoComputer -> R.drawable.ic_ll_desktop to context.getString(R.string.tile_no_computer)
                     else -> R.drawable.ic_ll_refresh to context.getString(R.string.deck_loading)
                 }
