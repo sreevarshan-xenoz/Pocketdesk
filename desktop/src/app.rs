@@ -1489,6 +1489,7 @@ impl PocketdeskApp {
             .is_some_and(|(_, closed)| closed);
         let count = self.snapshot.sessions.len();
         for session in &self.snapshot.sessions {
+            let control = model::control_cell(session, count, self.snapshot.shared_control);
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
@@ -1512,12 +1513,9 @@ impl PocketdeskApp {
                     };
                     chip(ui, road, neutral).on_hover_text(format!("{why}, from {}", session.peer));
                     chip(ui, model::session_kind(session), neutral);
-                    match model::control_cell(session, count, self.snapshot.shared_control) {
-                        model::ControlCell::Driving => {
-                            let good = crate::theme::good(ui);
-                            chip(ui, "driving", good);
-                        }
-                        model::ControlCell::Give(_) | model::ControlCell::Nothing => {}
+                    if matches!(control, model::ControlCell::Driving) {
+                        let good = crate::theme::good(ui);
+                        chip(ui, "driving", good);
                     }
                 });
                 ui.label(
@@ -1531,8 +1529,7 @@ impl PocketdeskApp {
                     if ui.button("End").clicked() {
                         end = Some(session.clone());
                     }
-                    if let model::ControlCell::Give(id) =
-                        model::control_cell(session, count, self.snapshot.shared_control)
+                    if let model::ControlCell::Give(id) = control
                         && ui
                             .button("Give control")
                             .on_hover_text(
