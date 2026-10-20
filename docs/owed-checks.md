@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-730 open items.
+736 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 428 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 432 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 23 |
 | A second phone | 9 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
-| A Linux desktop (the Azure VM serves for some) | 92 |
+| A Linux desktop (the Azure VM serves for some) | 93 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 66 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 67 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -882,6 +882,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The session ends: the song leaves the flyout within a few seconds. Paused five minutes: it leaves.
 - The setting off: it leaves at once.
 
+**155. The phone's sound with its screen (K5)**
+
+- Phone Settings "The phone's sound with its screen" asks for the microphone permission; desktop Devices "Play its sound here" on.
+- "Show screen" with a throwaway app playing a 1 kHz tone: a throwaway server with `POCKETDESK_PHONE_AUDIO_FILE` writes it; its pitch and level match.
+- With another app in front on the phone (the use case): the sound still comes.
+- "Play its sound here" off mid-cast: the cast ends. Without it: the phone does not capture.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1560,6 +1567,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Linux: GNOME and KDE show the icon; a server with body images shows the picture.
 
+**155. The phone's sound with its screen (K5)**
+
+- Linux: the sound through `pw-cat`.
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -1855,3 +1866,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **153. Notifications with their app's icon, and pictures (K3)**
 
 - A phone notification's toast on Windows shows the app's icon as its logo (on screen, not only in the XML).
+
+**155. The phone's sound with its screen (K5)**
+
+- By ear: a video on the phone plays on the computer's speakers, behind the picture by how much.

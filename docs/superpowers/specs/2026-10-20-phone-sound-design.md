@@ -17,7 +17,7 @@
   - **Permission:** a per-phone permission, "Play its sound here" (off by default, Devices page).
   - **Playing:** with the permission on, the phone's sound plays on the computer's default output: WASAPI on Windows, `pw-cat` on Linux. A test seam (`POCKETDESK_PHONE_AUDIO_FILE`) writes it to a WAV file instead.
   - **What the phone is told:** the cast's ready stream says whether its sound is taken (a feature bit), so a phone whose computer would drop it does not capture.
-  - **Turned off mid-cast:** the cast's sound stops at once (the session goes on).
+  - **Turned off mid-cast:** the cast ends, as a session does when its mic is taken away; the owner shows the screen again. Turned on mid-cast, it applies from the next cast.
 
 ## Left out
 
@@ -34,5 +34,20 @@
   - the permission's default and the feature bit;
   - the WAV seam's header;
   - the phone's rule for when to capture (JVM: the setting, the permission, the computer's word, Android 10+).
-- **Server:** a cast session over loopback whose audio streams decode into the WAV seam with the permission on, and nothing with it off (`server/tests/cast_session.rs`).
+- **Server:** a cast session over loopback whose sound streams reach the player with the permission on, and nothing with it off, the cast told which (`server/tests/cast_sound.rs`); a 1 kHz tone through Opus into the WAV seam, its length, level and pitch (`phone_sound::tests`).
 - **On the device (checklist §155):** a throwaway app plays a 1 kHz tone; the WAV seam on a throwaway server checks its frequency and level; by ear, a real video.
+
+## As built
+
+- **Phone:** `cast/CastSound.kt` (capture and encode), `CastSoundRule` (JVM-tested), the Settings switch; `CastService` starts it once the cast is admitted and its computer said it takes the sound, and stops it on the cast's background thread.
+- **Bridge:** `cast.rs`'s own sound queue (10 packets) and sender, at most 5 packets undelivered; `nativeCastAudio`; `castState`'s `sound`.
+- **Core:** `CAST_AUDIO`, `CastPayload::Audio` (at most 4000 bytes), `Capability::PhoneSound`, `REMOTE_FEATURE_PHONE_SOUND`, `Streamed.phone_sound`.
+- **Server:** `phone_sound.rs`: Opus decoded and played, at most 80 ms queued at the output, a packet dropped whole past it; WASAPI on Windows, `pw-cat` on Linux fed through a hand-off of four packets; the WAV seam; a player only once a session sends sound.
+
+## Review
+
+A fresh review (0 Critical, 4 Important, 6 Minor), fixed one commit each:
+
+- **Important:** this spec said turning the permission off kept the cast (it ends it; now said); the sound's delay could only grow (now held at 80 ms at the output and a tenth of a second in flight on the phone); `pw-cat` could block the player for seconds or for good; a capture error spun a core.
+- **Minor, fixed:** a thread and a decoder for every session, the capture stopped on the main thread, the desktop not ending the cast at once, five seconds lost on an output change, the test's name.
+- **Left:** sound shares the server's one reader with the picture's frames, so a large keyframe can delay it; no sequence numbers or loss concealment; Linux never run (CI compiles it); the phone's own speaker keeps playing.
