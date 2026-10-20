@@ -39,7 +39,7 @@
         android:layout_height="wrap_content"
         android:layout_marginStart="4dp"
         android:ellipsize="end"
-        android:maxLines="2"
+        android:maxLines="1"
         android:textColor="@color/widget_on_surface_variant"
         android:text="@string/deck_loading"
         android:textSize="12sp" />

@@ -43,6 +43,8 @@
     <style name="WidgetRefresh">
         <item name="android:layout_width">48dp</item>
         <item name="android:layout_height">48dp</item>
+        <item name="android:layout_marginTop">-4dp</item>
+        <item name="android:layout_marginBottom">-4dp</item>
         <item name="android:padding">13dp</item>
         <item name="android:scaleType">centerInside</item>
         <item name="android:src">@drawable/ic_ll_refresh</item>

@@ -296,7 +296,8 @@ class MediaWidget : AppWidgetProvider() {
                 )
                 else -> context.getString(R.string.deck_loading)
             }
-            views.setTextViewText(R.id.widget_media_line, line.orEmpty())
+            // In the header beside a track; a message in the middle says the rest itself.
+            views.setTextViewText(R.id.widget_media_line, if (track) line.orEmpty() else "")
 
             val offered = MediaWidgetPlan.buttons(playing)
             val toggle = MediaWidgetPlan.toggle(playing)
