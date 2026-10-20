@@ -77,11 +77,16 @@ object DownloadTarget {
             @Suppress("DEPRECATION") // read only, for the app's own file
             val path = context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)
                 ?.use { if (it.moveToFirst()) it.getString(0) else null }
-                ?: return@runCatching false
-            val set = File(path).setLastModified(ms)
-            // MediaStore's own date follows the file's at its next look.
-            if (set) android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
-            set
+            if (path != null && File(path).setLastModified(ms)) {
+                // MediaStore's own date follows the file's at its next look.
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
+                return@runCatching true
+            }
+            // No path the app may touch (Android 10 without legacy storage):
+            // MediaStore's own date at least, which Files apps sort by
+            // (K1 review).
+            val row = ContentValues().apply { put(MediaStore.MediaColumns.DATE_MODIFIED, ms / 1000) }
+            context.contentResolver.update(uri, row, null, null) > 0
         }.getOrDefault(false)
 
         fun discard() {
