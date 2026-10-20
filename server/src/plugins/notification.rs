@@ -862,7 +862,7 @@ async fn notifications_proxy() -> Result<zbus::Proxy<'static>> {
 
 /// Send a desktop notification via D-Bus (native, no external binary),
 /// replacing the one with id `replaces` (0: none), and return the id the
-/// notification server gave it.
+/// notification server gave it and whether it shows any button.
 #[cfg(target_os = "linux")]
 async fn send_notification_dbus(
     summary: &str,
@@ -870,7 +870,7 @@ async fn send_notification_dbus(
     replaces: u32,
     answers: Option<&crate::toast_answers::Answerable>,
     mute: bool,
-) -> Result<u32> {
+) -> Result<(u32, bool)> {
     let proxy = notifications_proxy().await?;
     // Markup is escaped: the text may be a stranger's (N5a).
     let summary = crate::platform::markup_escaped(summary);
@@ -897,6 +897,7 @@ async fn send_notification_dbus(
     } else {
         5000
     };
+    let pressable = !actions.is_empty();
     proxy
         .call::<_, _, u32>(
             "Notify",
@@ -912,6 +913,7 @@ async fn send_notification_dbus(
             ),
         )
         .await
+        .map(|id| (id, pressable))
         .map_err(|e| pocketdesk_core::error::PocketdeskError::Other {
             detail: format!("D-Bus call failed: {e}"),
         })
@@ -943,13 +945,14 @@ async fn show_desktop_notification(
         )
         .await
         {
-            Ok(id) => {
+            Ok((id, pressable)) => {
                 if let Some(tag) = tag {
                     remember_shown(tag, id);
                 }
                 // A plain update of an answerable one is answerable no
-                // more (N3 review); a phone's can still be muted (K2b).
-                if tag.is_some() {
+                // more (N3 review); a phone's can still be muted (K2b), where
+                // the server shows its button at all (K2b review).
+                if tag.is_some() && pressable {
                     remember_answerable(
                         id,
                         Pressable {
