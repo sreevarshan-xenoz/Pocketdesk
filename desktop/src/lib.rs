@@ -1,6 +1,7 @@
 //! What the desktop app's window and its tray program share (E2): the
 //! icon, the state the pages read, the tray and its menu, and the words.
 
+pub mod hotkey;
 pub mod icon;
 pub mod model;
 #[cfg(not(target_os = "linux"))]

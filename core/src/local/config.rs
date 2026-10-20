@@ -135,6 +135,11 @@ pub struct Config {
     /// stay on disk, owner-only.
     #[serde(default)]
     pub clipboard_history: u32,
+    /// A key that sends this computer's clipboard to a phone from anywhere
+    /// (H3): "ctrl+alt+p" and the like, through the tray program on
+    /// Windows. Empty (the default) is off.
+    #[serde(default)]
+    pub clipboard_hotkey: String,
     /// Serve the phones' shared folders (T10g) read-only as WebDAV on
     /// loopback, behind a token (D8). Off by default.
     #[serde(default)]
@@ -316,6 +321,7 @@ impl Default for Config {
             clipboard_push: true,
             computer_clipboard: false,
             clipboard_history: 0,
+            clipboard_hotkey: String::new(),
             phone_drive: false,
             away_lock_minutes: default_away_lock_minutes(),
             kdeconnect_compat: true,
@@ -512,6 +518,7 @@ impl Config {
         "share_state",
         "virtual_screens",
         "clipboard_push",
+        "clipboard_hotkey",
         "computer_clipboard",
         "clipboard_history",
         "phone_drive",

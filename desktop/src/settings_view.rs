@@ -122,6 +122,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("clipboard_push", "Clipboard to phones", Section::Phones),
     ("clipboard_history", "Clipboard history", Section::Phones),
     (
+        "clipboard_hotkey",
+        "Send the clipboard with a key",
+        Section::Phones,
+    ),
+    (
         "phone_drive",
         "The phone's folders as a drive",
         Section::Phones,
@@ -248,6 +253,7 @@ pub fn applies_live(key: &str) -> bool {
             | "downloads_folder"
             | "remember_screen_grant"
             | "clipboard_history"
+            | "clipboard_hotkey"
             | "phone_drive"
             | "away_lock_minutes"
     )
@@ -636,6 +642,26 @@ impl SettingsForm {
                     note(
                         ui,
                         "The last texts that crossed between this computer and its phones, either way, kept on this computer for the Clipboard page; 0 keeps none, and emptying it there or here forgets them.",
+                    );
+                });
+                row(ui, "clipboard_hotkey", |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut e.clipboard_hotkey)
+                            .hint_text("ctrl+alt+p")
+                            .desired_width(140.0),
+                    );
+                    let text = e.clipboard_hotkey.trim();
+                    if !text.is_empty() && pocketdesk_desktop::hotkey::parse(text).is_none() {
+                        ui.label(
+                            egui::RichText::new(
+                                "Ctrl, Alt or Win, then a letter, a digit or F1 to F12, joined by +.",
+                            )
+                            .color(crate::theme::bad(ui)),
+                        );
+                    }
+                    note(
+                        ui,
+                        "Pressed anywhere, sends what this computer has copied to the phone the clipboard reaches (the one in the newest session when several do). Windows, through the tray; empty is off.",
                     );
                 });
                 row(ui, "phone_drive", |ui| {
