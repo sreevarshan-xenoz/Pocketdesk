@@ -44,6 +44,38 @@ class MediaWidgetPlanTest {
         assertEquals(null, MediaWidgetPlan.button("volumeUp"))
     }
 
+    /** I2: the track with its buttons, or one message in the widget's middle. */
+    @Test
+    fun theBodyIsTheTrackOrWhatThereIsInstead() {
+        val track = MediaWidgetPlan.body(hasComputer = true, playing = playing(), answered = true, failed = false, asking = false)
+        assertEquals(MediaWidgetPlan.Body.Track, track)
+        // Asking again keeps the track it has.
+        assertEquals(
+            MediaWidgetPlan.Body.Track,
+            MediaWidgetPlan.body(hasComputer = true, playing = playing(), answered = true, failed = false, asking = true),
+        )
+        assertEquals(
+            MediaWidgetPlan.Body.Nothing,
+            MediaWidgetPlan.body(hasComputer = true, playing = null, answered = true, failed = false, asking = false),
+        )
+        assertEquals(
+            MediaWidgetPlan.Body.Failed,
+            MediaWidgetPlan.body(hasComputer = true, playing = null, answered = false, failed = true, asking = false),
+        )
+        assertEquals(
+            MediaWidgetPlan.Body.Asking,
+            MediaWidgetPlan.body(hasComputer = true, playing = null, answered = false, failed = true, asking = true),
+        )
+        assertEquals(
+            MediaWidgetPlan.Body.Asking,
+            MediaWidgetPlan.body(hasComputer = true, playing = null, answered = false, failed = false, asking = false),
+        )
+        assertEquals(
+            MediaWidgetPlan.Body.NoComputer,
+            MediaWidgetPlan.body(hasComputer = false, playing = null, answered = false, failed = false, asking = false),
+        )
+    }
+
     @Test
     fun anAnswerIsKeptOnlyForItsComputer() {
         assertTrue(MediaWidgetPlan.keeps(readFor = "a", lastComputer = "a"))

@@ -262,13 +262,29 @@ class MediaWidget : AppWidgetProvider() {
                 R.id.widget_media_host,
                 host?.let { HostStore.shownName(context, it.address) } ?: context.getString(R.string.tile_no_computer),
             )
-            val title = when {
-                host == null -> ""
-                playing != null -> playing.headline()
-                shownJson != null -> context.getString(R.string.media_widget_nothing)
-                else -> ""
+            // The track with its buttons, or one message in the middle (I2).
+            val body = MediaWidgetPlan.body(
+                hasComputer = host != null,
+                playing = playing,
+                answered = shownJson != null,
+                failed = kept.failed,
+                asking = asking,
+            )
+            val track = body == MediaWidgetPlan.Body.Track
+            views.setViewVisibility(R.id.widget_media_track, if (track) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.widget_media_message, if (track) View.GONE else View.VISIBLE)
+            if (!track) {
+                val (icon, text) = when (body) {
+                    MediaWidgetPlan.Body.Nothing -> R.drawable.ic_ll_music to context.getString(R.string.media_widget_nothing)
+                    MediaWidgetPlan.Body.Failed ->
+                        R.drawable.ic_ll_warning to (kept.line ?: context.getString(R.string.media_widget_refused))
+                    MediaWidgetPlan.Body.NoComputer -> R.drawable.ic_ll_desktop to context.getString(R.string.tile_no_computer)
+                    else -> R.drawable.ic_ll_refresh to context.getString(R.string.deck_loading)
+                }
+                views.setImageViewResource(R.id.widget_media_message_icon, icon)
+                views.setTextViewText(R.id.widget_media_message_text, text)
             }
-            views.setTextViewText(R.id.widget_media_title, title)
+            views.setTextViewText(R.id.widget_media_title, playing?.headline().orEmpty())
             views.setTextViewText(R.id.widget_media_subline, playing?.subline().orEmpty())
             val line = when {
                 host == null -> null
