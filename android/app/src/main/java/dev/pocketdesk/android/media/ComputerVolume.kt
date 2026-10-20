@@ -61,6 +61,9 @@ private class ComputerVolume(private val context: Context, private val address: 
                 if (stopped) return@post
                 provider.currentVolume = VolumeKeys.toStep(now)
                 session = MediaSession(context, "Pocketdesk volume").apply {
+                    // Without a callback the session drops the keys Android
+                    // hands it (K4 review): the provider is told through it.
+                    setCallback(object : MediaSession.Callback() {}, android.os.Handler(context.mainLooper))
                     setPlaybackToRemote(provider)
                     // Android gives the keys to a session that plays.
                     setPlaybackState(
