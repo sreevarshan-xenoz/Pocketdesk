@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-709 open items.
+714 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 412 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 417 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 23 |
@@ -853,6 +853,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A phone notification's toast on Windows: "Not from this app" last among its buttons; pressed, a notification says the app is muted, and the app's next notification shows no toast but is on Activity, "muted here".
 - An answerable notification from a muted app: still on the Notifications page.
+
+**151. The phone's volume keys for the computer (K4)**
+
+- Remote open: the volume keys and the panel's slider move the computer's volume, one step a press; a held key stops when let go.
+- The Sound sheet moves the volume, then a key press: one step from there, no jump.
+- The screen off: the keys still the computer's. A call: the keys are the call's.
+- A sound session: the keys stay the phone's. The setting off: the keys stay the phone's.
+- `dumpsys media_session`: the session remote, and which session takes the keys on the OPPO and the A71.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
