@@ -2160,6 +2160,14 @@ Built 2026-10-20; tested through the harness and units, nothing by hand yet.
 - [ ] Copy pastes the lines shown; Open log folder opens the folder at the file (Windows, then Linux).
 - [ ] Just after midnight, today's log still empty: the page shows the controls and "0 of the last 0 lines".
 
+## 144. Find a setting on the desktop (J2)
+
+Built 2026-10-20; tested through the harness and units, nothing by hand yet.
+- [ ] Ctrl+F with Settings scrolled down: the box in view with the cursor in it. Esc empties it, and a Restart question open at the same time stays open.
+- [ ] Searches for "browser", "file manager", "computers" and "kde": each extra shown alone in its section.
+- [ ] A setting with a problem, then a search that does not find it: its section still there, whole.
+- [ ] The page at the minimum width, light and dark.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

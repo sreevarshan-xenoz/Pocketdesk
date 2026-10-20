@@ -386,7 +386,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/confi
 - **Approval prompt**: when a phone that must ask connects, the window comes to the front with **Allow once**, **Always allow** and **Deny**. No answer within 30 s is a deny.
 - **Sessions**: live sessions, with End, and with several phones, which one drives and Give control.
 - **Files**: send a file to a connected phone (at home, or by the internet path with "Files over the internet" on), in a session or not (pick the phone, then a path, "Choose file…" on Windows, or drop files on the window), the files sent and whether each was saved, and files received from phones, newest first, with Show in folder. A send that failed has Send again; a received picture, PDF, text, video or audio file has Open.
-- **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
+- **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Find a setting" (Ctrl+F) shows only the settings whose names hold the words typed. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
 - **Diagnostics**: why a phone might not connect. It checks the server, its ports, the firewall, the addresses phones can use and the internet path, shows the last session (encoder and latency), and copies a debug report for an issue. The checks run as the page opens.
 - **Logs**: the server's newest log, its last 400 lines, read again only when the file changes; filter by words or show only warnings and errors, Copy, Open log folder.
 
