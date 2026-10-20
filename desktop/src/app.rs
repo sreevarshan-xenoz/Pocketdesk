@@ -905,6 +905,22 @@ impl PocketdeskApp {
                     ui.end_row();
                 }
             });
+        // Not a fact among the others: a warning, with the way to change it (I3).
+        if self.config.as_ref().is_some_and(|c| !c.pairing_required) {
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(
+                        "Pairing is not required: any device that reaches this computer can connect without pairing.",
+                    )
+                    .color(crate::theme::warn(ui)),
+                );
+                if ui.button("Open Settings").clicked() {
+                    self.switch_to(Tab::Settings);
+                    self.chosen = Tab::Settings;
+                }
+            });
+        }
         ui.add_space(16.0);
         self.phones_panel(ui);
     }
@@ -1026,7 +1042,29 @@ impl PocketdeskApp {
                 });
                 // Its battery, and its last session unless one runs now
                 // (a session is recorded when it ends).
-                let mut facts = vec![format!("Battery {}", battery_text(device.battery.as_ref(), now))];
+                // The battery as a small bar, in the warning colour when low
+                // (I3); its words beside it.
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Battery").color(crate::theme::muted(ui)));
+                    if let Some(battery) = device.battery.as_ref() {
+                        let low = battery_low(battery);
+                        let mut bar = egui::ProgressBar::new(f32::from(battery.charge) / 100.0)
+                            .desired_width(90.0)
+                            .desired_height(8.0);
+                        if low {
+                            bar = bar.fill(crate::theme::warn(ui));
+                        }
+                        ui.add(bar);
+                    }
+                    let words = battery_text(device.battery.as_ref(), now);
+                    let low = device.battery.as_ref().is_some_and(battery_low);
+                    ui.label(if low {
+                        RichText::new(format!("{words}, low")).color(crate::theme::warn(ui))
+                    } else {
+                        RichText::new(words).color(crate::theme::muted(ui))
+                    });
+                });
+                let mut facts = Vec::new();
                 if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now) {
                     facts.push(quiet);
                 }
@@ -2417,6 +2455,12 @@ pub fn media_line(media: &pocketdesk_core::protocol::phone_media::PhoneMedia) ->
     }
 }
 
+/// Whether a battery is low as the server warns of it (T8b's 15 %), not
+/// charging: its bar on the Overview is drawn as a warning (I3).
+pub fn battery_low(battery: &pocketdesk_core::local::phone_status::PhoneBattery) -> bool {
+    battery.charge <= 15 && !battery.charging
+}
+
 /// A phone's last battery report for the Devices tab (T8b): its charge,
 /// whether it is charging, and its age once it is over a minute old.
 pub fn battery_text(
@@ -2593,6 +2637,21 @@ mod tests {
         );
         // A clock that went back is not "in the future".
         assert_eq!(battery_text(Some(&battery(9, false)), 900), "9 %");
+    }
+
+    /// I3: low as the server warns of it, 15 % or under and not charging.
+    #[test]
+    fn a_battery_is_low_at_the_servers_mark() {
+        use pocketdesk_core::local::phone_status::PhoneBattery;
+        let battery = |charge, charging| PhoneBattery {
+            charge,
+            charging,
+            updated_unix: 0,
+        };
+        assert!(battery_low(&battery(15, false)));
+        assert!(battery_low(&battery(3, false)));
+        assert!(!battery_low(&battery(16, false)));
+        assert!(!battery_low(&battery(9, true)), "charging is not low");
     }
 
     #[test]
