@@ -492,6 +492,49 @@ fn find<'a>(app: &'a Harness<'static, PocketdeskApp>) -> egui_kittest::Node<'a> 
         .expect("the search box")
 }
 
+/// J3: the Sessions page lists the recent sessions from the log, by the
+/// phone's name, a refused one as refused, with the server not running.
+#[test]
+fn the_sessions_page_lists_the_recent_sessions() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let log = format!(
+        "{{\"unix_secs\":{},\"outcome\":\"lan_direct\",\"duration_secs\":125,\"device_id\":\"{PHONE}\",\"e2e_tail\":{{\"count\":3,\"mean_ms\":40,\"p50_ms\":38,\"p90_ms\":50,\"p95_ms\":55,\"p99_ms\":70,\"max_ms\":90}}}}\n\
+         {{\"unix_secs\":{},\"outcome\":\"rejected\",\"duration_secs\":0,\"device_id\":\"{PHONE}\"}}\n",
+        now - 7200,
+        now - 120,
+    );
+    std::fs::write(
+        fixture
+            .state()
+            .join(pocketdesk_core::local::paths::SESSIONS_FILE),
+        log,
+    )
+    .expect("log");
+    let mut app = fixture.open(Some(Tab::Sessions));
+    app.run_steps(3);
+    assert!(
+        app.query_by_label_contains("The server is not running")
+            .is_some()
+    );
+    assert!(app.query_by_label("Recent sessions").is_some());
+    assert!(
+        app.query_by_label("2 h ago · for 2m 5s · on this network · 38 ms capture to arrival")
+            .is_some()
+    );
+    assert!(app.query_by_label("2 min ago · refused").is_some());
+    // A refusal is named by its claim, never as the phone (J3 review).
+    assert_eq!(app.query_all_by_label("Test Phone").count(), 1);
+    assert!(
+        app.query_by_label_contains("A device claiming to be")
+            .is_some()
+    );
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

@@ -2168,6 +2168,14 @@ Built 2026-10-20; tested through the harness and units, nothing by hand yet.
 - [ ] A setting with a problem, then a search that does not find it: its section still there, whole.
 - [ ] The page at the minimum width, light and dark.
 
+## 145. The Sessions page in blocks, with the recent ones (J3)
+
+Built 2026-10-20; tested through the harness and units, nothing by hand yet.
+- [ ] A live screen session: its block with the phone, "on this network" and "screen" chips (the address on hover), how long, End.
+- [ ] Two phones: "driving" on one, Give control on the other. A cast with its window closed: Show screen. Music on the phone: Previous, Play/Pause, Next inside its block.
+- [ ] The page at the minimum width: the chips wrap whole, not as tall slivers.
+- [ ] After a session ends: it heads "Recent sessions" with its length, its road and "capture to arrival"; a refused phone reads "A device claiming to be …", its retries one line.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

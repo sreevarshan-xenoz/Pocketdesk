@@ -2,15 +2,15 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-688 open items.
+692 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 397 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 400 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 52 |
 | A phone with a SIM | 22 |
-| A second phone | 7 |
+| A second phone | 8 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
 | A Linux desktop (the Azure VM serves for some) | 89 |
@@ -821,6 +821,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A setting with a problem, then a search that does not find it: its section still there, whole.
 - The page at the minimum width, light and dark.
 
+**145. The Sessions page in blocks, with the recent ones (J3)**
+
+- A live screen session: its block with the phone, "on this network" and "screen" chips (the address on hover), how long, End.
+- The page at the minimum width: the chips wrap whole, not as tall slivers.
+- After a session ends: it heads "Recent sessions" with its length, its road and "capture to arrival"; a refused phone reads "A device claiming to be …", its retries one line.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1116,6 +1122,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **126. The deck (F1)**
 
 - Each refusal on the button: Input, Tasks, Audio or Links off for the phone; "Deck" off; another phone driving.
+
+**145. The Sessions page in blocks, with the recent ones (J3)**
+
+- Two phones: "driving" on one, Give control on the other. A cast with its window closed: Show screen. Music on the phone: Previous, Play/Pause, Next inside its block.
 
 ## Away from home: another network, or through a router
 

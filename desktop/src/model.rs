@@ -408,6 +408,107 @@ pub fn last_sessions(lines: &str) -> std::collections::HashMap<String, u64> {
     last
 }
 
+/// What a live session is, as its chip says (J3).
+pub fn session_kind(session: &pocketdesk_core::local::sessions::MirrorSession) -> &'static str {
+    if session.cast {
+        "its screen or camera here"
+    } else if session.control_only {
+        "control only"
+    } else if session.sound_only {
+        "sound only"
+    } else {
+        "screen"
+    }
+}
+
+/// A session from the log, as the Sessions page lists it (J3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentSession {
+    /// The phone it was with, as it said; `None` when it never said.
+    pub device_id: Option<String>,
+    pub ended_unix: u64,
+    /// `None` when the record does not say (J3 review: it read "for 0s").
+    pub duration_secs: Option<u64>,
+    /// How it connected, or that it was refused or failed, in words.
+    pub how: &'static str,
+    pub refused: bool,
+    /// How many refusals in a row this line stands for: a phone refused as
+    /// it reconnects is refused every few seconds (J3 review).
+    pub times: u32,
+    /// The phone's median latency from capture to arrival, when it
+    /// measured it.
+    pub e2e_ms: Option<u64>,
+}
+
+/// Who a recent session was with, in words. A refused one is named only
+/// by the id it claimed: that is all a refused client proved, and a
+/// stranger may claim a paired phone's (J3 review; N6's last sessions skip
+/// them for the same reason).
+pub fn recent_who(recent: &RecentSession, devices: &[Device]) -> String {
+    match recent.device_id.as_deref() {
+        Some(id) if recent.refused => {
+            format!("A device claiming to be {}", crate::words::short(id))
+        }
+        Some(id) => device_label(devices, id),
+        None => "A device that did not say who it is".to_string(),
+    }
+}
+
+/// The newest `n` sessions in the session log's `lines`, newest first
+/// (J3). Lines that are not records, a cut first line among them, are
+/// skipped.
+pub fn recent_sessions(lines: &str, n: usize) -> Vec<RecentSession> {
+    let mut all: Vec<RecentSession> = lines
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|record| {
+            let outcome = record.get("outcome")?.as_str()?;
+            Some(RecentSession {
+                device_id: record
+                    .get("device_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                ended_unix: record.get("unix_secs")?.as_u64()?,
+                duration_secs: record.get("duration_secs").and_then(|v| v.as_u64()),
+                how: match outcome {
+                    "lan_direct" => "on this network",
+                    "wan_punched" => "over the internet, direct",
+                    "wan_relayed" => "over the internet, through a relay",
+                    "rejected" => "refused",
+                    "failed" => "failed",
+                    _ => "connected",
+                },
+                refused: outcome == "rejected",
+                times: 1,
+                e2e_ms: record
+                    .get("e2e_tail")
+                    .and_then(|t| t.get("p50_ms"))
+                    .and_then(|v| v.as_u64()),
+            })
+        })
+        .collect();
+    // The log is in order of ending already; sorted anyway, stably, from
+    // its end, so two that ended in one second keep the later first (J3
+    // review).
+    all.reverse();
+    all.sort_by_key(|s| std::cmp::Reverse(s.ended_unix));
+    // Refusals of one device in a row are one line, so a phone retrying
+    // does not push the real sessions out of the list.
+    let mut lines: Vec<RecentSession> = Vec::new();
+    for session in all {
+        match lines.last_mut() {
+            Some(last)
+                if last.refused && session.refused && last.device_id == session.device_id =>
+            {
+                last.times += 1;
+            }
+            _ => lines.push(session),
+        }
+    }
+    lines.truncate(n);
+    lines
+}
+
 /// The session log's size and change time, so it is read again only when
 /// it changes (N6 review); `None` when there is no log.
 pub fn session_log_stamp(state_dir: &Path) -> Option<(u64, std::time::SystemTime)> {
@@ -765,6 +866,151 @@ mod tests {
         assert_eq!(last.get("a"), Some(&200));
         assert_eq!(last.get("b"), Some(&300));
         assert_eq!(last.len(), 2);
+    }
+
+    /// J3 review: a refused session is never named as the paired phone
+    /// whose id it claimed.
+    #[test]
+    fn a_refused_session_is_named_only_by_its_claim() {
+        let devices = [Device {
+            id: "0123456789abcdef".to_string(),
+            name: Some("Test Phone".to_string()),
+            ..Default::default()
+        }];
+        let recent = |refused, id: Option<&str>| RecentSession {
+            device_id: id.map(str::to_string),
+            ended_unix: 1,
+            duration_secs: Some(1),
+            how: "on this network",
+            refused,
+            times: 1,
+            e2e_ms: None,
+        };
+        assert_eq!(
+            recent_who(&recent(false, Some("0123456789abcdef")), &devices),
+            "Test Phone"
+        );
+        assert_eq!(
+            recent_who(&recent(true, Some("0123456789abcdef")), &devices),
+            "A device claiming to be 0123456789ab…"
+        );
+        assert_eq!(
+            recent_who(&recent(false, None), &devices),
+            "A device that did not say who it is"
+        );
+    }
+
+    /// J3: a live session's kind chip.
+    #[test]
+    fn a_live_sessions_kind_in_words() {
+        let session =
+            |cast, control_only, sound_only| pocketdesk_core::local::sessions::MirrorSession {
+                cast,
+                control_only,
+                sound_only,
+                id: 1,
+                device_id: None,
+                peer: String::new(),
+                transport: "lan".to_string(),
+                started_unix: 0,
+                driving: false,
+            };
+        assert_eq!(session_kind(&session(false, false, false)), "screen");
+        assert_eq!(
+            session_kind(&session(true, false, false)),
+            "its screen or camera here"
+        );
+        assert_eq!(session_kind(&session(false, true, false)), "control only");
+        assert_eq!(session_kind(&session(false, false, true)), "sound only");
+    }
+
+    /// J3: the Sessions page's recent sessions, newest first, in words.
+    #[test]
+    fn recent_sessions_are_the_logs_newest_in_words() {
+        let log = concat!(
+            r#"{"unix_secs":100,"outcome":"lan_direct","duration_secs":60,"device_id":"a","e2e_tail":{"count":9,"mean_ms":40,"p50_ms":38,"p90_ms":50,"p95_ms":55,"p99_ms":70,"max_ms":90}}"#,
+            "\n",
+            "not json\n",
+            r#"{"unix_secs":300,"outcome":"wan_relayed","duration_secs":5,"device_id":"b","e2e_tail":null}"#,
+            "\n",
+            r#"{"unix_secs":200,"outcome":"rejected","duration_secs":0,"device_id":"c"}"#,
+            "\n",
+            r#"{"unix_secs":400,"outcome":"wan_punched","duration_secs":7}"#,
+            "\n",
+            r#"{"unix_secs":500,"outcome":"failed","duration_secs":1,"device_id":"a"}"#,
+            "\n",
+            r#"{"unix_secs":600,"outcome":"completed","duration_secs":2,"device_id":"a"}"#,
+            "\n",
+        );
+        // A partial first line, as a read from the file's tail leaves.
+        let all = recent_sessions(&format!("_secs\":9}}\n{log}"), 10);
+        let ended: Vec<u64> = all.iter().map(|s| s.ended_unix).collect();
+        assert_eq!(ended, [600, 500, 400, 300, 200, 100], "newest first");
+        let how: Vec<&str> = all.iter().map(|s| s.how).collect();
+        assert_eq!(
+            how,
+            [
+                "connected",
+                "failed",
+                "over the internet, direct",
+                "over the internet, through a relay",
+                "refused",
+                "on this network",
+            ]
+        );
+        assert!(all[4].refused);
+        assert!(!all[5].refused);
+        assert_eq!(all[5].device_id.as_deref(), Some("a"));
+        assert_eq!(all[5].duration_secs, Some(60));
+        assert_eq!(
+            recent_sessions(r#"{"unix_secs":1,"outcome":"failed"}"#, 1)[0].duration_secs,
+            None,
+            "a record without one"
+        );
+        assert_eq!(all[5].e2e_ms, Some(38), "the median, when measured");
+        assert_eq!(all[3].e2e_ms, None);
+        assert_eq!(all[2].device_id, None, "a session with no id");
+        // At most N, the newest.
+        let two = recent_sessions(log, 2);
+        assert_eq!(two.len(), 2);
+        assert_eq!(two[0].ended_unix, 600);
+        assert!(recent_sessions("", 10).is_empty());
+    }
+
+    /// J3 review: two sessions that ended in one second, the later first.
+    #[test]
+    fn sessions_ending_in_one_second_keep_their_order() {
+        let log = concat!(
+            r#"{"unix_secs":100,"outcome":"lan_direct","duration_secs":1,"device_id":"first"}"#,
+            "
+",
+            r#"{"unix_secs":100,"outcome":"lan_direct","duration_secs":1,"device_id":"second"}"#,
+        );
+        let both = recent_sessions(log, 10);
+        assert_eq!(both[0].device_id.as_deref(), Some("second"));
+        assert_eq!(both[1].device_id.as_deref(), Some("first"));
+    }
+
+    /// J3 review: a device refused again and again is one line, and the
+    /// sessions before it stay in the list.
+    #[test]
+    fn refusals_in_a_row_are_one_line() {
+        let mut log = String::from(
+            r#"{"unix_secs":100,"outcome":"lan_direct","duration_secs":60,"device_id":"a"}"#,
+        );
+        log.push('\n');
+        for at in 200..206 {
+            log.push_str(&format!(
+                r#"{{"unix_secs":{at},"outcome":"rejected","duration_secs":0,"device_id":"b"}}"#
+            ));
+            log.push('\n');
+        }
+        let two = recent_sessions(&log, 2);
+        assert_eq!(two.len(), 2);
+        assert!(two[0].refused);
+        assert_eq!(two[0].times, 6);
+        assert_eq!(two[0].ended_unix, 205, "the newest refusal's time");
+        assert_eq!(two[1].device_id.as_deref(), Some("a"), "still listed");
     }
 
     #[test]
