@@ -240,6 +240,18 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_state_info" />
         </receiver>
+        <!-- G5: what the last computer plays, on the home screen. -->
+        <receiver
+            android:name=".shortcuts.MediaWidget"
+            android:exported="false"
+            android:label="@string/media_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_media_info" />
+        </receiver>
         <!-- G3: the last computer's deck on the home screen. -->
         <receiver
             android:name=".shortcuts.DeckWidget"

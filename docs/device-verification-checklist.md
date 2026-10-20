@@ -2047,6 +2047,14 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet. The 
 - [ ] Desktop Settings "Laser pointer from phones" off, after a restart: the switch is not offered.
 - [ ] A slide show (PowerPoint or a browser's): a tap with the laser on still advances or clicks at the pointer.
 
+## 136. The computer's music on the home screen (G5)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet.
+- [ ] Place "Pocketdesk: playing" with music playing on the computer: its title and artist, Previous, Pause and Next as the player offers them, "Read at <time>".
+- [ ] Pause from the widget: the music stops, and the button turns to Play; Next: the next track shown.
+- [ ] Nothing playing: "Nothing is playing", no buttons; Audio off for the phone on the computer: the refusal, no old track.
+- [ ] The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

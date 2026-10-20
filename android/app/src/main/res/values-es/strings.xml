@@ -831,4 +831,15 @@
     <string name="deck_widget_no_answer">El ordenador aún no responde</string>
     <string name="remote_laser">Puntero láser</string>
     <string name="air_hint_laser">Mantén pulsado aquí y gira el teléfono para mover un punto rojo en la pantalla del ordenador; suelta para ocultarlo. Un toque hace clic en el puntero.</string>
+    <string name="media_widget_name">Pocketdesk: sonando</string>
+    <string name="media_widget_description">Lo que suena en el último ordenador, con Anterior, Reproducir/Pausa y Siguiente.</string>
+    <string name="media_widget_refresh">Volver a preguntar qué suena</string>
+    <string name="media_widget_nothing">No suena nada</string>
+    <string name="media_widget_read">Leído a las %1$s</string>
+    <string name="media_widget_previous">Anterior</string>
+    <string name="media_widget_next">Siguiente</string>
+    <string name="media_widget_play">Reproducir</string>
+    <string name="media_widget_pause">Pausa</string>
+    <string name="media_widget_refused">El ordenador lo rechazó</string>
+    <string name="media_widget_unreadable">No se pudo leer la respuesta del ordenador</string>
 </resources>

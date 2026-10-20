@@ -6,7 +6,6 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import androidx.core.content.edit
@@ -16,9 +15,7 @@ import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.Deck
 import dev.pocketdesk.android.ui.plainErrorText
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.concurrent.thread
 
 /**
  * Home-screen widget (G3): the last computer's first six deck buttons
@@ -62,8 +59,8 @@ class DeckWidget : AppWidgetProvider() {
             }
             if (newest) redrawAll(app)
         }
-        bounded("deck-widget-list", onTimeout = noAnswer) {
-            val answer = ask(app) { RustCore.listDeck(host.address, host.controlPort) }
+        WidgetAsk.bounded(this, "deck-widget-list", onTimeout = noAnswer) {
+            val answer = WidgetAsk.ask(app) { RustCore.listDeck(host.address, host.controlPort) }
             val json = answer.getOrNull()?.takeIf { runCatching { Deck.parse(it) }.isSuccess }
             val why = app.plainErrorText(answer.exceptionOrNull()?.message)
             // Only the newest ask keeps what it heard, checked and written at once.
@@ -95,8 +92,8 @@ class DeckWidget : AppWidgetProvider() {
                 line(app, host.address, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_widget_no_answer)))
             }
         }
-        bounded("deck-widget-press", onEnd = { pressing.remove(index) }, onTimeout = noAnswer) {
-            val answer = ask(app) { RustCore.pressDeck(host.address, host.controlPort, index, label) }
+        WidgetAsk.bounded(this, "deck-widget-press", onEnd = { pressing.remove(index) }, onTimeout = noAnswer) {
+            val answer = WidgetAsk.ask(app) { RustCore.pressDeck(host.address, host.controlPort, index, label) }
             val outcome = answer.mapCatching { Deck.outcome(it) }.getOrNull()
             val words = when (DeckWidgetPlan.said(outcome)) {
                 DeckWidgetPlan.Said.Done -> app.getString(R.string.deck_done)
@@ -106,48 +103,6 @@ class DeckWidget : AppWidgetProvider() {
             }
             asking = null
             line(app, host.address, app.getString(R.string.deck_widget_said, label, words))
-        }
-    }
-
-    /**
-     * The bridge's [request], with the bridge started first: a widget's tap
-     * may start the process, which then has no identity or pins until it is
-     * (G3 review). An Error from the library is a failure, said on the line.
-     */
-    private fun ask(app: Context, request: () -> Result<String>): Result<String> = try {
-        RustCore.start(app)
-        request()
-    } catch (e: Throwable) {
-        Result.failure(e)
-    }
-
-    /**
-     * Run [work] on a thread under the broadcast's goAsync, waiting at most
-     * [ASK_SECONDS], then [onTimeout] if it still runs; an Error is caught,
-     * never the app's crash. [work] draws what it heard itself, so a late
-     * answer is drawn too.
-     */
-    private fun bounded(name: String, onEnd: () -> Unit = {}, onTimeout: () -> Unit, work: () -> Unit) {
-        val pending = goAsync()
-        thread(name = name) {
-            try {
-                val worker = thread(name = "$name-ask") {
-                    try {
-                        work()
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "deck widget: $name failed", e)
-                    } finally {
-                        onEnd()
-                    }
-                }
-                worker.join(TimeUnit.SECONDS.toMillis(ASK_SECONDS))
-                // Said, not kept as "Asking…" for good (G3 review).
-                if (worker.isAlive) onTimeout()
-            } catch (e: Exception) {
-                Log.w(TAG, "deck widget: $name failed", e)
-            } finally {
-                pending.finish()
-            }
         }
     }
 
@@ -223,14 +178,12 @@ class DeckWidget : AppWidgetProvider() {
     }
 
     companion object {
-        private const val TAG = "DeckWidget"
         private const val ACTION_REFRESH = "dev.pocketdesk.android.action.DECK_WIDGET_REFRESH"
         private const val ACTION_FOLLOW = "dev.pocketdesk.android.action.DECK_WIDGET_FOLLOW"
         private const val ACTION_PRESS = "dev.pocketdesk.android.action.DECK_WIDGET_PRESS"
         private const val EXTRA_COMPUTER = "computer"
         private const val EXTRA_INDEX = "index"
         private const val EXTRA_LABEL = "label"
-        private const val ASK_SECONDS = 8L
 
         /** The newest list ask in this process: only it keeps what it heard. */
         private val generation = AtomicLong()
