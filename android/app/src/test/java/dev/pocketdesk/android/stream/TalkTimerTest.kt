@@ -33,6 +33,16 @@ class TalkTimerTest {
         assertEquals(2, TalkTimer.pulses(total, before = 400, now = 50))
     }
 
+    /** H2 review: the time left rounds up, so the end comes at the end. */
+    @Test
+    fun theTimeLeftRoundsUp() {
+        assertEquals(1L, TalkTimer.left(endsAtMs = 10_000, nowMs = 9_001))
+        assertEquals(0L, TalkTimer.left(endsAtMs = 10_000, nowMs = 10_000))
+        assertEquals(-1L, TalkTimer.left(endsAtMs = 10_000, nowMs = 11_000))
+        assertEquals(0L, TalkTimer.left(endsAtMs = 10_000, nowMs = 10_999))
+        assertEquals(300L to 1, TalkTimer.crossed(1_200, before = 301, now = 300))
+    }
+
     @Test
     fun theChoicesAreTheUsualTalkLengths() {
         assertEquals(listOf(5, 10, 15, 20, 30, 45, 60), TalkTimer.MINUTES)

@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.ui
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.SystemClock
 import android.os.VibrationEffect
@@ -38,14 +39,19 @@ import kotlinx.coroutines.delay
  * going down and up again) never loses it (H2 review). On the uptime
  * clock, which sleep does not stop; saved across rotation.
  */
-class TalkTimerState(endsAt: Long = 0L, totalSec: Long = 0L) {
+class TalkTimerState(endsAt: Long = 0L, totalSec: Long = 0L, lastMark: Long = NO_MARK) {
     var endsAt by mutableLongStateOf(endsAt)
     var totalSec by mutableLongStateOf(totalSec)
 
+    /** The last mark buzzed, so a restart never buzzes it again (H2 review). */
+    var lastMark by mutableLongStateOf(lastMark)
+
     companion object {
+        const val NO_MARK = Long.MAX_VALUE
+
         val Saver = listSaver<TalkTimerState, Long>(
-            save = { listOf(it.endsAt, it.totalSec) },
-            restore = { TalkTimerState(it[0], it[1]) },
+            save = { listOf(it.endsAt, it.totalSec, it.lastMark) },
+            restore = { TalkTimerState(it[0], it[1], it[2]) },
         )
     }
 }
@@ -68,12 +74,15 @@ fun TalkTimerButton(state: TalkTimerState) {
     LaunchedEffect(state.endsAt) {
         val endsAt = state.endsAt
         if (endsAt == 0L) return@LaunchedEffect
-        var before = (endsAt - SystemClock.elapsedRealtime()) / 1000 + 1
+        var before = TalkTimer.left(endsAt, SystemClock.elapsedRealtime()) + 1
         while (true) {
             now = SystemClock.elapsedRealtime()
-            val left = Math.floorDiv(endsAt - now, 1000L)
-            val pulses = TalkTimer.pulses(state.totalSec, before, left)
-            if (pulses > 0 && Prefs.talkTimerBuzz(context)) buzz(context, pulses)
+            val left = TalkTimer.left(endsAt, now)
+            val mark = TalkTimer.crossed(state.totalSec, before, left)
+            if (mark != null && mark.first < state.lastMark) {
+                state.lastMark = mark.first
+                if (Prefs.talkTimerBuzz(context)) buzz(context, mark.second)
+            }
             before = left
             delay(TICK_MS)
         }
@@ -82,7 +91,7 @@ fun TalkTimerButton(state: TalkTimerState) {
     if (state.endsAt == 0L) {
         TextButton(onClick = { choosing = true }) { Text(stringResource(R.string.talk_timer)) }
     } else {
-        val left = Math.floorDiv(state.endsAt - now, 1000L)
+        val left = TalkTimer.left(state.endsAt, now)
         val shown = TalkTimer.text(left)
         val description = stringResource(R.string.talk_timer_running, shown)
         TextButton(
@@ -107,7 +116,10 @@ fun TalkTimerButton(state: TalkTimerState) {
                         TextButton(onClick = {
                             Prefs.setTalkTimerMinutes(context, minutes)
                             state.totalSec = minutes * 60L
-                            state.endsAt = SystemClock.elapsedRealtime() + state.totalSec * 1000
+                            state.lastMark = TalkTimerState.NO_MARK
+                            // Read at once, so the first frame shows the length, not a stale time (H2 review).
+                            now = SystemClock.elapsedRealtime()
+                            state.endsAt = now + state.totalSec * 1000
                             choosing = false
                         }) {
                             val mark = if (minutes == Prefs.talkTimerMinutes(context)) " ✓" else ""
@@ -134,5 +146,8 @@ private fun buzz(context: Context, count: Int) {
     } ?: return
     // Off, on, in pairs: 220 ms buzzes 180 ms apart.
     val timings = LongArray(count * 2) { i -> if (i % 2 == 1) 220L else if (i == 0) 0L else 180L }
-    runCatching { vibrator.vibrate(VibrationEffect.createWaveform(timings, -1)) }
+    // As an alarm, which Do Not Disturb and touch-feedback settings leave alone (H2 review).
+    val alarm = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
+    @Suppress("DEPRECATION")
+    runCatching { vibrator.vibrate(VibrationEffect.createWaveform(timings, -1), alarm) }
 }

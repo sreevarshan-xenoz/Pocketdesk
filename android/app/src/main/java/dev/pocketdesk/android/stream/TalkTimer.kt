@@ -29,6 +29,15 @@ object TalkTimer {
      * How many buzzes to give as the time left goes from [before] to [now]
      * seconds: the latest mark crossed, or 0.
      */
-    fun pulses(totalSec: Long, before: Long, now: Long): Int =
-        marks(totalSec).filter { (at, _) -> before > at && now <= at }.minByOrNull { it.first }?.second ?: 0
+    fun pulses(totalSec: Long, before: Long, now: Long): Int = crossed(totalSec, before, now)?.second ?: 0
+
+    /** The latest mark crossed going from [before] to [now], with its buzzes, or null. */
+    fun crossed(totalSec: Long, before: Long, now: Long): Pair<Long, Int>? =
+        marks(totalSec).filter { (at, _) -> before > at && now <= at }.minByOrNull { it.first }
+
+    /**
+     * Whole seconds left at [nowMs] for a talk ending at [endsAtMs], rounded
+     * up, so the end mark comes at the end, not a second early (H2 review).
+     */
+    fun left(endsAtMs: Long, nowMs: Long): Long = -Math.floorDiv(nowMs - endsAtMs, 1000L)
 }

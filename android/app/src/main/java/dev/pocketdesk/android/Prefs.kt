@@ -417,6 +417,14 @@ object Prefs {
 
     /** How far the cursor moves per finger pixel on the trackpad. */
     /** How fast the air mouse moves the pointer (F4), as the trackpad's range. */
+    fun airMouseSpeed(ctx: Context): Float =
+        prefs(ctx).getFloat(KEY_AIR_MOUSE_SPEED, 1f).coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)
+
+    fun setAirMouseSpeed(ctx: Context, value: Float) {
+        prefs(ctx).edit { putFloat(KEY_AIR_MOUSE_SPEED, value.coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)) }
+        bump()
+    }
+
     /** The talk timer's last length in minutes (H2), 20 until one is chosen. */
     fun talkTimerMinutes(ctx: Context): Int = prefs(ctx).getInt(KEY_TALK_TIMER_MINUTES, 20)
 
@@ -429,14 +437,6 @@ object Prefs {
 
     fun setTalkTimerBuzz(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_TALK_TIMER_BUZZ, on) }
-        bump()
-    }
-
-    fun airMouseSpeed(ctx: Context): Float =
-        prefs(ctx).getFloat(KEY_AIR_MOUSE_SPEED, 1f).coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)
-
-    fun setAirMouseSpeed(ctx: Context, value: Float) {
-        prefs(ctx).edit { putFloat(KEY_AIR_MOUSE_SPEED, value.coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)) }
         bump()
     }
 
