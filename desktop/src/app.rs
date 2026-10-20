@@ -1622,8 +1622,10 @@ impl PocketdeskApp {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(who).strong());
                 let mut line = vec![crate::words::ago(now, recent.ended_unix)];
-                if !recent.refused {
-                    line.push(format!("for {}", human_duration(recent.duration_secs)));
+                if !recent.refused
+                    && let Some(secs) = recent.duration_secs.filter(|&secs| secs > 0)
+                {
+                    line.push(format!("for {}", human_duration(secs)));
                 }
                 line.push(match recent.times {
                     1 => recent.how.to_string(),

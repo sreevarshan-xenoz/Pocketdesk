@@ -427,7 +427,8 @@ pub struct RecentSession {
     /// The phone it was with, as it said; `None` when it never said.
     pub device_id: Option<String>,
     pub ended_unix: u64,
-    pub duration_secs: u64,
+    /// `None` when the record does not say (J3 review: it read "for 0s").
+    pub duration_secs: Option<u64>,
     /// How it connected, or that it was refused or failed, in words.
     pub how: &'static str,
     pub refused: bool,
@@ -468,10 +469,7 @@ pub fn recent_sessions(lines: &str, n: usize) -> Vec<RecentSession> {
                     .and_then(|v| v.as_str())
                     .map(str::to_string),
                 ended_unix: record.get("unix_secs")?.as_u64()?,
-                duration_secs: record
-                    .get("duration_secs")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
+                duration_secs: record.get("duration_secs").and_then(|v| v.as_u64()),
                 how: match outcome {
                     "lan_direct" => "on this network",
                     "wan_punched" => "over the internet, direct",
@@ -882,7 +880,7 @@ mod tests {
         let recent = |refused, id: Option<&str>| RecentSession {
             device_id: id.map(str::to_string),
             ended_unix: 1,
-            duration_secs: 1,
+            duration_secs: Some(1),
             how: "on this network",
             refused,
             times: 1,
@@ -963,7 +961,12 @@ mod tests {
         assert!(all[4].refused);
         assert!(!all[5].refused);
         assert_eq!(all[5].device_id.as_deref(), Some("a"));
-        assert_eq!(all[5].duration_secs, 60);
+        assert_eq!(all[5].duration_secs, Some(60));
+        assert_eq!(
+            recent_sessions(r#"{"unix_secs":1,"outcome":"failed"}"#, 1)[0].duration_secs,
+            None,
+            "a record without one"
+        );
         assert_eq!(all[5].e2e_ms, Some(38), "the median, when measured");
         assert_eq!(all[3].e2e_ms, None);
         assert_eq!(all[2].device_id, None, "a session with no id");
