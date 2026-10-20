@@ -92,27 +92,31 @@ impl LogsView {
             );
             return;
         }
-        let shown = shown(&self.lines, &self.filter, self.warnings_only);
-        ui.horizontal_wrapped(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.filter)
-                    .hint_text("Filter")
-                    .desired_width(220.0),
-            );
-            ui.checkbox(&mut self.warnings_only, "Warnings and errors only");
-            if ui.button("Copy").on_hover_text("The lines shown").clicked() {
-                ui.ctx().copy_text(shown.join("\n"));
-                self.copied = Some(Instant::now());
-            }
-            crate::notice::copied(ui, &mut self.copied);
-            if let Some((path, _, _)) = &self.read
-                && ui.button("Open log folder").clicked()
-                && let Err(e) = crate::reveal::show_in_folder(path)
-            {
-                self.notice =
-                    crate::notice::Notice::error(format!("Could not open the folder: {e}"));
-            }
-        });
+        let shown = ui
+            .horizontal_wrapped(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.filter)
+                        .hint_text("Filter")
+                        .desired_width(220.0),
+                );
+                ui.checkbox(&mut self.warnings_only, "Warnings and errors only");
+                // After the filter's box, so a key's change shows this frame.
+                let shown = shown(&self.lines, &self.filter, self.warnings_only);
+                if ui.button("Copy").on_hover_text("The lines shown").clicked() {
+                    ui.ctx().copy_text(shown.join("\n"));
+                    self.copied = Some(Instant::now());
+                }
+                crate::notice::copied(ui, &mut self.copied);
+                if let Some((path, _, _)) = &self.read
+                    && ui.button("Open log folder").clicked()
+                    && let Err(e) = crate::reveal::show_in_folder(path)
+                {
+                    self.notice =
+                        crate::notice::Notice::error(format!("Could not open the folder: {e}"));
+                }
+                shown
+            })
+            .inner;
         ui.label(
             RichText::new(format!(
                 "{} of the last {} lines",
