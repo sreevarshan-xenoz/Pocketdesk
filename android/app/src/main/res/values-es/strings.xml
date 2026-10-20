@@ -847,6 +847,9 @@
     <string name="wake_tile_label">Despertar ordenador</string>
     <string name="wake_tile_not_yet">Conéctate una vez mientras esté encendido</string>
     <string name="wake_tile_off">Despertar está desactivado para él</string>
-    <string name="wake_tile_sent">Aviso para despertar enviado</string>
     <string name="wake_tile_failed">No se pudo enviar el aviso</string>
+    <string name="wake_tile_sending">Enviando el aviso…</string>
+    <string name="wake_tile_waiting">Enviado, esperando respuesta…</string>
+    <string name="wake_tile_awake">Está encendido</string>
+    <string name="wake_tile_no_answer">Enviado, pero no responde</string>
 </resources>
