@@ -204,6 +204,12 @@ class DeckWidget : AppWidgetProvider() {
             R.id.widget_deck_b3, R.id.widget_deck_b4, R.id.widget_deck_b5,
         )
 
+        /** Each slot's label, inside its tile (I2). */
+        private val LABEL_IDS = intArrayOf(
+            R.id.widget_deck_b0_label, R.id.widget_deck_b1_label, R.id.widget_deck_b2_label,
+            R.id.widget_deck_b3_label, R.id.widget_deck_b4_label, R.id.widget_deck_b5_label,
+        )
+
         /** The deck sheet's list (F1), kept for the widget too. */
         fun keep(context: Context, computer: String, json: String) {
             val app = context.applicationContext
@@ -268,7 +274,9 @@ class DeckWidget : AppWidgetProvider() {
                     views.setViewVisibility(id, View.INVISIBLE)
                 } else {
                     views.setViewVisibility(id, View.VISIBLE)
-                    views.setTextViewText(id, button.label)
+                    views.setTextViewText(LABEL_IDS[slot], button.label)
+                    // What the button does, as on the deck sheet (I2).
+                    views.setTextViewCompoundDrawables(LABEL_IDS[slot], 0, Deck.iconRes(button.kind), 0, 0)
                     views.setContentDescription(id, button.label)
                     views.setOnClickPendingIntent(
                         id,

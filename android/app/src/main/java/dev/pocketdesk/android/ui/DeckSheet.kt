@@ -154,11 +154,5 @@ fun DeckSheet(address: String, controlPort: Int, computer: String, onDismiss: ()
     }
 }
 
-/** Each kind's icon: keys a keyboard, a task a gear, media play, a link the globe, text the clipboard. */
-private fun kindIcon(kind: String): LlGlyph = when (kind) {
-    "task" -> LlIcons.Settings
-    "media" -> LlIcons.Play
-    "link" -> LlIcons.Language
-    "text" -> LlIcons.Clipboard
-    else -> LlIcons.Keyboard
-}
+/** Each kind's icon, as the widget draws it ([Deck.iconRes]). */
+private fun kindIcon(kind: String): LlGlyph = LlGlyph(Deck.iconRes(kind))

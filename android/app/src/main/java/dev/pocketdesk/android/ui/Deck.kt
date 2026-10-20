@@ -1,5 +1,6 @@
 package dev.pocketdesk.android.ui
 
+import dev.pocketdesk.android.R
 import org.json.JSONObject
 
 /**
@@ -19,6 +20,18 @@ object Deck {
 
     /** The kinds a button may have; any other is shown as keys. */
     val KINDS = listOf("keys", "task", "media", "link", "text")
+
+    /**
+     * Each kind's icon, on the deck sheet and the widget (I2): keys a
+     * keyboard, a task a gear, media play, a link the globe, text the clipboard.
+     */
+    fun iconRes(kind: String): Int = when (kind) {
+        "task" -> R.drawable.ic_ll_settings
+        "media" -> R.drawable.ic_ll_play
+        "link" -> R.drawable.ic_ll_language
+        "text" -> R.drawable.ic_ll_clipboard
+        else -> R.drawable.ic_ll_keyboard
+    }
 
     /** Buttons a row holds: the owner's choice, 2 to 4. */
     const val DEFAULT_COLUMNS = 3
