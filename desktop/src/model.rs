@@ -23,8 +23,9 @@ pub struct Device {
     pub grant_remaining: Option<u64>,
     /// Whether it has a live streaming session right now.
     pub connected: bool,
-    /// Whether a file can be offered to it now: in a session, or holding a
-    /// control link at home (T10d).
+    /// Whether a file can be offered to it now: holding a control link
+    /// files can ride (T10d), which a screen or sound session keeps and a
+    /// remote does not.
     pub takes_files: bool,
     /// Whether it keeps a link now, a session's or the background one, so
     /// a ring can reach it (N1).
@@ -314,7 +315,7 @@ pub fn phone_rows<'a>(
                 file: if !allows(Capability::Files) {
                     Err("Files are off for this phone, on the Devices page.")
                 } else if !device.takes_files {
-                    Err("Files reach it in a session, or at home with \"Files from the computer in the background\" on in Pocketdesk's Settings on the phone.")
+                    Err("Files reach it in a screen or sound session (not the remote alone), or at home with \"Files from the computer in the background\" on in Pocketdesk's Settings on the phone.")
                 } else {
                     Ok(())
                 },
@@ -431,8 +432,8 @@ pub fn session_log_tail(state_dir: &Path) -> String {
     String::from_utf8_lossy(&tail).into_owned()
 }
 
-/// The phones a file can be sent to: in a session, or holding a control
-/// link the server can dial back (T10d).
+/// The phones a file can be sent to: holding a control link files can
+/// ride, a screen or sound session's or a background one (T10d).
 pub fn send_targets(snapshot: &Snapshot) -> Vec<&Device> {
     snapshot.devices.iter().filter(|d| d.takes_files).collect()
 }
@@ -793,7 +794,12 @@ mod tests {
         assert!(rows[1].file.unwrap_err().contains("Devices"));
         assert!(rows[1].link.unwrap_err().contains("Devices"));
         assert!(rows[2].ring.unwrap_err().contains("Not linked"));
-        assert!(rows[2].file.unwrap_err().contains("in a session"));
+        assert!(
+            rows[2]
+                .file
+                .unwrap_err()
+                .contains("in a screen or sound session")
+        );
         assert!(rows[2].link.unwrap_err().contains("Not linked"));
         assert!(rows[0].mute.is_ok());
         assert!(rows[1].mute.unwrap_err().contains("Devices"));
@@ -862,6 +868,8 @@ mod tests {
     }
 
     const ONE_SESSION: &str = r#"{"updated_unix":100,"sessions":[{"device_id":"a","peer":"1.2.3.4:5","transport":"lan","started_unix":90}]}"#;
+    /// [`ONE_SESSION`] with the control link a screen session keeps.
+    const ONE_SESSION_LINKED: &str = r#"{"updated_unix":100,"sessions":[{"device_id":"a","peer":"1.2.3.4:5","transport":"lan","started_unix":90}],"linked":[{"device_id":"a","files":true}]}"#;
 
     #[test]
     fn a_dead_server_shows_no_sessions_even_with_a_mirror_left_behind() {
@@ -1049,7 +1057,10 @@ mod tests {
         let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
         store.trust_device("a").unwrap();
         store.trust_device("b").unwrap();
+        // A session alone (a remote) keeps no control link: no road for files.
         std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
+        assert!(send_targets(&snapshot_with(&dir, 101, true)).is_empty());
+        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION_LINKED).unwrap();
         let snap = snapshot_with(&dir, 101, true);
         let ids: Vec<_> = send_targets(&snap).iter().map(|d| d.id.clone()).collect();
         assert_eq!(ids, ["a"]);
@@ -1133,7 +1144,7 @@ mod tests {
         let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
         store.trust_device("a").unwrap();
         store.trust_device("b").unwrap();
-        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION).unwrap();
+        std::fs::write(dir.join(LIVE_FILE), ONE_SESSION_LINKED).unwrap();
         let snap = snapshot_with(&dir, 101, true);
         assert_eq!(target_for_send(&snap, Some("a")), Ok("a".to_string()));
         assert_eq!(

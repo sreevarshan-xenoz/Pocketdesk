@@ -55,13 +55,13 @@ pub struct PhotosView {
     copying: Option<mpsc::Receiver<Result<egui::ColorImage, String>>>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
-    /// The phones files reach now (a session, or linked at home), read
+    /// The phones files reach now (a control link files can ride), read
     /// with the photos: only those can be asked for a photo (F3 review).
     reach: Option<pocketdesk_core::local::sessions::LiveMirror>,
 }
 
-/// The phones files reach now, from the live sessions' mirror: in a
-/// session, or linked at home.
+/// The phones files reach now, from the live sessions' mirror: those
+/// holding a control link files can ride (a remote alone holds none).
 fn reachable(
     state_dir: &Path,
     now_unix: u64,

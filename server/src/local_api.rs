@@ -370,10 +370,11 @@ pub fn send_in(
             None => return refused(exit::BAD_ARGUMENTS, reason),
         },
     };
-    // An offer reaches only a phone files can reach (in a session, or
-    // holding a control link at home, T10d, or by the internet road with
-    // `internet_files` on, 2c), and a computer only while its link is up
-    // (2h): say so now, not after queueing a send the server can only fail.
+    // An offer reaches only a phone files can reach (holding a control
+    // link at home, a session's or a background one, T10d, or by the
+    // internet road with `internet_files` on, 2c), and a computer only
+    // while its link is up (2h): say so now, not after queueing a send the
+    // server can only fail.
     let now = pocketdesk_core::local::pin::now_unix();
     if let Some(computer) = computers.iter().find(|c| c.device_id == device_id) {
         if computer.link != "linked" {
@@ -836,7 +837,8 @@ pub fn run_link(query: &str, url: &str, as_json: bool) -> i32 {
 }
 
 /// The phone "Send to phone" sends to: of the paired phones files reach
-/// now, one in a session first, else the first linked (T10e).
+/// now, one in a session first, else the first linked (T10e). A remote
+/// alone keeps no control link, so files never reach it.
 /// The phone a link goes to with no phone named: the first paired one in a
 /// session (only a session shows a link) with Links on.
 pub fn link_phone(state_dir: &Path, now_unix: u64, running: bool) -> Option<String> {
@@ -855,7 +857,7 @@ pub fn default_phone(state_dir: &Path, now_unix: u64, running: bool) -> Option<S
         .sessions
         .iter()
         .filter_map(|s| s.device_id.clone())
-        .find(|id| paired.contains(id));
+        .find(|id| paired.contains(id) && mirror.files_reach(id));
     in_session.or_else(|| {
         mirror
             .linked
@@ -1429,19 +1431,35 @@ mod tests {
             .unwrap();
         let file = dir.join("report.pdf");
         std::fs::write(&file, b"r").unwrap();
-        in_session(&dir, &["5f1c9b3d-6e70"]);
+        in_screen_session(&dir, &["5f1c9b3d-6e70"]);
         (dir, file)
     }
 
-    /// The running server's report: `phones` in a session now.
+    /// The running server's report: `phones` in a session now, with no
+    /// control link (a remote's, or a screen session's before its link).
     fn in_session(dir: &Path, phones: &[&str]) {
+        mirror_of(dir, phones, false);
+    }
+
+    /// The running server's report: `phones` in a screen session now, each
+    /// with the control link such a session keeps.
+    fn in_screen_session(dir: &Path, phones: &[&str]) {
+        mirror_of(dir, phones, true);
+    }
+
+    fn mirror_of(dir: &Path, phones: &[&str], linked: bool) {
         let sessions: Vec<Value> = phones
             .iter()
             .map(|p| json!({ "device_id": p, "peer": "192.0.2.7:1", "transport": "lan", "started_unix": 1 }))
             .collect();
+        let linked: Vec<Value> = phones
+            .iter()
+            .filter(|_| linked)
+            .map(|p| json!({ "device_id": p, "files": true }))
+            .collect();
         std::fs::write(
             dir.join(LIVE_FILE),
-            json!({ "updated_unix": pocketdesk_core::local::pin::now_unix(), "sessions": sessions }).to_string(),
+            json!({ "updated_unix": pocketdesk_core::local::pin::now_unix(), "sessions": sessions, "linked": linked }).to_string(),
         )
         .unwrap();
     }
@@ -1489,11 +1507,21 @@ mod tests {
         };
         let now = pocketdesk_core::local::pin::now_unix();
         let linked = json!([{ "device_id": "a71e00aa-0002", "files": true }]);
-        mirror(&["5f1c9b3d-6e70"], linked.clone());
+        let both = json!([
+            { "device_id": "a71e00aa-0002", "files": true },
+            { "device_id": "5f1c9b3d-6e70", "files": true }
+        ]);
+        mirror(&["5f1c9b3d-6e70"], both);
         assert_eq!(
             default_phone(&dir, now, true).as_deref(),
             Some("5f1c9b3d-6e70"),
             "a session first"
+        );
+        mirror(&["5f1c9b3d-6e70"], linked.clone());
+        assert_eq!(
+            default_phone(&dir, now, true).as_deref(),
+            Some("a71e00aa-0002"),
+            "a remote alone keeps no control link"
         );
         mirror(&["stranger"], linked.clone());
         assert_eq!(
@@ -1568,7 +1596,7 @@ mod tests {
         assert_eq!(code, exit::FAILED);
         assert!(body.contains("No phone is connected"), "{body}");
         let missing = dir.join("gone.pdf");
-        in_session(&dir, &["5f1c9b3d-6e70"]);
+        in_screen_session(&dir, &["5f1c9b3d-6e70"]);
         let (summary, body, code) = send_to_phone_in(&dir, &[file, missing], &|| true);
         assert_eq!(code, exit::FAILED, "one of two failed");
         assert!(summary.starts_with("Some not sent"), "{summary}");
@@ -1808,6 +1836,7 @@ mod tests {
     #[test]
     fn a_ring_is_queued_for_a_linked_phone_with_ring_on() {
         let (dir, _) = send_setup("ring");
+        in_session(&dir, &["5f1c9b3d-6e70"]);
         let (out, code) = ring_in(&dir, "5f1c9b", true);
         assert_eq!(
             code,
