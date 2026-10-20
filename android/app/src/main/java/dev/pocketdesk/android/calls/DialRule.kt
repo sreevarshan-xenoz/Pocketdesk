@@ -3,7 +3,8 @@ package dev.pocketdesk.android.calls
 /**
  * Whether a number the computer sent opens the dialer (L4): "Calls from the
  * computer" on, from the phone's own computer, a number (as the computer's
- * rule: digits, * and #, a + only at the start, 3 to 32), within
+ * rule: digits, a + only at the start, 3 to 32; never * or #, which make
+ * MMI and USSD codes), within
  * [PER_MINUTE]. The dialer only shows it; the owner presses Call. Pure, for
  * JVM tests.
  */
@@ -14,12 +15,12 @@ object DialRule {
     enum class Decision { Open, Off, NotOwnComputer, NotANumber, TooMany }
 
     private val PUNCTUATION = Regex("[ .()-]")
-    private val NUMBER = Regex("^\\+?[0-9*#]{2,31}$")
+    private val NUMBER = Regex("^\\+?[0-9]+$")
 
     /** [raw] cleaned as the computer cleans it, or null when it is not a number. */
     fun number(raw: String): String? {
         val kept = raw.replace(PUNCTUATION, "")
-        val ok = kept.length in 3..32 && NUMBER.matches(kept) && kept.any { it.isDigit() }
+        val ok = kept.length in 3..32 && NUMBER.matches(kept)
         return kept.takeIf { ok }
     }
 
@@ -32,6 +33,6 @@ object DialRule {
             else -> Decision.Open
         }
 
-    /** The dialer's address for [number]: a `#` would end it, so it is escaped. */
-    fun telUri(number: String): String = "tel:" + number.replace("#", "%23")
+    /** The dialer's address for [number] (digits and a leading +). */
+    fun telUri(number: String): String = "tel:$number"
 }

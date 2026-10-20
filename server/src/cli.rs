@@ -91,7 +91,7 @@ pub enum Commands {
     Call {
         /// The phone: its device id, or 6 or more of its first characters
         phone: String,
-        /// The number: digits, * and #, a + only at the start
+        /// The number: digits, a + only at the start
         number: String,
         /// Print the local API's JSON (see docs/local-api.md)
         #[arg(long)]

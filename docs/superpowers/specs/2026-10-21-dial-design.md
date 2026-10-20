@@ -10,7 +10,7 @@
 ## What changes
 
 - **The computer asks:** "Call" beside each conversation's number on the Messages page, and `pocketdesk call <phone> <number> [--json]`. The request goes through `<state>/dials_out/` (one file each, a minute to live), and the server sends `kdeconnect.pocketdesk.dial {number}` to that phone if it is connected.
-- **The number:** spaces, dashes, dots and brackets are dropped; what is left must be digits, `*` and `#`, with at most one `+` at the start, 3 to 32 characters (`core::protocol::dial`, tested on both ends).
+- **The number:** spaces, dashes, dots and brackets are dropped; what is left must be digits, with at most one `+` at the start, 3 to 32 characters (`core::protocol::dial`, tested on both ends). Never `*` or `#`: those make MMI and USSD codes, and one tap on Call of `**21*…#` would forward every call.
 - **Permissions:**
   - **The computer:** a per-phone permission, "Call numbers from here" (`Capability::Dial`, on). Like Ring, it is about what the computer sends.
   - **The phone:** Settings "Calls from the computer", off by default.

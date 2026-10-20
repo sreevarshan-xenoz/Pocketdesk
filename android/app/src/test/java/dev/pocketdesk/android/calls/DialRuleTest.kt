@@ -10,13 +10,14 @@ class DialRuleTest {
     @Test
     fun `a number is cleaned as the computer does`() {
         assertEquals("+15550100100", DialRule.number("+1 (555) 010-0100"))
-        assertEquals("*#06#", DialRule.number("*#06#"))
+        assertNull("a code", DialRule.number("*#06#"))
+        assertNull("call forwarding", DialRule.number("**21*5550100#"))
+        assertEquals(32, DialRule.number("1".repeat(32))?.length)
         assertEquals("112", DialRule.number("112"))
         assertNull(DialRule.number("12"))
         assertNull(DialRule.number("1".repeat(33)))
         assertNull(DialRule.number("1+555"))
         assertNull(DialRule.number("555-CALL"))
-        assertNull(DialRule.number("***"))
     }
 
     /** L4: the dialer opens only with everything in place. */
@@ -27,6 +28,6 @@ class DialRuleTest {
         assertEquals(Decision.NotOwnComputer, DialRule.decide(true, false, "112", true))
         assertEquals(Decision.NotANumber, DialRule.decide(true, true, null, true))
         assertEquals(Decision.TooMany, DialRule.decide(true, true, "112", false))
-        assertEquals("tel:*%2306%23", DialRule.telUri("*#06#"))
+        assertEquals("tel:+15550100100", DialRule.telUri("+15550100100"))
     }
 }
