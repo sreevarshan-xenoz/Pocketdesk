@@ -132,6 +132,29 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Pause what the phones bring to this computer (K2a): their
+    /// notifications and texts not shown, links not opened, rings not
+    /// sounded. With no flag, says whether it is paused. Exit codes: 0 done,
+    /// 1 failed, 2 bad arguments
+    Pause {
+        /// For how many minutes, 1 to 10080 (a week)
+        #[arg(
+            long = "for",
+            value_name = "MINUTES",
+            conflicts_with_all = ["until_resumed", "resume"],
+            value_parser = clap::value_parser!(u32).range(1..=10080)
+        )]
+        minutes: Option<u32>,
+        /// Until resumed
+        #[arg(long, conflicts_with = "resume")]
+        until_resumed: bool,
+        /// End the pause
+        #[arg(long)]
+        resume: bool,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// Send files or folders to your phone, the one connected on this
     /// network (in a session first): what the file manager's "Send to
     /// phone" runs. Says how it went in a desktop notification too.

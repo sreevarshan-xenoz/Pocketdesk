@@ -138,6 +138,23 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             let minutes = if off { 0 } else { minutes };
             std::process::exit(local_api::run_quiet(&phone, minutes, json))
         }
+        cli::Commands::Pause {
+            minutes,
+            until_resumed,
+            resume,
+            json,
+        } => {
+            let ask = if resume {
+                local_api::PauseAsk::Resume
+            } else if until_resumed {
+                local_api::PauseAsk::Pause(None)
+            } else if let Some(minutes) = minutes {
+                local_api::PauseAsk::Pause(Some(minutes))
+            } else {
+                local_api::PauseAsk::Show
+            };
+            std::process::exit(local_api::run_pause(ask, json))
+        }
         cli::Commands::Send {
             phone,
             path,
