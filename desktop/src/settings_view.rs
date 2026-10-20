@@ -254,10 +254,27 @@ pub fn matches(query: &str, texts: &[&str]) -> bool {
     })
 }
 
-/// A row shows for `query` by its name or key, or its section's title.
+/// The row a setting is drawn in: its own, or the one it shares (J2
+/// review: the broker's fields sit in Home Assistant's row, the details
+/// switch in the event log's, so a search for them found an empty section).
+fn drawn_in(key: &str) -> &str {
+    match key {
+        "mqtt_broker" | "mqtt_user" | "mqtt_password" => "home_assistant",
+        "events_detail" => "events",
+        _ => key,
+    }
+}
+
+/// A row shows for `query` by its name or key, or a setting drawn in it,
+/// or its section's title.
 pub fn row_shown(query: &str, key: &str) -> bool {
-    matches(query, &[name(key), key])
-        || section_of(key).is_some_and(|s| matches(query, &[s.title()]))
+    let mut texts = vec![name(key), key];
+    for (k, n, _) in SETTINGS {
+        if *k != key && drawn_in(k) == key {
+            texts.extend([*n, *k]);
+        }
+    }
+    matches(query, &texts) || section_of(key).is_some_and(|s| matches(query, &[s.title()]))
 }
 
 /// A section is drawn for `query` by its title, or for a row or an extra
@@ -266,7 +283,7 @@ pub fn section_shown(query: &str, section: Section) -> bool {
     matches(query, &[section.title()])
         || SETTINGS
             .iter()
-            .any(|(key, _, s)| *s == section && row_shown(query, key))
+            .any(|(key, _, s)| *s == section && drawn_in(key) == *key && row_shown(query, key))
         || extras(section).iter().any(|x| matches(query, &[x]))
 }
 
@@ -1477,6 +1494,20 @@ mod tests {
         assert!(!row_shown("laser", "control_port"));
         assert!(row_shown("", "control_port"));
         assert!(row_shown("  ", "control_port"), "only spaces is nothing");
+    }
+
+    /// J2 review: a setting drawn in another's row is found through that
+    /// row, so no search opens a section with nothing in it.
+    #[test]
+    fn every_setting_is_found_by_its_name_in_the_row_that_draws_it() {
+        use super::{SETTINGS, drawn_in, row_shown};
+        for (key, name, _) in SETTINGS {
+            assert!(row_shown(name, drawn_in(key)), "{key}");
+            assert!(row_shown(key, drawn_in(key)), "{key}");
+        }
+        assert!(row_shown("broker", "home_assistant"));
+        assert!(row_shown("details", "events"));
+        assert!(!row_shown("broker", "events"));
     }
 
     /// J2: a section shows whole by its title, with a match, or not at all.
