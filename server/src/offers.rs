@@ -679,12 +679,7 @@ const MAX_FOLDER_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
 /// The date the file at `path` was last changed, as it goes with the file
 /// (K1); none with Settings "Keep files' dates" off or no date to read.
-pub(crate) fn sent_date(path: &Path) -> Option<u64> {
-    sent_date_when(path, crate::events::current_config().keep_file_dates)
-}
-
-/// [`sent_date`] with the setting given.
-fn sent_date_when(path: &Path, keep: bool) -> Option<u64> {
+fn sent_date(path: &Path, keep: bool) -> Option<u64> {
     if !keep {
         return None;
     }
@@ -699,7 +694,7 @@ pub(crate) fn with_date(body: serde_json::Value, path: &Path) -> serde_json::Val
 
 /// [`with_date`] with the setting given.
 fn with_date_when(mut body: serde_json::Value, path: &Path, keep: bool) -> serde_json::Value {
-    if let Some(ms) = sent_date_when(path, keep) {
+    if let Some(ms) = sent_date(path, keep) {
         body[pocketdesk_core::protocol::file_time::FIELD] = ms.into();
     }
     body
