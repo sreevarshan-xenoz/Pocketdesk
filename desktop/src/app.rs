@@ -1623,7 +1623,9 @@ impl PocketdeskApp {
         if ui.input_mut(|i| i.consume_shortcut(&crate::keys::FIND)) {
             search.request_focus();
         }
-        if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        // Esc empties a search, and is taken, so it does not also cancel a
+        // question drawn later in the frame (J2 review).
+        if search.lost_focus() && !self.settings_query.is_empty() && crate::keys::escaped(ui) {
             self.settings_query.clear();
         }
         let query = self.settings_query.trim().to_string();

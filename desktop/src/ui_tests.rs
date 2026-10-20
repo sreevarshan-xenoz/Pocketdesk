@@ -450,6 +450,14 @@ fn settings_search_shows_what_it_finds() {
     app.run_steps(3);
     assert!(app.query_by_label_contains("No setting matches").is_some());
     assert!(app.query_by_label("Outside wake port").is_none());
+
+    // Esc in the box empties it: every section back.
+    find(&app).focus();
+    app.run();
+    app.key_press(egui::Key::Escape);
+    app.run_steps(3);
+    assert!(app.query_by_label_contains("No setting matches").is_none());
+    assert!(app.query_by_label("Control port (TCP)").is_some());
 }
 
 /// J2 review: a section held open by a problem stays, whole, under a
