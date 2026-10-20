@@ -30,6 +30,15 @@ class VolumeKeysTest {
         assertEquals("a clock that went back", false, VolumeKeys.fresh(5_000, 4_000))
     }
 
+    /** K4 review: during a call the keys are the call's. */
+    @Test
+    fun `a call keeps the keys`() {
+        assertEquals(true, VolumeKeys.takesKeys(android.media.AudioManager.MODE_NORMAL))
+        assertEquals(true, VolumeKeys.takesKeys(android.media.AudioManager.MODE_RINGTONE))
+        assertEquals(false, VolumeKeys.takesKeys(android.media.AudioManager.MODE_IN_CALL))
+        assertEquals(false, VolumeKeys.takesKeys(android.media.AudioManager.MODE_IN_COMMUNICATION))
+    }
+
     /** K4: a press is one step, never past either end. */
     @Test
     fun `a press moves one step and stops at the ends`() {

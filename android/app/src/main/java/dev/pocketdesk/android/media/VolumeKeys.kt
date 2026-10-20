@@ -13,6 +13,22 @@ object VolumeKeys {
     /** The computer's percent for a panel [step]. */
     fun toPercent(step: Int): Int = step.coerceIn(0, STEPS) * 5
 
+    /**
+     * Whether the computer takes the keys with the phone's audio in [mode]:
+     * not in a call or a call app's own audio (K4 review), so the call's
+     * volume stays the keys'.
+     */
+    // The newer modes' constants are compiled in: an older phone never reports them.
+    @android.annotation.SuppressLint("InlinedApi")
+    fun takesKeys(mode: Int): Boolean =
+        mode !in setOf(
+            android.media.AudioManager.MODE_IN_CALL,
+            android.media.AudioManager.MODE_IN_COMMUNICATION,
+            android.media.AudioManager.MODE_CALL_SCREENING,
+            android.media.AudioManager.MODE_CALL_REDIRECT,
+            android.media.AudioManager.MODE_COMMUNICATION_REDIRECT,
+        )
+
     /** How long the computer's volume as last read stands for it, in ms. */
     const val FRESH_MS = 3_000L
 

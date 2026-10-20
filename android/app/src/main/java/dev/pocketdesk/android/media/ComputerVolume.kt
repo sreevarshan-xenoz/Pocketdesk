@@ -11,6 +11,8 @@ import androidx.compose.ui.platform.LocalContext
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
+import android.media.AudioManager
+import android.os.Build
 import android.os.SystemClock
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -85,12 +87,9 @@ private class ComputerVolume(private val context: Context, private val address: 
                     // hands it (K4 review): the provider is told through it.
                     setCallback(object : MediaSession.Callback() {}, android.os.Handler(context.mainLooper))
                     setPlaybackToRemote(provider)
-                    // Android gives the keys to a session that plays.
-                    setPlaybackState(
-                        PlaybackState.Builder()
-                            .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
-                            .build(),
-                    )
+                    // Android gives the keys to a session that plays; during a
+                    // call it does not, so they stay the call's (K4 review).
+                    setPlaybackState(state())
                     setMetadata(
                         android.media.MediaMetadata.Builder()
                             .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, HostStore.shownName(context, address))
@@ -98,12 +97,38 @@ private class ComputerVolume(private val context: Context, private val address: 
                     )
                     isActive = true
                 }
+                watchCalls()
             }
         }
     }
 
+    private val audio = context.getSystemService(AudioManager::class.java)
+
+    /** Playing, so it takes the keys, unless a call is on. */
+    private fun state(): PlaybackState =
+        PlaybackState.Builder()
+            .setState(
+                if (VolumeKeys.takesKeys(audio.mode)) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+                0L,
+                1f,
+            ).build()
+
+    private var modeListener: AudioManager.OnModeChangedListener? = null
+
+    /** Follow calls as they start and end (Android 12+; before, as at start). */
+    private fun watchCalls() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val listener = AudioManager.OnModeChangedListener { if (!stopped) session?.setPlaybackState(state()) }
+        audio.addOnModeChangedListener(context.mainExecutor, listener)
+        modeListener = listener
+    }
+
     fun stop() {
         stopped = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            modeListener?.let { audio.removeOnModeChangedListener(it) }
+        }
+        modeListener = null
         session?.let {
             it.isActive = false
             it.release()
