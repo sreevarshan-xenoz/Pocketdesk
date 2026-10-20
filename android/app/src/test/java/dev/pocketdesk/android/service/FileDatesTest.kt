@@ -14,6 +14,14 @@ class FileDatesTest {
         assertEquals("nonsense", 0L, FileDates.toSend(true, -5L))
     }
 
+    /** K1 review: a file downloaded from the browser takes its listing's date. */
+    @Test
+    fun `a listing's seconds become milliseconds`() {
+        assertEquals(1_780_000_000_000L, FileDates.fromListing(1_780_000_000L))
+        assertEquals(0L, FileDates.fromListing(0L))
+        assertEquals(0L, FileDates.fromListing(-1L))
+    }
+
     /** K1: a received file keeps the offer's date, never one after now. */
     @Test
     fun `a received file keeps its date up to now`() {
