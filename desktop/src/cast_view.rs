@@ -93,7 +93,14 @@ pub fn drop_words(reaches: bool, files: usize, folders: usize, failed: &[String]
             crate::model::files_and_folders(files, folders)
         );
     }
-    format!("Not sent: {}.", failed.join(", "))
+    // What went, beside what did not (L2 review: the queued ones were not said).
+    let total = files + folders;
+    let reasons: Vec<&str> = failed.iter().map(|f| f.trim_end_matches('.')).collect();
+    format!(
+        "Queued {} of {total}; not queued: {}.",
+        total.saturating_sub(failed.len()),
+        reasons.join("; ")
+    )
 }
 
 /// `text` cut to the control road's limit for one text, at a character (L2).
@@ -507,19 +514,27 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
         .clone()
         .filter(|(_, at)| at.elapsed() < DROP_NOTE)
         .map(|(note, _)| note);
+    // Over the picture, never beside it (L2 review: a panel shrank the
+    // picture, and a drag under way jumped).
     if let Some(note) = drop_note {
-        egui::Panel::bottom("cast-drop")
-            .frame(
+        egui::Area::new(egui::Id::new("cast-drop"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
+            .interactable(false)
+            .show(&ctx, |ui| {
                 egui::Frame::NONE
                     .fill(egui::Color32::from_gray(24))
-                    .inner_margin(4.0),
-            )
-            .show(ui, |ui| {
-                ui.style_mut().visuals = egui::Visuals::dark();
-                ui.add(
-                    egui::Label::new(egui::RichText::new(note).color(egui::Color32::LIGHT_GRAY))
-                        .wrap(),
-                );
+                    .inner_margin(6.0)
+                    .corner_radius(4.0)
+                    .show(ui, |ui| {
+                        ui.set_max_width(ctx.content_rect().width() - 32.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(note).color(egui::Color32::LIGHT_GRAY),
+                            )
+                            .wrap(),
+                        );
+                    });
             });
     }
     egui::CentralPanel::default()
@@ -584,6 +599,18 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                         )
                     });
                     events.extend(control_events(&input, rect, hover, &mut state.pressing));
+                    // A paste cut to the road's limit says so (L2 review).
+                    let max = pocketdesk_core::streaming::cast_control::MAX_TEXT;
+                    if input
+                        .iter()
+                        .any(|e| matches!(e, egui::Event::Paste(text) if text.len() > max))
+                    {
+                        state.drop_note = Some((
+                            format!("Pasted the first {max} bytes of the clipboard."),
+                            std::time::Instant::now(),
+                        ));
+                        ctx.request_repaint_after(DROP_NOTE);
+                    }
                     // A release the window never saw (focus went mid-drag):
                     // the finger lifts where it last was (C8 review).
                     if state.pressing && !down {
@@ -916,8 +943,13 @@ mod tests {
         assert!(drop_words(true, 1, 1, &[]).contains("1 file and 1 folder"));
         assert!(drop_words(false, 1, 0, &[]).starts_with("This phone cannot take files now"));
         assert_eq!(
-            drop_words(true, 1, 0, &["Could not queue a.txt: busy".to_string()]),
-            "Not sent: Could not queue a.txt: busy."
+            drop_words(
+                true,
+                3,
+                0,
+                &["c.txt is not a file or a folder.".to_string()]
+            ),
+            "Queued 2 of 3; not queued: c.txt is not a file or a folder."
         );
     }
 
