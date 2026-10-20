@@ -61,13 +61,38 @@ pub fn is_muted(muted: &[MutedApp], app: &str) -> bool {
     !app.is_empty() && muted.iter().any(|m| key(&m.app) == app)
 }
 
+/// Write `apps` whole, owner-only, through a temp file of this writer's
+/// own, so a reader never sees it half written.
 fn write(state_dir: &Path, apps: Vec<MutedApp>) -> io::Result<()> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let json = serde_json::to_string(&MutedFile { apps }).map_err(io::Error::other)?;
     let path = state_dir.join(MUTED_APPS_FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = path.with_extension(format!(
+        "json.{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(state_dir)?;
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    crate::secure_fs::write_private(&tmp, json.as_bytes())?;
+    std::fs::rename(&tmp, &path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Change the list under its lock (K2b review: the desktop app and the
+/// server's toast handlers both change it, and each change is read, change,
+/// write).
+fn change(
+    state_dir: &Path,
+    edit: impl FnOnce(&mut Vec<MutedApp>) -> io::Result<bool>,
+) -> io::Result<()> {
+    let _lock = crate::protocol::kdeconnect::StoreLock::acquire(&state_dir.join(MUTED_APPS_FILE))
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let mut apps = load(state_dir)?;
+    if edit(&mut apps)? {
+        write(state_dir, apps)?;
+    }
+    Ok(())
 }
 
 /// Mute `app` from `now_unix`; muting one already muted changes nothing.
@@ -79,32 +104,31 @@ pub fn mute(state_dir: &Path, app: &str, now_unix: u64) -> io::Result<()> {
             "an app with no name",
         ));
     }
-    let mut apps = load(state_dir)?;
-    if is_muted(&apps, &name) {
-        return Ok(());
-    }
-    if apps.len() >= MAX_APPS {
-        return Err(io::Error::other(format!(
-            "{MAX_APPS} apps are muted already; unmute one first"
-        )));
-    }
-    apps.push(MutedApp {
-        app: name,
-        since_unix: now_unix,
-    });
-    write(state_dir, apps)
+    change(state_dir, |apps| {
+        if is_muted(apps, &name) {
+            return Ok(false);
+        }
+        if apps.len() >= MAX_APPS {
+            return Err(io::Error::other(format!(
+                "{MAX_APPS} apps are muted already; unmute one first"
+            )));
+        }
+        apps.push(MutedApp {
+            app: name,
+            since_unix: now_unix,
+        });
+        Ok(true)
+    })
 }
 
 /// Unmute `app`; one not muted changes nothing.
 pub fn unmute(state_dir: &Path, app: &str) -> io::Result<()> {
-    let mut apps = load(state_dir)?;
-    let before = apps.len();
     let gone = key(app);
-    apps.retain(|m| key(&m.app) != gone);
-    if apps.len() == before {
-        return Ok(());
-    }
-    write(state_dir, apps)
+    change(state_dir, |apps| {
+        let before = apps.len();
+        apps.retain(|m| key(&m.app) != gone);
+        Ok(apps.len() != before)
+    })
 }
 
 #[cfg(test)]
@@ -140,6 +164,23 @@ mod tests {
         assert!(read(&dir).is_empty());
         unmute(&dir, "never muted").unwrap();
         assert!(mute(&dir, "   ", 1).is_err(), "no name");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// K2b review: two writers at once each keep their change.
+    #[test]
+    fn writers_at_once_lose_nothing() {
+        let dir = dir("race");
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                let dir = dir.clone();
+                std::thread::spawn(move || mute(&dir, &format!("app {n}"), 1).unwrap())
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(read(&dir).len(), 8);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
