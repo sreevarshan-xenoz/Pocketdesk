@@ -166,9 +166,8 @@ fn remember_answerable(id: u32, pressable: Pressable) {
     let mut ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
     ids.retain(|(i, _)| *i != id);
     ids.push_back((id, pressable));
-    while ids.len() > MAX_ANSWERABLE {
-        ids.pop_front();
-    }
+    // Each kind its own places (K2b review).
+    crate::toast_answers::keep_within(&mut ids, |(_, p)| p.answers.is_some(), MAX_ANSWERABLE);
 }
 
 #[cfg(target_os = "linux")]

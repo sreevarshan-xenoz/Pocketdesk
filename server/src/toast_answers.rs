@@ -167,6 +167,23 @@ pub fn dbus_actions(answers: Option<&Answerable>, caps: DbusCaps, mute: bool) ->
     actions
 }
 
+/// Keep `kept`, newest last, to `cap` of each kind: an answerable one's
+/// place is never taken by a plain one's (K2b review: thirty plain toasts
+/// had left an answerable one's buttons dead).
+pub fn keep_within<T>(
+    kept: &mut std::collections::VecDeque<T>,
+    answerable: impl Fn(&T) -> bool,
+    cap: usize,
+) {
+    for kind in [true, false] {
+        while kept.iter().filter(|t| answerable(t) == kind).count() > cap {
+            if let Some(oldest) = kept.iter().position(|t| answerable(t) == kind) {
+                kept.remove(oldest);
+            }
+        }
+    }
+}
+
 /// Mute `app` on this computer from its notification's button (K2b): its
 /// next notifications are kept and logged, not shown.
 pub fn mute(app: &str) {
@@ -362,6 +379,20 @@ mod tests {
             dbus_actions(None, DbusCaps::default(), true).is_empty(),
             "no buttons shown"
         );
+    }
+
+    /// K2b review: plain toasts never push an answerable one out.
+    #[test]
+    fn each_kind_keeps_its_own_places() {
+        let mut kept: std::collections::VecDeque<(u32, bool)> = [(1, true)]
+            .into_iter()
+            .chain((2..40).map(|n| (n, false)))
+            .collect();
+        keep_within(&mut kept, |(_, answerable)| *answerable, 30);
+        assert!(kept.contains(&(1, true)), "the answerable one stays");
+        assert_eq!(kept.iter().filter(|(_, a)| !a).count(), 30);
+        assert_eq!(kept.front(), Some(&(1, true)), "the oldest plain ones went");
+        assert!(!kept.contains(&(2, false)));
     }
 
     #[test]

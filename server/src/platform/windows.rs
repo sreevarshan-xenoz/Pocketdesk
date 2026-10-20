@@ -379,14 +379,14 @@ const PHONE_GROUP: &str = "phone";
 /// The phone toasts with buttons (N3's answers, K2b's "Not from this app"),
 /// newest last, by tag: each holds its `Activated` handler, which lives only
 /// as long as the toast object does.
-static ANSWERABLE: std::sync::Mutex<std::collections::VecDeque<(String, ToastNotification)>> =
+static ANSWERABLE: std::sync::Mutex<std::collections::VecDeque<(String, ToastNotification, bool)>> =
     std::sync::Mutex::new(std::collections::VecDeque::new());
 
 /// As many as the notes kept to answer (`phone_notes`).
 const KEEP_ANSWERABLE: usize = 30;
 
 fn answerable()
--> std::sync::MutexGuard<'static, std::collections::VecDeque<(String, ToastNotification)>> {
+-> std::sync::MutexGuard<'static, std::collections::VecDeque<(String, ToastNotification, bool)>> {
     ANSWERABLE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -448,12 +448,11 @@ fn show_toast(
     // answered: a plain update of it drops the old one (N3 review).
     if let Some(tag) = tag {
         let mut kept = answerable();
-        kept.retain(|(t, _)| t != tag);
+        kept.retain(|(t, _, _)| t != tag);
         if has_buttons {
-            kept.push_back((tag.to_string(), toast));
-            while kept.len() > KEEP_ANSWERABLE {
-                kept.pop_front();
-            }
+            kept.push_back((tag.to_string(), toast, answers.is_some()));
+            // Each kind its own places: thirty to answer, thirty to mute.
+            crate::toast_answers::keep_within(&mut kept, |(_, _, a)| *a, KEEP_ANSWERABLE);
         }
     }
     Ok(())
@@ -503,7 +502,7 @@ pub(super) fn notify_tagged(
 /// Take the phone toast tagged `tag` off the screen and out of the Action
 /// Center. A tag that is not there is no error.
 pub(super) fn remove_tagged(tag: &str) {
-    answerable().retain(|(t, _)| t != tag);
+    answerable().retain(|(t, _, _)| t != tag);
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
     let removed = ToastNotificationManager::History().and_then(|history| {
         history.RemoveGroupedTagWithId(
@@ -843,12 +842,12 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(500));
         assert!(phone_tags_in_history().iter().any(|t| t == tag), "shown");
         assert!(
-            super::answerable().iter().any(|(t, _)| t == tag),
+            super::answerable().iter().any(|(t, _, _)| t == tag),
             "kept to answer"
         );
         remove_tagged(tag);
         assert!(
-            !super::answerable().iter().any(|(t, _)| t == tag),
+            !super::answerable().iter().any(|(t, _, _)| t == tag),
             "dropped with its toast"
         );
     }
