@@ -77,7 +77,8 @@ fn main() {
                 eprintln!("Pocketdesk tray: the window did not start ({e})");
             }
             let rows = model::phone_rows(&snapshot, &log.1);
-            if pressed {
+            // A press queued before its key was taken back is not acted on (H3 review).
+            if pressed && key.status.registered {
                 let to = hotkey::phone(&rows);
                 // Said where the owner looks: this program has no console (H3 review).
                 key.said_press(&state_dir, to.is_some());

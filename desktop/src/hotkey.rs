@@ -165,6 +165,9 @@ mod tests {
         assert_eq!(parse("ctrl+f13"), None);
         assert_eq!(parse("ctrl+hyper+p"), None);
         assert_eq!(parse("ctrl+pp"), None);
+        assert_eq!(parse("ctrl+"), None);
+        assert_eq!(parse("ctrl++p"), None);
+        assert_eq!(parse("+"), None);
     }
 
     /// H3 review: Settings says what the tray made of the key.
