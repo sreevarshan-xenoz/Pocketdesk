@@ -196,10 +196,22 @@ pub fn mute(app: &str) {
                 pocketdesk_core::local::pin::now_unix(),
             )
         });
-    match muted {
-        Ok(()) => tracing::info!("Notifications from {app} muted on this computer"),
-        Err(e) => tracing::warn!("Could not mute {app}: {e}"),
-    }
+    // Said, not only logged (K2b review): a toast pops up under the
+    // pointer, and a stray press would hide an app without a word.
+    let (title, body) = match muted {
+        Ok(()) => {
+            tracing::info!("Notifications from {app} muted on this computer");
+            (
+                format!("{app} muted"),
+                "Its notifications from phones are not shown here now. Unmute it in Pocketdesk's Settings, under Notifications and texts.".to_string(),
+            )
+        }
+        Err(e) => {
+            tracing::warn!("Could not mute {app}: {e}");
+            (format!("{app} not muted"), e.to_string())
+        }
+    };
+    crate::platform::notify(&title, &body, std::time::Duration::from_secs(8));
 }
 
 /// What `ActionInvoked` with `key` answers: a button by its `a<n>` key.
