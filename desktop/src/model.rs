@@ -436,6 +436,20 @@ pub struct RecentSession {
     pub e2e_ms: Option<u64>,
 }
 
+/// Who a recent session was with, in words. A refused one is named only
+/// by the id it claimed: that is all a refused client proved, and a
+/// stranger may claim a paired phone's (J3 review; N6's last sessions skip
+/// them for the same reason).
+pub fn recent_who(recent: &RecentSession, devices: &[Device]) -> String {
+    match recent.device_id.as_deref() {
+        Some(id) if recent.refused => {
+            format!("A device claiming to be {}", crate::words::short(id))
+        }
+        Some(id) => device_label(devices, id),
+        None => "A device that did not say who it is".to_string(),
+    }
+}
+
 /// The newest `n` sessions in the session log's `lines`, newest first
 /// (J3). Lines that are not records, a cut first line among them, are
 /// skipped.
@@ -834,6 +848,37 @@ mod tests {
         assert_eq!(last.get("a"), Some(&200));
         assert_eq!(last.get("b"), Some(&300));
         assert_eq!(last.len(), 2);
+    }
+
+    /// J3 review: a refused session is never named as the paired phone
+    /// whose id it claimed.
+    #[test]
+    fn a_refused_session_is_named_only_by_its_claim() {
+        let devices = [Device {
+            id: "0123456789abcdef".to_string(),
+            name: Some("Test Phone".to_string()),
+            ..Default::default()
+        }];
+        let recent = |refused, id: Option<&str>| RecentSession {
+            device_id: id.map(str::to_string),
+            ended_unix: 1,
+            duration_secs: 1,
+            how: "on this network",
+            refused,
+            e2e_ms: None,
+        };
+        assert_eq!(
+            recent_who(&recent(false, Some("0123456789abcdef")), &devices),
+            "Test Phone"
+        );
+        assert_eq!(
+            recent_who(&recent(true, Some("0123456789abcdef")), &devices),
+            "A device claiming to be 0123456789ab…"
+        );
+        assert_eq!(
+            recent_who(&recent(false, None), &devices),
+            "A device that did not say who it is"
+        );
     }
 
     /// J3: a live session's kind chip.

@@ -1618,10 +1618,7 @@ impl PocketdeskApp {
         ui.heading("Recent sessions");
         let now = now_unix();
         for recent in &self.recent_sessions {
-            let who = match recent.device_id.as_deref() {
-                Some(id) => model::device_label(&self.snapshot.devices, id),
-                None => "a phone that did not say who it is".to_string(),
-            };
+            let who = model::recent_who(recent, &self.snapshot.devices);
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(who).strong());
                 let mut line = vec![crate::words::ago(now, recent.ended_unix)];

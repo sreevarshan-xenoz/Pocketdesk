@@ -527,7 +527,12 @@ fn the_sessions_page_lists_the_recent_sessions() {
             .is_some()
     );
     assert!(app.query_by_label("2 min ago · refused").is_some());
-    assert_eq!(app.query_all_by_label("Test Phone").count(), 2);
+    // A refusal is named by its claim, never as the phone (J3 review).
+    assert_eq!(app.query_all_by_label("Test Phone").count(), 1);
+    assert!(
+        app.query_by_label_contains("A device claiming to be")
+            .is_some()
+    );
 }
 
 /// D3: the Clipboard page says the history is off, and with it on lists
