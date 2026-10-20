@@ -3,7 +3,74 @@
 //! apart from Windows so it is tested; `tray_main` registers it with
 //! `RegisterHotKey` and acts on `WM_HOTKEY`.
 
+use std::path::Path;
+
 use crate::model::PhoneRow;
+
+/// What the tray program says of the key (H3 review): the tray has no
+/// console, so Settings shows this instead.
+pub const STATUS_FILE: &str = "clipboard_hotkey.json";
+
+/// The key as the tray program last saw it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Status {
+    /// The key's text in Settings when this was written.
+    pub key: String,
+    /// It is registered and pressed sends.
+    pub registered: bool,
+    /// Another app holds the combination.
+    pub taken: bool,
+    /// The last press found no phone the clipboard reaches.
+    pub no_phone: bool,
+}
+
+pub fn write_status(state_dir: &Path, status: &Status) {
+    let body = serde_json::json!({
+        "key": status.key,
+        "registered": status.registered,
+        "taken": status.taken,
+        "no_phone": status.no_phone,
+    });
+    let _ = std::fs::write(state_dir.join(STATUS_FILE), body.to_string());
+}
+
+pub fn read_status(state_dir: &Path) -> Option<Status> {
+    let raw = std::fs::read_to_string(state_dir.join(STATUS_FILE)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let flag = |k: &str| {
+        v.get(k)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    };
+    Some(Status {
+        key: v.get("key")?.as_str()?.to_string(),
+        registered: flag("registered"),
+        taken: flag("taken"),
+        no_phone: flag("no_phone"),
+    })
+}
+
+/// What Settings says of the key `text` from the tray's [Status]; None when
+/// there is nothing to say, or the status is of another key.
+pub fn status_words(text: &str, status: Option<&Status>) -> Option<&'static str> {
+    let text = text.trim();
+    if text.is_empty() || parse(text).is_none() {
+        return None;
+    }
+    match status.filter(|s| s.key == text) {
+        None => {
+            Some("Not taken up yet: the tray program (pocketdesk-tray) registers it while it runs.")
+        }
+        Some(s) if s.taken => {
+            Some("Another app holds this combination; the tray tries again every 30 s.")
+        }
+        Some(s) if s.no_phone => {
+            Some("Registered. The last press found no phone the clipboard reaches.")
+        }
+        Some(s) if s.registered => Some("Registered."),
+        Some(_) => None,
+    }
+}
 
 /// `RegisterHotKey`'s modifier bits (MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN).
 pub const MOD_ALT: u32 = 0x1;
@@ -98,6 +165,49 @@ mod tests {
         assert_eq!(parse("ctrl+f13"), None);
         assert_eq!(parse("ctrl+hyper+p"), None);
         assert_eq!(parse("ctrl+pp"), None);
+    }
+
+    /// H3 review: Settings says what the tray made of the key.
+    #[test]
+    fn settings_says_what_the_tray_made_of_the_key() {
+        let taken = Status {
+            key: "ctrl+alt+p".to_string(),
+            taken: true,
+            ..Default::default()
+        };
+        assert!(
+            status_words("ctrl+alt+p", Some(&taken))
+                .unwrap()
+                .contains("Another app")
+        );
+        assert!(
+            status_words("ctrl+alt+p", None)
+                .unwrap()
+                .contains("tray program")
+        );
+        let other = Status {
+            key: "ctrl+alt+o".to_string(),
+            registered: true,
+            ..Default::default()
+        };
+        assert!(
+            status_words("ctrl+alt+p", Some(&other))
+                .unwrap()
+                .contains("tray program")
+        );
+        assert_eq!(status_words("", Some(&taken)), None);
+        assert_eq!(status_words("p", None), None, "a bad key says so elsewhere");
+        let pressed = Status {
+            key: "ctrl+alt+p".to_string(),
+            registered: true,
+            no_phone: true,
+            ..Default::default()
+        };
+        assert!(
+            status_words("ctrl+alt+p", Some(&pressed))
+                .unwrap()
+                .contains("no phone")
+        );
     }
 
     #[test]

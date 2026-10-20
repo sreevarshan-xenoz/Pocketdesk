@@ -62,7 +62,7 @@ fn main() {
         if pressed || refreshed.is_none_or(|at| at.elapsed() >= REFRESH) {
             let now = now_unix();
             let snapshot = model::snapshot(&state_dir, now);
-            key.follow();
+            key.follow(&state_dir);
             let stamp = model::session_log_stamp(&state_dir);
             if stamp != log.0 {
                 log = (
@@ -78,11 +78,11 @@ fn main() {
             }
             let rows = model::phone_rows(&snapshot, &log.1);
             if pressed {
-                match hotkey::phone(&rows) {
-                    Some(id) => {
-                        act(&state_dir, TrayAction::SendClipboard(id.to_string()));
-                    }
-                    None => eprintln!("Pocketdesk tray: no phone the clipboard reaches now"),
+                let to = hotkey::phone(&rows);
+                // Said where the owner looks: this program has no console (H3 review).
+                key.said_press(&state_dir, to.is_some());
+                if let Some(id) = to {
+                    act(&state_dir, TrayAction::SendClipboard(id.to_string()));
                 }
             }
             tray.show(pocketdesk_desktop::tray_menu::menu(
@@ -105,19 +105,38 @@ const HOTKEY_ID: i32 = 0x5044;
 #[derive(Default)]
 struct Key {
     text: Option<String>,
+    status: hotkey::Status,
+    /// When a taken key was last tried again.
+    tried: Option<Instant>,
     #[cfg(windows)]
     registered: bool,
 }
 
+/// How often a key another app holds is tried again.
+const RETRY_TAKEN: Duration = Duration::from_secs(30);
+
 impl Key {
-    fn follow(&mut self) {
+    /// Say a press's outcome in the status Settings shows.
+    fn said_press(&mut self, state_dir: &Path, reached: bool) {
+        self.status.no_phone = !reached;
+        hotkey::write_status(state_dir, &self.status);
+    }
+
+    fn follow(&mut self, state_dir: &Path) {
         let text = pocketdesk_core::local::config::Config::load()
             .map(|c| c.clipboard_hotkey.trim().to_string())
             .unwrap_or_default();
-        if self.text.as_deref() == Some(text.as_str()) {
+        // A key another app held is tried again now and then (H3 review).
+        let retry = self.status.taken && self.tried.is_none_or(|at| at.elapsed() >= RETRY_TAKEN);
+        if self.text.as_deref() == Some(text.as_str()) && !retry {
             return;
         }
         self.text = Some(text.clone());
+        self.tried = Some(Instant::now());
+        self.status = hotkey::Status {
+            key: text.clone(),
+            ..Default::default()
+        };
         #[cfg(windows)]
         {
             use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -135,10 +154,12 @@ impl Key {
                 } {
                     Ok(()) => self.registered = true,
                     // Another app holds the combination.
-                    Err(e) => eprintln!("Pocketdesk tray: the key {text} is taken ({e})"),
+                    Err(_) => self.status.taken = true,
                 }
             }
+            self.status.registered = self.registered;
         }
+        hotkey::write_status(state_dir, &self.status);
     }
 }
 

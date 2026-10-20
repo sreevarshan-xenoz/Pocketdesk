@@ -651,6 +651,15 @@ impl SettingsForm {
                             .desired_width(140.0),
                     );
                     let text = e.clipboard_hotkey.trim();
+                    // What the tray program made of it (H3 review).
+                    let status = pocketdesk_core::local::paths::state_dir()
+                        .ok()
+                        .and_then(|dir| pocketdesk_desktop::hotkey::read_status(&dir));
+                    if let Some(words) =
+                        pocketdesk_desktop::hotkey::status_words(text, status.as_ref())
+                    {
+                        note(ui, words);
+                    }
                     if !text.is_empty() && pocketdesk_desktop::hotkey::parse(text).is_none() {
                         ui.label(
                             egui::RichText::new(
