@@ -99,6 +99,8 @@ fun RemoteInputScreen(
     // G4: the laser dot, offered once the computer admitted the remote and said it draws one.
     var laser by remember { mutableStateOf(Prefs.airLaser(context)) }
     val laserOffered = remember(state) { state == State.Ready && RustCore.laserSupported() }
+    // The phone's volume keys for the computer while it is admitted (K4).
+    dev.pocketdesk.android.media.ComputerVolumeEffect(address, controlPort, state == State.Ready)
 
     // Ecosystem 1f: other apps hear the remote start and end.
     val tell = remember(address) { SessionTell("remote") }

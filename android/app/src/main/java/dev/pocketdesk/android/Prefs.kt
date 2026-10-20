@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
+    private const val KEY_VOLUME_KEYS = "volume_keys"
     private const val KEY_KEEP_FILE_DATES = "keep_file_dates"
     private const val KEY_DOWNLOAD_TREE = "download_tree"
     private const val KEY_CONTROL_FROM_COMPUTER = "control_from_computer"
@@ -308,6 +309,15 @@ object Prefs {
 
     fun setDownloadTree(ctx: Context, tree: String?) {
         prefs(ctx).edit { if (tree == null) remove(KEY_DOWNLOAD_TREE) else putString(KEY_DOWNLOAD_TREE, tree) }
+        bump()
+    }
+
+    /** The phone's volume keys change the computer's volume in Remote and sound (K4). On by default. */
+    fun volumeKeys(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_VOLUME_KEYS, true)
+
+    fun setVolumeKeys(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_VOLUME_KEYS, enabled) }
         bump()
     }
 

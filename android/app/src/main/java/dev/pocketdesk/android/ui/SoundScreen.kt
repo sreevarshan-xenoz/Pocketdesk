@@ -249,6 +249,8 @@ fun SoundScreen(
     // The session's control link, as a screen session keeps one: the sound
     // sheet's requests ride it instead of a connection each (N5 review).
     if (state == State.Ready) ControlLinkEffect(address, controlPort, attempt)
+    // The phone's volume keys for the computer while it is admitted (K4).
+    dev.pocketdesk.android.media.ComputerVolumeEffect(address, controlPort, state == State.Ready)
 
     val snackbar = remember { SnackbarHostState() }
     var micErrorRes by remember { mutableStateOf<Int?>(null) }

@@ -122,6 +122,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 { Prefs.setAutoReconnect(context, it) },
             )
             SettingSwitch(
+                stringResource(R.string.settings_volume_keys),
+                stringResource(R.string.settings_volume_keys_summary),
+                Prefs.volumeKeys(context),
+                { Prefs.setVolumeKeys(context, it) },
+            )
+            SettingSwitch(
                 stringResource(R.string.settings_show_driving),
                 stringResource(R.string.settings_show_driving_summary),
                 Prefs.showDriving(context),
