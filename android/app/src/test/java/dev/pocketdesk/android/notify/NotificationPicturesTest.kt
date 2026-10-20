@@ -6,12 +6,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NotificationPicturesTest {
-    /** K3: an app's icon goes with its first notification only. */
+    /** K3: an app's icon goes until one reached that computer (K3 review: per computer). */
     @Test
-    fun `an icon goes once per app`() {
-        assertTrue(NotificationPictures.sendIcon(emptySet(), "com.chat"))
-        assertFalse(NotificationPictures.sendIcon(setOf("com.chat"), "com.chat"))
-        assertTrue(NotificationPictures.sendIcon(setOf("com.chat"), "com.mail"))
+    fun `an icon goes once per app and computer`() {
+        assertTrue(NotificationPictures.sendIcon(emptySet(), "pc-a|com.chat"))
+        assertFalse(NotificationPictures.sendIcon(setOf("pc-a|com.chat"), "pc-a|com.chat"))
+        assertTrue(NotificationPictures.sendIcon(setOf("pc-a|com.chat"), "pc-a|com.mail"))
+        assertTrue("another computer", NotificationPictures.sendIcon(setOf("pc-a|com.chat"), "pc-b|com.chat"))
     }
 
     /** K3: a picture goes only with the setting on and the notification in full. */

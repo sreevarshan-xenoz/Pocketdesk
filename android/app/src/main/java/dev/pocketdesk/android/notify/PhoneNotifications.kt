@@ -326,7 +326,10 @@ class PhoneNotificationListener : NotificationListenerService() {
      */
     private fun sendBody(body: JSONObject, waitedMs: Long): Boolean {
         val out = if (waitedMs >= 1_000) JSONObject(body.toString()).put("waited", waitedMs / 1_000) else body
-        return PhoneLink.sendNow(this, "kdeconnect.notification", out)
+        val sent = PhoneLink.sendNow(this, "kdeconnect.notification", out)
+        // Its app's icon reached this computer (K3 review).
+        if (sent) iconOf.remove(body)?.let { iconsSent.add(iconKey(it)) }
+        return sent
     }
 
     private fun handle(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>) {
@@ -381,17 +384,27 @@ class PhoneNotificationListener : NotificationListenerService() {
             .forEach { rule.removed(it) }
     }
 
-    /** Apps whose icon this run has sent (K3): the computer keeps them. */
+    /**
+     * Apps whose icon reached a computer this run (K3), as "computer|app":
+     * the computer keeps them. Marked once the notification carrying it was
+     * sent, never when it was only put in (K3 review).
+     */
     private val iconsSent = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** The app whose icon a body carries, until the body is sent. */
+    private val iconOf = java.util.Collections.synchronizedMap(java.util.WeakHashMap<JSONObject, String>())
+
+    /** [pkg]'s key in [iconsSent], for the computer notifications go to now. */
+    private fun iconKey(pkg: String): String = "${PhoneLink.target(this)?.address}|$pkg"
 
     /** [body] with [pkg]'s icon the first time, and [sbn]'s picture when it may go (K3). */
     private fun addPictures(sbn: StatusBarNotification, pkg: String, body: JSONObject, full: Boolean) {
-        if (NotificationPictures.sendIcon(iconsSent, pkg)) {
+        if (NotificationPictures.sendIcon(iconsSent, iconKey(pkg))) {
             runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull()
                 ?.let { encoded(it, NotificationPictures.ICON_PX, Bitmap.CompressFormat.PNG) }
                 ?.let {
                     body.put("appIcon", it)
-                    iconsSent.add(pkg)
+                    iconOf[body] = pkg
                 }
         }
         if (!NotificationPictures.sendPicture(Prefs.notificationPictures(this), full)) return

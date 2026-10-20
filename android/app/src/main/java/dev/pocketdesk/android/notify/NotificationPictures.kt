@@ -12,8 +12,11 @@ object NotificationPictures {
     /** The longest side of a notification's picture, in pixels. */
     const val PICTURE_PX = 720
 
-    /** Whether [pkg]'s icon goes now: the first of its notifications this computer gets since the app started. */
-    fun sendIcon(sent: Set<String>, pkg: String): Boolean = pkg !in sent
+    /**
+     * Whether an app's icon goes now: [key] (the computer and the app) not
+     * yet in [sent], which holds those a notification carried to it this run.
+     */
+    fun sendIcon(sent: Set<String>, key: String): Boolean = key !in sent
 
     /** Whether the notification's picture goes: the setting on, and the notification sent in full (never redacted). */
     fun sendPicture(enabled: Boolean, full: Boolean): Boolean = enabled && full
