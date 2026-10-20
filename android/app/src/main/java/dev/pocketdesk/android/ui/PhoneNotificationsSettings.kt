@@ -69,6 +69,16 @@ fun PhoneNotificationsSection() {
     if (enabled && !granted) AllowNotificationAccess()
     // Its neighbours go while sharing is off, and so does it (E6).
     if (!enabled) return
+    // L1: closed on the computer, cleared here.
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_clear),
+        stringResource(R.string.phone_notifications_clear_summary),
+        version.let { Prefs.letComputerClear(context) },
+        {
+            Prefs.setLetComputerClear(context, it)
+            version++
+        },
+    )
     // T10c: the computer may press buttons and reply, as this phone's owner.
     SettingSwitch(
         stringResource(R.string.phone_notifications_answer),

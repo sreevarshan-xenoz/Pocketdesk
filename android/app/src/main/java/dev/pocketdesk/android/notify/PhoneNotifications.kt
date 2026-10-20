@@ -140,6 +140,9 @@ class PhoneNotificationListener : NotificationListenerService() {
      */
     private val answerable = LinkedHashMap<String, Answerable>()
     private val answerBudget = NotificationActionRule.Budget()
+
+    /** Clears from the computer (L1), thirty a minute. */
+    private val clearBudget = NotificationActionRule.Budget(ClearRule.PER_MINUTE)
     private var answerConnectMs = 0L
     private val answerTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
@@ -384,6 +387,33 @@ class PhoneNotificationListener : NotificationListenerService() {
             .forEach { rule.removed(it) }
     }
 
+    /** Clear [answer]'s notification here, if [ClearRule] lets it (L1). */
+    private fun clear(answer: RustCore.NotificationAnswer, settingOn: Boolean, ownComputer: Boolean) {
+        val shown = runCatching { activeNotifications?.firstOrNull { it.key == answer.key } }.getOrNull()
+        val decision =
+            ClearRule.decide(
+                settingOn = settingOn,
+                ownComputer = ownComputer,
+                sent = rule.wasSent(answer.key),
+                shown = shown != null,
+                clearable = shown?.isClearable == true,
+                call = CallRule.isCall(answer.key),
+                withinBudget = true,
+            ).let {
+                if (it == ClearRule.Decision.Clear && !clearBudget.take(SystemClock.elapsedRealtime())) {
+                    ClearRule.Decision.TooMany
+                } else {
+                    it
+                }
+            }
+        if (decision != ClearRule.Decision.Clear) {
+            Log.i("PhoneNotifications", "a clear from the computer was not taken: $decision")
+            return
+        }
+        runCatching { cancelNotification(answer.key) }
+            .onFailure { Log.w("PhoneNotifications", "a clear failed: ${it.message}") }
+    }
+
     /**
      * Apps whose icon reached a computer this run (K3), as "computer|app":
      * the computer keeps them. Marked once the notification carrying it was
@@ -498,7 +528,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         // The permission is often granted while the listener runs (F5 review).
         if (callsOn) android.os.Handler(android.os.Looper.getMainLooper()).post { calls.start() }
         calls.retry()
-        if ((answering || callsOn) && own != null && RustCore.controlPeer() == null) {
+        // L1: the computer's clears come on the same link.
+        val clearing = Prefs.letComputerClear(this) && PhoneNotificationPrefs.enabled(this)
+        if ((answering || callsOn || clearing) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
                 answerConnectMs = now
@@ -508,6 +540,11 @@ class PhoneNotificationListener : NotificationListenerService() {
         val answers = RustCore.takeNotificationAnswers()
         if (answers.isEmpty()) return
         for (answer in answers) {
+            // L1: a clear, not an answer.
+            if (answer.cancel) {
+                clear(answer, clearing, NotificationActionRule.fromOwnComputer(answer.host, answer.port, own?.address, own?.controlPort))
+                continue
+            }
             // F5: an answer to a ringing call's note is the call's, not a notification's.
             if (CallRule.isCall(answer.key)) {
                 val act = CallRule.decide(
