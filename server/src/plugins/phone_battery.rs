@@ -89,13 +89,28 @@ impl LowBatteryWatch {
 struct ChargedWatch {
     /// Each phone's: whether the next time at the level tells.
     armed: std::collections::HashMap<String, bool>,
+    /// The level the phones were watched for: a new one starts over.
+    level: u8,
 }
 
 impl ChargedWatch {
     /// `device`'s `report`; whether it has just charged to `level` (0: off).
     fn report(&mut self, device: &str, report: &BatteryReport, level: u8) -> bool {
-        let armed = self.armed.entry(device.to_string()).or_insert(true);
+        // A new level is watched afresh (L3 review: turning it on, or down,
+        // told at once of a phone already past it).
+        if level != self.level {
+            self.level = level;
+            self.armed.clear();
+        }
         if level == 0 {
+            return false;
+        }
+        // A phone first seen past the level is no charge seen (L3 review:
+        // each start told of a phone left on its charger).
+        let first = !self.armed.contains_key(device);
+        let armed = self.armed.entry(device.to_string()).or_insert(true);
+        if first && report.charging && report.charge >= level.min(100) {
+            *armed = false;
             return false;
         }
         let level = level.min(100);
@@ -372,6 +387,29 @@ mod tests {
         );
         assert!(watch.report("p", &r(80, true), 80));
         assert!(!watch.report("q", &r(100, true), 0), "off");
+    }
+
+    /// L3 review: a phone first seen past the level, or past a new level,
+    /// tells nothing until a charge is seen.
+    #[test]
+    fn charged_waits_for_a_charge_it_sees() {
+        let mut watch = ChargedWatch::default();
+        let r = |charge: u8, charging: bool| BatteryReport {
+            charge,
+            charging,
+            low: false,
+        };
+        assert!(
+            !watch.report("p", &r(100, true), 100),
+            "on its charger at start"
+        );
+        assert!(!watch.report("p", &r(100, true), 100));
+        assert!(
+            !watch.report("p", &r(95, true), 80),
+            "the level turned down"
+        );
+        assert!(!watch.report("p", &r(100, false), 80), "unplugged");
+        assert!(watch.report("p", &r(80, true), 80), "a charge seen");
     }
 
     use super::*;
