@@ -1731,10 +1731,21 @@ pub(crate) async fn receive_offered(
 /// The date a share or offer `body` gives its file (K1), held to now; none
 /// with Settings "Keep files' dates" off.
 pub(crate) fn received_date(body: &serde_json::Value) -> Option<std::time::SystemTime> {
-    if !crate::events::current_config().keep_file_dates {
-        return None;
-    }
-    pocketdesk_core::protocol::file_time::from_body(body, std::time::SystemTime::now())
+    received_date_when(
+        body,
+        crate::events::current_config().keep_file_dates,
+        std::time::SystemTime::now(),
+    )
+}
+
+/// [`received_date`] with the setting given.
+fn received_date_when(
+    body: &serde_json::Value,
+    keep: bool,
+    now: std::time::SystemTime,
+) -> Option<std::time::SystemTime> {
+    keep.then(|| pocketdesk_core::protocol::file_time::from_body(body, now))
+        .flatten()
 }
 
 /// Date the file at `path` `at` (K1). A file that will not take it is kept
@@ -1844,6 +1855,16 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// K1 review: with "Keep files' dates" off, a body's date is no date.
+    #[test]
+    fn a_date_is_none_with_the_setting_off() {
+        let body = serde_json::json!({ "lastModified": 1_780_000_000_000u64 });
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000);
+        let june = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000);
+        assert_eq!(received_date_when(&body, true, now), Some(june));
+        assert_eq!(received_date_when(&body, false, now), None);
+    }
 
     /// K1 review: a read-only file takes its date too.
     #[test]

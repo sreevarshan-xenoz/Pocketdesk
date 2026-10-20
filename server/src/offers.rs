@@ -680,7 +680,12 @@ const MAX_FOLDER_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 /// The date the file at `path` was last changed, as it goes with the file
 /// (K1); none with Settings "Keep files' dates" off or no date to read.
 pub(crate) fn sent_date(path: &Path) -> Option<u64> {
-    if !crate::events::current_config().keep_file_dates {
+    sent_date_when(path, crate::events::current_config().keep_file_dates)
+}
+
+/// [`sent_date`] with the setting given.
+fn sent_date_when(path: &Path, keep: bool) -> Option<u64> {
+    if !keep {
         return None;
     }
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
@@ -688,8 +693,13 @@ pub(crate) fn sent_date(path: &Path) -> Option<u64> {
 }
 
 /// `body` with the file at `path`'s date in it, when it goes with it (K1).
-pub(crate) fn with_date(mut body: serde_json::Value, path: &Path) -> serde_json::Value {
-    if let Some(ms) = sent_date(path) {
+pub(crate) fn with_date(body: serde_json::Value, path: &Path) -> serde_json::Value {
+    with_date_when(body, path, crate::events::current_config().keep_file_dates)
+}
+
+/// [`with_date`] with the setting given.
+fn with_date_when(mut body: serde_json::Value, path: &Path, keep: bool) -> serde_json::Value {
+    if let Some(ms) = sent_date_when(path, keep) {
         body[pocketdesk_core::protocol::file_time::FIELD] = ms.into();
     }
     body
@@ -1663,6 +1673,37 @@ mod tests {
 
     fn request(dir: &Path, path: &Path) -> SendRequest {
         outbox::request(dir, "phone-a", path.to_str().unwrap(), now_unix()).unwrap()
+    }
+
+    /// K1 review: a single file's offer carries its date, and none with
+    /// "Keep files' dates" off.
+    #[test]
+    fn an_offer_carries_its_files_date_only_with_the_setting_on() {
+        let dir = temp_dir("dated-offer");
+        let file = dir.join("photo.jpg");
+        std::fs::write(&file, b"p").unwrap();
+        let june = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .and_then(|f| f.set_modified(june))
+            .unwrap();
+        let body = serde_json::json!({ "id": "x", "name": "photo.jpg" });
+        assert_eq!(
+            with_date_when(body.clone(), &file, true)["lastModified"],
+            1_780_000_000_000u64
+        );
+        assert!(
+            with_date_when(body.clone(), &file, false)
+                .get("lastModified")
+                .is_none()
+        );
+        assert!(
+            with_date_when(body, &dir.join("gone"), true)
+                .get("lastModified")
+                .is_none(),
+            "no file, no date"
+        );
     }
 
     #[tokio::test]
