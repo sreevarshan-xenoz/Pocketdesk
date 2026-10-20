@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-670 open items.
+680 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 383 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 391 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 49 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
 | A phone with a SIM | 22 |
 | A second phone | 7 |
 | Away from home: another network, or through a router | 9 |
@@ -798,6 +798,17 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The state widget made one cell tall: the line, no "%" left alone; on its side at two cells: the line where bars do not fit.
 - Spanish and Tamil (the bar labels at 68 dp); font scale 2.0.
 
+**142. The desktop app, upgrades and UI tweaks (I3)**
+
+- Messages: half-type a reply to one conversation, open another, then New text: each its own draft; Enter sends, Shift+Enter a new line.
+- The notice at the foot of the window, the page not moving; a long one readable; Restart's spinner.
+- The page list: a count on Sessions in a session, on Files while a file moves, a warning dot on Settings while it has changes; readable selected and hovered, light and dark.
+- Files: Send again on a failed send (and disabled with the phone away); Open on a received picture and PDF, none on a program; the rows wrapping at the minimum width.
+- Overview: a phone's battery bar, in the warning colour at 15 % or under not charging; with pairing off, the warning and Open Settings.
+- Diagnostics: the checks running as it opens, the chips in both themes.
+- Pair: "For 15 minutes" makes a new code; a phone paired with it shows its time left on Devices and goes when it runs out.
+- Phone files: the spinner while a folder is asked for.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -991,6 +1002,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Remote on the A71 with the air mouse on: "Laser pointer" under the pad; on, a press shows a red dot in the middle of the pointer's screen, turning moves it, the pointer stays put.
 - A slide show (PowerPoint or a browser's): a tap with the laser on still advances or clicks at the pointer.
+
+**142. The desktop app, upgrades and UI tweaks (I3)**
+
+- Settings: change a key by hand in `config.toml` with the app open, then change another in the form and Save: the hand edit stays. Ctrl+S saves.
+- Keys: Esc on Unpair, Restart and Clear; Ctrl+Page Up and Down; Enter in the Files and Notifications boxes.
 
 ## A phone with a SIM
 

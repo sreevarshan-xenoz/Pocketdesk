@@ -2475,8 +2475,10 @@ pub fn media_line(media: &pocketdesk_core::protocol::phone_media::PhoneMedia) ->
     }
 }
 
-/// Whether a battery is low as the server warns of it (T8b's 15 %), not
-/// charging: its bar on the Overview is drawn as a warning (I3).
+/// Whether a battery is low as the server warns of it (T8b's 15 %, the
+/// server's `phone_battery::LOW_AT`, kept in step by hand: the desktop
+/// cannot take it from the server crate), not charging: its bar on the
+/// Overview is drawn as a warning (I3).
 pub fn battery_low(battery: &pocketdesk_core::local::phone_status::PhoneBattery) -> bool {
     battery.charge <= 15 && !battery.charging
 }
