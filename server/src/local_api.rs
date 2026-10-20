@@ -171,8 +171,10 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
                 "media": media.get(&id).map(|m| &m.media),
                 // Its Do Not Disturb as it last said (D2), or null.
                 "quiet": quiet.get(&id).filter(|_| linked.contains(&id)),
-                // Which of its features it has on, as it last said (L7), or null.
-                "switches": switches.get(&id),
+                // Which of its features it has on, as it last said (L7), or
+                // null; and when it said so.
+                "switches": switches.get(&id).map(|s| &s.switches),
+                "switches_unix": switches.get(&id).map(|s| s.updated_unix),
             })
         })
         .collect();
@@ -1617,8 +1619,8 @@ mod tests {
             "what it did not say is left out"
         );
         assert_eq!(b["battery"], Value::Null, "never reported");
-        assert_eq!(a["switches"]["switches"]["links"], json!({"on": true}));
-        assert_eq!(a["switches"]["updated_unix"], 98);
+        assert_eq!(a["switches"]["links"], json!({"on": true}));
+        assert_eq!(a["switches_unix"], 98);
         assert_eq!(b["switches"], Value::Null, "none said yet");
         assert_eq!(a["media"]["title"], "Song");
         assert_eq!(a["media"]["isPlaying"], true);
