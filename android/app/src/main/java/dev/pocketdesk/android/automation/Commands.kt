@@ -52,9 +52,10 @@ object Commands {
             }
             val intent =
                 Intent(CommandRule.ACTION)
-                    .putExtra("name", command.name)
-                    .putExtra("text", command.text)
-                    .putExtra("computer", command.host)
+                    // Named as the phone's other broadcasts' extras are (1f).
+                    .putExtra("dev.pocketdesk.android.extra.NAME", command.name)
+                    .putExtra("dev.pocketdesk.android.extra.TEXT", command.text)
+                    .putExtra("dev.pocketdesk.android.extra.ADDRESS", command.host)
             intent.setPackage(to)
             runCatching { context.applicationContext.sendBroadcast(intent) }
                 .onSuccess { Log.d("Commands", "a command went to $to") }
