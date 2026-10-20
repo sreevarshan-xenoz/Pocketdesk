@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-666 open items.
+670 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 379 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 383 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
 | A phone with a SIM | 22 |
@@ -787,6 +787,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - On the lock screen: a tap asks to unlock first.
 - Audio off for the phone on the computer: the refusal as the subtitle.
 - Opened after an hour: "Tap to play or pause", not the old track.
+
+**138. Wake the computer from Quick Settings (G7)**
+
+- Add "Wake computer" to the A71's Quick Settings: its subtitle names the last computer; with its MAC not known yet, "Connect once while it is awake".
+- A tap with the computer awake: "Sending the wake…", "Sent, waiting for it to answer…", then "It is awake"; a tap again at once is ignored.
+- On the lock screen: a tap asks to unlock first. With no computer saved: a tap opens the app.
+- A computer asleep (not this box): woken, "It is awake" within a minute.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 

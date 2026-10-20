@@ -2063,6 +2063,14 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] Audio off for the phone on the computer: the refusal as the subtitle.
 - [ ] Opened after an hour: "Tap to play or pause", not the old track.
 
+## 138. Wake the computer from Quick Settings (G7)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet. Waking is a magic packet, never a power action on this box; a computer really asleep is owed elsewhere.
+- [ ] Add "Wake computer" to the A71's Quick Settings: its subtitle names the last computer; with its MAC not known yet, "Connect once while it is awake".
+- [ ] A tap with the computer awake: "Sending the wake…", "Sent, waiting for it to answer…", then "It is awake"; a tap again at once is ignored.
+- [ ] On the lock screen: a tap asks to unlock first. With no computer saved: a tap opens the app.
+- [ ] A computer asleep (not this box): woken, "It is awake" within a minute.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

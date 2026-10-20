@@ -183,7 +183,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
   - **Through another computer:** an always-on computer can send it instead, onto its own network only, if that computer gives the phone the Power permission.
   - **Then connect:** the card waits for the computer to answer, and connects ("Connect after waking"). Connect on a computer that does not answer offers "Wake and connect".
   - **Per computer:** "Wake settings" sets the method, the relay, the outside address and port, and the MAC.
-  - **From the shade:** the Quick Settings tile "Wake computer" wakes the last computer as its settings say, with no app open; its subtitle says when it cannot from here, and how a tap went.
+  - **From the shade:** the Quick Settings tile "Wake computer" wakes the last computer as its settings say, with no app open; its subtitle says when it cannot from here, and after a tap whether the computer answered.
 
   Wi-Fi adapters usually wake a computer only from sleep, not from shutdown.
 - **Input control** — remote mouse/keyboard via trackpad gestures
