@@ -190,6 +190,10 @@ pub struct PocketdeskApp {
     last_sessions: std::collections::HashMap<String, u64>,
     /// The session log as last read for [`Self::last_sessions`].
     last_sessions_stamp: Option<(u64, std::time::SystemTime)>,
+    /// The Sessions page's recent sessions, and the log as they were read
+    /// from it (J3).
+    recent_sessions: Vec<model::RecentSession>,
+    recent_sessions_stamp: Option<(u64, std::time::SystemTime)>,
     /// The Overview's link box: the phone it is for, and the link typed.
     overview_link: Option<(String, String)>,
     /// The link box was just opened: its field takes the cursor once.
@@ -258,6 +262,8 @@ impl PocketdeskApp {
             send_link: String::new(),
             last_sessions: Default::default(),
             last_sessions_stamp: None,
+            recent_sessions: Vec::new(),
+            recent_sessions_stamp: None,
             overview_link: None,
             overview_link_focus: false,
             picking: None,
@@ -430,6 +436,14 @@ impl PocketdeskApp {
                 self.last_sessions =
                     model::last_sessions(&model::session_log_tail(&self.state_dir));
                 self.last_sessions_stamp = stamp;
+            }
+        }
+        if self.tab == Tab::Sessions {
+            let stamp = model::session_log_stamp(&self.state_dir);
+            if stamp != self.recent_sessions_stamp {
+                self.recent_sessions =
+                    model::recent_sessions(&model::session_log_tail(&self.state_dir), 10);
+                self.recent_sessions_stamp = stamp;
             }
         }
         if self.tab == Tab::Activity {
@@ -1445,9 +1459,7 @@ impl PocketdeskApp {
             if ui.button("Overview").clicked() {
                 self.switch_to(Tab::Status);
             }
-            return;
-        }
-        if self.snapshot.sessions.is_empty() {
+        } else if self.snapshot.sessions.is_empty() {
             ui.label(
                 "No phone is viewing this computer right now. On the phone, tap Connect on this \
                  computer's card.",
@@ -1455,12 +1467,20 @@ impl PocketdeskApp {
             if self.snapshot.devices.is_empty() && ui.button("Pair a phone").clicked() {
                 self.switch_to(Tab::Pair);
             }
-            return;
+        } else {
+            self.live_sessions(ui);
         }
+        self.recent_sessions_list(ui);
+    }
+
+    /// A block per live session (J3): the phone, chips for how it is
+    /// connected and what it is, its control, End, and its music.
+    fn live_sessions(&mut self, ui: &mut egui::Ui) {
         let now = now_unix();
         let mut end = None;
         let mut give = None;
         let mut show_cast = false;
+        let mut pressed = None;
         // A cast whose window the owner closed (T10k).
         let cast_closed = self
             .cast
@@ -1468,99 +1488,93 @@ impl PocketdeskApp {
             .and_then(|c| c.showing())
             .is_some_and(|(_, closed)| closed);
         let count = self.snapshot.sessions.len();
-        egui::Grid::new("sessions")
-            .num_columns(5)
-            .striped(true)
-            .spacing([16.0, 8.0])
-            .show(ui, |ui| {
-                for session in &self.snapshot.sessions {
+        for session in &self.snapshot.sessions {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
                     match session.device_id.as_deref() {
                         Some(id) => {
-                            ui.label(model::device_label(&self.snapshot.devices, id))
-                                .on_hover_text(id);
+                            ui.label(
+                                RichText::new(model::device_label(&self.snapshot.devices, id))
+                                    .strong(),
+                            )
+                            .on_hover_text(id);
                         }
                         None => {
-                            ui.monospace("unannounced");
+                            ui.label(RichText::new("A phone that has not said who it is").strong());
                         }
                     }
-                    ui.label(format!(
-                        "{} · {}{}",
-                        session.transport.to_uppercase(),
-                        session.peer,
-                        if session.cast {
-                            " · showing its screen or camera"
-                        } else if session.control_only {
-                            " · control only"
-                        } else if session.sound_only {
-                            " · sound only"
-                        } else {
-                            ""
-                        }
-                    ));
-                    ui.label(format!(
-                        "for {}",
-                        human_duration(now.saturating_sub(session.started_unix))
-                    ));
+                    let neutral = ui.visuals().widgets.inactive.bg_fill;
+                    let (road, why) = if session.transport == "lan" {
+                        ("on this network", "Straight across your network")
+                    } else {
+                        ("over the internet", "Through the internet road")
+                    };
+                    chip(ui, road, neutral).on_hover_text(format!("{why}, from {}", session.peer));
+                    chip(ui, model::session_kind(session), neutral);
                     match model::control_cell(session, count, self.snapshot.shared_control) {
                         model::ControlCell::Driving => {
-                            ui.label(RichText::new("Driving").color(crate::theme::good(ui)));
+                            let good = crate::theme::good(ui);
+                            chip(ui, "driving", good);
                         }
-                        model::ControlCell::Give(id) => {
-                            if ui
-                                .button("Give control")
-                                .on_hover_text(
-                                    "This phone drives; the others only watch until it goes quiet",
-                                )
-                                .clicked()
-                            {
-                                give = Some(id);
+                        model::ControlCell::Give(_) | model::ControlCell::Nothing => {}
+                    }
+                });
+                ui.label(
+                    RichText::new(format!(
+                        "For {}",
+                        human_duration(now.saturating_sub(session.started_unix))
+                    ))
+                    .color(crate::theme::muted(ui)),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("End").clicked() {
+                        end = Some(session.clone());
+                    }
+                    if let model::ControlCell::Give(id) =
+                        model::control_cell(session, count, self.snapshot.shared_control)
+                        && ui
+                            .button("Give control")
+                            .on_hover_text(
+                                "This phone drives; the others only watch until it goes quiet",
+                            )
+                            .clicked()
+                    {
+                        give = Some(id);
+                    }
+                    if session.cast && cast_closed && ui.button("Show screen").clicked() {
+                        show_cast = true;
+                    }
+                });
+                // Its music, in its own block (J3: it had sat below them all).
+                if let Some(id) = session.device_id.as_deref()
+                    && let Some(playing) = self.snapshot.phone_media.get(id)
+                {
+                    let media = &playing.media;
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Playing:");
+                        ui.label(RichText::new(media_line(media)).strong());
+                    });
+                    ui.horizontal(|ui| {
+                        let buttons = [
+                            ("Previous", "previous", media.can_previous),
+                            (
+                                if media.is_playing { "Pause" } else { "Play" },
+                                "playPause",
+                                media.can_play_pause,
+                            ),
+                            ("Next", "next", media.can_next),
+                        ];
+                        for (label, command, enabled) in buttons {
+                            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                pressed = Some((id.to_string(), command));
                             }
                         }
-                        model::ControlCell::Nothing => {
-                            ui.label("");
-                        }
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button("End").clicked() {
-                            end = Some(session.clone());
-                        }
-                        if session.cast && cast_closed && ui.button("Show screen").clicked() {
-                            show_cast = true;
-                        }
                     });
-                    ui.end_row();
                 }
             });
-        let mut pressed = None;
-        for session in &self.snapshot.sessions {
-            let Some(id) = session.device_id.as_deref() else {
-                continue;
-            };
-            let Some(playing) = self.snapshot.phone_media.get(id) else {
-                continue;
-            };
-            let media = &playing.media;
-            ui.add_space(8.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(format!("Playing on {}:", self.label(id)));
-                ui.label(RichText::new(media_line(media)).strong());
-            });
-            ui.horizontal(|ui| {
-                let buttons = [
-                    ("Previous", "previous", media.can_previous),
-                    (
-                        if media.is_playing { "Pause" } else { "Play" },
-                        "playPause",
-                        media.can_play_pause,
-                    ),
-                    ("Next", "next", media.can_next),
-                ];
-                for (label, command, enabled) in buttons {
-                    if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                        pressed = Some((id.to_string(), command));
-                    }
-                }
-            });
+            ui.add_space(4.0);
         }
         if let Some((id, command)) = pressed {
             self.notice = crate::notice::Notice::outcome(
@@ -1592,6 +1606,39 @@ impl PocketdeskApp {
                     Err(e) => Err(format!("Could not hand control over: {e}")),
                 },
             );
+        }
+    }
+
+    /// The last sessions from the session log, newest first (J3).
+    fn recent_sessions_list(&mut self, ui: &mut egui::Ui) {
+        if self.recent_sessions.is_empty() {
+            return;
+        }
+        ui.add_space(12.0);
+        ui.heading("Recent sessions");
+        let now = now_unix();
+        for recent in &self.recent_sessions {
+            let who = match recent.device_id.as_deref() {
+                Some(id) => model::device_label(&self.snapshot.devices, id),
+                None => "a phone that did not say who it is".to_string(),
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(who).strong());
+                let mut line = vec![crate::words::ago(now, recent.ended_unix)];
+                if !recent.refused {
+                    line.push(format!("for {}", human_duration(recent.duration_secs)));
+                }
+                line.push(recent.how.to_string());
+                if let Some(ms) = recent.e2e_ms {
+                    line.push(format!("{ms} ms latency"));
+                }
+                let text = RichText::new(line.join(" · "));
+                ui.label(if recent.refused {
+                    text.color(crate::theme::warn(ui))
+                } else {
+                    text.color(crate::theme::muted(ui))
+                });
+            });
         }
     }
 
@@ -2581,6 +2628,18 @@ pub fn human_duration(secs: u64) -> String {
         3600..86_400 => format!("{}h {}m", secs / 3600, (secs % 3600) / 60),
         _ => format!("{}d {}h", secs / 86_400, (secs % 86_400) / 3600),
     }
+}
+
+/// A word on a filled chip (I3's Diagnostics, J3's Sessions).
+fn chip(ui: &mut egui::Ui, text: &str, fill: egui::Color32) -> egui::Response {
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(8, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).color(crate::theme::on_chip(ui, fill)));
+        })
+        .response
 }
 
 /// Whether closing the window hides it to the tray: only with a tray, and
