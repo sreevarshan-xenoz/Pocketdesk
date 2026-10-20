@@ -246,7 +246,8 @@ pub(crate) fn take_from(device: &str, body: &serde_json::Value) {
             serde_json::json!({}),
         );
     }
-    if let Some(warning) = warning {
+    // Paused (K2a): the Overview shows the battery; no warning pops up.
+    if let Some(warning) = warning.filter(|_| !crate::paused::now()) {
         tracing::info!("{warning}");
         std::thread::spawn(move || {
             crate::platform::notify("Pocketdesk", &warning, Duration::from_secs(15));

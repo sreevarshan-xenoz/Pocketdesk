@@ -418,8 +418,11 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     let Some((app, title, text)) = kde_to_show(body) else {
         return;
     };
-    // A muted app's never counts against the limit (K2b review).
+    // A muted app's never counts against the limit (K2b review); a pause
+    // holds them all alike, still counted, so a phone's burst stays bounded
+    // (K2a review).
     let muted = muted_here(&app);
+    let held = held_here(muted);
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
     if !muted
         && !flood_guard()
@@ -435,7 +438,7 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
         serde_json::json!({ "app": app }),
         serde_json::json!({ "title": title, "text": text }),
     );
-    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || muted {
+    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || held {
         return;
     }
     // Muteable only by a name the device gave (K2b review: the fallback
@@ -455,6 +458,12 @@ fn given_name(body: &serde_json::Value, field: &str) -> bool {
     body.get(field)
         .and_then(|v| v.as_str())
         .is_some_and(|app| !app.trim().is_empty())
+}
+
+/// Whether a notification is held here: its app `muted` (K2b), or this
+/// computer paused (K2a).
+fn held_here(muted: bool) -> bool {
+    muted || crate::paused::now()
 }
 
 /// Whether `app` is muted on this computer (K2b): its notifications are
@@ -551,7 +560,10 @@ impl Plugin for NotificationPlugin {
                 // Muted here (K2b): logged and kept, never shown, and never
                 // counted against the phone's limit, which is for what shows
                 // (K2b review: a muted app's burst dropped the others).
+                // Paused (K2a): held as a muted app's are, but still counted
+                // (K2a review: a week's pause must not unbound a phone).
                 let muted = muted_here(&app);
+                let held = held_here(muted);
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 if !muted
                     && !flood_guard()
@@ -592,7 +604,7 @@ impl Plugin for NotificationPlugin {
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }
-                if muted {
+                if held {
                     return Ok(());
                 }
                 let text = with_late(&text, waited);
@@ -1338,6 +1350,16 @@ mod tests {
         assert!(muted_here("mail (k2b test)"));
         pocketdesk_core::local::muted_apps::unmute(dir, "Mail (K2b test)").unwrap();
         assert!(!muted_here("Mail (K2b test)"));
+    }
+
+    /// K2a: a pause holds every app's notifications, phones' and KDE
+    /// devices' alike (both ask `held_here`).
+    #[test]
+    fn a_pause_holds_every_app_s_notifications() {
+        assert!(!held_here(false));
+        assert!(held_here(true), "a muted app's");
+        let _paused = crate::paused::paused_for_test();
+        assert!(held_here(false));
     }
 
     /// E1 review: a phone's word is kept only for an answer sent to that

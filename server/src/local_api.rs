@@ -670,6 +670,84 @@ pub fn run_quiet(query: &str, minutes: u32, as_json: bool) -> i32 {
     code
 }
 
+/// What `pocketdesk pause` was asked (K2a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseAsk {
+    Show,
+    /// For these minutes, or until resumed with `None`.
+    Pause(Option<u32>),
+    Resume,
+}
+
+/// Do `ask` in `state_dir` at `now_unix`: what to print, and the exit code.
+pub fn pause_in(state_dir: &Path, ask: PauseAsk, now_unix: u64) -> (Value, i32) {
+    use pocketdesk_core::local::pause;
+    let done = match ask {
+        PauseAsk::Show => Ok(()),
+        PauseAsk::Pause(minutes) => pause::pause(state_dir, minutes, now_unix).map(|_| ()),
+        PauseAsk::Resume => pause::resume(state_dir),
+    };
+    if let Err(e) = done {
+        return (
+            error(format!("could not change the pause: {e}")),
+            exit::FAILED,
+        );
+    }
+    // A pause that cannot be read is said so, never "not paused" (K2a
+    // review): the server then holds nothing, and the owner should know.
+    let pause = match pause::load(state_dir) {
+        Ok(pause) => pause.filter(|p| p.active(now_unix)),
+        Err(e) => {
+            return (
+                error(format!("could not read the pause: {e}")),
+                exit::FAILED,
+            );
+        }
+    };
+    let out = match pause {
+        Some(p) => {
+            json!({ "paused": true, "since_unix": p.since_unix, "until_unix": p.until_unix })
+        }
+        None => json!({ "paused": false }),
+    };
+    (versioned(out), exit::DONE)
+}
+
+/// `pocketdesk pause`: [`pause_in`] for the owner's state folder, printed.
+pub fn run_pause(ask: PauseAsk, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
+            return exit::FAILED;
+        }
+    };
+    let (out, code) = pause_in(&dir, ask, pocketdesk_core::local::pin::now_unix());
+    if as_json {
+        print(&out);
+    } else if let Some(reason) = out["error"].as_str() {
+        eprintln!("Error: {reason}");
+    } else if out["paused"] == true {
+        match out["until_unix"].as_u64() {
+            Some(until) => {
+                let left = until
+                    .saturating_sub(pocketdesk_core::local::pin::now_unix())
+                    .div_ceil(60);
+                let unit = if left == 1 { "minute" } else { "minutes" };
+                println!("paused for {left} more {unit}")
+            }
+            None => println!("paused until resumed"),
+        }
+    } else {
+        println!("not paused");
+    }
+    code
+}
+
 /// The clipboard's history in `state_dir` (D3), or, with `send` (a place
 /// in it, 1 the newest, and a phone), that entry queued for the phone's
 /// clipboard. What to print, and the exit code.
@@ -1228,6 +1306,29 @@ pub fn print(value: &Value) {
 
 #[cfg(test)]
 mod tests {
+    /// K2a: `pocketdesk pause` pauses, says so, and resumes.
+    #[test]
+    fn pause_pauses_says_so_and_resumes() {
+        let dir = std::env::temp_dir().join(format!("pd-api-pause-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (out, code) = pause_in(&dir, PauseAsk::Show, 1_000);
+        assert_eq!((out["paused"].clone(), code), (json!(false), exit::DONE));
+        let (out, _) = pause_in(&dir, PauseAsk::Pause(Some(30)), 1_000);
+        assert_eq!(out["paused"], true);
+        assert_eq!(out["until_unix"], 1_000 + 1_800);
+        assert_eq!(out["api"], 1);
+        let (out, _) = pause_in(&dir, PauseAsk::Pause(None), 1_000);
+        assert_eq!(out["until_unix"], Value::Null, "until resumed");
+        let (out, _) = pause_in(&dir, PauseAsk::Resume, 1_000);
+        assert_eq!(out["paused"], false);
+        std::fs::write(dir.join(pocketdesk_core::local::paths::PAUSE_FILE), "x").unwrap();
+        assert_eq!(pause_in(&dir, PauseAsk::Resume, 1_000).1, exit::FAILED);
+        let (out, code) = pause_in(&dir, PauseAsk::Show, 1_000);
+        assert_eq!(code, exit::FAILED, "a broken pause is said so: {out}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
@@ -1899,6 +2000,27 @@ mod tests {
             pocketdesk_core::local::rings::take_all(&dir, now).is_empty(),
             "none refused was queued"
         );
+    }
+
+    /// K2a: `pause` takes 1 to 10080 minutes, until resumed, or resume,
+    /// one of them at most.
+    #[test]
+    fn pause_takes_one_of_minutes_until_resumed_or_resume() {
+        use clap::Parser;
+        let parse = |args: &[&str]| crate::cli::Cli::try_parse_from(args);
+        assert!(
+            parse(&["pocketdesk", "pause"]).is_ok(),
+            "says whether paused"
+        );
+        assert!(parse(&["pocketdesk", "pause", "--for", "1"]).is_ok());
+        assert!(parse(&["pocketdesk", "pause", "--for", "10080"]).is_ok());
+        assert!(parse(&["pocketdesk", "pause", "--for", "0"]).is_err());
+        assert!(parse(&["pocketdesk", "pause", "--for", "10081"]).is_err());
+        assert!(parse(&["pocketdesk", "pause", "--until-resumed"]).is_ok());
+        assert!(parse(&["pocketdesk", "pause", "--resume", "--json"]).is_ok());
+        assert!(parse(&["pocketdesk", "pause", "--for", "5", "--resume"]).is_err());
+        assert!(parse(&["pocketdesk", "pause", "--for", "5", "--until-resumed"]).is_err());
+        assert!(parse(&["pocketdesk", "pause", "--until-resumed", "--resume"]).is_err());
     }
 
     /// D2: a mute is queued for a linked phone with Mute on, refused at once

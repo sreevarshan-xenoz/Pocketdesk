@@ -167,7 +167,8 @@ impl Plugin for SmsPlugin {
                         serde_json::json!({ "from": from, "body": body }),
                     );
                 }
-                if NOTIFY.load(Ordering::Relaxed) {
+                // Paused (K2a): kept on the Messages page, not shown.
+                if shows_texts() {
                     // The phone's notification limit holds for texts too.
                     for (address, body, _, name) in texts {
                         if !crate::plugins::notification::admit(&phone) {
@@ -434,6 +435,12 @@ fn forget(dir: &Path, id: &str) {
 
 /// Daemon task: hand the desktop app's replies to their phones, and give up
 /// on those never confirmed.
+/// Whether a text that came is shown here: text notifications on, and this
+/// computer not paused (K2a).
+fn shows_texts() -> bool {
+    NOTIFY.load(Ordering::Relaxed) && !crate::paused::now()
+}
+
 pub async fn run_watcher() {
     let Ok(dir) = crate::state::state_dir() else {
         return;
@@ -457,6 +464,15 @@ pub async fn run_watcher() {
 
 #[cfg(test)]
 mod tests {
+    /// K2a: a pause keeps texts off the screen; they stay on Messages.
+    #[test]
+    fn a_pause_holds_texts() {
+        let shown = super::NOTIFY.load(Ordering::Relaxed);
+        assert_eq!(super::shows_texts(), shown);
+        let _paused = crate::paused::paused_for_test();
+        assert!(!super::shows_texts());
+    }
+
     use super::*;
     use serde_json::json;
 

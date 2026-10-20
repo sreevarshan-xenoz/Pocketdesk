@@ -86,7 +86,11 @@ fn main() {
                     act(&state_dir, TrayAction::SendClipboard(id.to_string()));
                 }
             }
-            let mut entries = pocketdesk_desktop::tray_menu::menu(&rows, &snapshot.devices, now);
+            let mut entries = pocketdesk_desktop::tray_menu::with_pause(
+                pocketdesk_desktop::tray_menu::menu(&rows, &snapshot.devices, now),
+                pocketdesk_core::local::pause::current(&state_dir, now).as_ref(),
+                now,
+            );
             // H4: the key names itself where its action is.
             if key.status.registered
                 && let Some(phone) = hotkey::phone(&rows)
@@ -247,6 +251,10 @@ fn act(state_dir: &Path, action: TrayAction) -> bool {
             now,
         )
         .map(|_| ()),
+        TrayAction::Pause(minutes) => {
+            pocketdesk_core::local::pause::pause(state_dir, *minutes, now).map(|_| ())
+        }
+        TrayAction::Resume => pocketdesk_core::local::pause::resume(state_dir),
         TrayAction::Quit => {
             // The window goes too, when it runs (E2).
             let _ = pocketdesk_core::local::app_open::request(
@@ -260,6 +268,11 @@ fn act(state_dir: &Path, action: TrayAction) -> bool {
     };
     if let Err(e) = done {
         eprintln!("Pocketdesk tray: {action:?} failed: {e}");
+        // The tray program has no console (K2a review): a pause that failed
+        // opens the Overview, which says what became of it.
+        if matches!(action, TrayAction::Pause(_) | TrayAction::Resume) {
+            let _ = open_window(state_dir, "overview", None);
+        }
     }
     true
 }

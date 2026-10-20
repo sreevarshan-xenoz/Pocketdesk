@@ -458,7 +458,10 @@ impl State {
             PING => {
                 // Quiet in the log: a device may ping as often as it likes.
                 tracing::debug!(device_id = %self.device_id, "A ping from a KDE Connect device");
-                notify("Ping from a KDE Connect device", self.name.clone());
+                // Paused (K2a): a ping is a ring's cousin, held alike.
+                if !crate::paused::now() {
+                    notify("Ping from a KDE Connect device", self.name.clone());
+                }
             }
             BATTERY if may.battery => {
                 crate::plugins::phone_battery::take_from(&self.device_id, &packet.body);

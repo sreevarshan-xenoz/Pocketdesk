@@ -1230,6 +1230,12 @@ pub(crate) fn on_received(path: &Path, size: u64, from: &str, top: Option<&Path>
     let Some((summary, body)) = received_in(&dir, path, size, from, top) else {
         return;
     };
+    // Paused (K2a): listed on the Files page, not announced (its name
+    // could show on a shared screen).
+    if crate::paused::now() {
+        tracing::info!("A file arrived while paused; it is on the Files page");
+        return;
+    }
     std::thread::spawn(move || {
         if !crate::platform::notify(summary, &body, Duration::from_secs(8)) {
             tracing::info!("{summary} — {body}");

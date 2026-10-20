@@ -26,16 +26,22 @@ pub fn configure(open_links: bool) {
 
 type Opener = Arc<dyn Fn(&str) -> std::result::Result<(), String> + Send + Sync>;
 type Shower = Arc<dyn Fn(&str, &str) + Send + Sync>;
+type Paused = Arc<dyn Fn() -> bool + Send + Sync>;
 
 pub struct LinksPlugin {
     open: Opener,
     show: Shower,
+    /// Whether this computer is paused (K2a): a link is then only listed.
+    paused: Paused,
     recent: Mutex<HashMap<String, VecDeque<Instant>>>,
 }
 
 impl Default for LinksPlugin {
     fn default() -> Self {
-        Self::with(Arc::new(open_detached), Arc::new(show_link))
+        Self {
+            paused: Arc::new(crate::paused::now),
+            ..Self::with(Arc::new(open_detached), Arc::new(show_link))
+        }
     }
 }
 
@@ -44,6 +50,7 @@ impl LinksPlugin {
         Self {
             open,
             show,
+            paused: Arc::new(|| false),
             recent: Mutex::default(),
         }
     }
@@ -80,6 +87,11 @@ impl LinksPlugin {
             serde_json::json!({ "host": pocketdesk_core::protocol::link::link_host(url) }),
             serde_json::json!({ "url": url }),
         );
+        // Paused (K2a): on Activity with the event above, nothing more.
+        if (self.paused)() {
+            tracing::info!("A link from {device} kept on Activity: paused");
+            return;
+        }
         if OPEN_LINKS.load(Ordering::Relaxed) {
             match (self.open)(url) {
                 Ok(()) => {
@@ -291,6 +303,21 @@ mod tests {
         plugin.take("file:///etc/passwd", "phone-a", now);
         plugin.take("javascript:alert(1)", "phone-a", now);
         assert_eq!(*opened.lock().unwrap(), ["https://example.org/page"]);
+        assert!(shown.lock().unwrap().is_empty());
+    }
+
+    /// K2a: paused, a link is neither opened nor shown.
+    #[test]
+    fn a_pause_holds_a_link() {
+        let _setting = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        configure(true);
+        let (plugin, opened, shown) = plugin();
+        let plugin = LinksPlugin {
+            paused: Arc::new(|| true),
+            ..plugin
+        };
+        plugin.take("https://example.org/page", "phone-a", Instant::now());
+        assert!(opened.lock().unwrap().is_empty());
         assert!(shown.lock().unwrap().is_empty());
     }
 

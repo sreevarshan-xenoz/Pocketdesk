@@ -134,6 +134,9 @@ fn action_id(action: &TrayAction) -> String {
         TrayAction::SendClipboard(id) => format!("clipboard:{id}"),
         TrayAction::SendFile(id) => format!("file:{id}"),
         TrayAction::TakePhoto(id) => format!("photo:{id}"),
+        TrayAction::Pause(Some(minutes)) => format!("pause:{minutes}"),
+        TrayAction::Pause(None) => "pause:resumed".to_string(),
+        TrayAction::Resume => "resume".to_string(),
     }
 }
 
@@ -163,6 +166,10 @@ mod tests {
             TrayAction::SendClipboard("p".into()),
             TrayAction::SendFile("p".into()),
             TrayAction::TakePhoto("p".into()),
+            TrayAction::Pause(Some(60)),
+            TrayAction::Pause(Some(480)),
+            TrayAction::Pause(None),
+            TrayAction::Resume,
             TrayAction::Ring("q".into()),
         ];
         let ids: std::collections::HashSet<String> = actions.iter().map(action_id).collect();
