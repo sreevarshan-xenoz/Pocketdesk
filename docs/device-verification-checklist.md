@@ -2320,6 +2320,14 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] Mobile data with its bars, on a phone with a SIM (two SIMs: the data SIM's).
 - [ ] The phone away: the line is gone; "Share the phone's state" off: nothing is sent.
 
+## 163. Features on both sides (L7)
+
+Built 2026-10-21; tested through units and the desktop harness, nothing on a device yet.
+- [ ] A switch turned off on the phone shows on the computer's Devices page within 15 s in a session, and within 30 s with only a background link.
+- [ ] Notification access revoked on the phone: the features the listener runs say "Android allows: no", with the advice.
+- [ ] Settings "Phone notifications" off on the computer: the notifications rows name it.
+- [ ] A phone unpaired: its report gone from `phone_switches.json` within seconds.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
