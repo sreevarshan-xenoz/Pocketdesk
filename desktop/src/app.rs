@@ -2147,7 +2147,16 @@ impl PocketdeskApp {
                 );
                 if row.exists {
                     // I3: what opens in a viewer opens from here.
-                    if crate::reveal::openable(&file.name) && ui.button("Open").clicked() {
+                    // Judged by the file opened as well as the name shown
+                    // (I3 review): the two come from different places.
+                    let opened_name = std::path::Path::new(&file.path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    if crate::reveal::openable(&file.name)
+                        && crate::reveal::openable(&opened_name)
+                        && ui.button("Open").clicked()
+                    {
                         open = Some(file.path.clone());
                     }
                     if ui.button("Show in folder").clicked() {
