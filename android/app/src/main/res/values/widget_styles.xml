@@ -15,4 +15,28 @@
         <item name="android:textColor">@color/widget_on_surface</item>
         <item name="android:textSize">13sp</item>
     </style>
+
+    <!-- A widget's icon button (I2): a 48 dp target, tinted from the theme. -->
+    <style name="WidgetIconButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginStart">3dp</item>
+        <item name="android:layout_marginEnd">3dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:background">@drawable/widget_button</item>
+        <item name="android:padding">10dp</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:tint">@color/widget_on_surface</item>
+    </style>
+
+    <!-- A widget's refresh: a 48 dp target in its header. -->
+    <style name="WidgetRefresh">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:padding">13dp</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:src">@drawable/ic_ll_refresh</item>
+        <item name="android:tint">@color/widget_on_surface_variant</item>
+    </style>
 </resources>

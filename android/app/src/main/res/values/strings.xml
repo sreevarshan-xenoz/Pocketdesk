@@ -830,7 +830,6 @@
     <string name="deck_widget_name">Pocketdesk: deck</string>
     <string name="deck_widget_description">Your last computer\'s deck buttons, pressed from the home screen.</string>
     <string name="deck_widget_refresh">Ask for the buttons again</string>
-    <string name="deck_widget_refresh_glyph" translatable="false">↻</string>
     <string name="deck_widget_said">%1$s: %2$s</string>
     <string name="deck_widget_no_answer">No answer from the computer yet</string>
     <string name="remote_laser">Laser pointer</string>
@@ -844,10 +843,6 @@
     <string name="media_widget_next">Next</string>
     <string name="media_widget_play">Play</string>
     <string name="media_widget_pause">Pause</string>
-    <string name="media_widget_previous_glyph" translatable="false">⏮︎</string>
-    <string name="media_widget_next_glyph" translatable="false">⏭︎</string>
-    <string name="media_widget_play_glyph" translatable="false">▶︎</string>
-    <string name="media_widget_pause_glyph" translatable="false">⏸︎</string>
     <string name="media_widget_refused">The computer refused</string>
     <string name="media_widget_unreadable">The computer\'s answer did not read</string>
     <string name="media_tile_label">Computer\'s music</string>

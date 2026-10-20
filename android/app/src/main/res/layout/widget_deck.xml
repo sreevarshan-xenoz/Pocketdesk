@@ -25,15 +25,10 @@
             android:textSize="14sp"
             android:textStyle="bold" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_deck_refresh"
-            android:layout_width="40dp"
-            android:layout_height="32dp"
-            android:contentDescription="@string/deck_widget_refresh"
-            android:gravity="center"
-            android:text="@string/deck_widget_refresh_glyph"
-            android:textColor="@color/widget_on_surface"
-            android:textSize="18sp" />
+            style="@style/WidgetRefresh"
+            android:contentDescription="@string/deck_widget_refresh" />
     </LinearLayout>
 
     <TextView

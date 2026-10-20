@@ -301,9 +301,9 @@ class MediaWidget : AppWidgetProvider() {
             button(R.id.widget_media_previous, MediaWidgetPlan.Button.Previous, offered.previous, 0)
             button(R.id.widget_media_play, MediaWidgetPlan.Button.PlayPause, offered.playPause, 1)
             button(R.id.widget_media_next, MediaWidgetPlan.Button.Next, offered.next, 2)
-            views.setTextViewText(
+            views.setImageViewResource(
                 R.id.widget_media_play,
-                context.getString(if (toggle == MediaWidgetPlan.Toggle.Pause) R.string.media_widget_pause_glyph else R.string.media_widget_play_glyph),
+                if (toggle == MediaWidgetPlan.Toggle.Pause) R.drawable.ic_ll_pause else R.drawable.ic_ll_play,
             )
             views.setContentDescription(
                 R.id.widget_media_play,

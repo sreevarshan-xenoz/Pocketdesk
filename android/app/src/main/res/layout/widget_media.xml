@@ -24,15 +24,10 @@
             android:textColor="@color/widget_on_surface_variant"
             android:textSize="12sp" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_media_refresh"
-            android:layout_width="40dp"
-            android:layout_height="32dp"
-            android:contentDescription="@string/media_widget_refresh"
-            android:gravity="center"
-            android:text="@string/deck_widget_refresh_glyph"
-            android:textColor="@color/widget_on_surface"
-            android:textSize="18sp" />
+            style="@style/WidgetRefresh"
+            android:contentDescription="@string/media_widget_refresh" />
     </LinearLayout>
 
     <TextView
@@ -63,24 +58,23 @@
         android:layout_weight="1"
         android:orientation="horizontal">
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_media_previous"
-            style="@style/DeckWidgetButton"
+            style="@style/WidgetIconButton"
             android:contentDescription="@string/media_widget_previous"
-            android:text="@string/media_widget_previous_glyph"
-            android:textSize="20sp" />
+            android:src="@drawable/ic_ll_skip_previous" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_media_play"
-            style="@style/DeckWidgetButton"
-            android:textSize="20sp" />
+            style="@style/WidgetIconButton"
+            android:contentDescription="@string/media_widget_play"
+            android:src="@drawable/ic_ll_play" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_media_next"
-            style="@style/DeckWidgetButton"
+            style="@style/WidgetIconButton"
             android:contentDescription="@string/media_widget_next"
-            android:text="@string/media_widget_next_glyph"
-            android:textSize="20sp" />
+            android:src="@drawable/ic_ll_skip_next" />
     </LinearLayout>
 
     <TextView
