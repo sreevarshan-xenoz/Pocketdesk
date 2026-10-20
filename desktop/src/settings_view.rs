@@ -810,7 +810,7 @@ impl SettingsForm {
                         );
                         note(
                             ui,
-                            "While a phone in a session plays music and may share it (Media on the Devices page), Windows' media controls show its song with Previous, Play/Pause and Next. The keyboard's media keys may then go to the phone instead of a player here. It needs the tray program (pocketdesk-tray) beside the app.",
+                            "While a phone in a session plays music and says so (\"My media on the computer\" on in its Settings, Pocketdesk in front on the phone, and Media on the Devices page here), Windows' media controls show its song with Previous, Play/Pause and Next; a paused one stays five minutes. The keyboard's media keys may then go to the phone instead of a player here. It needs the tray program (pocketdesk-tray) beside the app.",
                         );
                     });
                 }

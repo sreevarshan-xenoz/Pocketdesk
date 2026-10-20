@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-725 open items.
+730 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 423 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 428 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 23 |
@@ -873,6 +873,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The Notifications page shows each answerable notification's app icon.
 - Closing the notification on the phone removes its picture from `notification_icons/pictures/`.
 - Desktop Settings "Apps' icons and pictures" off: plain toasts.
+
+**154. The phone's music in the computer's media controls (K7)**
+
+- Settings "The phone's music in this computer's media controls" on; a phone in a session plays music: the volume flyout shows its song as Pocketdesk, with its buttons.
+- Play/Pause, Next and Previous from the flyout reach the phone; the flyout shows the new state at once.
+- The keyboard's media keys (input on this box: with the owner).
+- The session ends: the song leaves the flyout within a few seconds. Paused five minutes: it leaves.
+- The setting off: it leaves at once.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
