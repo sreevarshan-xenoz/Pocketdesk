@@ -316,7 +316,13 @@ fun SoundScreen(
                     reason = reason,
                     reconnectInS = reconnectInS,
                     gaveUp = gaveUp,
-                    onRetry = { attempt++ },
+                    // The person's own try starts a fresh ten minutes (I1:
+                    // after giving up, a Retry that failed stopped at once).
+                    onRetry = {
+                        reconnects = 0
+                        droppedAtMs = 0L
+                        attempt++
+                    },
                     onExit = onExit,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
