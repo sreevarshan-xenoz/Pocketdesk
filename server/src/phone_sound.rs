@@ -95,16 +95,25 @@ impl Sink for WavSink {
     }
 }
 
-/// The default output on Linux: `pw-cat` reading float samples.
+/// The default output on Linux: `pw-cat` reading float samples, fed by a
+/// writer thread through a hand-off of [`PW_QUEUE`] packets (K5 review: a
+/// blocking pipe write had added seconds of delay, and a stalled PipeWire
+/// held the player thread for the session's life). A full hand-off drops
+/// the packet, as the Windows output does past its target.
 #[cfg(not(windows))]
 struct PwCat {
     child: std::process::Child,
+    feed: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
 }
+
+/// Packets waiting for `pw-cat`: 4, 80 ms.
+#[cfg(not(windows))]
+const PW_QUEUE: usize = 4;
 
 #[cfg(not(windows))]
 impl PwCat {
     fn open() -> Result<Self> {
-        let child = std::process::Command::new("pw-cat")
+        let mut child = std::process::Command::new("pw-cat")
             .args([
                 "--playback",
                 "--rate",
@@ -113,6 +122,8 @@ impl PwCat {
                 "2",
                 "--format",
                 "f32",
+                "--latency",
+                "60ms",
                 "--media-role",
                 "Music",
                 "-",
@@ -121,7 +132,26 @@ impl PwCat {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()?;
-        Ok(Self { child })
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("pw-cat has no input"))?;
+        let (feed, packets) = std::sync::mpsc::sync_channel::<Vec<u8>>(PW_QUEUE);
+        // Ends when the hand-off closes, or when the pipe breaks as the
+        // child is killed.
+        std::thread::Builder::new()
+            .name("phone-sound-pw-cat".into())
+            .spawn(move || {
+                while let Ok(bytes) = packets.recv() {
+                    if stdin.write_all(&bytes).is_err() {
+                        break;
+                    }
+                }
+            })?;
+        Ok(Self {
+            child,
+            feed: Some(feed),
+        })
     }
 }
 
@@ -129,20 +159,23 @@ impl PwCat {
 impl Sink for PwCat {
     fn play(&mut self, samples: &[f32]) -> Result<()> {
         let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-        let stdin = self
-            .child
-            .stdin
-            .as_mut()
+        let feed = self
+            .feed
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("pw-cat has no input"))?;
-        stdin.write_all(&bytes)?;
-        Ok(())
+        match feed.try_send(bytes) {
+            Ok(()) | Err(std::sync::mpsc::TrySendError::Full(_)) => Ok(()),
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                Err(anyhow::anyhow!("pw-cat stopped"))
+            }
+        }
     }
 }
 
 #[cfg(not(windows))]
 impl Drop for PwCat {
     fn drop(&mut self) {
-        drop(self.child.stdin.take());
+        self.feed.take();
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -244,7 +277,7 @@ fn open(seam: Option<&Path>) -> Result<Box<dyn Sink>> {
     }
 }
 
-fn play_blocking(mut rx: Receiver<Vec<u8>>, seam: Option<PathBuf>) {
+fn play_blocking(mut rx: Receiver<Vec<u8>>, seam: Option<PathBuf>, mut first: Option<Vec<u8>>) {
     let mut decoder = match AudioDecoder::new(RATE, CHANNELS) {
         Ok(decoder) => decoder,
         Err(e) => {
@@ -254,7 +287,7 @@ fn play_blocking(mut rx: Receiver<Vec<u8>>, seam: Option<PathBuf>) {
     };
     let mut sink: Option<Box<dyn Sink>> = None;
     let mut retry_after: Option<Instant> = None;
-    while let Some(opus) = rx.blocking_recv() {
+    while let Some(opus) = first.take().or_else(|| rx.blocking_recv()) {
         let samples = match decoder.decode(&opus) {
             Ok(samples) => samples,
             Err(e) => {
@@ -292,9 +325,14 @@ fn play_blocking(mut rx: Receiver<Vec<u8>>, seam: Option<PathBuf>) {
 
 /// Play a session's sound packets until the session ends (its channel
 /// closes). The seam is read once, at the session's start.
-pub async fn run(rx: Receiver<Vec<u8>>) {
+pub async fn run(mut rx: Receiver<Vec<u8>>) {
+    // Most sessions carry no sound: no thread or decoder until one does
+    // (K5 review).
+    let Some(first) = rx.recv().await else {
+        return;
+    };
     let seam = std::env::var_os(SEAM).map(PathBuf::from);
-    let _ = tokio::task::spawn_blocking(move || play_blocking(rx, seam)).await;
+    let _ = tokio::task::spawn_blocking(move || play_blocking(rx, seam, Some(first))).await;
 }
 
 #[cfg(test)]
@@ -340,7 +378,7 @@ mod tests {
         let player = tokio::spawn({
             let path = path.clone();
             async move {
-                tokio::task::spawn_blocking(move || play_blocking(rx, Some(path)))
+                tokio::task::spawn_blocking(move || play_blocking(rx, Some(path), None))
                     .await
                     .unwrap()
             }
