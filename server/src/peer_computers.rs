@@ -697,11 +697,14 @@ pub(crate) async fn send_file(device_id: &str, path: &Path) -> Result<(), String
         let outgoing = live(device_id).ok_or("the computer is not linked now")?;
         let mut waiter = Waiter::new();
         let ask = NetworkPacket::new("kdeconnect.share.request")
-            .with_body(serde_json::json!({
-                "filename": name,
-                "sourceId": source,
-                "payloadTransferInfo": {"key": waiter.key},
-            }))
+            .with_body(crate::offers::with_date(
+                serde_json::json!({
+                    "filename": name,
+                    "sourceId": source,
+                    "payloadTransferInfo": {"key": waiter.key},
+                }),
+                path,
+            ))
             .with_payload_size(size);
         if outgoing.send(ask).await.is_err() {
             return Err("the link closed".to_string());

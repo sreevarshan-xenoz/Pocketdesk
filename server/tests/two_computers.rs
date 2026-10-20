@@ -80,6 +80,13 @@ fn send_and_receive(from: &Path, to: &str, to_state: &Path, file: &Path) {
         "{} arrived whole",
         arrived.display()
     );
+    // K1: with the date it had where it came from.
+    assert_eq!(
+        std::fs::metadata(&arrived).unwrap().modified().unwrap(),
+        std::fs::metadata(file).unwrap().modified().unwrap(),
+        "{} kept its date",
+        arrived.display()
+    );
 }
 
 /// Wait for `state`'s clipboard to hold `text`.
@@ -260,6 +267,13 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
             .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8 ^ seed)
             .collect();
         std::fs::write(&path, bytes).unwrap();
+        // An old date, to be kept where it lands (K1).
+        let june = std::time::UNIX_EPOCH + Duration::from_secs(1_780_000_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(june))
+            .unwrap();
         path
     };
     let b_id = link.device_id.clone();
