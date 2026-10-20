@@ -82,6 +82,13 @@ class AutoReconnectTest {
         assertTrue(AutoReconnect.retryable(AutoReconnect.endedBy(null, false)!!))
     }
 
+    /** I1: a server restarting mid-handshake comes back by itself. */
+    @Test
+    fun `a handshake the far side closed is retried`() {
+        assertTrue(AutoReconnect.retryable("Connection failed: connection to 127.0.0.1:1716 failed: TLS: tls handshake eof"))
+        assertFalse(AutoReconnect.retryable("TLS handshake failed: invalid peer certificate"))
+    }
+
     @Test
     fun `retries back off, then stop after ten minutes`() {
         assertEquals(2_000L, AutoReconnect.delayMs(attempt = 0, elapsedMs = 0))
