@@ -319,11 +319,14 @@ pub fn describe(event: &Event) -> String {
         }
         // H1: a deck press (F1), by its label when details are kept.
         "deck_pressed" => {
+            // One noun per kind (H1 review).
             let kind = match text(event, "kind") {
+                Some("keys") => "keys",
                 Some("task") => "a task",
+                Some("media") => "a media key",
                 Some("link") => "a link",
-                Some(other) => other,
-                None => "?",
+                Some("text") => "typed text",
+                _ => "?",
             };
             match (text(event, "label"), flag("ok")) {
                 (Some(label), true) => format!("Deck \"{label}\" pressed ({kind})"),
@@ -366,12 +369,16 @@ mod tests {
             "A deck button pressed (keys)"
         );
         assert_eq!(
+            describe(&event("deck_pressed", json!({"kind": "text", "ok": true}))),
+            "A deck button pressed (typed text)"
+        );
+        assert_eq!(
             describe(&event("deck_pressed", json!({"kind": "task", "ok": false}))),
             "A deck button could not run (a task)"
         );
         let mut named = event("deck_pressed", json!({"kind": "media", "ok": true}));
         named.fields.insert("label".into(), json!("Pause"));
-        assert_eq!(describe(&named), "Deck \"Pause\" pressed (media)");
+        assert_eq!(describe(&named), "Deck \"Pause\" pressed (a media key)");
     }
 
     #[test]
