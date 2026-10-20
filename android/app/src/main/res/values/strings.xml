@@ -865,4 +865,18 @@
         <item quantity="one">%d minute</item>
         <item quantity="other">%d minutes</item>
     </plurals>
+    <!-- The widget picker's previews (I2): sample content, not translated. -->
+    <string name="widget_preview_computer" translatable="false">Living room PC</string>
+    <string name="widget_preview_updated" translatable="false">Updated 9:41</string>
+    <string name="widget_preview_disk" translatable="false">Disk</string>
+    <string name="widget_preview_percent_cpu" translatable="false">23&#160;%</string>
+    <string name="widget_preview_percent_memory" translatable="false">58&#160;%</string>
+    <string name="widget_preview_percent_disk" translatable="false">71&#160;%</string>
+    <string name="widget_preview_percent_battery" translatable="false">86&#160;%</string>
+    <string name="widget_preview_track" translatable="false">Midnight City</string>
+    <string name="widget_preview_artist" translatable="false">M83</string>
+    <string name="widget_preview_deck_mute" translatable="false">Mute mic</string>
+    <string name="widget_preview_deck_type" translatable="false">Sign-off</string>
+    <string name="widget_preview_deck_open" translatable="false">Calendar</string>
+    <string name="widget_preview_deck_build" translatable="false">Build</string>
 </resources>

@@ -3,6 +3,8 @@
      buttons or one message in the middle; the message shows first, so a
      widget not yet drawn reads as asking. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UseCompoundDrawables,NestedWeights"
     android:id="@+id/widget_media_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
