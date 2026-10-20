@@ -109,6 +109,61 @@ fn remember_shown(tag: &str, dbus_id: u32) {
     }
 }
 
+/// The tag the D-Bus id `dbus_id` was shown with, if it is still remembered.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn tag_of(dbus_id: u32) -> Option<String> {
+    let shown = shown_ids().lock().unwrap_or_else(|e| e.into_inner());
+    shown
+        .iter()
+        .find(|(_, id)| *id == dbus_id)
+        .map(|(t, _)| t.clone())
+}
+
+/// Each phone notification shown here, by tag: its phone and the phone's id
+/// for it, so one closed here can be cleared there (L1). The newest
+/// [`MAX_SHOWN`].
+fn shown_notes() -> &'static Mutex<std::collections::VecDeque<(String, String, String)>> {
+    static NOTES: std::sync::OnceLock<Mutex<std::collections::VecDeque<(String, String, String)>>> =
+        std::sync::OnceLock::new();
+    NOTES.get_or_init(Default::default)
+}
+
+fn remember_note(tag: &str, phone: &str, id: &str) {
+    let mut notes = shown_notes().lock().unwrap_or_else(|e| e.into_inner());
+    notes.retain(|(t, _, _)| t != tag);
+    notes.push_back((tag.to_string(), phone.to_string(), id.to_string()));
+    while notes.len() > MAX_SHOWN {
+        notes.pop_front();
+    }
+}
+
+/// The phone and its id for the notification shown with `tag`.
+fn note_of(tag: &str) -> Option<(String, String)> {
+    let notes = shown_notes().lock().unwrap_or_else(|e| e.into_inner());
+    notes
+        .iter()
+        .find(|(t, _, _)| t == tag)
+        .map(|(_, phone, id)| (phone.clone(), id.clone()))
+}
+
+/// The person closed the phone notification shown with `tag` here (its
+/// toast's ✕, a Linux close): ask its phone to clear it too (L1), with
+/// "Clearing here clears it on the phone" on.
+pub(crate) fn cleared_here(tag: &str) {
+    if !crate::events::current_config().clear_on_phone {
+        return;
+    }
+    let Some((phone, id)) = note_of(tag) else {
+        return;
+    };
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    if let Err(e) = pocketdesk_core::local::note_clears::request(&dir, &phone, &id, unix_now()) {
+        tracing::warn!("A notification closed here was not cleared on the phone: {e}");
+    }
+}
+
 /// The D-Bus id `tag` was shown with, if it is still remembered.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn shown_id(tag: &str) -> Option<u32> {
@@ -122,6 +177,11 @@ fn take_shown(tag: &str) -> Option<u32> {
     let at = shown.iter().position(|(t, _)| t == tag)?;
     shown.remove(at).map(|(_, id)| id)
 }
+
+/// How long after an action or reply a close is the server's, not the
+/// person's (L1 review).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const ANSWERED_CLOSE: Duration = Duration::from_secs(3);
 
 /// What the notification server shows (N3), asked once it answers.
 #[cfg(target_os = "linux")]
@@ -222,9 +282,20 @@ async fn answer_signals() -> Result<()> {
         .receive_signal("NotificationReplied")
         .await
         .map_err(failed)?;
+    let mut closed = proxy
+        .receive_signal("NotificationClosed")
+        .await
+        .map_err(failed)?;
+    // Notifications just answered or clicked: GNOME closes them after an
+    // action with the person's reason, which is no clear (L1 review).
+    let mut answered: std::collections::HashMap<u32, Instant> = std::collections::HashMap::new();
     loop {
+        answered.retain(|_, at| at.elapsed() < ANSWERED_CLOSE);
         tokio::select! {
             Some(message) = invoked.next() => {
+                if let Ok((id, _)) = message.body().deserialize::<(u32, String)>() {
+                    answered.insert(id, Instant::now());
+                }
                 if let Ok((id, key)) = message.body().deserialize::<(u32, String)>()
                     && let Some(pressable) = answerable_for(id)
                 {
@@ -237,7 +308,20 @@ async fn answer_signals() -> Result<()> {
                     }
                 }
             }
+            // Closed by the person (reason 2), to clear on the phone (L1).
+            Some(message) = closed.next() => {
+                if let Ok((id, reason)) = message.body().deserialize::<(u32, u32)>()
+                    && reason == 2
+                    && !answered.contains_key(&id)
+                    && let Some(tag) = tag_of(id)
+                {
+                    cleared_here(&tag);
+                }
+            }
             Some(message) = replied.next() => {
+                if let Ok((id, _)) = message.body().deserialize::<(u32, String)>() {
+                    answered.insert(id, Instant::now());
+                }
                 if let Ok((id, text)) = message.body().deserialize::<(u32, String)>()
                     && let Some(answers) = answerable_for(id).and_then(|p| p.answers)
                     && let Some(answer) = crate::toast_answers::dbus_reply_answer(&text, &answers)
@@ -588,6 +672,8 @@ impl Plugin for NotificationPlugin {
             ACK,
             pocketdesk_core::protocol::notification_action::NOTIFICATION_REPLY,
             pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION,
+            // A clear (L1).
+            pocketdesk_core::protocol::notification_action::NOTIFICATION_REQUEST,
         ]
     }
 
@@ -602,6 +688,13 @@ impl Plugin for NotificationPlugin {
                 // A notification without an id cannot be closed or updated
                 // later, and is shown untagged so it never replaces another.
                 let tag = (!id.is_empty()).then(|| tag_for(sender.device_id(), id));
+                // Known by its tag, to clear on the phone when closed here (L1);
+                // not as it is closed on the phone.
+                if let Some(tag) = &tag
+                    && packet.body.get("isCancel").and_then(|v| v.as_bool()) != Some(true)
+                {
+                    remember_note(tag, sender.device_id(), id);
+                }
                 if packet.body.get("isCancel").and_then(|v| v.as_bool()) == Some(true) {
                     // Closed on the phone (N5c): close it here too.
                     if let Some(tag) = &tag {
@@ -973,6 +1066,63 @@ pub async fn run_answers() {
     }
 }
 
+/// Send the clears of phones' notifications (L1), each to its own phone
+/// if it is connected within a minute and its Notifications permission is
+/// on, as KDE Connect's own `kdeconnect.notification.request {cancel}`.
+/// Runs for the server's life.
+pub async fn run_clears() {
+    use pocketdesk_core::local::note_clears;
+    use pocketdesk_core::protocol::notification_action::{NOTIFICATION_REQUEST, cancel_body};
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let mut waiting: Vec<note_clears::ClearRequest> = Vec::new();
+    loop {
+        if waiting.is_empty() {
+            crate::inbox::wait(
+                pocketdesk_core::local::paths::NOTIFICATION_CLEARS_DIR,
+                std::time::Duration::from_millis(500),
+            )
+            .await;
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        let now = unix_now();
+        waiting.extend(note_clears::take_all(&dir, now));
+        if waiting.is_empty() {
+            continue;
+        }
+        let clients = crate::state::clone_clients().await;
+        let mut still = Vec::new();
+        // The owner's switch holds for every clear, the page's too, and one
+        // queued before it was turned off (L1 review).
+        if !crate::events::current_config().clear_on_phone {
+            waiting.clear();
+            continue;
+        }
+        for clear in waiting.drain(..) {
+            // The Notifications permission covers the phone's notifications
+            // here, both ways.
+            if !crate::plugins::pair::permits(&clear.device_id, "kdeconnect.notification") {
+                tracing::info!("A clear was not sent: Notifications is off for the phone");
+                continue;
+            }
+            let Some(phone) = clients.iter().find(|c| c.device_id() == clear.device_id) else {
+                if now.saturating_sub(clear.created_unix) < note_clears::CLEAR_TTL_SECS {
+                    still.push(clear);
+                }
+                continue;
+            };
+            let packet =
+                NetworkPacket::new(NOTIFICATION_REQUEST).with_body(cancel_body(&clear.key));
+            if let Err(e) = phone.send_packet(&packet).await {
+                tracing::warn!("A clear was not sent to the phone: {e}");
+            }
+        }
+        waiting = still;
+    }
+}
+
 /// The session bus's notification server.
 #[cfg(target_os = "linux")]
 async fn notifications_proxy() -> Result<zbus::Proxy<'static>> {
@@ -1113,6 +1263,10 @@ async fn show_desktop_notification(
                     listen_for_answers();
                 } else {
                     forget_answerable(id);
+                }
+                // Its close is heard too, to clear it on the phone (L1).
+                if tag.is_some() {
+                    listen_for_answers();
                 }
                 tracing::info!("Desktop notification shown: {}", title);
                 return Ok(());
@@ -1466,6 +1620,26 @@ mod tests {
             self.0.lock().unwrap().push(packet.clone());
             Ok(())
         }
+    }
+
+    /// L1: a notification closed here, known by its tag, becomes a clear
+    /// for its phone; an unknown tag, none.
+    #[test]
+    fn a_notification_closed_here_is_cleared_on_its_phone() {
+        let dir = pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        std::fs::create_dir_all(dir).unwrap();
+        let tag = tag_for("phone-l1", "0|com.chat|7|null|10");
+        remember_note(&tag, "phone-l1", "0|com.chat|7|null|10");
+        cleared_here(&tag);
+        cleared_here(&tag_for("phone-l1", "never shown"));
+        let taken: Vec<_> = pocketdesk_core::local::note_clears::take_all(dir, unix_now())
+            .into_iter()
+            .filter(|c| c.device_id == "phone-l1")
+            .map(|c| c.key)
+            .collect();
+        assert_eq!(taken, vec!["0|com.chat|7|null|10".to_string()]);
     }
 
     /// K2b review: only a name the phone gave can be muted.

@@ -96,6 +96,8 @@ pub const NOTIFICATION_ANSWERS_FILE: &str = "notification_answers.json";
 pub const NOTIFICATION_OUT_DIR: &str = "notification_out";
 /// Presses for a phone's player (T8d), one file each, taken by the server.
 pub const PHONE_MEDIA_DIR: &str = "phone_media_out";
+/// Phone notifications cleared here, to clear on the phone (L1).
+pub const NOTIFICATION_CLEARS_DIR: &str = "notification_clears";
 pub const DEVICE_KEYS_FILE: &str = "device_keys.json";
 /// What the server measured about its internet path (N1): yes/no facts,
 /// never an address.

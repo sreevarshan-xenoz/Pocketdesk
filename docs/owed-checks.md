@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-736 open items.
+741 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 432 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 436 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 23 |
 | A second phone | 9 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
-| A Linux desktop (the Azure VM serves for some) | 93 |
+| A Linux desktop (the Azure VM serves for some) | 94 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 67 |
 
@@ -889,6 +889,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With another app in front on the phone (the use case): the sound still comes.
 - "Play its sound here" off mid-cast: the cast ends. Without it: the phone does not capture.
 
+**156. Cleared on the computer, cleared on the phone (L1)**
+
+- The throwaway chat app posts a notification; Clear on the Notifications page: `adb shell dumpsys notification --noredact` no longer lists it.
+- The toast's ✕ on its banner, and inside the Action Center: cleared on the phone (by hand).
+- An ongoing or unclearable notification, and a ringing call: not cleared.
+- Phone Settings "Let the computer clear my notifications" off, or desktop "Clearing here clears it on the phone" off: not cleared.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1570,6 +1577,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **155. The phone's sound with its screen (K5)**
 
 - Linux: the sound through `pw-cat`.
+
+**156. Cleared on the computer, cleared on the phone (L1)**
+
+- Linux (GNOME): closing a notification clears it; pressing its button does not.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

@@ -3,7 +3,8 @@
 use windows::Data::Xml::Dom::XmlDocument;
 use windows::Foundation::{IPropertyValue, TypedEventHandler};
 use windows::UI::Notifications::{
-    ToastActivatedEventArgs, ToastNotification, ToastNotificationManager,
+    ToastActivatedEventArgs, ToastDismissalReason, ToastDismissedEventArgs, ToastNotification,
+    ToastNotificationManager,
 };
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
 use windows::Win32::System::Registry::{
@@ -390,6 +391,16 @@ fn answerable()
     ANSWERABLE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Phone toasts without buttons, the newest thirty, kept so their ✕ is
+/// heard (L1).
+static PLAIN: std::sync::Mutex<std::collections::VecDeque<(String, ToastNotification)>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+fn plain_toasts()
+-> std::sync::MutexGuard<'static, std::collections::VecDeque<(String, ToastNotification)>> {
+    PLAIN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn show_toast(
     summary: &str,
     body: &str,
@@ -445,16 +456,40 @@ fn show_toast(
             },
         ))?;
     }
+    // L1: closed with its ✕, cleared on the phone too.
+    if let Some(tag) = tag {
+        let tag = tag.to_string();
+        toast.Dismissed(&TypedEventHandler::<
+            ToastNotification,
+            ToastDismissedEventArgs,
+        >::new(move |_, args| {
+            if let Some(args) = args.as_ref()
+                && args.Reason()? == ToastDismissalReason::UserCanceled
+            {
+                crate::plugins::notification::cleared_here(&tag);
+            }
+            Ok(())
+        }))?;
+    }
     ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)?;
     // Kept only once shown, and only while the toast for this tag can be
     // answered: a plain update of it drops the old one (N3 review).
     if let Some(tag) = tag {
+        // An update replaces the toast it had, of either kind (L1 review).
+        plain_toasts().retain(|(t, _)| t != tag);
         let mut kept = answerable();
         kept.retain(|(t, _, _)| t != tag);
         if has_buttons {
             kept.push_back((tag.to_string(), toast, answers.is_some()));
             // Each kind its own places: thirty to answer, thirty to mute.
             crate::toast_answers::keep_within(&mut kept, |(_, _, a)| *a, KEEP_ANSWERABLE);
+        } else {
+            // Kept alive for its ✕ (L1): a toast dropped hears no event.
+            let mut plain = plain_toasts();
+            plain.push_back((tag.to_string(), toast));
+            while plain.len() > KEEP_ANSWERABLE {
+                plain.pop_front();
+            }
         }
     }
     Ok(())
@@ -506,6 +541,7 @@ pub(super) fn notify_tagged(
 /// Center. A tag that is not there is no error.
 pub(super) fn remove_tagged(tag: &str) {
     answerable().retain(|(t, _, _)| t != tag);
+    plain_toasts().retain(|(t, _)| t != tag);
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
     let removed = ToastNotificationManager::History().and_then(|history| {
         history.RemoveGroupedTagWithId(

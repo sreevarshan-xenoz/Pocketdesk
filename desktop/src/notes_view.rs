@@ -125,6 +125,22 @@ impl NotesView {
         }
     }
 
+    /// Ask the phone to clear `note` (L1).
+    fn clear(&mut self, state_dir: &Path, note: &PhoneNote, now_unix: u64) {
+        self.notice = match pocketdesk_core::local::note_clears::request(
+            state_dir,
+            &note.device_id,
+            &note.key,
+            now_unix,
+        ) {
+            Ok(_) => crate::notice::Notice::done(format!(
+                "Asked the phone to clear the {} notification; it does with \u{201c}Let the computer clear my notifications\u{201d} on.",
+                note.app
+            )),
+            Err(e) => crate::notice::Notice::error(format!("Not cleared: {e}")),
+        };
+    }
+
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -229,6 +245,14 @@ impl NotesView {
                                     now_unix,
                                 );
                             }
+                        }
+                        // L1: cleared here, cleared on the phone.
+                        if ui
+                            .button("Clear")
+                            .on_hover_text("Clear it on the phone too")
+                            .clicked()
+                        {
+                            self.clear(state_dir, note, now_unix);
                         }
                     });
                     if note.reply {

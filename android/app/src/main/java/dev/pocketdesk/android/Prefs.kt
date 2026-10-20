@@ -252,6 +252,14 @@ object Prefs {
         bump()
     }
 
+    /** L1: a notification closed on the computer is cleared here (on by default). */
+    fun letComputerClear(ctx: Context): Boolean = prefs(ctx).getBoolean("let_computer_clear", true)
+
+    fun setLetComputerClear(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("let_computer_clear", enabled) }
+        bump()
+    }
+
     /**
      * Whether the computer may press this phone's notifications' buttons and
      * reply to them (T10c). Off by default: an answer goes out as the owner.

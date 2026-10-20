@@ -73,6 +73,9 @@ class NotificationForwardRule(private val ownPackage: String) {
      */
     fun removed(key: String): Boolean = sent.remove(key) != null
 
+    /** Whether [key] was sent to the computer and not removed since (L1). */
+    fun wasSent(key: String): Boolean = key in sent
+
     /** The title and text shown, and whether that is the notification in full. */
     private fun shown(note: PostedNote): Triple<String, String, Boolean>? {
         if (note.visibility == VISIBILITY_PRIVATE) {

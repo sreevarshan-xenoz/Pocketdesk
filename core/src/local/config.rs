@@ -98,6 +98,11 @@ pub struct Config {
     /// still answers.
     #[serde(default = "default_true")]
     pub toast_answers: bool,
+    /// A phone notification closed here (its toast's ✕, the Notifications
+    /// page's Clear, a Linux notification closed) is cleared on the phone
+    /// too (L1). On by default.
+    #[serde(default = "default_true")]
+    pub clear_on_phone: bool,
     /// A phone notification shows its app's icon and, when the phone sends
     /// one, its picture (K3); off, none is kept or shown. On by default.
     #[serde(default = "default_true")]
@@ -323,6 +328,7 @@ impl Default for Config {
             dht_publish: DhtPublish::Relay,
             phone_notifications: true,
             toast_answers: true,
+            clear_on_phone: true,
             notification_pictures: true,
             downloads_folder: String::new(),
             cast_control: true,
@@ -543,6 +549,7 @@ impl Config {
         "dht_publish",
         "phone_notifications",
         "toast_answers",
+        "clear_on_phone",
         "notification_pictures",
         "downloads_folder",
         "cast_control",

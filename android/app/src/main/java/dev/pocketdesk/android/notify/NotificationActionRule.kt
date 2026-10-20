@@ -100,15 +100,15 @@ object NotificationActionRule {
             else -> Outcome(false, "the phone could not run it")
         }
 
-    /** [PER_MINUTE] answers in any minute. */
-    class Budget {
+    /** [perMinute] answers in any minute. */
+    class Budget(private val perMinute: Int = PER_MINUTE) {
         private val times = ArrayDeque<Long>()
 
         /** Take one at [nowMs] (elapsed realtime), if the minute allows. */
         @Synchronized
         fun take(nowMs: Long): Boolean {
             while (times.isNotEmpty() && nowMs - times.first() >= 60_000L) times.removeFirst()
-            if (times.size >= PER_MINUTE) return false
+            if (times.size >= perMinute) return false
             times.addLast(nowMs)
             return true
         }

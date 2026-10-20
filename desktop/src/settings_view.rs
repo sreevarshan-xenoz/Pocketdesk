@@ -177,6 +177,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Notifications,
     ),
     (
+        "clear_on_phone",
+        "Clearing here clears it on the phone",
+        Section::Notifications,
+    ),
+    (
         "notification_pictures",
         "Apps' icons and pictures",
         Section::Notifications,
@@ -359,6 +364,7 @@ pub fn applies_live(key: &str) -> bool {
             | "internet_files"
             | "keep_file_dates"
             | "toast_answers"
+            | "clear_on_phone"
             | "notification_pictures"
             | "cast_control"
             | "downloads_folder"
@@ -944,6 +950,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "Kept in this computer's state folder while they show: icons by app, pictures by notification, removed once it closes. A phone sends pictures only with \"Pictures in notifications\" on in its Settings.",
+                    );
+                });
+                row(ui, "clear_on_phone", |ui| {
+                    ui.checkbox(
+                        &mut e.clear_on_phone,
+                        "a phone notification closed here is cleared on the phone",
+                    );
+                    note(
+                        ui,
+                        "Its ✕ (closing its banner too, so a notification closed to read later goes from the phone and the Action Center alike), Clear on the Notifications page, or closing it on Linux; the phone takes it with its own \"Let the computer clear my notifications\" on. The Action Center's Clear all is not seen: Windows tells only packaged apps.",
                     );
                 });
                 row(ui, "sms_notify", |ui| {

@@ -927,6 +927,7 @@ object RustCore {
                     a.optString("action").takeIf { a.has("action") },
                     a.optString("message").takeIf { a.has("message") },
                     a.optString("answerId").takeIf { a.has("answerId") },
+                    a.optBoolean("cancel", false),
                 )
             }
         }.getOrDefault(emptyList())
@@ -940,6 +941,8 @@ object RustCore {
         val message: String?,
         /** The computer's id for it, to say how it went (E1); null from a computer before E1. */
         val answerId: String? = null,
+        /** A clear (L1): the notification was closed on the computer. */
+        val cancel: Boolean = false,
     )
 
     /** One `kdeconnect.clipboard` text from the computer at [host]:[port]. */

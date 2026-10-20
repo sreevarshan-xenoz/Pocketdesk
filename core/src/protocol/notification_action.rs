@@ -16,6 +16,22 @@ pub const NOTIFICATION_REPLY: &str = "kdeconnect.notification.reply";
 /// The computer's press of a notification's button.
 pub const NOTIFICATION_ACTION: &str = "kdeconnect.notification.action";
 
+/// Computer → phone: `{cancel: id}`, clear that notification on the phone
+/// (L1; KDE Connect's own request).
+pub const NOTIFICATION_REQUEST: &str = "kdeconnect.notification.request";
+
+/// A clear's body: the phone's id for the notification.
+pub fn cancel_body(key: &str) -> serde_json::Value {
+    serde_json::json!({ "cancel": key })
+}
+
+/// The id a clear names, if `body` is one within bounds.
+pub fn cancel_key(body: &serde_json::Value) -> Option<&str> {
+    body.get("cancel")
+        .and_then(|v| v.as_str())
+        .filter(|key| valid_key(key))
+}
+
 /// Buttons a notification offers the computer, at most.
 pub const MAX_ACTIONS: usize = 3;
 
@@ -141,6 +157,16 @@ pub fn action_packet(key: &str, action: &str) -> Option<NetworkPacket> {
 
 #[cfg(test)]
 mod tests {
+    /// L1: a clear names the notification within its bounds.
+    #[test]
+    fn a_clear_names_its_notification() {
+        let body = cancel_body("0|com.chat|1|null|10");
+        assert_eq!(cancel_key(&body), Some("0|com.chat|1|null|10"));
+        assert_eq!(cancel_key(&serde_json::json!({ "cancel": "" })), None);
+        assert_eq!(cancel_key(&serde_json::json!({ "cancel": "a\nb" })), None);
+        assert_eq!(cancel_key(&serde_json::json!({ "request": true })), None);
+    }
+
     use super::*;
 
     #[test]
