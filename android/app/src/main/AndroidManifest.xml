@@ -204,6 +204,18 @@
             </intent-filter>
         </service>
 
+        <!-- G6: the last computer's music, played or paused from Quick Settings. -->
+        <service
+            android:name=".shortcuts.MediaTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_pocketdesk"
+            android:label="@string/media_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- F11: one tap to the last computer from Quick Settings. -->
         <service
             android:name=".shortcuts.ConnectTileService"

@@ -836,4 +836,6 @@
     <string name="media_widget_pause">இடைநிறுத்து</string>
     <string name="media_widget_refused">கணினி மறுத்தது</string>
     <string name="media_widget_unreadable">கணினியின் பதிலைப் படிக்க முடியவில்லை</string>
+    <string name="media_tile_label">கணினியின் இசை</string>
+    <string name="media_tile_hint">இயக்க அல்லது இடைநிறுத்த தட்டவும்</string>
 </resources>

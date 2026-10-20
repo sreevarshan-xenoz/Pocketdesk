@@ -2055,6 +2055,14 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] Nothing playing: "Nothing is playing", no buttons; Audio off for the phone on the computer: the refusal, no old track.
 - [ ] The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
 
+## 137. The computer's music from Quick Settings (G6)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet.
+- [ ] Add "Computer's music" to the A71's Quick Settings; with music on the computer, a tap pauses it, the shade still open showing "Asking the computer…", then the track, the tile off; a tap again plays, the tile on.
+- [ ] On the lock screen: a tap asks to unlock first.
+- [ ] Audio off for the phone on the computer: the refusal as the subtitle.
+- [ ] Opened after an hour: "Tap to play or pause", not the old track.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

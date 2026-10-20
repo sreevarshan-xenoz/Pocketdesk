@@ -850,4 +850,6 @@
     <string name="media_widget_pause_glyph" translatable="false">⏸︎</string>
     <string name="media_widget_refused">The computer refused</string>
     <string name="media_widget_unreadable">The computer\'s answer did not read</string>
+    <string name="media_tile_label">Computer\'s music</string>
+    <string name="media_tile_hint">Tap to play or pause</string>
 </resources>
