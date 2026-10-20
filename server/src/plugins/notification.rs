@@ -444,11 +444,74 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     // Muteable only by a name the device gave (K2b review: the fallback
     // name stands for every nameless one).
     let named = given_name(body, "appName");
-    if let Err(e) =
-        show_desktop_notification(tag.as_deref(), &app, &title, &text, None, named).await
+    if let Err(e) = show_desktop_notification(
+        tag.as_deref(),
+        &app,
+        &title,
+        &text,
+        None,
+        named,
+        crate::toast_answers::Pictures::default(),
+    )
+    .await
     {
         tracing::warn!("Failed to show a KDE Connect device's notification: {}", e);
     }
+}
+
+/// The most base64 a picture or icon may come as: [`MAX_BYTES`]'s worth.
+///
+/// [`MAX_BYTES`]: pocketdesk_core::local::notification_icons::MAX_BYTES
+const MAX_BASE64: usize = pocketdesk_core::local::notification_icons::MAX_BYTES / 3 * 4 + 4;
+
+/// `body`'s `field` decoded from base64, if it is there and not too long.
+fn decoded(body: &serde_json::Value, field: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    let text = body.get(field)?.as_str()?;
+    if text.len() > MAX_BASE64 {
+        tracing::info!("A phone notification's {field} was dropped: too large");
+        return None;
+    }
+    base64::engine::general_purpose::STANDARD.decode(text).ok()
+}
+
+/// Keep the icon `body` brings for `phone`'s `app`, if any and it fits (K3).
+fn keep_icon(phone: &str, app: &str, body: &serde_json::Value) {
+    let Some(bytes) = decoded(body, "appIcon") else {
+        return;
+    };
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    if let Err(e) = pocketdesk_core::local::notification_icons::keep_icon(&dir, phone, app, &bytes)
+    {
+        tracing::info!("A phone notification's icon was not kept: {e}");
+    }
+}
+
+/// What a notification to be shown shows with it (K3): `phone`'s kept icon
+/// for `app` (one it `named`), and the picture `body` brings for its `id`.
+fn pictures_for(
+    phone: &str,
+    app: &str,
+    named: bool,
+    id: &str,
+    body: &serde_json::Value,
+) -> crate::toast_answers::Pictures {
+    use pocketdesk_core::local::notification_icons as icons;
+    let Ok(dir) = crate::state::state_dir() else {
+        return Default::default();
+    };
+    let icon = named.then(|| icons::kept_icon(&dir, phone, app)).flatten();
+    let picture = (!id.is_empty())
+        .then(|| decoded(body, "picture"))
+        .flatten()
+        .and_then(|bytes| {
+            icons::keep_picture(&dir, phone, id, &bytes)
+                .inspect_err(|e| tracing::info!("A phone notification's picture was not kept: {e}"))
+                .ok()
+        });
+    crate::toast_answers::Pictures { icon, picture }
 }
 
 /// Whether `body` names its app in `field`: a notification without one is
@@ -555,6 +618,11 @@ impl Plugin for NotificationPlugin {
                 let Some((app, title, text)) = to_show(&packet.body) else {
                     return Ok(());
                 };
+                // The app's icon, kept for this and later ones (K3).
+                let named = given_name(&packet.body, "app");
+                if named {
+                    keep_icon(sender.device_id(), &app, &packet.body);
+                }
                 // One that waited on the phone says so (C3).
                 let waited = waited_secs(&packet.body);
                 // Muted here (K2b): logged and kept, never shown, and never
@@ -608,13 +676,15 @@ impl Plugin for NotificationPlugin {
                     return Ok(());
                 }
                 let text = with_late(&text, waited);
+                let pictures = pictures_for(sender.device_id(), &app, named, id, &packet.body);
                 if let Err(e) = show_desktop_notification(
                     tag.as_deref(),
                     &app,
                     &title,
                     &text,
                     answers,
-                    given_name(&packet.body, "app"),
+                    named,
+                    pictures,
                 )
                 .await
                 {
@@ -882,21 +952,36 @@ async fn send_notification_dbus(
     replaces: u32,
     answers: Option<&crate::toast_answers::Answerable>,
     mute: bool,
+    pictures: &crate::toast_answers::Pictures,
 ) -> Result<(u32, bool)> {
     let proxy = notifications_proxy().await?;
     // Markup is escaped: the text may be a stranger's (N5a).
     let summary = crate::platform::markup_escaped(summary);
-    let body = crate::platform::markup_escaped(body);
+    let mut body = crate::platform::markup_escaped(body);
     // N3: an answerable one carries its buttons, and KDE's inline reply
     // when it takes one, as far as the server shows them; it stays longer,
     // to be answered.
-    let caps = if answers.is_some() || mute {
+    let caps = if answers.is_some() || mute || pictures.picture.is_some() {
         server_caps(&proxy).await
     } else {
         Default::default()
     };
     let actions = crate::toast_answers::dbus_actions(answers, caps, mute);
     let mut hints = std::collections::HashMap::<String, zbus::zvariant::Value>::new();
+    // K3: the app's icon as the notification's image, and its picture in
+    // the body where the server shows one.
+    if let Some(icon) = &pictures.icon {
+        hints.insert(
+            "image-path".to_string(),
+            zbus::zvariant::Value::from(crate::toast_answers::file_uri(icon)),
+        );
+    }
+    if let Some(picture) = pictures.picture.as_ref().filter(|_| caps.body_images) {
+        body.push_str(&format!(
+            "\n<img src=\"{}\" alt=\"\"/>",
+            crate::platform::markup_escaped(&crate::toast_answers::file_uri(picture))
+        ));
+    }
     if caps.inline_reply && answers.is_some_and(|a| a.reply) {
         hints.insert(
             "x-kde-reply-placeholder-text".to_string(),
@@ -942,6 +1027,7 @@ async fn show_desktop_notification(
     text: &str,
     answers: Option<crate::toast_answers::Answerable>,
     muteable: bool,
+    pictures: crate::toast_answers::Pictures,
 ) -> Result<()> {
     let summary = format!("{}: {}", app, title);
 
@@ -954,6 +1040,7 @@ async fn show_desktop_notification(
             replaces,
             answers.as_ref(),
             tag.is_some() && muteable,
+            &pictures,
         )
         .await
         {
@@ -999,6 +1086,7 @@ async fn show_desktop_notification(
                     tag,
                     answers.as_ref(),
                     muteable.then_some(toast_app.as_str()),
+                    &pictures,
                 ),
                 None => crate::platform::notify(
                     &toast_summary,
@@ -1009,8 +1097,9 @@ async fn show_desktop_notification(
         }
         #[cfg(not(windows))]
         {
-            // The D-Bus path above answers and mutes; notify-send cannot.
-            let _ = (toast_tag, answers, toast_app);
+            // The D-Bus path above answers, mutes and shows pictures;
+            // notify-send cannot.
+            let _ = (toast_tag, answers, toast_app, pictures);
             crate::platform::notify(
                 &toast_summary,
                 &toast_text,

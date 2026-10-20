@@ -101,8 +101,9 @@ pub fn notify_tagged(
     tag: &str,
     answers: Option<&crate::toast_answers::Answerable>,
     app: Option<&str>,
+    pictures: &crate::toast_answers::Pictures,
 ) -> bool {
-    windows::notify_tagged(summary, body, tag, answers, app)
+    windows::notify_tagged(summary, body, tag, answers, app, pictures)
 }
 
 /// Take back the toast [`notify_tagged`] showed with `tag`.
