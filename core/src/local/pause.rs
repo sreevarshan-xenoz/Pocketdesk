@@ -1,6 +1,7 @@
 //! A pause on what the phones bring to this computer (K2a): for a while,
 //! or until resumed, phones' notifications and texts are not shown, links
-//! not opened, and rings not sounded. Kept in `<state>/pause.json`; the
+//! not opened, and a phone ringing this computer
+//! silent. Kept in `<state>/pause.json`; the
 //! desktop app, its tray and the CLI write it, and the server reads it at
 //! each thing it holds.
 

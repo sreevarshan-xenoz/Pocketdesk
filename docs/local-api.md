@@ -160,7 +160,7 @@ Asks the server to turn on the phone's Do Not Disturb for `N` minutes (1 to 1440
 
 ### `pocketdesk pause [--for MINUTES | --until-resumed | --resume] --json`
 
-Pauses what the phones bring to this computer (K2a) for `MINUTES` (1 to 10080), until resumed, or ends the pause; with no flag, says whether it is paused. While paused, phones' notifications and texts are kept but not shown, links are listed on Activity but not opened, and rings for the computer are not sounded; sessions, files and the clipboard go on. `{"api": 1, "paused": true, "since_unix": 1792069000, "until_unix": 1792072600}` (`until_unix` null until resumed), or `{"api": 1, "paused": false}`. It needs no running server: the server reads the pause at each thing it holds. Exit 1 when the pause cannot be read or written, 2 for bad arguments.
+Pauses what the phones bring to this computer (K2a) for `MINUTES` (1 to 10080), until resumed, or ends the pause; with no flag, says whether it is paused. While paused, phones' notifications are not shown (they stay on the phone, and those that can be answered wait on the Notifications page), texts wait on the Messages page, links are not opened and not kept (Activity names their site), and a phone ringing this computer stays silent; sessions, files and the clipboard go on. `{"api": 1, "paused": true, "since_unix": 1792069000, "until_unix": 1792072600}` (`until_unix` null until resumed), or `{"api": 1, "paused": false}`. It needs no running server: the server reads the pause at each thing it holds. Exit 1 when the pause cannot be read or written (the server then holds nothing), 2 for bad arguments.
 
 ### `pocketdesk clipboard [--send N --to <phone>] --json`
 

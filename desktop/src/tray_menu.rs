@@ -34,6 +34,16 @@ pub const PAUSES: [(&str, Option<u32>); 3] = [
     ("Until resumed", None),
 ];
 
+/// `minutes` in words (K2a): "an hour", "8 hours", "90 minutes".
+pub fn span(minutes: u32) -> String {
+    match minutes {
+        60 => "an hour".to_string(),
+        m if m % 60 == 0 => format!("{} hours", m / 60),
+        1 => "a minute".to_string(),
+        m => format!("{m} minutes"),
+    }
+}
+
 /// How a pause in force reads (K2a): "Paused, 42 min left" or "Paused
 /// until resumed".
 pub fn pause_text(pause: &pocketdesk_core::local::pause::Pause, now_unix: u64) -> String {
@@ -238,6 +248,10 @@ mod tests {
             until_unix: None,
         };
         assert_eq!(pause_text(&forever, 9_999_999), "Paused until resumed");
+        assert_eq!(span(60), "an hour");
+        assert_eq!(span(480), "8 hours");
+        assert_eq!(span(90), "90 minutes");
+        assert_eq!(span(1), "a minute");
     }
 
     use super::*;

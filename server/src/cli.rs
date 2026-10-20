@@ -133,8 +133,8 @@ pub enum Commands {
         json: bool,
     },
     /// Pause what the phones bring to this computer (K2a): their
-    /// notifications and texts not shown, links not opened, rings not
-    /// sounded. With no flag, says whether it is paused. Exit codes: 0 done,
+    /// notifications and texts not shown, links not opened, a phone ringing
+    /// this computer silent. With no flag, says whether it is paused. Exit codes: 0 done,
     /// 1 failed, 2 bad arguments
     Pause {
         /// For how many minutes, 1 to 10080 (a week)

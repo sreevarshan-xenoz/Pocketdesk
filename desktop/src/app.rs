@@ -993,17 +993,13 @@ impl PocketdeskApp {
             );
     }
 
-    /// Ask the phone `id` to be quiet for `minutes`, or to end the mute with
-    /// 0 (D2), and say how that went.
     /// Pause this computer for `minutes`, or until resumed (K2a).
     fn pause(&mut self, minutes: Option<u32>) {
         self.pause_read = None;
         self.notice = crate::notice::Notice::outcome(
             pocketdesk_core::local::pause::pause(&self.state_dir, minutes, now_unix())
                 .map(|_| match minutes {
-                    Some(m) if m >= 120 => format!("Paused for {} hours.", m / 60),
-                    Some(m) if m >= 60 => "Paused for an hour.".to_string(),
-                    Some(m) => format!("Paused for {m} minutes."),
+                    Some(m) => format!("Paused for {}.", crate::tray_menu::span(m)),
                     None => "Paused until you resume.".to_string(),
                 })
                 .map_err(|e| format!("Could not pause: {e}")),
@@ -1063,13 +1059,13 @@ impl PocketdeskApp {
                     ui.set_width(ui.available_width());
                     ui.label(RichText::new(crate::tray_menu::pause_text(&pause, now)).strong());
                     ui.label(
-                        "Phones' notifications and texts are not shown, links not opened, and rings not sounded. Sessions, files and the clipboard go on.",
+                        "Phones' notifications are not shown here: they stay on the phone, and those you can answer wait on the Notifications page. Texts wait on Messages. Links are not opened, nor kept: send them again after. A phone ringing this computer stays silent. Sessions, files and the clipboard go on.",
                     );
                     resume = ui.button("Resume").clicked();
                 });
             }
             Ok(None) => {
-                ui.menu_button("Pause…", |ui| {
+                ui.menu_button("Pause", |ui| {
                     for (label, minutes) in crate::tray_menu::PAUSES {
                         if ui.button(label).clicked() {
                             picked = Some(minutes);
@@ -1089,6 +1085,8 @@ impl PocketdeskApp {
         }
     }
 
+    /// Ask the phone `id` to be quiet for `minutes`, or to end the mute with
+    /// 0 (D2), and say how that went.
     fn quiet(&mut self, id: &str, minutes: u32) {
         let who = self.label(id);
         self.notice = crate::notice::Notice::outcome(match pocketdesk_core::local::quiet::request(

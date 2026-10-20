@@ -733,12 +733,13 @@ pub fn run_pause(ask: PauseAsk, as_json: bool) -> i32 {
         eprintln!("Error: {reason}");
     } else if out["paused"] == true {
         match out["until_unix"].as_u64() {
-            Some(until) => println!(
-                "paused for {} more minutes",
-                until
+            Some(until) => {
+                let left = until
                     .saturating_sub(pocketdesk_core::local::pin::now_unix())
-                    .div_ceil(60)
-            ),
+                    .div_ceil(60);
+                let unit = if left == 1 { "minute" } else { "minutes" };
+                println!("paused for {left} more {unit}")
+            }
             None => println!("paused until resumed"),
         }
     } else {

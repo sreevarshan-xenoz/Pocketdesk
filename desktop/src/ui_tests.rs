@@ -746,7 +746,7 @@ fn a_broken_muted_list_is_said_in_settings() {
 fn the_overview_pauses_and_resumes() {
     let fixture = Fixture::new();
     let mut app = fixture.open(None);
-    app.get_by_label("Pause…").click();
+    app.get_by_label("Pause").click();
     app.run_steps(3);
     app.get_by_label("For an hour").click();
     app.run_steps(3);
@@ -758,12 +758,12 @@ fn the_overview_pauses_and_resumes() {
     assert!(pocketdesk_core::local::pause::current(fixture.state(), now).is_some());
     app.get_by_label("Resume").click();
     app.run_steps(3);
-    assert!(app.query_by_label("Pause…").is_some());
+    assert!(app.query_by_label("Pause").is_some());
     assert!(pocketdesk_core::local::pause::current(fixture.state(), now).is_none());
 }
 
 /// K2a review: a pause that cannot be read is said so on the Overview,
-/// not shown as "not paused" with a Pause… that fails.
+/// not shown as "not paused" with a Pause that fails.
 #[test]
 fn the_overview_says_a_broken_pause() {
     let fixture = Fixture::new();
@@ -776,7 +776,7 @@ fn the_overview_says_a_broken_pause() {
     .expect("pause");
     let app = fixture.open(None);
     assert!(app.query_by_label_contains("could not be read").is_some());
-    assert!(app.query_by_label("Pause…").is_none());
+    assert!(app.query_by_label("Pause").is_none());
 }
 
 /// D3: the Clipboard page says the history is off, and with it on lists
