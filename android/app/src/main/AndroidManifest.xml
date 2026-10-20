@@ -45,6 +45,13 @@
          SIM, and simply has nothing to forward there. -->
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- L6: the automation apps commands from the computer may go to. -->
+    <queries>
+        <package android:name="net.dinglisch.android.taskerm" />
+        <package android:name="com.llamalab.automate" />
+        <package android:name="com.arlosoft.macrodroid" />
+    </queries>
     <!-- Scanning a desktop's pairing code; the app works without a camera. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />

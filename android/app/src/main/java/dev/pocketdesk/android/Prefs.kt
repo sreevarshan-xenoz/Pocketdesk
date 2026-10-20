@@ -196,6 +196,22 @@ object Prefs {
         bump()
     }
 
+    /** L6: commands from the computer go to the automation apps (off by default). */
+    fun commandsFromComputer(ctx: Context): Boolean = prefs(ctx).getBoolean("commands_from_computer", false)
+
+    fun setCommandsFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("commands_from_computer", enabled) }
+        bump()
+    }
+
+    /** L6: the automation app commands go to, or null for the first known one installed. */
+    fun commandsOnlyTo(ctx: Context): String? = prefs(ctx).getString("commands_only_to", null)
+
+    fun setCommandsOnlyTo(ctx: Context, pkg: String?) {
+        prefs(ctx).edit { if (pkg == null) remove("commands_only_to") else putString("commands_only_to", pkg) }
+        bump()
+    }
+
     /** Whether a link the computer hands over is shown as a notification (T8a). On by default. */
     fun linksFromComputer(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_LINKS_FROM_COMPUTER, true)

@@ -236,6 +236,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.callsFromComputer(context),
                 { Prefs.setCallsFromComputer(context, it) },
             )
+            // L6: the computer's commands to the automation apps.
+            CommandsSetting()
             DownloadFolderSetting()
             PhoneFoldersSection()
 

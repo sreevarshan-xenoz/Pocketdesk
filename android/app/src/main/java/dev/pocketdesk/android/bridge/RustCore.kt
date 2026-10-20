@@ -168,6 +168,7 @@ object RustCore {
     private external fun nativeTakeFileOffers(): String
     private external fun nativeSendLink(address: String, port: Int, url: String): String
     private external fun nativeTakeLinks(): String
+    private external fun nativeTakeCommands(): String
     private external fun nativeTakeDials(): String
     private external fun nativeTakeMediaPresses(): String
     private external fun nativeTakeClipboardPush(): String
@@ -962,6 +963,19 @@ object RustCore {
             (0 until array.length()).map { i ->
                 val d = array.getJSONObject(i)
                 Dial(d.getString("host"), d.getInt("port"), d.getString("number"))
+            }
+        }.getOrDefault(emptyList())
+
+    /** A command from the computer at [host]:[port] for the phone's automation apps (L6). */
+    data class Command(val host: String, val port: Int, val name: String, val text: String)
+
+    /** The commands waiting (L6), taken. */
+    fun takeCommands(): List<Command> =
+        runCatching {
+            val array = org.json.JSONArray(envelope(nativeTakeCommands()).getOrDefault("[]"))
+            (0 until array.length()).map { i ->
+                val c = array.getJSONObject(i)
+                Command(c.getString("host"), c.getInt("port"), c.getString("name"), c.optString("text"))
             }
         }.getOrDefault(emptyList())
 
