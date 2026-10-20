@@ -77,8 +77,16 @@ private class ComputerVolume(private val context: Context, private val address: 
         // The panel is offered only once the computer says what its volume
         // is: one that refuses the Audio permission keeps the phone's keys.
         worker.execute {
-            val now = status() ?: return@execute
-            if (stopped) return@execute
+            // A first answer that does not come is asked for again: Remote's
+            // first request may be the one that dials (K4 review).
+            var now: Int? = null
+            for (attempt in 0 until 3) {
+                if (stopped) return@execute
+                now = status()
+                if (now != null) break
+                Thread.sleep(2_000)
+            }
+            if (now == null || stopped) return@execute
             android.os.Handler(context.mainLooper).post {
                 if (stopped) return@post
                 provider.currentVolume = now
