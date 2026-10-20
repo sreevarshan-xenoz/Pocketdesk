@@ -26,6 +26,67 @@ const REFRESH: Duration = Duration::from_secs(1);
 pub const PAGE_KEY: &str = "page";
 
 /// The Devices tab's switches, in the order a person thinks of them.
+/// The features both sides must have on, for one phone (L7): a block per
+/// feature (it wraps at the minimum width, E5), with what holds it back.
+fn switches_table(ui: &mut egui::Ui, device: &model::Device) {
+    let yes_no = |on: Option<bool>| match on {
+        Some(true) => "on",
+        Some(false) => "off",
+        None => "not said",
+    };
+    match device.switches.as_ref() {
+        None => {
+            ui.label(
+                RichText::new(
+                    "The phone has not said which of its features are on. It needs this \
+                     version of Pocketdesk and \"Share the phone's state with the computer\" on.",
+                )
+                .color(crate::theme::muted(ui)),
+            );
+        }
+        Some(said) => {
+            let now = pocketdesk_core::local::pin::now_unix();
+            ui.label(
+                RichText::new(format!(
+                    "As the phone said {}.",
+                    crate::words::ago(now, said.updated_unix)
+                ))
+                .color(crate::theme::muted(ui)),
+            );
+        }
+    }
+    for row in model::switch_rows(&device.permissions, device.switches.as_ref()) {
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let works = row.advice.is_none() && row.phone == Some(true);
+            let mark = if row.advice.is_some() {
+                RichText::new("✕").color(crate::theme::warn(ui))
+            } else if works {
+                RichText::new("✓").color(crate::theme::good(ui))
+            } else {
+                RichText::new("·").color(crate::theme::muted(ui))
+            };
+            ui.label(mark);
+            ui.label(RichText::new(row.what).strong());
+        });
+        let mut sides = format!(
+            "This computer allows: {} · The phone sends: {}",
+            if row.here { "yes" } else { "no" },
+            yes_no(row.phone)
+        );
+        if let Some(android) = row.android {
+            sides.push_str(&format!(
+                " · Android allows: {}",
+                if android { "yes" } else { "no" }
+            ));
+        }
+        ui.label(RichText::new(sides).color(crate::theme::muted(ui)));
+        if let Some(advice) = row.advice {
+            ui.label(RichText::new(advice).color(crate::theme::warn(ui)));
+        }
+    }
+}
+
 const PERMISSIONS: [(Capability, &str, &str); 19] = [
     (
         Capability::Input,
@@ -1594,6 +1655,12 @@ impl PocketdeskApp {
                         }
                     }
                 });
+            // L7: each feature as this computer, the phone and Android stand.
+            if !device.computer {
+                egui::CollapsingHeader::new(format!("Features on both sides for {label}"))
+                    .id_salt(("switches", &device.id))
+                    .show(ui, |ui| switches_table(ui, device));
+            }
         }
         if let Some((id, capability, allowed)) = change {
             self.set_permission(&id, capability, allowed);
@@ -3008,6 +3075,18 @@ fn on_wayland() -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// L7: the switches table names each permission as its switch reads.
+    #[test]
+    fn the_switches_table_names_permissions_as_their_switches() {
+        for feature in crate::model::FEATURES {
+            let label = super::PERMISSIONS
+                .iter()
+                .find(|(c, _, _)| *c == feature.permission)
+                .map(|(_, label, _)| *label);
+            assert_eq!(label, Some(feature.permission_name), "{}", feature.key);
+        }
+    }
+
     #[test]
     fn a_paired_computer_is_not_shown_a_phone_s_switches() {
         for capability in [
