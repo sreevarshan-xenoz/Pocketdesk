@@ -808,10 +808,11 @@
     <string name="cast_camera_lost">கேமரா நின்றது: வேறொரு செயலி அதை எடுத்திருக்கலாம்</string>
     <string name="state_widget_name">Pocketdesk: கணினி நிலை</string>
     <string name="state_widget_description">கடைசி கணினியின் CPU, நினைவகம், வட்டு, பேட்டரி. மீண்டும் கேட்க தட்டவும்.</string>
-    <string name="state_widget_cpu">CPU %1$d %%</string>
-    <string name="state_widget_memory">நினை %1$d %%</string>
-    <string name="state_widget_disk">வட்டு %1$d %%</string>
-    <string name="state_widget_battery">பேட் %1$d %%</string>
+    <string name="state_widget_cpu">CPU %1$d %%</string>
+    <string name="state_widget_memory">நினை %1$d %%</string>
+    <string name="state_widget_disk">வட்டு %1$d %%</string>
+    <string name="state_widget_battery">பேட் %1$d %%</string>
+    <string name="state_widget_percent">%1$d&#160;%%</string>
     <string name="state_widget_updated">%1$s இல் புதுப்பிக்கப்பட்டது</string>
     <string name="state_widget_stale">பதில் இல்லை · %1$s நிலவரம்</string>
     <string name="state_widget_not_answering">பதில் இல்லை</string>

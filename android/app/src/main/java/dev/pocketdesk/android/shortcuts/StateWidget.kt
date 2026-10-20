@@ -7,8 +7,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
+import android.os.Bundle
 import android.text.format.DateUtils
 import android.util.Log
+import android.view.View
 import android.widget.RemoteViews
 import androidx.core.content.edit
 import dev.pocketdesk.android.HostStore
@@ -28,6 +30,11 @@ import kotlin.concurrent.thread
 class StateWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         refresh(context, StateWidgetPlan.Why.Period)
+    }
+
+    // Resized: bars or the line, from what is kept, asking nothing (I2).
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) {
+        redraw(context, manager, intArrayOf(id))
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -170,13 +177,75 @@ class StateWidget : AppWidgetProvider() {
             val host = HostStore.lastHost(context)
             val kept = Kept.read(context, host?.address)
             val state = kept.json?.let { runCatching { ComputerState.parse(it) }.getOrNull() }
-            val views = RemoteViews(context.packageName, R.layout.widget_state).apply {
+            val readAt = if (state == null) null else kept.readAt
+            val time = StateWidgetPlan.timeLine(readAt, kept.failed, host != null && askingFor == host.address)
+            // Each widget by its own height: bars with room for them, else the line (I2).
+            for (id in ids) {
+                val height = manager.getAppWidgetOptions(id)?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) ?: 0
+                val layout = StateWidgetPlan.layout(height)
+                val views = RemoteViews(
+                    context.packageName,
+                    if (layout == StateWidgetPlan.Layout.Bars) R.layout.widget_state_bars else R.layout.widget_state,
+                )
+                draw(context, views, layout, host, state, readAt, time)
+                manager.updateAppWidget(id, views)
+            }
+        }
+
+        private val BARS = mapOf(
+            StateWidgetPlan.Part.Cpu to Bar(R.id.widget_state_row_cpu, R.id.widget_state_label_cpu, R.id.widget_state_bar_cpu, R.id.widget_state_value_cpu),
+            StateWidgetPlan.Part.Memory to Bar(R.id.widget_state_row_memory, R.id.widget_state_label_memory, R.id.widget_state_bar_memory, R.id.widget_state_value_memory),
+            StateWidgetPlan.Part.Disk to Bar(R.id.widget_state_row_disk, R.id.widget_state_label_disk, R.id.widget_state_bar_disk, R.id.widget_state_value_disk),
+            StateWidgetPlan.Part.Battery to Bar(R.id.widget_state_row_battery, R.id.widget_state_label_battery, R.id.widget_state_bar_battery, R.id.widget_state_value_battery),
+        )
+
+        /** One bar's views in the bars layout. */
+        private class Bar(val row: Int, val label: Int, val bar: Int, val value: Int)
+
+        private fun label(context: Context, part: StateWidgetPlan.Part): String = when (part) {
+            StateWidgetPlan.Part.Cpu -> context.getString(R.string.state_cpu)
+            StateWidgetPlan.Part.Memory -> context.getString(R.string.state_memory)
+            // The fullest disk: the sheet's "Disk %1$s" with no name.
+            StateWidgetPlan.Part.Disk -> context.getString(R.string.state_disk, "").trim()
+            StateWidgetPlan.Part.Battery -> context.getString(R.string.state_battery)
+        }
+
+        private fun draw(
+            context: Context,
+            views: RemoteViews,
+            layout: StateWidgetPlan.Layout,
+            host: HostStore.Host?,
+            state: ComputerState.State?,
+            readAt: Long?,
+            time: StateWidgetPlan.When,
+        ) {
+            views.apply {
                 setTextViewText(
                     R.id.widget_state_host,
                     host?.let { HostStore.shownName(context, it.address) } ?: context.getString(R.string.tile_no_computer),
                 )
-                setTextViewText(R.id.widget_state_numbers, numbers(context, state))
-                setTextViewText(R.id.widget_state_when, timeLine(context, if (state == null) null else kept.readAt, kept.failed, host != null && askingFor == host.address))
+                if (layout == StateWidgetPlan.Layout.Bars) {
+                    val rows = state?.takeIf { !it.off }?.let { StateWidgetPlan.rows(StateWidgetPlan.numbers(it)) }.orEmpty()
+                    for ((part, bar) in BARS) {
+                        val row = rows.firstOrNull { it.part == part }
+                        setViewVisibility(bar.row, if (row == null) View.GONE else View.VISIBLE)
+                        if (row == null) continue
+                        setTextViewText(bar.label, label(context, part))
+                        setProgressBar(bar.bar, 100, row.percent.coerceIn(0, 100), false)
+                        setTextViewText(bar.value, context.getString(R.string.state_widget_percent, row.percent))
+                    }
+                    // Not shared: its words instead of bars.
+                    val note = if (state?.off == true) context.getString(R.string.state_widget_not_shared) else null
+                    setViewVisibility(R.id.widget_state_numbers, if (note == null) View.GONE else View.VISIBLE)
+                    setTextViewText(R.id.widget_state_numbers, note.orEmpty())
+                } else {
+                    setTextViewText(R.id.widget_state_numbers, numbers(context, state))
+                }
+                setTextViewText(R.id.widget_state_when, timeLine(context, readAt, time))
+                setTextColor(
+                    R.id.widget_state_when,
+                    context.getColor(if (StateWidgetPlan.warns(time)) R.color.widget_warning else R.color.widget_on_surface_variant),
+                )
                 setOnClickPendingIntent(
                     R.id.widget_state_root,
                     if (host == null) {
@@ -196,7 +265,6 @@ class StateWidget : AppWidgetProvider() {
                     },
                 )
             }
-            manager.updateAppWidget(ids, views)
         }
 
         private fun numbers(context: Context, state: ComputerState.State?): String {
@@ -211,13 +279,13 @@ class StateWidget : AppWidgetProvider() {
             ).joinToString(" · ")
         }
 
-        private fun timeLine(context: Context, readAt: Long?, failed: Boolean, asking: Boolean): String {
+        private fun timeLine(context: Context, readAt: Long?, line: StateWidgetPlan.When): String {
             // The time today, the date before (G1 review): a day-old reading never reads as now.
             val time = readAt?.let {
                 DateUtils.formatSameDayTime(it, System.currentTimeMillis(), java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
                     .toString()
             }
-            return when (StateWidgetPlan.timeLine(readAt, failed, asking)) {
+            return when (line) {
                 StateWidgetPlan.When.Updated -> context.getString(R.string.state_widget_updated, time)
                 StateWidgetPlan.When.StaleSince -> context.getString(R.string.state_widget_stale, time)
                 StateWidgetPlan.When.NotAnswering -> context.getString(R.string.state_widget_not_answering)

@@ -817,10 +817,11 @@
     <string name="cast_camera_lost">The camera stopped: another app may have taken it</string>
     <string name="state_widget_name">Pocketdesk: how it is doing</string>
     <string name="state_widget_description">Your last computer\'s CPU, memory, disk and battery. Tap to ask again.</string>
-    <string name="state_widget_cpu">CPU %1$d %%</string>
-    <string name="state_widget_memory">Mem %1$d %%</string>
-    <string name="state_widget_disk">Disk %1$d %%</string>
-    <string name="state_widget_battery">Bat %1$d %%</string>
+    <string name="state_widget_cpu">CPU %1$d %%</string>
+    <string name="state_widget_memory">Mem %1$d %%</string>
+    <string name="state_widget_disk">Disk %1$d %%</string>
+    <string name="state_widget_battery">Bat %1$d %%</string>
+    <string name="state_widget_percent">%1$d&#160;%%</string>
     <string name="state_widget_updated">Updated %1$s</string>
     <string name="state_widget_stale">Not answering · from %1$s</string>
     <string name="state_widget_not_answering">Not answering</string>

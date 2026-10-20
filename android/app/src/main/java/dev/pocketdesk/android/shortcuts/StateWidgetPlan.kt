@@ -47,6 +47,32 @@ object StateWidgetPlan {
         else -> When.Asking
     }
 
+    /** How the widget draws its numbers (I2): bars with room for them, else one line. */
+    enum class Layout { Line, Bars }
+
+    /** The layout for a widget [heightDp] tall; 0 when the launcher never said. */
+    fun layout(heightDp: Int): Layout = if (heightDp >= BARS_FROM_DP) Layout.Bars else Layout.Line
+
+    /** What a bar shows. */
+    enum class Part { Cpu, Memory, Disk, Battery }
+
+    /** One bar: what it is and its whole percent. */
+    data class Row(val part: Part, val percent: Int)
+
+    /** The bars, one for each reading the computer gave, in a fixed order. */
+    fun rows(numbers: Numbers): List<Row> = listOfNotNull(
+        numbers.cpu?.let { Row(Part.Cpu, it) },
+        numbers.memory?.let { Row(Part.Memory, it) },
+        numbers.disk?.let { Row(Part.Disk, it) },
+        numbers.battery?.let { Row(Part.Battery, it) },
+    )
+
+    /** Whether the time line is drawn as a warning: the computer did not answer. */
+    fun warns(time: When): Boolean = time == When.NotAnswering || time == When.StaleSince
+
+    /** From this height, four bars and the time line fit under the name. */
+    private const val BARS_FROM_DP = 110
+
     /** A kept reading is shown only while its computer is still the last one. */
     fun keeps(readFor: String?, lastComputer: String?): Boolean =
         readFor != null && readFor == lastComputer
