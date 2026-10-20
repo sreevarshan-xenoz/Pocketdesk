@@ -3,6 +3,11 @@ package dev.pocketdesk.android.notify
 import android.app.Notification
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.SystemClock
 import android.os.Process
@@ -12,6 +17,8 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.toDrawable
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
@@ -361,6 +368,8 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
+        // K3: the app's icon once, and its picture with the setting on.
+        addPictures(sbn, note.pkg, body, out.full)
         // Only with the notification in full.
         if (out.full) thread?.let { body.put("messages", it) }
         if (out.id in closedKeys) return
@@ -369,6 +378,57 @@ class PhoneNotificationListener : NotificationListenerService() {
         outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
             .forEach { rule.removed(it) }
     }
+
+    /** Apps whose icon this run has sent (K3): the computer keeps them. */
+    private val iconsSent = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** [body] with [pkg]'s icon the first time, and [sbn]'s picture when it may go (K3). */
+    private fun addPictures(sbn: StatusBarNotification, pkg: String, body: JSONObject, full: Boolean) {
+        if (NotificationPictures.sendIcon(iconsSent, pkg)) {
+            runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull()
+                ?.let { encoded(it, NotificationPictures.ICON_PX, Bitmap.CompressFormat.PNG) }
+                ?.let {
+                    body.put("appIcon", it)
+                    iconsSent.add(pkg)
+                }
+        }
+        if (!NotificationPictures.sendPicture(Prefs.notificationPictures(this), full)) return
+        val extras = sbn.notification.extras
+        // The untyped reads: the typed ones need Android 13, and apps set
+        // either a Bitmap or (Android 12+) an Icon here.
+        @Suppress("DEPRECATION")
+        val picture: Drawable? =
+            extras.getParcelable<Bitmap>(Notification.EXTRA_PICTURE)?.toDrawable(resources)
+                ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    extras.getParcelable<Icon>(Notification.EXTRA_PICTURE_ICON)
+                        ?.let { runCatching { it.loadDrawable(this) }.getOrNull() }
+                } else {
+                    null
+                }
+                ?: sbn.notification.getLargeIcon()?.let { runCatching { it.loadDrawable(this) }.getOrNull() }
+        picture
+            ?.let { encoded(it, NotificationPictures.PICTURE_PX, Bitmap.CompressFormat.JPEG) }
+            ?.let { body.put("picture", it) }
+    }
+
+    /** [drawable] drawn at most [max] on its long side, compressed, as base64; a JPEG on white. */
+    private fun encoded(drawable: Drawable, max: Int, format: Bitmap.CompressFormat): String? =
+        runCatching {
+            val (w, h) = NotificationPictures.fit(
+                drawable.intrinsicWidth.takeIf { it > 0 } ?: max,
+                drawable.intrinsicHeight.takeIf { it > 0 } ?: max,
+                max,
+            )
+            val bitmap = createBitmap(w, h)
+            val canvas = Canvas(bitmap)
+            if (format == Bitmap.CompressFormat.JPEG) canvas.drawColor(Color.WHITE)
+            drawable.setBounds(0, 0, w, h)
+            drawable.draw(canvas)
+            val out = java.io.ByteArrayOutputStream()
+            bitmap.compress(format, 80, out)
+            bitmap.recycle()
+            android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        }.getOrNull()
 
     /**
      * Offer the computer [sbn]'s buttons and its reply, if any, in [body],
