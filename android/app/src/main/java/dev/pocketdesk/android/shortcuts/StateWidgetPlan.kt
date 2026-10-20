@@ -53,6 +53,13 @@ object StateWidgetPlan {
     /** The layout for a widget [heightDp] tall; 0 when the launcher never said. */
     fun layout(heightDp: Int): Layout = if (heightDp >= BARS_FROM_DP) Layout.Bars else Layout.Line
 
+    /**
+     * A widget's height as a launcher before Android 12 gives it: its
+     * tallest held upright, its shortest on its side (I2 review).
+     */
+    fun heightDp(portrait: Boolean, minHeightDp: Int, maxHeightDp: Int): Int =
+        if (portrait) maxHeightDp else minHeightDp
+
     /** What a bar shows. */
     enum class Part { Cpu, Memory, Disk, Battery }
 
@@ -71,7 +78,7 @@ object StateWidgetPlan {
     fun warns(time: When): Boolean = time == When.NotAnswering || time == When.StaleSince
 
     /** From this height, four bars and the time line fit under the name. */
-    private const val BARS_FROM_DP = 110
+    const val BARS_FROM_DP = 110
 
     /** A kept reading is shown only while its computer is still the last one. */
     fun keeps(readFor: String?, lastComputer: String?): Boolean =

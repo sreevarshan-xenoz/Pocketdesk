@@ -6,10 +6,13 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.ConnectivityManager
+import android.os.Build
 import android.os.Bundle
 import android.text.format.DateUtils
 import android.util.Log
+import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
 import androidx.core.content.edit
@@ -179,16 +182,32 @@ class StateWidget : AppWidgetProvider() {
             val state = kept.json?.let { runCatching { ComputerState.parse(it) }.getOrNull() }
             val readAt = if (state == null) null else kept.readAt
             val time = StateWidgetPlan.timeLine(readAt, kept.failed, host != null && askingFor == host.address)
-            // Each widget by its own height: bars with room for them, else the line (I2).
-            for (id in ids) {
-                val height = manager.getAppWidgetOptions(id)?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) ?: 0
-                val layout = StateWidgetPlan.layout(height)
-                val views = RemoteViews(
-                    context.packageName,
-                    if (layout == StateWidgetPlan.Layout.Bars) R.layout.widget_state_bars else R.layout.widget_state,
+            fun views(layout: StateWidgetPlan.Layout) = RemoteViews(
+                context.packageName,
+                if (layout == StateWidgetPlan.Layout.Bars) R.layout.widget_state_bars else R.layout.widget_state,
+            ).also { draw(context, it, layout, host, state, readAt, time) }
+            // Bars with room for them, else the line (I2). Android 12+: both,
+            // and the launcher picks by the widget's real size, either way
+            // up; before, by the height the phone held as it is now gives.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val both = RemoteViews(
+                    mapOf(
+                        SizeF(1f, 1f) to views(StateWidgetPlan.Layout.Line),
+                        SizeF(1f, StateWidgetPlan.BARS_FROM_DP.toFloat()) to views(StateWidgetPlan.Layout.Bars),
+                    ),
                 )
-                draw(context, views, layout, host, state, readAt, time)
-                manager.updateAppWidget(id, views)
+                manager.updateAppWidget(ids, both)
+                return
+            }
+            val portrait = context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+            for (id in ids) {
+                val options = manager.getAppWidgetOptions(id)
+                val height = StateWidgetPlan.heightDp(
+                    portrait,
+                    minHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) ?: 0,
+                    maxHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) ?: 0,
+                )
+                manager.updateAppWidget(id, views(StateWidgetPlan.layout(height)))
             }
         }
 

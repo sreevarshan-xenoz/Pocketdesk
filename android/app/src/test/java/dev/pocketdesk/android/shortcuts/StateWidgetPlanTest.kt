@@ -65,6 +65,15 @@ class StateWidgetPlanTest {
         assertEquals(StateWidgetPlan.Layout.Line, StateWidgetPlan.layout(heightDp = 0))
     }
 
+    /** I2 review: a launcher's height for the phone held as it is now. */
+    @Test
+    fun theHeightIsThePortraitOrLandscapeOne() {
+        // Portrait: the widget's tallest; landscape: its shortest.
+        assertEquals(180, StateWidgetPlan.heightDp(portrait = true, minHeightDp = 90, maxHeightDp = 180))
+        assertEquals(90, StateWidgetPlan.heightDp(portrait = false, minHeightDp = 90, maxHeightDp = 180))
+        assertEquals(StateWidgetPlan.Layout.Line, StateWidgetPlan.layout(StateWidgetPlan.heightDp(false, 90, 180)))
+    }
+
     @Test
     fun theBarsAreTheReadingsTheComputerGave() {
         val rows = StateWidgetPlan.rows(StateWidgetPlan.Numbers(cpu = 10, memory = null, disk = 84, battery = null))
