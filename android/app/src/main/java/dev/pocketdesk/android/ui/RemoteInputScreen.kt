@@ -284,6 +284,8 @@ fun RemoteInputScreen(
                         if (keyboardOpen) keyboard.open() else keyboard.close()
                     }) { Text(stringResource(R.string.remote_keyboard)) }
                 }
+                // H2: a talk timer, for a presenter.
+                if (state == State.Ready) TalkTimerButton()
                 TextButton(onClick = onExit) { Text(stringResource(R.string.remote_exit)) }
             }
             when (state) {

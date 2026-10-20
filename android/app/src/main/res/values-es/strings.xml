@@ -852,4 +852,14 @@
     <string name="wake_tile_waiting">Enviado, esperando respuesta…</string>
     <string name="wake_tile_awake">Está encendido</string>
     <string name="wake_tile_no_answer">Enviado, pero no responde</string>
+    <string name="talk_timer">Tiempo</string>
+    <string name="talk_timer_title">¿Cuánto dura la charla?</string>
+    <string name="talk_timer_running">Tiempo de charla, %1$s; toca para parar</string>
+    <string name="settings_talk_timer_buzz">El tiempo de charla vibra</string>
+    <string name="settings_talk_timer_buzz_summary">El tiempo de charla del mando vibra una vez a falta de cinco minutos, dos a falta de uno y tres al final.</string>
+    <plurals name="talk_timer_minutes">
+        <item quantity="one">%d minuto</item>
+        <item quantity="many">%d minutos</item>
+        <item quantity="other">%d minutos</item>
+    </plurals>
 </resources>

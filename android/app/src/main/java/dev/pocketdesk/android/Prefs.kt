@@ -54,6 +54,8 @@ object Prefs {
     private const val KEY_CALLS_ON = "calls_on"
     private const val KEY_CALLS_DECLINE = "calls_decline"
     private const val KEY_AIR_MOUSE_SPEED = "air_mouse_speed"
+    private const val KEY_TALK_TIMER_MINUTES = "talk_timer_minutes"
+    private const val KEY_TALK_TIMER_BUZZ = "talk_timer_buzz"
     private const val KEY_AIR_MOUSE = "air_mouse"
     private const val KEY_AIR_LASER = "air_laser"
     private const val KEY_PEN_CURVE = "pen_curve"
@@ -415,6 +417,21 @@ object Prefs {
 
     /** How far the cursor moves per finger pixel on the trackpad. */
     /** How fast the air mouse moves the pointer (F4), as the trackpad's range. */
+    /** The talk timer's last length in minutes (H2), 20 until one is chosen. */
+    fun talkTimerMinutes(ctx: Context): Int = prefs(ctx).getInt(KEY_TALK_TIMER_MINUTES, 20)
+
+    fun setTalkTimerMinutes(ctx: Context, minutes: Int) {
+        prefs(ctx).edit { putInt(KEY_TALK_TIMER_MINUTES, minutes) }
+    }
+
+    /** Whether the talk timer buzzes at five minutes, one minute and the end (H2). On by default. */
+    fun talkTimerBuzz(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_TALK_TIMER_BUZZ, true)
+
+    fun setTalkTimerBuzz(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_TALK_TIMER_BUZZ, on) }
+        bump()
+    }
+
     fun airMouseSpeed(ctx: Context): Float =
         prefs(ctx).getFloat(KEY_AIR_MOUSE_SPEED, 1f).coerceIn(TRACKPAD_SENSITIVITY_MIN, TRACKPAD_SENSITIVITY_MAX)
 
