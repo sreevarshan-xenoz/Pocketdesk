@@ -229,6 +229,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.linksFromComputer(context),
                 { Prefs.setLinksFromComputer(context, it) },
             )
+            // L4: the dialer opens with a number the computer sends.
+            SettingSwitch(
+                stringResource(R.string.settings_calls_from_computer),
+                stringResource(R.string.settings_calls_from_computer_summary),
+                Prefs.callsFromComputer(context),
+                { Prefs.setCallsFromComputer(context, it) },
+            )
             DownloadFolderSetting()
             PhoneFoldersSection()
 

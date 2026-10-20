@@ -200,7 +200,40 @@ impl MessagesView {
                         .iter()
                         .find(|c| c.device_id == device && c.address == address)
                         .and_then(|c| c.name.clone());
-                    pane.strong(title(&address, name.as_deref()));
+                    pane.horizontal(|ui| {
+                        ui.strong(title(&address, name.as_deref()));
+                        // L4: the phone's dialer opens with the number.
+                        if pocketdesk_core::protocol::dial::clean_number(&address).is_some()
+                            && ui
+                                .button("Call")
+                                .on_hover_text(
+                                    "Open the phone's dialer with this number; you press Call there",
+                                )
+                                .clicked()
+                        {
+                            // Said at once with Dial off (L4 review).
+                            let allowed = pocketdesk_core::protocol::kdeconnect::TrustStore::read(
+                                state_dir.join(pocketdesk_core::local::paths::TRUST_FILE),
+                            )
+                            .map(|store| {
+                                store.permissions(&device).allows(
+                                    pocketdesk_core::protocol::permissions::Capability::Dial,
+                                )
+                            })
+                            .unwrap_or(true);
+                            self.notice = crate::notice::Notice::outcome(if !allowed {
+                                Err("Not asked: Call numbers from here is off for this phone (Devices).".to_string())
+                            } else {
+                                pocketdesk_core::local::dials::request(
+                                    state_dir, &device, &address, now_unix,
+                                )
+                                .map(|_| {
+                                    "Asked the phone to open its dialer with the number; it does with \u{201c}Calls from the computer\u{201d} on.".to_string()
+                                })
+                                .map_err(|e| format!("Not asked: {e}"))
+                            });
+                        }
+                    });
                     pane.label(
                         RichText::new(format!(
                             "through {}",

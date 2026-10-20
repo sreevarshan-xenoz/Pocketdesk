@@ -26,7 +26,7 @@ const REFRESH: Duration = Duration::from_secs(1);
 pub const PAGE_KEY: &str = "page";
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 17] = [
+const PERMISSIONS: [(Capability, &str, &str); 18] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -88,6 +88,11 @@ const PERMISSIONS: [(Capability, &str, &str); 17] = [
         "The phone can show its own screen, or its camera, in a window here, when its owner starts it on the phone.",
     ),
     (
+        Capability::Dial,
+        "Call numbers from here",
+        "Call on the Messages page (and pocketdesk call) opens the phone's dialer with the number; you press Call on the phone. The phone takes it with \u{201c}Calls from the computer\u{201d} on.",
+    ),
+    (
         Capability::PhoneSound,
         "Play its sound here",
         "With its screen shown here, what the phone's apps play comes out of this computer's speakers (when the phone's own setting sends it).",
@@ -125,6 +130,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
                 | Capability::AwayLock
                 | Capability::Cast
                 | Capability::PhoneSound
+                | Capability::Dial
         ))
 }
 
@@ -2992,6 +2998,7 @@ mod tests {
             Capability::AwayLock,
             Capability::Cast,
             Capability::PhoneSound,
+            Capability::Dial,
         ] {
             assert!(!shown_for(capability, true), "{capability:?}");
             assert!(shown_for(capability, false), "{capability:?}");

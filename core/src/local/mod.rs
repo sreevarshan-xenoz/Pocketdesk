@@ -15,6 +15,7 @@ pub mod config;
 pub mod deck;
 pub mod device_keys;
 pub mod diagnostics;
+pub mod dials;
 pub mod drive;
 pub mod events;
 pub mod home_assistant;

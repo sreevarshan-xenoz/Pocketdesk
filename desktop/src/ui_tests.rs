@@ -852,6 +852,41 @@ fn the_notifications_page_clears_on_the_phone() {
     );
 }
 
+/// L4: Call beside a conversation's number asks its phone to dial it.
+#[test]
+fn the_messages_page_calls_a_number() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    pocketdesk_core::local::sms::record(
+        fixture.state(),
+        pocketdesk_core::local::sms::Message {
+            device_id: PHONE.to_string(),
+            address: "+15550100100".to_string(),
+            body: "call me".to_string(),
+            at_unix: 1,
+            direction: pocketdesk_core::local::sms::Direction::Received,
+            reply: None,
+            name: None,
+        },
+        100,
+    )
+    .expect("text");
+    let mut app = fixture.open(Some(Tab::Messages));
+    app.get_by_label_contains("+15550100100").click();
+    app.run_steps(3);
+    app.get_by_label("Call").click();
+    app.run_steps(3);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let calls: Vec<_> = pocketdesk_core::local::dials::take_all(fixture.state(), now)
+        .into_iter()
+        .map(|c| (c.device_id, c.number))
+        .collect();
+    assert_eq!(calls, vec![(PHONE.to_string(), "+15550100100".to_string())]);
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

@@ -501,6 +501,11 @@
     <string name="link_not_web">திறக்க இணைய இணைப்பு இல்லை (http, https இணைப்புகள் மட்டும்).</string>
     <string name="link_from_computer">%1$s இலிருந்து ஓர் இணைப்பு</string>
     <string name="channel_links">கணினியிலிருந்து இணைப்புகள்</string>
+    <string name="settings_calls_from_computer">கணினியிலிருந்து அழைப்புகள்</string>
+    <string name="settings_calls_from_computer_summary">கணினி அனுப்பும் எண் (அதன் செய்திகள் பக்கத்தில் அழை) அதனுடன் டயலரைத் திறக்கும்; நீங்கள் அழை அழுத்துங்கள். அமர்வுக்கு வெளியே, மற்றொரு அம்சத்துக்காக (பதில்கள், அழைப்புகள், கிளிப்போர்டு) கணினியுடன் இணைப்பு இருக்கும்போது அது அறிவிப்பாகக் காத்திருக்கும்</string>
+    <string name="channel_dials">கணினியிலிருந்து எண்கள்</string>
+    <string name="dial_from_computer">%1$s ஐ அழைக்கவா?</string>
+    <string name="dial_from_computer_text">%1$s இலிருந்து: டயலரைத் திறக்கத் தட்டவும்</string>
     <string name="settings_links_from_computer">கணினியிலிருந்து இணைப்புகள்</string>
     <string name="settings_links_from_computer_summary">கணினி அனுப்பும் இணைப்பு, அதைத் திறக்கும் அறிவிப்பாகக் காட்டப்படும். அணைத்தால்: அத்தகைய இணைப்புகள் கைவிடப்படும்</string>
     <string name="settings_share_battery">மின்கலத்தைக் கணினியுடன் பகிர்</string>

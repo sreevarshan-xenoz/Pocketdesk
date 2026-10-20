@@ -2287,6 +2287,14 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] `dumpsys battery unplug`, then `set ac 1` again at 80: one more.
 - [ ] `adb shell dumpsys battery reset` after.
 
+## 159. Call a number from the computer (L4)
+
+Built 2026-10-21; tested through units and the harness, nothing on a device yet.
+- [ ] Phone Settings "Calls from the computer" on; in a session, Call on the Messages page (or `pocketdesk call`): the dialer opens with the number (`adb shell dumpsys activity activities`); nothing is called.
+- [ ] With the app behind another, or outside a session with a background link: the notification, its tap opening the dialer.
+- [ ] A number with `*` or `#`: refused on the computer.
+- [ ] A real call (a SIM): the owner presses Call.
+
 ## 160. Screenshot and record the phone's window (L5)
 
 Built 2026-10-21; tested through units and a real ffmpeg recording, nothing on a device yet.

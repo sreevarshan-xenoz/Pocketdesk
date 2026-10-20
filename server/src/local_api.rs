@@ -100,6 +100,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::Mute => "mute",
         Capability::AwayLock => "away_lock",
         Capability::PhoneSound => "phone_sound",
+        Capability::Dial => "dial",
     }
 }
 
@@ -460,6 +461,89 @@ fn wait_deadline(wait: std::time::Duration) -> std::time::Instant {
     let now = std::time::Instant::now();
     now.checked_add(wait)
         .unwrap_or_else(|| now + std::time::Duration::from_secs(365 * 24 * 3600))
+}
+
+/// Have the phone `query` names dial `number` (L4), through the server.
+pub fn call_in(state_dir: &Path, query: &str, number: &str, running: bool) -> (Value, i32) {
+    if !running {
+        return (
+            error("no Pocketdesk server is running to send it"),
+            exit::NO_SERVER,
+        );
+    }
+    if pocketdesk_core::protocol::dial::clean_number(number).is_none() {
+        return (
+            error("not a phone number: digits, with a + only at the start"),
+            exit::BAD_ARGUMENTS,
+        );
+    }
+    let store = match trust_store(state_dir) {
+        Ok(store) => store,
+        Err(reason) => return (error(reason), exit::FAILED),
+    };
+    let device_id = match resolve_phone(&store.trusted_devices(), query) {
+        Ok(id) => id,
+        Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
+    };
+    // A paired computer has no dialer (L4 review).
+    if store.is_computer(&device_id) {
+        return (
+            error(format!("{device_id} is a computer, not a phone")),
+            exit::BAD_ARGUMENTS,
+        );
+    }
+    // The server would drop it: say so now, not "queued".
+    if !store.permissions(&device_id).allows(Capability::Dial) {
+        return (
+            error(format!(
+                "Call numbers from here is off for {device_id} (the Devices tab)"
+            )),
+            exit::FAILED,
+        );
+    }
+    let now = pocketdesk_core::local::pin::now_unix();
+    match pocketdesk_core::local::dials::request(state_dir, &device_id, number, now) {
+        Ok(request) => (
+            versioned(json!({
+                "id": request.id,
+                "device_id": device_id,
+                "number": request.number,
+                "state": "queued",
+            })),
+            exit::DONE,
+        ),
+        Err(e) => (
+            error(format!("could not queue the call: {e}")),
+            exit::FAILED,
+        ),
+    }
+}
+
+/// `pocketdesk call`: [`call_in`] for the owner's state folder, printed.
+pub fn run_call(query: &str, number: &str, as_json: bool) -> i32 {
+    let dir = match crate::state::state_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            if as_json {
+                print(&error(format!("no state folder: {e:#}")));
+            } else {
+                eprintln!("No state folder: {e:#}");
+            }
+            return exit::FAILED;
+        }
+    };
+    let running = pocketdesk_core::local::server::is_running(&dir);
+    let (out, code) = call_in(&dir, query, number, running);
+    if as_json {
+        print(&out);
+    } else if let Some(reason) = out["error"].as_str() {
+        eprintln!("Error: {reason}");
+    } else {
+        println!(
+            "sent to the phone, whose dialer opens with it (with \"Calls from the computer\" on there)"
+        );
+    }
+    code
 }
 
 /// Ask the running server in `state_dir` to hand the link `url` to the
@@ -1523,6 +1607,32 @@ mod tests {
         assert_eq!(session["device_id"], "phone-a");
         assert_eq!(session["transport"], "wan");
         assert_eq!(session["driving"], true);
+    }
+
+    /// L4: a call is queued cleaned for a paired phone with Dial on, and
+    /// refused with no server, a bad number, or Dial off.
+    #[test]
+    fn a_call_is_queued_for_a_phone_with_dial_on() {
+        let (dir, _) = send_setup("call");
+        let (_, code) = call_in(&dir, "5f1c9b", "112", false);
+        assert_eq!(code, exit::NO_SERVER);
+        let (_, code) = call_in(&dir, "5f1c9b", "call me", true);
+        assert_eq!(code, exit::BAD_ARGUMENTS);
+        let (out, code) = call_in(&dir, "5f1c9b", "+1 555 010 0100", true);
+        assert_eq!(code, exit::DONE, "{out}");
+        assert_eq!(out["number"], "+15550100100");
+        assert_eq!(out["state"], "queued");
+        let queued =
+            pocketdesk_core::local::dials::take_all(&dir, pocketdesk_core::local::pin::now_unix());
+        assert_eq!(queued.len(), 1);
+        let mut off = pocketdesk_core::protocol::permissions::DevicePermissions::default();
+        off.set(Capability::Dial, false);
+        TrustStore::load_or_create(dir.join(TRUST_FILE))
+            .unwrap()
+            .set_permissions("5f1c9b3d-6e70", off)
+            .unwrap();
+        let (_, code) = call_in(&dir, "5f1c9b", "112", true);
+        assert_eq!(code, exit::FAILED, "Dial off");
     }
 
     fn send_setup(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {

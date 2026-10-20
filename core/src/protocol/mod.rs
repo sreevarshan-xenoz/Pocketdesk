@@ -2,6 +2,7 @@ pub mod backoff;
 pub mod clipboard;
 pub mod connection;
 pub mod conversation;
+pub mod dial;
 pub mod file_time;
 pub mod kdeconnect;
 pub mod link;

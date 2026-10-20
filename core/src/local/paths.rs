@@ -31,6 +31,8 @@ pub const RECEIVED_FILE: &str = "received.json";
 pub const OUTBOX_DIR: &str = "outbox";
 /// Links the desktop app or the local API asks the server to hand to a phone (T8a).
 pub const LINKS_DIR: &str = "links_out";
+/// Numbers for phones to dial (L4), one file a call.
+pub const DIALS_DIR: &str = "dials_out";
 /// Rings the desktop app or the local API asks the server to send to a phone (N1).
 pub const RINGS_DIR: &str = "rings_out";
 /// Mutes the desktop app or the local API asks the server to send to a phone (D2).

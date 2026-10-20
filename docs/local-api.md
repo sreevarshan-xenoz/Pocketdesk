@@ -150,6 +150,10 @@ pocketdesk send 0d7c3a backup.tar --wait 600 --json || notify-send "backup did n
 
 Hands a web link to a phone in a session; it waits there as a notification that opens it (T8a). Only `http` and `https` links of at most 2048 bytes, with no user name or password, and not to the phone's own `localhost`. `{"api": 1, "id": "…", "device_id": "…", "url": "…", "state": "queued"}`. Exit 2 for a link that may not be opened, 1 for a phone not in a session or with its Links permission off, 3 when no server runs.
 
+### `pocketdesk call <phone> <number> --json`
+
+Has a phone dial a number (L4): its dialer opens with it, and the owner presses Call there (the phone takes it with "Calls from the computer" on). The number may have spaces, dashes, dots and brackets, which are dropped; what is left is digits, a `+` only at the start, 3 to 32 characters (never `*` or `#`, which make codes). `{"api": 1, "id": "…", "device_id": "…", "number": "+15550100100", "state": "queued"}`; it goes to the phone if it is connected within a minute. Exit 2 for a number it is not, or a paired computer; 1 for a phone with "Call numbers from here" off; 3 when no server runs.
+
 ### `pocketdesk ring <phone> --json`
 
 Asks the server to ring the phone (N1): `{"api": 1, "id": "…", "device_id": "…", "state": "queued"}`. Refused at once (exit 1) when the phone's Ring permission is off or it keeps no link now: it rings in a session, or with "Ring from the computer" on in its own Settings. The server sends at most one ring a minute to a phone, and drops a ring not sent within a minute.

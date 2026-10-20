@@ -13,9 +13,9 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
 use pocketdesk_core::local::paths::{
-    CLIPBOARD_OUT_DIR, COMPUTERS_DIR, CONTROL_DIR, KDECONNECT_OUT_DIR, KICKS_DIR, LINKS_DIR,
-    NOTIFICATION_CLEARS_DIR, NOTIFICATION_OUT_DIR, OUTBOX_DIR, PHONE_FILES_DIR, PHONE_MEDIA_DIR,
-    PHONE_PHOTOS_OUT_DIR, QUIET_DIR, RINGS_DIR, TRANSFER_CANCELS_DIR,
+    CLIPBOARD_OUT_DIR, COMPUTERS_DIR, CONTROL_DIR, DIALS_DIR, KDECONNECT_OUT_DIR, KICKS_DIR,
+    LINKS_DIR, NOTIFICATION_CLEARS_DIR, NOTIFICATION_OUT_DIR, OUTBOX_DIR, PHONE_FILES_DIR,
+    PHONE_MEDIA_DIR, PHONE_PHOTOS_OUT_DIR, QUIET_DIR, RINGS_DIR, TRANSFER_CANCELS_DIR,
 };
 use tokio::sync::Notify;
 
@@ -39,7 +39,8 @@ pub const FOLDERS: &[&str] = &[
     KDECONNECT_OUT_DIR,
     TRANSFER_CANCELS_DIR,
     // Notifications closed here, to clear on the phone (L1).
-    NOTIFICATION_CLEARS_DIR,
+    NOTIFICATION_CLEARS_DIR, // Numbers for phones to dial (L4).
+    DIALS_DIR,
 ];
 
 /// One wake-up per folder; a change while its consumer is busy is kept for
@@ -175,6 +176,7 @@ mod tests {
     #[test]
     fn the_newer_outboxes_are_watched() {
         assert!(FOLDERS.contains(&NOTIFICATION_CLEARS_DIR));
+        assert!(FOLDERS.contains(&DIALS_DIR));
     }
 
     #[test]

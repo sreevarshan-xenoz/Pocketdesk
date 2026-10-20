@@ -85,6 +85,18 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Have a phone dial a number (L4): its dialer opens with it, and you
+    /// press Call there. Exit codes: 0 queued, 1 failed, 2 bad arguments, 3
+    /// no server running
+    Call {
+        /// The phone: its device id, or 6 or more of its first characters
+        phone: String,
+        /// The number: digits, a + only at the start
+        number: String,
+        /// Print the local API's JSON (see docs/local-api.md)
+        #[arg(long)]
+        json: bool,
+    },
     /// The clipboard's history (D3): the texts that crossed between this
     /// computer and its phones, newest first; or, with --send, one of them
     /// put on a phone's clipboard again. Exit codes: 0 done, 1 failed, 2 bad

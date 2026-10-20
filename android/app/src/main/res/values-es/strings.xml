@@ -506,6 +506,11 @@
     <string name="link_not_web">No hay un enlace web que abrir (solo enlaces http y https).</string>
     <string name="link_from_computer">Un enlace de %1$s</string>
     <string name="channel_links">Enlaces del equipo</string>
+    <string name="settings_calls_from_computer">Llamadas desde el equipo</string>
+    <string name="settings_calls_from_computer_summary">Un número que envía el equipo (Llamar en su página de Mensajes) abre el marcador con él; tú pulsas Llamar. Fuera de una sesión espera como notificación, mientras haya un enlace con el equipo por otra función (respuestas, llamadas, portapapeles)</string>
+    <string name="channel_dials">Números del equipo</string>
+    <string name="dial_from_computer">¿Llamar a %1$s?</string>
+    <string name="dial_from_computer_text">Desde %1$s: toca para abrir el marcador</string>
     <string name="settings_links_from_computer">Enlaces del equipo</string>
     <string name="settings_links_from_computer_summary">Un enlace que envía el equipo aparece como una notificación que lo abre. Desactivado: esos enlaces se descartan</string>
     <string name="settings_share_battery">Compartir la batería con el equipo</string>
