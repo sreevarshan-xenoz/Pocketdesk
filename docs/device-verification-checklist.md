@@ -2303,6 +2303,14 @@ Built 2026-10-21; tested through units and a real ffmpeg recording, nothing on a
 - [ ] Recording while the phone turns: the file so far kept, the bar says why it stopped.
 - [ ] The cast ends during a recording: the bar names the file and stops counting.
 
+## 161. Commands to the phone's automation apps (L6)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] A throwaway receiver in Tasker's package logs `dev.pocketdesk.android.event.COMMAND` with NAME, TEXT and ADDRESS after `pocketdesk phone-command`.
+- [ ] With "Only to" set to another installed app: nothing reaches the receiver.
+- [ ] With no automation app installed: nothing is sent, and Settings says so.
+- [ ] Tasker itself.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
