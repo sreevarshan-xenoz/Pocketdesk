@@ -4,6 +4,8 @@
     <color name="widget_on_surface">#FFFFFFFF</color>
     <color name="widget_on_surface_variant">#CCFFFFFF</color>
     <color name="widget_tile">#33FFFFFF</color>
+    <!-- Drawn at the bar's own 30 % (I2). -->
+    <color name="widget_track">#FFFFFFFF</color>
     <color name="widget_accent">#FF9FD8CA</color>
     <color name="widget_warning">#FFFFB68A</color>
 </resources>

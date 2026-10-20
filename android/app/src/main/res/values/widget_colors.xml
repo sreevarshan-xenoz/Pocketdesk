@@ -6,6 +6,8 @@
     <color name="widget_on_surface">#FF10201D</color>
     <color name="widget_on_surface_variant">#FF3F4B48</color>
     <color name="widget_tile">#FFD0E3DE</color>
+    <!-- Drawn at the bar's own 30 % (I2). -->
+    <color name="widget_track">#FF3F4B48</color>
     <color name="widget_accent">#FF1E6B5E</color>
     <color name="widget_warning">#FF9A4600</color>
 </resources>

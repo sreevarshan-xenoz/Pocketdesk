@@ -85,7 +85,7 @@
             android:layout_height="6dp"
             android:layout_weight="1"
             android:max="100"
-            android:progressBackgroundTint="@color/widget_tile"
+            android:progressBackgroundTint="@color/widget_track"
             android:progressTint="@color/widget_accent" />
 
         <TextView
@@ -124,7 +124,7 @@
             android:layout_height="6dp"
             android:layout_weight="1"
             android:max="100"
-            android:progressBackgroundTint="@color/widget_tile"
+            android:progressBackgroundTint="@color/widget_track"
             android:progressTint="@color/widget_accent" />
 
         <TextView
@@ -163,7 +163,7 @@
             android:layout_height="6dp"
             android:layout_weight="1"
             android:max="100"
-            android:progressBackgroundTint="@color/widget_tile"
+            android:progressBackgroundTint="@color/widget_track"
             android:progressTint="@color/widget_accent" />
 
         <TextView
@@ -202,7 +202,7 @@
             android:layout_height="6dp"
             android:layout_weight="1"
             android:max="100"
-            android:progressBackgroundTint="@color/widget_tile"
+            android:progressBackgroundTint="@color/widget_track"
             android:progressTint="@color/widget_accent" />
 
         <TextView
