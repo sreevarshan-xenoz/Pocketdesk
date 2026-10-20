@@ -1541,6 +1541,7 @@ mod tests {
                 charge: 54,
                 charging: true,
                 updated_unix: 95,
+                ..Default::default()
             },
         );
         pocketdesk_core::local::phone_status::write(&dir, &batteries).unwrap();

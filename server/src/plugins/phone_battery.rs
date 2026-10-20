@@ -195,6 +195,7 @@ impl Reports {
                 charge: report.charge,
                 charging: report.charging,
                 updated_unix: now_unix,
+                state: report.state,
             },
         );
         self.dirty = true;
@@ -370,6 +371,7 @@ mod tests {
             charge,
             charging,
             low: false,
+            state: Default::default(),
         };
         assert!(!watch.report("p", &r(79, true), 80));
         assert!(watch.report("p", &r(82, true), 80), "a level skipped");
@@ -398,6 +400,7 @@ mod tests {
             charge,
             charging,
             low: false,
+            state: Default::default(),
         };
         assert!(
             !watch.report("p", &r(100, true), 100),
@@ -427,10 +430,19 @@ mod tests {
             PhoneBattery {
                 charge: 54,
                 charging: true,
-                updated_unix: 100
+                updated_unix: 100,
+                ..Default::default()
             }
         );
         assert!(reports.dirty);
+        // L9: what the phone says of itself is kept beside its battery.
+        let mut with_state = report(54, true);
+        with_state.state.ringer = Some(pocketdesk_core::local::phone_status::Ringer::Silent);
+        reports.take("phone-a", &with_state, true, 0, 120, now);
+        assert_eq!(
+            reports.batteries["phone-a"].state.ringer,
+            Some(pocketdesk_core::local::phone_status::Ringer::Silent)
+        );
         let warning = reports.take("phone-a", &report(12, false), true, 0, 160, now);
         assert_eq!(
             warning.as_deref(),
@@ -562,6 +574,7 @@ mod tests {
             charge,
             charging,
             low: false,
+            state: Default::default(),
         }
     }
 
@@ -594,6 +607,7 @@ mod tests {
             charge: 30,
             charging: false,
             low: true,
+            state: Default::default(),
         };
         assert!(
             watch.report("b", &said_low, now),

@@ -731,6 +731,7 @@ mod tests {
                         charge: 64,
                         charging: true,
                         updated_unix: 1,
+                        ..Default::default()
                     }),
                     connected: true,
                 },

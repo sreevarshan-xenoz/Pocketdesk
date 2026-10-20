@@ -303,6 +303,7 @@ mod tests {
                 charge: 64,
                 charging: true,
                 updated_unix: 10_000 - 60,
+                ..Default::default()
             }),
             ..Default::default()
         };

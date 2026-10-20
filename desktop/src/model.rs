@@ -349,6 +349,53 @@ pub fn quiet_text(
     })
 }
 
+/// What a phone last said of itself beside its battery (L9), for the
+/// Overview: "Wi-Fi, 3 of 4 bars · 12.0 GB free of 125.0 GB · on silent".
+/// `None` when it said nothing of it (a KDE device, an older phone).
+pub fn phone_state_text(
+    state: &pocketdesk_core::local::phone_status::PhoneState,
+) -> Option<String> {
+    use pocketdesk_core::local::phone_status::{Network, Ringer};
+    const MB: u64 = 1024 * 1024;
+    let mut parts = Vec::new();
+    let bars = state.signal.map(|bars| format!(", {bars} of 4 bars"));
+    match state.network {
+        Some(Network::Wifi) => parts.push(format!("Wi-Fi{}", bars.unwrap_or_default())),
+        Some(Network::Mobile) => parts.push(format!("mobile data{}", bars.unwrap_or_default())),
+        Some(Network::Ethernet) => parts.push("Ethernet".to_string()),
+        Some(Network::None) => parts.push("no network".to_string()),
+        None => {}
+    }
+    match (state.storage_free_mb, state.storage_total_mb) {
+        (Some(free), Some(total)) => parts.push(format!(
+            "{} free of {}",
+            crate::words::human_size(free.saturating_mul(MB)),
+            crate::words::human_size(total.saturating_mul(MB))
+        )),
+        (Some(free), None) => parts.push(format!(
+            "{} free",
+            crate::words::human_size(free.saturating_mul(MB))
+        )),
+        _ => {}
+    }
+    match state.ringer {
+        Some(Ringer::Silent) => parts.push("on silent".to_string()),
+        Some(Ringer::Vibrate) => parts.push("on vibrate".to_string()),
+        Some(Ringer::Normal) => parts.push("ringer on".to_string()),
+        None => {}
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    // The first word capitalised: it starts the line.
+    let line = parts.join(" · ");
+    let mut chars = line.chars();
+    Some(match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => line,
+    })
+}
+
 /// How long the Overview says a phone said no to a mute.
 pub const REFUSAL_SHOWN_SECS: u64 = 120;
 
@@ -834,6 +881,42 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_phones_state_reads_as_one_line_of_what_it_said() {
+        use pocketdesk_core::local::phone_status::{Network, PhoneState, Ringer};
+        assert_eq!(super::phone_state_text(&PhoneState::default()), None);
+        let full = PhoneState {
+            storage_free_mb: Some(12 * 1024),
+            storage_total_mb: Some(125 * 1024),
+            network: Some(Network::Wifi),
+            signal: Some(3),
+            ringer: Some(Ringer::Silent),
+        };
+        assert_eq!(
+            super::phone_state_text(&full).as_deref(),
+            Some("Wi-Fi, 3 of 4 bars · 12.0 GB free of 125.0 GB · on silent")
+        );
+        let mobile = PhoneState {
+            network: Some(Network::Mobile),
+            ringer: Some(Ringer::Vibrate),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::phone_state_text(&mobile).as_deref(),
+            Some("Mobile data · on vibrate")
+        );
+        let bare = PhoneState {
+            network: Some(Network::None),
+            storage_free_mb: Some(500),
+            ringer: Some(Ringer::Normal),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::phone_state_text(&bare).as_deref(),
+            Some("No network · 500.0 MB free · ringer on")
+        );
+    }
+
     use super::*;
 
     fn under_way(size: u64, done: u64, rate: u64) -> pocketdesk_core::local::transfers::Transfer {
