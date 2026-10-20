@@ -672,6 +672,8 @@ impl Plugin for NotificationPlugin {
             ACK,
             pocketdesk_core::protocol::notification_action::NOTIFICATION_REPLY,
             pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION,
+            // A clear (L1).
+            pocketdesk_core::protocol::notification_action::NOTIFICATION_REQUEST,
         ]
     }
 

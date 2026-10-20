@@ -20,7 +20,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.notification.ack` |  | yes |  | notification |
 | `kdeconnect.notification.action` |  | yes |  | notification |
 | `kdeconnect.notification.reply` |  | yes |  | notification |
-| `kdeconnect.notification.request` | yes |  | none (any paired phone) | notification |
+| `kdeconnect.notification.request` | yes | yes | none (any paired phone) | notification |
 | `kdeconnect.pair` | yes | yes | none (any phone: pairing) | pair |
 | `kdeconnect.pocketdesk.audio` | yes | yes | Audio | audio_control |
 | `kdeconnect.pocketdesk.clipboard_image` | yes |  | Clipboard | clipboard |
