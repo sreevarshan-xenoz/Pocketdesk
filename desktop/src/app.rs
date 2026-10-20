@@ -1622,6 +1622,8 @@ impl PocketdeskApp {
         );
         if ui.input_mut(|i| i.consume_shortcut(&crate::keys::FIND)) {
             search.request_focus();
+            // The page may be scrolled down past the box (J2 review).
+            search.scroll_to_me(Some(egui::Align::TOP));
         }
         // Esc empties a search, and is taken, so it does not also cancel a
         // question drawn later in the frame (J2 review).
