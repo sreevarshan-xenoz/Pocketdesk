@@ -99,7 +99,11 @@ impl PhoneFilesView {
     ) {
         match store::request(state_dir, phone, kind, root, &path, now_unix) {
             Ok(_) => {
-                self.waiting = (kind == Kind::List).then(|| (phone.to_string(), now_unix));
+                // A fetch leaves a listing's wait as it is (I3 review: it
+                // dropped its spinner and its "did not answer").
+                if kind == Kind::List {
+                    self.waiting = Some((phone.to_string(), now_unix));
+                }
                 self.notice = match kind {
                     // A listing's ask shows as a spinner until it answers (I3).
                     Kind::List => None,
