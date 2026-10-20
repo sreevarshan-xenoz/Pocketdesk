@@ -20,6 +20,25 @@
 5. **Deck buttons carry their kind.** A small icon above each label: keys, text, media, a link, a task.
 6. **Previews and sizes.** Each widget names a preview layout with sample content for the picker (Android 12+) and its target cells.
 
+## As built
+
+- Bars from 110 dp; on Android 12+ the state widget hands the launcher both layouts by size, so it picks by the widget's real size either way up; before 12, by the height for how the phone is held.
+- The deck's buttons are tiles holding a centred label with the deck sheet's icons (`Deck.iconRes`, shared); the music and deck widgets' first draw reads as asking.
+- The bars' track has its own colour (the bar draws it at 30 %); the state widget's warning is a twin view in the warning colour, since a colour set from code keeps the mode it was drawn in.
+- Previews and cells live in `xml-v31` (Android 12+ reads only those); cells four wide, two tall for the state, three for the music and deck; the music widget's least height 160 dp, its buttons 56 dp.
+
+## Review
+
+A fresh review found 0 Critical, 3 Important and 3 Minor issues. All the Important ones and one Minor are fixed, one commit each:
+- **Previews and cells on Android 12+.** The `xml-v31` copies of three widget infos shadowed the edits, so on Android 12+ the previews and cells never applied. They now live in `xml-v31`.
+- **The vertical space.** The 48 dp header left a two-cell music widget no room for its buttons, and the deck's tiles were shorter than their content. Fixed with the header's height, the line moved, and new minimums and cells.
+- **The layout chosen in landscape.** It was chosen from the height held upright. Fixed with the size map, and with the orientation on older Android.
+- **A wordless refusal (Minor).** It drew an empty message, and now says the computer refused.
+
+Left as they are:
+- The previews' sample text is English in every language. It is sample content, as a screenshot is.
+- The 68 dp bar labels are owed in Tamil and at a large font.
+
 ## Left out
 
 - Widgets drawn with Jetpack Glance: a new dependency, and the RemoteViews code is tested where it decides.

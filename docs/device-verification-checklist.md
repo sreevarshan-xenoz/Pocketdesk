@@ -2124,6 +2124,19 @@ Built 2026-10-20 on the owner's night of features; nothing by hand yet. It regis
 - [ ] A password manager's copy: not sent (the server's notification says why).
 - [ ] The tray's menu (H4): the phone it sends to shows "Send the clipboard (Win+Shift+C)"; with the key cleared, the plain label again.
 
+## 141. The home-screen widgets, a design pass (I2)
+
+Built 2026-10-20 on the owner's word; checked on the A71 as it was built (against the throwaway server, stopped for the last checks):
+- [x] The four widgets in dark mode with the system's colours, and in light mode: text, tiles and the warning readable in both; the warning's colour following a switch from light to dark.
+- [x] The state widget at two cells: four bars with their percents and "Not answering · from <time>" in the warning colour; the bars' track seen in both modes.
+- [x] The music widget refused: its warning icon and the reason in its middle; before its first draw it reads "Asking the computer…".
+- [x] The deck's buttons with their kinds' icons, centred with their labels; before its first draw it reads as asking.
+- [x] The picker's previews on Android 16 for all four, at four cells wide (two tall for the state, three for the music and deck).
+- [ ] The music widget with a track: title, artist, the buttons at 56 dp and "Read at <time>" in its header; nothing playing.
+- [ ] The state widget made one cell tall: the line, no "%" left alone; on its side at two cells: the line where bars do not fit.
+- [ ] Android 11 or older: the pine theme in both modes, no previews, the state widget's layout by its height.
+- [ ] Spanish and Tamil (the bar labels at 68 dp); font scale 2.0.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
