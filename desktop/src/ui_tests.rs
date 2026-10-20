@@ -535,6 +535,51 @@ fn the_sessions_page_lists_the_recent_sessions() {
     );
 }
 
+/// J4: the Activity page's Search narrows the events by their line, and
+/// under a kind chip says the chip narrows too.
+#[test]
+fn the_activity_page_searches_its_events() {
+    use pocketdesk_core::local::events::{Event, EventsDetail, append};
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    for (kind, meta) in [
+        ("phone_linked", serde_json::json!({})),
+        ("link_received", serde_json::json!({"host": "example.org"})),
+    ] {
+        let event = Event::new(
+            kind,
+            Some(PHONE),
+            now,
+            meta,
+            serde_json::json!({}),
+            EventsDetail::Metadata,
+        );
+        append(fixture.state(), &event).expect("logged");
+    }
+    let mut app = fixture.open(Some(Tab::Activity));
+    app.run_steps(3);
+    assert!(app.query_by_label("Connected").is_some());
+    assert!(app.query_by_label_contains("example.org").is_some());
+
+    app.get_by_role(egui::accesskit::Role::TextInput).focus();
+    app.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("connected");
+    app.run_steps(3);
+    assert!(app.query_by_label("Connected").is_some());
+    assert!(app.query_by_label_contains("example.org").is_none());
+
+    app.get_by_label("Files and links").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label("Nothing of this kind matches \"connected\".")
+            .is_some()
+    );
+}
+
 /// J4: the Clipboard page's Search narrows the texts, and says when it
 /// finds none, with Clear search.
 #[test]

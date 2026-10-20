@@ -160,10 +160,14 @@ impl ActivityView {
             if !query.is_empty() && !self.events.is_empty() {
                 // J4: a search that finds nothing says so, with the way back.
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(
-                        RichText::new(format!("Nothing here matches \"{query}\"."))
-                            .color(crate::theme::muted(ui)),
-                    );
+                    // Under a kind chip, it says the chip narrows too (J4
+                    // review).
+                    let said = if self.filter == Filter::All {
+                        format!("Nothing here matches \"{query}\".")
+                    } else {
+                        format!("Nothing of this kind matches \"{query}\".")
+                    };
+                    ui.label(RichText::new(said).color(crate::theme::muted(ui)));
                     if ui.button("Clear search").clicked() {
                         self.search.clear();
                     }
