@@ -565,7 +565,13 @@ fn the_activity_page_searches_its_events() {
     assert!(app.query_by_label("Connected").is_some());
     assert!(app.query_by_label_contains("example.org").is_some());
 
-    app.get_by_role(egui::accesskit::Role::TextInput).focus();
+    // Ctrl+F puts the cursor in the box, as on Settings.
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
+    app.run_steps(2);
+    assert!(
+        app.get_by_role(egui::accesskit::Role::TextInput)
+            .is_focused()
+    );
     app.get_by_role(egui::accesskit::Role::TextInput)
         .type_text("connected");
     app.run_steps(3);

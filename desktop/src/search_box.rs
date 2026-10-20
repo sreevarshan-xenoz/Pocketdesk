@@ -3,14 +3,19 @@
 
 use eframe::egui;
 
-/// The box, filling `query`. Esc in it empties it, and that press does
-/// nothing else on the page.
+/// The box, filling `query`. Ctrl+F puts the cursor in it, as on
+/// Settings (J2); Esc in it empties it, and that press does nothing else
+/// on the page.
 pub fn show(ui: &mut egui::Ui, query: &mut String) -> egui::Response {
     let response = ui.add(
         egui::TextEdit::singleline(query)
             .hint_text("Search")
             .desired_width(200.0),
     );
+    if ui.input_mut(|i| i.consume_shortcut(&crate::keys::FIND)) {
+        response.request_focus();
+        response.scroll_to_me(Some(egui::Align::TOP));
+    }
     if response.lost_focus() && !query.is_empty() && crate::keys::escaped(ui) {
         query.clear();
     }
