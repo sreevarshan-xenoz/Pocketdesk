@@ -2274,6 +2274,12 @@ Built 2026-10-20; tested through units, the harness and the server's mapping, no
 - [ ] Phone Settings "Let the computer clear my notifications" off, or desktop "Clearing here clears it on the phone" off: not cleared.
 - [ ] Linux (GNOME): closing a notification clears it; pressing its button does not.
 
+## 157. Drop files and paste into the phone's window (L2)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] With "Files from the computer in the background" on: a 3 MB file dropped on the phone's window; its MD5 on the phone matches. Without it: the window says why.
+- [ ] With control on: Ctrl+V into a scratch field, read back with `uiautomator dump`; a long paste says it was cut.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

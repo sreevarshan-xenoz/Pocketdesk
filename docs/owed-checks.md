@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-741 open items.
+743 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 436 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 437 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 23 |
 | A second phone | 9 |
 | Away from home: another network, or through a router | 9 |
@@ -896,6 +896,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - An ongoing or unclearable notification, and a ringing call: not cleared.
 - Phone Settings "Let the computer clear my notifications" off, or desktop "Clearing here clears it on the phone" off: not cleared.
 
+**157. Drop files and paste into the phone's window (L2)**
+
+- With "Files from the computer in the background" on: a 3 MB file dropped on the phone's window; its MD5 on the phone matches. Without it: the window says why.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1102,6 +1106,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **146. Search on Activity and Clipboard (J4)**
 
 - Ctrl+F on each page, scrolled down; both boxes at the minimum width, light and dark.
+
+**157. Drop files and paste into the phone's window (L2)**
+
+- With control on: Ctrl+V into a scratch field, read back with `uiautomator dump`; a long paste says it was cut.
 
 ## A phone with a SIM
 

@@ -2674,6 +2674,7 @@ impl eframe::App for PocketdeskApp {
                 ctx,
                 &self.snapshot.devices,
                 self.config.as_ref().is_none_or(|c| c.cast_control),
+                model::send_target_ids(&self.snapshot),
             );
         ctx.request_repaint_after(REFRESH);
     }

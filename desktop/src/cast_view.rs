@@ -74,11 +74,53 @@ struct State {
     pressing: bool,
     /// Where the last touch went, for a release the window did not see.
     last_touch: (u16, u16),
+    /// What a drop on the window did, and when (L2).
+    drop_note: Option<(String, std::time::Instant)>,
+}
+
+/// How long a drop's line stays at the window's foot.
+const DROP_NOTE: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// What a drop of `files` and `folders` on `device`'s window says (L2):
+/// sending, or why not; `failed` names what could not be queued.
+pub fn drop_words(reaches: bool, files: usize, folders: usize, failed: &[String]) -> String {
+    if !reaches {
+        return "This phone cannot take files now: it takes them in a session, or with \u{201c}Files from the computer in the background\u{201d} on in its Settings.".to_string();
+    }
+    if failed.is_empty() {
+        return format!(
+            "Sending {} to the phone: the Files page's Sent list says when they have gone.",
+            crate::model::files_and_folders(files, folders)
+        );
+    }
+    // What went, beside what did not (L2 review: the queued ones were not said).
+    let total = files + folders;
+    let reasons: Vec<&str> = failed.iter().map(|f| f.trim_end_matches('.')).collect();
+    format!(
+        "Queued {} of {total}; not queued: {}.",
+        total.saturating_sub(failed.len()),
+        reasons.join("; ")
+    )
+}
+
+/// `text` cut to the control road's limit for one text, at a character (L2).
+fn pasted(text: &str) -> String {
+    let max = pocketdesk_core::streaming::cast_control::MAX_TEXT;
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
 }
 
 /// The cast window and its worker.
 pub struct CastView {
     shared: Arc<Mutex<State>>,
+    /// Where drops are queued (L2).
+    state_dir: PathBuf,
 }
 
 impl CastView {
@@ -86,12 +128,13 @@ impl CastView {
         let shared = Arc::new(Mutex::new(State::default()));
         let worker = shared.clone();
         let ctx = ctx.clone();
+        let watched = state_dir.clone();
         let spawned = std::thread::Builder::new()
             .name("cast-view".into())
-            .spawn(move || watch(&state_dir, &worker, &ctx));
+            .spawn(move || watch(&watched, &worker, &ctx));
         // Without the thread no cast is ever shown, and nothing else breaks.
         drop(spawned);
-        Self { shared }
+        Self { shared, state_dir }
     }
 
     /// The cast now, and whether its window was closed.
@@ -107,8 +150,14 @@ impl CastView {
 
     /// Call each pass: keeps the window open while there is a cast to show.
     /// `control` is the owner's Settings ("Control phones from their screen
-    /// window", C8).
-    pub fn show(&self, ctx: &egui::Context, devices: &[crate::model::Device], control: bool) {
+    /// window", C8); `targets`, the phones files reach now (L2).
+    pub fn show(
+        &self,
+        ctx: &egui::Context,
+        devices: &[crate::model::Device],
+        control: bool,
+        targets: Vec<String>,
+    ) {
         let (title, size) = {
             let state = lock(&self.shared);
             let Some(id) = state.session_id else { return };
@@ -134,7 +183,9 @@ impl CastView {
             .with_inner_size([w, h])
             .with_min_inner_size([160.0, 160.0]);
         let shared = self.shared.clone();
+        let state_dir = self.state_dir.clone();
         ctx.show_viewport_deferred(viewport_id(), builder, move |ui, _class| {
+            take_drops(&shared, ui.ctx(), &state_dir, &targets);
             draw(&shared, ui, control);
         });
     }
@@ -265,6 +316,10 @@ fn control_events(
             egui::Event::Text(text) if !text.is_empty() => {
                 out.push(ControlEvent::Text(text.clone()));
             }
+            // Ctrl+V: the computer's clipboard typed at the phone (L2).
+            egui::Event::Paste(text) if !text.is_empty() => {
+                out.push(ControlEvent::Text(pasted(text)));
+            }
             egui::Event::Key {
                 key, pressed: true, ..
             } => match key {
@@ -334,6 +389,47 @@ fn letterbox(area: egui::Rect, w: usize, h: usize) -> egui::Rect {
     let (w, h) = (w.max(1) as f32, h.max(1) as f32);
     let scale = (area.width() / w).min(area.height() / h);
     egui::Rect::from_center_size(area.center(), egui::vec2(w * scale, h * scale))
+}
+
+/// Files or folders dropped on the window go to its phone (L2), as the Files
+/// page sends them, and the window says how that went.
+fn take_drops(
+    shared: &Mutex<State>,
+    ctx: &egui::Context,
+    state_dir: &std::path::Path,
+    targets: &[String],
+) {
+    let dropped: Vec<PathBuf> = ctx.input(|i| {
+        i.raw
+            .dropped_files
+            .iter()
+            .map(|f| f.path().to_path_buf())
+            .filter(|p| !p.as_os_str().is_empty())
+            .collect()
+    });
+    if dropped.is_empty() {
+        return;
+    }
+    let device = lock(shared).device_id.clone();
+    let reaches = !device.is_empty() && targets.contains(&device);
+    let folders = dropped.iter().filter(|p| p.is_dir()).count();
+    let files = dropped.len() - folders;
+    let mut failed = Vec::new();
+    if reaches {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        for path in &dropped {
+            if let Err(e) = crate::model::queue_send(state_dir, &device, path, now) {
+                failed.push(e);
+            }
+        }
+    }
+    lock(shared).drop_note = Some((
+        drop_words(reaches, files, folders, &failed),
+        std::time::Instant::now(),
+    ));
+    ctx.request_repaint_after(DROP_NOTE);
 }
 
 fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
@@ -413,6 +509,34 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                 });
             });
     }
+    let drop_note = lock(shared)
+        .drop_note
+        .clone()
+        .filter(|(_, at)| at.elapsed() < DROP_NOTE)
+        .map(|(note, _)| note);
+    // Over the picture, never beside it (L2 review: a panel shrank the
+    // picture, and a drag under way jumped).
+    if let Some(note) = drop_note {
+        egui::Area::new(egui::Id::new("cast-drop"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
+            .interactable(false)
+            .show(&ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_gray(24))
+                    .inner_margin(6.0)
+                    .corner_radius(4.0)
+                    .show(ui, |ui| {
+                        ui.set_max_width(ctx.content_rect().width() - 32.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(note).color(egui::Color32::LIGHT_GRAY),
+                            )
+                            .wrap(),
+                        );
+                    });
+            });
+    }
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
         .show(ui, |ui| {
@@ -475,6 +599,18 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                         )
                     });
                     events.extend(control_events(&input, rect, hover, &mut state.pressing));
+                    // A paste cut to the road's limit says so (L2 review).
+                    let max = pocketdesk_core::streaming::cast_control::MAX_TEXT;
+                    if input
+                        .iter()
+                        .any(|e| matches!(e, egui::Event::Paste(text) if text.len() > max))
+                    {
+                        state.drop_note = Some((
+                            format!("Pasted the first {max} bytes of the clipboard."),
+                            std::time::Instant::now(),
+                        ));
+                        ctx.request_repaint_after(DROP_NOTE);
+                    }
                     // A release the window never saw (focus went mid-drag):
                     // the finger lifts where it last was (C8 review).
                     if state.pressing && !down {
@@ -800,6 +936,41 @@ impl Drop for Decoder {
 
 #[cfg(test)]
 mod tests {
+    /// L2: a drop says it is sending, why it cannot, or what failed.
+    #[test]
+    fn a_drop_says_what_it_did() {
+        assert!(drop_words(true, 2, 0, &[]).starts_with("Sending 2 files to the phone"));
+        assert!(drop_words(true, 1, 1, &[]).contains("1 file and 1 folder"));
+        assert!(drop_words(false, 1, 0, &[]).starts_with("This phone cannot take files now"));
+        assert_eq!(
+            drop_words(
+                true,
+                3,
+                0,
+                &["c.txt is not a file or a folder.".to_string()]
+            ),
+            "Queued 2 of 3; not queued: c.txt is not a file or a folder."
+        );
+    }
+
+    /// L2: a paste is typed, cut at a character within the road's limit.
+    #[test]
+    fn a_paste_is_typed_within_its_limit() {
+        let max = pocketdesk_core::streaming::cast_control::MAX_TEXT;
+        assert_eq!(pasted("héllo"), "héllo");
+        let long = "é".repeat(max);
+        let cut = pasted(&long);
+        assert!(cut.len() <= max && cut.chars().all(|c| c == 'é'));
+        let mut pressing = false;
+        let events = control_events(
+            &[egui::Event::Paste("from here".into())],
+            picture(),
+            None,
+            &mut pressing,
+        );
+        assert_eq!(events, vec![ControlEvent::Text("from here".into())]);
+    }
+
     use super::*;
 
     fn picture() -> egui::Rect {
