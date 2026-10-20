@@ -27,6 +27,7 @@ import android.util.Log
 import android.view.Display
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.MainActivity
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.RemoteSession
@@ -188,6 +189,31 @@ class CastService : Service() {
         return START_NOT_STICKY
     }
 
+    /** What the phone's apps play, with its screen (K5). */
+    @Volatile
+    private var sound: CastSound? = null
+
+    /** Start the cast's sound when everything says it may go (K5). */
+    private fun startSound(castState: String) {
+        val taken = projection ?: return
+        val granted =
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!CastSoundRule.capture(
+                Prefs.castSound(this),
+                granted,
+                CastSoundRule.computerTakes(castState),
+                camera,
+                Build.VERSION.SDK_INT,
+            )
+        ) {
+            return
+        }
+        if (Build.VERSION.SDK_INT >= CastSoundRule.MIN_SDK) {
+            sound = CastSound(taken).takeIf { it.start() }
+        }
+    }
+
     /** Control from the computer while the screen is shown (C8). */
     @Volatile
     private var control: dev.pocketdesk.android.control.ControlRunner? = null
@@ -213,7 +239,8 @@ class CastService : Service() {
             val closed = RustCore.streamClosedReason
             // Only the cast's own session: another the person opened since
             // ends the cast, quietly, and is left alone.
-            val cast = RemoteSession.parse(RustCore.castState())
+            val castState = RustCore.castState()
+            val cast = RemoteSession.parse(castState)
             val replaced = cast == "none" && state != State.Connecting
             state = RemoteSession.next(state, cast, closed.takeUnless { replaced })
             if (state == State.Waiting && SystemClock.elapsedRealtime() - since > WAIT_MS) {
@@ -233,6 +260,7 @@ class CastService : Service() {
                     if (!showing) {
                         showing = true
                         main.post(::startPicture)
+                        startSound(castState)
                         update(getString(if (camera) R.string.cast_showing_camera else R.string.cast_showing, shown))
                         // C8: the computer may control the phone while its screen is shown.
                         if (!camera) control = dev.pocketdesk.android.control.ControlRunner(this) { on ->
@@ -348,6 +376,9 @@ class CastService : Service() {
         if (finished) return
         finished = true
         castingTo = null
+        // Its sound first: it captures under the projection given back below.
+        sound?.stop()
+        sound = null
         main.post {
             val shown = display
             val coding = encoder

@@ -723,6 +723,9 @@
     <string name="settings_capture_mouse_summary_17">During a session, a mouse or touchpad connected to this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
     <string name="control_service_label">Pocketdesk control</string>
     <string name="control_service_description">While this phone shows its screen on your computer with Pocketdesk, and you allow it in Pocketdesk\'s Settings, that computer can tap, swipe, scroll, type into the field you are in, and press Back, Home and Recents. Android lets the service read what is on the screen; Pocketdesk reads only the field it types into, and sends nothing it reads anywhere.</string>
+    <string name="settings_cast_sound">The phone\'s sound with its screen</string>
+    <string name="settings_cast_sound_summary">\"Show screen\" also sends what the phone\'s apps play, to play on the computer (its \"Play its sound here\" on). Android asks for the microphone permission to capture other apps\' sound; calls and apps that forbid it stay silent</string>
+    <string name="settings_cast_sound_needs_mic">Needs the microphone permission: Android asks for it to capture other apps\' sound</string>
     <string name="settings_control_from_computer">Let the computer control this phone</string>
     <string name="settings_control_summary_off">While this phone shows its screen on a computer, that computer can tap, swipe and type on it. Uses an Accessibility service, which Android\'s Advanced Protection does not allow</string>
     <string name="settings_control_summary_needs_service">Almost: turn on \"Pocketdesk control\" in Android\'s Accessibility settings. If Android greys it out, open Pocketdesk\'s App info, then ⋮, Allow restricted settings</string>
