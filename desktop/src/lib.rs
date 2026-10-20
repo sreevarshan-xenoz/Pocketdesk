@@ -4,6 +4,7 @@
 pub mod hotkey;
 pub mod icon;
 pub mod model;
+pub mod phone_player;
 #[cfg(not(target_os = "linux"))]
 pub mod tray;
 // N6: a StatusNotifierItem over D-Bus, no GTK.

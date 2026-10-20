@@ -128,6 +128,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "phone_media_controls",
+        "The phone's music in this computer's media controls",
+        Section::Phones,
+    ),
+    (
         "phone_drive",
         "The phone's folders as a drive",
         Section::Phones,
@@ -279,7 +284,9 @@ fn drawn_in(key: &str) -> &str {
 fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" => cfg!(target_os = "linux"),
-        "clipboard_hotkey" | "away_lock_minutes" | "mic_relay_device" => cfg!(windows),
+        "clipboard_hotkey" | "away_lock_minutes" | "mic_relay_device" | "phone_media_controls" => {
+            cfg!(windows)
+        }
         _ => true,
     }
 }
@@ -358,6 +365,7 @@ pub fn applies_live(key: &str) -> bool {
             | "remember_screen_grant"
             | "clipboard_history"
             | "clipboard_hotkey"
+            | "phone_media_controls"
             | "phone_drive"
             | "away_lock_minutes"
     )
@@ -790,6 +798,19 @@ impl SettingsForm {
                         note(
                             ui,
                             "Pressed anywhere, sends what this computer has copied to the phone the clipboard reaches (the one in the newest session when several do). It needs the tray program (pocketdesk-tray) beside the app; the window's own tray does not take it. Empty is off. Ctrl+Alt with a letter is AltGr on many keyboards, which types characters such as @: Win+Shift is safer.",
+                        );
+                    });
+                }
+                // Windows only: Linux's MPRIS player is not built (K7).
+                if cfg!(windows) {
+                    row(ui, "phone_media_controls", |ui| {
+                        ui.checkbox(
+                            &mut e.phone_media_controls,
+                            "show a phone's player in the volume flyout, with its buttons",
+                        );
+                        note(
+                            ui,
+                            "While a phone in a session plays music and may share it (Media on the Devices page), Windows' media controls show its song with Previous, Play/Pause and Next. The keyboard's media keys may then go to the phone instead of a player here. It needs the tray program (pocketdesk-tray) beside the app.",
                         );
                     });
                 }
