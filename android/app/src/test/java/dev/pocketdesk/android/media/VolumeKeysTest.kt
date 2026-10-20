@@ -18,6 +18,18 @@ class VolumeKeysTest {
         assertEquals(100, VolumeKeys.toPercent(25))
     }
 
+    /** K4 review: presses sent together move as many steps, from a reading only while fresh. */
+    @Test
+    fun `presses go together from a fresh reading`() {
+        assertEquals(14, VolumeKeys.target(9, 5))
+        assertEquals(0, VolumeKeys.target(2, -5))
+        assertEquals(20, VolumeKeys.target(18, 4))
+        assertEquals(true, VolumeKeys.fresh(1_000, 3_999))
+        assertEquals(false, VolumeKeys.fresh(1_000, 4_000))
+        assertEquals("never read", false, VolumeKeys.fresh(0, 10))
+        assertEquals("a clock that went back", false, VolumeKeys.fresh(5_000, 4_000))
+    }
+
     /** K4: a press is one step, never past either end. */
     @Test
     fun `a press moves one step and stops at the ends`() {

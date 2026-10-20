@@ -13,6 +13,15 @@ object VolumeKeys {
     /** The computer's percent for a panel [step]. */
     fun toPercent(step: Int): Int = step.coerceIn(0, STEPS) * 5
 
+    /** How long the computer's volume as last read stands for it, in ms. */
+    const val FRESH_MS = 3_000L
+
+    /** Whether a reading at [readAt] is fresh at [now] (both elapsedRealtime). */
+    fun fresh(readAt: Long, now: Long): Boolean = readAt > 0 && now - readAt in 0 until FRESH_MS
+
+    /** The step [presses] (summed, up positive) move to from [base]. */
+    fun target(base: Int, presses: Int): Int = (base + presses).coerceIn(0, STEPS)
+
     /** The step one press in [direction] (-1 down, +1 up, 0 none) moves to from [step]. */
     fun adjust(step: Int, direction: Int): Int = (step + direction.coerceIn(-1, 1)).coerceIn(0, STEPS)
 }
