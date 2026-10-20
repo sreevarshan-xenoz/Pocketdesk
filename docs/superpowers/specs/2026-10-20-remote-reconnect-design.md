@@ -20,3 +20,11 @@
 
 - `AutoReconnectTest`: `endedBy` for a close, a silent link and a remote never admitted; "tls handshake eof" retryable; a refused certificate still not.
 - On a device (checklist §73): a remote, the throwaway server restarted, the card counting down and the remote back by itself with the timer still running; Kick from the computer not retried; Settings "Reconnect by itself" off, Retry only.
+
+## Review
+
+A fresh review found 0 Critical and 0 Important issues. Both of its Minor findings are fixed, one commit each:
+- **The keyboard over the card.** An open keyboard stayed over the reconnecting card, its keys going nowhere. It now closes when the remote leaves Ready.
+- **The service on a too-old computer.** A remote or sound session refused as too old kept its foreground service and wake lock. It now stops them, as a session that gives up does.
+
+Found on the way and fixed: a sound session's Retry after giving up stopped at once on a failure, because the drop's time was kept. It now starts a fresh ten minutes, as the remote's does.
