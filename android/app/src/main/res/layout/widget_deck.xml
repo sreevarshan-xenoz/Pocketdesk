@@ -21,7 +21,7 @@
             android:layout_weight="1"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#FFFFFFFF"
+            android:textColor="@color/widget_on_surface"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -32,7 +32,7 @@
             android:contentDescription="@string/deck_widget_refresh"
             android:gravity="center"
             android:text="@string/deck_widget_refresh_glyph"
-            android:textColor="#FFFFFFFF"
+            android:textColor="@color/widget_on_surface"
             android:textSize="18sp" />
     </LinearLayout>
 
@@ -43,7 +43,7 @@
         android:layout_marginStart="4dp"
         android:ellipsize="end"
         android:maxLines="2"
-        android:textColor="#CCFFFFFF"
+        android:textColor="@color/widget_on_surface_variant"
         android:textSize="12sp"
         android:visibility="gone" />
 

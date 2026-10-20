@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home-screen widgets' colours (I2): the brand's light pine before
+     Android 12; values-night has the dark, values-v31 the system's own. -->
+<resources>
+    <color name="widget_surface">#F2E6EFEC</color>
+    <color name="widget_on_surface">#FF10201D</color>
+    <color name="widget_on_surface_variant">#FF3F4B48</color>
+    <color name="widget_tile">#FFD0E3DE</color>
+    <color name="widget_accent">#FF1E6B5E</color>
+    <color name="widget_warning">#FF9A4600</color>
+</resources>
