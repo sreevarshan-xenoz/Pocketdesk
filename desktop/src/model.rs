@@ -663,7 +663,9 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
         return Vec::new();
     };
     let len = file.metadata().map(|m| m.len()).unwrap_or(0);
-    let start = len.saturating_sub(LOG_TAIL_BYTES);
+    // One byte early, so the first piece read is cut only if the line it
+    // ends was: read on a line's first byte, it is the empty piece before it.
+    let start = len.saturating_sub(LOG_TAIL_BYTES).saturating_sub(1);
     let mut raw = Vec::new();
     if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut raw).is_err() {
         return Vec::new();
@@ -1099,6 +1101,13 @@ mod tests {
             few.first()
         );
         assert!(few.len() < 20_000, "only the tail was read");
+        // Each line is 32 bytes, so the read starts on a line's first byte:
+        // that whole line is kept, not dropped as cut (J1 review).
+        assert!(
+            few.first().unwrap().starts_with("line 11808"),
+            "{:?}",
+            few.first()
+        );
     }
 
     /// J1: the log is read again only when its size or time changed.
