@@ -741,6 +741,27 @@ fn a_broken_muted_list_is_said_in_settings() {
     assert!(app.query_by_label_contains("could not be read").is_some());
 }
 
+/// K2a: the Overview pauses for an hour, says so, and resumes.
+#[test]
+fn the_overview_pauses_and_resumes() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    app.get_by_label("Pause…").click();
+    app.run_steps(3);
+    app.get_by_label("For an hour").click();
+    app.run_steps(3);
+    assert!(app.query_by_label_contains("Paused,").is_some());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    assert!(pocketdesk_core::local::pause::current(fixture.state(), now).is_some());
+    app.get_by_label("Resume").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("Pause…").is_some());
+    assert!(pocketdesk_core::local::pause::current(fixture.state(), now).is_none());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

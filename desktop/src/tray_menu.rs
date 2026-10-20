@@ -21,6 +21,71 @@ pub enum TrayAction {
     SendFile(String),
     /// G2: the phone offers its camera; the photo lands here (F3).
     TakePhoto(String),
+    /// K2a: pause for these minutes, or until resumed with `None`.
+    Pause(Option<u32>),
+    /// K2a: end the pause.
+    Resume,
+}
+
+/// The pauses offered (K2a): an hour, 8 hours, until resumed.
+pub const PAUSES: [(&str, Option<u32>); 3] = [
+    ("For an hour", Some(60)),
+    ("For 8 hours", Some(480)),
+    ("Until resumed", None),
+];
+
+/// How a pause in force reads (K2a): "Paused, 42 min left" or "Paused
+/// until resumed".
+pub fn pause_text(pause: &pocketdesk_core::local::pause::Pause, now_unix: u64) -> String {
+    match pause.minutes_left(now_unix) {
+        Some(minutes) => format!("Paused, {minutes} min left"),
+        None => "Paused until resumed".to_string(),
+    }
+}
+
+/// `entries` with the pause after "Pair a phone" (K2a): while paused, how
+/// long and Resume; else Pause with its three.
+pub fn with_pause(
+    mut entries: Vec<Entry>,
+    pause: Option<&pocketdesk_core::local::pause::Pause>,
+    now_unix: u64,
+) -> Vec<Entry> {
+    let at = entries
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                Entry::Item {
+                    action: Some(TrayAction::Pair),
+                    ..
+                }
+            )
+        })
+        .map_or(entries.len(), |i| i + 1);
+    let added = match pause {
+        Some(pause) => vec![
+            Entry::Item {
+                label: pause_text(pause, now_unix),
+                action: None,
+            },
+            Entry::Item {
+                label: "Resume".to_string(),
+                action: Some(TrayAction::Resume),
+            },
+        ],
+        None => vec![Entry::Phone {
+            label: "Pause".to_string(),
+            items: PAUSES
+                .iter()
+                .map(|(label, minutes)| Entry::Item {
+                    label: (*label).to_string(),
+                    action: Some(TrayAction::Pause(*minutes)),
+                })
+                .collect(),
+        }],
+    };
+    entries.splice(at..at, added);
+    entries
 }
 
 /// One line of the menu.
@@ -139,6 +204,42 @@ pub fn with_key(mut entries: Vec<Entry>, phone: &str, key: &str) -> Vec<Entry> {
 
 #[cfg(test)]
 mod tests {
+    /// K2a: the menu offers Pause, and while paused says so with Resume.
+    #[test]
+    fn the_menu_offers_a_pause_and_resume() {
+        use super::*;
+        let entries = with_pause(menu(&[], &[], 0), None, 1_000);
+        let Entry::Phone { label, items } = &entries[2] else {
+            panic!("Pause after Pair: {entries:?}");
+        };
+        assert_eq!(label, "Pause");
+        assert_eq!(items.len(), 3);
+        let pause = pocketdesk_core::local::pause::Pause {
+            since_unix: 1_000,
+            until_unix: Some(1_000 + 2_520),
+        };
+        let entries = with_pause(menu(&[], &[], 0), Some(&pause), 1_000);
+        assert_eq!(
+            entries[2],
+            Entry::Item {
+                label: "Paused, 42 min left".to_string(),
+                action: None
+            }
+        );
+        assert_eq!(
+            entries[3],
+            Entry::Item {
+                label: "Resume".to_string(),
+                action: Some(TrayAction::Resume)
+            }
+        );
+        let forever = pocketdesk_core::local::pause::Pause {
+            since_unix: 1,
+            until_unix: None,
+        };
+        assert_eq!(pause_text(&forever, 9_999_999), "Paused until resumed");
+    }
+
     use super::*;
     use crate::model::Snapshot;
     use pocketdesk_core::local::phone_quiet::PhoneQuiet;

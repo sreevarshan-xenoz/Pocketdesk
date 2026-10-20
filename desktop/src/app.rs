@@ -506,6 +506,14 @@ impl PocketdeskApp {
                     self.take_photo(&id);
                     false
                 }
+                TrayAction::Pause(minutes) => {
+                    self.pause(minutes);
+                    false
+                }
+                TrayAction::Resume => {
+                    self.resume();
+                    false
+                }
                 TrayAction::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -551,10 +559,11 @@ impl PocketdeskApp {
             return;
         };
         let rows = model::phone_rows(&self.snapshot, &self.last_sessions);
-        tray.show(crate::tray_menu::menu(
-            &rows,
-            &self.snapshot.devices,
-            now_unix(),
+        let now = now_unix();
+        tray.show(crate::tray_menu::with_pause(
+            crate::tray_menu::menu(&rows, &self.snapshot.devices, now),
+            pocketdesk_core::local::pause::current(&self.state_dir, now).as_ref(),
+            now,
         ));
     }
 
@@ -898,6 +907,8 @@ impl PocketdeskApp {
 
     fn status_tab(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
+        self.pause_row(ui);
+        ui.add_space(4.0);
         if self.snapshot.running {
             status_line(ui, crate::theme::GOOD, "The server is running");
             self.restart_button(ui);
@@ -978,6 +989,67 @@ impl PocketdeskApp {
 
     /// Ask the phone `id` to be quiet for `minutes`, or to end the mute with
     /// 0 (D2), and say how that went.
+    /// Pause this computer for `minutes`, or until resumed (K2a).
+    fn pause(&mut self, minutes: Option<u32>) {
+        self.notice = crate::notice::Notice::outcome(
+            pocketdesk_core::local::pause::pause(&self.state_dir, minutes, now_unix())
+                .map(|_| match minutes {
+                    Some(m) if m >= 120 => format!("Paused for {} hours.", m / 60),
+                    Some(m) if m >= 60 => "Paused for an hour.".to_string(),
+                    Some(m) => format!("Paused for {m} minutes."),
+                    None => "Paused until you resume.".to_string(),
+                })
+                .map_err(|e| format!("Could not pause: {e}")),
+        );
+    }
+
+    /// End the pause (K2a).
+    fn resume(&mut self) {
+        self.notice = crate::notice::Notice::outcome(
+            pocketdesk_core::local::pause::resume(&self.state_dir)
+                .map(|()| "Resumed.".to_string())
+                .map_err(|e| format!("Could not resume: {e}")),
+        );
+    }
+
+    /// The Overview's pause (K2a): while paused, what is held and Resume;
+    /// else Pause… with its three.
+    fn pause_row(&mut self, ui: &mut egui::Ui) {
+        let now = now_unix();
+        let mut picked = None;
+        let mut resume = false;
+        match pocketdesk_core::local::pause::current(&self.state_dir, now) {
+            Some(pause) => {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new(crate::tray_menu::pause_text(&pause, now)).strong());
+                    ui.label(
+                        "Phones' notifications and texts are not shown, links not opened, and rings not sounded. Sessions, files and the clipboard go on.",
+                    );
+                    resume = ui.button("Resume").clicked();
+                });
+            }
+            None => {
+                ui.menu_button("Pause…", |ui| {
+                    for (label, minutes) in crate::tray_menu::PAUSES {
+                        if ui.button(label).clicked() {
+                            picked = Some(minutes);
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Hold phones' notifications, texts, links and rings for a while");
+            }
+        }
+        if let Some(minutes) = picked {
+            self.pause(minutes);
+        }
+        if resume {
+            self.resume();
+        }
+    }
+
     fn quiet(&mut self, id: &str, minutes: u32) {
         let who = self.label(id);
         self.notice = crate::notice::Notice::outcome(match pocketdesk_core::local::quiet::request(
