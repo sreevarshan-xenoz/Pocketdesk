@@ -2203,8 +2203,23 @@ impl eframe::App for PocketdeskApp {
         if self.tab == Tab::Settings {
             self.settings_save_bar(ui);
         }
+        // The notice has a bar of its own at the foot of the window (I3): at
+        // the top of the page it pushed the page down a line under the
+        // pointer, and back as it went.
+        if self
+            .notice
+            .as_ref()
+            .is_some_and(|n| n.showing(std::time::Instant::now()))
+        {
+            egui::Panel::bottom("notice").show(ui, |ui| {
+                ui.add_space(4.0);
+                crate::notice::show(ui, &mut self.notice);
+                ui.add_space(4.0);
+            });
+        } else {
+            self.notice = None;
+        }
         egui::CentralPanel::default().show(ui, |ui| {
-            crate::notice::show(ui, &mut self.notice);
             ui.heading(self.tab.name());
             ui.label(RichText::new(self.tab.purpose()).color(crate::theme::muted(ui)));
             ui.add_space(6.0);

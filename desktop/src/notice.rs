@@ -75,7 +75,21 @@ impl Notice {
 
     /// Whether it still shows at `now`.
     pub fn showing(&self, now: Instant) -> bool {
-        now.duration_since(self.since) < self.kind.lasts()
+        now.duration_since(self.since) < self.lasts()
+    }
+
+    /// Its kind's time, and for a done or an error a second more per 40
+    /// characters, so a long one can be read (I3), to at most 20 s (30 s
+    /// for an error).
+    fn lasts(&self) -> Duration {
+        let base = self.kind.lasts();
+        let cap = match self.kind {
+            Kind::Done => Duration::from_secs(20),
+            Kind::Error => Duration::from_secs(30),
+            Kind::Working => return base,
+        };
+        let extra = Duration::from_secs((self.text.chars().count() / 40) as u64);
+        (base + extra).min(cap)
     }
 }
 
@@ -94,7 +108,11 @@ pub fn show(ui: &mut egui::Ui, notice: &mut Option<Notice>) {
     };
     let mut close = false;
     ui.horizontal(|ui| {
-        ui.label(RichText::new(&shown.text).color(color));
+        // Work under way says so as it goes (I3).
+        if shown.kind == Kind::Working {
+            ui.spinner();
+        }
+        ui.add(egui::Label::new(RichText::new(&shown.text).color(color)).wrap());
         close = ui.small_button("Dismiss").clicked();
     });
     if close {
@@ -140,6 +158,27 @@ mod tests {
             "work under way waits for its outcome"
         );
         assert!(!at(Kind::Working, 301), "but not for good");
+    }
+
+    /// I3: a long notice stays long enough to be read, within a bound.
+    #[test]
+    fn a_long_notice_stays_longer() {
+        let start = Instant::now();
+        let at = |kind, text: &str, secs| {
+            Notice {
+                text: text.to_string(),
+                kind,
+                since: start,
+            }
+            .showing(start + Duration::from_secs(secs))
+        };
+        let long = "x".repeat(200);
+        assert!(!at(Kind::Done, "Saved.", 7), "a short one as before");
+        assert!(at(Kind::Done, &long, 10), "200 characters: about 5 s more");
+        assert!(!at(Kind::Done, &long, 12));
+        assert!(at(Kind::Error, &long, 16));
+        let endless = "x".repeat(10_000);
+        assert!(!at(Kind::Done, &endless, 21), "never past 20 s");
     }
 
     #[test]
