@@ -2236,6 +2236,16 @@ Built 2026-10-20; tested through units and the harness, nothing by hand yet.
 - [ ] Resume from the tray and from the Overview; `pocketdesk pause --for 1` ends by itself in a minute.
 - [ ] Linux: the pause in the StatusNotifierItem menu.
 
+## 153. Notifications with their app's icon, and pictures (K3)
+
+Built 2026-10-20; tested through units and the harness, nothing on a device yet.
+- [ ] A phone notification's toast on Windows shows the app's icon as its logo (on screen, not only in the XML).
+- [ ] With "Pictures in notifications" on in the phone's Settings: a notification with a picture (BigPicture, or a contact's photo) shows it in the toast; one the lock screen hides shows none.
+- [ ] The Notifications page shows each answerable notification's app icon.
+- [ ] Closing the notification on the phone removes its picture from `notification_icons/pictures/`.
+- [ ] Desktop Settings "Apps' icons and pictures" off: plain toasts.
+- [ ] Linux: GNOME and KDE show the icon; a server with body images shows the picture.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

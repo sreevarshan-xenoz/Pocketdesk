@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-719 open items.
+725 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 419 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 423 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 23 |
 | A second phone | 9 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
-| A Linux desktop (the Azure VM serves for some) | 91 |
+| A Linux desktop (the Azure VM serves for some) | 92 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 65 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 66 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -867,6 +867,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - While paused: a phone's notification shows no toast (and an answerable one is on the Notifications page), a text is on Messages without a toast, a link is not opened, a phone's ring for the computer stays silent, a received file arrives with no toast.
 - A session and a file send still work while paused.
 
+**153. Notifications with their app's icon, and pictures (K3)**
+
+- With "Pictures in notifications" on in the phone's Settings: a notification with a picture (BigPicture, or a contact's photo) shows it in the toast; one the lock screen hides shows none.
+- The Notifications page shows each answerable notification's app icon.
+- Closing the notification on the phone removes its picture from `notification_icons/pictures/`.
+- Desktop Settings "Apps' icons and pictures" off: plain toasts.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1541,6 +1548,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Linux: the pause in the StatusNotifierItem menu.
 
+**153. Notifications with their app's icon, and pictures (K3)**
+
+- Linux: GNOME and KDE show the icon; a server with body images shows the picture.
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -1832,3 +1843,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The tray's Pause → For an hour: the menu says "Paused, 60 min left" with Resume, and the Overview says what is held.
 - Resume from the tray and from the Overview; `pocketdesk pause --for 1` ends by itself in a minute.
+
+**153. Notifications with their app's icon, and pictures (K3)**
+
+- A phone notification's toast on Windows shows the app's icon as its logo (on screen, not only in the XML).
