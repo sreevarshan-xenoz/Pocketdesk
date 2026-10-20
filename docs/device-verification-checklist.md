@@ -2081,6 +2081,14 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] Do Not Disturb on: the buzzes still come; Settings "Talk timer buzzes" off: none.
 - [ ] Landscape and font scale 2.0: all seven lengths reachable; the header not crowded.
 
+## 140. Send the clipboard to the phone with a key (H3)
+
+Built 2026-10-20 on the owner's night of features; nothing by hand yet. It registers a global key on this box: with the owner there.
+- [ ] Settings "Send the clipboard with a key" = `win+shift+c`, Save: "Registered." under it; with the A71 linked, copy a text on the computer and press it: the text on the phone.
+- [ ] A combination another app holds: "Another app holds this combination"; freed, registered within 30 s.
+- [ ] No phone in reach: a press says "the last press found no phone".
+- [ ] A password manager's copy: not sent (the server's notification says why).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

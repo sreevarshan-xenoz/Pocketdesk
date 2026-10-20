@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-676 open items.
+680 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 389 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 393 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
 | A phone with a SIM | 22 |
@@ -803,6 +803,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The link dropped and back mid-talk: the timer still counting; rotated: the same.
 - Do Not Disturb on: the buzzes still come; Settings "Talk timer buzzes" off: none.
 - Landscape and font scale 2.0: all seven lengths reachable; the header not crowded.
+
+**140. Send the clipboard to the phone with a key (H3)**
+
+- Settings "Send the clipboard with a key" = `win+shift+c`, Save: "Registered." under it; with the A71 linked, copy a text on the computer and press it: the text on the phone.
+- A combination another app holds: "Another app holds this combination"; freed, registered within 30 s.
+- No phone in reach: a press says "the last press found no phone".
+- A password manager's copy: not sent (the server's notification says why).
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
