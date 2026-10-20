@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-743 open items.
+746 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 437 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 440 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 23 |
@@ -899,6 +899,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **157. Drop files and paste into the phone's window (L2)**
 
 - With "Files from the computer in the background" on: a 3 MB file dropped on the phone's window; its MD5 on the phone matches. Without it: the window says why.
+
+**158. A phone charged to a level (L3)**
+
+- Desktop Settings "Tell me when a phone has charged to" 80 %; with Share battery on, `adb shell dumpsys battery set ac 1`, `set level 79`, then `set level 80`: one notification, "charged to 80 %"; `set level 81`: none.
+- `dumpsys battery unplug`, then `set ac 1` again at 80: one more.
+- `adb shell dumpsys battery reset` after.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 

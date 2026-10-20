@@ -2280,6 +2280,13 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] With "Files from the computer in the background" on: a 3 MB file dropped on the phone's window; its MD5 on the phone matches. Without it: the window says why.
 - [ ] With control on: Ctrl+V into a scratch field, read back with `uiautomator dump`; a long paste says it was cut.
 
+## 158. A phone charged to a level (L3)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] Desktop Settings "Tell me when a phone has charged to" 80 %; with Share battery on, `adb shell dumpsys battery set ac 1`, `set level 79`, then `set level 80`: one notification, "charged to 80 %"; `set level 81`: none.
+- [ ] `dumpsys battery unplug`, then `set ac 1` again at 80: one more.
+- [ ] `adb shell dumpsys battery reset` after.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
