@@ -25,10 +25,13 @@ const REFRESH: Duration = Duration::from_secs(1);
 /// Where the last page shown is kept between runs.
 pub const PAGE_KEY: &str = "page";
 
-/// The Devices tab's switches, in the order a person thinks of them.
 /// The features both sides must have on, for one phone (L7): a block per
 /// feature (it wraps at the minimum width, E5), with what holds it back.
-fn switches_table(ui: &mut egui::Ui, device: &model::Device) {
+fn switches_table(
+    ui: &mut egui::Ui,
+    device: &model::Device,
+    settings_off: &[(&'static str, &'static str)],
+) {
     let yes_no = |on: Option<bool>| match on {
         Some(true) => "on",
         Some(false) => "off",
@@ -55,10 +58,10 @@ fn switches_table(ui: &mut egui::Ui, device: &model::Device) {
             );
         }
     }
-    for row in model::switch_rows(&device.permissions, device.switches.as_ref()) {
+    for row in model::switch_rows(&device.permissions, device.switches.as_ref(), settings_off) {
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            let works = row.advice.is_none() && row.phone == Some(true);
+            let works = row.advice.is_none() && row.phone == Some(true) && row.here;
             let mark = if row.advice.is_some() {
                 RichText::new("✕").color(crate::theme::warn(ui))
             } else if works {
@@ -87,6 +90,7 @@ fn switches_table(ui: &mut egui::Ui, device: &model::Device) {
     }
 }
 
+/// The Devices tab's switches, in the order a person thinks of them.
 const PERMISSIONS: [(Capability, &str, &str); 19] = [
     (
         Capability::Input,
@@ -1587,6 +1591,12 @@ impl PocketdeskApp {
         let mut change = None;
         let mut ask = None;
         let mut rename = None;
+        // L7 review: Settings that turn a feature off for every phone.
+        let settings_off = self
+            .config
+            .as_ref()
+            .map(model::settings_off)
+            .unwrap_or_default();
         for device in &self.snapshot.devices {
             let label = model::device_label(&self.snapshot.devices, &device.id);
             egui::CollapsingHeader::new(format!("What {label} may do"))
@@ -1659,7 +1669,7 @@ impl PocketdeskApp {
             if !device.computer {
                 egui::CollapsingHeader::new(format!("Features on both sides for {label}"))
                     .id_salt(("switches", &device.id))
-                    .show(ui, |ui| switches_table(ui, device));
+                    .show(ui, |ui| switches_table(ui, device, &settings_off));
             }
         }
         if let Some((id, capability, allowed)) = change {
