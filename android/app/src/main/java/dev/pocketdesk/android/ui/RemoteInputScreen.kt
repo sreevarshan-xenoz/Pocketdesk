@@ -4,6 +4,7 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.automation.PhoneEventBroadcast
 import dev.pocketdesk.android.automation.SessionTell
 import android.content.Intent
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -119,51 +121,12 @@ fun RemoteInputScreen(
         onDispose { tell.left()?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) } }
     }
 
-    LaunchedEffect(attempt) {
-        state = State.Connecting
-        reason = null
-        val connected =
-            withContext(Dispatchers.IO) {
-                RustCore.connectRemote(address, port).recoverCatching { lan ->
-                    // Left while the LAN dial failed: no internet dial after the screen's stop.
-                    coroutineContext.ensureActive()
-                    val identity = HostStore.wanIdentity(context, address) ?: throw lan
-                    RustCore.connectRemoteWan(address, identity).getOrThrow()
-                }
-            }
-        // Left while it connected: the session the dial made has no screen to own it.
-        if (!isActive) {
-            if (connected.isSuccess) withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
-            return@LaunchedEffect
-        }
-        if (connected.isFailure) {
-            reason = connected.exceptionOrNull()?.message?.let { context.plainErrorText(it) }
-            state = State.Down
-            return@LaunchedEffect
-        }
-        state = State.Waiting
-        val waitingSince = android.os.SystemClock.elapsedRealtime()
-        while (isActive) {
-            val (remote, closed) =
-                withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
-            state = RemoteSession.next(state, remote, closed)
-            // Past the owner's 30 s to decide: the computer is not going to.
-            if (state == State.Waiting && android.os.SystemClock.elapsedRealtime() - waitingSince > WAIT_MS) {
-                state = State.Down
-            }
-            if (state == State.Down || state == State.TooOld) {
-                // The transport's words, said plainly (U2 review), as the
-                // session's error card does.
-                reason = closed?.let { context.closeReasonText(it) }
-                break
-            }
-            delay(POLL_MS)
-        }
-    }
-
-    // A session's foreground service and keep-screen-on, and the session
-    // ended with the screen.
-    DisposableEffect(Unit) {
+    // The session's foreground service: started from the foreground (the
+    // first attempt, a Retry) and kept while the remote reconnects by
+    // itself; once it stays down it stops and lets the phone sleep, as a
+    // sound session's does (N5 review).
+    var serviceOn by remember { mutableStateOf(false) }
+    fun startService() {
         context.startForegroundService(
             Intent(context, SessionForegroundService::class.java).apply {
                 action = SessionForegroundService.ACTION_START
@@ -172,6 +135,107 @@ fun RemoteInputScreen(
                 putExtra(SessionForegroundService.EXTRA_CONTROL_PORT, controlPort)
             },
         )
+        serviceOn = true
+    }
+
+    // I1, as a screen or sound session: a link that went away comes back by
+    // itself, with backoff, for ten minutes; an end the computer chose
+    // waits for the person (AutoReconnect). The talk timer, the air mouse
+    // and the laser live outside each attempt, so they carry on.
+    var reconnects by remember { mutableIntStateOf(0) }
+    var droppedAtMs by remember { mutableLongStateOf(0L) }
+    var reconnectInS by remember { mutableStateOf<Int?>(null) }
+    var gaveUp by remember { mutableStateOf(false) }
+
+    LaunchedEffect(attempt) {
+        state = State.Connecting
+        reason = null
+        reconnectInS = null
+        gaveUp = false
+        if (!serviceOn) startService()
+        // Why it ended, in the bridge's words, for AutoReconnect; null when
+        // it is not to be retried (the owner never answered).
+        var ended: String? = null
+        run attempt@{
+            val connected =
+                withContext(Dispatchers.IO) {
+                    RustCore.connectRemote(address, port).recoverCatching { lan ->
+                        // Left while the LAN dial failed: no internet dial after the screen's stop.
+                        coroutineContext.ensureActive()
+                        val identity = HostStore.wanIdentity(context, address) ?: throw lan
+                        RustCore.connectRemoteWan(address, identity).getOrThrow()
+                    }
+                }
+            // Left while it connected: the session the dial made has no screen to own it.
+            if (!isActive) {
+                if (connected.isSuccess) withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
+                return@LaunchedEffect
+            }
+            if (connected.isFailure) {
+                val raw = connected.exceptionOrNull()?.message
+                reason = raw?.let { context.plainErrorText(it) }
+                ended = raw
+                state = State.Down
+                return@attempt
+            }
+            state = State.Waiting
+            val waitingSince = SystemClock.elapsedRealtime()
+            var readySince = 0L
+            while (isActive) {
+                val (remote, closed) =
+                    withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
+                val next = RemoteSession.next(state, remote, closed)
+                if (next == State.Ready && state != State.Ready) readySince = SystemClock.elapsedRealtime()
+                // Healthy for a while: the next drop gets a fresh window.
+                if (readySince != 0L && SystemClock.elapsedRealtime() - readySince > AutoReconnect.HEALTHY_MS) {
+                    reconnects = 0
+                    droppedAtMs = 0L
+                    readySince = 0L
+                }
+                val wasWaiting = state == State.Waiting
+                state = next
+                // Past the owner's 30 s to decide: the computer is not going to.
+                if (state == State.Waiting && SystemClock.elapsedRealtime() - waitingSince > WAIT_MS) {
+                    state = State.Down
+                }
+                if (state == State.Down || state == State.TooOld) {
+                    // The transport's words, said plainly (U2 review), as the
+                    // session's error card does.
+                    reason = closed?.let { context.closeReasonText(it) }
+                    ended = AutoReconnect.endedBy(closed, wasWaiting)
+                    return@attempt
+                }
+                delay(POLL_MS)
+            }
+        }
+        if (state != State.Down && state != State.TooOld) return@LaunchedEffect
+        // A computer too old for a remote never takes one: nothing to retry.
+        val retry = state == State.Down && ended?.let { Prefs.autoReconnect(context) && AutoReconnect.retryable(it) } == true
+        val now = SystemClock.elapsedRealtime()
+        if (retry && droppedAtMs == 0L) droppedAtMs = now
+        val wait = if (retry) AutoReconnect.delayMs(reconnects, now - droppedAtMs) else null
+        if (wait == null) {
+            // It stays down: no service holds the phone awake for nothing.
+            gaveUp = retry
+            context.stopService(Intent(context, SessionForegroundService::class.java))
+            serviceOn = false
+            withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
+            return@LaunchedEffect
+        }
+        val due = now + wait
+        while (true) {
+            val left = due - SystemClock.elapsedRealtime()
+            if (left <= 0) break
+            reconnectInS = ((left + 999) / 1000).toInt()
+            delay(minOf(left, 1_000L))
+        }
+        reconnectInS = null
+        reconnects++
+        attempt++
+    }
+
+    // Keep-screen-on, and the session and its service ended with the screen.
+    DisposableEffect(Unit) {
         val window = context.findActivity()?.window
         val keepOn = dev.pocketdesk.android.Prefs.keepScreenOn(context)
         if (keepOn) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -206,6 +270,14 @@ fun RemoteInputScreen(
         onDispose {
             keyboard.latch.onChange = null
             keyboard.close()
+        }
+    }
+    // A drop closes the keyboard (I1 review): it would cover the card while
+    // the remote reconnects, its keys going nowhere.
+    LaunchedEffect(state) {
+        if (state != State.Ready && keyboardOpen) {
+            keyboard.close()
+            keyboardOpen = false
         }
     }
     val imeVisible = WindowInsets.isImeVisible
@@ -336,7 +408,14 @@ fun RemoteInputScreen(
                     Status(
                         state = state,
                         reason = reason,
-                        onRetry = { attempt++ },
+                        reconnectInS = reconnectInS,
+                        gaveUp = gaveUp,
+                        // The person's own try starts a fresh ten minutes.
+                        onRetry = {
+                            reconnects = 0
+                            droppedAtMs = 0L
+                            attempt++
+                        },
                         onExit = onExit,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
@@ -398,6 +477,8 @@ private fun KeyRow(keys: List<RemoteSession.Key>, onTap: (Int) -> Unit) {
 private fun Status(
     state: State,
     reason: String?,
+    reconnectInS: Int?,
+    gaveUp: Boolean,
     onRetry: () -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
@@ -425,6 +506,19 @@ private fun Status(
                     },
                     textAlign = TextAlign.Center,
                 )
+                // It comes back by itself, as a screen or sound session does (I1).
+                val retrying =
+                    reconnectInS?.let { stringResource(R.string.reconnecting_in, it) }
+                        ?: if (gaveUp) stringResource(R.string.reconnect_gave_up) else null
+                retrying?.let {
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 Spacer(Modifier.size(16.dp))
                 Row {
                     Button(onClick = onRetry) { Text(stringResource(R.string.remote_retry)) }

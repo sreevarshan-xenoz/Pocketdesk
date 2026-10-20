@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-665 open items.
+666 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 379 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 380 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 49 |
 | A phone with a SIM | 22 |
@@ -476,6 +476,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The owner's approval prompt ("Ask before each session") before ready.
 - Over the internet road, and a phone driving while another has a picture session (driving rules).
+- I1: the computer's server restarted under a remote: "Reconnecting in N s…" on its card, then the remote back by itself, the talk timer still counting; Kick from the computer: not retried; Settings "Reconnect by itself" off: Retry only; after ten minutes, "Stopped trying" and the session's notification gone.
 
 **74. The phone's battery without a session**
 

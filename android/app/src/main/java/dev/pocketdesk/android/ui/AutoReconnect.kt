@@ -23,8 +23,10 @@ object AutoReconnect {
     private val DESKTOP_ENDS =
         listOf("kicked", "refused", "not paired", "permissions changed", "session end", "not allowed")
 
+    // "handshake eof": the far side closed while TLS was still opening, as a
+    // server stopping or starting does; never a refused certificate (I1).
     private val TRANSIENT =
-        listOf("stalled", "timed out", "timeout", "refused", "unreachable", "no route", "reset", "closed")
+        listOf("stalled", "timed out", "timeout", "refused", "unreachable", "no route", "reset", "closed", "handshake eof")
 
     fun retryable(reason: String): Boolean {
         val r = reason.lowercase()
@@ -34,6 +36,19 @@ object AutoReconnect {
         if (errorSuggestsRepair(reason)) return false
         return TRANSIENT.any { it in r }
     }
+
+    /**
+     * Why a sound session or a remote ended, in the words [retryable] reads:
+     * the computer's close reason [closed] when it gave one, a silent link
+     * otherwise; null when it ended while the owner was still to answer
+     * ([wasWaiting]), which is theirs to decide again (I1).
+     */
+    fun endedBy(closed: String?, wasWaiting: Boolean): String? =
+        when {
+            closed != null -> "stream $DESKTOP_CLOSED $closed"
+            wasWaiting -> null
+            else -> "stalled"
+        }
 
     /**
      * How long to wait before attempt [attempt] (0-based), [elapsedMs] after

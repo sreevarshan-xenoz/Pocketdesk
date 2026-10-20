@@ -194,14 +194,7 @@ fun SoundScreen(
                     }
                     if (state == State.Down || state == State.TooOld) {
                         reason = closed?.let { context.closeReasonText(it) }
-                        ended =
-                            when {
-                                closed != null -> "stream closed by the desktop: $closed"
-                                // The owner never answered: theirs to decide again.
-                                wasWaiting -> null
-                                // It went away under us.
-                                else -> "stalled"
-                            }
+                        ended = AutoReconnect.endedBy(closed, wasWaiting)
                         return@attempt
                     }
                     delay(POLL_MS)
@@ -210,8 +203,9 @@ fun SoundScreen(
         } finally {
             DesktopAudio.streamDown(generation)
         }
-        if (state != State.Down) return@LaunchedEffect
-        val retry = ended?.let { Prefs.autoReconnect(context) && AutoReconnect.retryable(it) } == true
+        if (state != State.Down && state != State.TooOld) return@LaunchedEffect
+        // A computer too old for a sound session never takes one: nothing to retry.
+        val retry = state == State.Down && ended?.let { Prefs.autoReconnect(context) && AutoReconnect.retryable(it) } == true
         val now = SystemClock.elapsedRealtime()
         if (retry && droppedAtMs == 0L) droppedAtMs = now
         val wait = if (retry) AutoReconnect.delayMs(reconnects, now - droppedAtMs) else null
@@ -323,7 +317,13 @@ fun SoundScreen(
                     reason = reason,
                     reconnectInS = reconnectInS,
                     gaveUp = gaveUp,
-                    onRetry = { attempt++ },
+                    // The person's own try starts a fresh ten minutes (I1:
+                    // after giving up, a Retry that failed stopped at once).
+                    onRetry = {
+                        reconnects = 0
+                        droppedAtMs = 0L
+                        attempt++
+                    },
                     onExit = onExit,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
