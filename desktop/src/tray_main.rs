@@ -86,11 +86,18 @@ fn main() {
                     act(&state_dir, TrayAction::SendClipboard(id.to_string()));
                 }
             }
-            tray.show(pocketdesk_desktop::tray_menu::menu(
-                &rows,
-                &snapshot.devices,
-                now,
-            ));
+            let mut entries = pocketdesk_desktop::tray_menu::menu(&rows, &snapshot.devices, now);
+            // H4: the key names itself where its action is.
+            if key.status.registered
+                && let Some(phone) = hotkey::phone(&rows)
+            {
+                entries = pocketdesk_desktop::tray_menu::with_key(
+                    entries,
+                    phone,
+                    &hotkey::display(&key.status.key),
+                );
+            }
+            tray.show(entries);
             refreshed = Some(Instant::now());
         }
     }

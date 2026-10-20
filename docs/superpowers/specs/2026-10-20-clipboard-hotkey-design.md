@@ -23,6 +23,16 @@ The phone sends text to the computer in one tap (N2). The computer sends its cli
 
 The parser, the phone's choice and those words are in `desktop/src/hotkey.rs`, tested.
 
+## The key in the tray (H4)
+
+**In the tray's menu:** with the key registered, the tray program names it on the phone it sends to, as "Send the clipboard (Win+Shift+C)", so the key is found where its action is. This uses `tray_menu::with_key` and `hotkey::display`, both tested.
+
+**Clicks and other trays:**
+- The item's id stays the action's, so a click queued during a rebuild still finds it.
+- The Linux tray never shows it, since the key is never registered there.
+
+A fresh review found 0 Critical and 0 Important issues. Its one Minor, these docs, is done.
+
 ## Left out
 
 - **Linux.** A global key there needs the GlobalShortcuts portal, so the row is not shown.
