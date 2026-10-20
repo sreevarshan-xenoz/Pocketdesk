@@ -268,6 +268,11 @@ fn act(state_dir: &Path, action: TrayAction) -> bool {
     };
     if let Err(e) = done {
         eprintln!("Pocketdesk tray: {action:?} failed: {e}");
+        // The tray program has no console (K2a review): a pause that failed
+        // opens the Overview, which says what became of it.
+        if matches!(action, TrayAction::Pause(_) | TrayAction::Resume) {
+            let _ = open_window(state_dir, "overview", None);
+        }
     }
     true
 }
