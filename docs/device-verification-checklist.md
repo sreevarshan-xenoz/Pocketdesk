@@ -2218,6 +2218,15 @@ Built 2026-10-20; tested through units and the harness, nothing by hand yet.
 - [ ] Settings → Notifications and texts → Muted apps: Unmute, and the app's toasts again.
 - [ ] Linux: GNOME and KDE show the action; a server without actions shows none.
 
+## 151. The phone's volume keys for the computer (K4)
+
+Built 2026-10-20; tested by JVM tests, nothing on a phone yet. Each press sets this computer's volume, so run it with the owner.
+- [ ] Remote open: the volume keys and the panel's slider move the computer's volume, one step a press; a held key stops when let go.
+- [ ] The Sound sheet moves the volume, then a key press: one step from there, no jump.
+- [ ] The screen off: the keys still the computer's. A call: the keys are the call's.
+- [ ] A sound session: the keys stay the phone's. The setting off: the keys stay the phone's.
+- [ ] `dumpsys media_session`: the session remote, and which session takes the keys on the OPPO and the A71.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
