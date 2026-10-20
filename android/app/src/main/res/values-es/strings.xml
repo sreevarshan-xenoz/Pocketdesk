@@ -814,10 +814,11 @@
     <string name="cast_camera_lost">La cámara se detuvo: puede que otra app la haya tomado</string>
     <string name="state_widget_name">Pocketdesk: cómo va</string>
     <string name="state_widget_description">CPU, memoria, disco y batería del último ordenador. Toca para volver a preguntar.</string>
-    <string name="state_widget_cpu">CPU %1$d %%</string>
-    <string name="state_widget_memory">Mem %1$d %%</string>
-    <string name="state_widget_disk">Disco %1$d %%</string>
-    <string name="state_widget_battery">Bat %1$d %%</string>
+    <string name="state_widget_cpu">CPU %1$d %%</string>
+    <string name="state_widget_memory">Mem %1$d %%</string>
+    <string name="state_widget_disk">Disco %1$d %%</string>
+    <string name="state_widget_battery">Bat %1$d %%</string>
+    <string name="state_widget_percent">%1$d&#160;%%</string>
     <string name="state_widget_updated">Actualizado %1$s</string>
     <string name="state_widget_stale">No responde · de %1$s</string>
     <string name="state_widget_not_answering">No responde</string>

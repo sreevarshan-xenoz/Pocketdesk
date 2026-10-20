@@ -1,10 +1,22 @@
 package dev.pocketdesk.android.ui
 
+import dev.pocketdesk.android.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class DeckTest {
+    /** I2: the sheet and the widget draw a kind with one icon. */
+    @Test
+    fun eachKindHasItsIconAndAnUnknownOneIsKeys() {
+        assertEquals(R.drawable.ic_ll_keyboard, Deck.iconRes("keys"))
+        assertEquals(R.drawable.ic_ll_settings, Deck.iconRes("task"))
+        assertEquals(R.drawable.ic_ll_play, Deck.iconRes("media"))
+        assertEquals(R.drawable.ic_ll_language, Deck.iconRes("link"))
+        assertEquals(R.drawable.ic_ll_clipboard, Deck.iconRes("text"))
+        assertEquals(R.drawable.ic_ll_keyboard, Deck.iconRes("something new"))
+    }
+
     @Test
     fun aListedEntryIsAButtonOnlyWithAnIndexAndALabel() {
         assertEquals(Deck.Button(0, "Mute mic", "keys"), Deck.button(0, "Mute mic", "keys"))

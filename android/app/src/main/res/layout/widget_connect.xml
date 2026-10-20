@@ -12,7 +12,8 @@
         android:layout_width="28dp"
         android:layout_height="28dp"
         android:contentDescription="@null"
-        android:src="@drawable/ic_stat_pocketdesk" />
+        android:src="@drawable/ic_stat_pocketdesk"
+        android:tint="@color/widget_accent" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -25,7 +26,7 @@
             android:id="@+id/widget_action"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="#FFFFFFFF"
+            android:textColor="@color/widget_on_surface"
             android:textSize="15sp"
             android:textStyle="bold" />
 
@@ -35,7 +36,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#CCFFFFFF"
+            android:textColor="@color/widget_on_surface_variant"
             android:textSize="13sp" />
     </LinearLayout>
 </LinearLayout>

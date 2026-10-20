@@ -817,10 +817,11 @@
     <string name="cast_camera_lost">The camera stopped: another app may have taken it</string>
     <string name="state_widget_name">Pocketdesk: how it is doing</string>
     <string name="state_widget_description">Your last computer\'s CPU, memory, disk and battery. Tap to ask again.</string>
-    <string name="state_widget_cpu">CPU %1$d %%</string>
-    <string name="state_widget_memory">Mem %1$d %%</string>
-    <string name="state_widget_disk">Disk %1$d %%</string>
-    <string name="state_widget_battery">Bat %1$d %%</string>
+    <string name="state_widget_cpu">CPU %1$d %%</string>
+    <string name="state_widget_memory">Mem %1$d %%</string>
+    <string name="state_widget_disk">Disk %1$d %%</string>
+    <string name="state_widget_battery">Bat %1$d %%</string>
+    <string name="state_widget_percent">%1$d&#160;%%</string>
     <string name="state_widget_updated">Updated %1$s</string>
     <string name="state_widget_stale">Not answering · from %1$s</string>
     <string name="state_widget_not_answering">Not answering</string>
@@ -830,7 +831,6 @@
     <string name="deck_widget_name">Pocketdesk: deck</string>
     <string name="deck_widget_description">Your last computer\'s deck buttons, pressed from the home screen.</string>
     <string name="deck_widget_refresh">Ask for the buttons again</string>
-    <string name="deck_widget_refresh_glyph" translatable="false">↻</string>
     <string name="deck_widget_said">%1$s: %2$s</string>
     <string name="deck_widget_no_answer">No answer from the computer yet</string>
     <string name="remote_laser">Laser pointer</string>
@@ -844,10 +844,6 @@
     <string name="media_widget_next">Next</string>
     <string name="media_widget_play">Play</string>
     <string name="media_widget_pause">Pause</string>
-    <string name="media_widget_previous_glyph" translatable="false">⏮︎</string>
-    <string name="media_widget_next_glyph" translatable="false">⏭︎</string>
-    <string name="media_widget_play_glyph" translatable="false">▶︎</string>
-    <string name="media_widget_pause_glyph" translatable="false">⏸︎</string>
     <string name="media_widget_refused">The computer refused</string>
     <string name="media_widget_unreadable">The computer\'s answer did not read</string>
     <string name="media_tile_label">Computer\'s music</string>
@@ -869,4 +865,18 @@
         <item quantity="one">%d minute</item>
         <item quantity="other">%d minutes</item>
     </plurals>
+    <!-- The widget picker's previews (I2): sample content, not translated. -->
+    <string name="widget_preview_computer" translatable="false">Living room PC</string>
+    <string name="widget_preview_updated" translatable="false">Updated 9:41</string>
+    <string name="widget_preview_disk" translatable="false">Disk</string>
+    <string name="widget_preview_percent_cpu" translatable="false">23&#160;%</string>
+    <string name="widget_preview_percent_memory" translatable="false">58&#160;%</string>
+    <string name="widget_preview_percent_disk" translatable="false">71&#160;%</string>
+    <string name="widget_preview_percent_battery" translatable="false">86&#160;%</string>
+    <string name="widget_preview_track" translatable="false">Midnight City</string>
+    <string name="widget_preview_artist" translatable="false">M83</string>
+    <string name="widget_preview_deck_mute" translatable="false">Mute mic</string>
+    <string name="widget_preview_deck_type" translatable="false">Sign-off</string>
+    <string name="widget_preview_deck_open" translatable="false">Calendar</string>
+    <string name="widget_preview_deck_build" translatable="false">Build</string>
 </resources>

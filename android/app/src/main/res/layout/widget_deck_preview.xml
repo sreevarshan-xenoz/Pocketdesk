@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget picker's preview of the deck widget (I2): sample buttons. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UseCompoundDrawables"
+    android:id="@+id/preview_deck_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/preview_deck_host"
+            android:text="@string/widget_preview_computer"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_on_surface"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/preview_deck_refresh"
+            style="@style/WidgetRefresh"
+            android:contentDescription="@string/deck_widget_refresh" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/preview_deck_line"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/widget_on_surface_variant"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <FrameLayout
+            android:id="@+id/preview_deck_b0"
+            style="@style/DeckWidgetTile"
+            >
+            <TextView
+                android:id="@+id/preview_deck_b0_label"
+                style="@style/DeckWidgetLabel"
+                android:drawableTop="@drawable/ic_ll_keyboard"
+                android:text="@string/widget_preview_deck_mute" />
+        </FrameLayout>
+        <FrameLayout
+            android:id="@+id/preview_deck_b1"
+            style="@style/DeckWidgetTile"
+            >
+            <TextView
+                android:id="@+id/preview_deck_b1_label"
+                style="@style/DeckWidgetLabel"
+                android:drawableTop="@drawable/ic_ll_clipboard"
+                android:text="@string/widget_preview_deck_type" />
+        </FrameLayout>
+        <FrameLayout
+            android:id="@+id/preview_deck_b2"
+            style="@style/DeckWidgetTile"
+            >
+            <TextView
+                android:id="@+id/preview_deck_b2_label"
+                style="@style/DeckWidgetLabel"
+                android:drawableTop="@drawable/ic_ll_play"
+                android:text="@string/media_widget_play" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <FrameLayout
+            android:id="@+id/preview_deck_b3"
+            style="@style/DeckWidgetTile"
+            >
+            <TextView
+                android:id="@+id/preview_deck_b3_label"
+                style="@style/DeckWidgetLabel"
+                android:drawableTop="@drawable/ic_ll_language"
+                android:text="@string/widget_preview_deck_open" />
+        </FrameLayout>
+        <FrameLayout
+            android:id="@+id/preview_deck_b4"
+            style="@style/DeckWidgetTile"
+            >
+            <TextView
+                android:id="@+id/preview_deck_b4_label"
+                style="@style/DeckWidgetLabel"
+                android:drawableTop="@drawable/ic_ll_settings"
+                android:text="@string/widget_preview_deck_build" />
+        </FrameLayout>
+        <FrameLayout
+            android:id="@+id/preview_deck_b5"
+            style="@style/DeckWidgetTile"
+            >
+            <TextView
+                android:id="@+id/preview_deck_b5_label"
+                style="@style/DeckWidgetLabel"
+                android:drawableTop="@drawable/ic_ll_play"
+                android:text="@string/media_widget_next" />
+        </FrameLayout>
+    </LinearLayout>
+</LinearLayout>

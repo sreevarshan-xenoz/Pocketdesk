@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UseCompoundDrawables"
     android:id="@+id/widget_deck_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -21,19 +23,14 @@
             android:layout_weight="1"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#FFFFFFFF"
+            android:textColor="@color/widget_on_surface"
             android:textSize="14sp"
             android:textStyle="bold" />
 
-        <TextView
+        <ImageView
             android:id="@+id/widget_deck_refresh"
-            android:layout_width="40dp"
-            android:layout_height="32dp"
-            android:contentDescription="@string/deck_widget_refresh"
-            android:gravity="center"
-            android:text="@string/deck_widget_refresh_glyph"
-            android:textColor="#FFFFFFFF"
-            android:textSize="18sp" />
+            style="@style/WidgetRefresh"
+            android:contentDescription="@string/deck_widget_refresh" />
     </LinearLayout>
 
     <TextView
@@ -42,10 +39,10 @@
         android:layout_height="wrap_content"
         android:layout_marginStart="4dp"
         android:ellipsize="end"
-        android:maxLines="2"
-        android:textColor="#CCFFFFFF"
-        android:textSize="12sp"
-        android:visibility="gone" />
+        android:maxLines="1"
+        android:textColor="@color/widget_on_surface_variant"
+        android:text="@string/deck_loading"
+        android:textSize="12sp" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -54,15 +51,30 @@
         android:layout_weight="1"
         android:orientation="horizontal">
 
-        <TextView
+        <FrameLayout
             android:id="@+id/widget_deck_b0"
-            style="@style/DeckWidgetButton" />
-        <TextView
+            style="@style/DeckWidgetTile"
+            android:visibility="invisible">
+            <TextView
+                android:id="@+id/widget_deck_b0_label"
+                style="@style/DeckWidgetLabel" />
+        </FrameLayout>
+        <FrameLayout
             android:id="@+id/widget_deck_b1"
-            style="@style/DeckWidgetButton" />
-        <TextView
+            style="@style/DeckWidgetTile"
+            android:visibility="invisible">
+            <TextView
+                android:id="@+id/widget_deck_b1_label"
+                style="@style/DeckWidgetLabel" />
+        </FrameLayout>
+        <FrameLayout
             android:id="@+id/widget_deck_b2"
-            style="@style/DeckWidgetButton" />
+            style="@style/DeckWidgetTile"
+            android:visibility="invisible">
+            <TextView
+                android:id="@+id/widget_deck_b2_label"
+                style="@style/DeckWidgetLabel" />
+        </FrameLayout>
     </LinearLayout>
 
     <LinearLayout
@@ -72,14 +84,29 @@
         android:layout_weight="1"
         android:orientation="horizontal">
 
-        <TextView
+        <FrameLayout
             android:id="@+id/widget_deck_b3"
-            style="@style/DeckWidgetButton" />
-        <TextView
+            style="@style/DeckWidgetTile"
+            android:visibility="invisible">
+            <TextView
+                android:id="@+id/widget_deck_b3_label"
+                style="@style/DeckWidgetLabel" />
+        </FrameLayout>
+        <FrameLayout
             android:id="@+id/widget_deck_b4"
-            style="@style/DeckWidgetButton" />
-        <TextView
+            style="@style/DeckWidgetTile"
+            android:visibility="invisible">
+            <TextView
+                android:id="@+id/widget_deck_b4_label"
+                style="@style/DeckWidgetLabel" />
+        </FrameLayout>
+        <FrameLayout
             android:id="@+id/widget_deck_b5"
-            style="@style/DeckWidgetButton" />
+            style="@style/DeckWidgetTile"
+            android:visibility="invisible">
+            <TextView
+                android:id="@+id/widget_deck_b5_label"
+                style="@style/DeckWidgetLabel" />
+        </FrameLayout>
     </LinearLayout>
 </LinearLayout>

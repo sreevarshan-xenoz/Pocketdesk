@@ -44,6 +44,23 @@ object MediaWidgetPlan {
      */
     fun ask(why: Why, tried: Boolean): Boolean = why == Why.Refresh || !tried
 
+    /** What fills the widget under its header (I2): the track, or one message. */
+    enum class Body { Track, Nothing, Failed, Asking, NoComputer }
+
+    /**
+     * The body for what is known: a track [playing] while there is one (an
+     * ask under way keeps it); else nothing playing once the computer
+     * [answered]; its failure; or asking (an ask under way, or none yet).
+     */
+    fun body(hasComputer: Boolean, playing: NowPlaying?, answered: Boolean, failed: Boolean, asking: Boolean): Body = when {
+        !hasComputer -> Body.NoComputer
+        playing != null -> Body.Track
+        asking -> Body.Asking
+        failed -> Body.Failed
+        answered -> Body.Nothing
+        else -> Body.Asking
+    }
+
     /** A kept answer is shown only while its computer is still the last one. */
     fun keeps(readFor: String?, lastComputer: String?): Boolean =
         readFor != null && readFor == lastComputer

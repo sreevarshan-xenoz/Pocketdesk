@@ -54,6 +54,44 @@ class StateWidgetPlanTest {
         assertEquals(StateWidgetPlan.When.Asking, StateWidgetPlan.timeLine(readAt = 5L, failed = true, asking = true))
     }
 
+    /** I2: bars once there is room for them, the one line below that. */
+    @Test
+    fun aTallWidgetShowsBarsAndASmallOneTheLine() {
+        assertEquals(StateWidgetPlan.Layout.Line, StateWidgetPlan.layout(heightDp = 80))
+        assertEquals(StateWidgetPlan.Layout.Line, StateWidgetPlan.layout(heightDp = 109))
+        assertEquals(StateWidgetPlan.Layout.Bars, StateWidgetPlan.layout(heightDp = 110))
+        assertEquals(StateWidgetPlan.Layout.Bars, StateWidgetPlan.layout(heightDp = 300))
+        // A launcher that never said: the line, which fits anywhere.
+        assertEquals(StateWidgetPlan.Layout.Line, StateWidgetPlan.layout(heightDp = 0))
+    }
+
+    /** I2 review: a launcher's height for the phone held as it is now. */
+    @Test
+    fun theHeightIsThePortraitOrLandscapeOne() {
+        // Portrait: the widget's tallest; landscape: its shortest.
+        assertEquals(180, StateWidgetPlan.heightDp(portrait = true, minHeightDp = 90, maxHeightDp = 180))
+        assertEquals(90, StateWidgetPlan.heightDp(portrait = false, minHeightDp = 90, maxHeightDp = 180))
+        assertEquals(StateWidgetPlan.Layout.Line, StateWidgetPlan.layout(StateWidgetPlan.heightDp(false, 90, 180)))
+    }
+
+    @Test
+    fun theBarsAreTheReadingsTheComputerGave() {
+        val rows = StateWidgetPlan.rows(StateWidgetPlan.Numbers(cpu = 10, memory = null, disk = 84, battery = null))
+        assertEquals(
+            listOf(StateWidgetPlan.Row(StateWidgetPlan.Part.Cpu, 10), StateWidgetPlan.Row(StateWidgetPlan.Part.Disk, 84)),
+            rows,
+        )
+        assertEquals(4, StateWidgetPlan.rows(StateWidgetPlan.Numbers(1, 2, 3, 4)).size)
+    }
+
+    @Test
+    fun aComputerNotAnsweringIsAWarning() {
+        assertTrue(StateWidgetPlan.warns(StateWidgetPlan.When.NotAnswering))
+        assertTrue(StateWidgetPlan.warns(StateWidgetPlan.When.StaleSince))
+        assertFalse(StateWidgetPlan.warns(StateWidgetPlan.When.Updated))
+        assertFalse(StateWidgetPlan.warns(StateWidgetPlan.When.Asking))
+    }
+
     @Test
     fun aReadingIsKeptOnlyForItsComputer() {
         assertTrue(StateWidgetPlan.keeps(readFor = "a", lastComputer = "a"))

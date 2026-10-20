@@ -3,7 +3,7 @@
     android:description="@string/media_widget_description"
     android:initialLayout="@layout/widget_media"
     android:minWidth="250dp"
-    android:minHeight="140dp"
+    android:minHeight="160dp"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="0"
     android:widgetCategory="home_screen" />
