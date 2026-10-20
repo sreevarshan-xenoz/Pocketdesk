@@ -183,9 +183,34 @@ pub fn badge(tab: Tab, waiting: Waiting) -> Option<String> {
     }
 }
 
+/// The page after `tab` in the page list (before it when not `forward`),
+/// round from the last to the first: Ctrl+Page Down and Up (I3).
+pub fn step(tab: Tab, forward: bool) -> Tab {
+    let order: Vec<Tab> = GROUPS
+        .iter()
+        .flat_map(|g| g.pages.iter().copied())
+        .collect();
+    let at = order.iter().position(|t| *t == tab).unwrap_or(0);
+    let n = order.len();
+    order[if forward {
+        (at + 1) % n
+    } else {
+        (at + n - 1) % n
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keys_step_through_the_pages_as_listed() {
+        assert_eq!(step(Tab::Status, true), Tab::Pair);
+        assert_eq!(step(Tab::Pair, false), Tab::Status);
+        assert_eq!(step(Tab::Sessions, true), Tab::Files, "across a group");
+        assert_eq!(step(Tab::Logs, true), Tab::Status, "round to the first");
+        assert_eq!(step(Tab::Status, false), Tab::Logs, "and back to the last");
+    }
 
     #[test]
     fn a_page_says_what_waits_there() {

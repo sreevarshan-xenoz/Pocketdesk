@@ -12,6 +12,7 @@ mod computers_view;
 mod diagnostics_view;
 mod fonts;
 mod kdeconnect_view;
+mod keys;
 mod messages_view;
 mod nav;
 mod notes_view;

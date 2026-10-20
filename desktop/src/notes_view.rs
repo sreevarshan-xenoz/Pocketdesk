@@ -162,11 +162,16 @@ impl NotesView {
                     if note.reply {
                         let key = (note.device_id.clone(), note.key.clone());
                         let draft = self.drafts.entry(key.clone()).or_default();
-                        ui.add(egui::TextEdit::singleline(draft).hint_text("Reply"));
+                        let reply_box =
+                            ui.add(egui::TextEdit::singleline(draft).hint_text("Reply"));
                         let ready = !draft.trim().is_empty();
-                        if ui
+                        // Enter in the box sends, as the button does (I3).
+                        let entered = crate::keys::entered(ui, &reply_box);
+                        if (ui
                             .add_enabled(ready, egui::Button::new("Send reply"))
                             .clicked()
+                            || entered)
+                            && ready
                         {
                             let message = self.drafts.get(&key).cloned().unwrap_or_default();
                             self.answer(state_dir, note, Answer::Reply(message), now_unix);

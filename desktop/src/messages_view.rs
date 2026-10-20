@@ -227,12 +227,17 @@ impl MessagesView {
                             }
                         });
                     pane.add_space(6.0);
-                    pane.add(
+                    let reply_box = pane.add(
                         egui::TextEdit::multiline(self.drafts.of(&key))
                             .desired_rows(2)
-                            .hint_text("Reply"),
+                            .return_key(Some(crate::keys::NEW_LINE))
+                            .hint_text("Reply (Enter sends, Shift+Enter starts a new line)"),
                     );
-                    if pane
+                    // Enter sends, as in a chat; Shift+Enter is a new line (I3).
+                    let sent_by_key = crate::keys::enter_in(pane, &reply_box)
+                        && !self.drafts.of(&key).trim().is_empty();
+                    if sent_by_key
+                        || pane
                         .add_enabled(!self.drafts.of(&key).trim().is_empty(), egui::Button::new("Send reply"))
                         .clicked()
                     {

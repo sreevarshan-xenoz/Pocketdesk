@@ -362,7 +362,8 @@ impl PocketdeskApp {
                         crate::restart::restart(&dir)
                     });
                 }
-                if ui.button("Cancel").clicked() {
+                // Esc answers Cancel (I3).
+                if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
                     self.confirm_restart = false;
                 }
             });
@@ -1288,7 +1289,7 @@ impl PocketdeskApp {
                         if ui.button("Unpair").clicked() {
                             confirmed = Some(device.id.clone());
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
                             revoke = Some(None);
                         }
                     });
@@ -1653,6 +1654,13 @@ impl PocketdeskApp {
             save = form.save_bar(ui);
             ui.add_space(6.0);
         });
+        // Ctrl+S saves too, while there is something to save (I3).
+        save |= ui.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND,
+                egui::Key::S,
+            ))
+        });
         if save {
             // D3: the history turned off is emptied at once.
             let history_off = form.turns_history_off();
@@ -1871,12 +1879,14 @@ impl PocketdeskApp {
         let mut send = None;
         // Wrapped: the box and three buttons are wider than a narrow page.
         ui.horizontal_wrapped(|ui| {
-            ui.add(
+            let path_box = ui.add(
                 egui::TextEdit::singleline(&mut self.send_path)
                     .hint_text("Path to a file or folder")
                     .desired_width(360.0),
             );
-            if ui.button("Send").clicked() && !self.send_path.trim().is_empty() {
+            // Enter in the box sends, as the button does (I3).
+            let entered = crate::keys::entered(ui, &path_box);
+            if (ui.button("Send").clicked() || entered) && !self.send_path.trim().is_empty() {
                 send = Some(PathBuf::from(self.send_path.trim()));
             }
             if crate::pick_file::AVAILABLE {
@@ -1900,12 +1910,13 @@ impl PocketdeskApp {
         }
         let mut link = None;
         ui.horizontal_wrapped(|ui| {
-            ui.add(
+            let link_box = ui.add(
                 egui::TextEdit::singleline(&mut self.send_link)
                     .hint_text("A web link (http or https)")
                     .desired_width(360.0),
             );
-            if ui.button("Send link").clicked() && !self.send_link.trim().is_empty() {
+            let entered = crate::keys::entered(ui, &link_box);
+            if (ui.button("Send link").clicked() || entered) && !self.send_link.trim().is_empty() {
                 link = Some(self.send_link.clone());
             }
         });
@@ -2174,6 +2185,24 @@ impl eframe::App for PocketdeskApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.take_files_to_send(ui.ctx());
+        // Ctrl+Page Down and Up move through the pages as listed (I3).
+        let (next, previous) = ui.input_mut(|i| {
+            (
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::COMMAND,
+                    egui::Key::PageDown,
+                )),
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::COMMAND,
+                    egui::Key::PageUp,
+                )),
+            )
+        });
+        if next || previous {
+            let tab = crate::nav::step(self.tab, next);
+            self.switch_to(tab);
+            self.chosen = tab;
+        }
         let waiting = crate::nav::Waiting {
             sessions: self.snapshot.sessions.len(),
             transfers: self.snapshot.under_way.len(),

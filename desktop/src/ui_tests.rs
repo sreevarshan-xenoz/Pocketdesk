@@ -182,6 +182,39 @@ fn unpair_asks_by_name_and_only_the_answer_unpairs() {
     assert!(!store.is_trusted(PHONE), "Unpair removes it");
 }
 
+/// I3: Esc answers an open question with Cancel.
+#[test]
+fn escape_cancels_the_unpair_question() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let mut app = fixture.open(Some(Tab::Devices));
+    let asked = "Unpair Test Phone? It must pair again to connect.";
+    app.get_by_label("Unpair…").click();
+    app.run_steps(3);
+    assert!(app.query_by_label(asked).is_some());
+    app.key_press(egui::Key::Escape);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(asked).is_none(),
+        "Esc took the question away"
+    );
+    let store = TrustStore::read(fixture.state().join(TRUST_FILE)).expect("the trust store");
+    assert!(store.is_trusted(PHONE), "and kept the phone");
+}
+
+/// I3: Ctrl+Page Down opens the next page down the left.
+#[test]
+fn control_page_down_opens_the_next_page() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Devices));
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::PageDown);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Sessions.purpose()).is_some(),
+        "Sessions follows Devices"
+    );
+}
+
 /// The Overview shows a paired phone's block: where it is, its battery,
 /// and Ring, Send file… and Send link… (N6).
 #[test]
