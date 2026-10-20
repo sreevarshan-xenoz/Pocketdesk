@@ -178,6 +178,11 @@ fn take_shown(tag: &str) -> Option<u32> {
     shown.remove(at).map(|(_, id)| id)
 }
 
+/// How long after an action or reply a close is the server's, not the
+/// person's (L1 review).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const ANSWERED_CLOSE: Duration = Duration::from_secs(3);
+
 /// What the notification server shows (N3), asked once it answers.
 #[cfg(target_os = "linux")]
 async fn server_caps(proxy: &zbus::Proxy<'static>) -> crate::toast_answers::DbusCaps {
@@ -281,9 +286,16 @@ async fn answer_signals() -> Result<()> {
         .receive_signal("NotificationClosed")
         .await
         .map_err(failed)?;
+    // Notifications just answered or clicked: GNOME closes them after an
+    // action with the person's reason, which is no clear (L1 review).
+    let mut answered: std::collections::HashMap<u32, Instant> = std::collections::HashMap::new();
     loop {
+        answered.retain(|_, at| at.elapsed() < ANSWERED_CLOSE);
         tokio::select! {
             Some(message) = invoked.next() => {
+                if let Ok((id, _)) = message.body().deserialize::<(u32, String)>() {
+                    answered.insert(id, Instant::now());
+                }
                 if let Ok((id, key)) = message.body().deserialize::<(u32, String)>()
                     && let Some(pressable) = answerable_for(id)
                 {
@@ -300,12 +312,16 @@ async fn answer_signals() -> Result<()> {
             Some(message) = closed.next() => {
                 if let Ok((id, reason)) = message.body().deserialize::<(u32, u32)>()
                     && reason == 2
+                    && !answered.contains_key(&id)
                     && let Some(tag) = tag_of(id)
                 {
                     cleared_here(&tag);
                 }
             }
             Some(message) = replied.next() => {
+                if let Ok((id, _)) = message.body().deserialize::<(u32, String)>() {
+                    answered.insert(id, Instant::now());
+                }
                 if let Ok((id, text)) = message.body().deserialize::<(u32, String)>()
                     && let Some(answers) = answerable_for(id).and_then(|p| p.answers)
                     && let Some(answer) = crate::toast_answers::dbus_reply_answer(&text, &answers)
