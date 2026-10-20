@@ -501,6 +501,10 @@
     <string name="link_not_web">திறக்க இணைய இணைப்பு இல்லை (http, https இணைப்புகள் மட்டும்).</string>
     <string name="link_from_computer">%1$s இலிருந்து ஓர் இணைப்பு</string>
     <string name="channel_links">கணினியிலிருந்து இணைப்புகள்</string>
+    <string name="settings_commands_from_computer">கணினியிலிருந்து என் தானியக்கச் செயலிகளுக்குக் கட்டளைகள்</string>
+    <string name="settings_commands_from_computer_summary">கணினியில் ஒரு ஸ்கிரிப்ட், Tasker, Automate அல்லது MacroDroid-க்கு மட்டும் ஒரு பெயரும் உரையும் dev.pocketdesk.android.event.COMMAND ஆக அனுப்பும்</string>
+    <string name="settings_commands_any_app">Tasker, Automate, MacroDroid எதுவும் இல்லை: கட்டளைகள் எங்கும் செல்லாது</string>
+    <string name="settings_commands_only_to">%1$s க்கு மட்டும்</string>
     <string name="settings_calls_from_computer">கணினியிலிருந்து அழைப்புகள்</string>
     <string name="settings_calls_from_computer_summary">கணினி அனுப்பும் எண் (அதன் செய்திகள் பக்கத்தில் அழை) அதனுடன் டயலரைத் திறக்கும்; நீங்கள் அழை அழுத்துங்கள். அமர்வுக்கு வெளியே, மற்றொரு அம்சத்துக்காக (பதில்கள், அழைப்புகள், கிளிப்போர்டு) கணினியுடன் இணைப்பு இருக்கும்போது அது அறிவிப்பாகக் காத்திருக்கும்</string>
     <string name="channel_dials">கணினியிலிருந்து எண்கள்</string>

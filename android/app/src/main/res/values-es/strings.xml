@@ -506,6 +506,10 @@
     <string name="link_not_web">No hay un enlace web que abrir (solo enlaces http y https).</string>
     <string name="link_from_computer">Un enlace de %1$s</string>
     <string name="channel_links">Enlaces del equipo</string>
+    <string name="settings_commands_from_computer">Comandos del equipo para mis apps de automatización</string>
+    <string name="settings_commands_from_computer_summary">Un script en el equipo da a Tasker, Automate o MacroDroid un nombre y un texto, como dev.pocketdesk.android.event.COMMAND, solo a esa app</string>
+    <string name="settings_commands_any_app">No se encontró Tasker, Automate ni MacroDroid: los comandos no van a ninguna parte</string>
+    <string name="settings_commands_only_to">Solo a %1$s</string>
     <string name="settings_calls_from_computer">Llamadas desde el equipo</string>
     <string name="settings_calls_from_computer_summary">Un número que envía el equipo (Llamar en su página de Mensajes) abre el marcador con él; tú pulsas Llamar. Fuera de una sesión espera como notificación, mientras haya un enlace con el equipo por otra función (respuestas, llamadas, portapapeles)</string>
     <string name="channel_dials">Números del equipo</string>

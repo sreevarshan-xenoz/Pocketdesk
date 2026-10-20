@@ -90,3 +90,19 @@ Also worth knowing: `no_answer` means the phone stopped waiting (75 s for a task
 
 Tasker, profile *Event → System → Intent Received*: Action `dev.pocketdesk.android.event.FILE_RECEIVED`. The task gets each extra as a local variable named after it (Tasker's variable list in the task shows the exact names, which depend on its version), so a test of the `MIME` extra against `image/*` can open the gallery. The same with `SESSION_ENDED` and a test of `REASON` for `lost` can say "the computer went away". Not yet tried with Tasker itself (checklist §83).
 
+## Commands from the computer
+
+With **Settings → Commands from the computer to my automation apps** on (off by default), a script on the computer can hand the phone's automation app a command: `pocketdesk phone-command <phone> <name> [text]` on the computer (the local API, `docs/local-api.md`). The phone broadcasts `dev.pocketdesk.android.event.COMMAND` to that app only, with:
+
+| Extra | What |
+|---|---|
+| `dev.pocketdesk.android.extra.NAME` | The command's name, 1 to 64 printable characters |
+| `dev.pocketdesk.android.extra.TEXT` | Its text, at most 4096 bytes (may be empty) |
+| `dev.pocketdesk.android.extra.ADDRESS` | The computer's saved address |
+
+It goes to the app "Only to" names in Settings, among Tasker, Automate and MacroDroid as found on the phone (the first found by default); with none of them found it goes nowhere. Only the phone's own computer is heard, at most 30 a minute. **Another app can send the same broadcast to your automation app**, which cannot tell it from Pocketdesk's: a command must not unlock anything an app on the phone should not. An automation app that was force-stopped, or never opened, gets nothing until it runs.
+
+### Example
+
+Tasker, profile *Event → System → Intent Received*: Action `dev.pocketdesk.android.event.COMMAND`. In the task, test the `NAME` extra (`lights off`) and use `TEXT`. On the computer: `pocketdesk phone-command 5f1c9b "lights off"`. Not yet tried with Tasker itself (checklist §161).
+

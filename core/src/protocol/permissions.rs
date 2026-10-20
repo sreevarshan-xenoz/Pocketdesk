@@ -51,10 +51,13 @@ pub enum Capability {
     /// Have the phone dial a number (L4): its dialer opens with it, the
     /// owner presses Call. About what the computer sends, as Ring is.
     Dial,
+    /// Send commands to the phone's automation apps (L6). About what the
+    /// computer sends, as Ring is.
+    Command,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 18] = [
+    pub const ALL: [Capability; 19] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -73,6 +76,7 @@ impl Capability {
         Capability::AwayLock,
         Capability::PhoneSound,
         Capability::Dial,
+        Capability::Command,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -142,6 +146,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::link::LINK => Capability::Links,
         // A number for the phone to dial (L4), the computer's own packet.
         crate::protocol::dial::DIAL => Capability::Dial,
+        // A command for the phone's automation apps (L6), the computer's own.
+        crate::protocol::command::COMMAND => Capability::Command,
         crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,
         crate::protocol::quiet::QUIET_STATE => Capability::Mute,
         _ => return None,
@@ -187,6 +193,8 @@ pub struct DevicePermissions {
     pub phone_sound: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dial: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -213,6 +221,7 @@ impl DevicePermissions {
             Capability::AwayLock => &mut self.away_lock,
             Capability::PhoneSound => &mut self.phone_sound,
             Capability::Dial => &mut self.dial,
+            Capability::Command => &mut self.command,
         }
     }
 
@@ -236,6 +245,7 @@ impl DevicePermissions {
             Capability::AwayLock => self.away_lock,
             Capability::PhoneSound => self.phone_sound,
             Capability::Dial => self.dial,
+            Capability::Command => self.command,
         };
         value.unwrap_or(capability.default_allowed())
     }

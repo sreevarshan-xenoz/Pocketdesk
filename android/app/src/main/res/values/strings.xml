@@ -510,6 +510,10 @@
     <string name="link_not_web">No web link to open (only http and https links).</string>
     <string name="link_from_computer">A link from %1$s</string>
     <string name="channel_links">Links from the computer</string>
+    <string name="settings_commands_from_computer">Commands from the computer to my automation apps</string>
+    <string name="settings_commands_from_computer_summary">A script on the computer hands Tasker, Automate or MacroDroid a name and a text, as dev.pocketdesk.android.event.COMMAND, to that app only</string>
+    <string name="settings_commands_any_app">No Tasker, Automate or MacroDroid found: the commands go nowhere</string>
+    <string name="settings_commands_only_to">Only to %1$s</string>
     <string name="settings_calls_from_computer">Calls from the computer</string>
     <string name="settings_calls_from_computer_summary">A number the computer sends (Call on its Messages page) opens the dialer with it; you press Call. Outside a session it waits as a notification, while a link to the computer is up for another feature (answers, calls, the clipboard)</string>
     <string name="channel_dials">Numbers from the computer</string>

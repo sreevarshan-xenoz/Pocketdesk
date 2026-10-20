@@ -728,6 +728,14 @@ pub async fn connect_to_peer(
                                 {
                                     crate::dials::receive(&pkt.body, &from_peer.0, from_peer.1);
                                 }
+                                // A command for this phone's automation
+                                // apps (L6), kept with its computer.
+                                if trimmed.contains("pocketdesk.command")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == pocketdesk_core::protocol::command::COMMAND
+                                {
+                                    crate::commands::receive(&pkt.body, &from_peer.0, from_peer.1);
+                                }
                                 // A link the computer handed over (T8a),
                                 // kept for the app to show.
                                 if trimmed.contains("pocketdesk.link")
@@ -863,6 +871,7 @@ pub async fn connect_to_peer(
                         // And links (T8a), shown as from the computer of
                         // the session that takes them.
                         crate::links::forget();
+                        crate::commands::forget();
                         crate::dials::forget();
                         crate::media_presses::forget();
                         crate::clipboard_push::forget();

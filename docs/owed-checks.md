@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-754 open items.
+758 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 446 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 448 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 24 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 7 |
 | A Linux desktop (the Azure VM serves for some) | 94 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 67 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 69 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -917,6 +917,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Record for about 30 s, then Stop: an MKV in Videos\Pocketdesk; `ffprobe` gives h264 at the cast's size and a duration within 10 % of the wall clock; it plays.
 - Recording while the phone turns: the file so far kept, the bar says why it stopped.
 - The cast ends during a recording: the bar names the file and stops counting.
+
+**161. Commands to the phone's automation apps (L6)**
+
+- With "Only to" set to another installed app: nothing reaches the receiver.
+- With no automation app installed: nothing is sent, and Settings says so.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1915,3 +1920,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **155. The phone's sound with its screen (K5)**
 
 - By ear: a video on the phone plays on the computer's speakers, behind the picture by how much.
+
+**161. Commands to the phone's automation apps (L6)**
+
+- A throwaway receiver in Tasker's package logs `dev.pocketdesk.android.event.COMMAND` with NAME, TEXT and ADDRESS after `pocketdesk phone-command`.
+- Tasker itself.
