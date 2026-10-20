@@ -40,7 +40,7 @@
     <string name="settings_keep_file_dates">Conservar las fechas de los archivos</string>
     <string name="settings_keep_file_dates_summary">Los archivos enviados al ordenador conservan la fecha de su último cambio, y los que llegan de él la suya en Downloads/Pocketdesk. Una carpeta elegida en \"Los archivos de ordenadores van a\" no puede conservarlas</string>
     <string name="settings_volume_keys">Las teclas de volumen cambian el volumen del ordenador</string>
-    <string name="settings_volume_keys_summary">En Remoto y mientras el teléfono es el altavoz del ordenador, las teclas y el panel de volumen del teléfono suben y bajan el ordenador. Necesita el permiso de Audio del ordenador</string>
+    <string name="settings_volume_keys_summary">En Remoto, las teclas y el panel de volumen del teléfono suben y bajan el ordenador. Necesita el permiso de Audio del ordenador. Como altavoz del ordenador, las teclas siguen siendo del teléfono</string>
     <string name="settings_retry_transfers_summary">Un archivo que se corta a mitad se vuelve a enviar hasta 3 veces, desde donde se detuvo; sin red, antes espera hasta 3 minutos a que vuelva</string>
     <string name="settings_internet_files">Archivos por internet</string>
     <string name="settings_internet_files_summary">Envía y recibe archivos con un equipo al que llegas desde fuera, por el mismo enlace. El equipo también puede desactivarlo</string>

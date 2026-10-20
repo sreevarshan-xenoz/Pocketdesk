@@ -17,7 +17,7 @@ import org.json.JSONObject
 private const val TAG = "ComputerVolume"
 
 /**
- * While [active] (a remote or sound session admitted), the phone's volume
+ * While [active] (a remote admitted), the phone's volume
  * keys and Android's volume panel change the computer's volume (K4): a
  * media session whose playback is remote, as casting apps use. Released
  * when it ends. Never with Settings "Volume keys change the computer's

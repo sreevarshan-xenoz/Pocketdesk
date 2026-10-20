@@ -11,13 +11,13 @@
 
 ## What changes
 
-- **While Remote or a sound session is admitted, the phone's volume keys change the computer's volume,** with the phone's screen off too.
+- **While Remote is admitted, the phone's volume keys change the computer's volume,** with the phone's screen off too.
 - **How:** a `MediaSession` whose playback is remote, with an absolute `VolumeProvider`, as casting apps do. Android's own volume panel shows it, named after the computer, in 20 steps of 5 %.
   - A key press is one step.
   - Dragging the panel's slider sets the volume.
   - Either goes through the computer's audio request (`setVolume`, the Audio permission), as the Sound sheet's slider does.
   - The panel starts at the computer's volume as its `status` reports it.
-- **The session lives while the remote or sound session is admitted,** and is released when it ends or the screen leaves.
+- **The session lives while the remote is admitted,** and is released when it ends or the screen leaves.
   - Android gives the keys to a call while one rings or is held.
   - A phone whose computer refuses the Audio permission keeps its own keys: the panel is never offered.
 - **Settings "Volume keys change the computer's volume"**, under Session, on by default.
@@ -26,6 +26,8 @@
   - one press's step, held between 0 and 20.
 
 ## Left out
+
+- The sound session (K4 review): there the phone is the computer's speaker, and its own keys set what the owner hears. A remote session playing beside the phone's own sound would take those keys, and the headset's buttons, from it.
 
 - Mute from the keys: Android has no mute key event for a remote session.
 - Screen sessions: their picture already takes the whole phone, and its own keys there are the computer's by the session's keyboard.
