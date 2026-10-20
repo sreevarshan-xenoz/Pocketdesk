@@ -1103,7 +1103,11 @@ pub async fn run_clears() {
         for clear in waiting.drain(..) {
             // The Notifications permission covers the phone's notifications
             // here, both ways.
-            if !crate::plugins::pair::permits(&clear.device_id, "kdeconnect.notification") {
+            // Paired now, not only allowed by default (as Ring is).
+            if !crate::plugins::pair::allows(
+                &clear.device_id,
+                pocketdesk_core::protocol::permissions::Capability::Notifications,
+            ) {
                 tracing::info!("A clear was not sent: Notifications is off for the phone");
                 continue;
             }
