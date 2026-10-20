@@ -70,6 +70,8 @@ fun SoundScreen(
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
+    // The card's words for a computer gone quiet (J6), read here as the remote does.
+    val quietReason = stringResource(R.string.remote_quiet)
     // Back ends it, as it ends a session (U2).
     androidx.activity.compose.BackHandler { onExit() }
     var state by remember { mutableStateOf(State.Connecting) }
@@ -176,7 +178,16 @@ fun SoundScreen(
                     val (json, closed) = withContext(Dispatchers.IO) { RustCore.remoteState() to RustCore.streamClosedReason }
                     val remote = RemoteSession.parse(json)
                     grants = RemoteSession.grants(json)
-                    val next = RemoteSession.next(state, remote, closed)
+                    var next = RemoteSession.next(state, remote, closed)
+                    // A computer gone quiet is a lost link in 12 s, as for a
+                    // remote (J6): the transport alone takes 45 s to say so.
+                    val quiet = RemoteSession.goneQuiet(next, closed, json)
+                    if (quiet) {
+                        next = State.Down
+                        // Closed here, or the reconnect would take the dead
+                        // connection for a live session and skip the dial.
+                        withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
+                    }
                     if (next == State.Ready && state != State.Ready) {
                         DesktopAudio.streamUp(context, generation)
                         readySince = SystemClock.elapsedRealtime()
@@ -193,7 +204,7 @@ fun SoundScreen(
                         state = State.Down
                     }
                     if (state == State.Down || state == State.TooOld) {
-                        reason = closed?.let { context.closeReasonText(it) }
+                        reason = if (quiet) quietReason else closed?.let { context.closeReasonText(it) }
                         ended = AutoReconnect.endedBy(closed, wasWaiting)
                         return@attempt
                     }

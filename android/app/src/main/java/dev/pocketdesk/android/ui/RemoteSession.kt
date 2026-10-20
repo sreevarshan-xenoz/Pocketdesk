@@ -43,6 +43,14 @@ object RemoteSession {
 
     private const val QUIET_LIMIT_MS = 12_000L
 
+    /**
+     * Whether a session about to be [next] is a computer gone quiet (I1b,
+     * J6): admitted, not closed by the transport, and unheard from for 12 s.
+     * The remote and the sound session ask it alike.
+     */
+    fun goneQuiet(next: State, closed: String?, json: String): Boolean =
+        next == State.Ready && closed == null && silent(quietMs(json))
+
     /** What a sound session (N5) may do: hear the computer, and be its mic. */
     data class Grants(val audio: Boolean, val mic: Boolean)
 

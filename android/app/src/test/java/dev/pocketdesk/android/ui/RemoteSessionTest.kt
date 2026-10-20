@@ -2,6 +2,7 @@ package dev.pocketdesk.android.ui
 
 import dev.pocketdesk.android.ui.RemoteSession.State
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -52,6 +53,17 @@ class RemoteSessionTest {
         assertEquals(12_500L, RemoteSession.quietMs("""{"state":"ready","quietMs":12500}"""))
         assertTrue(!RemoteSession.silent(11_999))
         assertTrue(RemoteSession.silent(12_000))
+    }
+
+    /** J6: one rule says a ready session is gone quiet, for the remote and the sound session. */
+    @Test
+    fun `a ready session heard from in twelve seconds is not gone`() {
+        val quiet = """{"state":"ready","quietMs":12500}"""
+        val heard = """{"state":"ready","quietMs":4000}"""
+        assertTrue(RemoteSession.goneQuiet(RemoteSession.State.Ready, null, quiet))
+        assertFalse("heard from", RemoteSession.goneQuiet(RemoteSession.State.Ready, null, heard))
+        assertFalse("not admitted yet", RemoteSession.goneQuiet(RemoteSession.State.Waiting, null, quiet))
+        assertFalse("the transport said why", RemoteSession.goneQuiet(RemoteSession.State.Ready, "timed out", quiet))
     }
 
     @Test

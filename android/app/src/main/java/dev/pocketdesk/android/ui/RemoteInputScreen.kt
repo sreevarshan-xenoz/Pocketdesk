@@ -190,7 +190,7 @@ fun RemoteInputScreen(
                 var next = RemoteSession.next(state, remote, closed)
                 // A computer gone quiet is a lost link in 12 s (I1b): a remote
                 // has no frames to stall, and the transport takes 45 s.
-                val quiet = next == State.Ready && closed == null && RemoteSession.silent(RemoteSession.quietMs(json))
+                val quiet = RemoteSession.goneQuiet(next, closed, json)
                 if (quiet) {
                     next = State.Down
                     // The bridge still holds the dead connection until the
