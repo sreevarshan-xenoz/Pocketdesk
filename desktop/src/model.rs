@@ -489,7 +489,10 @@ pub fn recent_sessions(lines: &str, n: usize) -> Vec<RecentSession> {
             })
         })
         .collect();
-    // The log is in order of ending already; sorted anyway, stably.
+    // The log is in order of ending already; sorted anyway, stably, from
+    // its end, so two that ended in one second keep the later first (J3
+    // review).
+    all.reverse();
     all.sort_by_key(|s| std::cmp::Reverse(s.ended_unix));
     // Refusals of one device in a row are one line, so a phone retrying
     // does not push the real sessions out of the list.
@@ -969,6 +972,20 @@ mod tests {
         assert_eq!(two.len(), 2);
         assert_eq!(two[0].ended_unix, 600);
         assert!(recent_sessions("", 10).is_empty());
+    }
+
+    /// J3 review: two sessions that ended in one second, the later first.
+    #[test]
+    fn sessions_ending_in_one_second_keep_their_order() {
+        let log = concat!(
+            r#"{"unix_secs":100,"outcome":"lan_direct","duration_secs":1,"device_id":"first"}"#,
+            "
+",
+            r#"{"unix_secs":100,"outcome":"lan_direct","duration_secs":1,"device_id":"second"}"#,
+        );
+        let both = recent_sessions(log, 10);
+        assert_eq!(both[0].device_id.as_deref(), Some("second"));
+        assert_eq!(both[1].device_id.as_deref(), Some("first"));
     }
 
     /// J3 review: a device refused again and again is one line, and the
