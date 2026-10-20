@@ -38,6 +38,7 @@ pub mod phone_notes;
 pub mod phone_photos;
 pub mod phone_quiet;
 pub mod phone_status;
+pub mod phone_switches;
 pub mod pin;
 pub mod quiet;
 pub mod received;

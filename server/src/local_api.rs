@@ -128,6 +128,7 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
     let keys = device_keys::read(state_dir).unwrap_or_default();
     let batteries = pocketdesk_core::local::phone_status::read(state_dir);
     let quiet = pocketdesk_core::local::phone_quiet::read(state_dir);
+    let switches = pocketdesk_core::local::phone_switches::read(state_dir);
     // D2 review: only a phone linked now says its quiet; an old report is not now's.
     let linked: std::collections::HashSet<String> = live_mirror(state_dir, now_unix, running)
         .map(|m| m.linked.into_iter().map(|p| p.device_id).collect())
@@ -170,6 +171,8 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
                 "media": media.get(&id).map(|m| &m.media),
                 // Its Do Not Disturb as it last said (D2), or null.
                 "quiet": quiet.get(&id).filter(|_| linked.contains(&id)),
+                // Which of its features it has on, as it last said (L7), or null.
+                "switches": switches.get(&id),
             })
         })
         .collect();
@@ -1580,6 +1583,18 @@ mod tests {
             },
         );
         pocketdesk_core::local::phone_quiet::write(&dir, &quiet).unwrap();
+        let mut switches = std::collections::BTreeMap::new();
+        switches.insert(
+            "phone-a".to_string(),
+            pocketdesk_core::local::phone_switches::PhoneSwitches {
+                switches: pocketdesk_core::local::phone_switches::from_body(
+                    &json!({"switches": {"links": {"on": true}}}),
+                )
+                .unwrap(),
+                updated_unix: 98,
+            },
+        );
+        pocketdesk_core::local::phone_switches::write(&dir, &switches).unwrap();
         let listed = devices(&dir, 101, true).unwrap();
         assert_eq!(listed["api"], API);
         assert_eq!(listed["server_running"], true);
@@ -1602,6 +1617,9 @@ mod tests {
             "what it did not say is left out"
         );
         assert_eq!(b["battery"], Value::Null, "never reported");
+        assert_eq!(a["switches"]["switches"]["links"], json!({"on": true}));
+        assert_eq!(a["switches"]["updated_unix"], 98);
+        assert_eq!(b["switches"], Value::Null, "none said yet");
         assert_eq!(a["media"]["title"], "Song");
         assert_eq!(a["media"]["isPlaying"], true);
         assert_eq!(b["media"], Value::Null, "plays nothing");
