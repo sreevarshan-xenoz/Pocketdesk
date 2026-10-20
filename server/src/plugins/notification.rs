@@ -438,9 +438,23 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || muted {
         return;
     }
-    if let Err(e) = show_desktop_notification(tag.as_deref(), &app, &title, &text, None).await {
+    // Muteable only by a name the device gave (K2b review: the fallback
+    // name stands for every nameless one).
+    let named = given_name(body, "appName");
+    if let Err(e) =
+        show_desktop_notification(tag.as_deref(), &app, &title, &text, None, named).await
+    {
         tracing::warn!("Failed to show a KDE Connect device's notification: {}", e);
     }
+}
+
+/// Whether `body` names its app in `field`: a notification without one is
+/// shown under a fallback name, which "Not from this app" must not mute
+/// (K2b review).
+fn given_name(body: &serde_json::Value, field: &str) -> bool {
+    body.get(field)
+        .and_then(|v| v.as_str())
+        .is_some_and(|app| !app.trim().is_empty())
 }
 
 /// Whether `app` is muted on this computer (K2b): its notifications are
@@ -582,8 +596,15 @@ impl Plugin for NotificationPlugin {
                     return Ok(());
                 }
                 let text = with_late(&text, waited);
-                if let Err(e) =
-                    show_desktop_notification(tag.as_deref(), &app, &title, &text, answers).await
+                if let Err(e) = show_desktop_notification(
+                    tag.as_deref(),
+                    &app,
+                    &title,
+                    &text,
+                    answers,
+                    given_name(&packet.body, "app"),
+                )
+                .await
                 {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
@@ -906,14 +927,21 @@ async fn show_desktop_notification(
     title: &str,
     text: &str,
     answers: Option<crate::toast_answers::Answerable>,
+    muteable: bool,
 ) -> Result<()> {
     let summary = format!("{}: {}", app, title);
 
     #[cfg(target_os = "linux")]
     {
         let replaces = tag.and_then(shown_id).unwrap_or(0);
-        match send_notification_dbus(&summary, text, replaces, answers.as_ref(), tag.is_some())
-            .await
+        match send_notification_dbus(
+            &summary,
+            text,
+            replaces,
+            answers.as_ref(),
+            tag.is_some() && muteable,
+        )
+        .await
         {
             Ok(id) => {
                 if let Some(tag) = tag {
@@ -955,7 +983,7 @@ async fn show_desktop_notification(
                     &toast_text,
                     tag,
                     answers.as_ref(),
-                    Some(&toast_app),
+                    muteable.then_some(toast_app.as_str()),
                 ),
                 None => crate::platform::notify(
                     &toast_summary,
@@ -1283,6 +1311,15 @@ mod tests {
             self.0.lock().unwrap().push(packet.clone());
             Ok(())
         }
+    }
+
+    /// K2b review: only a name the phone gave can be muted.
+    #[test]
+    fn only_a_given_name_is_muteable() {
+        assert!(given_name(&json!({"app": "Gmail"}), "app"));
+        assert!(!given_name(&json!({"app": "  "}), "app"));
+        assert!(!given_name(&json!({"title": "x"}), "app"));
+        assert!(given_name(&json!({"appName": "Chat"}), "appName"));
     }
 
     /// K2b: an app muted here is muted for the next notification, whatever
