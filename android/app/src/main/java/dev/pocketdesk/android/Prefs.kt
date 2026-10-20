@@ -188,6 +188,14 @@ object Prefs {
         bump()
     }
 
+    /** L4: a number the computer asks to dial opens the dialer (off by default). */
+    fun callsFromComputer(ctx: Context): Boolean = prefs(ctx).getBoolean("calls_from_computer", false)
+
+    fun setCallsFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("calls_from_computer", enabled) }
+        bump()
+    }
+
     /** Whether a link the computer hands over is shown as a notification (T8a). On by default. */
     fun linksFromComputer(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_LINKS_FROM_COMPUTER, true)

@@ -894,6 +894,7 @@ fun RemoteScreen(
     DesktopNotificationRelay(address = address, controlPort = controlPort)
     FileOffersEffect(address = address, controlPort = controlPort)
     LinksEffect(address = address)
+    DialsEffect(address = address)
     BatteryEffect(address = address, controlPort = controlPort)
     PhoneMediaEffect(address = address, controlPort = controlPort)
 

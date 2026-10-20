@@ -168,6 +168,7 @@ object RustCore {
     private external fun nativeTakeFileOffers(): String
     private external fun nativeSendLink(address: String, port: Int, url: String): String
     private external fun nativeTakeLinks(): String
+    private external fun nativeTakeDials(): String
     private external fun nativeTakeMediaPresses(): String
     private external fun nativeTakeClipboardPush(): String
     private external fun nativeTakeNotificationAnswers(): String
@@ -950,6 +951,19 @@ object RustCore {
 
     /** The links the computer handed over since the last call, oldest first (T8a). */
     fun takeLinks(): List<String> = parseStringArray(envelope(nativeTakeLinks()).getOrDefault("[]"))
+
+    /** A number the computer at [host]:[port] asked this phone to dial (L4). */
+    data class Dial(val host: String, val port: Int, val number: String)
+
+    /** The numbers waiting (L4), taken. */
+    fun takeDials(): List<Dial> =
+        runCatching {
+            val array = org.json.JSONArray(envelope(nativeTakeDials()).getOrDefault("[]"))
+            (0 until array.length()).map { i ->
+                val d = array.getJSONObject(i)
+                Dial(d.getString("host"), d.getInt("port"), d.getString("number"))
+            }
+        }.getOrDefault(emptyList())
 
     fun listRemoteFiles(address: String, port: Int, remotePath: String): Result<String> =
         envelope(nativeListRemoteFiles(address, port, remotePath))
