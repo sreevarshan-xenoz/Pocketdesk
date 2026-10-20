@@ -688,8 +688,11 @@ impl Plugin for NotificationPlugin {
                 // A notification without an id cannot be closed or updated
                 // later, and is shown untagged so it never replaces another.
                 let tag = (!id.is_empty()).then(|| tag_for(sender.device_id(), id));
-                // Known by its tag, to clear on the phone when closed here (L1).
-                if let Some(tag) = &tag {
+                // Known by its tag, to clear on the phone when closed here (L1);
+                // not as it is closed on the phone.
+                if let Some(tag) = &tag
+                    && packet.body.get("isCancel").and_then(|v| v.as_bool()) != Some(true)
+                {
                     remember_note(tag, sender.device_id(), id);
                 }
                 if packet.body.get("isCancel").and_then(|v| v.as_bool()) == Some(true) {
@@ -1091,6 +1094,12 @@ pub async fn run_clears() {
         }
         let clients = crate::state::clone_clients().await;
         let mut still = Vec::new();
+        // The owner's switch holds for every clear, the page's too, and one
+        // queued before it was turned off (L1 review).
+        if !crate::events::current_config().clear_on_phone {
+            waiting.clear();
+            continue;
+        }
         for clear in waiting.drain(..) {
             // The Notifications permission covers the phone's notifications
             // here, both ways.

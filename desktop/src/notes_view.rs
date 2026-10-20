@@ -134,7 +134,7 @@ impl NotesView {
             now_unix,
         ) {
             Ok(_) => crate::notice::Notice::done(format!(
-                "Asked the phone to clear the {} notification.",
+                "Asked the phone to clear the {} notification; it does with \u{201c}Let the computer clear my notifications\u{201d} on.",
                 note.app
             )),
             Err(e) => crate::notice::Notice::error(format!("Not cleared: {e}")),

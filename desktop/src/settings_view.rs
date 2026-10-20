@@ -959,7 +959,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "Its ✕ on the notification, Clear on the Notifications page, or closing it on Linux; the phone takes it with its own \"Let the computer clear my notifications\" on. The Action Center's Clear all is not seen: Windows tells only packaged apps.",
+                        "Its ✕ (closing its banner too, so a notification closed to read later goes from the phone and the Action Center alike), Clear on the Notifications page, or closing it on Linux; the phone takes it with its own \"Let the computer clear my notifications\" on. The Action Center's Clear all is not seen: Windows tells only packaged apps.",
                     );
                 });
                 row(ui, "sms_notify", |ui| {

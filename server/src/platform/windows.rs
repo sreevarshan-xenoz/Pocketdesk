@@ -475,6 +475,8 @@ fn show_toast(
     // Kept only once shown, and only while the toast for this tag can be
     // answered: a plain update of it drops the old one (N3 review).
     if let Some(tag) = tag {
+        // An update replaces the toast it had, of either kind (L1 review).
+        plain_toasts().retain(|(t, _)| t != tag);
         let mut kept = answerable();
         kept.retain(|(t, _, _)| t != tag);
         if has_buttons {
@@ -484,7 +486,6 @@ fn show_toast(
         } else {
             // Kept alive for its ✕ (L1): a toast dropped hears no event.
             let mut plain = plain_toasts();
-            plain.retain(|(t, _)| t != tag);
             plain.push_back((tag.to_string(), toast));
             while plain.len() > KEEP_ANSWERABLE {
                 plain.pop_front();
