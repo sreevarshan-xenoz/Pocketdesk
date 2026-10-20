@@ -2287,14 +2287,6 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] `dumpsys battery unplug`, then `set ac 1` again at 80: one more.
 - [ ] `adb shell dumpsys battery reset` after.
 
-## 160. Screenshot and record the phone's window (L5)
-
-Built 2026-10-21; tested through units and a real ffmpeg recording, nothing on a device yet.
-- [ ] Screenshot: a PNG in Pictures\Pocketdesk at the cast's size, and on the clipboard.
-- [ ] Record for about 30 s, then Stop: an MKV in Videos\Pocketdesk; `ffprobe` gives h264 at the cast's size and a duration within 10 % of the wall clock; it plays.
-- [ ] Recording while the phone turns: the file so far kept, the bar says why it stopped.
-- [ ] The cast ends during a recording: the bar names the file and stops counting.
-
 ## 159. Call a number from the computer (L4)
 
 Built 2026-10-21; tested through units and the harness, nothing on a device yet.
@@ -2302,6 +2294,14 @@ Built 2026-10-21; tested through units and the harness, nothing on a device yet.
 - [ ] With the app behind another, or outside a session with a background link: the notification, its tap opening the dialer.
 - [ ] A number with `*` or `#`: refused on the computer.
 - [ ] A real call (a SIM): the owner presses Call.
+
+## 160. Screenshot and record the phone's window (L5)
+
+Built 2026-10-21; tested through units and a real ffmpeg recording, nothing on a device yet.
+- [ ] Screenshot: a PNG in Pictures\Pocketdesk at the cast's size, and on the clipboard.
+- [ ] Record for about 30 s, then Stop: an MKV in Videos\Pocketdesk; `ffprobe` gives h264 at the cast's size and a duration within 10 % of the wall clock; it plays.
+- [ ] Recording while the phone turns: the file so far kept, the bar says why it stopped.
+- [ ] The cast ends during a recording: the bar names the file and stops counting.
 
 ## Recording results
 

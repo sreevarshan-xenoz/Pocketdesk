@@ -906,17 +906,17 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - `dumpsys battery unplug`, then `set ac 1` again at 80: one more.
 - `adb shell dumpsys battery reset` after.
 
+**159. Call a number from the computer (L4)**
+
+- Phone Settings "Calls from the computer" on; in a session, Call on the Messages page (or `pocketdesk call`): the dialer opens with the number (`adb shell dumpsys activity activities`); nothing is called.
+- A number with `*` or `#`: refused on the computer.
+
 **160. Screenshot and record the phone's window (L5)**
 
 - Screenshot: a PNG in Pictures\Pocketdesk at the cast's size, and on the clipboard.
 - Record for about 30 s, then Stop: an MKV in Videos\Pocketdesk; `ffprobe` gives h264 at the cast's size and a duration within 10 % of the wall clock; it plays.
 - Recording while the phone turns: the file so far kept, the bar says why it stopped.
 - The cast ends during a recording: the bar names the file and stops counting.
-
-**159. Call a number from the computer (L4)**
-
-- Phone Settings "Calls from the computer" on; in a session, Call on the Messages page (or `pocketdesk call`): the dialer opens with the number (`adb shell dumpsys activity activities`); nothing is called.
-- A number with `*` or `#`: refused on the computer.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
