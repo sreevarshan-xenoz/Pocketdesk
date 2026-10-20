@@ -568,6 +568,7 @@ impl Plugin for SharePlugin {
             if let Some(transfer_info) = body.get("payloadTransferInfo") {
                 let name =
                     safe_file_name(body.get("filename").and_then(|v| v.as_str()).unwrap_or(""));
+                let modified = received_date(body);
                 // The phone hands the bytes only to whoever presents the key
                 // it put in this request, so they reach this desktop and no
                 // one else on the network. Without one there is nothing to
@@ -724,6 +725,7 @@ impl Plugin for SharePlugin {
                                         None => on_received(path, size, &from, top.as_deref()),
                                     })
                                 },
+                                modified,
                             },
                         )
                         .await
@@ -1527,6 +1529,9 @@ struct Incoming<'a> {
     /// Told where the file went once it is in place (the notification and
     /// the received list), before the phone hears "saved".
     on_saved: Box<dyn FnOnce(&Path) + Send>,
+    /// The date the file was last changed where it came from (K1), set
+    /// once it is in place; none keeps the arrival's.
+    modified: Option<std::time::SystemTime>,
 }
 
 /// Reach the phone by `route` and receive one file with the resumable
@@ -1546,6 +1551,7 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
         limits,
         progress,
         on_saved,
+        modified,
     } = incoming;
     if size == 0 || size > MAX_FILE_BYTES {
         return Err(io_error(
@@ -1645,7 +1651,7 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
                 let source = source.clone();
                 async move {
                     let _in_use = in_use_guard;
-                    let placed = place(&part_path, &dir, &name).await;
+                    let placed = place(&part_path, &dir, &name, modified).await;
                     records.remove(&device, &source);
                     let _ = std::fs::remove_file(&part_path);
                     if let Ok(path) = &placed {
@@ -1716,15 +1722,43 @@ pub(crate) async fn receive_offered(
             on_saved: Box::new(move |path: &Path| {
                 on_received(path, size, &announced, top.as_deref())
             }),
+            modified: received_date(offer),
         },
     )
     .await
 }
 
+/// The date a share or offer `body` gives its file (K1), held to now; none
+/// with Settings "Keep files' dates" off.
+pub(crate) fn received_date(body: &serde_json::Value) -> Option<std::time::SystemTime> {
+    if !crate::events::current_config().keep_file_dates {
+        return None;
+    }
+    pocketdesk_core::protocol::file_time::from_body(body, std::time::SystemTime::now())
+}
+
+/// Date the file at `path` `at` (K1). A file that will not take it is kept
+/// as it is, and the failure logged.
+fn set_date(path: &Path, at: std::time::SystemTime) {
+    let set = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|file| file.set_modified(at));
+    if let Err(e) = set {
+        tracing::warn!("Could not date {}: {e}", path.display());
+    }
+}
+
 /// Move the finished `part` into `dir` under a name like `name` that no
 /// file has yet, and return where it went. A rename when the state folder
-/// and `dir` share a volume, else a copy.
-pub(crate) async fn place(part: &Path, dir: &Path, name: &str) -> Result<PathBuf> {
+/// and `dir` share a volume, else a copy. With `modified`, the file is
+/// dated so once it is there (K1).
+pub(crate) async fn place(
+    part: &Path,
+    dir: &Path,
+    name: &str,
+    modified: Option<std::time::SystemTime>,
+) -> Result<PathBuf> {
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| io_error("create_dir", e))?;
@@ -1742,6 +1776,10 @@ pub(crate) async fn place(part: &Path, dir: &Path, name: &str) -> Result<PathBuf
         return Err(e);
     }
     mark_of_the_web(&final_path);
+    // After the mark: writing it may touch the file's time.
+    if let Some(at) = modified {
+        set_date(&final_path, at);
+    }
     Ok(final_path)
 }
 
@@ -1798,6 +1836,28 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// K1: a placed file takes the date it is given, and keeps its own
+    /// without one.
+    #[tokio::test]
+    async fn a_placed_file_takes_its_date() {
+        let dir = std::env::temp_dir().join(format!("pd-k1-place-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let june = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000);
+        let part = dir.join("a.part");
+        std::fs::write(&part, b"hello").unwrap();
+        let dated = place(&part, &dir, "a.txt", Some(june)).await.unwrap();
+        assert_eq!(std::fs::metadata(&dated).unwrap().modified().unwrap(), june);
+        let part = dir.join("b.part");
+        std::fs::write(&part, b"hello").unwrap();
+        let undated = place(&part, &dir, "b.txt", None).await.unwrap();
+        let age = std::time::SystemTime::now()
+            .duration_since(std::fs::metadata(&undated).unwrap().modified().unwrap())
+            .unwrap_or_default();
+        assert!(age.as_secs() < 60, "its own date: now");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn received_files_go_to_the_chosen_folder_only_when_it_is_one() {
@@ -2218,6 +2278,7 @@ mod tests {
             limits: LIMITS,
             progress: Box::new(|_| {}),
             on_saved: Box::new(|_| {}),
+            modified: None,
         }
     }
 
