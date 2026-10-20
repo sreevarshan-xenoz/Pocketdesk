@@ -482,7 +482,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Files from the computer in the background",
         permission: Capability::Files,
         permission_name: "Send and browse files",
-        android: "",
+        android: "its notifications",
     },
     Feature {
         key: "folders",
@@ -522,7 +522,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Links from the computer",
         permission: Capability::Links,
         permission_name: "Open its links here",
-        android: "",
+        android: "its notifications",
     },
     Feature {
         key: "ring",
@@ -555,6 +555,22 @@ pub const FEATURES: &[Feature] = &[
         permission: Capability::Cast,
         permission_name: "Show its screen or camera here",
         android: "the Pocketdesk control Accessibility service",
+    },
+    Feature {
+        key: "dial",
+        what: "Calling numbers from here",
+        phone_switch: "Calls from the computer",
+        permission: Capability::Dial,
+        permission_name: "Call numbers from here",
+        android: "",
+    },
+    Feature {
+        key: "commands",
+        what: "Commands to its automation apps",
+        phone_switch: "Commands from the computer to my automation apps",
+        permission: Capability::Command,
+        permission_name: "Send commands to its automation apps",
+        android: "",
     },
 ];
 

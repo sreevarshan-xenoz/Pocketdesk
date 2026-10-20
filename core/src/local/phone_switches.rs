@@ -35,6 +35,8 @@ pub const FEATURES: &[&str] = &[
     "media",
     "mute",
     "control",
+    "dial",
+    "commands",
 ];
 
 /// One feature as the phone says it stands.

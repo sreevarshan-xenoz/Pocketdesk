@@ -37,8 +37,8 @@ The features are a fixed list of names, and nothing else goes: no package lists,
 | `mute` | Let the computer mute this phone | Do Not Disturb access | Mute |
 | `control` | Let the computer control this phone | the Accessibility service | Cast |
 | `camera` | Photos the computer asks for | the camera | Files |
-| `dial` | Calls the computer asks for | — | Dial |
-| `commands` | Commands to my automation apps | — | Command |
+| `dial` | Calls from the computer | — | Dial |
+| `commands` | Commands from the computer to my automation apps | — | Command |
 
 **When it is sent:** with the battery report's ticks, under the same switch ("Share the phone's state with the computer"): at once on a change, and every 5 minutes otherwise (`SwitchReport`, JVM-tested). It goes only to its own computer, on a link that is already up.
 
