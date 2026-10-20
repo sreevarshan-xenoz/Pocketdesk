@@ -222,6 +222,70 @@ pub fn name(key: &str) -> &'static str {
         .unwrap_or("A setting")
 }
 
+/// "Send from the browser", beside Phones' rows (J2: found by its name).
+pub const EXTRA_BROWSER: &str = "Send from the browser";
+/// The file manager's "Send to phone", beside Phones' rows.
+pub const EXTRA_SEND_MENU: &str = "Send to phone in the file manager";
+/// The other computers' list, beside Computers' rows.
+pub const EXTRA_COMPUTERS: &str = "Your other computers";
+/// KDE Connect's devices, beside its rows.
+pub const EXTRA_KDE: &str = "KDE Connect devices";
+
+/// What a section draws beside its rows, by name.
+fn extras(section: Section) -> &'static [&'static str] {
+    match section {
+        Section::Phones => &[EXTRA_BROWSER, EXTRA_SEND_MENU],
+        Section::Computers => &[EXTRA_COMPUTERS],
+        Section::KdeConnect => &[EXTRA_KDE],
+        _ => &[],
+    }
+}
+
+/// Every word of `query`, case ignored, is in one of `texts` (J2). A key's
+/// `_` reads as a space, both in the words and in the texts.
+pub fn matches(query: &str, texts: &[&str]) -> bool {
+    let texts: Vec<String> = texts
+        .iter()
+        .map(|t| t.to_lowercase().replace('_', " "))
+        .collect();
+    query.split_whitespace().all(|word| {
+        let word = word.to_lowercase().replace('_', " ");
+        texts.iter().any(|t| t.contains(word.as_str()))
+    })
+}
+
+/// A row shows for `query` by its name or key, or its section's title.
+pub fn row_shown(query: &str, key: &str) -> bool {
+    matches(query, &[name(key), key])
+        || section_of(key).is_some_and(|s| matches(query, &[s.title()]))
+}
+
+/// A section is drawn for `query` by its title, or for a row or an extra
+/// in it that matches.
+pub fn section_shown(query: &str, section: Section) -> bool {
+    matches(query, &[section.title()])
+        || SETTINGS
+            .iter()
+            .any(|(key, _, s)| *s == section && row_shown(query, key))
+        || extras(section).iter().any(|x| matches(query, &[x]))
+}
+
+/// An extra beside a section's rows shows for `query` by its own name or
+/// its section's title.
+pub fn extra_shown(query: &str, section: Section, extra: &str) -> bool {
+    matches(query, &[extra]) || matches(query, &[section.title()])
+}
+
+/// Where the search box's words wait while the page draws, for `row`.
+fn search_id() -> egui::Id {
+    egui::Id::new("settings-search")
+}
+
+/// Set what the rows drawn next are held to; empty for all of them.
+pub fn set_search(ctx: &egui::Context, query: &str) {
+    ctx.data_mut(|d| d.insert_temp(search_id(), query.to_string()));
+}
+
 fn section_of(key: &str) -> Option<Section> {
     SETTINGS
         .iter()
@@ -1346,6 +1410,13 @@ fn task_problems(tasks: &[TaskSpec]) -> Vec<String> {
 /// One setting: its name, then its control and any note under it, wrapping
 /// at the page's width (U5: a grid's long labels widened the page).
 fn row(ui: &mut egui::Ui, key: &str, add: impl FnOnce(&mut egui::Ui)) {
+    let query: String = ui
+        .ctx()
+        .data(|d| d.get_temp(search_id()))
+        .unwrap_or_default();
+    if !row_shown(&query, key) {
+        return;
+    }
     ui.add_space(8.0);
     ui.label(RichText::new(name(key)).strong());
     add(ui);
@@ -1391,6 +1462,57 @@ fn parse_hooks(text: &str) -> (std::collections::BTreeMap<String, String>, Vec<S
 
 #[cfg(test)]
 mod tests {
+    /// J2: a row shows when every word is in its name or its key.
+    #[test]
+    fn a_search_finds_a_row_by_its_name_or_its_key() {
+        use super::{matches, row_shown};
+        assert!(matches("", &["anything"]), "nothing typed matches all");
+        assert!(matches("LASER", &["Laser pointer from phones"]));
+        assert!(matches("pointer laser", &["Laser pointer from phones"]));
+        assert!(!matches("laser mouse", &["Laser pointer from phones"]));
+        assert!(row_shown("laser", "laser_pointer"));
+        assert!(row_shown("tcp", "control_port"), "by its name");
+        assert!(row_shown("control port", "control_port"));
+        assert!(row_shown("streaming_port", "streaming_port"), "by its key");
+        assert!(!row_shown("laser", "control_port"));
+        assert!(row_shown("", "control_port"));
+        assert!(row_shown("  ", "control_port"), "only spaces is nothing");
+    }
+
+    /// J2: a section shows whole by its title, with a match, or not at all.
+    #[test]
+    fn a_search_shows_only_the_sections_it_finds() {
+        use super::{Section, row_shown, section_shown};
+        assert!(section_shown("laser", Section::Phones));
+        assert!(!section_shown("laser", Section::Connection));
+        assert!(section_shown("", Section::Connection));
+        // Its title shows all of it, every row included.
+        assert!(section_shown("advanced", Section::Advanced));
+        assert!(row_shown("connection", "control_port"));
+        // An extra counts for its section.
+        assert!(section_shown("browser", Section::Phones));
+        assert!(section_shown("kde", Section::KdeConnect));
+        for section in Section::ALL {
+            assert!(!section_shown("zzzz nothing", section), "{section:?}");
+        }
+    }
+
+    /// J2: the extras beside a section's rows are found by their own names
+    /// or their section's title.
+    #[test]
+    fn a_search_finds_an_extra_by_its_name() {
+        use super::{EXTRA_BROWSER, EXTRA_SEND_MENU, Section, extra_shown};
+        assert!(extra_shown("browser", Section::Phones, EXTRA_BROWSER));
+        assert!(!extra_shown("browser", Section::Phones, EXTRA_SEND_MENU));
+        assert!(extra_shown(
+            "file manager",
+            Section::Phones,
+            EXTRA_SEND_MENU
+        ));
+        assert!(extra_shown("phones", Section::Phones, EXTRA_SEND_MENU));
+        assert!(extra_shown("", Section::Phones, EXTRA_BROWSER));
+    }
+
     use super::*;
     use pocketdesk_core::local::config::Config;
 
