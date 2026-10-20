@@ -572,6 +572,7 @@
     <string name="remote_too_old">This computer\'s Pocketdesk is too old for the remote: update it, or open a session instead.</string>
     <string name="remote_down">The remote stopped: %1$s</string>
     <string name="remote_no_reason">the computer did not answer</string>
+    <string name="remote_quiet">the computer stopped answering</string>
     <string name="remote_retry">Retry</string>
     <string name="remote_key_previous">Previous</string>
     <string name="remote_key_play_pause">Play or pause</string>

@@ -45,6 +45,15 @@ class RemoteSessionTest {
         assertEquals(State.TooOld, RemoteSession.next(State.Waiting, "tooOld", "input-only session not known here"))
     }
 
+    /** I1b: a remote takes a long quiet as a computer gone. */
+    @Test
+    fun `twelve seconds of quiet is a lost link`() {
+        assertEquals("an older bridge says nothing", 0L, RemoteSession.quietMs("""{"state":"ready"}"""))
+        assertEquals(12_500L, RemoteSession.quietMs("""{"state":"ready","quietMs":12500}"""))
+        assertTrue(!RemoteSession.silent(11_999))
+        assertTrue(RemoteSession.silent(12_000))
+    }
+
     @Test
     fun `the rows send keys the bridge maps`() {
         // android/bridge/src/api.rs maps these Android key codes to evdev.
