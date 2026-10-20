@@ -2227,6 +2227,15 @@ Built 2026-10-20; tested by JVM tests, nothing on a phone yet. Each press sets t
 - [ ] A sound session: the keys stay the phone's. The setting off: the keys stay the phone's.
 - [ ] `dumpsys media_session`: the session remote, and which session takes the keys on the OPPO and the A71.
 
+## 152. Pause the phones on the computer (K2a)
+
+Built 2026-10-20; tested through units and the harness, nothing by hand yet.
+- [ ] The tray's Pause → For an hour: the menu says "Paused, 60 min left" with Resume, and the Overview says what is held.
+- [ ] While paused: a phone's notification shows no toast (and an answerable one is on the Notifications page), a text is on Messages without a toast, a link is not opened, a phone's ring for the computer stays silent, a received file arrives with no toast.
+- [ ] A session and a file send still work while paused.
+- [ ] Resume from the tray and from the Overview; `pocketdesk pause --for 1` ends by itself in a minute.
+- [ ] Linux: the pause in the StatusNotifierItem menu.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

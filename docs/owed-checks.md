@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-714 open items.
+719 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 417 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 419 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 23 |
 | A second phone | 9 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
-| A Linux desktop (the Azure VM serves for some) | 90 |
+| A Linux desktop (the Azure VM serves for some) | 91 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 63 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 65 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -862,6 +862,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A sound session: the keys stay the phone's. The setting off: the keys stay the phone's.
 - `dumpsys media_session`: the session remote, and which session takes the keys on the OPPO and the A71.
 
+**152. Pause the phones on the computer (K2a)**
+
+- While paused: a phone's notification shows no toast (and an answerable one is on the Notifications page), a text is on Messages without a toast, a link is not opened, a phone's ring for the computer stays silent, a received file arrives with no toast.
+- A session and a file send still work while paused.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1532,6 +1537,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Linux: GNOME and KDE show the action; a server without actions shows none.
 
+**152. Pause the phones on the computer (K2a)**
+
+- Linux: the pause in the StatusNotifierItem menu.
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -1818,3 +1827,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **140. Send the clipboard to the phone with a key (H3)**
 
 - The tray's menu (H4): the phone it sends to shows "Send the clipboard (Win+Shift+C)"; with the key cleared, the plain label again.
+
+**152. Pause the phones on the computer (K2a)**
+
+- The tray's Pause → For an hour: the menu says "Paused, 60 min left" with Resume, and the Overview says what is held.
+- Resume from the tray and from the Overview; `pocketdesk pause --for 1` ends by itself in a minute.
