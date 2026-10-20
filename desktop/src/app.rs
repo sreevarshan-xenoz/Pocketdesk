@@ -1233,6 +1233,18 @@ impl PocketdeskApp {
                         RichText::new(words).color(crate::theme::muted(ui))
                     });
                 });
+                // What else it said of itself (L9), on its own line.
+                // Only while it is reached and the report is recent (L9
+                // review): an away phone's Wi-Fi and ringer are not now's.
+                if let Some(state) = device
+                    .battery
+                    .as_ref()
+                    .filter(|b| model::state_is_now(b, row.place, now))
+                    .and_then(|b| model::phone_state_text(&b.state))
+                {
+                    ui.label(RichText::new(state).color(crate::theme::muted(ui)))
+                        .on_hover_text("As the phone last said, with its battery");
+                }
                 let mut facts = Vec::new();
                 if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now) {
                     facts.push(quiet);
@@ -3079,6 +3091,7 @@ mod tests {
             charge,
             charging,
             updated_unix: 1000,
+            ..Default::default()
         };
         assert_eq!(battery_text(None, 1000), "—");
         assert_eq!(
@@ -3101,6 +3114,7 @@ mod tests {
             charge,
             charging,
             updated_unix: 0,
+            ..Default::default()
         };
         assert!(battery_low(&battery(15, false)));
         assert!(battery_low(&battery(3, false)));

@@ -10,7 +10,7 @@ import dev.pocketdesk.android.notify.PhoneLink
 /**
  * The phone's battery to its computer without a session (research item
  * 11), on the notification listener's tick: as [BatteryRule] says, while
- * "Share battery with the computer" is on, and only on a control link
+ * "Share the phone's state with the computer" is on, and only on a control link
  * another background feature keeps up (the clipboard, files, answers,
  * folders). It never dials one of its own, so turning on nothing else costs
  * nothing.
@@ -29,9 +29,12 @@ class BackgroundBattery(private val ctx: Context) {
         }
         // A session's own BatteryEffect reports it.
         if (RustCore.isStreamingActive) return
-        val now = readBattery(ctx) ?: return
+        // Only what decides a send is read each tick (L9 review); storage
+        // and bars for a report that goes.
+        val light = readBattery(ctx, full = false) ?: return
         val nowMs = SystemClock.elapsedRealtime()
-        if (!BatteryRule.shouldSend(last, lastMs, now, nowMs)) return
+        if (!BatteryRule.shouldSend(last, lastMs, light, nowMs)) return
+        val now = readBattery(ctx) ?: light
         // On the link alone: if it has just gone, nothing is dialed for this.
         val sent = RustCore.sendPhonePacketOnLink(own.address, own.controlPort, BATTERY, BatteryRule.body(now))
         if (sent.isSuccess) {

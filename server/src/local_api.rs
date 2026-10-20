@@ -1541,6 +1541,13 @@ mod tests {
                 charge: 54,
                 charging: true,
                 updated_unix: 95,
+                // L9: what it said of itself, beside the battery.
+                state: pocketdesk_core::local::phone_status::PhoneState {
+                    storage_free_mb: Some(12_300),
+                    network: Some(pocketdesk_core::local::phone_status::Network::Wifi),
+                    ringer: Some(pocketdesk_core::local::phone_status::Ringer::Silent),
+                    ..Default::default()
+                },
             },
         );
         pocketdesk_core::local::phone_status::write(&dir, &batteries).unwrap();
@@ -1588,7 +1595,11 @@ mod tests {
         assert_eq!(a["permissions"]["files"], true);
         assert_eq!(
             a["battery"],
-            json!({"charge": 54, "charging": true, "updated_unix": 95})
+            json!({
+                "charge": 54, "charging": true, "updated_unix": 95,
+                "storage_free_mb": 12_300, "network": "wifi", "ringer": "silent",
+            }),
+            "what it did not say is left out"
         );
         assert_eq!(b["battery"], Value::Null, "never reported");
         assert_eq!(a["media"]["title"], "Song");

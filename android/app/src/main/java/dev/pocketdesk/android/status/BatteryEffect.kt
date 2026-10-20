@@ -26,7 +26,7 @@ private const val CHECK_MS = 15_000L
 
 /**
  * Tells the computer of this session the phone's battery (T8b), as
- * [BatteryRule] says, while "Share battery with the computer" is on. It
+ * [BatteryRule] says, while "Share the phone's state with the computer" is on. It
  * reads Android's last battery broadcast every 15 s while the app is
  * started, and sends only on the session's own control connection
  * ([ControlLinkEffect][dev.pocketdesk.android.ui.ControlLinkEffect] keeps
@@ -45,9 +45,16 @@ fun BatteryEffect(address: String, controlPort: Int) {
                 val linked = withContext(Dispatchers.IO) {
                     !ControlLink.needsConnect(RustCore.controlPeer(), address, controlPort)
                 }
-                val now = if (linked && Prefs.shareBattery(context)) readBattery(context) else null
+                // Read off the main thread (L9 review: binder calls and a
+                // statfs); storage and bars only for a report that goes.
+                val light = if (linked && Prefs.shareBattery(context)) {
+                    withContext(Dispatchers.IO) { readBattery(context, full = false) }
+                } else {
+                    null
+                }
                 val nowMs = SystemClock.elapsedRealtime()
-                if (now != null && BatteryRule.shouldSend(last, lastMs, now, nowMs)) {
+                if (light != null && BatteryRule.shouldSend(last, lastMs, light, nowMs)) {
+                    val now = withContext(Dispatchers.IO) { readBattery(context) } ?: light
                     val sent = withContext(Dispatchers.IO) {
                         RustCore.sendPhonePacket(address, controlPort, BATTERY, BatteryRule.body(now))
                     }
@@ -64,8 +71,12 @@ fun BatteryEffect(address: String, controlPort: Int) {
     }
 }
 
-/** The battery now, from the sticky broadcast (no receiver is kept). */
-internal fun readBattery(context: Context): BatteryRule.Report? {
+/**
+ * The battery now, from the sticky broadcast (no receiver is kept), with the
+ * phone's state (L9): all of it when [full], else only what decides a send
+ * (the network's kind and the ringer), which costs less.
+ */
+internal fun readBattery(context: Context, full: Boolean = true): BatteryRule.Report? {
     val intent: Intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         ?: return null
     val low = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
@@ -75,5 +86,5 @@ internal fun readBattery(context: Context): BatteryRule.Report? {
         scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1),
         plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0),
         low = low,
-    )
+    )?.copy(state = readPhoneState(context, full))
 }

@@ -2,14 +2,14 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-758 open items.
+763 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 448 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 452 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
-| A phone with a SIM | 24 |
+| A phone with a SIM | 25 |
 | A second phone | 9 |
 | Away from home: another network, or through a router | 10 |
 | A second computer | 7 |
@@ -923,6 +923,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With "Only to" set to another installed app: nothing reaches the receiver.
 - With no automation app installed: nothing is sent, and Settings says so.
 
+**162. The phone's state on the computer (L9)**
+
+- The Overview's line matches the phone's Settings: free and total storage, Wi-Fi with its bars.
+- The ringer turned to vibrate and to silent on the phone shows within 15 s in a session, and within a tick in the background.
+- Behind Tailscale on the phone: Wi-Fi with its bars, not nothing.
+- The phone away: the line is gone; "Share the phone's state" off: nothing is sent.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1204,6 +1211,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **159. Call a number from the computer (L4)**
 
 - A real call (a SIM): the owner presses Call.
+
+**162. The phone's state on the computer (L9)**
+
+- Mobile data with its bars, on a phone with a SIM (two SIMs: the data SIM's).
 
 ## A second phone
 

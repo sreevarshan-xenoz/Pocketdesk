@@ -231,6 +231,7 @@ fn the_overview_shows_a_phone_with_its_battery_and_actions() {
             charge: 42,
             charging: true,
             updated_unix: now,
+            ..Default::default()
         },
     )]
     .into_iter()

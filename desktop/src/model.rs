@@ -349,6 +349,81 @@ pub fn quiet_text(
     })
 }
 
+/// What a phone last said of itself beside its battery (L9), for the
+/// Overview: "Wi-Fi, 3 of 4 bars · 12.3 GB free of 128 GB · on silent".
+/// `None` when it said nothing of it (a KDE device, an older phone).
+pub fn phone_state_text(
+    state: &pocketdesk_core::local::phone_status::PhoneState,
+) -> Option<String> {
+    use pocketdesk_core::local::phone_status::{Network, Ringer};
+    let mut parts = Vec::new();
+    let bars = state.signal.map(|bars| format!(", {bars} of 4 bars"));
+    match state.network {
+        Some(Network::Wifi) => parts.push(format!("Wi-Fi{}", bars.unwrap_or_default())),
+        Some(Network::Mobile) => parts.push(format!("mobile data{}", bars.unwrap_or_default())),
+        Some(Network::Ethernet) => parts.push("Ethernet".to_string()),
+        Some(Network::None) => parts.push("no network".to_string()),
+        None => {}
+    }
+    match (state.storage_free_mb, state.storage_total_mb) {
+        (Some(free), Some(total)) => parts.push(format!(
+            "{} free of {}",
+            storage_words(free),
+            storage_words(total)
+        )),
+        (Some(free), None) => parts.push(format!("{} free", storage_words(free))),
+        _ => {}
+    }
+    match state.ringer {
+        Some(Ringer::Silent) => parts.push("on silent".to_string()),
+        Some(Ringer::Vibrate) => parts.push("on vibrate".to_string()),
+        Some(Ringer::Normal) => parts.push("ringer on".to_string()),
+        None => {}
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    // The first word capitalised: it starts the line.
+    let line = parts.join(" · ");
+    let mut chars = line.chars();
+    Some(match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => line,
+    })
+}
+
+/// How long a phone's state is shown after its report: it resends every
+/// five minutes while reached, so twice that is a report that stopped.
+pub const STATE_FRESH_SECS: u64 = 600;
+
+/// Whether the Overview shows a phone's state (L9 review): only while the
+/// phone is reached, and its report is recent.
+pub fn state_is_now(
+    battery: &pocketdesk_core::local::phone_status::PhoneBattery,
+    place: Place,
+    now_unix: u64,
+) -> bool {
+    place != Place::Away && now_unix.saturating_sub(battery.updated_unix) <= STATE_FRESH_SECS
+}
+
+/// A phone's storage in decimal units, as its own Settings says it (L9
+/// review): "128 GB", "12.3 GB", "800 MB". Free space comes rounded down
+/// to 100 MB, so 0 is "under 100 MB".
+fn storage_words(mb: u64) -> String {
+    if mb == 0 {
+        return "under 100 MB".to_string();
+    }
+    if mb < 1000 {
+        return format!("{mb} MB");
+    }
+    let gb = mb as f64 / 1000.0;
+    if gb >= 100.0 {
+        format!("{gb:.0} GB")
+    } else {
+        format!("{gb:.1} GB")
+    }
+}
+
 /// How long the Overview says a phone said no to a mute.
 pub const REFUSAL_SHOWN_SECS: u64 = 120;
 
@@ -834,6 +909,80 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_phones_state_is_shown_only_while_it_is_reached_and_recent() {
+        use super::{Place, STATE_FRESH_SECS, state_is_now};
+        let battery = pocketdesk_core::local::phone_status::PhoneBattery {
+            updated_unix: 1000,
+            ..Default::default()
+        };
+        assert!(state_is_now(
+            &battery,
+            Place::Linked,
+            1000 + STATE_FRESH_SECS
+        ));
+        assert!(state_is_now(&battery, Place::Session, 1000));
+        assert!(!state_is_now(&battery, Place::Away, 1000), "away");
+        assert!(
+            !state_is_now(&battery, Place::Linked, 1001 + STATE_FRESH_SECS),
+            "stopped reporting"
+        );
+    }
+
+    #[test]
+    fn a_phones_state_reads_as_one_line_of_what_it_said() {
+        use pocketdesk_core::local::phone_status::{Network, PhoneState, Ringer};
+        assert_eq!(super::phone_state_text(&PhoneState::default()), None);
+        let full = PhoneState {
+            storage_free_mb: Some(12_300),
+            storage_total_mb: Some(128_000),
+            network: Some(Network::Wifi),
+            signal: Some(3),
+            ringer: Some(Ringer::Silent),
+        };
+        assert_eq!(
+            super::phone_state_text(&full).as_deref(),
+            Some("Wi-Fi, 3 of 4 bars · 12.3 GB free of 128 GB · on silent")
+        );
+        let mobile = PhoneState {
+            network: Some(Network::Mobile),
+            ringer: Some(Ringer::Vibrate),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::phone_state_text(&mobile).as_deref(),
+            Some("Mobile data · on vibrate")
+        );
+        let bare = PhoneState {
+            network: Some(Network::None),
+            storage_free_mb: Some(500),
+            ringer: Some(Ringer::Normal),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::phone_state_text(&bare).as_deref(),
+            Some("No network · 500 MB free · ringer on")
+        );
+        // Nearly full reads as such, not "0 B" (L9 review).
+        let full_up = PhoneState {
+            storage_free_mb: Some(0),
+            storage_total_mb: Some(64_000),
+            network: Some(Network::Mobile),
+            signal: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::phone_state_text(&full_up).as_deref(),
+            Some("Mobile data, 2 of 4 bars · under 100 MB free of 64.0 GB")
+        );
+        let wired = PhoneState {
+            network: Some(Network::Ethernet),
+            storage_total_mb: Some(256_000),
+            ..Default::default()
+        };
+        assert_eq!(super::phone_state_text(&wired).as_deref(), Some("Ethernet"));
+    }
+
     use super::*;
 
     fn under_way(size: u64, done: u64, rate: u64) -> pocketdesk_core::local::transfers::Transfer {
