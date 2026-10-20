@@ -72,7 +72,10 @@ pub fn targets(devices: &[Device]) -> Vec<&Device> {
 pub fn shown<'a>(entries: &'a [ClipEntry], search: &str, devices: &[Device]) -> Vec<&'a ClipEntry> {
     entries
         .iter()
-        .filter(|e| crate::words::holds_all(search, &[&e.text, &origin(e, devices)]))
+        .filter(|e| {
+            search.trim().is_empty()
+                || crate::words::holds_all(search, &[&e.text, &origin(e, devices)])
+        })
         .collect()
 }
 

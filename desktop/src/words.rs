@@ -41,11 +41,16 @@ pub fn human_size(bytes: u64) -> String {
 /// Every word of `query`, case ignored, is in one of `texts` (J4): the
 /// pages' search boxes. Nothing typed holds everywhere.
 pub fn holds_all(query: &str, texts: &[&str]) -> bool {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    // Nothing typed: nothing lowercased (J4 review: a page's every text was,
+    // each frame, for a search no one made).
+    if words.is_empty() {
+        return true;
+    }
     let texts: Vec<String> = texts.iter().map(|t| t.to_lowercase()).collect();
-    query.split_whitespace().all(|word| {
-        let word = word.to_lowercase();
-        texts.iter().any(|t| t.contains(word.as_str()))
-    })
+    words
+        .iter()
+        .all(|word| texts.iter().any(|t| t.contains(word.as_str())))
 }
 
 #[cfg(test)]

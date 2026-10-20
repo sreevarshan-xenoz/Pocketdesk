@@ -84,7 +84,11 @@ pub fn shown<'a>(
         .iter()
         .rev()
         .filter(|e| filter.admits(&e.event))
-        .filter(|e| crate::words::holds_all(search, &[&phone(e, devices), &describe(e)]))
+        // An event's words are built only for a search (J4 review).
+        .filter(|e| {
+            search.trim().is_empty()
+                || crate::words::holds_all(search, &[&phone(e, devices), &describe(e)])
+        })
         .collect()
 }
 
