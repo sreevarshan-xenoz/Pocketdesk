@@ -419,12 +419,15 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     let Some((app, title, text)) = kde_to_show(body) else {
         return;
     };
+    // A muted app's never counts against the limit (K2b review).
+    let muted = muted_here(&app);
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
-    let admitted = flood_guard()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .admit(device_id, Instant::now(), limit);
-    if !admitted {
+    if !muted
+        && !flood_guard()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .admit(device_id, Instant::now(), limit)
+    {
         return;
     }
     crate::events::emit(
@@ -433,7 +436,7 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
         serde_json::json!({ "app": app }),
         serde_json::json!({ "title": title, "text": text }),
     );
-    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || muted_here(&app) {
+    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || muted {
         return;
     }
     if let Err(e) = show_desktop_notification(tag.as_deref(), &app, &title, &text, None).await {
@@ -532,12 +535,17 @@ impl Plugin for NotificationPlugin {
                 };
                 // One that waited on the phone says so (C3).
                 let waited = waited_secs(&packet.body);
+                // Muted here (K2b): logged and kept, never shown, and never
+                // counted against the phone's limit, which is for what shows
+                // (K2b review: a muted app's burst dropped the others).
+                let muted = muted_here(&app);
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
-                let admitted = flood_guard()
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .admit(sender.device_id(), Instant::now(), limit);
-                if !admitted {
+                if !muted
+                    && !flood_guard()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .admit(sender.device_id(), Instant::now(), limit)
+                {
                     return Ok(());
                 }
                 // An event whether or not it is shown here (a script may want
@@ -571,8 +579,7 @@ impl Plugin for NotificationPlugin {
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }
-                // Muted here (K2b): kept to answer and logged, not shown.
-                if muted_here(&app) {
+                if muted {
                     return Ok(());
                 }
                 let text = with_late(&text, waited);
