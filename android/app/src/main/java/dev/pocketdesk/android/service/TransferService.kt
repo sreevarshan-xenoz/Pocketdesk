@@ -681,9 +681,10 @@ class TransferService : Service() {
             val size = copy.length()
             when {
                 size == 0L -> Result.failure(IllegalStateException("$name is empty"))
-                // A file the computer's drive asked for says so (D8 review):
-                // sent as any other, it would land in its Downloads.
-                drive != null -> {
+                // Sent from the copy as any file is, with its date (K1
+                // review: the plain send carried none) and, for one the
+                // computer's drive asked for, saying so (D8 review).
+                else -> {
                     val descriptor = android.os.ParcelFileDescriptor.open(copy, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                     val modified = lastModified(uri)
                     val source = SourceId.of(uri.toString(), size, modified)
@@ -692,7 +693,6 @@ class TransferService : Service() {
                         FileDates.toSend(Prefs.keepFileDates(this), modified),
                     )
                 }
-                else -> RustCore.sendFile(address, port, copy.absolutePath)
             }
         } finally {
             copy.delete()
