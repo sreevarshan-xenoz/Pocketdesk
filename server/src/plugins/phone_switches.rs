@@ -69,6 +69,21 @@ impl Plugin for PhoneSwitchesPlugin {
     }
 }
 
+/// Forget the reports of phones no longer `paired` (L7 review: an unpaired
+/// phone's report stayed until another phone's changed); from the battery
+/// writer's loop, which reads the paired set every few seconds.
+pub(crate) fn prune(dir: &std::path::Path, paired: &std::collections::HashSet<String>) {
+    let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let phones = reports.get_or_insert_with(|| phone_switches::read(dir));
+    let before = phones.len();
+    phones.retain(|id, _| paired.contains(id));
+    if phones.len() != before
+        && let Err(e) = phone_switches::write(dir, phones)
+    {
+        tracing::warn!("Could not keep the phones' switches: {e}");
+    }
+}
+
 /// Keep `device`'s `switches` and write the reports, those of phones no
 /// longer paired left out; nothing is written when the report is the one
 /// kept (apart from its age, which only a change needs).
@@ -84,6 +99,15 @@ fn keep(
         kept.switches == switches && now_unix.saturating_sub(kept.updated_unix) < 60
     }) {
         return;
+    }
+    // Phones no longer paired go first, so the cap never evicts a paired
+    // phone for one (L7 review).
+    // An unreadable store forgets no one.
+    if let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(dir.join(TRUST_FILE))
+    {
+        let paired: std::collections::HashSet<String> =
+            store.trusted_devices().into_iter().collect();
+        phones.retain(|id, _| paired.contains(id));
     }
     if !phones.contains_key(device) && phones.len() >= MAX_PHONES {
         let oldest = phones
@@ -101,13 +125,6 @@ fn keep(
             updated_unix: now_unix,
         },
     );
-    // An unreadable store forgets no one.
-    if let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(dir.join(TRUST_FILE))
-    {
-        let paired: std::collections::HashSet<String> =
-            store.trusted_devices().into_iter().collect();
-        phones.retain(|id, _| paired.contains(id));
-    }
     if let Err(e) = phone_switches::write(dir, phones) {
         tracing::warn!("Could not keep the phones' switches: {e}");
     }
@@ -150,6 +167,9 @@ mod tests {
         assert_eq!(kept.keys().collect::<Vec<_>>(), ["phone-a"]);
         assert_eq!(kept["phone-a"].switches, switches);
         assert_eq!(kept["phone-a"].updated_unix, 100);
+        // Unpaired since: forgotten without waiting for another report.
+        prune(&dir, &std::collections::HashSet::new());
+        assert!(phone_switches::read(&dir).is_empty());
         *REPORTS.lock().unwrap() = None;
         let _ = std::fs::remove_dir_all(&dir);
     }
