@@ -76,6 +76,14 @@ struct State {
     last_touch: (u16, u16),
     /// What a drop on the window did, and when (L2).
     drop_note: Option<(String, std::time::Instant)>,
+    /// The picture shown, for a screenshot (L5).
+    shown: Option<Picture>,
+    /// The owner asked to record (L5); the worker starts and stops it.
+    record_want: bool,
+    /// The recording under way, and since when (L5).
+    recording: Option<(PathBuf, std::time::Instant)>,
+    /// What the last screenshot or recording did, and when (L5).
+    saved_note: Option<(String, std::time::Instant)>,
 }
 
 /// How long a drop's line stays at the window's foot.
@@ -114,6 +122,144 @@ fn pasted(text: &str) -> String {
         end -= 1;
     }
     text[..end].to_string()
+}
+
+/// How long a screenshot's or recording's line stays (L5).
+const SAVED_NOTE: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// `unix` as a name's date and time, UTC: "2026-10-21 01-02-03" (L5).
+pub fn stamp(unix: u64) -> String {
+    let days = (unix / 86_400) as i64;
+    let secs = unix % 86_400;
+    // Howard Hinnant's civil-from-days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}-{:02}-{:02}",
+        secs / 3600,
+        secs % 3600 / 60,
+        secs % 60
+    )
+}
+
+/// The user's own Pictures or Videos folder (`name`), with Pocketdesk in
+/// it: where the system says it is (L5 review: OneDrive's moved folders,
+/// localized XDG ones), else under the home folder.
+fn user_folder(name: &str) -> PathBuf {
+    let known = match name {
+        "Pictures" => dirs::picture_dir(),
+        "Videos" => dirs::video_dir(),
+        _ => None,
+    };
+    known
+        .or_else(|| dirs::home_dir().map(|home| home.join(name)))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Pocketdesk")
+}
+
+/// `dir`/`stem`.`ext`, or the next free "`stem` (2)".
+fn free_name(dir: &std::path::Path, stem: &str, ext: &str) -> PathBuf {
+    let first = dir.join(format!("{stem}.{ext}"));
+    if !first.exists() {
+        return first;
+    }
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}).{ext}")))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// A recording: the cast's H.264 copied, not encoded again, into an MKV by
+/// ffmpeg, with the wall clock's timestamps (the cast's frame rate varies),
+/// from a keyframe on (L5).
+struct Recorder {
+    child: std::process::Child,
+    stdin: Option<std::process::ChildStdin>,
+    /// Nothing is written before a keyframe: the file would open grey.
+    started: bool,
+}
+
+impl Recorder {
+    fn start(path: &std::path::Path) -> io::Result<Self> {
+        let mut command = Command::new("ffmpeg");
+        command
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-use_wallclock_as_timestamps",
+                "1",
+                "-fflags",
+                "+genpts",
+                "-f",
+                "h264",
+                "-i",
+                "pipe:0",
+                "-c",
+                "copy",
+                "-y",
+            ])
+            .arg(path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        let mut child = command.spawn()?;
+        let stdin = child.stdin.take();
+        Ok(Self {
+            child,
+            stdin,
+            started: false,
+        })
+    }
+
+    /// Write one access unit, once a keyframe has come.
+    fn feed(&mut self, keyframe: bool, access_unit: &[u8]) -> io::Result<()> {
+        self.started |= keyframe;
+        if !self.started {
+            return Ok(());
+        }
+        match self.stdin.as_mut() {
+            Some(stdin) => stdin.write_all(access_unit),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for Recorder {
+    /// The file is closed: ffmpeg finishes it once its input ends, given
+    /// three seconds, then it is stopped (L5 review: a stalled disk must not
+    /// hold the window's worker for good).
+    fn drop(&mut self) {
+        drop(self.stdin.take());
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 /// The cast window and its worker.
@@ -432,7 +578,7 @@ fn take_drops(
     ctx.request_repaint_after(DROP_NOTE);
 }
 
-fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
+fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
     let ctx = ui.ctx().clone();
     let mut state = lock(shared);
     if ctx.input(|i| i.viewport().close_requested()) {
@@ -462,14 +608,79 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
                 state.texture = Some(ctx.load_texture("cast", image, egui::TextureOptions::LINEAR));
             }
         }
+        // Kept for a screenshot (L5).
+        state.shown = Some(picture);
     }
     let texture = state.texture.clone();
     let note = state.note.clone();
     let phone_takes = state.control_on && state.writer.is_some();
     let controlling = control && phone_takes && !state.watch_only;
     let mut watch_only = state.watch_only;
+    let recording = state.recording.clone();
+    let record_want = state.record_want;
+    let saved = state
+        .saved_note
+        .clone()
+        .filter(|(_, at)| at.elapsed() < SAVED_NOTE)
+        .map(|(note, _)| note);
     drop(state);
     let mut buttons = Vec::new();
+    // L5: a screenshot and a recording, whatever control says.
+    egui::Panel::top("cast-capture")
+        .frame(
+            egui::Frame::NONE
+                .fill(egui::Color32::from_gray(24))
+                .inner_margin(4.0),
+        )
+        .show(ui, |ui| {
+            ui.style_mut().visuals = egui::Visuals::dark();
+            ui.horizontal_wrapped(|ui| {
+                let shot = ui
+                    .add_enabled(texture.is_some(), egui::Button::new("Screenshot"))
+                    .on_hover_text("Save the phone's screen as a picture, and copy it");
+                if shot.clicked() {
+                    shot.surrender_focus();
+                    screenshot(shared, &ctx);
+                }
+                let label = if record_want { "Stop" } else { "Record" };
+                let record = ui
+                    .add_enabled(texture.is_some() || record_want, egui::Button::new(label))
+                    .on_hover_text("Record the phone's screen as a video, as it comes");
+                if record.clicked() {
+                    record.surrender_focus();
+                    lock(shared).record_want = !record_want;
+                }
+                if let Some((path, since)) = &recording {
+                    // Read once a second (L5 review: not on every pass).
+                    let size = ui.ctx().memory_mut(|m| {
+                        let id = egui::Id::new("cast-recording-size");
+                        let (at, size): (u64, u64) = m.data.get_temp(id).unwrap_or((u64::MAX, 0));
+                        let now = since.elapsed().as_secs();
+                        if at == now {
+                            size
+                        } else {
+                            let size = std::fs::metadata(path).map_or(0, |m| m.len());
+                            m.data.insert_temp(id, (now, size));
+                            size
+                        }
+                    });
+                    let secs = since.elapsed().as_secs();
+                    ui.colored_label(
+                        egui::Color32::LIGHT_GRAY,
+                        format!(
+                            "Recording {}:{:02} · {}",
+                            secs / 60,
+                            secs % 60,
+                            crate::words::human_size(size)
+                        ),
+                    );
+                    ctx.request_repaint_after(Duration::from_secs(1));
+                } else if let Some(note) = &saved {
+                    ui.colored_label(egui::Color32::LIGHT_GRAY, note);
+                    ctx.request_repaint_after(SAVED_NOTE);
+                }
+            });
+        });
     if control {
         egui::Panel::top("cast-control")
             .frame(egui::Frame::NONE.fill(egui::Color32::from_gray(24)).inner_margin(4.0))
@@ -654,6 +865,68 @@ fn draw(shared: &Mutex<State>, ui: &mut egui::Ui, control: bool) {
         });
 }
 
+/// A recording ended (its ffmpeg has finished the file): the window says
+/// where it went, if it holds anything, and why it stopped (L5 review: a
+/// recording's state had outlived it, and named files never written).
+fn end_recording(shared: &Mutex<State>, why: Option<&str>) {
+    let mut state = lock(shared);
+    state.record_want = false;
+    let Some((path, _)) = state.recording.take() else {
+        return;
+    };
+    let kept = std::fs::metadata(&path).is_ok_and(|m| m.len() > 0);
+    let note = match (kept, why) {
+        (true, None) => format!("Recorded {}.", path.display()),
+        (true, Some(why)) => format!("Recorded {}; {why}.", path.display()),
+        (false, Some(why)) => format!("Nothing recorded: {why}."),
+        (false, None) => "Nothing recorded: no picture came.".to_string(),
+    };
+    state.saved_note = Some((note, std::time::Instant::now()));
+}
+
+/// Save the picture shown as a PNG in Pictures\\Pocketdesk, and copy it
+/// (L5); the file is written off the window's thread.
+fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
+    let Some((width, height, rgba)) = lock(shared)
+        .shown
+        .as_ref()
+        .map(|p| (p.width, p.height, p.rgba.clone()))
+    else {
+        return;
+    };
+    ctx.copy_image(egui::ColorImage::from_rgba_unmultiplied(
+        [width, height],
+        &rgba,
+    ));
+    let dir = user_folder("Pictures");
+    let stem = format!("Phone screen {}", stamp(now_unix()));
+    let shared = shared.clone();
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        // One screenshot at a time picks its name, so two in a second do not
+        // take the same one (L5 review).
+        static SAVING: Mutex<()> = Mutex::new(());
+        let _one = SAVING.lock().unwrap_or_else(|e| e.into_inner());
+        let path = free_name(&dir, &stem, "png");
+        let saved = std::fs::create_dir_all(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|()| {
+                image::RgbaImage::from_raw(width as u32, height as u32, rgba)
+                    .ok_or_else(|| "a picture of the wrong size".to_string())?
+                    .save(&path)
+                    .map_err(|e| e.to_string())
+            });
+        lock(&shared).saved_note = Some((
+            match saved {
+                Ok(()) => format!("Saved {} and copied it.", path.display()),
+                Err(e) => format!("Copied, not saved: {e}."),
+            },
+            std::time::Instant::now(),
+        ));
+        ctx.request_repaint_of(viewport_id());
+    });
+}
+
 /// The worker: find the cast, show it until it ends, again.
 fn watch(state_dir: &std::path::Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
     loop {
@@ -681,6 +954,9 @@ fn watch(state_dir: &std::path::Path, shared: &Arc<Mutex<State>>, ctx: &egui::Co
         // An error is the relay gone or the window closed: the file says
         // which on the next look.
         let _ = view(&file, shared, ctx);
+        // A recording ends with its cast, however it ended (L5 review).
+        end_recording(shared, Some("the phone's screen stopped"));
+        ctx.request_repaint_of(viewport_id());
         let mut state = lock(shared);
         state.stream = None;
         state.writer = None;
@@ -689,6 +965,7 @@ fn watch(state_dir: &std::path::Path, shared: &Arc<Mutex<State>>, ctx: &egui::Co
         state.size = None;
         state.texture = None;
         state.picture = None;
+        state.shown = None;
     }
 }
 
@@ -727,11 +1004,49 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
 
     let mut decoder: Option<Decoder> = None;
     let mut gate = KeyGate::default();
+    let mut recorder: Option<Recorder> = None;
     loop {
-        match Message::read(&mut reader)? {
+        let message = Message::read(&mut reader)?;
+        // L5: the owner's Record and Stop, between frames or heartbeats; a
+        // config (a reconnect, the phone turned) starts a new stream first.
+        let want = lock(shared).record_want
+            && matches!(message, Message::Frame { .. } | Message::Heartbeat);
+        let stop = !lock(shared).record_want;
+        if want && recorder.is_none() {
+            let dir = user_folder("Videos");
+            let path = free_name(&dir, &format!("Phone screen {}", stamp(now_unix())), "mkv");
+            let started = std::fs::create_dir_all(&dir).and_then(|()| Recorder::start(&path));
+            let mut state = lock(shared);
+            match started {
+                Ok(r) => {
+                    recorder = Some(r);
+                    state.recording = Some((path, std::time::Instant::now()));
+                    // It starts on the next keyframe.
+                    Message::WantKeyframe.write(&mut asks)?;
+                }
+                Err(e) => {
+                    state.record_want = false;
+                    let why = if e.kind() == io::ErrorKind::NotFound {
+                        format!("Not recording: {e} (it needs ffmpeg).")
+                    } else {
+                        format!("Not recording: {e}.")
+                    };
+                    state.saved_note = Some((why, std::time::Instant::now()));
+                }
+            }
+        } else if stop && recorder.is_some() {
+            recorder = None;
+            end_recording(shared, None);
+            ctx.request_repaint_of(viewport_id());
+        }
+        match message {
             Message::Config { width, height } => {
                 decoder = None;
                 gate = KeyGate::default();
+                // A new size is a new stream: the recording so far is kept.
+                if recorder.take().is_some() {
+                    end_recording(shared, Some("it stopped as the phone's screen changed"));
+                }
                 let started = Decoder::start(width, height, publisher(shared, ctx));
                 let mut state = lock(shared);
                 state.size = Some((width, height));
@@ -761,6 +1076,13 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                         Message::WantKeyframe.write(&mut asks)?;
                         continue;
                     }
+                }
+                // L5: the recording takes it as it is.
+                if let Some(r) = recorder.as_mut()
+                    && let Err(e) = r.feed(keyframe, &data)
+                {
+                    recorder = None;
+                    end_recording(shared, Some(&format!("it stopped ({e})")));
                 }
                 if let Err(e) = d.feed(&data) {
                     decoder = None;
@@ -969,6 +1291,122 @@ mod tests {
             &mut pressing,
         );
         assert_eq!(events, vec![ControlEvent::Text("from here".into())]);
+    }
+
+    /// L5: a recording copies the stream into an MKV of the wall clock's
+    /// length, from its first keyframe. Needs ffmpeg and ffprobe; skipped
+    /// without them.
+    #[test]
+    fn a_recording_lasts_as_long_as_the_cast() {
+        let dir = std::env::temp_dir().join(format!("pd-l5-rec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("t.h264");
+        let made = Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+            ])
+            .arg("testsrc=size=320x240:rate=10")
+            .args([
+                "-t",
+                "2",
+                "-c:v",
+                "libx264",
+                "-x264-params",
+                "aud=1:keyint=10",
+            ])
+            .args(["-bsf:v", "h264_mp4toannexb", "-f", "h264"])
+            .arg(&source)
+            .status();
+        if !made.is_ok_and(|s| s.success()) {
+            eprintln!("no ffmpeg with libx264 here: skipped");
+            return;
+        }
+        let data = std::fs::read(&source).unwrap();
+        let aud: &[u8] = &[0, 0, 0, 1, 9];
+        let mut starts: Vec<usize> = data
+            .windows(aud.len())
+            .enumerate()
+            .filter(|(_, w)| *w == aud)
+            .map(|(i, _)| i)
+            .collect();
+        starts.push(data.len());
+        let units: Vec<&[u8]> = starts.windows(2).map(|w| &data[w[0]..w[1]]).collect();
+        assert_eq!(units.len(), 20);
+        let out = dir.join("out.mkv");
+        let mut recorder = Recorder::start(&out).unwrap();
+        // A delta frame before the first keyframe is left out.
+        recorder.feed(false, units[1]).unwrap();
+        for (i, unit) in units.iter().enumerate() {
+            recorder.feed(i % 10 == 0, unit).unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        drop(recorder);
+        let probe = Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration:stream=codec_name,width",
+            ])
+            .args(["-of", "default=nw=1"])
+            .arg(&out)
+            .output();
+        let Ok(probe) = probe else {
+            eprintln!("no ffprobe here: skipped");
+            return;
+        };
+        let text = String::from_utf8_lossy(&probe.stdout).to_string();
+        assert!(
+            text.contains("codec_name=h264") && text.contains("width=320"),
+            "{text}"
+        );
+        let duration: f64 = text
+            .lines()
+            .find_map(|l| l.strip_prefix("duration="))
+            .and_then(|d| d.parse().ok())
+            .unwrap();
+        assert!(
+            (1.6..2.4).contains(&duration),
+            "{duration} s for 2 s of frames"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// L5: names carry the date and time, UTC.
+    #[test]
+    fn a_name_carries_the_date() {
+        assert_eq!(super::stamp(0), "1970-01-01 00-00-00");
+        assert_eq!(super::stamp(1_792_070_523), "2026-10-15 13-22-03");
+        assert_eq!(
+            super::stamp(951_782_400),
+            "2000-02-29 00-00-00",
+            "a leap day"
+        );
+    }
+
+    /// L5: a name taken gets the next free one.
+    #[test]
+    fn a_name_taken_gets_the_next() {
+        let dir = std::env::temp_dir().join(format!("pd-l5-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(
+            super::free_name(&dir, "Phone", "png"),
+            dir.join("Phone.png")
+        );
+        std::fs::write(dir.join("Phone.png"), b"x").unwrap();
+        assert_eq!(
+            super::free_name(&dir, "Phone", "png"),
+            dir.join("Phone (2).png")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     use super::*;
