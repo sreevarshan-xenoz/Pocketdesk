@@ -271,6 +271,14 @@ fun RemoteInputScreen(
             keyboard.close()
         }
     }
+    // A drop closes the keyboard (I1 review): it would cover the card while
+    // the remote reconnects, its keys going nowhere.
+    LaunchedEffect(state) {
+        if (state != State.Ready && keyboardOpen) {
+            keyboard.close()
+            keyboardOpen = false
+        }
+    }
     val imeVisible = WindowInsets.isImeVisible
     var imeSeen by remember { mutableStateOf(false) }
     LaunchedEffect(keyboardOpen, imeVisible) {
