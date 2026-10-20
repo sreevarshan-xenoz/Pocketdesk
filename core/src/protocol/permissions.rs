@@ -45,10 +45,13 @@ pub enum Capability {
     /// Lock this computer when the phone leaves (D9): about what the
     /// computer does, as Ring is; off unless chosen.
     AwayLock,
+    /// Play the sound the phone's apps play here, with its screen (K5); off
+    /// unless chosen: it plays on this computer's speakers.
+    PhoneSound,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 16] = [
+    pub const ALL: [Capability; 17] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -65,6 +68,7 @@ impl Capability {
         Capability::Ring,
         Capability::Mute,
         Capability::AwayLock,
+        Capability::PhoneSound,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -72,7 +76,10 @@ impl Capability {
     /// hand out, and locking this computer when it leaves, which only the
     /// owner turns on (D9).
     pub fn default_allowed(self) -> bool {
-        !matches!(self, Capability::Exec | Capability::AwayLock)
+        !matches!(
+            self,
+            Capability::Exec | Capability::AwayLock | Capability::PhoneSound
+        )
     }
 }
 
@@ -170,6 +177,8 @@ pub struct DevicePermissions {
     pub mute: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub away_lock: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_sound: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -194,6 +203,7 @@ impl DevicePermissions {
             Capability::Ring => &mut self.ring,
             Capability::Mute => &mut self.mute,
             Capability::AwayLock => &mut self.away_lock,
+            Capability::PhoneSound => &mut self.phone_sound,
         }
     }
 
@@ -215,6 +225,7 @@ impl DevicePermissions {
             Capability::Ring => self.ring,
             Capability::Mute => self.mute,
             Capability::AwayLock => self.away_lock,
+            Capability::PhoneSound => self.phone_sound,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -320,7 +331,10 @@ mod tests {
                 none.allows(capability),
                 // Nor lock this computer when it leaves, which only the
                 // owner turns on (D9).
-                !matches!(capability, Capability::Exec | Capability::AwayLock),
+                !matches!(
+                    capability,
+                    Capability::Exec | Capability::AwayLock | Capability::PhoneSound
+                ),
                 "{capability:?}"
             );
         }

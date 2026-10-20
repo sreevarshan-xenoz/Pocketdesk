@@ -34,6 +34,16 @@ pub(crate) const NO_CAST: i32 = 2;
 
 static QUEUE_TX: Mutex<Option<mpsc::Sender<Vec<u8>>>> = Mutex::new(None);
 
+/// The cast's sound waiting for the link (K5): its own queue and sender,
+/// so it never waits behind the picture's frames; a full queue drops a
+/// packet, as late sound is worse than a gap.
+static AUDIO_TX: Mutex<Option<mpsc::Sender<Vec<u8>>>> = Mutex::new(None);
+
+/// Sound packets waiting: 10, a fifth of a second.
+const AUDIO_QUEUE: usize = 10;
+/// Sound packets sent and not yet delivered: 5, a tenth of a second.
+const AUDIO_IN_FLIGHT: usize = 5;
+
 fn queue_tx() -> Option<mpsc::Sender<Vec<u8>>> {
     QUEUE_TX.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
@@ -41,7 +51,55 @@ fn queue_tx() -> Option<mpsc::Sender<Vec<u8>>> {
 /// A cast session was installed: send what is queued on `connection` until
 /// `cancel`.
 pub(crate) fn start(connection: SharedConnection, cancel: CancellationToken) {
+    *AUDIO_TX.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some(spawn_audio_sender(connection.clone(), cancel.clone()));
     *QUEUE_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(spawn_sender(connection, cancel));
+}
+
+/// The task that sends the cast's sound, one stream a packet (K5).
+fn spawn_audio_sender(
+    connection: SharedConnection,
+    cancel: CancellationToken,
+) -> mpsc::Sender<Vec<u8>> {
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(AUDIO_QUEUE);
+    tokio::spawn(async move {
+        // At most a tenth of a second sent and not yet delivered (K5 review:
+        // a stalled link had piled the sound up in the transport, to arrive
+        // late); meanwhile the queue fills, and a full queue drops.
+        let mut in_flight = InFlight::new(AUDIO_IN_FLIGHT);
+        loop {
+            if !in_flight.admit(&cancel).await {
+                break;
+            }
+            let bytes = tokio::select! {
+                _ = cancel.cancelled() => break,
+                bytes = rx.recv() => match bytes {
+                    Some(bytes) => bytes,
+                    None => break,
+                },
+            };
+            match send(&connection, &bytes).await {
+                Ok(delivered) => in_flight.push(delivered),
+                Err(e) => {
+                    tracing::debug!("A cast's sound was not sent: {e}");
+                    if connection.close_reason().is_some() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    tx
+}
+
+/// One Opus packet of the phone's sound (K5): queued, dropped when the
+/// link is behind, or no cast.
+pub(crate) fn audio(opus: &[u8]) -> i32 {
+    if opus.is_empty() || opus.len() > wire::MAX_CAST_AUDIO {
+        return FULL;
+    }
+    let tx = AUDIO_TX.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    offer(tx, wire::audio_bytes(opus))
 }
 
 /// The task that sends what is queued, in order, keeping at most a round
@@ -80,6 +138,7 @@ fn spawn_sender(connection: SharedConnection, cancel: CancellationToken) -> mpsc
 
 /// The cast session ended: nothing more is queued.
 pub(crate) fn stop() {
+    AUDIO_TX.lock().unwrap_or_else(|e| e.into_inner()).take();
     QUEUE_TX.lock().unwrap_or_else(|e| e.into_inner()).take();
 }
 

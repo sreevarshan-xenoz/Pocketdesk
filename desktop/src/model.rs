@@ -741,7 +741,7 @@ pub fn set_permission(
 pub fn fixed_at_session_start(capability: Capability) -> bool {
     matches!(
         capability,
-        Capability::Input | Capability::Audio | Capability::Mic
+        Capability::Input | Capability::Audio | Capability::Mic | Capability::PhoneSound
     )
 }
 
@@ -1310,7 +1310,12 @@ mod tests {
             .collect();
         assert_eq!(
             fixed,
-            [Capability::Input, Capability::Audio, Capability::Mic]
+            [
+                Capability::Input,
+                Capability::Audio,
+                Capability::Mic,
+                Capability::PhoneSound
+            ]
         );
     }
 

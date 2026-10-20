@@ -2255,6 +2255,16 @@ Built 2026-10-20; the media controls read back on this Windows box by a live tes
 - [ ] The session ends: the song leaves the flyout within a few seconds. Paused five minutes: it leaves.
 - [ ] The setting off: it leaves at once.
 
+## 155. The phone's sound with its screen (K5)
+
+Built 2026-10-20; tested through units, a loopback cast and the WAV seam, nothing on a device yet.
+- [ ] Phone Settings "The phone's sound with its screen" asks for the microphone permission; desktop Devices "Play its sound here" on.
+- [ ] "Show screen" with a throwaway app playing a 1 kHz tone: a throwaway server with `POCKETDESK_PHONE_AUDIO_FILE` writes it; its pitch and level match.
+- [ ] By ear: a video on the phone plays on the computer's speakers, behind the picture by how much.
+- [ ] With another app in front on the phone (the use case): the sound still comes.
+- [ ] "Play its sound here" off mid-cast: the cast ends. Without it: the phone does not capture.
+- [ ] Linux: the sound through `pw-cat`.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

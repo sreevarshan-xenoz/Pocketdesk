@@ -565,6 +565,14 @@ object RustCore {
     /** The cast session's state, as [remoteState]'s, but `none` while the phone's session is not a cast. */
     fun castState(): String = nativeCastState()
 
+    /** No cast session: what [castAudio] answers then (K5). */
+    const val CAST_NONE = 2
+
+    /** One Opus packet of the phone's sound with its cast (K5): 0 queued, 1 dropped, [CAST_NONE] no cast. */
+    fun castAudio(packet: ByteArray): Int = runCatching { nativeCastAudio(packet) }.getOrDefault(CAST_NONE)
+
+    private external fun nativeCastAudio(packet: ByteArray): Int
+
     /** End the phone's session if it is a cast, and no other session the person opened since. */
     fun stopCast() = nativeStopCast()
 

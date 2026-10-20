@@ -36,6 +36,8 @@ pub struct Streamed {
     pub video: bool,
     /// The phone shows its own screen here (T10k).
     pub cast: bool,
+    /// The phone's sound plays here with its screen (K5).
+    pub phone_sound: bool,
 }
 
 /// One currently-live streaming session, safe to render or serialize.

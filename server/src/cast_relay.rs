@@ -133,6 +133,9 @@ pub async fn run(mut events: mpsc::Receiver<CastEvent>, listener: TcpListener, s
                                     .store(on, std::sync::atomic::Ordering::Release);
                                 Message::ControlState { on }
                             }
+                            // Its sound goes to the player, never the
+                            // viewer (K5): the streamer keeps it from here.
+                            CastPayload::Audio { .. } => continue,
                         };
                         if let Some(v) = viewer.as_ref().filter(|v| v.session_id == session_id)
                             && v.tx.try_send(message).is_err()

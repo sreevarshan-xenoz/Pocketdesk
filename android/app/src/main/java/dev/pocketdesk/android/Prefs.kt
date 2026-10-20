@@ -303,6 +303,14 @@ object Prefs {
         bump()
     }
 
+    /** K5: "Show screen" also sends what the phone's apps play (off by default). */
+    fun castSound(ctx: Context): Boolean = prefs(ctx).getBoolean("cast_sound", false)
+
+    fun setCastSound(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("cast_sound", enabled) }
+        bump()
+    }
+
     /** C8: the computer this phone casts to may control it (off by default). */
     fun controlFromComputer(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_CONTROL_FROM_COMPUTER, false)

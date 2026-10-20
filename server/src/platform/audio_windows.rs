@@ -56,6 +56,11 @@ fn friendly_name(device: &IMMDevice) -> String {
     named.unwrap_or_else(|_| "Unknown device".to_string())
 }
 
+/// The default output device, where the phone's sound plays (K5).
+pub(crate) fn default_output() -> Result<IMMDevice> {
+    default_render(&enumerator()?)
+}
+
 fn default_render(enumerator: &IMMDeviceEnumerator) -> Result<IMMDevice> {
     unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }
         .context("no default audio output device")

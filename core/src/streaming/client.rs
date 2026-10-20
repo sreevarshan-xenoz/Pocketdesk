@@ -93,6 +93,9 @@ pub const SCREEN_FEATURE_PEN: u8 = 1;
 pub const REMOTE_FEATURES_SAID: u8 = 0x80;
 /// The computer draws a laser dot ([`super::InputPacket::Laser`]).
 pub const REMOTE_FEATURE_LASER: u8 = 1;
+/// A cast: the computer plays the phone's sound (K5), so the phone
+/// captures it.
+pub const REMOTE_FEATURE_PHONE_SOUND: u8 = 2;
 
 /// What a remote's ready stream says the computer offers, from its
 /// payload: 0 when it says nothing.

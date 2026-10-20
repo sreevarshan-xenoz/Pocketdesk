@@ -14,6 +14,8 @@ pub const CAST_CONFIG: [u8; 2] = [0xFA, 0x01];
 pub const CAST_FRAME: [u8; 2] = [0xFA, 0x00];
 /// Whether the phone takes control from the computer now (C8).
 pub const CAST_CONTROL_STATE: [u8; 2] = [0xFA, 0x02];
+/// A stream of the phone's sound (K5): an Opus packet follows.
+pub const CAST_AUDIO: [u8; 2] = [CAST_PREFIX, 0x03];
 
 /// The first byte of every cast stream; no input packet tag is this high.
 pub const CAST_PREFIX: u8 = 0xFA;
@@ -37,6 +39,21 @@ pub enum CastPayload {
     ControlState {
         on: bool,
     },
+    /// One Opus packet of what the phone's apps play (K5): 48 kHz stereo.
+    Audio {
+        opus: Vec<u8>,
+    },
+}
+
+/// The largest Opus packet a cast's sound may carry: 20 ms at 96 kbit/s
+/// is about 240 bytes, and Opus allows at most 1275 a frame.
+pub const MAX_CAST_AUDIO: usize = 4000;
+
+/// The stream the phone sends for one Opus packet of its sound (K5).
+pub fn audio_bytes(opus: &[u8]) -> Vec<u8> {
+    let mut out = CAST_AUDIO.to_vec();
+    out.extend_from_slice(opus);
+    out
 }
 
 /// The stream the phone sends to say whether it takes control (C8).
@@ -81,6 +98,11 @@ pub fn parse(stream: &[u8]) -> Option<CastPayload> {
         m if m == CAST_CONTROL_STATE && stream.len() == 3 => Some(CastPayload::ControlState {
             on: stream[2] & 1 != 0,
         }),
+        m if m == CAST_AUDIO && stream.len() > 2 && stream.len() <= 2 + MAX_CAST_AUDIO => {
+            Some(CastPayload::Audio {
+                opus: stream[2..].to_vec(),
+            })
+        }
         _ => None,
     }
 }
@@ -156,6 +178,23 @@ pub enum CastEvent {
 
 #[cfg(test)]
 mod tests {
+    /// K5: the phone's sound travels as its own cast stream, within a size.
+    #[test]
+    fn a_cast_carries_its_sound() {
+        let opus = vec![0xFC, 1, 2, 3];
+        assert_eq!(
+            parse(&audio_bytes(&opus)),
+            Some(CastPayload::Audio { opus: opus.clone() })
+        );
+        assert_eq!(parse(&CAST_AUDIO), None, "empty");
+        assert!(parse(&audio_bytes(&vec![0; MAX_CAST_AUDIO])).is_some());
+        assert_eq!(
+            parse(&audio_bytes(&vec![0; MAX_CAST_AUDIO + 1])),
+            None,
+            "too large"
+        );
+    }
+
     use super::*;
 
     #[test]
