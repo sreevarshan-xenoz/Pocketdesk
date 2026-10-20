@@ -54,6 +54,8 @@ object PhoneLink {
 
     /** Send `packetType` with [body] now (on the worker thread). Returns whether it went. */
     fun sendNow(ctx: Context, packetType: String, body: JSONObject): Boolean {
+        // L8: the other computers picked get a copy, whatever becomes of this.
+        copyToOthers(ctx, packetType, body)
         if (SystemClock.elapsedRealtime() < pausedUntilMs) return false
         val host = target(ctx) ?: return false
         val send = {
@@ -84,5 +86,53 @@ object PhoneLink {
             Log.d(TAG, "not sent to ${host.address}, pausing a minute: ${it.message}")
             pausedUntilMs = SystemClock.elapsedRealtime() + PAUSE_MS
         }.isSuccess
+    }
+
+    /**
+     * The copies for the other computers (L8), on a worker of their own so a
+     * computer out of reach never holds up the phone's own; each paused a
+     * minute after it fails, and dropped then (they are copies, not waited).
+     */
+    private val others: ThreadPoolExecutor =
+        ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue(40), ThreadPoolExecutor.DiscardOldestPolicy())
+
+    private val othersPausedUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** What was copied lately, so one sent again after a wait (C3) is copied once. */
+    private val copied = object : LinkedHashMap<String, Unit>(64, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>?) = size > 200
+    }
+
+    private fun copyToOthers(ctx: Context, packetType: String, body: JSONObject) {
+        val picked = AlsoToPrefs.picked(ctx)
+        if (picked.isEmpty()) return
+        val hosts = HostStore.hosts(ctx)
+        val targets = AlsoTo.targets(
+            packetType,
+            hosts.map { it.address },
+            { HostStore.pairedDesktopId(ctx, it) != null },
+            picked,
+            target(ctx)?.address,
+        )
+        if (targets.isEmpty()) return
+        synchronized(copied) {
+            if (copied.put(AlsoTo.key(packetType, body), Unit) != null) return
+        }
+        val copy = AlsoTo.copyFor(body).toString()
+        targets.mapNotNull { address -> hosts.firstOrNull { it.address == address } }.forEach { host ->
+            others.execute {
+                val now = SystemClock.elapsedRealtime()
+                if (now < (othersPausedUntil[host.address] ?: 0L)) return@execute
+                val sent = if (packetType == "kdeconnect.notification") {
+                    RustCore.sendNotificationAcked(host.address, host.controlPort, copy).map { }
+                } else {
+                    RustCore.sendPhonePacket(host.address, host.controlPort, packetType, copy)
+                }
+                sent.onFailure {
+                    Log.d(TAG, "a copy was not sent to ${host.address}, pausing a minute: ${it.message}")
+                    othersPausedUntil[host.address] = SystemClock.elapsedRealtime() + PAUSE_MS
+                }
+            }
+        }
     }
 }

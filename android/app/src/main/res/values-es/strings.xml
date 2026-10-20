@@ -553,6 +553,9 @@
     <string name="phone_notifications_wait_10">Esperar hasta 10 minutos</string>
     <string name="phone_notifications_wait_60">Esperar hasta una hora</string>
     <string name="phone_notifications_wait_0">No esperar</string>
+    <string name="phone_notifications_also">Mis otros equipos</string>
+    <string name="phone_notifications_also_summary">Enviar también las notificaciones y los mensajes de este teléfono a estos equipos emparejados, como máximo %1$d, para verlos en cada uno. Solo el equipo que este teléfono usó más recientemente puede responderlos o borrarlos</string>
+    <string name="phone_notifications_also_to">También a %1$s</string>
     <string name="channel_offers">Archivos del equipo</string>
     <string name="offer_waiting_title">El equipo envía un archivo</string>
     <string name="offer_save">Guardar</string>

@@ -133,6 +133,34 @@ fun PhoneNotificationsSection() {
             )
         }
     }
+    // L8: other computers of mine get a copy, to see but not to answer.
+    val own = version.let { dev.pocketdesk.android.notify.PhoneLink.target(context)?.address }
+    val others = version.let {
+        dev.pocketdesk.android.HostStore.hosts(context).filter {
+            it.address != own && dev.pocketdesk.android.HostStore.pairedDesktopId(context, it.address) != null
+        }
+    }
+    if (others.isNotEmpty()) {
+        val picked = version.let { dev.pocketdesk.android.notify.AlsoToPrefs.picked(context) }
+        SettingRow(
+            stringResource(R.string.phone_notifications_also),
+            stringResource(R.string.phone_notifications_also_summary, dev.pocketdesk.android.notify.AlsoTo.MAX),
+        )
+        others.forEach { host ->
+            SettingSwitch(
+                stringResource(
+                    R.string.phone_notifications_also_to,
+                    dev.pocketdesk.android.HostStore.shownName(context, host.address),
+                ),
+                null,
+                host.address in picked,
+                {
+                    dev.pocketdesk.android.notify.AlsoToPrefs.set(context, host.address, it)
+                    version++
+                },
+            )
+        }
+    }
     if (seen.isEmpty()) {
         Text(
             stringResource(R.string.phone_notifications_apps_empty),
