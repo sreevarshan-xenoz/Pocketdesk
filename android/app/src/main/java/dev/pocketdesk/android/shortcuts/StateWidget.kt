@@ -241,11 +241,14 @@ class StateWidget : AppWidgetProvider() {
                 } else {
                     setTextViewText(R.id.widget_state_numbers, numbers(context, state))
                 }
-                setTextViewText(R.id.widget_state_when, timeLine(context, readAt, time))
-                setTextColor(
-                    R.id.widget_state_when,
-                    context.getColor(if (StateWidgetPlan.warns(time)) R.color.widget_warning else R.color.widget_on_surface_variant),
-                )
+                // Not answering in the warning colour: the twin view, whose
+                // colour follows dark mode as one set from here would not.
+                val warns = StateWidgetPlan.warns(time)
+                val line = timeLine(context, readAt, time)
+                setTextViewText(R.id.widget_state_when, line)
+                setTextViewText(R.id.widget_state_when_warning, line)
+                setViewVisibility(R.id.widget_state_when, if (warns) View.GONE else View.VISIBLE)
+                setViewVisibility(R.id.widget_state_when_warning, if (warns) View.VISIBLE else View.GONE)
                 setOnClickPendingIntent(
                     R.id.widget_state_root,
                     if (host == null) {

@@ -48,6 +48,18 @@
             android:maxWidth="180dp"
             android:textColor="@color/widget_on_surface_variant"
             android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_state_when_warning"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:maxWidth="180dp"
+            android:textColor="@color/widget_warning"
+            android:textSize="11sp"
+            android:visibility="gone" />
     </LinearLayout>
 
     <TextView
