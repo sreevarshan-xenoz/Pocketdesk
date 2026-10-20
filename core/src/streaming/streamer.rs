@@ -106,10 +106,14 @@ fn screen_feature_byte(input: bool) -> u8 {
 
 /// What a remote's ready stream says this computer offers it (G4): a laser
 /// only for a phone whose input is taken, where the dot can be drawn.
-fn remote_feature_byte(input: bool, laser: bool) -> u8 {
+fn remote_feature_byte(input: bool, laser: bool, phone_sound: bool) -> u8 {
     let mut byte = super::client::REMOTE_FEATURES_SAID;
     if input && laser {
         byte |= super::client::REMOTE_FEATURE_LASER;
+    }
+    // K5: a cast's sound is taken.
+    if phone_sound {
+        byte |= super::client::REMOTE_FEATURE_PHONE_SOUND;
     }
     byte
 }
@@ -213,6 +217,10 @@ pub struct StreamingServer {
     /// T10k: where a cast session's screen goes (the server crate's cast
     /// relay, which hands it to the desktop app). Unset, casts are refused.
     cast_tx: Option<tokio::sync::mpsc::Sender<super::cast::CastEvent>>,
+    /// K5: where a cast's sound goes, its Opus packets (the server crate's
+    /// player). Bounded with drop-on-full, as the mic's. Unset, a cast's
+    /// sound is not taken, and the phone is told so.
+    phone_sound_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
     /// Optional session gate (pairing, F5 permissions and approval): called
     /// with the device id the client announced in-band (None if it sent
     /// none); `None` rejects the session before capture starts, `Some` is what
@@ -269,6 +277,7 @@ impl StreamingServer {
             input_tx: None,
             mic_tx: None,
             cast_tx: None,
+            phone_sound_tx: None,
             session_gate: None,
             telemetry: false,
             view_only: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -329,6 +338,11 @@ impl StreamingServer {
     /// (R4 E2 reverse audio). See the `mic_tx` field docs.
     pub fn set_mic_channel(&mut self, tx: tokio::sync::mpsc::Sender<InputPacket>) {
         self.mic_tx = Some(tx);
+    }
+
+    /// Set where casts' sound goes (K5). See the `phone_sound_tx` field docs.
+    pub fn set_phone_sound_channel(&mut self, tx: tokio::sync::mpsc::Sender<Vec<u8>>) {
+        self.phone_sound_tx = Some(tx);
     }
 
     /// Set where cast sessions' screens go (T10k). See the `cast_tx` field docs.
@@ -515,6 +529,9 @@ impl StreamingServer {
         let laser = self.laser;
         let allow_mic = permissions.allows(Capability::Mic) && !input_only;
         let allow_audio = permissions.allows(Capability::Audio) && !input_only;
+        // A cast's sound plays here with its own permission (K5).
+        let allow_phone_sound =
+            cast && permissions.allows(Capability::PhoneSound) && self.phone_sound_tx.is_some();
         // A cast needs its own permission, and somewhere to show it.
         let cast_tx = if cast {
             let refusal: Option<&[u8]> = if !permissions.allows(Capability::Cast) {
@@ -592,6 +609,7 @@ impl StreamingServer {
                 mic: allow_mic,
                 video: !no_picture,
                 cast,
+                phone_sound: allow_phone_sound,
             },
         );
         // An input-only session says it was admitted, so the phone shows its
@@ -619,7 +637,11 @@ impl StreamingServer {
                         said.push(grant);
                     } else {
                         // A remote hears what it is offered (G4).
-                        said.push(remote_feature_byte(!force_view_only, laser));
+                        said.push(remote_feature_byte(
+                            !force_view_only,
+                            laser,
+                            allow_phone_sound,
+                        ));
                     }
                     if let Err(e) = ready.write_all(&said).await {
                         warn!(error = %e, "Could not say the input-only session is ready");
@@ -1379,6 +1401,8 @@ impl StreamingServer {
         let monitor_full_quality = self.full_quality.clone();
         let monitor_preset = self.preset.clone();
         let monitor_mic_tx = self.mic_tx.clone();
+        let monitor_phone_sound_tx = self.phone_sound_tx.clone();
+        let monitor_allow_phone_sound = allow_phone_sound;
         let monitor_cast_tx = cast_tx.clone();
         let monitor_cast_want = cast_want_tx;
         let monitor_cast_control_on = cast_control_on;
@@ -1467,6 +1491,17 @@ impl StreamingServer {
                                                     monitor_cast_control_on
                                                         .store(*on, std::sync::atomic::Ordering::Release);
                                                     false
+                                                }
+                                                // Its sound (K5): to the player, never
+                                                // the viewer; stale sound is worse than
+                                                // a gap, so a full channel drops it.
+                                                super::cast::CastPayload::Audio { opus } => {
+                                                    if monitor_allow_phone_sound
+                                                        && let Some(tx) = &monitor_phone_sound_tx
+                                                    {
+                                                        let _ = tx.try_send(opus.clone());
+                                                    }
+                                                    continue;
                                                 }
                                             };
                                             let delivered = monitor_cast_tx.as_ref().is_some_and(|tx| {
@@ -2556,7 +2591,7 @@ mod tests {
     fn a_remote_is_offered_the_laser_only_with_input_where_it_is_drawn() {
         use super::super::client::{REMOTE_FEATURE_LASER, remote_features};
         let laser = |input, drawn| {
-            remote_features(&[remote_feature_byte(input, drawn)]) & REMOTE_FEATURE_LASER
+            remote_features(&[remote_feature_byte(input, drawn, false)]) & REMOTE_FEATURE_LASER
         };
         assert_eq!(laser(true, true), REMOTE_FEATURE_LASER);
         assert_eq!(
@@ -2566,9 +2601,25 @@ mod tests {
         );
         assert_eq!(laser(true, false), 0, "no dot here");
         assert_ne!(
-            remote_features(&[remote_feature_byte(false, false)]),
+            remote_features(&[remote_feature_byte(false, false, false)]),
             u8::MAX,
             "said either way"
+        );
+    }
+
+    /// K5: a cast hears whether its sound is taken.
+    #[test]
+    fn a_cast_is_told_whether_its_sound_is_taken() {
+        use super::super::client::{REMOTE_FEATURE_PHONE_SOUND, remote_features};
+        assert_eq!(
+            remote_features(&[remote_feature_byte(false, false, true)])
+                & REMOTE_FEATURE_PHONE_SOUND,
+            REMOTE_FEATURE_PHONE_SOUND
+        );
+        assert_eq!(
+            remote_features(&[remote_feature_byte(false, false, false)])
+                & REMOTE_FEATURE_PHONE_SOUND,
+            0
         );
     }
 

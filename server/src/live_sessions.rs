@@ -101,6 +101,8 @@ pub fn narrowed_sessions(
             (s.streamed.input && !now.allows(Capability::Input))
                 || (s.streamed.audio && !now.allows(Capability::Audio))
                 || (s.streamed.mic && !now.allows(Capability::Mic))
+                // A cast's sound (K5) ends with its permission, as the mic.
+                || (s.streamed.phone_sound && !now.allows(Capability::PhoneSound))
         })
         .map(|s| s.id)
         .collect()
@@ -531,6 +533,7 @@ mod tests {
             mic: true,
             video: true,
             cast: false,
+            phone_sound: false,
         };
         assert!(session_summary(&screen).contains("streaming this desktop"));
         let remote = Streamed {
@@ -626,6 +629,7 @@ mod tests {
             mic: true,
             video: true,
             cast: false,
+            phone_sound: false,
         };
         let view_only = Streamed {
             input: false,
@@ -647,6 +651,27 @@ mod tests {
             ..DevicePermissions::default()
         };
         assert_eq!(narrowed_sessions(&live, permissions), vec![1]);
+    }
+
+    /// K5: a cast whose sound plays here ends when its permission goes.
+    #[test]
+    fn a_cast_s_sound_ends_with_its_permission() {
+        use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
+        use pocketdesk_core::streaming::sessions::Streamed;
+        let mut cast = session(Some("phone"), true);
+        cast.streamed = Streamed {
+            cast: true,
+            phone_sound: true,
+            ..Streamed::default()
+        };
+        let mut on = DevicePermissions::default();
+        on.set(Capability::PhoneSound, true);
+        assert!(narrowed_sessions(std::slice::from_ref(&cast), |_| on.clone()).is_empty());
+        assert_eq!(
+            narrowed_sessions(&[cast], |_| DevicePermissions::default()),
+            vec![7],
+            "off by default"
+        );
     }
 
     fn session(device: Option<&str>, lan: bool) -> LiveSession {

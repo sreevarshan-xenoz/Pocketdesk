@@ -26,7 +26,7 @@ const REFRESH: Duration = Duration::from_secs(1);
 pub const PAGE_KEY: &str = "page";
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 16] = [
+const PERMISSIONS: [(Capability, &str, &str); 17] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -88,6 +88,11 @@ const PERMISSIONS: [(Capability, &str, &str); 16] = [
         "The phone can show its own screen, or its camera, in a window here, when its owner starts it on the phone.",
     ),
     (
+        Capability::PhoneSound,
+        "Play its sound here",
+        "With its screen shown here, what the phone's apps play comes out of this computer's speakers (when the phone's own setting sends it).",
+    ),
+    (
         Capability::Tasks,
         "Start my tasks",
         "The phone can list the tasks named in Settings and start them (each one may ask you first).",
@@ -115,7 +120,11 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
     !(computer
         && matches!(
             capability,
-            Capability::Ring | Capability::Mute | Capability::AwayLock | Capability::Cast
+            Capability::Ring
+                | Capability::Mute
+                | Capability::AwayLock
+                | Capability::Cast
+                | Capability::PhoneSound
         ))
 }
 
@@ -2981,6 +2990,7 @@ mod tests {
             Capability::Mute,
             Capability::AwayLock,
             Capability::Cast,
+            Capability::PhoneSound,
         ] {
             assert!(!shown_for(capability, true), "{capability:?}");
             assert!(shown_for(capability, false), "{capability:?}");

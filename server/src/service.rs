@@ -682,6 +682,10 @@ pub async fn run(config: Config) -> Result<()> {
                                     mic_relay_device,
                                 ));
                                 streaming_server.set_mic_channel(mic_tx);
+                                // K5: a cast's sound plays here.
+                                let (sound_tx, sound_rx) = tokio::sync::mpsc::channel(64);
+                                tokio::spawn(crate::phone_sound::run(sound_rx));
+                                streaming_server.set_phone_sound_channel(sound_tx);
                                 if let Some(cast_tx) = cast_tx {
                                     streaming_server.set_cast_channel(cast_tx);
                                 }
