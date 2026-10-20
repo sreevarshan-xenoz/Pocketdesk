@@ -149,12 +149,19 @@ pub fn stamp(unix: u64) -> String {
     )
 }
 
-/// The user's own folder `name` ("Pictures", "Videos"), with Pocketdesk in it.
+/// The user's own Pictures or Videos folder (`name`), with Pocketdesk in
+/// it: where the system says it is (L5 review: OneDrive's moved folders,
+/// localized XDG ones), else under the home folder.
 fn user_folder(name: &str) -> PathBuf {
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    home.join(name).join("Pocketdesk")
+    let known = match name {
+        "Pictures" => dirs::picture_dir(),
+        "Videos" => dirs::video_dir(),
+        _ => None,
+    };
+    known
+        .or_else(|| dirs::home_dir().map(|home| home.join(name)))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Pocketdesk")
 }
 
 /// `dir`/`stem`.`ext`, or the next free "`stem` (2)".

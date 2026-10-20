@@ -29,6 +29,9 @@ memmap2 = "0.9"
 skrifa = "0.44"
 serde_json = "1"
 # The phone's recent photos (C7): thumbnails, and a photo to copy.
+# The phone window's screenshots and recordings (L5) go where the system keeps
+# pictures and videos (OneDrive's moved folders, localized XDG ones).
+dirs.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 # C4: the snapshots need a GPU renderer; a feature, so the usual test run
