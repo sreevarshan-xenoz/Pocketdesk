@@ -1972,6 +1972,7 @@ Built 2026-10-20 on the owner's night of features; nothing here ran on a device 
 - [ ] Each refusal on the button: Input, Tasks, Audio or Links off for the phone; "Deck" off; another phone driving.
 - [ ] A button edited after the phone listed it: "the computer's deck has changed".
 - [ ] 2, 3 and 4 a row; a long label; Spanish and Tamil; TalkBack reads each button's label.
+- [ ] The Activity page (H1): a press reads "A deck button pressed (a media key)", or by its label with "Details in events" on, under "Tasks, deck and hooks".
 
 ## 127. How the computer is doing (F2)
 

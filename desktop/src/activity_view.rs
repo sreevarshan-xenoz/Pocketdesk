@@ -30,7 +30,7 @@ impl Filter {
         (Filter::Phones, "Phones"),
         (Filter::FilesAndLinks, "Files and links"),
         (Filter::Messages, "Messages"),
-        (Filter::Hooks, "Tasks and hooks"),
+        (Filter::Hooks, "Tasks, deck and hooks"),
     ];
 
     fn admits(self, kind: &str) -> bool {
@@ -41,7 +41,9 @@ impl Filter {
             Filter::Phones => kind.starts_with("phone_") || kind == "away_locked",
             Filter::FilesAndLinks => matches!(kind, "file_received" | "link_received"),
             Filter::Messages => matches!(kind, "notification" | "text_received"),
-            Filter::Hooks => kind == "hook_ran" || kind.starts_with("task_"),
+            Filter::Hooks => {
+                kind == "hook_ran" || kind == "deck_pressed" || kind.starts_with("task_")
+            }
         }
     }
 }
@@ -315,6 +317,24 @@ pub fn describe(event: &Event) -> String {
                 _ => format!("Task \"{task}\" refused: no such task"),
             }
         }
+        // H1: a deck press (F1), by its label when details are kept.
+        "deck_pressed" => {
+            // One noun per kind (H1 review).
+            let kind = match text(event, "kind") {
+                Some("keys") => "keys",
+                Some("task") => "a task",
+                Some("media") => "a media key",
+                Some("link") => "a link",
+                Some("text") => "typed text",
+                _ => "?",
+            };
+            match (text(event, "label"), flag("ok")) {
+                (Some(label), true) => format!("Deck \"{label}\" pressed ({kind})"),
+                (Some(label), false) => format!("Deck \"{label}\" could not run ({kind})"),
+                (None, true) => format!("A deck button pressed ({kind})"),
+                (None, false) => format!("A deck button could not run ({kind})"),
+            }
+        }
         other => other.replace('_', " "),
     }
 }
@@ -339,6 +359,27 @@ fn file_path(
 mod tests {
     use super::*;
     use pocketdesk_core::local::events::EventsDetail;
+
+    /// H1: a deck press reads as one, under Tasks, deck and hooks.
+    #[test]
+    fn a_deck_press_reads_as_a_sentence() {
+        assert!(Filter::Hooks.admits("deck_pressed"));
+        assert_eq!(
+            describe(&event("deck_pressed", json!({"kind": "keys", "ok": true}))),
+            "A deck button pressed (keys)"
+        );
+        assert_eq!(
+            describe(&event("deck_pressed", json!({"kind": "text", "ok": true}))),
+            "A deck button pressed (typed text)"
+        );
+        assert_eq!(
+            describe(&event("deck_pressed", json!({"kind": "task", "ok": false}))),
+            "A deck button could not run (a task)"
+        );
+        let mut named = event("deck_pressed", json!({"kind": "media", "ok": true}));
+        named.fields.insert("label".into(), json!("Pause"));
+        assert_eq!(describe(&named), "Deck \"Pause\" pressed (a media key)");
+    }
 
     #[test]
     fn a_lock_when_a_phone_left_shows_under_phones() {

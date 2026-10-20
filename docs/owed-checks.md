@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-670 open items.
+671 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 383 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 384 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
 | A phone with a SIM | 22 |
@@ -732,6 +732,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A button of each kind set up in the desktop app's Settings, listed on the A71's Deck from Home and from the session menu, with its icon.
 - A button edited after the phone listed it: "the computer's deck has changed".
+- The Activity page (H1): a press reads "A deck button pressed (a media key)", or by its label with "Details in events" on, under "Tasks, deck and hooks".
 
 **127. How the computer is doing (F2)**
 
