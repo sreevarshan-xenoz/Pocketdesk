@@ -2370,8 +2370,10 @@ impl PocketdeskApp {
             // phone that just linked must be asked about (J5 review).
             self.refresh();
             match model::drop_to(&self.snapshot) {
-                // Several could take them: they wait for the owner (J5).
-                model::DropTo::Ask(_) => self.dropped.extend(dropped),
+                // Several could take them, or a question is open already:
+                // they wait with it, never going around it (J5 review).
+                _ if !self.dropped.is_empty() => model::join_drops(&mut self.dropped, dropped),
+                model::DropTo::Ask(_) => model::join_drops(&mut self.dropped, dropped),
                 // The only one, or none (send_file says so).
                 to => {
                     if let model::DropTo::Send(id) = to {

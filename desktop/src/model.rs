@@ -630,6 +630,16 @@ pub fn drop_to(snapshot: &Snapshot) -> DropTo {
     }
 }
 
+/// Files dropped while a question waits join it, each path once (J5
+/// review: the same file dropped twice went twice).
+pub fn join_drops(waiting: &mut Vec<std::path::PathBuf>, dropped: Vec<std::path::PathBuf>) {
+    for path in dropped {
+        if !waiting.contains(&path) {
+            waiting.push(path);
+        }
+    }
+}
+
 /// Queue the link `url` for the phone `device_id` (T8a), which shows it as
 /// a notification that opens it; what to tell the owner.
 pub fn queue_link(
@@ -1514,6 +1524,18 @@ mod tests {
         );
         assert_eq!(target_label(&with_computer, "desk-b"), "Desk (computer)");
         assert_eq!(target_label(&with_computer, "phone-a"), "phone-a");
+    }
+
+    /// J5 review: a second drop joins the files waiting, each path once.
+    #[test]
+    fn dropped_files_join_the_waiting_ones_once() {
+        use std::path::PathBuf;
+        let mut waiting = vec![PathBuf::from("a.txt")];
+        join_drops(
+            &mut waiting,
+            vec![PathBuf::from("b.txt"), PathBuf::from("a.txt")],
+        );
+        assert_eq!(waiting, [PathBuf::from("a.txt"), PathBuf::from("b.txt")]);
     }
 
     /// J5: a drop goes straight to the only target, asks with several.
