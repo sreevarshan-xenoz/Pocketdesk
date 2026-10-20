@@ -1629,15 +1629,22 @@ impl PocketdeskApp {
                     1 => recent.how.to_string(),
                     n => format!("{} {n} times", recent.how),
                 });
+                // Capture to arrival, not to the screen (J3 review: "latency"
+                // read as the whole way to the phone's screen).
                 if let Some(ms) = recent.e2e_ms {
-                    line.push(format!("{ms} ms latency"));
+                    line.push(format!("{ms} ms capture to arrival"));
                 }
                 let text = RichText::new(line.join(" · "));
-                ui.label(if recent.refused {
+                let label = ui.label(if recent.refused {
                     text.color(crate::theme::warn(ui))
                 } else {
                     text.color(crate::theme::muted(ui))
                 });
+                if recent.e2e_ms.is_some() {
+                    label.on_hover_text(
+                        "The session's median, measured by the phone: from this computer                          capturing the screen to the picture arriving on the phone, before                          the phone decodes and shows it.",
+                    );
+                }
             });
         }
     }

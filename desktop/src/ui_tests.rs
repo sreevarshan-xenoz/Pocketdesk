@@ -523,7 +523,7 @@ fn the_sessions_page_lists_the_recent_sessions() {
     );
     assert!(app.query_by_label("Recent sessions").is_some());
     assert!(
-        app.query_by_label("2 h ago · for 2m 5s · on this network · 38 ms latency")
+        app.query_by_label("2 h ago · for 2m 5s · on this network · 38 ms capture to arrival")
             .is_some()
     );
     assert!(app.query_by_label("2 min ago · refused").is_some());
