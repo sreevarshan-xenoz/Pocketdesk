@@ -10,6 +10,7 @@ mod cancel;
 mod cast;
 mod clipboard_push;
 mod deck;
+mod dials;
 mod download;
 mod link;
 mod link_quiet;
@@ -1537,6 +1538,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeMed
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(media_presses::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The numbers the computer asked this phone to dial (L4), with their
+/// computer, as a JSON array; taken.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeDials(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(dials::take_json()));
     to_jstring(&mut env, json)
 }
 
