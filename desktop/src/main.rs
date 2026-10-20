@@ -24,6 +24,7 @@ mod photos_view;
 mod pick_file;
 mod restart;
 mod reveal;
+mod search_box;
 mod settings_view;
 mod single_instance;
 mod theme;

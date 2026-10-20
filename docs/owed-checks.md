@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-692 open items.
+695 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 400 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 402 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 52 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 22 |
 | A second phone | 8 |
 | Away from home: another network, or through a router | 9 |
@@ -827,6 +827,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The page at the minimum width: the chips wrap whole, not as tall slivers.
 - After a session ends: it heads "Recent sessions" with its length, its road and "capture to arrival"; a refused phone reads "A device claiming to be …", its retries one line.
 
+**146. Search on Activity and Clipboard (J4)**
+
+- Activity with a few hundred events: Search by a phone's name, a file's name and a link's host; with a kind chip; nothing found, then Clear search.
+- Clipboard: Search by a text and by "From …"; with Clear's question open, Esc in the box empties it and leaves the question.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1029,6 +1034,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **144. Find a setting on the desktop (J2)**
 
 - Ctrl+F with Settings scrolled down: the box in view with the cursor in it. Esc empties it, and a Restart question open at the same time stays open.
+
+**146. Search on Activity and Clipboard (J4)**
+
+- Ctrl+F on each page, scrolled down; both boxes at the minimum width, light and dark.
 
 ## A phone with a SIM
 

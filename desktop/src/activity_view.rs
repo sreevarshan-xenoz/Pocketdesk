@@ -67,6 +67,29 @@ pub struct ActivityView {
     /// `received.json`, as last read, for Show in folder.
     received: Vec<pocketdesk_core::local::received::ReceivedFile>,
     filter: Filter,
+    /// What the Search box holds (J4).
+    search: String,
+}
+
+/// The events shown, newest first: of the chip's kind, and holding every
+/// word of `search` in their line as shown, the phone's name and the
+/// event's words (J4).
+pub fn shown<'a>(
+    events: &'a [Event],
+    filter: Filter,
+    search: &str,
+    devices: &[crate::model::Device],
+) -> Vec<&'a Event> {
+    events
+        .iter()
+        .rev()
+        .filter(|e| filter.admits(&e.event))
+        // An event's words are built only for a search (J4 review).
+        .filter(|e| {
+            search.trim().is_empty()
+                || crate::words::holds_all(search, &[&phone(e, devices), &describe(e)])
+        })
+        .collect()
 }
 
 impl ActivityView {
@@ -128,17 +151,29 @@ impl ActivityView {
                     self.filter = filter;
                 }
             }
+            crate::search_box::show(ui, &mut self.search);
         });
         ui.add_space(6.0);
-        let shown: Vec<&Event> = self
-            .events
-            .iter()
-            .rev()
-            .filter(|e| self.filter.admits(&e.event))
-            .collect();
+        let shown = shown(&self.events, self.filter, &self.search, devices);
         if shown.is_empty() {
-            // A filter that hides everything says so, with the way back (E5).
-            if self.filter != Filter::All && !self.events.is_empty() {
+            let query = self.search.trim().to_string();
+            if !query.is_empty() && !self.events.is_empty() {
+                // J4: a search that finds nothing says so, with the way back.
+                ui.horizontal_wrapped(|ui| {
+                    // Under a kind chip, it says the chip narrows too (J4
+                    // review).
+                    let said = if self.filter == Filter::All {
+                        format!("Nothing here matches \"{query}\".")
+                    } else {
+                        format!("Nothing of this kind matches \"{query}\".")
+                    };
+                    ui.label(RichText::new(said).color(crate::theme::muted(ui)));
+                    if ui.button("Clear search").clicked() {
+                        self.search.clear();
+                    }
+                });
+            } else if self.filter != Filter::All && !self.events.is_empty() {
+                // A filter that hides everything says so, with the way back (E5).
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
                         RichText::new("Nothing of this kind yet.").color(crate::theme::muted(ui)),
@@ -379,6 +414,43 @@ mod tests {
         let mut named = event("deck_pressed", json!({"kind": "media", "ok": true}));
         named.fields.insert("label".into(), json!("Pause"));
         assert_eq!(describe(&named), "Deck \"Pause\" pressed (a media key)");
+    }
+
+    /// J4: Search narrows by the line as shown, with the kind chip.
+    #[test]
+    fn a_search_finds_events_by_their_line() {
+        let devices = [crate::model::Device {
+            id: "0123456789ab".to_string(),
+            name: Some("Pixel 8".to_string()),
+            ..Default::default()
+        }];
+        let mut linked = event("phone_linked", json!({}));
+        linked.at = 1;
+        let mut link = event("link_received", json!({"host": "example.org"}));
+        link.at = 2;
+        let mut unpaired = event("phone_unpaired", json!({}));
+        unpaired.at = 3;
+        let events = [linked.clone(), link.clone(), unpaired.clone()];
+        let kinds = |found: Vec<&Event>| found.iter().map(|e| e.event.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            kinds(shown(&events, Filter::All, "", &devices)),
+            ["phone_unpaired", "link_received", "phone_linked"],
+            "newest first"
+        );
+        assert_eq!(
+            kinds(shown(&events, Filter::All, "pixel CONNECTED", &devices)),
+            ["phone_linked"]
+        );
+        assert_eq!(
+            kinds(shown(&events, Filter::All, "example.org", &devices)),
+            ["link_received"]
+        );
+        assert_eq!(
+            kinds(shown(&events, Filter::Phones, "pixel", &devices)),
+            ["phone_unpaired", "phone_linked"],
+            "with the chip"
+        );
+        assert!(shown(&events, Filter::FilesAndLinks, "paired", &devices).is_empty());
     }
 
     #[test]

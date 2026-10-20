@@ -535,6 +535,118 @@ fn the_sessions_page_lists_the_recent_sessions() {
     );
 }
 
+/// J4: the Activity page's Search narrows the events by their line, and
+/// under a kind chip says the chip narrows too.
+#[test]
+fn the_activity_page_searches_its_events() {
+    use pocketdesk_core::local::events::{Event, EventsDetail, append};
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    for (kind, meta) in [
+        ("phone_linked", serde_json::json!({})),
+        ("link_received", serde_json::json!({"host": "example.org"})),
+    ] {
+        let event = Event::new(
+            kind,
+            Some(PHONE),
+            now,
+            meta,
+            serde_json::json!({}),
+            EventsDetail::Metadata,
+        );
+        append(fixture.state(), &event).expect("logged");
+    }
+    let mut app = fixture.open(Some(Tab::Activity));
+    app.run_steps(3);
+    assert!(app.query_by_label("Connected").is_some());
+    assert!(app.query_by_label_contains("example.org").is_some());
+
+    // Ctrl+F puts the cursor in the box, as on Settings.
+    app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
+    app.run_steps(2);
+    assert!(
+        app.get_by_role(egui::accesskit::Role::TextInput)
+            .is_focused()
+    );
+    app.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("connected");
+    app.run_steps(3);
+    assert!(app.query_by_label("Connected").is_some());
+    assert!(app.query_by_label_contains("example.org").is_none());
+
+    app.get_by_label("Files and links").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label("Nothing of this kind matches \"connected\".")
+            .is_some()
+    );
+}
+
+/// J4: the Clipboard page's Search narrows the texts, and says when it
+/// finds none, with Clear search.
+#[test]
+fn the_clipboard_page_searches_its_texts() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    std::fs::write(
+        fixture.config().join("config.toml"),
+        "clipboard_history = 20\n",
+    )
+    .expect("config");
+    use pocketdesk_core::local::clip_history::{ClipEntry, record};
+    record(
+        fixture.state(),
+        ClipEntry::new("12 Main Street", Some(PHONE), 100),
+        20,
+    )
+    .expect("kept");
+    record(
+        fixture.state(),
+        ClipEntry::new("the meeting link", None, 200),
+        20,
+    )
+    .expect("kept");
+    let mut app = fixture.open(Some(Tab::Clipboard));
+    app.get_by_role(egui::accesskit::Role::TextInput).focus();
+    app.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("test phone");
+    app.run_steps(3);
+    assert!(app.query_by_label("12 Main Street").is_some());
+    assert!(app.query_by_label("the meeting link").is_none());
+
+    app.get_by_role(egui::accesskit::Role::TextInput).focus();
+    app.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text(" nowhere");
+    app.run_steps(3);
+    assert!(app.query_by_label_contains("No kept text holds").is_some());
+    app.get_by_label("Clear search").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("the meeting link").is_some());
+    assert!(app.query_by_label("12 Main Street").is_some());
+
+    // Esc in the box empties the search and leaves Clear's question open
+    // (J4 review: Clear's Cancel, drawn first, had taken it).
+    app.get_by_label("Clear history…").click();
+    app.run_steps(3);
+    app.get_by_role(egui::accesskit::Role::TextInput).focus();
+    app.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("main");
+    app.run_steps(3);
+    assert!(app.query_by_label("the meeting link").is_none());
+    app.key_press(egui::Key::Escape);
+    app.run_steps(3);
+    assert!(app.query_by_label("the meeting link").is_some(), "emptied");
+    assert!(
+        app.query_by_label("Forget all 2 texts kept here?")
+            .is_some(),
+        "the question stays"
+    );
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]
