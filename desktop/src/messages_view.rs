@@ -2,6 +2,7 @@
 //! back through them. The server keeps the conversation; this view reads it
 //! and leaves replies in the outbox for the server to hand over.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -82,11 +83,29 @@ pub fn texting_phones(devices: &[Device]) -> Vec<&Device> {
         .collect()
 }
 
+/// A conversation's key: its phone and number; None for a new text.
+type Key = Option<(String, String)>;
+
+/// The draft of each conversation and of a new text (I3): a reply typed for
+/// one conversation never goes to another when the selection moves.
+#[derive(Default)]
+struct Drafts(HashMap<Key, String>);
+
+impl Drafts {
+    fn of(&mut self, key: &Key) -> &mut String {
+        self.0.entry(key.clone()).or_default()
+    }
+
+    fn clear(&mut self, key: &Key) {
+        self.0.remove(key);
+    }
+}
+
 #[derive(Default)]
 pub struct MessagesView {
     /// The open conversation: phone and number.
-    selected: Option<(String, String)>,
-    draft: String,
+    selected: Key,
+    drafts: Drafts,
     /// A new conversation's number and phone.
     new_number: String,
     new_phone: Option<String>,
@@ -112,11 +131,19 @@ impl MessagesView {
         self.read_at = Some(Instant::now());
     }
 
-    /// Queue the draft; whether it was queued.
-    fn send(&mut self, state_dir: &Path, device: &str, address: &str, now_unix: u64) -> bool {
-        match sms::queue_reply(state_dir, device, address, &self.draft, now_unix) {
+    /// Queue the draft of [key]; whether it was queued.
+    fn send(
+        &mut self,
+        state_dir: &Path,
+        key: &Key,
+        device: &str,
+        address: &str,
+        now_unix: u64,
+    ) -> bool {
+        let body = self.drafts.of(key).clone();
+        match sms::queue_reply(state_dir, device, address, &body, now_unix) {
             Ok(_) => {
-                self.draft.clear();
+                self.drafts.clear(key);
                 self.read_at = None;
                 // In place of an earlier failure's (E5 review).
                 self.notice = crate::notice::Notice::done("Queued: the phone sends it.");
@@ -168,6 +195,7 @@ impl MessagesView {
             let pane = &mut columns[1];
             match self.selected.clone() {
                 Some((device, address)) => {
+                    let key = Some((device.clone(), address.clone()));
                     let name = conversations
                         .iter()
                         .find(|c| c.device_id == device && c.address == address)
@@ -200,15 +228,15 @@ impl MessagesView {
                         });
                     pane.add_space(6.0);
                     pane.add(
-                        egui::TextEdit::multiline(&mut self.draft)
+                        egui::TextEdit::multiline(self.drafts.of(&key))
                             .desired_rows(2)
                             .hint_text("Reply"),
                     );
                     if pane
-                        .add_enabled(!self.draft.trim().is_empty(), egui::Button::new("Send reply"))
+                        .add_enabled(!self.drafts.of(&key).trim().is_empty(), egui::Button::new("Send reply"))
                         .clicked()
                     {
-                        self.send(state_dir, &device, &address, now_unix);
+                        self.send(state_dir, &key, &device, &address, now_unix);
                     }
                 }
                 None => {
@@ -234,14 +262,14 @@ impl MessagesView {
                             });
                         pane.add(egui::TextEdit::singleline(&mut self.new_number).hint_text("Number"));
                         pane.add(
-                            egui::TextEdit::multiline(&mut self.draft)
+                            egui::TextEdit::multiline(self.drafts.of(&None))
                                 .desired_rows(2)
                                 .hint_text("Message"),
                         );
-                        let ready = !self.new_number.trim().is_empty() && !self.draft.trim().is_empty();
+                        let ready = !self.new_number.trim().is_empty() && !self.drafts.of(&None).trim().is_empty();
                         if pane.add_enabled(ready, egui::Button::new("Send")).clicked() {
                             let number = self.new_number.trim().to_string();
-                            if self.send(state_dir, &chosen, &number, now_unix) {
+                            if self.send(state_dir, &None, &chosen, &number, now_unix) {
                                 self.selected = Some((chosen, number));
                                 self.new_number.clear();
                             }
@@ -256,6 +284,22 @@ impl MessagesView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// I3: a reply typed for one conversation never goes to another.
+    #[test]
+    fn a_draft_stays_with_its_conversation() {
+        let ann = Some(("p".to_string(), "+1".to_string()));
+        let bob = Some(("p".to_string(), "+2".to_string()));
+        let mut drafts = Drafts::default();
+        drafts.of(&ann).push_str("to Ann");
+        assert_eq!(drafts.of(&bob), "", "another conversation starts empty");
+        assert_eq!(drafts.of(&None), "", "so does a new text");
+        drafts.of(&None).push_str("new");
+        assert_eq!(drafts.of(&ann), "to Ann", "and Ann's is kept");
+        drafts.clear(&ann);
+        assert_eq!(drafts.of(&ann), "");
+        assert_eq!(drafts.of(&None), "new", "sending one keeps the others");
+    }
 
     #[test]
     fn a_conversation_is_titled_by_its_contact_name_when_it_has_one() {
