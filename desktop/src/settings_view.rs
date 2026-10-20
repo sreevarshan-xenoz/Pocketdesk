@@ -171,6 +171,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Answer in the notification",
         Section::Notifications,
     ),
+    (
+        "notification_pictures",
+        "Apps' icons and pictures",
+        Section::Notifications,
+    ),
     ("sms_notify", "Text notifications", Section::Notifications),
     (
         "sms_names",
@@ -347,6 +352,7 @@ pub fn applies_live(key: &str) -> bool {
             | "internet_files"
             | "keep_file_dates"
             | "toast_answers"
+            | "notification_pictures"
             | "cast_control"
             | "downloads_folder"
             | "remember_screen_grant"
@@ -907,6 +913,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "Only for notifications the phone lets this computer answer, while this server runs. The Notifications page answers them too.",
+                    );
+                });
+                row(ui, "notification_pictures", |ui| {
+                    ui.checkbox(
+                        &mut e.notification_pictures,
+                        "a phone notification shows its app's icon, and its picture when the phone sends one",
+                    );
+                    note(
+                        ui,
+                        "Kept in this computer's state folder while they show: icons by app, pictures by notification, removed once it closes. A phone sends pictures only with \"Pictures in notifications\" on in its Settings.",
                     );
                 });
                 row(ui, "sms_notify", |ui| {

@@ -14,6 +14,8 @@ name = "pocketdesk"
 path = "src/main.rs"
 
 [dependencies]
+# Notifications' icons and pictures come as base64 (K3).
+base64 = "0.22"
 anyhow.workspace = true
 pocketdesk-core = { path = "../core", features = ["wan", "local"] }
 serde.workspace = true
@@ -90,7 +92,6 @@ rustls.workspace = true
 n0-mainline = "0.7"
 # The browser extension's id from its key (ecosystem 1d); versions core uses.
 sha2 = "0.10"
-base64 = "0.22"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # `dup2` in the uinput rebuild test, to fault a live device's descriptor.

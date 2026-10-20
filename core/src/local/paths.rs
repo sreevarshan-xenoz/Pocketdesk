@@ -68,6 +68,8 @@ pub const PHONE_QUIET_FILE: &str = "phone_quiet.json";
 pub const MUTED_APPS_FILE: &str = "muted_apps.json";
 /// A pause on what the phones bring to this computer (K2a).
 pub const PAUSE_FILE: &str = "pause.json";
+/// The icons and pictures phones' notifications bring (K3).
+pub const NOTIFICATION_ICONS_DIR: &str = "notification_icons";
 /// Each phone's last media report (T8d), written by the server.
 pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
 /// Each phone's last listing of its shared folders (T10g).

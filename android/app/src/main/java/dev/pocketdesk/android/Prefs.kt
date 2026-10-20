@@ -243,6 +243,15 @@ object Prefs {
         bump()
     }
 
+    /** A notification's picture goes to the computer with it (K3). Off by default: a picture may be private. */
+    fun notificationPictures(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("notification_pictures", false)
+
+    fun setNotificationPictures(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("notification_pictures", enabled) }
+        bump()
+    }
+
     /**
      * Whether the computer may press this phone's notifications' buttons and
      * reply to them (T10c). Off by default: an answer goes out as the owner.

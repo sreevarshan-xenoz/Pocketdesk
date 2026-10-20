@@ -533,6 +533,8 @@
     <string name="send_clipboard_private_send">Enviar</string>
     <string name="settings_clipboard_background">Portapapeles del equipo en segundo plano</string>
     <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
+    <string name="phone_notifications_pictures">Imágenes en las notificaciones</string>
+    <string name="phone_notifications_pictures_summary">La imagen o la foto del contacto de una notificación va con ella, como en el teléfono. Nunca para una que la pantalla de bloqueo oculta o que tiene un código. El icono de cada app va siempre</string>
     <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>
     <string name="phone_notifications_answer_summary">El equipo puede pulsar los botones de una notificación y responder chats, en tu nombre: desde su página Notificaciones o desde la notificación que muestra. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
     <string name="phone_notifications_wait">Cuando el equipo no está al alcance</string>

@@ -24,6 +24,7 @@ pub mod kdeconnect_devices;
 pub mod links;
 pub mod muted_apps;
 pub mod network;
+pub mod notification_icons;
 pub mod outbox;
 pub mod pair_link;
 pub mod paths;

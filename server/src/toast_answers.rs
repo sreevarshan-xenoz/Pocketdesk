@@ -68,11 +68,62 @@ fn xml_escape(text: &str) -> String {
 /// that can be answered, a reply box with Send and its buttons, and with
 /// `mute`, "Not from this app" last (K2b).
 pub fn toast_xml(summary: &str, body: &str, answers: Option<&Answerable>, mute: bool) -> String {
+    toast_xml_pictured(summary, body, answers, mute, &Pictures::default())
+}
+
+/// The pictures a phone's notification shows with it (K3): its app's icon
+/// and its own picture, as kept files.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Pictures {
+    pub icon: Option<std::path::PathBuf>,
+    pub picture: Option<std::path::PathBuf>,
+}
+
+/// `path` as a `file:` URI: separators forward, and any byte but a path's
+/// plain characters percent-encoded.
+pub fn file_uri(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let mut uri = String::from("file://");
+    if !path.starts_with('/') {
+        uri.push('/');
+    }
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~/:".contains(&byte) {
+            uri.push(char::from(byte));
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
+}
+
+/// [`toast_xml`] with the app's icon as the toast's logo and the
+/// notification's picture inline (K3).
+pub fn toast_xml_pictured(
+    summary: &str,
+    body: &str,
+    answers: Option<&Answerable>,
+    mute: bool,
+    pictures: &Pictures,
+) -> String {
     let mut xml = format!(
-        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual>",
+        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text>",
         xml_escape(summary),
         xml_escape(body)
     );
+    if let Some(icon) = &pictures.icon {
+        xml.push_str(&format!(
+            "<image placement=\"appLogoOverride\" src=\"{}\"/>",
+            xml_escape(&file_uri(icon))
+        ));
+    }
+    if let Some(picture) = &pictures.picture {
+        xml.push_str(&format!(
+            "<image src=\"{}\"/>",
+            xml_escape(&file_uri(picture))
+        ));
+    }
+    xml.push_str("</binding></visual>");
     let answers = answers.filter(|a| a.reply || !a.actions.is_empty());
     if answers.is_some() || mute {
         xml.push_str("<actions>");
@@ -130,6 +181,8 @@ pub struct DbusCaps {
     pub actions: bool,
     /// KDE's inline reply (`inline-reply`).
     pub inline_reply: bool,
+    /// Pictures in the body (`body-images`, with `body-markup`), K3.
+    pub body_images: bool,
 }
 
 impl DbusCaps {
@@ -137,6 +190,8 @@ impl DbusCaps {
         Self {
             actions: caps.iter().any(|c| c == "actions"),
             inline_reply: caps.iter().any(|c| c == DBUS_INLINE_REPLY),
+            body_images: caps.iter().any(|c| c == "body-images")
+                && caps.iter().any(|c| c == "body-markup"),
         }
     }
 }
@@ -281,6 +336,36 @@ mod tests {
             actions: actions.iter().map(|a| a.to_string()).collect(),
             reply,
         }
+    }
+
+    /// K3: the icon is the toast's logo and the picture shows inline, each
+    /// a file URI the toast can read.
+    #[test]
+    fn a_toast_shows_its_icon_and_picture() {
+        let pictures = Pictures {
+            icon: Some(std::path::PathBuf::from(
+                r"C:\state\notification_icons\ab.png",
+            )),
+            picture: Some(std::path::PathBuf::from("/state/my pictures/c&d.jpg")),
+        };
+        let xml = toast_xml_pictured("Chat: Ann", "hi", None, false, &pictures);
+        assert!(xml.contains(
+            "<image placement=\"appLogoOverride\" src=\"file:///C:/state/notification_icons/ab.png\"/>"
+        ));
+        assert!(xml.contains("<image src=\"file:///state/my%20pictures/c%26d.jpg\"/>"));
+        assert!(xml.find("<image").unwrap() < xml.find("</binding>").unwrap());
+        assert!(!toast_xml("t", "b", None, false).contains("<image"));
+    }
+
+    /// K3: pictures go in a D-Bus body only where the server shows them.
+    #[test]
+    fn body_images_need_markup_too() {
+        let caps = |list: &[&str]| {
+            DbusCaps::from_list(&list.iter().map(|c| c.to_string()).collect::<Vec<_>>())
+        };
+        assert!(caps(&["body-images", "body-markup"]).body_images);
+        assert!(!caps(&["body-images"]).body_images);
+        assert!(!caps(&["body-markup"]).body_images);
     }
 
     #[test]

@@ -779,6 +779,42 @@ fn the_overview_says_a_broken_pause() {
     assert!(app.query_by_label("Pause").is_none());
 }
 
+/// K3: a notification on the Notifications page shows its app's icon, as
+/// the phone sent it, named for the app.
+#[test]
+fn a_notification_shows_its_app_s_icon() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    pocketdesk_core::local::phone_notes::keep(
+        fixture.state(),
+        pocketdesk_core::local::phone_notes::PhoneNote {
+            device_id: PHONE.to_string(),
+            key: "0|chat|1".to_string(),
+            app: "Chat".to_string(),
+            title: "Ann".to_string(),
+            text: "hi".to_string(),
+            at_unix: 1,
+            actions: vec!["Mark read".to_string()],
+            reply: true,
+            messages: Vec::new(),
+        },
+    )
+    .expect("note");
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(8, 8, image::Rgba([0, 128, 255, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .expect("png");
+    pocketdesk_core::local::notification_icons::keep_icon(
+        fixture.state(),
+        PHONE,
+        "Chat",
+        png.get_ref(),
+    )
+    .expect("icon");
+    let app = fixture.open(Some(Tab::Notifications));
+    assert!(app.query_by_label("Chat").is_some(), "the icon, named");
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

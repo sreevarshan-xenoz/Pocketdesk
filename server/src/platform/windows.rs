@@ -396,6 +396,7 @@ fn show_toast(
     tag: Option<&str>,
     answers: Option<&crate::toast_answers::Answerable>,
     app: Option<&str>,
+    pictures: &crate::toast_answers::Pictures,
 ) -> windows::core::Result<()> {
     // The calling thread may never have touched WinRT; an apartment that is
     // already initialized makes this a no-op error worth ignoring.
@@ -406,11 +407,12 @@ fn show_toast(
     // alive.
     let answers = answers.filter(|_| tag.is_some());
     let app = app.filter(|_| tag.is_some()).map(str::to_string);
-    doc.LoadXml(&HSTRING::from(crate::toast_answers::toast_xml(
+    doc.LoadXml(&HSTRING::from(crate::toast_answers::toast_xml_pictured(
         summary,
         body,
         answers,
         app.is_some(),
+        pictures,
     )))?;
     let toast = ToastNotification::CreateToastNotification(&doc)?;
     if let Some(tag) = tag {
@@ -489,8 +491,9 @@ pub(super) fn notify_tagged(
     tag: &str,
     answers: Option<&crate::toast_answers::Answerable>,
     app: Option<&str>,
+    pictures: &crate::toast_answers::Pictures,
 ) -> bool {
-    match show_toast(summary, body, Some(tag), answers, app) {
+    match show_toast(summary, body, Some(tag), answers, app, pictures) {
         Ok(()) => true,
         Err(e) => {
             tracing::debug!("toast notification failed: {e}");
@@ -517,7 +520,14 @@ pub(super) fn remove_tagged(tag: &str) {
 }
 
 pub(super) fn notify(summary: &str, body: &str) -> bool {
-    match show_toast(summary, body, None, None, None) {
+    match show_toast(
+        summary,
+        body,
+        None,
+        None,
+        None,
+        &crate::toast_answers::Pictures::default(),
+    ) {
         Ok(()) => true,
         Err(e) => {
             tracing::debug!("toast notification failed: {e}");
@@ -723,7 +733,8 @@ mod tests {
             "This toast removes itself",
             tag,
             None,
-            None
+            None,
+            &crate::toast_answers::Pictures::default()
         ));
         std::thread::sleep(std::time::Duration::from_millis(500));
         assert!(phone_tags_in_history().iter().any(|t| t == tag), "shown");
@@ -825,6 +836,29 @@ mod tests {
         ToastNotification::CreateToastNotification(&doc).expect("a toast Windows accepts");
     }
 
+    /// K3: Windows takes a toast with its app's logo and a picture.
+    #[test]
+    fn a_pictured_toast_loads_as_toast_xml() {
+        let pictures = crate::toast_answers::Pictures {
+            icon: Some(std::path::PathBuf::from(
+                r"C:\state\notification_icons\ab.png",
+            )),
+            picture: Some(std::path::PathBuf::from(
+                r"C:\state\notification_icons\pictures\c d.jpg",
+            )),
+        };
+        let xml = crate::toast_answers::toast_xml_pictured(
+            "Chat: Ann",
+            "hi",
+            Some(&answerable()),
+            true,
+            &pictures,
+        );
+        let doc = XmlDocument::new().unwrap();
+        doc.LoadXml(&HSTRING::from(xml)).expect("well-formed");
+        ToastNotification::CreateToastNotification(&doc).expect("a toast Windows accepts");
+    }
+
     /// Live (N3): an answerable phone toast is shown, with its reply box and
     /// buttons, and taken back. Flashes one toast; pressing it is the owner's.
     /// `cargo test -p pocketdesk-server --lib an_answerable_toast_is_shown -- --ignored`.
@@ -837,7 +871,8 @@ mod tests {
             "Reply or press a button",
             tag,
             Some(&answerable()),
-            None
+            None,
+            &crate::toast_answers::Pictures::default()
         ));
         std::thread::sleep(std::time::Duration::from_millis(500));
         assert!(phone_tags_in_history().iter().any(|t| t == tag), "shown");

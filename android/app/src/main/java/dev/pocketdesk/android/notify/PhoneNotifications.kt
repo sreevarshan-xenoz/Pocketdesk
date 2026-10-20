@@ -3,7 +3,13 @@ package dev.pocketdesk.android.notify
 import android.app.Notification
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Parcelable
 import android.os.SystemClock
 import android.os.Process
 import android.provider.Settings
@@ -12,6 +18,8 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.toDrawable
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
@@ -318,7 +326,10 @@ class PhoneNotificationListener : NotificationListenerService() {
      */
     private fun sendBody(body: JSONObject, waitedMs: Long): Boolean {
         val out = if (waitedMs >= 1_000) JSONObject(body.toString()).put("waited", waitedMs / 1_000) else body
-        return PhoneLink.sendNow(this, "kdeconnect.notification", out)
+        val sent = PhoneLink.sendNow(this, "kdeconnect.notification", out)
+        // Its app's icon reached this computer (K3 review).
+        if (sent) iconOf.remove(body)?.let { iconsSent.add(iconKey(it)) }
+        return sent
     }
 
     private fun handle(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>) {
@@ -361,6 +372,9 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
+        // K3: the app's icon once, and its picture with the setting on;
+        // whatever an app put in its extras never stops the listener.
+        runCatching { addPictures(sbn, note.pkg, body, out.full) }
         // Only with the notification in full.
         if (out.full) thread?.let { body.put("messages", it) }
         if (out.id in closedKeys) return
@@ -369,6 +383,68 @@ class PhoneNotificationListener : NotificationListenerService() {
         outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
             .forEach { rule.removed(it) }
     }
+
+    /**
+     * Apps whose icon reached a computer this run (K3), as "computer|app":
+     * the computer keeps them. Marked once the notification carrying it was
+     * sent, never when it was only put in (K3 review).
+     */
+    private val iconsSent = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** The app whose icon a body carries, until the body is sent. */
+    private val iconOf = java.util.Collections.synchronizedMap(java.util.WeakHashMap<JSONObject, String>())
+
+    /** [pkg]'s key in [iconsSent], for the computer notifications go to now. */
+    private fun iconKey(pkg: String): String = "${PhoneLink.target(this)?.address}|$pkg"
+
+    /** [body] with [pkg]'s icon the first time, and [sbn]'s picture when it may go (K3). */
+    private fun addPictures(sbn: StatusBarNotification, pkg: String, body: JSONObject, full: Boolean) {
+        if (NotificationPictures.sendIcon(iconsSent, iconKey(pkg))) {
+            runCatching { packageManager.getApplicationIcon(pkg) }.getOrNull()
+                ?.let { encoded(it, NotificationPictures.ICON_PX, Bitmap.CompressFormat.PNG) }
+                ?.let {
+                    body.put("appIcon", it)
+                    iconOf[body] = pkg
+                }
+        }
+        if (!NotificationPictures.sendPicture(Prefs.notificationPictures(this), full)) return
+        val extras = sbn.notification.extras
+        // The untyped reads (the typed ones need Android 13), each checked:
+        // an app may put anything under these keys (K3 review).
+        @Suppress("DEPRECATION")
+        val picture: Drawable? =
+            runCatching {
+                (extras.getParcelable<Parcelable>(Notification.EXTRA_PICTURE) as? Bitmap)?.toDrawable(resources)
+                    ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        (extras.getParcelable<Parcelable>(Notification.EXTRA_PICTURE_ICON) as? Icon)?.loadDrawable(this)
+                    } else {
+                        null
+                    }
+                    ?: sbn.notification.getLargeIcon()?.loadDrawable(this)
+            }.getOrNull()
+        picture
+            ?.let { encoded(it, NotificationPictures.PICTURE_PX, Bitmap.CompressFormat.JPEG) }
+            ?.let { body.put("picture", it) }
+    }
+
+    /** [drawable] drawn at most [max] on its long side, compressed, as base64; a JPEG on white. */
+    private fun encoded(drawable: Drawable, max: Int, format: Bitmap.CompressFormat): String? =
+        runCatching {
+            val (w, h) = NotificationPictures.fit(
+                drawable.intrinsicWidth.takeIf { it > 0 } ?: max,
+                drawable.intrinsicHeight.takeIf { it > 0 } ?: max,
+                max,
+            )
+            val bitmap = createBitmap(w, h)
+            val canvas = Canvas(bitmap)
+            if (format == Bitmap.CompressFormat.JPEG) canvas.drawColor(Color.WHITE)
+            drawable.setBounds(0, 0, w, h)
+            drawable.draw(canvas)
+            val out = java.io.ByteArrayOutputStream()
+            bitmap.compress(format, 80, out)
+            bitmap.recycle()
+            android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        }.getOrNull()
 
     /**
      * Offer the computer [sbn]'s buttons and its reply, if any, in [body],

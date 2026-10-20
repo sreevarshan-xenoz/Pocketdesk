@@ -528,6 +528,8 @@
     <string name="send_clipboard_private_send">அனுப்பு</string>
     <string name="settings_clipboard_background">பின்னணியில் கணினியின் கிளிப்போர்டு</string>
     <string name="settings_clipboard_background_summary">கணினியில் நீங்கள் நகலெடுப்பது அமர்வு இல்லாமலும், வீட்டிற்கு வெளியேயும் இந்த ஃபோனை அடையும். இதற்கு அறிவிப்பு அணுகல் தேவை, அது இணைப்பை வைத்திருக்கும்</string>
+    <string name="phone_notifications_pictures">அறிவிப்புகளில் படங்கள்</string>
+    <string name="phone_notifications_pictures_summary">அறிவிப்பின் படம் அல்லது தொடர்பின் படம் தொலைபேசியில் உள்ளது போலவே அதனுடன் செல்லும். பூட்டுத் திரை மறைக்கும் அல்லது குறியீடு உள்ள அறிவிப்புக்கு ஒருபோதும் இல்லை. ஒவ்வொரு செயலியின் சின்னமும் எப்போதும் செல்லும்</string>
     <string name="phone_notifications_answer">அறிவிப்புகளுக்குக் கணினி பதிலளிக்க அனுமதி</string>
     <string name="phone_notifications_answer_summary">கணினி ஒரு அறிவிப்பின் பொத்தான்களை அழுத்தி அரட்டைகளுக்கு உங்கள் பெயரில் பதிலளிக்கலாம்: அதன் அறிவிப்புகள் பக்கத்திலிருந்தோ, அது காட்டும் அறிவிப்பிலிருந்தோ. முழுமையாக அனுப்பப்பட்ட அறிவிப்புகளுக்கு மட்டும், உங்கள் சொந்தக் கணினியிலிருந்து மட்டும்</string>
     <string name="phone_notifications_wait">கணினியை அடைய முடியாதபோது</string>

@@ -79,6 +79,17 @@ fun PhoneNotificationsSection() {
             version++
         },
     )
+    // K3: a notification's picture with it, off by default.
+    val pictures = version.let { Prefs.notificationPictures(context) }
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_pictures),
+        stringResource(R.string.phone_notifications_pictures_summary),
+        pictures,
+        {
+            Prefs.setNotificationPictures(context, it)
+            version++
+        },
+    )
     // D2: what Do Not Disturb hides on the phone stays off the computer.
     val holdBack = version.let { dev.pocketdesk.android.notify.QuietPrefs.holdBack(context) }
     SettingSwitch(
