@@ -418,8 +418,9 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     let Some((app, title, text)) = kde_to_show(body) else {
         return;
     };
-    // A muted app's never counts against the limit (K2b review).
-    let muted = muted_here(&app);
+    // A muted app's never counts against the limit (K2b review); a pause
+    // holds them all alike (K2a).
+    let muted = muted_here(&app) || crate::paused::now();
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
     if !muted
         && !flood_guard()
@@ -551,7 +552,8 @@ impl Plugin for NotificationPlugin {
                 // Muted here (K2b): logged and kept, never shown, and never
                 // counted against the phone's limit, which is for what shows
                 // (K2b review: a muted app's burst dropped the others).
-                let muted = muted_here(&app);
+                // Paused (K2a): held as a muted app's are.
+                let muted = muted_here(&app) || crate::paused::now();
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 if !muted
                     && !flood_guard()

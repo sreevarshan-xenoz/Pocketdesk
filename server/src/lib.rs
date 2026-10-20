@@ -48,6 +48,7 @@ mod notification_listener_windows;
 pub mod notification_monitor;
 pub mod offers;
 pub mod packets;
+pub mod paused;
 pub mod peer_computers;
 pub mod pen;
 pub mod platform;

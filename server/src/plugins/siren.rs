@@ -59,6 +59,11 @@ impl Plugin for SirenPlugin {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true)
         {
+            // Paused (K2a): not sounded.
+            if crate::paused::now() {
+                tracing::info!("Find-my-device: not ringing, paused");
+                return Ok(());
+            }
             tokio::spawn(async { ring_desktop(SIREN_SECS).await });
         }
         Ok(())

@@ -167,7 +167,8 @@ impl Plugin for SmsPlugin {
                         serde_json::json!({ "from": from, "body": body }),
                     );
                 }
-                if NOTIFY.load(Ordering::Relaxed) {
+                // Paused (K2a): kept on the Messages page, not shown.
+                if NOTIFY.load(Ordering::Relaxed) && !crate::paused::now() {
                     // The phone's notification limit holds for texts too.
                     for (address, body, _, name) in texts {
                         if !crate::plugins::notification::admit(&phone) {
